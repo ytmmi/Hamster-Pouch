@@ -99,3 +99,21 @@ fn settings_upsert() {
     assert_eq!(g.get_setting("lang").expect("读失败").as_deref(), Some("en"));
     assert_eq!(g.get_setting("missing").expect("读失败"), None);
 }
+
+#[test]
+fn get_repo_by_id() {
+    let global_path = temp_global_path("get");
+    let repo_path = temp_repo_path("g");
+    RepoDb::create(&repo_path, "仓库").expect("创建失败").close().expect("关闭失败");
+
+    let id = {
+        let mut g = GlobalDb::open(&global_path).expect("打开全局库失败");
+        g.register_repo("仓库", repo_path.to_str().unwrap()).expect("注册失败").id
+    };
+
+    let g = GlobalDb::open(&global_path).expect("重开全局库失败");
+    let row = g.get_repo(&id).expect("查询失败").expect("应存在");
+    assert_eq!(row.name, "仓库");
+    assert_eq!(row.repo_db_path, repo_path.to_str().unwrap());
+    assert!(g.get_repo("不存在").expect("查询失败").is_none());
+}

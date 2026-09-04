@@ -125,6 +125,29 @@ impl GlobalDb {
         Ok(value)
     }
 
+    /// 按 ID 查询仓库注册行；不存在返回 None。
+    pub fn get_repo(&self, id: &str) -> HpResult<Option<RepoRow>> {
+        let row = self
+            .conn
+            .query_row(
+                "SELECT id, name, repo_db_path, created_at, last_opened_at
+                 FROM repos WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(RepoRow {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        repo_db_path: row.get(2)?,
+                        created_at: row.get(3)?,
+                        last_opened_at: row.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|e| store_err("查询仓库注册行", e))?;
+        Ok(row)
+    }
+
     /// 检查仓库是否已注册。
     pub fn repo_exists(&self, id: &str) -> HpResult<bool> {
         let exists: bool = self

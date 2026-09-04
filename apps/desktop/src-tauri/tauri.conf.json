@@ -1,9 +1,24 @@
 {
+  "$schema": "https://schema.tauri.app/config/2",
   "productName": "仓鼠颊",
+  "version": "0.1.0",
   "identifier": "dev.hamsterpouch.desktop",
   "build": {
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "仓鼠颊",
+        "width": 1280,
+        "height": 800
+      }
+    ],
+    "security": {
+      "csp": null
+    }
   }
 }
