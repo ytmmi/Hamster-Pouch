@@ -1,2 +1,9 @@
 //! hp-store：SQLite 访问、迁移、事务、仓库库/全局库边界。
-//! M0 占位：无实现。
+
+mod global_db;
+mod migrate;
+mod repo_db;
+mod util;
+
+pub use global_db::{GlobalDb, RepoRow};
+pub use repo_db::RepoDb;

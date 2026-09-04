@@ -4,4 +4,5 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-# M0 保持零依赖；hp-core 禁止依赖 tauri/sqlite/fs
+# hp-core 保持纯净：不依赖 Tauri/SQLite/文件系统；uuid 仅用于领域标识生成。
+uuid = { version = "1", features = ["v4"] }

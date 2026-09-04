@@ -4,4 +4,11 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-# M0 保持零依赖
+hp-core = { path = "../hp-core" }
+# bundled：SQLite 源码编译进 crate，不依赖系统 SQLite（D20 本地化）
+rusqlite = { version = "0.31", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+time = { version = "0.3", features = ["formatting"] }
+
+[dev-dependencies]
+tempfile = "3"
