@@ -1,0 +1,17 @@
+[workspace]
+members = [
+  "crates/hp-core",
+  "crates/hp-store",
+  "crates/hp-scanner",
+  "crates/hp-hash",
+  "crates/hp-album",
+  "crates/hp-fsops",
+  "crates/hp-plugin-host",
+  "crates/hp-ai",
+  "crates/hp-media",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"

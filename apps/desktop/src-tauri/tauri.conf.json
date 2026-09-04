@@ -1,0 +1,9 @@
+{
+  "productName": "仓鼠颊",
+  "identifier": "dev.hamsterpouch.desktop",
+  "build": {
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  }
+}

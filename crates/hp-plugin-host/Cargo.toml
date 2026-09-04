@@ -1,0 +1,7 @@
+[package]
+name = "hp-plugin-host"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# M0 保持零依赖

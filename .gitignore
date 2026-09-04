@@ -1,0 +1,44 @@
+# === 依赖与构建产物 ===
+node_modules/
+target/
+dist/
+
+# 文档（本地规划资料，不入库）
+docs/
+
+# 本地工具生成物（代码图索引、AI 会话续接状态）
+.codegraph/
+.omo/
+
+# pnpm 相关
+.pnpm-store/
+*.tgz
+
+# === Rust / Cargo ===
+# Cargo.lock 对应用（workspace 顶层是应用壳）应提交，不忽略
+
+# === 前端 / Vite / Tauri ===
+apps/desktop/dist/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/schemas/
+
+# === 编辑器与系统 ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Windows 杂项
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# === 环境与密钥 ===
+.env
+.env.*
+!.env.example
+
+# === 日志 ===
+*.log
+logs/

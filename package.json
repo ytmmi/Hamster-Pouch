@@ -1,0 +1,14 @@
+{
+  "name": "hamster-pouch",
+  "private": true,
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=22.16.0",
+    "pnpm": ">=11.10.0"
+  },
+  "scripts": {
+    "generate:types": "echo placeholder",
+    "check:line-count": "node tools/check-line-count.mjs",
+    "check:doc-status": "node tools/check-doc-status.mjs"
+  }
+}
