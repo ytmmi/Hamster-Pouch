@@ -1129,6 +1129,37 @@ fn file_metadata(
     })
 }
 
+/// file.query：按仓库分页查询文件索引（支持媒体类型 / 图像源过滤）。
+#[tauri::command]
+fn file_query(
+    repo_id: String,
+    media_type: Option<String>,
+    source_id: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+    state: State<AppState>,
+) -> Result<Vec<AlbumFileItem>, String> {
+    let mt = match media_type.as_deref() {
+        None | Some("") | Some("multimedia") => None,
+        Some(s) => Some(MediaType::from_str(s).ok_or_else(|| format!("未知媒体类型: {s}"))?),
+    };
+    let guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+    let rows = db
+        .query_files(
+            &repo_id,
+            mt,
+            source_id.as_deref(),
+            limit.unwrap_or(500),
+            offset.unwrap_or(0),
+        )
+        .map_err(hp_err_to_string)?;
+    Ok(rows.into_iter().map(file_to_item).collect())
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -1165,7 +1196,8 @@ fn main() {
             color_get,
             color_set,
             color_extract,
-            file_metadata
+            file_metadata,
+            file_query
         ])
         .run(tauri::generate_context!())
         .expect("仓鼠颊启动失败");

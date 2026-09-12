@@ -4,13 +4,19 @@ use hp_core::{FileId, FileIndexRow, HpResult, MediaType, SourceId, ThumbStatus, 
 use rusqlite::{params, OptionalExtension, Row};
 
 use crate::repo_db::RepoDb;
-use crate::util::store_err;
+use crate::util::{require_nonempty, store_err};
 
 /// `files` 表列清单（与迁移 0001 + 0002 顺序一致）。
 const FILE_COLUMNS: &str = "id, source_id, relative_path, media_type, \
      content_hash, content_hash_algo, content_hash_algo_version, \
      perceptual_hash, perceptual_hash_algo, perceptual_hash_algo_version, \
      size, mtime, scan_time, verify_status, thumb_status, missing_status, media_info_json";
+
+/// 带 `f.` 前缀的列清单（JOIN 查询用）。
+const FILE_COLUMNS_F: &str = "f.id, f.source_id, f.relative_path, f.media_type, \
+     f.content_hash, f.content_hash_algo, f.content_hash_algo_version, \
+     f.perceptual_hash, f.perceptual_hash_algo, f.perceptual_hash_algo_version, \
+     f.size, f.mtime, f.scan_time, f.verify_status, f.thumb_status, f.missing_status, f.media_info_json";
 
 impl RepoDb {
     /// 插入或更新文件索引行（按 `source_id + relative_path` 唯一索引冲突时更新，保留原 id）。
@@ -132,6 +138,45 @@ impl RepoDb {
             .map_err(|e| store_err("读取全部文件", e))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| store_err("解析全部文件", e))?;
+        Ok(rows)
+    }
+
+    /// 按仓库分页查询文件索引（可选媒体类型 / 图像源过滤，网格面板基础筛选用）。
+    pub fn query_files(
+        &self,
+        repo_id: &str,
+        media_type: Option<MediaType>,
+        source_id: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> HpResult<Vec<FileIndexRow>> {
+        require_nonempty(repo_id, "仓库 ID")?;
+        let mut stmt = self
+            .conn()
+            .prepare(&format!(
+                "SELECT {FILE_COLUMNS_F}
+                 FROM files f JOIN sources s ON s.id = f.source_id
+                 WHERE s.repo_id = ?1
+                   AND (?2 IS NULL OR f.media_type = ?2)
+                   AND (?3 IS NULL OR f.source_id = ?3)
+                 ORDER BY f.relative_path
+                 LIMIT ?4 OFFSET ?5"
+            ))
+            .map_err(|e| store_err("查询文件列表", e))?;
+        let rows = stmt
+            .query_map(
+                params![
+                    repo_id,
+                    media_type.map(|m| m.as_str()),
+                    source_id,
+                    limit,
+                    offset
+                ],
+                row_to_file,
+            )
+            .map_err(|e| store_err("读取文件列表", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析文件列表", e))?;
         Ok(rows)
     }
 
