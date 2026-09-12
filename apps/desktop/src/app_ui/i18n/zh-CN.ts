@@ -83,6 +83,13 @@ export const zhCN = {
   "common.seek": "定位",
   "common.danger": "危险",
   "common.selectRepo": "请先打开仓库",
+  "common.confirm": "确定",
+  "repo.create": "创建仓库",
+  "repo.switch": "切换仓库",
+  "repo.namePlaceholder": "请输入仓库名称",
+  "repo.created": "仓库已创建",
+  "repo.opened": "已切换仓库",
+  "repo.current": "当前仓库",
 } as const;
 
 export type DictZhCN = typeof zhCN;

@@ -19,6 +19,25 @@ async function bootstrap(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const singlePanel = params.get("panel");
 
+  // 对话框窗口：仓库创建 / 切换
+  const dialog = params.get("dialog");
+  if (dialog === "repo-create" || dialog === "repo-switch") {
+    await import("./app_ui/styles.css");
+    const [{ RepoCreateDialog }, { RepoSwitchDialog }] = await Promise.all([
+      import("./app_ui/dialogs/RepoCreateDialog"),
+      import("./app_ui/dialogs/RepoSwitchDialog"),
+    ]);
+    const lang = params.get("lang");
+    root.render(
+      dialog === "repo-create" ? (
+        <RepoCreateDialog lang={lang} />
+      ) : (
+        <RepoSwitchDialog lang={lang} />
+      ),
+    );
+    return;
+  }
+
   // 独立面板窗口：只加载 app_ui 的单面板宿主
   if (singlePanel) {
     const [{ SinglePanelHost }] = await Promise.all([

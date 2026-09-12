@@ -763,3 +763,37 @@ button.danger {
 .app-root.theme-dark .dv-inactive-tab {
   color: #9aa1a8;
 }
+
+/* ===== 对话框（独立窗口） ===== */
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  height: 100vh;
+  background: var(--bg-2);
+  color: var(--fg);
+}
+
+.dialog h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.dialog-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.dialog-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

@@ -79,4 +79,11 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "common.seek": "定位",
   "common.danger": "危險",
   "common.selectRepo": "請先開啟倉庫",
+  "common.confirm": "確定",
+  "repo.create": "建立倉庫",
+  "repo.switch": "切換倉庫",
+  "repo.namePlaceholder": "請輸入倉庫名稱",
+  "repo.created": "倉庫已建立",
+  "repo.opened": "已切換倉庫",
+  "repo.current": "目前倉庫",
 };

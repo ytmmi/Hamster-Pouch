@@ -1,5 +1,5 @@
 /**
- * 仓库面板 — 创建 / 打开 / 关闭 / 列表。
+ * 仓库组件 — 子菜单形式：创建仓库 / 切换仓库（点击展开子菜单）。
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -10,6 +10,9 @@ import type { RepoListItem } from "../types";
 
 export function RepoPanel(): JSX.Element {
   const app = useApp();
+  const { t } = app;
+  const [openCreate, setOpenCreate] = useState(false);
+  const [openSwitch, setOpenSwitch] = useState(false);
   const [name, setName] = useState("");
   const [repos, setRepos] = useState<RepoListItem[]>([]);
 
@@ -26,68 +29,86 @@ export function RepoPanel(): JSX.Element {
   }, [load, app.refreshKey]);
 
   const create = async () => {
-    if (!name.trim()) {
-      app.status("仓库名不能为空", "error");
+    const trimmed = name.trim();
+    if (!trimmed) {
+      app.status(t("repo.namePlaceholder"), "error");
       return;
     }
     try {
-      const r = await api.repoCreate({ name: name.trim() });
+      const r = await api.repoCreate({ name: trimmed });
       app.setRepoId(r.id);
-      app.status(`仓库已创建并打开: ${r.name}`, "ok");
+      app.status(`${t("repo.created")}: ${r.name}`, "ok");
       setName("");
+      setOpenCreate(false);
       app.refresh();
     } catch (e) {
       app.status(`创建仓库失败: ${String(e)}`, "error");
     }
   };
 
-  const open = async (id: string) => {
+  const switchTo = async (id: string) => {
     try {
       const r = await api.repoOpen({ repoId: id });
       app.setRepoId(r.id);
-      app.status(`已打开仓库: ${r.name}`, "ok");
+      app.status(`${t("repo.opened")}: ${r.name}`, "ok");
+      setOpenSwitch(false);
       app.refresh();
     } catch (e) {
-      app.status(`打开仓库失败: ${String(e)}`, "error");
-    }
-  };
-
-  const close = async () => {
-    try {
-      await api.repoClose();
-      app.setRepoId(null);
-      app.status("仓库已关闭", "ok");
-      app.refresh();
-    } catch (e) {
-      app.status(`关闭仓库失败: ${String(e)}`, "error");
+      app.status(`切换仓库失败: ${String(e)}`, "error");
     }
   };
 
   return (
-    <div className="panel">
-      <div className="row">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="新仓库名"
-        />
-        <button onClick={create}>创建</button>
-        <button className="danger" onClick={close}>
-          关闭当前
-        </button>
-      </div>
-      <div className="list">
-        {repos.map((r) => (
-          <button
-            key={r.id}
-            className={`list-row ${app.repoId === r.id ? "selected" : ""}`}
-            onClick={() => open(r.id)}
-          >
-            <span>{r.name}</span>
-            <span className="dim">{r.id.slice(0, 8)}</span>
-          </button>
-        ))}
-        {repos.length === 0 && <span className="placeholder">无仓库</span>}
+    <div className="panel repo-panel">
+      {/* 创建仓库（点击 → 子菜单） */}
+      <button className="menu-item has-sub" onClick={() => setOpenCreate((v) => !v)}>
+        {t("repo.create")} <span className="sub-arrow">{openCreate ? "▾" : "▸"}</span>
+      </button>
+      {openCreate && (
+        <div className="menu-sub">
+          <div className="menu-item-row">
+            <input
+              className="menu-input"
+              value={name}
+              autoFocus
+              placeholder={t("repo.namePlaceholder")}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  void create();
+                }
+              }}
+            />
+            <button className="menu-item small" onClick={() => void create()}>
+              ✓
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 切换仓库（点击 → 子菜单） */}
+      <button className="menu-item has-sub" onClick={() => setOpenSwitch((v) => !v)}>
+        {t("repo.switch")} <span className="sub-arrow">{openSwitch ? "▾" : "▸"}</span>
+      </button>
+      {openSwitch && (
+        <div className="menu-sub">
+          {repos.map((r) => (
+            <button
+              key={r.id}
+              className={`menu-item ${app.repoId === r.id ? "first" : ""}`}
+              onClick={() => void switchTo(r.id)}
+            >
+              {app.repoId === r.id ? "● " : "　"}
+              {r.name}
+            </button>
+          ))}
+          {repos.length === 0 && <span className="menu-item dim">{t("common.noRepo")}</span>}
+        </div>
+      )}
+
+      <div className="kv">
+        <span>{t("repo.current")}</span>
+        <span className="mono">{app.repoId ?? "—"}</span>
       </div>
     </div>
   );

@@ -118,6 +118,18 @@ export function AppUiApp(): JSX.Element {
     [status, t, language],
   );
 
+  // 监听对话框窗口的仓库变更（创建/切换）
+  useEffect(() => {
+    const un = listen<{ repoId: string }>("repo.changed", (e) => {
+      setRepoId(e.payload.repoId);
+      refresh();
+      status(`${t("repo.opened")}: ${e.payload.repoId.slice(0, 8)}`, "ok");
+    });
+    return () => {
+      void un.then((fn) => fn());
+    };
+  }, [refresh, status, t]);
+
   // 监听独立窗口的「收回主窗口」请求
   useEffect(() => {
     const un = listen<{ id: string }>("panel.restore", (e) => {

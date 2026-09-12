@@ -79,4 +79,11 @@ export const en: Record<keyof DictZhCN, string> = {
   "common.seek": "Seek",
   "common.danger": "Danger",
   "common.selectRepo": "Open a repository first",
+  "common.confirm": "OK",
+  "repo.create": "Create Repository",
+  "repo.switch": "Switch Repository",
+  "repo.namePlaceholder": "Enter repository name",
+  "repo.created": "Repository created",
+  "repo.opened": "Repository switched",
+  "repo.current": "Current repository",
 };
