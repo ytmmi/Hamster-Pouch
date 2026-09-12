@@ -5,6 +5,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DockviewReact,
+  themeDark,
+  themeLight,
   type DockviewApi,
   type DockviewReadyEvent,
 } from "dockview-react";
@@ -135,6 +137,7 @@ export function AppUiApp(): JSX.Element {
             components={DOCK_COMPONENTS}
             onReady={onReady}
             disableFloatingGroups={false}
+            theme={theme === "dark" ? themeDark : themeLight}
           />
         </div>
         <div className="app-status">
