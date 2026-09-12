@@ -86,4 +86,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "repo.created": "倉庫已建立",
   "repo.opened": "已切換倉庫",
   "repo.current": "目前倉庫",
+  "source.add": "新增影像來源",
+  "source.pathPlaceholder": "本機資料夾路徑",
+  "source.aliasPlaceholder": "別名（選填）",
+  "source.list": "已新增的影像來源",
 };

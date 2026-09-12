@@ -86,4 +86,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "repo.created": "Repository created",
   "repo.opened": "Repository switched",
   "repo.current": "Current repository",
+  "source.add": "Add Source",
+  "source.pathPlaceholder": "Local folder path",
+  "source.aliasPlaceholder": "Alias (optional)",
+  "source.list": "Added Sources",
 };

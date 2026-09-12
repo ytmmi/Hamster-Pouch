@@ -90,6 +90,10 @@ export const zhCN = {
   "repo.created": "仓库已创建",
   "repo.opened": "已切换仓库",
   "repo.current": "当前仓库",
+  "source.add": "添加图像源",
+  "source.pathPlaceholder": "本地文件夹路径",
+  "source.aliasPlaceholder": "别名（可选）",
+  "source.list": "已添加的图像源",
 } as const;
 
 export type DictZhCN = typeof zhCN;

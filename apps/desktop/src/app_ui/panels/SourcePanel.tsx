@@ -1,5 +1,5 @@
 /**
- * 图像源面板 — 挂载 / 列表 / 重命名 / 卸载 / 扫描（含事件订阅）。
+ * 图像源组件 — 添加图像源（子菜单）+ 已添加的图像源列表。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -16,6 +16,8 @@ import type {
 
 export function SourcePanel(): JSX.Element {
   const app = useApp();
+  const { t } = app;
+  const [openAdd, setOpenAdd] = useState(false);
   const [localPath, setLocalPath] = useState("");
   const [alias, setAlias] = useState("");
   const [sources, setSources] = useState<SourceItem[]>([]);
@@ -38,6 +40,7 @@ export function SourcePanel(): JSX.Element {
     void load();
   }, [load, app.refreshKey]);
 
+  // 扫描事件订阅
   useEffect(() => {
     void (async () => {
       try {
@@ -75,7 +78,7 @@ export function SourcePanel(): JSX.Element {
 
   const mount = async () => {
     if (!app.repoId || !localPath.trim()) {
-      app.status("图像源路径不能为空", "error");
+      app.status(t("source.pathPlaceholder"), "error");
       return;
     }
     try {
@@ -84,12 +87,24 @@ export function SourcePanel(): JSX.Element {
         localPath: localPath.trim(),
         alias: alias.trim() || undefined,
       });
-      app.status(`图像源已挂载: ${s.alias ?? s.id.slice(0, 8)}`, "ok");
+      app.status(`${t("source.add")}: ${s.alias ?? s.id.slice(0, 8)}`, "ok");
       setLocalPath("");
       setAlias("");
+      setOpenAdd(false);
       app.refresh();
     } catch (e) {
       app.status(`挂载失败: ${String(e)}`, "error");
+    }
+  };
+
+  const unmount = async (sourceId: string) => {
+    if (!app.repoId) return;
+    try {
+      await api.sourceUnmount({ repoId: app.repoId, sourceId });
+      app.status(`${t("common.unmount")} ✓`, "ok");
+      app.refresh();
+    } catch (e) {
+      app.status(`卸载失败: ${String(e)}`, "error");
     }
   };
 
@@ -109,22 +124,48 @@ export function SourcePanel(): JSX.Element {
 
   return (
     <div className="panel">
-      {!app.repoId && <span className="placeholder">请先打开仓库</span>}
+      {!app.repoId && <span className="placeholder">{t("common.pleaseOpenRepo")}</span>}
       {app.repoId && (
         <>
-          <div className="row">
-            <input
-              value={localPath}
-              onChange={(e) => setLocalPath(e.target.value)}
-              placeholder="本地文件夹路径"
-            />
-            <input
-              value={alias}
-              onChange={(e) => setAlias(e.target.value)}
-              placeholder="别名（可选）"
-            />
-            <button onClick={mount}>挂载</button>
-          </div>
+          {/* 添加图像源（点击 → 子菜单） */}
+          <button className="menu-item has-sub" onClick={() => setOpenAdd((v) => !v)}>
+            {t("source.add")}{" "}
+            <span className="sub-arrow">{openAdd ? "▾" : "▸"}</span>
+          </button>
+          {openAdd && (
+            <div className="menu-sub">
+              <div className="menu-item-row">
+                <input
+                  className="menu-input"
+                  value={localPath}
+                  autoFocus
+                  placeholder={t("source.pathPlaceholder")}
+                  onChange={(e) => setLocalPath(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      void mount();
+                    }
+                  }}
+                />
+              </div>
+              <div className="menu-item-row">
+                <input
+                  className="menu-input"
+                  value={alias}
+                  placeholder={t("source.aliasPlaceholder")}
+                  onChange={(e) => setAlias(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      void mount();
+                    }
+                  }}
+                />
+                <button className="menu-item small" onClick={() => void mount()}>
+                  ✓
+                </button>
+              </div>
+            </div>
+          )}
 
           {progress && (
             <div className="progress-wrap">
@@ -132,11 +173,13 @@ export function SourcePanel(): JSX.Element {
                 <div className="progress-fill" style={{ width: `${pct}%` }} />
               </div>
               <button className="danger" onClick={() => void api.taskCancel()}>
-                取消
+                {t("common.cancel")}
               </button>
             </div>
           )}
 
+          {/* 已添加的图像源 */}
+          <div className="section-title">{t("source.list")}</div>
           <div className="list">
             {sources.map((s) => (
               <div
@@ -152,12 +195,15 @@ export function SourcePanel(): JSX.Element {
                   <span className="dim">{s.local_path}</span>
                 </button>
                 <div className="row-actions">
-                  <button onClick={() => void scan(s.id, false)}>扫描</button>
-                  <button onClick={() => void scan(s.id, true)}>全量</button>
+                  <button onClick={() => void scan(s.id, false)}>{t("common.scan")}</button>
+                  <button onClick={() => void scan(s.id, true)}>{t("common.fullScan")}</button>
+                  <button className="danger" onClick={() => void unmount(s.id)}>
+                    {t("common.unmount")}
+                  </button>
                 </div>
               </div>
             ))}
-            {sources.length === 0 && <span className="placeholder">无图像源</span>}
+            {sources.length === 0 && <span className="placeholder">{t("common.noFile")}</span>}
           </div>
         </>
       )}
