@@ -1160,6 +1160,23 @@ fn file_query(
     Ok(rows.into_iter().map(file_to_item).collect())
 }
 
+/// file.path：返回文件绝对路径（供前端 `convertFileSrc` 预览）。
+#[tauri::command]
+fn file_path(repo_id: String, file_id: String, state: State<AppState>) -> Result<String, String> {
+    let _ = repo_id;
+    let guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+    let file = db
+        .get_file(&file_id)
+        .map_err(hp_err_to_string)?
+        .ok_or_else(|| format!("文件不存在: {file_id}"))?;
+    let path = resolve_file_path(db, &file).map_err(hp_err_to_string)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -1197,7 +1214,8 @@ fn main() {
             color_set,
             color_extract,
             file_metadata,
-            file_query
+            file_query,
+            file_path
         ])
         .run(tauri::generate_context!())
         .expect("仓鼠颊启动失败");

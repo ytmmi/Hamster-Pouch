@@ -25,6 +25,7 @@ import type {
   FileItem,
   FileMetadataArgs,
   FileMetadataResult,
+  FilePathArgs,
   FileQueryArgs,
   RepoCreateArgs,
   RepoListItem,
@@ -280,6 +281,14 @@ export function colorExtract(args: ColorExtractArgs): Promise<string> {
 /** 读取文件元数据 */
 export function fileMetadata(args: FileMetadataArgs): Promise<FileMetadataResult> {
   return invoke<FileMetadataResult>("file_metadata", {
+    repoId: args.repoId,
+    fileId: args.fileId,
+  });
+}
+
+/** 获取文件绝对路径（供 convertFileSrc 预览） */
+export function filePath(args: FilePathArgs): Promise<string> {
+  return invoke<string>("file_path", {
     repoId: args.repoId,
     fileId: args.fileId,
   });

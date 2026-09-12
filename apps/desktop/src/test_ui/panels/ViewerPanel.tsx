@@ -1,5 +1,8 @@
 /**
- * 查看器面板 — 显示选中文件信息，尝试图片预览。
+ * 查看器面板 — 显示选中文件信息，提供图片/视频/音频预览。
+ *
+ * 通过 `file_path` 命令获取绝对路径，再用 `convertFileSrc` 构建预览 URL。
+ * 所有错误均降级为占位提示，不抛出。
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -21,34 +24,32 @@ export function ViewerPanel({
   onStatus,
   refreshKey,
 }: ViewerPanelProps): JSX.Element {
-  const [imgSrc, setImgSrc] = useState<string | null>(null);
-  const [imgError, setImgError] = useState(false);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   const buildPreview = useCallback(async () => {
-    setImgSrc(null);
-    setImgError(false);
+    setPreviewSrc(null);
+    setLoadError(false);
     if (!selectedFile || !repoId) return;
-    if (selectedFile.media_type !== "image") return;
 
     try {
-      // 查找源的 local_path 以拼接完整路径
-      const sources = await api.sourceList({ repoId });
-      const src = sources.find((s) => s.id === selectedFile.source_id);
-      if (!src) {
-        onStatus("找不到文件对应的图像源", "info");
-        return;
-      }
-      const fullPath = `${src.local_path}\\${selectedFile.relative_path}`;
-      const url = convertFileSrc(fullPath);
-      setImgSrc(url);
+      const path = await api.filePath({ repoId, fileId: selectedFile.id });
+      const url = convertFileSrc(path);
+      setPreviewSrc(url);
     } catch (e) {
-      onStatus(`图片预览构建失败: ${String(e)}`, "info");
+      onStatus(`预览路径构建失败: ${String(e)}`, "info");
+      setLoadError(true);
     }
   }, [selectedFile, repoId, onStatus]);
 
   useEffect(() => {
     void buildPreview();
   }, [buildPreview, refreshKey]);
+
+  const handleMediaError = useCallback(() => {
+    setLoadError(true);
+    onStatus("媒体预览加载失败", "info");
+  }, [onStatus]);
 
   if (!selectedFile) {
     return (
@@ -58,6 +59,10 @@ export function ViewerPanel({
       </div>
     );
   }
+
+  const mediaType = selectedFile.media_type;
+  const isPreviewable =
+    mediaType === "image" || mediaType === "video" || mediaType === "audio";
 
   return (
     <div className="panel">
@@ -90,34 +95,50 @@ export function ViewerPanel({
         </div>
       </div>
 
-      {selectedFile.media_type === "image" && (
-        <div className="panel-section">
-          <label>图片预览</label>
-          {imgSrc && !imgError ? (
-            <img
-              src={imgSrc}
-              alt="预览"
-              className="file-preview"
-              onError={() => {
-                setImgError(true);
-                onStatus("图片预览加载失败（asset 协议可能未启用）", "info");
-              }}
-            />
-          ) : imgError ? (
+      <div className="panel-section">
+        <label>媒体预览</label>
+        <div className="preview-container">
+          {isPreviewable && previewSrc && !loadError ? (
+            <>
+              {mediaType === "image" && (
+                <img
+                  src={previewSrc}
+                  alt="预览"
+                  className="file-preview"
+                  onError={handleMediaError}
+                />
+              )}
+              {mediaType === "video" && (
+                <video
+                  className="file-preview"
+                  controls
+                  preload="metadata"
+                  src={previewSrc}
+                  onError={handleMediaError}
+                />
+              )}
+              {mediaType === "audio" && (
+                <audio
+                  controls
+                  preload="metadata"
+                  src={previewSrc}
+                  onError={handleMediaError}
+                />
+              )}
+            </>
+          ) : loadError ? (
             <span className="placeholder">
-              图片预览不可用（路径: {selectedFile.relative_path}）
+              媒体预览不可用（{selectedFile.relative_path}）
             </span>
-          ) : (
+          ) : isPreviewable ? (
             <span className="placeholder">加载中...</span>
+          ) : (
+            <span className="placeholder">
+              不支持的预览类型（{mediaType}）
+            </span>
           )}
         </div>
-      )}
-
-      {selectedFile.media_type !== "image" && (
-        <span className="placeholder">
-          非图片文件，无预览（{selectedFile.media_type}）
-        </span>
-      )}
+      </div>
     </div>
   );
 }

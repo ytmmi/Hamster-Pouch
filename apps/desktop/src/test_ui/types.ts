@@ -311,6 +311,11 @@ export interface FileMetadataArgs {
   fileId: string;
 }
 
+export interface FilePathArgs {
+  repoId: string;
+  fileId: string;
+}
+
 export interface FileQueryArgs {
   repoId: string;
   mediaType?: string;

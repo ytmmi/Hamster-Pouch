@@ -48,7 +48,7 @@ body {
 .test-body {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr 1fr;
+  grid-template-rows: repeat(5, minmax(0, 1fr));
   gap: 1px;
   flex: 1;
   overflow: hidden;
@@ -189,6 +189,45 @@ tr.clickable:hover {
   border-left: 3px solid #e94560;
 }
 
+/* 源选择高亮 */
+.source-row {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.source-row:hover {
+  background: #1a3050;
+}
+
+.source-row.selected {
+  background: #1a3050;
+  border-left: 3px solid #e94560;
+}
+
+/* 文件列表 */
+.file-row {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.file-row:hover {
+  background: #1a3050;
+}
+
+.file-row.selected {
+  background: #1a3050;
+  border-left: 3px solid #e94560;
+}
+
+.file-type-badge {
+  font-size: 10px;
+  color: #a0a0a0;
+  background: #0d1b2a;
+  padding: 1px 6px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
 .swatch-row {
   display: flex;
   gap: 4px;
@@ -256,11 +295,23 @@ label {
   min-width: 50px;
 }
 
+/* 预览区 */
+.preview-container {
+  background: #000;
+  border-radius: 3px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+}
+
 .file-preview {
   max-width: 100%;
-  max-height: 200px;
-  border-radius: 3px;
+  max-height: 420px;
   object-fit: contain;
+  background: #000;
+  border-radius: 3px;
 }
 
 .placeholder {

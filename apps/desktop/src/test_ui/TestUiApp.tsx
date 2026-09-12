@@ -10,6 +10,7 @@ import { useCallback, useState } from "react";
 import type { FileItem, StatusType } from "./types";
 import { RepoPanel } from "./panels/RepoPanel";
 import { SourcePanel } from "./panels/SourcePanel";
+import { SourceSelectPanel } from "./panels/SourceSelectPanel";
 import { GridPanel } from "./panels/GridPanel";
 import { ViewerPanel } from "./panels/ViewerPanel";
 import { MetadataPanel } from "./panels/MetadataPanel";
@@ -71,6 +72,13 @@ export function TestUiApp(): JSX.Element {
         <SourcePanel
           repoId={repoId}
           onRefresh={handleRefresh}
+          onStatus={handleStatus}
+          refreshKey={refreshKey}
+        />
+        <SourceSelectPanel
+          repoId={repoId}
+          selectedFileId={selectedFile?.id ?? null}
+          onSelectFile={handleSelectFile}
           onStatus={handleStatus}
           refreshKey={refreshKey}
         />
