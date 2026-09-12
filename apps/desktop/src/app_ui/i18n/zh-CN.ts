@@ -14,6 +14,12 @@ export const zhCN = {
   "menubar.theme.dark": "黑暗（深色）",
   "menubar.language": "语言",
   "menubar.resetLayout": "重置布局",
+  "menubar.layout": "布局",
+  "menubar.layout.save": "保存当前布局…",
+  "menubar.layout.namePrompt": "布局名称",
+  "menubar.layout.empty": "无已保存布局",
+  "menubar.layout.saved": "布局已保存",
+  "menubar.components": "组件",
   "menubar.detach": "独立",
   "menubar.language.zhCN": "简体中文",
   "menubar.language.zhTW": "繁體中文",
@@ -25,6 +31,7 @@ export const zhCN = {
   "tabmenu.close": "关闭",
   "tabmenu.float": "浮动",
   "tabmenu.popout": "在新窗口打开",
+  "tabmenu.detach": "独立",
   "tabmenu.maximize": "最大化",
 
   // 面板标题

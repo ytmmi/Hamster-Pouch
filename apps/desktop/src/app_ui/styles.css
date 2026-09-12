@@ -133,7 +133,34 @@ body {
 
 .menu-item.small {
   width: auto;
-  color: var(--accent);
+  color: var(--fg-dim);
+}
+
+.menu-item.has-sub {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sub-arrow {
+  color: var(--fg-dim);
+  font-size: 10px;
+}
+
+.menu-sub {
+  margin-left: 10px;
+  border-left: 1px solid var(--border);
+  padding-left: 4px;
+}
+
+.menu-input {
+  flex: 1;
+  min-width: 120px;
+}
+
+.menu-item.first {
+  color: var(--fg);
+  font-weight: 600;
 }
 
 .menu-item-row {

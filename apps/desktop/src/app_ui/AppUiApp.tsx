@@ -276,16 +276,8 @@ export function AppUiApp(): JSX.Element {
                 action: () => params.api.addFloatingGroup(params.panel),
               },
               {
-                label: t("tabmenu.popout"),
-                action: () => {
-                  void params.api.addPopoutGroup(params.panel, {
-                    popoutUrl: "/popout.html",
-                  });
-                },
-              },
-              {
-                label: t("tabmenu.maximize"),
-                action: () => params.api.maximizeGroup(params.panel),
+                label: t("tabmenu.detach"),
+                action: () => detachPanel(params.panel.id),
               },
             ]}
           />
