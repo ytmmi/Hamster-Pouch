@@ -5,6 +5,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
+import { emit } from "@tauri-apps/api/event";
 
 import { AppContext, type AppContextValue } from "./AppContext";
 import { panelRender, panelTitle } from "./panelRegistry";
@@ -47,7 +48,17 @@ export function SinglePanelHost({ panelId, repoId }: SinglePanelHostProps): JSX.
   return (
     <AppContext.Provider value={ctxValue}>
       <div className="app-root single">
-        <div className="single-header">{panelTitle(panelId)}</div>
+        <div className="single-header">
+          <span>{panelTitle(panelId)}</span>
+          <button
+            className="single-restore"
+            onClick={() => {
+              void emit("panel.restore", { id: panelId });
+            }}
+          >
+            收回主窗口
+          </button>
+        </div>
         <div className="single-body">
           {content ?? <span className="placeholder">未知面板: {panelId}</span>}
         </div>

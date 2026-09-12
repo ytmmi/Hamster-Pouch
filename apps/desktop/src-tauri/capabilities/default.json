@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "默认窗口能力（含面板独立窗口）",
-  "windows": ["main", "panel-*"],
+  "windows": ["*"],
   "permissions": ["core:default", "core:webview:allow-create-webview-window"]
 }

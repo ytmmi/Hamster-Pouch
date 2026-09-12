@@ -199,10 +199,16 @@ body {
   height: 30px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 10px;
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
   font-weight: 600;
+}
+
+.single-restore {
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .single-body {
