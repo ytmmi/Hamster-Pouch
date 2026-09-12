@@ -19,3 +19,4 @@ hp-core = { path = "../../../crates/hp-core" }
 hp-store = { path = "../../../crates/hp-store" }
 hp-scanner = { path = "../../../crates/hp-scanner" }
 hp-media = { path = "../../../crates/hp-media" }
+hp-album = { path = "../../../crates/hp-album" }

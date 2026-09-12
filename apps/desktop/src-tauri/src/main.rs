@@ -6,7 +6,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use hp_core::{HpError, HpResult, RepoId, Source};
+use hp_album::AlbumService;
+use hp_core::{AlbumKind, AlbumMediaType, HpError, HpResult, RepoId, Source, SyncMode};
 use hp_media::ThumbnailCache;
 use hp_scanner::{ScanOptions, ScanPhase, ScanProgress, ScanOutcome, Scanner};
 use hp_store::{GlobalDb, RepoDb};
@@ -75,6 +76,66 @@ struct ScanErrorEvent {
     task_id: String,
     source_id: String,
     error: String,
+}
+
+#[derive(Serialize)]
+struct AlbumItem {
+    id: String,
+    repo_id: String,
+    parent_album_id: Option<String>,
+    name: String,
+    kind: String,
+    media_type: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Serialize)]
+struct AlbumFileItem {
+    id: String,
+    source_id: String,
+    relative_path: String,
+    media_type: String,
+    size: i64,
+    mtime: String,
+}
+
+#[derive(Serialize)]
+struct AlbumCreateResult {
+    album_id: String,
+}
+
+#[derive(Serialize)]
+struct AlbumSetMediaTypeResult {
+    removed_count: u64,
+    op_record_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AlbumMemberResult {
+    added: u64,
+}
+
+#[derive(Serialize)]
+struct AlbumRemoveResult {
+    removed: u64,
+}
+
+#[derive(Serialize, Clone)]
+struct AlbumSyncProgressEvent {
+    task_id: String,
+    album_id: String,
+    added: u64,
+    removed: u64,
+    pinned: u64,
+}
+
+#[derive(Serialize, Clone)]
+struct AlbumSyncConflictEvent {
+    task_id: String,
+    album_id: String,
+    file_id: String,
+    reason: String,
 }
 
 fn hp_err_to_string(e: HpError) -> String {
@@ -503,6 +564,259 @@ fn task_cancel(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+// ===== M3：虚拟相册命令 =====
+
+/// 解析相册媒体属性字符串；缺省或空串表示继承父相册。
+fn parse_album_media_type(value: Option<&str>) -> Result<Option<AlbumMediaType>, String> {
+    match value {
+        None | Some("") => Ok(None),
+        Some(s) => AlbumMediaType::from_str(s)
+            .map(Some)
+            .ok_or_else(|| format!("未知媒体属性: {s}")),
+    }
+}
+
+fn album_to_item(a: hp_core::Album) -> AlbumItem {
+    AlbumItem {
+        id: a.id.as_str().to_string(),
+        repo_id: a.repo_id.as_str().to_string(),
+        parent_album_id: a.parent_album_id.map(|p| p.as_str().to_string()),
+        name: a.name,
+        kind: a.kind.as_str().to_string(),
+        media_type: a.media_type.map(|m| m.as_str().to_string()),
+        created_at: a.created_at,
+        updated_at: a.updated_at,
+    }
+}
+
+fn file_to_item(f: hp_core::FileIndexRow) -> AlbumFileItem {
+    AlbumFileItem {
+        id: f.id.as_str().to_string(),
+        source_id: f.source_id.as_str().to_string(),
+        relative_path: f.relative_path,
+        media_type: f.media_type.as_str().to_string(),
+        size: f.size,
+        mtime: f.mtime,
+    }
+}
+
+/// album.create：创建固定型或跟随源型相册。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn album_create(
+    repo_id: String,
+    name: String,
+    kind: String,
+    media_type: Option<String>,
+    parent_album_id: Option<String>,
+    source_id: Option<String>,
+    sync_mode: Option<String>,
+    include_subsources: Option<bool>,
+    filter_json: Option<String>,
+    file_ids: Option<Vec<String>>,
+    state: State<AppState>,
+) -> Result<AlbumCreateResult, String> {
+    if name.trim().is_empty() {
+        return Err("相册名不能为空".into());
+    }
+    let kind = AlbumKind::from_str(&kind).ok_or_else(|| format!("未知相册类型: {kind}"))?;
+    let media_type = parse_album_media_type(media_type.as_deref())?;
+
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+
+    let album = match kind {
+        AlbumKind::Fixed => {
+            let files = file_ids.unwrap_or_default();
+            AlbumService::create_fixed(
+                db,
+                &repo_id,
+                &name,
+                media_type,
+                parent_album_id.as_deref(),
+                &files,
+            )
+            .map_err(hp_err_to_string)?
+        }
+        AlbumKind::FollowSource => {
+            let source_id = source_id.ok_or("跟随源型相册必须提供 sourceId".to_string())?;
+            let mode = SyncMode::from_str(sync_mode.as_deref().unwrap_or("add_only"))
+                .ok_or_else(|| "未知同步模式".to_string())?;
+            AlbumService::create_follow_source(
+                db,
+                &repo_id,
+                &name,
+                media_type,
+                parent_album_id.as_deref(),
+                &source_id,
+                mode,
+                include_subsources.unwrap_or(false),
+                filter_json,
+            )
+            .map_err(hp_err_to_string)?
+        }
+    };
+
+    Ok(AlbumCreateResult {
+        album_id: album.id.as_str().to_string(),
+    })
+}
+
+/// album.setMediaType：修改相册媒体属性（移除不匹配成员并写操作历史）。
+#[tauri::command]
+fn album_set_media_type(
+    repo_id: String,
+    album_id: String,
+    media_type: Option<String>,
+    state: State<AppState>,
+) -> Result<AlbumSetMediaTypeResult, String> {
+    let media_type = parse_album_media_type(media_type.as_deref())?;
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    let outcome = AlbumService::set_media_type(db, &repo_id, &album_id, media_type)
+        .map_err(hp_err_to_string)?;
+    Ok(AlbumSetMediaTypeResult {
+        removed_count: outcome.removed_count,
+        op_record_id: outcome.op_record_id,
+    })
+}
+
+/// album.addMember：手动加入成员（不匹配相册属性的文件被拒绝）。
+#[tauri::command]
+fn album_add_member(
+    repo_id: String,
+    album_id: String,
+    file_ids: Vec<String>,
+    state: State<AppState>,
+) -> Result<AlbumMemberResult, String> {
+    let _ = repo_id;
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    let outcome = AlbumService::add_members(db, &album_id, &file_ids).map_err(hp_err_to_string)?;
+    Ok(AlbumMemberResult {
+        added: outcome.added,
+    })
+}
+
+/// album.removeMember：移除成员。
+#[tauri::command]
+fn album_remove_member(
+    repo_id: String,
+    album_id: String,
+    file_ids: Vec<String>,
+    state: State<AppState>,
+) -> Result<AlbumRemoveResult, String> {
+    let _ = repo_id;
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    let removed =
+        AlbumService::remove_members(db, &album_id, &file_ids).map_err(hp_err_to_string)?;
+    Ok(AlbumRemoveResult { removed })
+}
+
+/// album.list：列出仓库下全部相册。
+#[tauri::command]
+fn album_list(repo_id: String, state: State<AppState>) -> Result<Vec<AlbumItem>, String> {
+    let guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+    let albums = db.list_albums(&repo_id).map_err(hp_err_to_string)?;
+    Ok(albums.into_iter().map(album_to_item).collect())
+}
+
+/// album.members：列出相册可见成员（按有效媒体属性过滤）。
+#[tauri::command]
+fn album_members(
+    repo_id: String,
+    album_id: String,
+    state: State<AppState>,
+) -> Result<Vec<AlbumFileItem>, String> {
+    let _ = repo_id;
+    let guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+    let files = AlbumService::visible_members(db, &album_id).map_err(hp_err_to_string)?;
+    Ok(files.into_iter().map(file_to_item).collect())
+}
+
+/// album.sync：执行跟随源同步，后台运行并发出进度/冲突事件。
+#[tauri::command]
+async fn album_sync(
+    repo_id: String,
+    album_id: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    if album_id.trim().is_empty() {
+        return Err("相册 ID 不能为空".into());
+    }
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let st = state.inner().clone();
+    let app_handle = app.clone();
+    let emit_task_id = task_id.clone();
+    let emit_album_id = album_id.clone();
+
+    tauri::async_runtime::spawn_blocking(move || match run_album_sync(&st, &repo_id, &album_id) {
+        Ok(outcome) => {
+            let _ = app_handle.emit(
+                "album.sync.progress",
+                AlbumSyncProgressEvent {
+                    task_id: emit_task_id.clone(),
+                    album_id: emit_album_id.clone(),
+                    added: outcome.added,
+                    removed: outcome.removed,
+                    pinned: outcome.pinned_kept,
+                },
+            );
+        }
+        Err(e) => {
+            let _ = app_handle.emit(
+                "album.sync.conflict",
+                AlbumSyncConflictEvent {
+                    task_id: emit_task_id.clone(),
+                    album_id: emit_album_id.clone(),
+                    file_id: String::new(),
+                    reason: e.to_string(),
+                },
+            );
+        }
+    });
+
+    Ok(task_id)
+}
+
+/// 在后台线程执行相册同步。
+fn run_album_sync(
+    state: &AppState,
+    repo_id: &str,
+    album_id: &str,
+) -> HpResult<hp_album::SyncOutcome> {
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| HpError::Store("仓库锁中毒".into()))?;
+    let db = guard
+        .as_mut()
+        .ok_or_else(|| HpError::NotFound("未打开仓库".into()))?;
+    AlbumService::sync(db, repo_id, album_id)
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -522,7 +836,14 @@ fn main() {
             source_rename,
             source_list,
             source_scan,
-            task_cancel
+            task_cancel,
+            album_create,
+            album_set_media_type,
+            album_add_member,
+            album_remove_member,
+            album_list,
+            album_members,
+            album_sync
         ])
         .run(tauri::generate_context!())
         .expect("仓鼠颊启动失败");

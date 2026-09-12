@@ -1,5 +1,6 @@
 //! hp-store：SQLite 访问、迁移、事务、仓库库/全局库边界。
 
+mod album_repo;
 mod file_repo;
 mod global_db;
 mod migrate;

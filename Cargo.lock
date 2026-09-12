@@ -498,6 +498,12 @@ version = "0.1.0"
 [[package]]
 name = "hp-album"
 version = "0.1.0"
+dependencies = [
+ "hp-core",
+ "hp-store",
+ "tempfile",
+ "time",
+]
 
 [[package]]
 name = "hp-core"
