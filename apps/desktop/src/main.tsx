@@ -26,7 +26,11 @@ async function bootstrap(): Promise<void> {
       import("./app_ui/styles.css"),
     ]);
     root.render(
-      <SinglePanelHost panelId={singlePanel} repoId={params.get("repoId")} />,
+      <SinglePanelHost
+        panelId={singlePanel}
+        repoId={params.get("repoId")}
+        lang={params.get("lang")}
+      />,
     );
     return;
   }

@@ -4,6 +4,7 @@
 
 import { createContext, useContext } from "react";
 
+import type { Language, Translate } from "./i18n";
 import type { FileItem, StatusType } from "./types";
 
 export interface AppContextValue {
@@ -16,6 +17,9 @@ export interface AppContextValue {
   refreshKey: number;
   refresh: () => void;
   status: (message: string, type?: StatusType) => void;
+  language: Language;
+  setLanguage: (lang: Language) => void;
+  t: Translate;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);

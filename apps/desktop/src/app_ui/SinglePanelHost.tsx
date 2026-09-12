@@ -1,26 +1,31 @@
 /**
  * 独立窗口宿主 — 当 URL 带 ?panel=<id> 时只渲染单个面板。
  *
- * 用于「窗口 → 独立」把面板脱离为系统窗口。仓库上下文可从 ?repoId= 读取。
+ * 用于「窗口 → 独立」把面板脱离为系统窗口。仓库与语言上下文从 URL 读取。
  */
 
 import { useCallback, useMemo, useState } from "react";
 import { emit } from "@tauri-apps/api/event";
 
 import { AppContext, type AppContextValue } from "./AppContext";
+import { DEFAULT_LANGUAGE, isLanguage, makeTranslator, type Language } from "./i18n";
 import { panelRender, panelTitle } from "./panelRegistry";
 import type { FileItem, StatusType } from "./types";
 
 export interface SinglePanelHostProps {
   panelId: string;
   repoId: string | null;
+  lang?: string | null;
 }
 
-export function SinglePanelHost({ panelId, repoId }: SinglePanelHostProps): JSX.Element {
+export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps): JSX.Element {
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: StatusType } | null>(null);
+
+  const language: Language = isLanguage(lang) ? lang : DEFAULT_LANGUAGE;
+  const t = useMemo(() => makeTranslator(language), [language]);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
   const status = useCallback(
@@ -39,8 +44,11 @@ export function SinglePanelHost({ panelId, repoId }: SinglePanelHostProps): JSX.
       refreshKey,
       refresh,
       status,
+      language,
+      setLanguage: () => undefined,
+      t,
     }),
-    [repoId, sourceId, selectedFile, refreshKey, refresh, status],
+    [repoId, sourceId, selectedFile, refreshKey, refresh, status, language, t],
   );
 
   const content = panelRender(panelId);
@@ -49,24 +57,30 @@ export function SinglePanelHost({ panelId, repoId }: SinglePanelHostProps): JSX.
     <AppContext.Provider value={ctxValue}>
       <div className="app-root single">
         <div className="single-header">
-          <span>{panelTitle(panelId)}</span>
+          <span>{panelTitle(panelId, t)}</span>
           <button
             className="single-restore"
             onClick={() => {
               void emit("panel.restore", { id: panelId });
             }}
           >
-            收回主窗口
+            {t("single.restore")}
           </button>
         </div>
         <div className="single-body">
-          {content ?? <span className="placeholder">未知面板: {panelId}</span>}
+          {content ?? (
+            <span className="placeholder">
+              {t("single.unknownPanel")}: {panelId}
+            </span>
+          )}
         </div>
         <div className="app-status">
           <span className={`status-text ${statusMsg?.type ?? "info"}`}>
-            {statusMsg?.text ?? "就绪"}
+            {statusMsg?.text ?? t("status.ready")}
           </span>
-          <span className="dim">仓库: {repoId ?? "—"}</span>
+          <span className="dim">
+            {t("status.repo")}: {repoId ?? "—"}
+          </span>
         </div>
       </div>
     </AppContext.Provider>

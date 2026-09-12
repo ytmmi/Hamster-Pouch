@@ -5,6 +5,7 @@
 import type { FC } from "react";
 import type { IDockviewPanelProps } from "dockview-react";
 
+import type { Translate, TranslationKey } from "./i18n";
 import { AlbumPanel } from "./panels/AlbumPanel";
 import { ColorPanel } from "./panels/ColorPanel";
 import { MediaPlayerPanel } from "./panels/MediaPlayerPanel";
@@ -18,25 +19,26 @@ import { ViewerPanel } from "./panels/ViewerPanel";
 
 export interface PanelDef {
   id: string;
-  title: string;
+  titleKey: TranslationKey;
   render: () => JSX.Element;
 }
 
 export const PANEL_DEFS: PanelDef[] = [
-  { id: "repo", title: "仓库", render: () => <RepoPanel /> },
-  { id: "sources", title: "图像源", render: () => <SourcePanel /> },
-  { id: "albums", title: "相册", render: () => <AlbumPanel /> },
-  { id: "media", title: "媒体预览", render: () => <MediaPreviewPanel /> },
-  { id: "viewer", title: "查看器", render: () => <ViewerPanel /> },
-  { id: "metadata", title: "元数据", render: () => <MetadataPanel /> },
-  { id: "tags", title: "标签/评分", render: () => <TagRatingPanel /> },
-  { id: "color", title: "色彩参考", render: () => <ColorPanel /> },
-  { id: "player", title: "媒体播放", render: () => <MediaPlayerPanel /> },
-  { id: "tasks", title: "任务", render: () => <TaskPanel /> },
+  { id: "repo", titleKey: "panel.repo", render: () => <RepoPanel /> },
+  { id: "sources", titleKey: "panel.sources", render: () => <SourcePanel /> },
+  { id: "albums", titleKey: "panel.albums", render: () => <AlbumPanel /> },
+  { id: "media", titleKey: "panel.media", render: () => <MediaPreviewPanel /> },
+  { id: "viewer", titleKey: "panel.viewer", render: () => <ViewerPanel /> },
+  { id: "metadata", titleKey: "panel.metadata", render: () => <MetadataPanel /> },
+  { id: "tags", titleKey: "panel.tags", render: () => <TagRatingPanel /> },
+  { id: "color", titleKey: "panel.color", render: () => <ColorPanel /> },
+  { id: "player", titleKey: "panel.player", render: () => <MediaPlayerPanel /> },
+  { id: "tasks", titleKey: "panel.tasks", render: () => <TaskPanel /> },
 ];
 
-export function panelTitle(id: string): string {
-  return PANEL_DEFS.find((p) => p.id === id)?.title ?? id;
+export function panelTitle(id: string, t: Translate): string {
+  const def = PANEL_DEFS.find((p) => p.id === id);
+  return def ? t(def.titleKey) : id;
 }
 
 export function panelRender(id: string): JSX.Element | null {

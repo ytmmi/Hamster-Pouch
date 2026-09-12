@@ -9,16 +9,26 @@ import type { DockviewApi } from "dockview-react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 import { useApp } from "./AppContext";
+import { LANGUAGES, type Language } from "./i18n";
 import { PANEL_DEFS, panelTitle } from "./panelRegistry";
 
 export interface MenuBarProps {
   apiRef: MutableRefObject<DockviewApi | null>;
   theme: "light" | "dark";
   onThemeChange: (next: "light" | "dark") => void;
+  language: Language;
+  onLanguageChange: (next: Language) => void;
 }
 
-export function MenuBar({ apiRef, theme, onThemeChange }: MenuBarProps): JSX.Element {
+export function MenuBar({
+  apiRef,
+  theme,
+  onThemeChange,
+  language,
+  onLanguageChange,
+}: MenuBarProps): JSX.Element {
   const app = useApp();
+  const { t } = app;
   const [open, setOpen] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -39,7 +49,7 @@ export function MenuBar({ apiRef, theme, onThemeChange }: MenuBarProps): JSX.Ele
     if (existing) {
       existing.api.close();
     } else {
-      api.addPanel({ id, component: id, title: panelTitle(id) });
+      api.addPanel({ id, component: id, title: panelTitle(id, t) });
     }
     setOpen(null);
   };
@@ -51,12 +61,12 @@ export function MenuBar({ apiRef, theme, onThemeChange }: MenuBarProps): JSX.Ele
     const order = PANEL_DEFS.map((p) => p.id);
     order.forEach((id, index) => {
       if (index === 0) {
-        api.addPanel({ id, component: id, title: panelTitle(id) });
+        api.addPanel({ id, component: id, title: panelTitle(id, t) });
       } else {
         api.addPanel({
           id,
           component: id,
-          title: panelTitle(id),
+          title: panelTitle(id, t),
           position: { referencePanel: order[0], direction: "within" },
         });
       }
@@ -69,59 +79,78 @@ export function MenuBar({ apiRef, theme, onThemeChange }: MenuBarProps): JSX.Ele
     const repo = app.repoId ? `&repoId=${encodeURIComponent(app.repoId)}` : "";
     try {
       const win = new WebviewWindow(`panel-${id}-${Date.now()}`, {
-        url: `index.html?panel=${id}${repo}`,
-        title: `仓鼠颊 · ${panelTitle(id)}`,
+        url: `index.html?panel=${id}&lang=${language}${repo}`,
+        title: `${t("app.name")} · ${panelTitle(id, t)}`,
         width: 900,
         height: 620,
       });
       void win.once("tauri://error", (e) => {
-        app.status(`独立窗口创建失败: ${String(e)}`, "error");
+        app.status(`${t("menubar.detach")}失败: ${String(e)}`, "error");
       });
       api?.getPanel(id)?.api.close();
-      app.status(`面板已独立为窗口: ${panelTitle(id)}`, "ok");
+      app.status(`${panelTitle(id, t)} → ${t("menubar.detach")}`, "ok");
     } catch (e) {
-      app.status(`独立窗口创建失败: ${String(e)}`, "error");
+      app.status(`${t("menubar.detach")}失败: ${String(e)}`, "error");
     }
     setOpen(null);
   };
 
   return (
     <div className="menubar" ref={rootRef}>
-      <span className="menubar-brand">仓鼠颊</span>
+      <span className="menubar-brand">{t("app.name")}</span>
 
       <div className="menu">
-        <button className="menu-btn" onClick={() => setOpen(open === "settings" ? null : "settings")}>
-          设置
+        <button
+          className="menu-btn"
+          onClick={() => setOpen(open === "settings" ? null : "settings")}
+        >
+          {t("menubar.settings")}
         </button>
         {open === "settings" && (
           <div className="menu-pop">
             <div className="menu-item-row">
-              <span className="menu-label">主题</span>
+              <span className="menu-label">{t("menubar.theme")}</span>
               <button
                 className={`menu-item small ${theme === "light" ? "on" : ""}`}
                 onClick={() => onThemeChange("light")}
               >
-                白天（浅色）
+                {t("menubar.theme.light")}
               </button>
               <button
                 className={`menu-item small ${theme === "dark" ? "on" : ""}`}
                 onClick={() => onThemeChange("dark")}
               >
-                黑暗（深色）
+                {t("menubar.theme.dark")}
               </button>
+            </div>
+            <div className="menu-sep" />
+            <div className="menu-item-row">
+              <span className="menu-label">{t("menubar.language")}</span>
+              {LANGUAGES.map((lang) => (
+                <button
+                  key={lang.id}
+                  className={`menu-item small ${language === lang.id ? "on" : ""}`}
+                  onClick={() => onLanguageChange(lang.id)}
+                >
+                  {t(lang.labelKey)}
+                </button>
+              ))}
             </div>
           </div>
         )}
       </div>
 
       <div className="menu">
-        <button className="menu-btn" onClick={() => setOpen(open === "window" ? null : "window")}>
-          窗口
+        <button
+          className="menu-btn"
+          onClick={() => setOpen(open === "window" ? null : "window")}
+        >
+          {t("menubar.window")}
         </button>
         {open === "window" && (
           <div className="menu-pop">
             <button className="menu-item" onClick={resetLayout}>
-              重置布局
+              {t("menubar.resetLayout")}
             </button>
             <div className="menu-sep" />
             {PANEL_DEFS.map((p) => {
@@ -130,14 +159,14 @@ export function MenuBar({ apiRef, theme, onThemeChange }: MenuBarProps): JSX.Ele
                 <div key={p.id} className="menu-item-row">
                   <button className="menu-item grow" onClick={() => togglePanel(p.id)}>
                     {exists ? "✓ " : "　"}
-                    {p.title}
+                    {t(p.titleKey)}
                   </button>
                   <button
                     className="menu-item small"
-                    title="独立为系统窗口"
+                    title={t("menubar.detach")}
                     onClick={() => detachPanel(p.id)}
                   >
-                    独立
+                    {t("menubar.detach")}
                   </button>
                 </div>
               );
@@ -148,11 +177,11 @@ export function MenuBar({ apiRef, theme, onThemeChange }: MenuBarProps): JSX.Ele
 
       <div className="menu">
         <button className="menu-btn" onClick={() => setOpen(open === "ext" ? null : "ext")}>
-          扩展
+          {t("menubar.extensions")}
         </button>
         {open === "ext" && (
           <div className="menu-pop">
-            <span className="menu-item dim">插件与 AI 扩展将在 M5 提供</span>
+            <span className="menu-item dim">{t("menubar.extensionsHint")}</span>
           </div>
         )}
       </div>

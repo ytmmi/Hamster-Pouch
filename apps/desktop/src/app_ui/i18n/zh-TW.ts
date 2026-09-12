@@ -1,0 +1,75 @@
+/**
+ * 繁體中文。
+ */
+
+import type { DictZhCN } from "./zh-CN";
+
+export const zhTW: Record<keyof DictZhCN, string> = {
+  "app.name": "倉鼠頰",
+
+  "menubar.settings": "設定",
+  "menubar.window": "視窗",
+  "menubar.extensions": "擴充",
+  "menubar.theme": "主題",
+  "menubar.theme.light": "白天（淺色）",
+  "menubar.theme.dark": "黑暗（深色）",
+  "menubar.language": "語言",
+  "menubar.resetLayout": "重設版面",
+  "menubar.detach": "獨立",
+  "menubar.language.zhCN": "简体中文",
+  "menubar.language.zhTW": "繁體中文",
+  "menubar.language.en": "English",
+  "menubar.settingsHint": "設定項將於後續里程碑提供",
+  "menubar.extensionsHint": "外掛與 AI 擴充將於 M5 提供",
+
+  "tabmenu.close": "關閉",
+  "tabmenu.float": "浮動",
+  "tabmenu.popout": "在新視窗開啟",
+  "tabmenu.maximize": "最大化",
+
+  "panel.repo": "倉庫",
+  "panel.sources": "影像來源",
+  "panel.albums": "相簿",
+  "panel.media": "媒體預覽",
+  "panel.viewer": "檢視器",
+  "panel.metadata": "中繼資料",
+  "panel.tags": "標籤/評分",
+  "panel.color": "色彩參考",
+  "panel.player": "媒體播放",
+  "panel.tasks": "工作",
+
+  "status.ready": "就緒",
+  "status.repo": "倉庫",
+  "status.source": "來源",
+  "status.file": "檔案",
+  "status.panels": "面板",
+
+  "single.restore": "收回主視窗",
+  "single.unknownPanel": "未知面板",
+
+  "common.pleaseOpenRepo": "請先開啟倉庫",
+  "common.noRepo": "無倉庫",
+  "common.noFile": "無檔案",
+  "common.noSelection": "未選取檔案",
+  "common.loading": "載入中…",
+  "common.refresh": "重新整理",
+  "common.create": "建立",
+  "common.close": "關閉",
+  "common.cancel": "取消",
+  "common.clear": "清除",
+  "common.add": "新增",
+  "common.remove": "移除",
+  "common.scan": "掃描",
+  "common.fullScan": "完整掃描",
+  "common.mount": "掛載",
+  "common.unmount": "卸載",
+  "common.rename": "重新命名",
+  "common.sync": "同步",
+  "common.play": "播放",
+  "common.pause": "暫停",
+  "common.resume": "繼續",
+  "common.stop": "停止",
+  "common.seek": "定位",
+  "common.danger": "危險",
+  "common.selectRepo": "請先開啟倉庫",
+};

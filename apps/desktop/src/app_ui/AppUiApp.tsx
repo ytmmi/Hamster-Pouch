@@ -17,6 +17,12 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 import * as api from "./api";
 import { AppContext, type AppContextValue } from "./AppContext";
+import {
+  DEFAULT_LANGUAGE,
+  isLanguage,
+  makeTranslator,
+  type Language,
+} from "./i18n";
 import { MenuBar } from "./MenuBar";
 import { DOCK_COMPONENTS, PANEL_DEFS, panelTitle } from "./panelRegistry";
 import type { FileItem, StatusType } from "./types";
@@ -28,16 +34,23 @@ export function AppUiApp(): JSX.Element {
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: StatusType } | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [language, setLanguageState] = useState<Language>(DEFAULT_LANGUAGE);
   const apiRef = useRef<DockviewApi | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
 
-  // 加载主题设置（默认白天模式 / 浅色）
+  const t = useMemo(() => makeTranslator(language), [language]);
+
+  // 加载主题与语言设置（默认：白天模式 + 简体中文）
   useEffect(() => {
     void (async () => {
       try {
-        const saved = await api.settingGet({ key: "ui.theme" });
-        if (saved === "dark" || saved === "light") {
-          setTheme(saved);
+        const savedTheme = await api.settingGet({ key: "ui.theme" });
+        if (savedTheme === "dark" || savedTheme === "light") {
+          setTheme(savedTheme);
+        }
+        const savedLang = await api.settingGet({ key: "ui.language" });
+        if (isLanguage(savedLang)) {
+          setLanguageState(savedLang);
         }
       } catch {
         /* 非 Tauri 运行时忽略 */
@@ -49,6 +62,12 @@ export function AppUiApp(): JSX.Element {
     setTheme(next);
     void api.settingSet({ key: "ui.theme", value: next }).catch(() => undefined);
   }, []);
+
+  const changeLanguage = useCallback((next: Language) => {
+    setLanguageState(next);
+    void api.settingSet({ key: "ui.language", value: next }).catch(() => undefined);
+  }, []);
+
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   const status = useCallback(
@@ -58,20 +77,21 @@ export function AppUiApp(): JSX.Element {
 
   const detachPanel = useCallback(
     (id: string) => {
+      const title = panelTitle(id, t);
       try {
         new WebviewWindow(`panel-${id}-${Date.now()}`, {
-          url: `index.html?panel=${id}`,
-          title: `仓鼠颊 · ${panelTitle(id)}`,
+          url: `index.html?panel=${id}&lang=${language}`,
+          title: `${t("app.name")} · ${title}`,
           width: 900,
           height: 620,
         });
         apiRef.current?.getPanel(id)?.api.close();
-        status(`面板已独立为窗口: ${panelTitle(id)}`, "ok");
+        status(`${title} → ${t("menubar.detach")}`, "ok");
       } catch (e) {
-        status(`独立窗口创建失败: ${String(e)}`, "error");
+        status(`${t("menubar.detach")}失败: ${String(e)}`, "error");
       }
     },
-    [status],
+    [status, t, language],
   );
 
   // 监听独立窗口的「收回主窗口」请求
@@ -80,14 +100,14 @@ export function AppUiApp(): JSX.Element {
       const id = e.payload.id;
       const apiInstance = apiRef.current;
       if (apiInstance && !apiInstance.getPanel(id)) {
-        apiInstance.addPanel({ id, component: id, title: panelTitle(id) });
-        status(`面板已收回: ${panelTitle(id)}`, "ok");
+        apiInstance.addPanel({ id, component: id, title: panelTitle(id, t) });
+        status(`${panelTitle(id, t)} ← ${t("single.restore")}`, "ok");
       }
     });
     return () => {
       void un.then((fn) => fn());
     };
-  }, [status]);
+  }, [status, t]);
 
   const ctxValue: AppContextValue = useMemo(
     () => ({
@@ -100,96 +120,108 @@ export function AppUiApp(): JSX.Element {
       refreshKey,
       refresh,
       status,
+      language,
+      setLanguage: changeLanguage,
+      t,
     }),
-    [repoId, sourceId, selectedFile, refreshKey, refresh, status],
+    [repoId, sourceId, selectedFile, refreshKey, refresh, status, language, changeLanguage, t],
   );
 
-  const onReady = useCallback((event: DockviewReadyEvent) => {
-    apiRef.current = event.api;
-    const api = event.api;
-    // 默认布局：左侧功能栏 + 中央媒体预览 + 右侧检查器
-    api.addPanel({ id: "repo", component: "repo", title: "仓库" });
-    api.addPanel({
-      id: "sources",
-      component: "sources",
-      title: "图像源",
-      position: { referencePanel: "repo", direction: "below" },
-    });
-    api.addPanel({
-      id: "albums",
-      component: "albums",
-      title: "相册",
-      position: { referencePanel: "sources", direction: "below" },
-    });
-    api.addPanel({
-      id: "media",
-      component: "media",
-      title: "媒体预览",
-      position: { referencePanel: "repo", direction: "right" },
-    });
-    api.addPanel({
-      id: "viewer",
-      component: "viewer",
-      title: "查看器",
-      position: { referencePanel: "media", direction: "below" },
-    });
-    api.addPanel({
-      id: "metadata",
-      component: "metadata",
-      title: "元数据",
-      position: { referencePanel: "media", direction: "right" },
-    });
-    api.addPanel({
-      id: "tags",
-      component: "tags",
-      title: "标签/评分",
-      position: { referencePanel: "metadata", direction: "below" },
-    });
-    api.addPanel({
-      id: "color",
-      component: "color",
-      title: "色彩参考",
-      position: { referencePanel: "tags", direction: "within" },
-    });
-    api.addPanel({
-      id: "player",
-      component: "player",
-      title: "媒体播放",
-      position: { referencePanel: "tags", direction: "below" },
-    });
-    api.addPanel({
-      id: "tasks",
-      component: "tasks",
-      title: "任务",
-      position: { referencePanel: "player", direction: "within" },
-    });
+  const onReady = useCallback(
+    (event: DockviewReadyEvent) => {
+      apiRef.current = event.api;
+      const dv = event.api;
+      // 默认布局：左侧功能栏 + 中央媒体预览 + 右侧检查器
+      dv.addPanel({ id: "repo", component: "repo", title: panelTitle("repo", t) });
+      dv.addPanel({
+        id: "sources",
+        component: "sources",
+        title: panelTitle("sources", t),
+        position: { referencePanel: "repo", direction: "below" },
+      });
+      dv.addPanel({
+        id: "albums",
+        component: "albums",
+        title: panelTitle("albums", t),
+        position: { referencePanel: "sources", direction: "below" },
+      });
+      dv.addPanel({
+        id: "media",
+        component: "media",
+        title: panelTitle("media", t),
+        position: { referencePanel: "repo", direction: "right" },
+      });
+      dv.addPanel({
+        id: "viewer",
+        component: "viewer",
+        title: panelTitle("viewer", t),
+        position: { referencePanel: "media", direction: "below" },
+      });
+      dv.addPanel({
+        id: "metadata",
+        component: "metadata",
+        title: panelTitle("metadata", t),
+        position: { referencePanel: "media", direction: "right" },
+      });
+      dv.addPanel({
+        id: "tags",
+        component: "tags",
+        title: panelTitle("tags", t),
+        position: { referencePanel: "metadata", direction: "below" },
+      });
+      dv.addPanel({
+        id: "color",
+        component: "color",
+        title: panelTitle("color", t),
+        position: { referencePanel: "tags", direction: "within" },
+      });
+      dv.addPanel({
+        id: "player",
+        component: "player",
+        title: panelTitle("player", t),
+        position: { referencePanel: "tags", direction: "below" },
+      });
+      dv.addPanel({
+        id: "tasks",
+        component: "tasks",
+        title: panelTitle("tasks", t),
+        position: { referencePanel: "player", direction: "within" },
+      });
 
-    // 拖出工作区 → 独立窗口（左键按住标签页拖拽，指针离开工作区即脱离）
-    event.api.onWillDragPanel((dragEvent) => {
-      const panelId = dragEvent.panel.id;
-      const onUp = (ev: PointerEvent) => {
-        document.removeEventListener("pointerup", onUp, true);
-        const rect = workspaceRef.current?.getBoundingClientRect();
-        if (!rect) {
-          return;
-        }
-        const outside =
-          ev.clientX < rect.left ||
-          ev.clientX > rect.right ||
-          ev.clientY < rect.top ||
-          ev.clientY > rect.bottom;
-        if (outside) {
-          detachPanel(panelId);
-        }
-      };
-      document.addEventListener("pointerup", onUp, true);
-    });
-  }, [detachPanel]);
+      // 拖出工作区 → 独立窗口（左键按住标签页拖拽，指针离开工作区即脱离）
+      dv.onWillDragPanel((dragEvent) => {
+        const panelId = dragEvent.panel.id;
+        const onUp = (ev: PointerEvent) => {
+          document.removeEventListener("pointerup", onUp, true);
+          const rect = workspaceRef.current?.getBoundingClientRect();
+          if (!rect) {
+            return;
+          }
+          const outside =
+            ev.clientX < rect.left ||
+            ev.clientX > rect.right ||
+            ev.clientY < rect.top ||
+            ev.clientY > rect.bottom;
+          if (outside) {
+            detachPanel(panelId);
+          }
+        };
+        document.addEventListener("pointerup", onUp, true);
+      });
+    },
+    [detachPanel, t],
+  );
 
   return (
     <AppContext.Provider value={ctxValue}>
       <div className={`app-root ${theme === "dark" ? "theme-dark" : ""}`}>
-        <MenuBar apiRef={apiRef} theme={theme} onThemeChange={changeTheme} />
+        <MenuBar
+          apiRef={apiRef}
+          theme={theme}
+          onThemeChange={changeTheme}
+          language={language}
+          onLanguageChange={changeLanguage}
+        />
         <div className="app-workspace" ref={workspaceRef}>
           <DockviewReact
             components={DOCK_COMPONENTS}
@@ -198,23 +230,38 @@ export function AppUiApp(): JSX.Element {
             dndStrategy="pointer"
             theme={theme === "dark" ? themeDark : themeLight}
             popoutUrl="/popout.html"
-            getTabContextMenuItems={() => [
-              "close",
-              "separator",
-              "float",
-              "popout",
-              "separator",
-              "maximize",
+            getTabContextMenuItems={(params) => [
+              {
+                label: t("tabmenu.close"),
+                action: () => params.panel.api.close(),
+              },
+              {
+                label: t("tabmenu.float"),
+                action: () => params.api.addFloatingGroup(params.panel),
+              },
+              {
+                label: t("tabmenu.popout"),
+                action: () => {
+                  void params.api.addPopoutGroup(params.panel, {
+                    popoutUrl: "/popout.html",
+                  });
+                },
+              },
+              {
+                label: t("tabmenu.maximize"),
+                action: () => params.api.maximizeGroup(params.panel),
+              },
             ]}
           />
         </div>
         <div className="app-status">
           <span className={`status-text ${statusMsg?.type ?? "info"}`}>
-            {statusMsg?.text ?? "就绪"}
+            {statusMsg?.text ?? t("status.ready")}
           </span>
           <span className="dim">
-            仓库: {repoId ?? "—"} | 源: {sourceId ?? "—"} | 文件:{" "}
-            {selectedFile?.relative_path ?? "—"} | 面板: {PANEL_DEFS.length}
+            {t("status.repo")}: {repoId ?? "—"} | {t("status.source")}: {sourceId ?? "—"} |{" "}
+            {t("status.file")}: {selectedFile?.relative_path ?? "—"} | {t("status.panels")}:{" "}
+            {PANEL_DEFS.length}
           </span>
         </div>
       </div>

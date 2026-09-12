@@ -1,0 +1,75 @@
+/**
+ * English.
+ */
+
+import type { DictZhCN } from "./zh-CN";
+
+export const en: Record<keyof DictZhCN, string> = {
+  "app.name": "Hamster Pouch",
+
+  "menubar.settings": "Settings",
+  "menubar.window": "Window",
+  "menubar.extensions": "Extensions",
+  "menubar.theme": "Theme",
+  "menubar.theme.light": "Light",
+  "menubar.theme.dark": "Dark",
+  "menubar.language": "Language",
+  "menubar.resetLayout": "Reset Layout",
+  "menubar.detach": "Detach",
+  "menubar.language.zhCN": "简体中文",
+  "menubar.language.zhTW": "繁體中文",
+  "menubar.language.en": "English",
+  "menubar.settingsHint": "More settings coming in later milestones",
+  "menubar.extensionsHint": "Plugins and AI extensions arrive in M5",
+
+  "tabmenu.close": "Close",
+  "tabmenu.float": "Float",
+  "tabmenu.popout": "Open in New Window",
+  "tabmenu.maximize": "Maximize",
+
+  "panel.repo": "Repository",
+  "panel.sources": "Sources",
+  "panel.albums": "Albums",
+  "panel.media": "Media Preview",
+  "panel.viewer": "Viewer",
+  "panel.metadata": "Metadata",
+  "panel.tags": "Tags / Rating",
+  "panel.color": "Color Reference",
+  "panel.player": "Media Player",
+  "panel.tasks": "Tasks",
+
+  "status.ready": "Ready",
+  "status.repo": "Repo",
+  "status.source": "Source",
+  "status.file": "File",
+  "status.panels": "Panels",
+
+  "single.restore": "Restore to Main Window",
+  "single.unknownPanel": "Unknown panel",
+
+  "common.pleaseOpenRepo": "Open a repository first",
+  "common.noRepo": "No repository",
+  "common.noFile": "No files",
+  "common.noSelection": "No file selected",
+  "common.loading": "Loading…",
+  "common.refresh": "Refresh",
+  "common.create": "Create",
+  "common.close": "Close",
+  "common.cancel": "Cancel",
+  "common.clear": "Clear",
+  "common.add": "Add",
+  "common.remove": "Remove",
+  "common.scan": "Scan",
+  "common.fullScan": "Full Scan",
+  "common.mount": "Mount",
+  "common.unmount": "Unmount",
+  "common.rename": "Rename",
+  "common.sync": "Sync",
+  "common.play": "Play",
+  "common.pause": "Pause",
+  "common.resume": "Resume",
+  "common.stop": "Stop",
+  "common.seek": "Seek",
+  "common.danger": "Danger",
+  "common.selectRepo": "Open a repository first",
+};

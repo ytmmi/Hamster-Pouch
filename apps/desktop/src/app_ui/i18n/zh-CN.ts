@@ -1,0 +1,81 @@
+/**
+ * 简体中文（默认语言）。
+ */
+
+export const zhCN = {
+  "app.name": "仓鼠颊",
+
+  // 顶部功能条
+  "menubar.settings": "设置",
+  "menubar.window": "窗口",
+  "menubar.extensions": "扩展",
+  "menubar.theme": "主题",
+  "menubar.theme.light": "白天（浅色）",
+  "menubar.theme.dark": "黑暗（深色）",
+  "menubar.language": "语言",
+  "menubar.resetLayout": "重置布局",
+  "menubar.detach": "独立",
+  "menubar.language.zhCN": "简体中文",
+  "menubar.language.zhTW": "繁體中文",
+  "menubar.language.en": "English",
+  "menubar.settingsHint": "设置项将在后续里程碑提供",
+  "menubar.extensionsHint": "插件与 AI 扩展将在 M5 提供",
+
+  // 标签页右键菜单
+  "tabmenu.close": "关闭",
+  "tabmenu.float": "浮动",
+  "tabmenu.popout": "在新窗口打开",
+  "tabmenu.maximize": "最大化",
+
+  // 面板标题
+  "panel.repo": "仓库",
+  "panel.sources": "图像源",
+  "panel.albums": "相册",
+  "panel.media": "媒体预览",
+  "panel.viewer": "查看器",
+  "panel.metadata": "元数据",
+  "panel.tags": "标签/评分",
+  "panel.color": "色彩参考",
+  "panel.player": "媒体播放",
+  "panel.tasks": "任务",
+
+  // 状态栏
+  "status.ready": "就绪",
+  "status.repo": "仓库",
+  "status.source": "源",
+  "status.file": "文件",
+  "status.panels": "面板",
+
+  // 独立窗口
+  "single.restore": "收回主窗口",
+  "single.unknownPanel": "未知面板",
+
+  // 通用
+  "common.pleaseOpenRepo": "请先打开仓库",
+  "common.noRepo": "无仓库",
+  "common.noFile": "无文件",
+  "common.noSelection": "未选中文件",
+  "common.loading": "加载中…",
+  "common.refresh": "刷新",
+  "common.create": "创建",
+  "common.close": "关闭",
+  "common.cancel": "取消",
+  "common.clear": "清空",
+  "common.add": "添加",
+  "common.remove": "移除",
+  "common.scan": "扫描",
+  "common.fullScan": "全量",
+  "common.mount": "挂载",
+  "common.unmount": "卸载",
+  "common.rename": "重命名",
+  "common.sync": "同步",
+  "common.play": "播放",
+  "common.pause": "暂停",
+  "common.resume": "继续",
+  "common.stop": "停止",
+  "common.seek": "定位",
+  "common.danger": "危险",
+  "common.selectRepo": "请先打开仓库",
+} as const;
+
+export type DictZhCN = typeof zhCN;
