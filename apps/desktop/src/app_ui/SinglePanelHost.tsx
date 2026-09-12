@@ -44,6 +44,7 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
       refreshKey,
       refresh,
       status,
+      focusPanel: () => undefined,
       language,
       setLanguage: () => undefined,
       t,

@@ -75,6 +75,30 @@ export function AppUiApp(): JSX.Element {
     [],
   );
 
+  // 双击预览：已存在的目标面板 → 激活（切换 tab）；不存在 → 创建（可按需浮动）
+  const focusPanel = useCallback(
+    (id: string, floating = false) => {
+      const dv = apiRef.current;
+      if (!dv) {
+        return;
+      }
+      const existing = dv.getPanel(id);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      dv.addPanel({
+        id,
+        component: id,
+        title: panelTitle(id, t),
+        ...(floating
+          ? { floating: { width: 880, height: 640, x: 140, y: 100 } }
+          : {}),
+      });
+    },
+    [t],
+  );
+
   const detachPanel = useCallback(
     (id: string) => {
       const title = panelTitle(id, t);
@@ -120,11 +144,23 @@ export function AppUiApp(): JSX.Element {
       refreshKey,
       refresh,
       status,
+      focusPanel,
       language,
       setLanguage: changeLanguage,
       t,
     }),
-    [repoId, sourceId, selectedFile, refreshKey, refresh, status, language, changeLanguage, t],
+    [
+      repoId,
+      sourceId,
+      selectedFile,
+      refreshKey,
+      refresh,
+      status,
+      focusPanel,
+      language,
+      changeLanguage,
+      t,
+    ],
   );
 
   const onReady = useCallback(

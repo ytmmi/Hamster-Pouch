@@ -149,6 +149,9 @@ export function MediaPreviewPanel(): JSX.Element {
                 app.selectedFile?.id === file.id ? "selected" : ""
               }`}
               onClick={() => app.setSelectedFile(file)}
+              onDoubleClick={() =>
+                app.focusPanel(file.media_type === "image" ? "viewer" : "player", true)
+              }
               title={file.relative_path}
             >
               <div className="mp-thumb">

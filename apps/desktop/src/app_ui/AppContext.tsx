@@ -17,6 +17,8 @@ export interface AppContextValue {
   refreshKey: number;
   refresh: () => void;
   status: (message: string, type?: StatusType) => void;
+  /** 聚焦/打开面板：已存在则激活（切换 tab），不存在则按 floating 创建。 */
+  focusPanel: (id: string, floating?: boolean) => void;
   language: Language;
   setLanguage: (lang: Language) => void;
   t: Translate;
