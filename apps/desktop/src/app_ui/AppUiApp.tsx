@@ -139,6 +139,13 @@ export function AppUiApp(): JSX.Element {
             disableFloatingGroups={false}
             dndStrategy="pointer"
             theme={theme === "dark" ? themeDark : themeLight}
+            getTabContextMenuItems={() => [
+              "close",
+              "separator",
+              "float",
+              "separator",
+              "maximize",
+            ]}
           />
         </div>
         <div className="app-status">

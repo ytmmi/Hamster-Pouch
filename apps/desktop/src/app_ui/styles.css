@@ -680,3 +680,53 @@ button.danger {
   --dv-floating-border: 1px solid #3a3f45;
   --dv-floating-titlebar-background-color: #1b1d21;
 }
+
+/* ===== 强制面板区域配色（元素级，确保白天为浅色） ===== */
+
+.app-root .dv-dockview,
+.app-root .dv-watermark {
+  background-color: #f4f5f7;
+  color: #6b7280;
+}
+.app-root .dv-groupview,
+.app-root .dv-content-container,
+.app-root .dv-void-container {
+  background-color: #ffffff;
+}
+.app-root .dv-tabs-and-actions-container {
+  background-color: #f4f5f7;
+}
+.app-root .dv-tab {
+  color: #1f2328;
+}
+.app-root .dv-active-tab {
+  background-color: #ffffff;
+  color: #1f2328;
+}
+.app-root .dv-inactive-tab {
+  color: #6b7280;
+}
+
+.app-root.theme-dark .dv-dockview,
+.app-root.theme-dark .dv-watermark {
+  background-color: #1b1d21;
+  color: #9aa1a8;
+}
+.app-root.theme-dark .dv-groupview,
+.app-root.theme-dark .dv-content-container,
+.app-root.theme-dark .dv-void-container {
+  background-color: #232629;
+}
+.app-root.theme-dark .dv-tabs-and-actions-container {
+  background-color: #1b1d21;
+}
+.app-root.theme-dark .dv-tab {
+  color: #e6e8ea;
+}
+.app-root.theme-dark .dv-active-tab {
+  background-color: #2b2f33;
+  color: #e6e8ea;
+}
+.app-root.theme-dark .dv-inactive-tab {
+  color: #9aa1a8;
+}
