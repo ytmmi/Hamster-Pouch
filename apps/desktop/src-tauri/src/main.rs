@@ -11,21 +11,25 @@ use hp_core::{
     AlbumKind, AlbumMediaType, FileIndexRow, HpError, HpResult, MediaType, RepoId, Source,
     SyncMode, Tag, TagSource,
 };
-use hp_media::{extract_exif, extract_palette, ThumbnailCache};
+use hp_media::{extract_exif, extract_palette, MediaProcess, ThumbnailCache};
 use hp_scanner::{ScanOptions, ScanPhase, ScanProgress, ScanOutcome, Scanner};
 use hp_store::{GlobalDb, RepoDb};
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 
+mod media_commands;
+
 /// 应用级共享状态（Arc 包装以支持后台扫描线程）。
 #[derive(Clone)]
-struct AppState {
-    global_db: Arc<Mutex<Option<GlobalDb>>>,
-    open_repo: Arc<Mutex<Option<RepoDb>>>,
-    scanner: Arc<Scanner>,
-    ffmpeg_bin: Arc<Option<PathBuf>>,
-    ffprobe_bin: Arc<Option<PathBuf>>,
-    thumb_cache: Arc<ThumbnailCache>,
+pub(crate) struct AppState {
+    pub(crate) global_db: Arc<Mutex<Option<GlobalDb>>>,
+    pub(crate) open_repo: Arc<Mutex<Option<RepoDb>>>,
+    pub(crate) scanner: Arc<Scanner>,
+    pub(crate) ffmpeg_bin: Arc<Option<PathBuf>>,
+    pub(crate) ffprobe_bin: Arc<Option<PathBuf>>,
+    pub(crate) thumb_cache: Arc<ThumbnailCache>,
+    /// 媒体子进程（libmpv，单实例常驻，D14）。
+    pub(crate) media: Arc<Mutex<Option<MediaProcess>>>,
 }
 
 #[derive(Serialize)]
@@ -170,7 +174,7 @@ struct ColorExtractedEvent {
     palette: Vec<String>,
 }
 
-fn hp_err_to_string(e: HpError) -> String {
+pub(crate) fn hp_err_to_string(e: HpError) -> String {
     e.to_string()
 }
 
@@ -232,6 +236,7 @@ fn make_state(app: &tauri::AppHandle) -> AppState {
         ffmpeg_bin: Arc::new(external_bin("ffmpeg")),
         ffprobe_bin: Arc::new(external_bin("ffprobe")),
         thumb_cache: Arc::new(ThumbnailCache::new(thumb_root)),
+        media: Arc::new(Mutex::new(None)),
     }
 }
 
@@ -861,7 +866,7 @@ fn tag_to_item(t: Tag) -> TagItem {
 }
 
 /// 解析文件绝对路径：源本地路径 + 相对路径。
-fn resolve_file_path(db: &RepoDb, file: &FileIndexRow) -> HpResult<PathBuf> {
+pub(crate) fn resolve_file_path(db: &RepoDb, file: &FileIndexRow) -> HpResult<PathBuf> {
     let source = db
         .get_source(file.source_id.as_str())?
         .ok_or_else(|| HpError::NotFound(format!("图像源不存在: {}", file.source_id.as_str())))?;
@@ -1215,7 +1220,12 @@ fn main() {
             color_extract,
             file_metadata,
             file_query,
-            file_path
+            file_path,
+            media_commands::media_play,
+            media_commands::media_pause,
+            media_commands::media_seek,
+            media_commands::media_stop,
+            media_commands::media_process_status
         ])
         .run(tauri::generate_context!())
         .expect("仓鼠颊启动失败");
