@@ -1,14 +1,21 @@
 /* app_ui 正式界面样式 — 深色专业主题 */
 
 :root {
-  /* 默认：白天模式（浅色） */
+  /* 默认：白天模式（浅色）—— 白色为强调色 */
   --bg: #f4f5f7;
   --bg-2: #ffffff;
   --bg-3: #eceef1;
   --border: #d4d8de;
   --fg: #1f2328;
   --fg-dim: #6b7280;
-  --accent: #1a73e8;
+  --accent: #ffffff;
+  --accent-border: #b8bcc2;
+  --sel-bg: #ffffff;
+  --sel-border: #b8bcc2;
+  --active-bg: #ffffff;
+  --active-fg: #1f2328;
+  --hover-border: #b8bcc2;
+  --progress: #6b7280;
   --danger: #d93025;
   --ok: #1a7f37;
 
@@ -22,10 +29,10 @@
   --dv-inactivegroup-hiddenpanel-tab-background-color: #f4f5f7;
   --dv-tab-divider-color: #d4d8de;
   --dv-separator-border: #d4d8de;
-  --dv-paneview-active-outline-color: #1a73e8;
-  --dv-active-sash-color: #1a73e8;
-  --dv-drag-over-background-color: rgba(26, 115, 232, 0.2);
-  --dv-drag-over-border-color: #1a73e8;
+  --dv-paneview-active-outline-color: #b8bcc2;
+  --dv-active-sash-color: #b8bcc2;
+  --dv-drag-over-background-color: rgba(255, 255, 255, 0.75);
+  --dv-drag-over-border-color: #b8bcc2;
 }
 
 * {
@@ -58,7 +65,15 @@ body {
 .app-workspace {
   flex: 1;
   min-height: 0;
+  display: flex;
   color: var(--fg);
+}
+
+/* dockview 容器需填满工作区，否则拖拽/布局异常 */
+.app-workspace > div {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
 }
 
 /* ===== 顶部功能条 ===== */
@@ -154,8 +169,9 @@ body {
 }
 
 .menu-item.small.on {
-  background: var(--accent);
-  color: #fff;
+  background: var(--active-bg);
+  color: var(--active-fg);
+  border: 1px solid var(--accent-border);
   border-radius: 4px;
 }
 
@@ -247,7 +263,7 @@ button {
 }
 
 button:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--hover-border);
 }
 
 button:disabled {
@@ -287,8 +303,8 @@ button.danger {
 }
 
 .list-row.selected {
-  border-color: var(--accent);
-  background: rgba(74, 163, 255, 0.12);
+  border-color: var(--sel-border);
+  background: var(--sel-bg);
 }
 
 .row-main {
@@ -393,7 +409,7 @@ button.danger {
 
 .progress-fill {
   height: 100%;
-  background: var(--accent);
+  background: var(--progress);
 }
 
 .palette {
@@ -439,8 +455,9 @@ button.danger {
 }
 
 .mp-toggle button.active {
-  background: var(--accent);
-  color: #fff;
+  background: var(--active-bg);
+  color: var(--active-fg);
+  border: 1px solid var(--accent-border);
 }
 
 .mp-count {
@@ -467,8 +484,8 @@ button.danger {
 }
 
 .mp-cell.selected {
-  border-color: var(--accent);
-  background: rgba(74, 163, 255, 0.12);
+  border-color: var(--sel-border);
+  background: var(--sel-bg);
 }
 
 .mp-thumb {
@@ -525,8 +542,8 @@ button.danger {
 }
 
 .mp-row.selected {
-  border-color: var(--accent);
-  background: rgba(74, 163, 255, 0.12);
+  border-color: var(--sel-border);
+  background: var(--sel-bg);
 }
 
 .mp-row-name {
@@ -600,6 +617,13 @@ button.danger {
   --fg: #e6e8ea;
   --fg-dim: #9aa1a8;
   --accent: #4aa3ff;
+  --accent-border: #4aa3ff;
+  --sel-bg: rgba(74, 163, 255, 0.12);
+  --sel-border: #4aa3ff;
+  --active-bg: #4aa3ff;
+  --active-fg: #ffffff;
+  --hover-border: #4aa3ff;
+  --progress: #4aa3ff;
   --danger: #ff5f56;
   --ok: #3fb950;
 
