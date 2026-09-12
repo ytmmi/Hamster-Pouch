@@ -4,4 +4,14 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-# M0 保持零依赖
+hp-core = { path = "../hp-core" }
+hp-hash = { path = "../hp-hash" }
+hp-store = { path = "../hp-store" }
+hp-media = { path = "../hp-media" }
+walkdir = "2"
+notify = "6"
+time = { version = "0.3", features = ["formatting"] }
+
+[dev-dependencies]
+tempfile = "3"
+image = "0.25"

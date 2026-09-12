@@ -4,4 +4,6 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-# M0 保持零依赖
+hp-core = { path = "../hp-core" }
+blake3 = "1"
+image = "0.25"

@@ -9,7 +9,10 @@ use crate::migrate;
 use crate::util::{now_iso, require_nonempty, store_err};
 
 /// 仓库库迁移脚本（按版本升序）。
-const REPO_MIGRATIONS: &[&str] = &[include_str!("../migrations/repo/0001_init.sql")];
+const REPO_MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/repo/0001_init.sql"),
+    include_str!("../migrations/repo/0002_media_info.sql"),
+];
 
 /// 仓库库句柄。
 pub struct RepoDb {
@@ -17,6 +20,11 @@ pub struct RepoDb {
 }
 
 impl RepoDb {
+    /// 内部连接访问器（供 `source_repo` / `file_repo` 等仓储扩展方法使用）。
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
     /// 在指定路径创建新仓库库；路径已存在则报错（不覆盖）。
     pub fn create(path: impl AsRef<Path>, name: &str) -> HpResult<Self> {
         require_nonempty(name, "仓库名")?;

@@ -4,4 +4,5 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-# M0 保持零依赖
+hp-core = { path = "../hp-core" }
+serde_json = "1"

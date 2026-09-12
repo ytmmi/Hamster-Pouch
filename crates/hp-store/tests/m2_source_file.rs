@@ -1,0 +1,108 @@
+//! M2 验收测试：图像源挂载/卸载/别名 + 文件索引仓储 + media_info_json 迁移。
+//! 对应 docs/roadmap/phase-1-top-level-plan.md 的 M2 范围。
+
+use hp_core::{FileId, FileIndexRow, MediaType, ThumbStatus, VerifyStatus};
+use hp_store::RepoDb;
+
+fn temp_path(tag: &str) -> std::path::PathBuf {
+    tempfile::tempdir()
+        .expect("创建临时目录失败")
+        .keep()
+        .join(format!("{tag}.sqlite3"))
+}
+
+#[test]
+fn source_mount_list_rename_unmount() {
+    let path = temp_path("src");
+    let mut db = RepoDb::create(&path, "仓库").expect("创建仓库失败");
+
+    let s = db
+        .mount_source("repo-1", "C:/photos", Some("我的照片"), None)
+        .expect("挂载失败");
+    assert_eq!(s.alias.as_deref(), Some("我的照片"));
+
+    // 嵌套源
+    let child = db
+        .mount_source("repo-1", "C:/photos/sub", None, Some(s.id.as_str()))
+        .expect("挂载子源失败");
+    assert_eq!(
+        child.parent_source_id.as_ref().map(|p| p.as_str()),
+        Some(s.id.as_str())
+    );
+
+    // 列表
+    let list = db.list_sources("repo-1").expect("列出源失败");
+    assert_eq!(list.len(), 2);
+
+    // 查询
+    let got = db
+        .get_source(s.id.as_str())
+        .expect("查询源失败")
+        .expect("源应存在");
+    assert_eq!(got.local_path, "C:/photos");
+
+    // 重命名别名
+    db.rename_source(s.id.as_str(), "新别名").expect("重命名失败");
+    let renamed = db
+        .get_source(s.id.as_str())
+        .expect("查询源失败")
+        .expect("源应存在");
+    assert_eq!(renamed.alias.as_deref(), Some("新别名"));
+
+    // 卸载（保留索引，仅标记离线）
+    db.unmount_source(s.id.as_str()).expect("卸载失败");
+    let unmounted = db
+        .get_source(s.id.as_str())
+        .expect("查询源失败")
+        .expect("源应保留");
+    assert!(!unmounted.mounted);
+
+    db.close().expect("关闭失败");
+}
+
+#[test]
+fn file_upsert_get_and_media_info_migration() {
+    let path = temp_path("file");
+    let mut db = RepoDb::create(&path, "仓库").expect("创建仓库失败");
+    let s = db
+        .mount_source("repo-1", "C:/photos", None, None)
+        .expect("挂载失败");
+
+    let row = FileIndexRow {
+        id: FileId::generate(),
+        source_id: s.id.clone(),
+        relative_path: "a.jpg".to_string(),
+        media_type: MediaType::Image,
+        content_hash: Some("abc".to_string()),
+        content_hash_algo: Some("BLAKE3".to_string()),
+        content_hash_algo_version: Some(1),
+        perceptual_hash: Some("def".to_string()),
+        perceptual_hash_algo: Some("dHash".to_string()),
+        perceptual_hash_algo_version: Some(1),
+        size: 100,
+        mtime: "1".to_string(),
+        scan_time: "t".to_string(),
+        verify_status: VerifyStatus::Ok,
+        thumb_status: ThumbStatus::NotGenerated,
+        missing_status: 0,
+        media_info_json: Some(r#"{"format":{"duration":"1.5"}}"#.to_string()),
+    };
+
+    db.upsert_file(&row).expect("写入文件索引失败");
+    assert_eq!(db.count_files().expect("统计失败"), 1);
+
+    let got = db
+        .get_file(row.id.as_str())
+        .expect("查询失败")
+        .expect("文件应存在");
+    assert_eq!(got.content_hash.as_deref(), Some("abc"));
+    assert_eq!(
+        got.media_info_json.as_deref(),
+        Some(r#"{"format":{"duration":"1.5"}}"#)
+    );
+
+    // 迁移 0002 已生效：schema_version 应为 2（0001 + 0002）
+    assert_eq!(db.schema_version().expect("读版本失败"), 2);
+
+    db.close().expect("关闭失败");
+}

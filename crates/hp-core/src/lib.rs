@@ -2,7 +2,11 @@
 //! 本 crate 保持纯净，不依赖 Tauri/SQLite/文件系统。
 
 pub mod error;
+pub mod file;
 pub mod repo;
+pub mod source;
 
 pub use error::{HpError, HpResult};
+pub use file::{FileId, FileIndexRow, ThumbStatus, VerifyStatus};
 pub use repo::RepoId;
+pub use source::{MediaType, Source, SourceId};
