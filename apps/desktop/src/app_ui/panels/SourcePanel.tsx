@@ -14,6 +14,38 @@ import type {
   SourceItem,
 } from "../types";
 
+/** 取路径最后一段文件夹名。 */
+function baseName(path: string): string {
+  const parts = path.replace(/[\\/]+$/, "").split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
+/** 路径文本：过长省略尾部；悬停时滚轮可水平滚动查看完整路径。 */
+function PathText({ path }: { path: string }): JSX.Element {
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) {
+      return;
+    }
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth > el.clientWidth) {
+        el.scrollLeft += e.deltaY;
+        e.preventDefault();
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  return (
+    <span ref={ref} className="source-path" title={path}>
+      {path}
+    </span>
+  );
+}
+
 export function SourcePanel(): JSX.Element {
   const app = useApp();
   const { t } = app;
@@ -191,8 +223,8 @@ export function SourcePanel(): JSX.Element {
                   onClick={() => app.setSourceId(s.id)}
                   title={s.local_path}
                 >
-                  <span>{s.alias ?? s.id.slice(0, 8)}</span>
-                  <span className="dim">{s.local_path}</span>
+                  <span className="source-name">{s.alias ?? baseName(s.local_path)}</span>
+                  <PathText path={s.local_path} />
                 </button>
                 <div className="row-actions">
                   <button onClick={() => void scan(s.id, false)}>{t("common.scan")}</button>
