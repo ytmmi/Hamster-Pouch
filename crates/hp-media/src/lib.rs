@@ -4,10 +4,14 @@
 //! 播放控制（libmpv 子进程）属于 M4，本里程碑不实现。
 
 mod cache;
+mod exif;
+mod palette;
 mod probe;
 mod process;
 mod thumbnail;
 
 pub use cache::ThumbnailCache;
+pub use exif::{extract_exif, ImageExif};
+pub use palette::{extract_palette, Palette, DEFAULT_PALETTE_SIZE};
 pub use probe::{probe, MediaProbe};
 pub use thumbnail::extract_thumbnail;

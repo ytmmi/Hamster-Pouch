@@ -7,8 +7,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use hp_album::AlbumService;
-use hp_core::{AlbumKind, AlbumMediaType, HpError, HpResult, RepoId, Source, SyncMode};
-use hp_media::ThumbnailCache;
+use hp_core::{
+    AlbumKind, AlbumMediaType, FileIndexRow, HpError, HpResult, MediaType, RepoId, Source,
+    SyncMode, Tag, TagSource,
+};
+use hp_media::{extract_exif, extract_palette, ThumbnailCache};
 use hp_scanner::{ScanOptions, ScanPhase, ScanProgress, ScanOutcome, Scanner};
 use hp_store::{GlobalDb, RepoDb};
 use serde::Serialize;
@@ -136,6 +139,35 @@ struct AlbumSyncConflictEvent {
     album_id: String,
     file_id: String,
     reason: String,
+}
+
+#[derive(Serialize)]
+struct TagItem {
+    id: String,
+    repo_id: String,
+    name: String,
+    color: Option<String>,
+}
+
+#[derive(Serialize)]
+struct FileMetadataResult {
+    id: String,
+    source_id: String,
+    relative_path: String,
+    media_type: String,
+    content_hash: Option<String>,
+    size: i64,
+    mtime: String,
+    verify_status: String,
+    media_info_json: Option<String>,
+    exif_json: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+struct ColorExtractedEvent {
+    task_id: String,
+    file_id: String,
+    palette: Vec<String>,
 }
 
 fn hp_err_to_string(e: HpError) -> String {
@@ -817,6 +849,286 @@ fn run_album_sync(
     AlbumService::sync(db, repo_id, album_id)
 }
 
+// ===== M4：tag / 评分 / 元数据 / 色彩参考命令 =====
+
+fn tag_to_item(t: Tag) -> TagItem {
+    TagItem {
+        id: t.id.as_str().to_string(),
+        repo_id: t.repo_id.as_str().to_string(),
+        name: t.name,
+        color: t.color,
+    }
+}
+
+/// 解析文件绝对路径：源本地路径 + 相对路径。
+fn resolve_file_path(db: &RepoDb, file: &FileIndexRow) -> HpResult<PathBuf> {
+    let source = db
+        .get_source(file.source_id.as_str())?
+        .ok_or_else(|| HpError::NotFound(format!("图像源不存在: {}", file.source_id.as_str())))?;
+    Ok(PathBuf::from(source.local_path).join(&file.relative_path))
+}
+
+/// tag.add：给文件批量添加 tag（仓库内，不存在则创建）。
+#[tauri::command]
+fn tag_add(
+    repo_id: String,
+    file_ids: Vec<String>,
+    tag_name: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    if tag_name.trim().is_empty() {
+        return Err("tag 名不能为空".into());
+    }
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    let tag = db
+        .create_tag(&repo_id, &tag_name, None)
+        .map_err(hp_err_to_string)?;
+    for file_id in &file_ids {
+        db.add_file_tag(file_id, tag.id.as_str(), TagSource::User, None, None)
+            .map_err(hp_err_to_string)?;
+    }
+    Ok(())
+}
+
+/// tag.remove：从文件批量移除 tag。
+#[tauri::command]
+fn tag_remove(
+    repo_id: String,
+    file_ids: Vec<String>,
+    tag_name: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    if let Some(tag) = db
+        .find_tag_by_name(&repo_id, &tag_name)
+        .map_err(hp_err_to_string)?
+    {
+        for file_id in &file_ids {
+            db.remove_file_tag(file_id, tag.id.as_str())
+                .map_err(hp_err_to_string)?;
+        }
+    }
+    Ok(())
+}
+
+/// tag.list：列出仓库内全部 tag。
+#[tauri::command]
+fn tag_list(repo_id: String, state: State<AppState>) -> Result<Vec<TagItem>, String> {
+    let guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+    let tags = db.list_tags(&repo_id).map_err(hp_err_to_string)?;
+    Ok(tags.into_iter().map(tag_to_item).collect())
+}
+
+/// tag.forFile：列出文件已关联的 tag。
+#[tauri::command]
+fn tag_for_file(
+    repo_id: String,
+    file_id: String,
+    state: State<AppState>,
+) -> Result<Vec<TagItem>, String> {
+    let _ = repo_id;
+    let guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+    let tags = db.list_tags_for_file(&file_id).map_err(hp_err_to_string)?;
+    Ok(tags.into_iter().map(tag_to_item).collect())
+}
+
+/// rating.set：设置文件评分（0-5）。
+#[tauri::command]
+fn rating_set(
+    repo_id: String,
+    file_id: String,
+    rating: i64,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let _ = repo_id;
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    db.upsert_rating(&file_id, rating)
+        .map_err(hp_err_to_string)?;
+    Ok(())
+}
+
+/// rating.get：读取文件评分。
+#[tauri::command]
+fn rating_get(
+    repo_id: String,
+    file_id: String,
+    state: State<AppState>,
+) -> Result<Option<i64>, String> {
+    let _ = repo_id;
+    let guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+    Ok(db
+        .get_rating(&file_id)
+        .map_err(hp_err_to_string)?
+        .map(|r| r.rating))
+}
+
+/// color.get：读取文件色彩参考。
+#[tauri::command]
+fn color_get(
+    repo_id: String,
+    file_id: String,
+    state: State<AppState>,
+) -> Result<Option<String>, String> {
+    let _ = repo_id;
+    let guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+    Ok(db
+        .get_color_ref(&file_id)
+        .map_err(hp_err_to_string)?
+        .map(|c| c.color_json))
+}
+
+/// color.set：手动调整/锁定色彩参考（覆盖自动结果，仅图片）。
+#[tauri::command]
+fn color_set(
+    repo_id: String,
+    file_id: String,
+    color_json: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let _ = repo_id;
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    db.upsert_color_ref(&file_id, &color_json)
+        .map_err(hp_err_to_string)?;
+    Ok(())
+}
+
+/// color.extract：按需提取图片调色板并缓存（仅图片），后台运行并发事件。
+#[tauri::command]
+async fn color_extract(
+    repo_id: String,
+    file_id: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let _ = repo_id;
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let st = state.inner().clone();
+    let app_handle = app.clone();
+    let emit_task_id = task_id.clone();
+    let emit_file_id = file_id.clone();
+
+    tauri::async_runtime::spawn_blocking(move || match run_color_extract(&st, &file_id) {
+        Ok(palette) => {
+            let _ = app_handle.emit(
+                "color.extracted",
+                ColorExtractedEvent {
+                    task_id: emit_task_id.clone(),
+                    file_id: emit_file_id.clone(),
+                    palette: palette.colors.clone(),
+                },
+            );
+        }
+        Err(_) => {
+            let _ = app_handle.emit(
+                "color.extracted",
+                ColorExtractedEvent {
+                    task_id: emit_task_id.clone(),
+                    file_id: emit_file_id.clone(),
+                    palette: Vec::new(),
+                },
+            );
+        }
+    });
+
+    Ok(task_id)
+}
+
+/// 在后台提取图片调色板并写入色彩参考（仅图片）。
+fn run_color_extract(state: &AppState, file_id: &str) -> HpResult<hp_media::Palette> {
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| HpError::Store("仓库锁中毒".into()))?;
+    let db = guard
+        .as_mut()
+        .ok_or_else(|| HpError::NotFound("未打开仓库".into()))?;
+    let file = db
+        .get_file(file_id)?
+        .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
+    if file.media_type != MediaType::Image {
+        return Err(HpError::InvalidArgument("色彩参考仅支持图片".into()));
+    }
+    let path = resolve_file_path(db, &file)?;
+    let palette = extract_palette(&path, 0)?;
+    let colors_json = serde_json::to_string(&palette.colors).unwrap_or_else(|_| "[]".to_string());
+    let color_json = format!(r#"{{"colors":{colors_json},"locked":false}}"#);
+    db.upsert_color_ref(file_id, &color_json)?;
+    Ok(palette)
+}
+
+/// file.metadata：读取文件元数据（图片附 EXIF，视频附 ffprobe 缓存）。
+#[tauri::command]
+fn file_metadata(
+    repo_id: String,
+    file_id: String,
+    state: State<AppState>,
+) -> Result<FileMetadataResult, String> {
+    let _ = repo_id;
+    let guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+    let file = db
+        .get_file(&file_id)
+        .map_err(hp_err_to_string)?
+        .ok_or_else(|| format!("文件不存在: {file_id}"))?;
+
+    let exif_json = if file.media_type == MediaType::Image {
+        resolve_file_path(db, &file)
+            .ok()
+            .and_then(|path| extract_exif(&path).ok())
+            .map(|e| e.raw_json)
+    } else {
+        None
+    };
+
+    Ok(FileMetadataResult {
+        id: file.id.as_str().to_string(),
+        source_id: file.source_id.as_str().to_string(),
+        relative_path: file.relative_path,
+        media_type: file.media_type.as_str().to_string(),
+        content_hash: file.content_hash,
+        size: file.size,
+        mtime: file.mtime,
+        verify_status: file.verify_status.as_str().to_string(),
+        media_info_json: file.media_info_json,
+        exif_json,
+    })
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -843,7 +1155,17 @@ fn main() {
             album_remove_member,
             album_list,
             album_members,
-            album_sync
+            album_sync,
+            tag_add,
+            tag_remove,
+            tag_list,
+            tag_for_file,
+            rating_set,
+            rating_get,
+            color_get,
+            color_set,
+            color_extract,
+            file_metadata
         ])
         .run(tauri::generate_context!())
         .expect("仓鼠颊启动失败");
