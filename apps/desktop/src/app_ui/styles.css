@@ -359,6 +359,37 @@ button.danger {
   cursor: default;
 }
 
+/* 图像源列表：撑满剩余空间 */
+.source-list {
+  flex: 1;
+  min-height: 0;
+}
+
+.source-row {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* 右键上下文菜单 */
+.context-menu {
+  position: fixed;
+  z-index: 2000;
+  min-width: 140px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.menu-item.danger {
+  color: var(--danger);
+}
+
 .row-actions {
   display: flex;
   gap: 4px;

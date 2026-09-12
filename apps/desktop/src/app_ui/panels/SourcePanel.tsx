@@ -1,5 +1,5 @@
 /**
- * 图像源组件 — 添加图像源（子菜单）+ 已添加的图像源列表。
+ * 图像源组件 — 添加图像源（子菜单）+ 已添加的图像源列表（右键操作）。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -46,6 +46,12 @@ function PathText({ path }: { path: string }): JSX.Element {
   );
 }
 
+interface ContextMenuState {
+  x: number;
+  y: number;
+  sourceId: string;
+}
+
 export function SourcePanel(): JSX.Element {
   const app = useApp();
   const { t } = app;
@@ -54,6 +60,7 @@ export function SourcePanel(): JSX.Element {
   const [alias, setAlias] = useState("");
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [progress, setProgress] = useState<{ p: number; t: number } | null>(null);
+  const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const unlistenRef = useRef<UnlistenFn[]>([]);
 
   const load = useCallback(async () => {
@@ -71,6 +78,16 @@ export function SourcePanel(): JSX.Element {
   useEffect(() => {
     void load();
   }, [load, app.refreshKey]);
+
+  // 点击任意处关闭右键菜单
+  useEffect(() => {
+    if (!menu) {
+      return;
+    }
+    const close = () => setMenu(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [menu]);
 
   // 扫描事件订阅
   useEffect(() => {
@@ -119,7 +136,9 @@ export function SourcePanel(): JSX.Element {
         localPath: localPath.trim(),
         alias: alias.trim() || undefined,
       });
-      app.status(`${t("source.add")}: ${s.alias ?? s.id.slice(0, 8)}`, "ok");
+      // 立即入列，避免等待刷新
+      setSources((prev) => (prev.some((x) => x.id === s.id) ? prev : [...prev, s]));
+      app.status(`${t("source.add")}: ${s.alias ?? baseName(s.local_path)}`, "ok");
       setLocalPath("");
       setAlias("");
       setOpenAdd(false);
@@ -133,6 +152,7 @@ export function SourcePanel(): JSX.Element {
     if (!app.repoId) return;
     try {
       await api.sourceUnmount({ repoId: app.repoId, sourceId });
+      setSources((prev) => prev.filter((x) => x.id !== sourceId));
       app.status(`${t("common.unmount")} ✓`, "ok");
       app.refresh();
     } catch (e) {
@@ -210,33 +230,64 @@ export function SourcePanel(): JSX.Element {
             </div>
           )}
 
-          {/* 已添加的图像源 */}
-          <div className="section-title">{t("source.list")}</div>
-          <div className="list">
+          {/* 已添加的图像源（右键操作） */}
+          <div className="section-title">
+            {t("source.list")}（{sources.length}）
+          </div>
+          <div className="list source-list">
             {sources.map((s) => (
               <div
                 key={s.id}
-                className={`list-row ${app.sourceId === s.id ? "selected" : ""}`}
+                className={`list-row source-row ${
+                  app.sourceId === s.id ? "selected" : ""
+                }`}
+                onClick={() => app.setSourceId(s.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  app.setSourceId(s.id);
+                  setMenu({ x: e.clientX, y: e.clientY, sourceId: s.id });
+                }}
               >
-                <button
-                  className="row-main"
-                  onClick={() => app.setSourceId(s.id)}
-                  title={s.local_path}
-                >
-                  <span className="source-name">{s.alias ?? baseName(s.local_path)}</span>
-                  <PathText path={s.local_path} />
-                </button>
-                <div className="row-actions">
-                  <button onClick={() => void scan(s.id, false)}>{t("common.scan")}</button>
-                  <button onClick={() => void scan(s.id, true)}>{t("common.fullScan")}</button>
-                  <button className="danger" onClick={() => void unmount(s.id)}>
-                    {t("common.unmount")}
-                  </button>
-                </div>
+                <span className="source-name">{s.alias ?? baseName(s.local_path)}</span>
+                <PathText path={s.local_path} />
               </div>
             ))}
             {sources.length === 0 && <span className="placeholder">{t("common.noFile")}</span>}
           </div>
+
+          {/* 右键上下文菜单 */}
+          {menu && (
+            <div className="context-menu" style={{ left: menu.x, top: menu.y }}>
+              <button
+                className="menu-item"
+                onClick={() => {
+                  void scan(menu.sourceId, false);
+                  setMenu(null);
+                }}
+              >
+                {t("common.scan")}
+              </button>
+              <button
+                className="menu-item"
+                onClick={() => {
+                  void scan(menu.sourceId, true);
+                  setMenu(null);
+                }}
+              >
+                {t("common.fullScan")}
+              </button>
+              <div className="menu-sep" />
+              <button
+                className="menu-item danger"
+                onClick={() => {
+                  void unmount(menu.sourceId);
+                  setMenu(null);
+                }}
+              >
+                {t("common.unmount")}
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>
