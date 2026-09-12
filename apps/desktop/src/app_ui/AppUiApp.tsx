@@ -2,7 +2,7 @@
  * 正式 UI（app_ui）根组件 — 顶部功能条 + 可停靠工作区 + 状态栏。
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DockviewReact,
   type DockviewApi,
@@ -10,6 +10,7 @@ import {
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
 
+import * as api from "./api";
 import { AppContext, type AppContextValue } from "./AppContext";
 import { MenuBar } from "./MenuBar";
 import { DOCK_COMPONENTS, PANEL_DEFS } from "./panelRegistry";
@@ -21,7 +22,27 @@ export function AppUiApp(): JSX.Element {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: StatusType } | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const apiRef = useRef<DockviewApi | null>(null);
+
+  // 加载主题设置（默认白天模式 / 浅色）
+  useEffect(() => {
+    void (async () => {
+      try {
+        const saved = await api.settingGet({ key: "ui.theme" });
+        if (saved === "dark" || saved === "light") {
+          setTheme(saved);
+        }
+      } catch {
+        /* 非 Tauri 运行时忽略 */
+      }
+    })();
+  }, []);
+
+  const changeTheme = useCallback((next: "light" | "dark") => {
+    setTheme(next);
+    void api.settingSet({ key: "ui.theme", value: next }).catch(() => undefined);
+  }, []);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
   const status = useCallback(
@@ -107,10 +128,14 @@ export function AppUiApp(): JSX.Element {
 
   return (
     <AppContext.Provider value={ctxValue}>
-      <div className="app-root">
-        <MenuBar apiRef={apiRef} />
+      <div className={`app-root ${theme === "dark" ? "theme-dark" : ""}`}>
+        <MenuBar apiRef={apiRef} theme={theme} onThemeChange={changeTheme} />
         <div className="app-workspace">
-          <DockviewReact components={DOCK_COMPONENTS} onReady={onReady} />
+          <DockviewReact
+            components={DOCK_COMPONENTS}
+            onReady={onReady}
+            disableFloatingGroups={false}
+          />
         </div>
         <div className="app-status">
           <span className={`status-text ${statusMsg?.type ?? "info"}`}>

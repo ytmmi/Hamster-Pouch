@@ -1,15 +1,31 @@
 /* app_ui 正式界面样式 — 深色专业主题 */
 
 :root {
-  --bg: #1b1d21;
-  --bg-2: #232629;
-  --bg-3: #2b2f33;
-  --border: #3a3f45;
-  --fg: #e6e8ea;
-  --fg-dim: #9aa1a8;
-  --accent: #4aa3ff;
-  --danger: #ff5f56;
-  --ok: #3fb950;
+  /* 默认：白天模式（浅色） */
+  --bg: #f4f5f7;
+  --bg-2: #ffffff;
+  --bg-3: #eceef1;
+  --border: #d4d8de;
+  --fg: #1f2328;
+  --fg-dim: #6b7280;
+  --accent: #1a73e8;
+  --danger: #d93025;
+  --ok: #1a7f37;
+
+  /* dockview 浅色主题变量 */
+  --dv-background-color: #f4f5f7;
+  --dv-group-view-background-color: #ffffff;
+  --dv-tabs-and-actions-container-background-color: #f4f5f7;
+  --dv-activegroup-visiblepanel-tab-background-color: #ffffff;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #eceef1;
+  --dv-activegroup-hiddenpanel-tab-background-color: #f4f5f7;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #f4f5f7;
+  --dv-tab-divider-color: #d4d8de;
+  --dv-separator-border: #d4d8de;
+  --dv-paneview-active-outline-color: #1a73e8;
+  --dv-active-sash-color: #1a73e8;
+  --dv-drag-over-background-color: rgba(26, 115, 232, 0.2);
+  --dv-drag-over-border-color: #1a73e8;
 }
 
 * {
@@ -35,25 +51,13 @@ body {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
 }
 
 .app-workspace {
   flex: 1;
   min-height: 0;
-  /* dockview 深色覆盖 */
-  --dv-background-color: #1b1d21;
-  --dv-group-view-background-color: #232629;
-  --dv-tabs-and-actions-container-background-color: #1b1d21;
-  --dv-activegroup-visiblepanel-tab-background-color: #2b2f33;
-  --dv-inactivegroup-visiblepanel-tab-background-color: #232629;
-  --dv-activegroup-hiddenpanel-tab-background-color: #1b1d21;
-  --dv-inactivegroup-hiddenpanel-tab-background-color: #1b1d21;
-  --dv-tab-divider-color: #3a3f45;
-  --dv-separator-border: #3a3f45;
-  --dv-paneview-active-outline-color: #4aa3ff;
-  --dv-active-sash-color: #4aa3ff;
-  --dv-drag-over-background-color: rgba(74, 163, 255, 0.25);
-  --dv-drag-over-border-color: #4aa3ff;
   color: var(--fg);
 }
 
@@ -141,6 +145,18 @@ body {
   height: 1px;
   background: var(--border);
   margin: 6px 4px;
+}
+
+.menu-label {
+  color: var(--fg-dim);
+  padding: 6px 8px;
+  min-width: 40px;
+}
+
+.menu-item.small.on {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 4px;
 }
 
 /* ===== 状态栏 ===== */
@@ -572,4 +588,32 @@ button.danger {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+
+/* ===== 黑暗模式（深色） ===== */
+
+.app-root.theme-dark {
+  --bg: #1b1d21;
+  --bg-2: #232629;
+  --bg-3: #2b2f33;
+  --border: #3a3f45;
+  --fg: #e6e8ea;
+  --fg-dim: #9aa1a8;
+  --accent: #4aa3ff;
+  --danger: #ff5f56;
+  --ok: #3fb950;
+
+  --dv-background-color: #1b1d21;
+  --dv-group-view-background-color: #232629;
+  --dv-tabs-and-actions-container-background-color: #1b1d21;
+  --dv-activegroup-visiblepanel-tab-background-color: #2b2f33;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #232629;
+  --dv-activegroup-hiddenpanel-tab-background-color: #1b1d21;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #1b1d21;
+  --dv-tab-divider-color: #3a3f45;
+  --dv-separator-border: #3a3f45;
+  --dv-paneview-active-outline-color: #4aa3ff;
+  --dv-active-sash-color: #4aa3ff;
+  --dv-drag-over-background-color: rgba(74, 163, 255, 0.25);
+  --dv-drag-over-border-color: #4aa3ff;
 }

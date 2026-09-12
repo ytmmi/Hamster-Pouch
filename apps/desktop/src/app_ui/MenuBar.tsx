@@ -13,9 +13,11 @@ import { PANEL_DEFS, panelTitle } from "./panelRegistry";
 
 export interface MenuBarProps {
   apiRef: MutableRefObject<DockviewApi | null>;
+  theme: "light" | "dark";
+  onThemeChange: (next: "light" | "dark") => void;
 }
 
-export function MenuBar({ apiRef }: MenuBarProps): JSX.Element {
+export function MenuBar({ apiRef, theme, onThemeChange }: MenuBarProps): JSX.Element {
   const app = useApp();
   const [open, setOpen] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -93,7 +95,21 @@ export function MenuBar({ apiRef }: MenuBarProps): JSX.Element {
         </button>
         {open === "settings" && (
           <div className="menu-pop">
-            <span className="menu-item dim">设置项将在后续里程碑提供</span>
+            <div className="menu-item-row">
+              <span className="menu-label">主题</span>
+              <button
+                className={`menu-item small ${theme === "light" ? "on" : ""}`}
+                onClick={() => onThemeChange("light")}
+              >
+                白天（浅色）
+              </button>
+              <button
+                className={`menu-item small ${theme === "dark" ? "on" : ""}`}
+                onClick={() => onThemeChange("dark")}
+              >
+                黑暗（深色）
+              </button>
+            </div>
           </div>
         )}
       </div>
