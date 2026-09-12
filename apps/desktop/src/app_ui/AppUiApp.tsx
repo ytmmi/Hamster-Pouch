@@ -30,6 +30,7 @@ import type { FileItem, StatusType } from "./types";
 export function AppUiApp(): JSX.Element {
   const [repoId, setRepoId] = useState<string | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(null);
+  const [albumId, setAlbumId] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: StatusType } | null>(null);
@@ -151,6 +152,8 @@ export function AppUiApp(): JSX.Element {
       setRepoId,
       sourceId,
       setSourceId,
+      albumId,
+      setAlbumId,
       selectedFile,
       setSelectedFile,
       refreshKey,
@@ -164,6 +167,7 @@ export function AppUiApp(): JSX.Element {
     [
       repoId,
       sourceId,
+      albumId,
       selectedFile,
       refreshKey,
       refresh,

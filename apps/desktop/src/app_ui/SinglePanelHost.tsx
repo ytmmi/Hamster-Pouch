@@ -20,6 +20,7 @@ export interface SinglePanelHostProps {
 
 export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps): JSX.Element {
   const [sourceId, setSourceId] = useState<string | null>(null);
+  const [albumId, setAlbumId] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: StatusType } | null>(null);
@@ -39,6 +40,8 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
       setRepoId: () => undefined,
       sourceId,
       setSourceId,
+      albumId,
+      setAlbumId,
       selectedFile,
       setSelectedFile,
       refreshKey,
@@ -49,7 +52,7 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
       setLanguage: () => undefined,
       t,
     }),
-    [repoId, sourceId, selectedFile, refreshKey, refresh, status, language, t],
+    [repoId, sourceId, albumId, selectedFile, refreshKey, refresh, status, language, t],
   );
 
   const content = panelRender(panelId);

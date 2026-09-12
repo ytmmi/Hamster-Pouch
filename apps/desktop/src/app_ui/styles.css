@@ -365,6 +365,13 @@ button.danger {
   min-height: 0;
 }
 
+/* 相册列表与成员 */
+.album-list,
+.album-members {
+  flex: 1;
+  min-height: 0;
+}
+
 .source-row {
   flex-direction: column;
   align-items: flex-start;

@@ -72,12 +72,14 @@ export function MediaPreviewPanel(): JSX.Element {
     }
     try {
       const [list, srcs] = await Promise.all([
-        api.fileQuery({
-          repoId: app.repoId,
-          sourceId: app.sourceId ?? undefined,
-          mediaType: typeFilter === "all" ? undefined : typeFilter,
-          limit: 300,
-        }),
+        app.albumId
+          ? api.albumMembers({ repoId: app.repoId, albumId: app.albumId })
+          : api.fileQuery({
+              repoId: app.repoId,
+              sourceId: app.sourceId ?? undefined,
+              mediaType: typeFilter === "all" ? undefined : typeFilter,
+              limit: 300,
+            }),
         api.sourceList({ repoId: app.repoId }),
       ]);
       setFiles(list);

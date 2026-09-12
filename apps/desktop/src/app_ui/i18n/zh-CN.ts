@@ -94,6 +94,22 @@ export const zhCN = {
   "source.pathPlaceholder": "本地文件夹路径",
   "source.aliasPlaceholder": "别名（可选）",
   "source.list": "已添加的图像源",
+  "album.add": "添加相册",
+  "album.list": "已添加的相册",
+  "album.name": "相册名称",
+  "album.kind": "类型",
+  "album.kind.fixed": "固定型",
+  "album.kind.follow": "跟随源",
+  "album.mediaType": "媒体属性",
+  "album.media.all": "全部",
+  "album.media.image": "图像",
+  "album.media.video": "视频",
+  "album.media.audio": "音频",
+  "album.inherit": "继承",
+  "album.sync": "同步",
+  "album.addSelected": "加入选中文件",
+  "album.removeSelected": "移除选中文件",
+  "album.members": "成员",
 } as const;
 
 export type DictZhCN = typeof zhCN;

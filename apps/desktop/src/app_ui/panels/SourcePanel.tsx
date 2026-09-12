@@ -241,7 +241,10 @@ export function SourcePanel(): JSX.Element {
                 className={`list-row source-row ${
                   app.sourceId === s.id ? "selected" : ""
                 }`}
-                onClick={() => app.setSourceId(s.id)}
+                onClick={() => {
+                  app.setSourceId(s.id);
+                  app.setAlbumId(null);
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   app.setSourceId(s.id);
