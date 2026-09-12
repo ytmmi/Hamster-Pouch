@@ -137,6 +137,7 @@ export function AppUiApp(): JSX.Element {
             components={DOCK_COMPONENTS}
             onReady={onReady}
             disableFloatingGroups={false}
+            dndStrategy="pointer"
             theme={theme === "dark" ? themeDark : themeLight}
           />
         </div>

@@ -616,3 +616,67 @@ button.danger {
   --ok: #3fb950;
   --media-bg: #000000;
 }
+
+/* ===== dockview 主题强制覆盖（浅色，默认白天） ===== */
+
+.app-root .dockview-theme-light {
+  color-scheme: light;
+  --dv-background-color: #f4f5f7;
+  --dv-group-view-background-color: #ffffff;
+  --dv-tabs-and-actions-container-background-color: #f4f5f7;
+  --dv-activegroup-visiblepanel-tab-background-color: #ffffff;
+  --dv-activegroup-hiddenpanel-tab-background-color: #eceef1;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #f4f5f7;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #f4f5f7;
+  --dv-tab-divider-color: #d4d8de;
+  --dv-activegroup-visiblepanel-tab-color: #1f2328;
+  --dv-activegroup-hiddenpanel-tab-color: #6b7280;
+  --dv-inactivegroup-visiblepanel-tab-color: #6b7280;
+  --dv-inactivegroup-hiddenpanel-tab-color: #9aa1a8;
+  --dv-separator-border: #d4d8de;
+  --dv-paneview-header-border-color: #d4d8de;
+  --dv-paneview-active-outline-color: #b8bcc2;
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: #b8bcc2;
+  --dv-drag-over-background-color: rgba(0, 0, 0, 0.08);
+  --dv-drag-over-border-color: #b8bcc2;
+  --dv-edge-dock-indicator-color: #b8bcc2;
+  --dv-icon-hover-background-color: rgba(0, 0, 0, 0.08);
+  --dv-scrollbar-background-color: rgba(0, 0, 0, 0.2);
+  --dv-floating-box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15),
+    0 2px 8px rgba(0, 0, 0, 0.1);
+  --dv-floating-border: 1px solid #d4d8de;
+  --dv-floating-titlebar-background-color: #f4f5f7;
+}
+
+/* ===== dockview 主题强制覆盖（黑暗） ===== */
+
+.app-root.theme-dark .dockview-theme-dark {
+  color-scheme: dark;
+  --dv-background-color: #1b1d21;
+  --dv-group-view-background-color: #232629;
+  --dv-tabs-and-actions-container-background-color: #1b1d21;
+  --dv-activegroup-visiblepanel-tab-background-color: #2b2f33;
+  --dv-activegroup-hiddenpanel-tab-background-color: #1b1d21;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #232629;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #1b1d21;
+  --dv-tab-divider-color: #3a3f45;
+  --dv-activegroup-visiblepanel-tab-color: #e6e8ea;
+  --dv-activegroup-hiddenpanel-tab-color: #9aa1a8;
+  --dv-inactivegroup-visiblepanel-tab-color: #9aa1a8;
+  --dv-inactivegroup-hiddenpanel-tab-color: #6b7280;
+  --dv-separator-border: #3a3f45;
+  --dv-paneview-header-border-color: #3a3f45;
+  --dv-paneview-active-outline-color: #4aa3ff;
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: #4aa3ff;
+  --dv-drag-over-background-color: rgba(74, 163, 255, 0.25);
+  --dv-drag-over-border-color: #4aa3ff;
+  --dv-edge-dock-indicator-color: #4aa3ff;
+  --dv-icon-hover-background-color: rgba(255, 255, 255, 0.1);
+  --dv-scrollbar-background-color: rgba(255, 255, 255, 0.2);
+  --dv-floating-box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.25);
+  --dv-floating-border: 1px solid #3a3f45;
+  --dv-floating-titlebar-background-color: #1b1d21;
+}
