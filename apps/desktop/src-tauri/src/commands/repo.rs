@@ -66,6 +66,9 @@ pub(crate) fn repo_create(
         .lock()
         .map_err(|_| "仓库锁中毒".to_string())?;
     *open_guard = Some(opened);
+    if let Ok(mut cur) = state.current_repo_id.lock() {
+        *cur = Some(row.id.clone());
+    }
 
     Ok(RepoSummary {
         id: row.id,
@@ -110,6 +113,9 @@ pub(crate) fn repo_open(
         .lock()
         .map_err(|_| "仓库锁中毒".to_string())?;
     *open_guard = Some(repo);
+    if let Ok(mut cur) = state.current_repo_id.lock() {
+        *cur = Some(repo_id.clone());
+    }
 
     Ok(RepoSummary {
         id: repo_id,
@@ -127,6 +133,9 @@ pub(crate) fn repo_close(state: State<AppState>) -> Result<(), String> {
         .map_err(|_| "仓库锁中毒".to_string())?;
     if let Some(repo) = guard.take() {
         repo.close().map_err(hp_err_to_string)?;
+    }
+    if let Ok(mut cur) = state.current_repo_id.lock() {
+        *cur = None;
     }
     Ok(())
 }
@@ -218,4 +227,140 @@ pub(crate) fn repo_backup(
     }
     std::fs::copy(&row.repo_db_path, &dest).map_err(|e| format!("备份仓库库失败: {e}"))?;
     Ok(uuid::Uuid::new_v4().to_string())
+}
+
+/// repo.rename：重命名仓库（全局注册表 + 若打开则同步仓库库 meta）。
+#[tauri::command]
+pub(crate) fn repo_rename(
+    repo_id: String,
+    name: String,
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("仓库名不能为空".into());
+    }
+    ensure_global(&state, &app).map_err(hp_err_to_string)?;
+    {
+        let mut guard = state
+            .global_db
+            .lock()
+            .map_err(|_| "全局库锁中毒".to_string())?;
+        let g = guard.as_mut().ok_or("全局库未初始化".to_string())?;
+        g.rename_repo(&repo_id, trimmed).map_err(hp_err_to_string)?;
+    }
+    let is_current = state
+        .current_repo_id
+        .lock()
+        .map(|c| c.as_deref() == Some(repo_id.as_str()))
+        .unwrap_or(false);
+    if is_current {
+        let mut open = state
+            .open_repo
+            .lock()
+            .map_err(|_| "仓库锁中毒".to_string())?;
+        if let Some(db) = open.as_mut() {
+            db.set_repo_name(trimmed).map_err(hp_err_to_string)?;
+        }
+    }
+    Ok(())
+}
+
+/// repo.delete：删除仓库（注册行 + 仓库库文件；不删除真实图像源文件）。
+#[tauri::command]
+pub(crate) fn repo_delete(
+    repo_id: String,
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    ensure_global(&state, &app).map_err(hp_err_to_string)?;
+
+    // 若删除的是当前打开仓库，先关闭以释放文件句柄。
+    let is_current = state
+        .current_repo_id
+        .lock()
+        .map(|c| c.as_deref() == Some(repo_id.as_str()))
+        .unwrap_or(false);
+    if is_current {
+        let mut guard = state
+            .open_repo
+            .lock()
+            .map_err(|_| "仓库锁中毒".to_string())?;
+        if let Some(repo) = guard.take() {
+            repo.close().map_err(hp_err_to_string)?;
+        }
+        if let Ok(mut cur) = state.current_repo_id.lock() {
+            *cur = None;
+        }
+    }
+
+    let repo_path = {
+        let guard = state
+            .global_db
+            .lock()
+            .map_err(|_| "全局库锁中毒".to_string())?;
+        let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
+        let row = g
+            .get_repo(&repo_id)
+            .map_err(hp_err_to_string)?
+            .ok_or_else(|| format!("仓库不存在: {repo_id}"))?;
+        row.repo_db_path
+    };
+
+    {
+        let mut guard = state
+            .global_db
+            .lock()
+            .map_err(|_| "全局库锁中毒".to_string())?;
+        let g = guard.as_mut().ok_or("全局库未初始化".to_string())?;
+        g.delete_repo(&repo_id).map_err(hp_err_to_string)?;
+        // 清理默认仓库标记。
+        if g.get_setting("repo.default")
+            .map_err(hp_err_to_string)?
+            .as_deref()
+            == Some(repo_id.as_str())
+        {
+            g.set_setting("repo.default", "").map_err(hp_err_to_string)?;
+        }
+    }
+
+    // 删除仓库库文件（含 WAL / SHM 附属文件）。
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{repo_path}{suffix}"));
+    }
+    Ok(())
+}
+
+/// repo.setDefault：把某仓库设为默认仓库（启动时自动打开）。
+#[tauri::command]
+pub(crate) fn repo_set_default(
+    repo_id: String,
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    ensure_global(&state, &app).map_err(hp_err_to_string)?;
+    let guard = state
+        .global_db
+        .lock()
+        .map_err(|_| "全局库锁中毒".to_string())?;
+    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
+    g.set_setting("repo.default", &repo_id)
+        .map_err(hp_err_to_string)
+}
+
+/// repo.getDefault：读取默认仓库 ID；未设置返回 `None`。
+#[tauri::command]
+pub(crate) fn repo_get_default(
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<Option<String>, String> {
+    ensure_global(&state, &app).map_err(hp_err_to_string)?;
+    let guard = state
+        .global_db
+        .lock()
+        .map_err(|_| "全局库锁中毒".to_string())?;
+    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
+    let value = g.get_setting("repo.default").map_err(hp_err_to_string)?;
+    Ok(value.filter(|v| !v.is_empty()))
 }

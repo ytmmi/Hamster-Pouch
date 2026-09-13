@@ -12,6 +12,7 @@ import * as api from "../shared/api";
 import { useApp } from "../core/AppContext";
 import { LANGUAGES, type Language } from "../i18n";
 import { PANEL_DEFS, panelTitle } from "../core/panelRegistry";
+import { ContextMenu } from "./ContextMenu";
 import { PANEL_MIN_SIZE } from "@hamster-pouch/config";
 
 /** 媒体预览面板必须保持 DOM（renderer=always），否则同组 tab 切换会丢失滚动位置。 */
@@ -45,6 +46,11 @@ export function MenuBar({
   const [layouts, setLayouts] = useState<string[]>([]);
   const [savingLayout, setSavingLayout] = useState(false);
   const [layoutName, setLayoutName] = useState("");
+  const [layoutMenu, setLayoutMenu] = useState<{ x: number; y: number; name: string } | null>(
+    null,
+  );
+  const [renamingLayout, setRenamingLayout] = useState<string | null>(null);
+  const [renameLayoutValue, setRenameLayoutValue] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -171,6 +177,63 @@ export function MenuBar({
     }
   };
 
+  const renameLayout = async (name: string, newName: string) => {
+    const trimmed = newName.trim();
+    setRenamingLayout(null);
+    setLayoutMenu(null);
+    if (!trimmed || trimmed === name) {
+      return;
+    }
+    try {
+      await api.layoutRename({ repoId, name, newName: trimmed });
+      await loadLayoutNames();
+      app.status(`布局已重命名: ${trimmed}`, "ok");
+    } catch (e) {
+      app.status(`重命名布局失败: ${String(e)}`, "error");
+    }
+  };
+
+  const deleteLayout = async (name: string) => {
+    setLayoutMenu(null);
+    if (!window.confirm(t("menubar.layout.deleteConfirm"))) {
+      return;
+    }
+    try {
+      await api.layoutDelete({ repoId, name });
+      await loadLayoutNames();
+      app.status(`布局已删除: ${name}`, "ok");
+    } catch (e) {
+      app.status(`删除布局失败: ${String(e)}`, "error");
+    }
+  };
+
+  /** 用当前布局覆盖该预设。 */
+  const updateLayout = async (name: string) => {
+    setLayoutMenu(null);
+    const dv = apiRef.current;
+    if (!dv) {
+      return;
+    }
+    try {
+      const json = JSON.stringify(dv.toJSON());
+      await api.layoutSave({ repoId, name, layoutJson: json });
+      await loadLayoutNames();
+      app.status(`布局已更新: ${name}`, "ok");
+    } catch (e) {
+      app.status(`更新布局失败: ${String(e)}`, "error");
+    }
+  };
+
+  const setDefaultLayout = async (name: string) => {
+    setLayoutMenu(null);
+    try {
+      await api.layoutSetDefault({ repoId, name });
+      app.status(`已设为默认布局: ${name}`, "ok");
+    } catch (e) {
+      app.status(`设置默认布局失败: ${String(e)}`, "error");
+    }
+  };
+
   return (
     <div className="menubar" ref={rootRef}>
       <span className="menubar-brand">{t("app.name")}</span>
@@ -266,15 +329,44 @@ export function MenuBar({
                   </button>
                 )}
                 <div className="menu-sep" />
-                {layouts.map((name, index) => (
-                  <button
-                    key={name}
-                    className={`menu-item ${index === 0 ? "first" : ""}`}
-                    onClick={() => void applyLayout(name)}
-                  >
-                    {name}
-                  </button>
-                ))}
+                {layouts.map((name, index) =>
+                  renamingLayout === name ? (
+                    <div key={name} className="menu-item-row">
+                      <input
+                        className="menu-input"
+                        value={renameLayoutValue}
+                        autoFocus
+                        onChange={(e) => setRenameLayoutValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            void renameLayout(name, renameLayoutValue);
+                          } else if (e.key === "Escape") {
+                            setRenamingLayout(null);
+                          }
+                        }}
+                      />
+                      <button
+                        className="menu-item small"
+                        onClick={() => void renameLayout(name, renameLayoutValue)}
+                      >
+                        ✓
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      key={name}
+                      className={`menu-item ${index === 0 ? "first" : ""}`}
+                      onClick={() => void applyLayout(name)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setLayoutMenu({ x: e.clientX, y: e.clientY, name });
+                      }}
+                    >
+                      {name}
+                    </button>
+                  ),
+                )}
                 {layouts.length === 0 && (
                   <span className="menu-item dim">{t("menubar.layout.empty")}</span>
                 )}
@@ -336,6 +428,40 @@ export function MenuBar({
           </div>
         )}
       </div>
+
+      {/* 布局预设右键菜单 */}
+      {layoutMenu && (
+        <ContextMenu x={layoutMenu.x} y={layoutMenu.y}>
+          <button
+            className="menu-item"
+            onClick={() => {
+              setRenamingLayout(layoutMenu.name);
+              setRenameLayoutValue(layoutMenu.name);
+              setLayoutMenu(null);
+            }}
+          >
+            {t("menubar.layout.rename")}
+          </button>
+          <button
+            className="menu-item"
+            onClick={() => void deleteLayout(layoutMenu.name)}
+          >
+            {t("menubar.layout.delete")}
+          </button>
+          <button
+            className="menu-item"
+            onClick={() => void updateLayout(layoutMenu.name)}
+          >
+            {t("menubar.layout.update")}
+          </button>
+          <button
+            className="menu-item"
+            onClick={() => void setDefaultLayout(layoutMenu.name)}
+          >
+            {t("menubar.layout.setDefault")}
+          </button>
+        </ContextMenu>
+      )}
     </div>
   );
 }

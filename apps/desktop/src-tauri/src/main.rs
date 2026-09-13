@@ -23,6 +23,8 @@ mod embed_window;
 pub(crate) struct AppState {
     pub(crate) global_db: Arc<Mutex<Option<GlobalDb>>>,
     pub(crate) open_repo: Arc<Mutex<Option<RepoDb>>>,
+    /// 当前打开的仓库 ID（用于删除仓库时判断是否需先关闭）。
+    pub(crate) current_repo_id: Arc<Mutex<Option<String>>>,
     pub(crate) scanner: Arc<Scanner>,
     pub(crate) ffmpeg_bin: Arc<Option<PathBuf>>,
     pub(crate) ffprobe_bin: Arc<Option<PathBuf>>,
@@ -52,6 +54,7 @@ fn make_state(app: &tauri::AppHandle) -> AppState {
     AppState {
         global_db: Arc::new(Mutex::new(None)),
         open_repo: Arc::new(Mutex::new(None)),
+        current_repo_id: Arc::new(Mutex::new(None)),
         scanner: Arc::new(Scanner::new()),
         ffmpeg_bin: Arc::new(external_bin("ffmpeg")),
         ffprobe_bin: Arc::new(external_bin("ffprobe")),
@@ -90,6 +93,10 @@ fn main() {
             commands::repo::repo_close,
             commands::repo::repo_list,
             commands::repo::repo_backup,
+            commands::repo::repo_rename,
+            commands::repo::repo_delete,
+            commands::repo::repo_set_default,
+            commands::repo::repo_get_default,
             commands::repo::setting_get,
             commands::repo::setting_set,
             commands::source::source_mount,
@@ -165,7 +172,11 @@ fn main() {
             commands::media::media_embed_release,
             commands::layout::layout_save,
             commands::layout::layout_list,
-            commands::layout::layout_get
+            commands::layout::layout_get,
+            commands::layout::layout_rename,
+            commands::layout::layout_delete,
+            commands::layout::layout_set_default,
+            commands::layout::layout_get_default
         ])
         .run(tauri::generate_context!())
         .expect("仓鼠颊启动失败");

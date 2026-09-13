@@ -35,3 +35,16 @@ export interface SettingSetArgs {
   key: string;
   value: string;
 }
+
+export interface RepoRenameArgs {
+  repoId: string;
+  name: string;
+}
+
+export interface RepoDeleteArgs {
+  repoId: string;
+}
+
+export interface RepoSetDefaultArgs {
+  repoId: string;
+}

@@ -23,3 +23,23 @@ export interface LayoutGetArgs {
   repoId: string;
   name: string;
 }
+
+export interface LayoutRenameArgs {
+  repoId: string;
+  name: string;
+  newName: string;
+}
+
+export interface LayoutDeleteArgs {
+  repoId: string;
+  name: string;
+}
+
+export interface LayoutSetDefaultArgs {
+  repoId: string;
+  name: string;
+}
+
+export interface LayoutGetDefaultArgs {
+  repoId: string;
+}

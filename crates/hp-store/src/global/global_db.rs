@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use hp_core::HpResult;
+use hp_core::{HpError, HpResult};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::migrate;
@@ -295,6 +295,89 @@ impl GlobalDb {
             .optional()
             .map_err(|e| store_err("查询面板布局", e))?;
         Ok(row)
+    }
+
+    /// 重命名某仓库下的命名布局（`workspace` 改名）。
+    pub fn rename_panel_layout(
+        &mut self,
+        repo_id: &str,
+        name: &str,
+        new_name: &str,
+    ) -> HpResult<()> {
+        require_nonempty(name, "布局名")?;
+        require_nonempty(new_name, "新布局名")?;
+        let n = self
+            .conn
+            .execute(
+                "UPDATE panel_layouts SET workspace = ?3, updated_at = ?4
+                 WHERE repo_id = ?1 AND workspace = ?2",
+                params![repo_id, name, new_name, now_iso()],
+            )
+            .map_err(|e| store_err("重命名面板布局", e))?;
+        if n == 0 {
+            return Err(HpError::NotFound(format!("布局不存在: {name}")));
+        }
+        Ok(())
+    }
+
+    /// 删除某仓库下的命名布局。
+    pub fn delete_panel_layout(&mut self, repo_id: &str, name: &str) -> HpResult<()> {
+        require_nonempty(name, "布局名")?;
+        let n = self
+            .conn
+            .execute(
+                "DELETE FROM panel_layouts WHERE repo_id = ?1 AND workspace = ?2",
+                params![repo_id, name],
+            )
+            .map_err(|e| store_err("删除面板布局", e))?;
+        if n == 0 {
+            return Err(HpError::NotFound(format!("布局不存在: {name}")));
+        }
+        Ok(())
+    }
+
+    /// 重命名仓库注册行。
+    pub fn rename_repo(&mut self, id: &str, name: &str) -> HpResult<()> {
+        require_nonempty(id, "仓库 ID")?;
+        require_nonempty(name, "仓库名")?;
+        let n = self
+            .conn
+            .execute(
+                "UPDATE repos SET name = ?2 WHERE id = ?1",
+                params![id, name],
+            )
+            .map_err(|e| store_err("重命名仓库", e))?;
+        if n == 0 {
+            return Err(HpError::NotFound(format!("仓库不存在: {id}")));
+        }
+        Ok(())
+    }
+
+    /// 删除仓库注册行及其关联数据（面板布局、插件仓库状态）。
+    ///
+    /// 不删除仓库库文件本身（由边界层处理），也不删除真实图像源文件。
+    pub fn delete_repo(&mut self, id: &str) -> HpResult<()> {
+        require_nonempty(id, "仓库 ID")?;
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| store_err("开启仓库删除事务", e))?;
+        for table in ["panel_layouts", "plugin_repo_state"] {
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE repo_id = ?1"),
+                params![id],
+            )
+            .map_err(|e| store_err("删除仓库关联数据", e))?;
+        }
+        let n = tx
+            .execute("DELETE FROM repos WHERE id = ?1", params![id])
+            .map_err(|e| store_err("删除仓库注册行", e))?;
+        tx.commit()
+            .map_err(|e| store_err("提交仓库删除事务", e))?;
+        if n == 0 {
+            return Err(HpError::NotFound(format!("仓库不存在: {id}")));
+        }
+        Ok(())
     }
 }
 

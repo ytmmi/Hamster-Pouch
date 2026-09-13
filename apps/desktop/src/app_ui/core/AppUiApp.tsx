@@ -274,6 +274,34 @@ export function AppUiApp(): JSX.Element {
         position: { referencePanel: "player", direction: "within" },
       });
 
+      // 启动：若设置了默认仓库，自动打开并应用其默认布局（D25 相邻能力，失败忽略）。
+      void (async () => {
+        try {
+          const defRepo = await api.repoGetDefault();
+          if (!defRepo) {
+            return;
+          }
+          const opened = await api.repoOpen({ repoId: defRepo });
+          setRepoId(opened.id);
+          const defLayout = await api.layoutGetDefault({ repoId: opened.id });
+          if (!defLayout) {
+            return;
+          }
+          const raw = await api.layoutGet({ repoId: opened.id, name: defLayout });
+          if (!raw) {
+            return;
+          }
+          const layout = JSON.parse(raw);
+          // 媒体预览需保持 DOM（renderer=always），否则 tab 切换丢滚动位置。
+          if (layout?.panels?.media) {
+            layout.panels.media.renderer = "always";
+          }
+          dv.fromJSON(layout);
+        } catch {
+          /* 无默认仓库/布局或打开失败：保留默认布局 */
+        }
+      })();
+
       // 拖出工作区 → 独立窗口（左键按住标签页拖拽，指针离开工作区即脱离）
       dv.onWillDragPanel((dragEvent) => {
         const panelId = dragEvent.panel.id;

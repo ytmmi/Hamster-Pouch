@@ -89,6 +89,12 @@ impl RepoDb {
         Ok(value)
     }
 
+    /// 更新仓库元信息中的仓库名（仓库库侧与全局注册表保持一致）。
+    pub fn set_repo_name(&mut self, name: &str) -> HpResult<()> {
+        require_nonempty(name, "仓库名")?;
+        self.set_meta("name", name)
+    }
+
     fn set_meta(&self, key: &str, value: &str) -> HpResult<()> {
         self.conn
             .execute(
