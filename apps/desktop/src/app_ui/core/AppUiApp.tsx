@@ -81,6 +81,17 @@ export function AppUiApp(): JSX.Element {
     [],
   );
 
+  // 语言切换时更新所有面板标签页标题（组件名随语言变化）
+  useEffect(() => {
+    const dv = apiRef.current;
+    if (!dv) {
+      return;
+    }
+    for (const panel of dv.panels) {
+      panel.setTitle(panelTitle(panel.id, t));
+    }
+  }, [t, language]);
+
   // 双击预览：已存在的目标面板 → 激活（切换 tab）；不存在 → 创建（可按需浮动）
   const focusPanel = useCallback(
     (id: string, floating = false) => {
