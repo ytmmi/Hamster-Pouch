@@ -714,6 +714,8 @@ button.danger {
 
 .app-root .dockview-theme-light {
   color-scheme: light;
+  --dv-tabs-and-actions-container-height: 16px;
+  --dv-tabs-and-actions-container-font-size: 11px;
   --dv-background-color: #f4f5f7;
   --dv-group-view-background-color: #ffffff;
   --dv-tabs-and-actions-container-background-color: #f4f5f7;
@@ -746,6 +748,8 @@ button.danger {
 
 .app-root.theme-dark .dockview-theme-dark {
   color-scheme: dark;
+  --dv-tabs-and-actions-container-height: 16px;
+  --dv-tabs-and-actions-container-font-size: 11px;
   --dv-background-color: #1b1d21;
   --dv-group-view-background-color: #232629;
   --dv-tabs-and-actions-container-background-color: #1b1d21;
