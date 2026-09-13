@@ -668,6 +668,8 @@ button.danger {
   border: 1px solid transparent;
   border-radius: 6px;
   text-align: center;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 140px;
 }
 
 .mp-cell.selected {
@@ -699,6 +701,14 @@ button.danger {
 }
 
 .mp-fallback {
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.mp-thumb-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--fg-dim);
   font-size: 11px;
 }

@@ -53,6 +53,7 @@ import type {
   TagRemoveArgs,
   RatingSetArgs,
   RatingGetArgs,
+  ThumbGetArgs,
 } from "./types";
 
 // ===== M1：仓库与设置 =====
@@ -315,6 +316,14 @@ export function fileQuery(args: FileQueryArgs): Promise<FileItem[]> {
     dirPrefix: args.dirPrefix,
     limit: args.limit,
     offset: args.offset,
+  });
+}
+
+/** 获取文件缩略图绝对路径（后端按需生成并缓存；null=不可用） */
+export function thumbGet(args: ThumbGetArgs): Promise<string | null> {
+  return invoke<string | null>("thumb_get", {
+    repoId: args.repoId,
+    fileId: args.fileId,
   });
 }
 

@@ -61,6 +61,136 @@ function AudioWaveform({ url }: { url: string }): JSX.Element {
   return <canvas ref={ref} className="mp-wave" />;
 }
 
+/** 缩略图 URL 缓存：fileId -> 已解析的 asset url（null=不可用）。 */
+const thumbUrlCache = new Map<string, string | null>();
+/** in-flight 请求去重：fileId -> 正在进行的 Promise，防止重复请求。 */
+const thumbPromiseCache = new Map<string, Promise<string | null>>();
+
+/** 解析文件缩略图 URL（命中缓存直接返回；否则发起请求并缓存结果）。 */
+function resolveThumbUrl(
+  repoId: string,
+  fileId: string,
+): Promise<string | null> {
+  const cached = thumbUrlCache.get(fileId);
+  if (cached !== undefined) {
+    return Promise.resolve(cached);
+  }
+  const inflight = thumbPromiseCache.get(fileId);
+  if (inflight) {
+    return inflight;
+  }
+  const promise = api
+    .thumbGet({ repoId, fileId })
+    .then((path): string | null => {
+      const url = path ? convertFileSrc(path) : null;
+      thumbUrlCache.set(fileId, url);
+      thumbPromiseCache.delete(fileId);
+      return url;
+    })
+    .catch((): null => {
+      thumbUrlCache.set(fileId, null);
+      thumbPromiseCache.delete(fileId);
+      return null;
+    });
+  thumbPromiseCache.set(fileId, promise);
+  return promise;
+}
+
+/**
+ * 媒体缩略图单元。
+ *
+ * 使用 IntersectionObserver（rootMargin 200px）在接近视口时才：
+ * - 图片/视频：请求并显示后端缓存的缩略图（而非原始全分辨率文件）；
+ * - 音频：挂载波形组件并开始解码（而非一次性预解码全部音频）。
+ * 离屏时显示占位符，节省网络与 CPU。
+ */
+function ThumbCell({
+  file,
+  repoId,
+  url,
+  selected,
+  onSelect,
+  onDoubleClick,
+}: {
+  file: FileItem;
+  repoId: string;
+  url: string;
+  selected: boolean;
+  onSelect: (file: FileItem) => void;
+  onDoubleClick: () => void;
+}): JSX.Element {
+  const cellRef = useRef<HTMLButtonElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  // 图片/视频需要请求缩略图 URL；音频走波形懒加载
+  const needsThumb =
+    file.media_type === "image" || file.media_type === "video";
+  // undefined=尚未请求；null=请求了但不可用；string=已就绪
+  const [thumbUrl, setThumbUrl] = useState<string | null | undefined>(
+    undefined,
+  );
+
+  // 进入视口附近后标记可见（仅触发一次，随后断开观察器）
+  useEffect(() => {
+    const el = cellRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setVisible(true);
+            obs.disconnect();
+          }
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  // 可见后请求缩略图（带模块级缓存 + in-flight 去重）
+  useEffect(() => {
+    if (!visible || !needsThumb) return;
+    let cancelled = false;
+    void resolveThumbUrl(repoId, file.id).then((resolved) => {
+      if (!cancelled) setThumbUrl(resolved);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, needsThumb, repoId, file.id]);
+
+  return (
+    <button
+      ref={cellRef}
+      className={`mp-cell ${selected ? "selected" : ""}`}
+      onClick={() => onSelect(file)}
+      onDoubleClick={onDoubleClick}
+      title={file.relative_path}
+    >
+      <div className="mp-thumb">
+        {!url ? (
+          <span className="mp-fallback">无路径</span>
+        ) : needsThumb ? (
+          thumbUrl === undefined ? (
+            <span className="mp-thumb-placeholder">{file.media_type}</span>
+          ) : thumbUrl === null ? (
+            <span className="mp-fallback">不可用</span>
+          ) : (
+            <img src={thumbUrl} alt={file.relative_path} loading="lazy" />
+          )
+        ) : visible ? (
+          <AudioWaveform url={url} />
+        ) : (
+          <span className="mp-thumb-placeholder">audio</span>
+        )}
+      </div>
+      <span className="mp-name">{fileName(file.relative_path)}</span>
+    </button>
+  );
+}
+
 export function MediaPreviewPanel(): JSX.Element {
   const app = useApp();
   const [viewMode, setViewMode] = useState<ViewMode>("thumb");
@@ -142,6 +272,8 @@ export function MediaPreviewPanel(): JSX.Element {
     [files, sourceMap],
   );
 
+  const repoId = app.repoId;
+
   return (
     <div className="panel mp-panel">
       <div className="mp-toolbar">
@@ -171,41 +303,31 @@ export function MediaPreviewPanel(): JSX.Element {
         <span className="mp-count">{items.length} 项</span>
       </div>
 
-      {!app.repoId && <span className="placeholder">请先打开仓库</span>}
+      {!repoId && <span className="placeholder">请先打开仓库</span>}
 
-      {app.repoId && viewMode === "thumb" && (
+      {repoId && viewMode === "thumb" && (
         <div className="mp-grid" ref={gridRef}>
           {items.map(({ file, url }) => (
-            <button
+            <ThumbCell
               key={file.id}
-              className={`mp-cell ${
-                app.selectedFile?.id === file.id ? "selected" : ""
-              }`}
-              onClick={() => app.setSelectedFile(file)}
+              file={file}
+              repoId={repoId}
+              url={url}
+              selected={app.selectedFile?.id === file.id}
+              onSelect={app.setSelectedFile}
               onDoubleClick={() =>
-                app.focusPanel(file.media_type === "image" ? "viewer" : "player", true)
+                app.focusPanel(
+                  file.media_type === "image" ? "viewer" : "player",
+                  true,
+                )
               }
-              title={file.relative_path}
-            >
-              <div className="mp-thumb">
-                {!url ? (
-                  <span className="mp-fallback">无路径</span>
-                ) : file.media_type === "image" ? (
-                  <img src={url} loading="lazy" alt={file.relative_path} />
-                ) : file.media_type === "video" ? (
-                  <video src={url} preload="metadata" muted />
-                ) : (
-                  <AudioWaveform url={url} />
-                )}
-              </div>
-              <span className="mp-name">{fileName(file.relative_path)}</span>
-            </button>
+            />
           ))}
           {items.length === 0 && <span className="placeholder">无文件</span>}
         </div>
       )}
 
-      {app.repoId && viewMode === "name" && (
+      {repoId && viewMode === "name" && (
         <div className="mp-list" ref={listRef}>
           {items.map(({ file }) => (
             <button

@@ -336,6 +336,12 @@ export interface FileQueryArgs {
   offset?: number;
 }
 
+/** thumb_get 命令参数 */
+export interface ThumbGetArgs {
+  repoId: string;
+  fileId: string;
+}
+
 // ===== M4-6：媒体播放（libmpv 子进程） =====
 
 /** media_play 返回 */

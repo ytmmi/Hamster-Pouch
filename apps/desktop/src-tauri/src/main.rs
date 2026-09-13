@@ -1260,6 +1260,84 @@ fn file_path(repo_id: String, file_id: String, state: State<AppState>) -> Result
     Ok(path.to_string_lossy().to_string())
 }
 
+/// thumb.get：按需生成并返回文件缩略图绝对路径（供前端 `convertFileSrc` 预览）。
+///
+/// 图片用 image crate 缩放，视频复用 ffmpeg 抽帧；命中缓存直接返回。
+/// 无内容哈希 / 生成失败 / 不支持的媒体类型返回 `None`（前端降级为占位）。
+#[tauri::command]
+async fn thumb_get(
+    repo_id: String,
+    file_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let _ = repo_id;
+
+    // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard。
+    let (src_path, content_hash, media_type, cache, ffmpeg) = {
+        let guard = state
+            .open_repo
+            .lock()
+            .map_err(|_| "仓库锁中毒".to_string())?;
+        let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+        let file = db
+            .get_file(&file_id)
+            .map_err(hp_err_to_string)?
+            .ok_or_else(|| format!("文件不存在: {file_id}"))?;
+        let src_path = resolve_file_path(db, &file).map_err(hp_err_to_string)?;
+        (
+            src_path,
+            file.content_hash,
+            file.media_type,
+            (*state.thumb_cache).clone(),
+            (*state.ffmpeg_bin).clone(),
+        )
+    };
+
+    let Some(hash) = content_hash else {
+        return Ok(None);
+    };
+
+    let thumb_path = cache.path_for(&hash);
+    if thumb_path.exists() {
+        return Ok(Some(thumb_path.to_string_lossy().to_string()));
+    }
+
+    // 缓存未命中：后台线程按需生成，避免阻塞 IPC 线程。
+    let gen_out = thumb_path.clone();
+    let generated = tauri::async_runtime::spawn_blocking(move || {
+        if cache.ensure_dir_for(&hash).is_err() {
+            return false;
+        }
+        match media_type {
+            MediaType::Image => hp_media::generate_image_thumbnail(
+                &src_path,
+                &gen_out,
+                hp_media::IMAGE_THUMB_MAX_DIM,
+            )
+            .is_ok(),
+            MediaType::Video => match ffmpeg {
+                Some(ffmpeg) => hp_media::extract_thumbnail(
+                    &src_path,
+                    &gen_out,
+                    &ffmpeg,
+                    std::time::Duration::from_secs(30),
+                )
+                .is_ok(),
+                None => false,
+            },
+            MediaType::Audio => false,
+        }
+    })
+    .await
+    .unwrap_or(false);
+
+    if generated && thumb_path.exists() {
+        Ok(Some(thumb_path.to_string_lossy().to_string()))
+    } else {
+        Ok(None)
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -1314,6 +1392,7 @@ fn main() {
             file_metadata,
             file_query,
             file_path,
+            thumb_get,
             media_commands::media_play,
             media_commands::media_pause,
             media_commands::media_seek,
