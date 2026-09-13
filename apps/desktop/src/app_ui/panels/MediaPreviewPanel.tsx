@@ -16,6 +16,10 @@ import { drawWaveform, extractWaveform } from "../waveform";
 type ViewMode = "thumb" | "name";
 type TypeFilter = "all" | "image" | "video" | "audio";
 
+/** 跨挂载保存滚动位置：面板被 dockview 卸载重建时也能恢复浏览进度。 */
+let savedThumbScroll = 0;
+let savedNameScroll = 0;
+
 /** 拼接本地绝对路径（按 base 的分隔符风格）。 */
 function joinPath(base: string, rel: string): string {
   const sep = base.includes("\\") ? "\\" : "/";
@@ -63,6 +67,8 @@ export function MediaPreviewPanel(): JSX.Element {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [files, setFiles] = useState<FileItem[]>([]);
   const [sources, setSources] = useState<SourceItem[]>([]);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     if (!app.repoId) {
@@ -93,6 +99,30 @@ export function MediaPreviewPanel(): JSX.Element {
   useEffect(() => {
     void load();
   }, [load, app.refreshKey]);
+
+  // 缩略图视图：恢复并跟踪滚动位置（跨面板卸载重建）
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    el.scrollTop = savedThumbScroll;
+    const onScroll = () => {
+      savedThumbScroll = el.scrollTop;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [viewMode, app.repoId, files.length > 0]);
+
+  // 列表视图：恢复并跟踪滚动位置
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = savedNameScroll;
+    const onScroll = () => {
+      savedNameScroll = el.scrollTop;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [viewMode, app.repoId, files.length > 0]);
 
   const sourceMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -144,7 +174,7 @@ export function MediaPreviewPanel(): JSX.Element {
       {!app.repoId && <span className="placeholder">请先打开仓库</span>}
 
       {app.repoId && viewMode === "thumb" && (
-        <div className="mp-grid">
+        <div className="mp-grid" ref={gridRef}>
           {items.map(({ file, url }) => (
             <button
               key={file.id}
@@ -176,7 +206,7 @@ export function MediaPreviewPanel(): JSX.Element {
       )}
 
       {app.repoId && viewMode === "name" && (
-        <div className="mp-list">
+        <div className="mp-list" ref={listRef}>
           {items.map(({ file }) => (
             <button
               key={file.id}
