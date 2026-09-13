@@ -206,6 +206,8 @@ export function AppUiApp(): JSX.Element {
         id: "media",
         component: "media",
         title: panelTitle("media", t),
+        // 保持 DOM（即使 tab 未激活），切回媒体预览时滚动位置不丢失
+        renderer: "always",
         position: { referencePanel: "repo", direction: "right" },
       });
       dv.addPanel({
@@ -290,7 +292,6 @@ export function AppUiApp(): JSX.Element {
             onReady={onReady}
             disableFloatingGroups={false}
             dndStrategy="pointer"
-            defaultRenderer="always"
             theme={theme === "dark" ? themeDark : themeLight}
             popoutUrl="/popout.html"
             getTabContextMenuItems={(params) => [
