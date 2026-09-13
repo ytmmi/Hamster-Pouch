@@ -102,8 +102,10 @@ export const en: Record<keyof DictZhCN, string> = {
   "album.media.video": "Video",
   "album.media.audio": "Audio",
   "album.inherit": "Inherit",
-  "album.sync": "Sync",
-  "album.addSelected": "Add Selected File",
-  "album.removeSelected": "Remove Selected File",
+  "album.rename": "Rename album",
+  "album.delete": "Delete album",
+  "album.mediaType.set": "Set media type",
+  "album.dropHint": "Drop to add",
+  "album.createChild": "Create sub-album",
   "album.members": "Members",
 };

@@ -102,8 +102,10 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "album.media.video": "影片",
   "album.media.audio": "音訊",
   "album.inherit": "繼承",
-  "album.sync": "同步",
-  "album.addSelected": "加入選取檔案",
-  "album.removeSelected": "移除選取檔案",
+  "album.rename": "重新命名相簿",
+  "album.delete": "刪除相簿",
+  "album.mediaType.set": "設定媒體屬性",
+  "album.dropHint": "拖到相簿加入",
+  "album.createChild": "建立子相簿",
   "album.members": "成員",
 };

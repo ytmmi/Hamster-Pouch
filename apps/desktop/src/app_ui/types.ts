@@ -58,6 +58,8 @@ export interface AlbumItem {
   name: string;
   kind: string;
   media_type: string | null;
+  /** 成员数量 */
+  member_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -340,6 +342,38 @@ export interface FileQueryArgs {
 export interface ThumbGetArgs {
   repoId: string;
   fileId: string;
+}
+
+/** file_rename 命令参数 */
+export interface FileRenameArgs {
+  repoId: string;
+  fileId: string;
+  newName: string;
+}
+
+/** file_trash 命令参数 */
+export interface FileTrashArgs {
+  repoId: string;
+  fileIds: string[];
+}
+
+/** file_reanalyze 命令参数 */
+export interface FileReanalyzeArgs {
+  repoId: string;
+  fileId: string;
+}
+
+/** album_rename 命令参数 */
+export interface AlbumRenameArgs {
+  repoId: string;
+  albumId: string;
+  name: string;
+}
+
+/** album_delete 命令参数 */
+export interface AlbumDeleteArgs {
+  repoId: string;
+  albumId: string;
 }
 
 // ===== M4-6：媒体播放（libmpv 子进程） =====

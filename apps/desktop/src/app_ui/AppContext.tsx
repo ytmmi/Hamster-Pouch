@@ -18,6 +18,9 @@ export interface AppContextValue {
   setDirPath: (p: string | null) => void;
   selectedFile: FileItem | null;
   setSelectedFile: (f: FileItem | null) => void;
+  /** 媒体预览多选集合（已选中的文件 id，跨视图/面板保持）。 */
+  selectedIds: ReadonlySet<string>;
+  setSelectedIds: (ids: Set<string>) => void;
   refreshKey: number;
   refresh: () => void;
   status: (message: string, type?: StatusType) => void;

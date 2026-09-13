@@ -23,6 +23,7 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
   const [albumId, setAlbumId] = useState<string | null>(null);
   const [dirPath, setDirPath] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: StatusType } | null>(null);
 
@@ -47,6 +48,8 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
       setDirPath,
       selectedFile,
       setSelectedFile,
+      selectedIds,
+      setSelectedIds,
       refreshKey,
       refresh,
       status,
@@ -55,7 +58,19 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
       setLanguage: () => undefined,
       t,
     }),
-    [repoId, sourceId, albumId, dirPath, selectedFile, refreshKey, refresh, status, language, t],
+    [
+      repoId,
+      sourceId,
+      albumId,
+      dirPath,
+      selectedFile,
+      selectedIds,
+      refreshKey,
+      refresh,
+      status,
+      language,
+      t,
+    ],
   );
 
   const content = panelRender(panelId);

@@ -210,6 +210,34 @@ impl Scanner {
         Ok(outcome)
     }
 
+    /// 重新分析单个文件（按相对路径）：重算哈希 / 缩略图 / 媒体信息并更新索引。
+    ///
+    /// 已存在的文件保留原 id（走变更重建路径），不存在则新建索引行。
+    pub fn rescan_file(
+        &self,
+        db: &mut RepoDb,
+        source: &Source,
+        relative_path: &str,
+        options: &ScanOptions,
+    ) -> HpResult<()> {
+        let root = Path::new(&source.local_path);
+        let path = root.join(relative_path);
+        let media_type = detect_media_type(&path)
+            .ok_or_else(|| HpError::NotFound(format!("不支持的媒体类型: {relative_path}")))?;
+        let (size, mtime) = file_stat(&path)
+            .ok_or_else(|| HpError::NotFound(format!("无法读取文件: {relative_path}")))?;
+        let mut outcome = ScanOutcome::default();
+        match db.get_file_by_path(source.id.as_str(), relative_path)? {
+            Some(row) => self.index_existing(
+                db, source, &path, relative_path, media_type, size, &mtime, &row, options,
+                &mut outcome,
+            ),
+            None => self.index_new(
+                db, source, &path, relative_path, media_type, size, &mtime, options, &mut outcome,
+            ),
+        }
+    }
+
     /// 索引全新文件（含移动/重命名识别）。
     #[allow(clippy::too_many_arguments)]
     fn index_new(

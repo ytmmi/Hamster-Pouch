@@ -106,9 +106,11 @@ export const zhCN = {
   "album.media.video": "视频",
   "album.media.audio": "音频",
   "album.inherit": "继承",
-  "album.sync": "同步",
-  "album.addSelected": "加入选中文件",
-  "album.removeSelected": "移除选中文件",
+  "album.rename": "重命名相册",
+  "album.delete": "删除相册",
+  "album.mediaType.set": "设置媒体属性",
+  "album.dropHint": "拖到相册加入",
+  "album.createChild": "创建子相册",
   "album.members": "成员",
 } as const;
 

@@ -105,6 +105,8 @@ struct AlbumItem {
     name: String,
     kind: String,
     media_type: Option<String>,
+    /// 成员数量（`album_member` 表行数）。
+    member_count: i64,
     created_at: String,
     updated_at: String,
 }
@@ -689,7 +691,7 @@ fn parse_album_media_type(value: Option<&str>) -> Result<Option<AlbumMediaType>,
     }
 }
 
-fn album_to_item(a: hp_core::Album) -> AlbumItem {
+fn album_to_item(a: hp_core::Album, member_count: i64) -> AlbumItem {
     AlbumItem {
         id: a.id.as_str().to_string(),
         repo_id: a.repo_id.as_str().to_string(),
@@ -697,6 +699,7 @@ fn album_to_item(a: hp_core::Album) -> AlbumItem {
         name: a.name,
         kind: a.kind.as_str().to_string(),
         media_type: a.media_type.map(|m| m.as_str().to_string()),
+        member_count,
         created_at: a.created_at,
         updated_at: a.updated_at,
     }
@@ -848,7 +851,14 @@ fn album_list(repo_id: String, state: State<AppState>) -> Result<Vec<AlbumItem>,
         .map_err(|_| "仓库锁中毒".to_string())?;
     let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
     let albums = db.list_albums(&repo_id).map_err(hp_err_to_string)?;
-    Ok(albums.into_iter().map(album_to_item).collect())
+    let mut items = Vec::with_capacity(albums.len());
+    for a in albums {
+        let count = db
+            .count_album_members(a.id.as_str())
+            .map_err(hp_err_to_string)?;
+        items.push(album_to_item(a, count));
+    }
+    Ok(items)
 }
 
 /// album.members：列出相册可见成员（按有效媒体属性过滤）。
@@ -1338,6 +1348,165 @@ async fn thumb_get(
     }
 }
 
+/// file.rename：重命名文件（磁盘重命名 + 更新索引相对路径）。
+#[tauri::command]
+fn file_rename(
+    repo_id: String,
+    file_id: String,
+    new_name: String,
+    state: State<AppState>,
+) -> Result<AlbumFileItem, String> {
+    let _ = repo_id;
+    let new_name = new_name.trim();
+    if new_name.is_empty() {
+        return Err("文件名不能为空".to_string());
+    }
+    if new_name.contains('/') || new_name.contains('\\') || new_name == "." || new_name == ".." {
+        return Err("文件名非法".to_string());
+    }
+
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    let file = db
+        .get_file(&file_id)
+        .map_err(hp_err_to_string)?
+        .ok_or_else(|| format!("文件不存在: {file_id}"))?;
+    let old_path = resolve_file_path(db, &file).map_err(hp_err_to_string)?;
+    let parent = old_path
+        .parent()
+        .ok_or_else(|| "无法解析文件父目录".to_string())?;
+    let target = parent.join(new_name);
+    if target.exists() {
+        return Err(format!("目标文件已存在: {new_name}"));
+    }
+    std::fs::rename(&old_path, &target).map_err(|e| format!("重命名失败: {e}"))?;
+
+    // 新相对路径 = 原目录部分 + 新文件名
+    let new_rel = match file.relative_path.rsplit_once(|c| c == '/' || c == '\\') {
+        Some((dir, _)) => format!("{dir}/{new_name}"),
+        None => new_name.to_string(),
+    };
+    db.update_file_path(&file_id, file.source_id.as_str(), &new_rel)
+        .map_err(hp_err_to_string)?;
+    let updated = db
+        .get_file(&file_id)
+        .map_err(hp_err_to_string)?
+        .ok_or_else(|| format!("文件不存在: {file_id}"))?;
+    Ok(file_to_item(updated))
+}
+
+/// file.trash：将文件批量移入系统回收站，并从索引移除；返回成功数。
+#[tauri::command]
+fn file_trash(
+    repo_id: String,
+    file_ids: Vec<String>,
+    state: State<AppState>,
+) -> Result<u32, String> {
+    let _ = repo_id;
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+
+    let mut removed: Vec<String> = Vec::new();
+    for id in &file_ids {
+        let Some(file) = db.get_file(id).map_err(hp_err_to_string)? else {
+            continue;
+        };
+        if let Ok(path) = resolve_file_path(db, &file) {
+            if path.exists() {
+                trash::delete(&path).map_err(|e| format!("移入回收站失败: {e}"))?;
+            }
+        }
+        removed.push(id.clone());
+    }
+    db.delete_files(&removed).map_err(hp_err_to_string)?;
+    Ok(removed.len() as u32)
+}
+
+/// file.reanalyze：重新分析单个文件（重算哈希 / 缩略图 / 媒体信息）并更新索引。
+#[tauri::command]
+fn file_reanalyze(
+    repo_id: String,
+    file_id: String,
+    state: State<AppState>,
+) -> Result<AlbumFileItem, String> {
+    let _ = repo_id;
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    let file = db
+        .get_file(&file_id)
+        .map_err(hp_err_to_string)?
+        .ok_or_else(|| format!("文件不存在: {file_id}"))?;
+    let source = db
+        .get_source(file.source_id.as_str())
+        .map_err(hp_err_to_string)?
+        .ok_or_else(|| "图像源不存在".to_string())?;
+
+    let options = ScanOptions {
+        full: true,
+        ffmpeg_bin: state.ffmpeg_bin.as_ref().clone(),
+        ffprobe_bin: state.ffprobe_bin.as_ref().clone(),
+        thumbnail_cache: Some((*state.thumb_cache).clone()),
+        ..ScanOptions::default()
+    };
+    state
+        .scanner
+        .rescan_file(db, &source, &file.relative_path, &options)
+        .map_err(hp_err_to_string)?;
+
+    let updated = db
+        .get_file(&file_id)
+        .map_err(hp_err_to_string)?
+        .ok_or_else(|| format!("文件不存在: {file_id}"))?;
+    Ok(file_to_item(updated))
+}
+
+/// album.rename：重命名相册。
+#[tauri::command]
+fn album_rename(
+    repo_id: String,
+    album_id: String,
+    name: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let _ = repo_id;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("相册名不能为空".to_string());
+    }
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    db.update_album_name(&album_id, name)
+        .map_err(hp_err_to_string)
+}
+
+/// album.delete：删除相册（成员关系与同步规则一并清理）。
+#[tauri::command]
+fn album_delete(
+    repo_id: String,
+    album_id: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let _ = repo_id;
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    db.delete_album(&album_id).map_err(hp_err_to_string)
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -1393,6 +1562,11 @@ fn main() {
             file_query,
             file_path,
             thumb_get,
+            file_rename,
+            file_trash,
+            file_reanalyze,
+            album_rename,
+            album_delete,
             media_commands::media_play,
             media_commands::media_pause,
             media_commands::media_seek,

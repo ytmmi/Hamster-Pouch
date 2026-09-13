@@ -20,3 +20,4 @@ hp-store = { path = "../../../crates/hp-store" }
 hp-scanner = { path = "../../../crates/hp-scanner" }
 hp-media = { path = "../../../crates/hp-media" }
 hp-album = { path = "../../../crates/hp-album" }
+trash = "5.2.8"

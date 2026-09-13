@@ -412,6 +412,13 @@ button.danger {
   cursor: pointer;
 }
 
+/* 相册行作为拖放目标时的高亮 */
+.list-row.drop-target {
+  outline: 1px dashed var(--sel-border);
+  outline-offset: -1px;
+  background: var(--sel-bg);
+}
+
 /* ===== 图像源目录树 ===== */
 
 .tree-node-wrap {
@@ -657,6 +664,16 @@ button.danger {
   grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
   gap: 8px;
   overflow: auto;
+}
+
+/* 网格可聚焦（支持 Ctrl+A / Esc 多选快捷键），仅键盘聚焦时显示描边 */
+.mp-grid:focus {
+  outline: none;
+}
+
+.mp-grid:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .mp-cell {

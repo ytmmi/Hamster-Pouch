@@ -109,6 +109,23 @@ impl RepoDb {
         Ok(())
     }
 
+    /// 重命名相册，并刷新 `updated_at`。
+    pub fn update_album_name(&mut self, album_id: &str, name: &str) -> HpResult<()> {
+        require_nonempty(album_id, "相册 ID")?;
+        require_nonempty(name, "相册名")?;
+        let n = self
+            .conn()
+            .execute(
+                "UPDATE albums SET name = ?2, updated_at = ?3 WHERE id = ?1",
+                params![album_id, name, now_iso()],
+            )
+            .map_err(|e| store_err("重命名相册", e))?;
+        if n == 0 {
+            return Err(HpError::NotFound(format!("相册不存在: {album_id}")));
+        }
+        Ok(())
+    }
+
     /// 删除相册及其成员关系、同步规则、同步状态（外键无级联，需手动清理）。
     pub fn delete_album(&mut self, album_id: &str) -> HpResult<()> {
         require_nonempty(album_id, "相册 ID")?;

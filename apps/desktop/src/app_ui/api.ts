@@ -10,6 +10,8 @@ import type {
   AlbumAddMemberArgs,
   AlbumCreateArgs,
   AlbumCreateResult,
+  AlbumDeleteArgs,
+  AlbumRenameArgs,
   AlbumItem,
   AlbumListArgs,
   AlbumMembersArgs,
@@ -27,6 +29,9 @@ import type {
   FileMetadataResult,
   FilePathArgs,
   FileQueryArgs,
+  FileReanalyzeArgs,
+  FileRenameArgs,
+  FileTrashArgs,
   MediaPauseArgs,
   MediaPlayArgs,
   MediaPlayResult,
@@ -324,6 +329,48 @@ export function thumbGet(args: ThumbGetArgs): Promise<string | null> {
   return invoke<string | null>("thumb_get", {
     repoId: args.repoId,
     fileId: args.fileId,
+  });
+}
+
+/** 重命名文件（磁盘重命名 + 更新索引） */
+export function fileRename(args: FileRenameArgs): Promise<FileItem> {
+  return invoke<FileItem>("file_rename", {
+    repoId: args.repoId,
+    fileId: args.fileId,
+    newName: args.newName,
+  });
+}
+
+/** 将文件批量移入系统回收站 */
+export function fileTrash(args: FileTrashArgs): Promise<number> {
+  return invoke<number>("file_trash", {
+    repoId: args.repoId,
+    fileIds: args.fileIds,
+  });
+}
+
+/** 重新分析单个文件（重算哈希 / 缩略图 / 媒体信息） */
+export function fileReanalyze(args: FileReanalyzeArgs): Promise<FileItem> {
+  return invoke<FileItem>("file_reanalyze", {
+    repoId: args.repoId,
+    fileId: args.fileId,
+  });
+}
+
+/** 重命名相册 */
+export function albumRename(args: AlbumRenameArgs): Promise<void> {
+  return invoke<void>("album_rename", {
+    repoId: args.repoId,
+    albumId: args.albumId,
+    name: args.name,
+  });
+}
+
+/** 删除相册 */
+export function albumDelete(args: AlbumDeleteArgs): Promise<void> {
+  return invoke<void>("album_delete", {
+    repoId: args.repoId,
+    albumId: args.albumId,
   });
 }
 

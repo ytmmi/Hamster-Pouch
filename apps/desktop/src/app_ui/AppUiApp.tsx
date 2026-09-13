@@ -34,6 +34,7 @@ export function AppUiApp(): JSX.Element {
   const [albumId, setAlbumId] = useState<string | null>(null);
   const [dirPath, setDirPath] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: StatusType } | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -160,6 +161,8 @@ export function AppUiApp(): JSX.Element {
       setDirPath,
       selectedFile,
       setSelectedFile,
+      selectedIds,
+      setSelectedIds,
       refreshKey,
       refresh,
       status,
@@ -174,6 +177,7 @@ export function AppUiApp(): JSX.Element {
       albumId,
       dirPath,
       selectedFile,
+      selectedIds,
       refreshKey,
       refresh,
       status,
