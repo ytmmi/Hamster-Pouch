@@ -37,6 +37,17 @@ export interface SourceItem {
   mounted_at: string;
 }
 
+/** source_tree 返回元素 — 递归目录树（源节点 + 子文件夹） */
+export interface SourceTreeNode {
+  key: string;
+  name: string;
+  local_path: string | null;
+  relative_path: string | null;
+  source_id: string | null;
+  file_count: number;
+  children: SourceTreeNode[];
+}
+
 // ===== M3：虚拟相册 =====
 
 /** album_list 返回元素 */
@@ -320,6 +331,7 @@ export interface FileQueryArgs {
   repoId: string;
   mediaType?: string;
   sourceId?: string;
+  dirPrefix?: string;
   limit?: number;
   offset?: number;
 }

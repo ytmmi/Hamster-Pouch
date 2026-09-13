@@ -13,7 +13,7 @@ use hp_core::{
 };
 use hp_media::{extract_exif, extract_palette, MediaProcess, ThumbnailCache};
 use hp_scanner::{ScanOptions, ScanPhase, ScanProgress, ScanOutcome, Scanner};
-use hp_store::{GlobalDb, RepoDb};
+use hp_store::{build_source_tree, GlobalDb, RepoDb};
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 
@@ -57,6 +57,18 @@ struct SourceItem {
     parent_source_id: Option<String>,
     mounted: bool,
     mounted_at: String,
+}
+
+/// 图像源目录树节点（源节点含本地路径与源 ID；子文件夹节点两者均为 None）。
+#[derive(Serialize)]
+struct SourceTreeNode {
+    key: String,
+    name: String,
+    relative_path: Option<String>,
+    local_path: Option<String>,
+    source_id: Option<String>,
+    file_count: i64,
+    children: Vec<SourceTreeNode>,
 }
 
 #[derive(Serialize, Clone)]
@@ -487,6 +499,70 @@ fn source_list(repo_id: String, state: State<AppState>) -> Result<Vec<SourceItem
     let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
     let sources = db.list_sources(&repo_id).map_err(hp_err_to_string)?;
     Ok(sources.into_iter().map(source_to_item).collect())
+}
+
+/// source.tree：列出仓库下图像源目录树（实际子文件夹 + 递归文件数）。
+#[tauri::command]
+fn source_tree(repo_id: String, state: State<AppState>) -> Result<Vec<SourceTreeNode>, String> {
+    let guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+    let sources = db.list_sources(&repo_id).map_err(hp_err_to_string)?;
+    let mut out = Vec::with_capacity(sources.len());
+    for source in sources {
+        let paths = db
+            .list_relative_paths_by_source(source.id.as_str())
+            .map_err(hp_err_to_string)?;
+        let tree = build_source_tree(&paths);
+        let source_id = source.id.as_str().to_string();
+        let name = source
+            .alias
+            .clone()
+            .filter(|a| !a.trim().is_empty())
+            .unwrap_or_else(|| last_path_segment(&source.local_path));
+        out.push(SourceTreeNode {
+            key: format!("src:{source_id}"),
+            name,
+            relative_path: None,
+            local_path: Some(source.local_path.clone()),
+            source_id: Some(source_id.clone()),
+            file_count: tree.file_count,
+            children: tree_nodes_to_items(tree.children, &source_id),
+        });
+    }
+    Ok(out)
+}
+
+/// 将 hp-store 目录树节点转换为可序列化的 `SourceTreeNode`。
+fn tree_nodes_to_items(nodes: Vec<hp_store::TreeNode>, source_id: &str) -> Vec<SourceTreeNode> {
+    nodes
+        .into_iter()
+        .map(|node| {
+            let relative_path = node.relative_path;
+            SourceTreeNode {
+                key: format!("dir:{source_id}/{relative_path}"),
+                name: node.name,
+                relative_path: Some(relative_path),
+                local_path: None,
+                source_id: None,
+                file_count: node.file_count,
+                children: tree_nodes_to_items(node.children, source_id),
+            }
+        })
+        .collect()
+}
+
+/// 取路径末级段（兼容 `\` 与 `/`，忽略尾部分隔符）。
+fn last_path_segment(path: &str) -> String {
+    let trimmed = path.trim_end_matches(|c| c == '\\' || c == '/');
+    trimmed
+        .rsplit(|c| c == '\\' || c == '/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(path)
+        .to_string()
 }
 
 /// source.scan：扫描/索引图像源，后台执行并通过事件报告进度。
@@ -1134,12 +1210,13 @@ fn file_metadata(
     })
 }
 
-/// file.query：按仓库分页查询文件索引（支持媒体类型 / 图像源过滤）。
+/// file.query：按仓库分页查询文件索引（支持媒体类型 / 图像源 / 目录前缀过滤）。
 #[tauri::command]
 fn file_query(
     repo_id: String,
     media_type: Option<String>,
     source_id: Option<String>,
+    dir_prefix: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
     state: State<AppState>,
@@ -1158,6 +1235,7 @@ fn file_query(
             &repo_id,
             mt,
             source_id.as_deref(),
+            dir_prefix.as_deref(),
             limit.unwrap_or(500),
             offset.unwrap_or(0),
         )
@@ -1187,6 +1265,20 @@ fn main() {
         .setup(|app| {
             let state = make_state(app.handle());
             app.manage(state);
+            // 初始隐藏主窗口，避免 WebView 加载期间白屏；前端首屏就绪后主动 show。
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.hide();
+            }
+            // 兜底：若前端 5s 内未主动显示（如加载失败），强制显示。
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                if let Some(win) = handle.get_webview_window("main") {
+                    if !win.is_visible().unwrap_or(true) {
+                        let _ = win.show();
+                    }
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1200,6 +1292,7 @@ fn main() {
             source_unmount,
             source_rename,
             source_list,
+            source_tree,
             source_scan,
             task_cancel,
             album_create,

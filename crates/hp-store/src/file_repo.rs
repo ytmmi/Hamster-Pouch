@@ -127,6 +127,20 @@ impl RepoDb {
         Ok(rows)
     }
 
+    /// 列出某图像源下全部文件的相对路径（仅取 `relative_path` 列，目录树构建用）。
+    pub fn list_relative_paths_by_source(&self, source_id: &str) -> HpResult<Vec<String>> {
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT relative_path FROM files WHERE source_id = ?1")
+            .map_err(|e| store_err("查询源文件相对路径", e))?;
+        let rows = stmt
+            .query_map(params![source_id], |row| row.get::<_, String>(0))
+            .map_err(|e| store_err("读取源文件相对路径", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析源文件相对路径", e))?;
+        Ok(rows)
+    }
+
     /// 列出仓库库内全部文件索引行（定期全量校验兜底用）。
     pub fn list_all_files(&self) -> HpResult<Vec<FileIndexRow>> {
         let mut stmt = self
@@ -141,16 +155,22 @@ impl RepoDb {
         Ok(rows)
     }
 
-    /// 按仓库分页查询文件索引（可选媒体类型 / 图像源过滤，网格面板基础筛选用）。
+    /// 按仓库分页查询文件索引（可选媒体类型 / 图像源 / 目录前缀过滤，网格面板基础筛选用）。
+    ///
+    /// `dir_prefix` 非空时仅返回 `relative_path` 以 `<dir_prefix>/` 开头的文件（含更深子目录）。
     pub fn query_files(
         &self,
         repo_id: &str,
         media_type: Option<MediaType>,
         source_id: Option<&str>,
+        dir_prefix: Option<&str>,
         limit: i64,
         offset: i64,
     ) -> HpResult<Vec<FileIndexRow>> {
         require_nonempty(repo_id, "仓库 ID")?;
+        let dir_pattern = dir_prefix
+            .filter(|p| !p.trim().is_empty())
+            .map(|p| format!("{}/%", escape_like(p.trim_matches('/'))));
         let mut stmt = self
             .conn()
             .prepare(&format!(
@@ -159,8 +179,9 @@ impl RepoDb {
                  WHERE s.repo_id = ?1
                    AND (?2 IS NULL OR f.media_type = ?2)
                    AND (?3 IS NULL OR f.source_id = ?3)
+                   AND (?4 IS NULL OR f.relative_path LIKE ?4 ESCAPE '\\')
                  ORDER BY f.relative_path
-                 LIMIT ?4 OFFSET ?5"
+                 LIMIT ?5 OFFSET ?6"
             ))
             .map_err(|e| store_err("查询文件列表", e))?;
         let rows = stmt
@@ -169,6 +190,7 @@ impl RepoDb {
                     repo_id,
                     media_type.map(|m| m.as_str()),
                     source_id,
+                    dir_pattern,
                     limit,
                     offset
                 ],
@@ -233,6 +255,18 @@ impl RepoDb {
             .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))
             .map_err(|e| store_err("统计文件数", e))
     }
+}
+
+/// 转义 SQL `LIKE` 通配符（配合 `ESCAPE '\'`）。
+fn escape_like(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
 }
 
 fn row_to_file(row: &Row) -> rusqlite::Result<FileIndexRow> {

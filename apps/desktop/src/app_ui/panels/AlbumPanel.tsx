@@ -223,11 +223,13 @@ export function AlbumPanel(): JSX.Element {
                 onClick={() => {
                   app.setAlbumId(a.id);
                   app.setSourceId(null);
+                  app.setDirPath(null);
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   app.setAlbumId(a.id);
                   app.setSourceId(null);
+                  app.setDirPath(null);
                   setMenu({ x: e.clientX, y: e.clientY, albumId: a.id });
                 }}
               >

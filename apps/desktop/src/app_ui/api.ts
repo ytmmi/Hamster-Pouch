@@ -44,6 +44,7 @@ import type {
   SourceMountArgs,
   SourceRenameArgs,
   SourceScanArgs,
+  SourceTreeNode,
   SourceUnmountArgs,
   TagAddArgs,
   TagForFileArgs,
@@ -121,6 +122,11 @@ export function sourceRename(args: SourceRenameArgs): Promise<void> {
 /** 列出仓库下全部图像源 */
 export function sourceList(args: SourceListArgs): Promise<SourceItem[]> {
   return invoke<SourceItem[]>("source_list", { repoId: args.repoId });
+}
+
+/** 列出仓库下图像源目录树（含子文件夹与递归文件数） */
+export function sourceTree(args: SourceListArgs): Promise<SourceTreeNode[]> {
+  return invoke<SourceTreeNode[]>("source_tree", { repoId: args.repoId });
 }
 
 /** 扫描图像源（后台执行，返回 taskId） */
@@ -306,6 +312,7 @@ export function fileQuery(args: FileQueryArgs): Promise<FileItem[]> {
     repoId: args.repoId,
     mediaType: args.mediaType,
     sourceId: args.sourceId,
+    dirPrefix: args.dirPrefix,
     limit: args.limit,
     offset: args.offset,
   });

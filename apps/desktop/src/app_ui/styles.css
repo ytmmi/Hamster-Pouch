@@ -19,6 +19,8 @@
   --danger: #d93025;
   --ok: #1a7f37;
   --media-bg: #ffffff;
+  --scroll-thumb: rgba(128, 128, 128, 0.4);
+  --scroll-thumb-hover: rgba(128, 128, 128, 0.65);
 }
 
 * {
@@ -37,6 +39,33 @@ body {
   color: var(--fg);
   font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
   font-size: 13px;
+}
+
+/* ===== 全局细滚动条（3px → 悬停 6px） ===== */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 3px;
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+  border-width: 0;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .app-root {
@@ -341,6 +370,8 @@ button.danger {
 }
 
 .source-name {
+  flex: 1;
+  min-width: 0;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -379,6 +410,83 @@ button.danger {
   min-width: 0;
   overflow: hidden;
   cursor: pointer;
+}
+
+/* ===== 图像源目录树 ===== */
+
+.tree-node-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  cursor: pointer;
+  background: transparent;
+  border-color: transparent;
+}
+
+.tree-node:hover {
+  background: var(--bg-2);
+}
+
+.tree-node.selected {
+  background: var(--sel-bg);
+  border-color: var(--sel-border);
+}
+
+.tree-arrow {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.tree-arrow.is-empty {
+  cursor: default;
+}
+
+.tree-chevron-icon {
+  display: block;
+  transition: transform 0.12s ease;
+}
+
+.tree-arrow.on .tree-chevron-icon {
+  transform: rotate(90deg);
+}
+
+.tree-folder {
+  flex: none;
+  display: inline-flex;
+  color: var(--fg-dim);
+}
+
+.tree-folder-icon {
+  display: block;
+}
+
+.tree-count {
+  margin-left: auto;
+  flex: none;
+  color: var(--fg-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tree-path {
+  min-width: 0;
+  padding-top: 0;
+  padding-bottom: 2px;
+  overflow: hidden;
 }
 
 /* 右键上下文菜单 */
@@ -708,6 +816,8 @@ button.danger {
   --danger: #ff5f56;
   --ok: #3fb950;
   --media-bg: #000000;
+  --scroll-thumb: rgba(180, 180, 180, 0.4);
+  --scroll-thumb-hover: rgba(180, 180, 180, 0.65);
 }
 
 /* ===== dockview 主题强制覆盖（浅色，默认白天） ===== */

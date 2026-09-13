@@ -3,5 +3,10 @@
   "identifier": "default",
   "description": "默认窗口能力（含面板独立窗口）",
   "windows": ["*"],
-  "permissions": ["core:default", "core:webview:allow-create-webview-window"]
+  "permissions": [
+    "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
+  ]
 }

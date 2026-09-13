@@ -8,8 +8,10 @@ mod migrate;
 mod rating_repo;
 mod repo_db;
 mod source_repo;
+mod source_tree;
 mod tag_repo;
 mod util;
 
 pub use global_db::{GlobalDb, RepoRow};
 pub use repo_db::RepoDb;
+pub use source_tree::{build_source_tree, SourceTree, TreeNode};

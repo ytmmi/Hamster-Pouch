@@ -1,8 +1,8 @@
 /**
- * 图像源组件 — 添加图像源（子菜单）+ 已添加的图像源列表（右键操作）。
+ * 图像源组件 — 添加图像源（子菜单）+ 已添加图像源目录树（右键操作）。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import * as api from "../api";
@@ -11,13 +11,53 @@ import type {
   ScanCompletedPayload,
   ScanErrorPayload,
   ScanProgressPayload,
-  SourceItem,
+  SourceTreeNode,
 } from "../types";
 
 /** 取路径最后一段文件夹名。 */
 function baseName(path: string): string {
   const parts = path.replace(/[\\/]+$/, "").split(/[\\/]/);
   return parts[parts.length - 1] || path;
+}
+
+/** 文件夹图标（内联 SVG，currentColor）。 */
+function FolderIcon(): JSX.Element {
+  return (
+    <svg
+      className="tree-folder-icon"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 5a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5z" />
+    </svg>
+  );
+}
+
+/** 展开箭头（内联 SVG，currentColor；展开时旋转 90°）。 */
+function ChevronIcon(): JSX.Element {
+  return (
+    <svg
+      className="tree-chevron-icon"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 6l6 6-6 6" />
+    </svg>
+  );
 }
 
 /** 路径文本：过长省略尾部；悬停时滚轮可水平滚动查看完整路径。 */
@@ -52,32 +92,55 @@ interface ContextMenuState {
   sourceId: string;
 }
 
+/** 递归移除指定 source_id 的节点（卸载后本地即时更新）。 */
+function removeBySourceId(
+  nodes: SourceTreeNode[],
+  sourceId: string,
+): SourceTreeNode[] {
+  return nodes
+    .filter((n) => n.source_id !== sourceId)
+    .map((n) => ({ ...n, children: removeBySourceId(n.children, sourceId) }));
+}
+
 export function SourcePanel(): JSX.Element {
   const app = useApp();
   const { t } = app;
   const [openAdd, setOpenAdd] = useState(false);
   const [localPath, setLocalPath] = useState("");
   const [alias, setAlias] = useState("");
-  const [sources, setSources] = useState<SourceItem[]>([]);
+  const [nodes, setNodes] = useState<SourceTreeNode[]>([]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [progress, setProgress] = useState<{ p: number; t: number } | null>(null);
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const unlistenRef = useRef<UnlistenFn[]>([]);
 
   const load = useCallback(async () => {
     if (!app.repoId) {
-      setSources([]);
+      setNodes([]);
       return;
     }
     try {
-      setSources(await api.sourceList({ repoId: app.repoId }));
+      setNodes(await api.sourceTree({ repoId: app.repoId }));
     } catch (e) {
-      app.status(`图像源列表失败: ${String(e)}`, "error");
+      app.status(`图像源目录树加载失败: ${String(e)}`, "error");
     }
   }, [app]);
 
   useEffect(() => {
     void load();
   }, [load, app.refreshKey]);
+
+  const toggle = useCallback((key: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
 
   // 点击任意处关闭右键菜单
   useEffect(() => {
@@ -137,7 +200,22 @@ export function SourcePanel(): JSX.Element {
         alias: alias.trim() || undefined,
       });
       // 立即入列，避免等待刷新
-      setSources((prev) => (prev.some((x) => x.id === s.id) ? prev : [...prev, s]));
+      setNodes((prev) =>
+        prev.some((n) => n.source_id === s.id)
+          ? prev
+          : [
+              ...prev,
+              {
+                key: `src:${s.id}`,
+                name: s.alias ?? baseName(s.local_path),
+                local_path: s.local_path,
+                relative_path: null,
+                source_id: s.id,
+                file_count: 0,
+                children: [],
+              },
+            ],
+      );
       app.status(`${t("source.add")}: ${s.alias ?? baseName(s.local_path)}`, "ok");
       setLocalPath("");
       setAlias("");
@@ -152,8 +230,8 @@ export function SourcePanel(): JSX.Element {
     if (!app.repoId) return;
     try {
       await api.sourceUnmount({ repoId: app.repoId, sourceId });
-      setSources((prev) => prev.filter((x) => x.id !== sourceId));
-      app.status(`${t("common.unmount")} ✓`, "ok");
+      setNodes((prev) => removeBySourceId(prev, sourceId));
+      app.status(`${t("common.unmount")} \u2713`, "ok");
       app.refresh();
     } catch (e) {
       app.status(`卸载失败: ${String(e)}`, "error");
@@ -172,17 +250,104 @@ export function SourcePanel(): JSX.Element {
     }
   };
 
-  const pct = progress && progress.t > 0 ? Math.round((progress.p / progress.t) * 100) : 0;
+  const pct =
+    progress && progress.t > 0 ? Math.round((progress.p / progress.t) * 100) : 0;
+
+  /** 递归渲染目录树节点。 */
+  const renderNode = (
+    node: SourceTreeNode,
+    depth: number,
+    ownerSourceId: string,
+  ): JSX.Element => {
+    const isSource = node.source_id !== null;
+    const expanded = !collapsed.has(node.key);
+    const hasChildren = node.children.length > 0;
+    const indent = depth * 14;
+    const selected = isSource
+      ? app.sourceId === node.source_id && app.dirPath === null
+      : app.sourceId === ownerSourceId && app.dirPath === node.relative_path;
+
+    return (
+      <Fragment key={node.key}>
+        <div className="tree-node-wrap">
+          <div
+            className={`tree-node list-row${selected ? " selected" : ""}`}
+            style={{ paddingLeft: indent }}
+            onClick={
+              isSource
+                ? () => {
+                    app.setSourceId(node.source_id!);
+                    app.setDirPath(null);
+                    app.setAlbumId(null);
+                  }
+                : () => {
+                    app.setSourceId(ownerSourceId);
+                    app.setDirPath(node.relative_path);
+                    app.setAlbumId(null);
+                  }
+            }
+            onContextMenu={
+              isSource
+                ? (e) => {
+                    e.preventDefault();
+                    app.setSourceId(node.source_id!);
+                    app.setDirPath(null);
+                    setMenu({
+                      x: e.clientX,
+                      y: e.clientY,
+                      sourceId: node.source_id!,
+                    });
+                  }
+                : undefined
+            }
+          >
+            <span
+              className={`tree-arrow${hasChildren ? "" : " is-empty"}${
+                expanded ? " on" : ""
+              }`}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (hasChildren) {
+                  toggle(node.key);
+                }
+              }}
+            >
+              {hasChildren ? <ChevronIcon /> : null}
+            </span>
+            <span className="tree-folder">
+              <FolderIcon />
+            </span>
+            <span className="source-name">{node.name}</span>
+            <span className="tree-count">{node.file_count}</span>
+          </div>
+
+          {isSource && node.local_path && (
+            <div className="tree-path" style={{ paddingLeft: indent + 28 }}>
+              <PathText path={node.local_path} />
+            </div>
+          )}
+        </div>
+
+        {expanded &&
+          hasChildren &&
+          node.children.map((child) =>
+            renderNode(child, depth + 1, ownerSourceId),
+          )}
+      </Fragment>
+    );
+  };
 
   return (
     <div className="panel">
-      {!app.repoId && <span className="placeholder">{t("common.pleaseOpenRepo")}</span>}
+      {!app.repoId && (
+        <span className="placeholder">{t("common.pleaseOpenRepo")}</span>
+      )}
       {app.repoId && (
         <>
           {/* 添加图像源（点击 → 子菜单） */}
           <button className="menu-item has-sub" onClick={() => setOpenAdd((v) => !v)}>
             {t("source.add")}{" "}
-            <span className="sub-arrow">{openAdd ? "▾" : "▸"}</span>
+            <span className="sub-arrow">{openAdd ? "\u25BE" : "\u25B8"}</span>
           </button>
           {openAdd && (
             <div className="menu-sub">
@@ -213,7 +378,7 @@ export function SourcePanel(): JSX.Element {
                   }}
                 />
                 <button className="menu-item small" onClick={() => void mount()}>
-                  ✓
+                  {"\u2713"}
                 </button>
               </div>
             </div>
@@ -230,32 +395,15 @@ export function SourcePanel(): JSX.Element {
             </div>
           )}
 
-          {/* 已添加的图像源（右键操作） */}
+          {/* 已添加的图像源目录树（右键操作） */}
           <div className="section-title">
-            {t("source.list")}（{sources.length}）
+            {t("source.list")}（{nodes.length}）
           </div>
           <div className="list source-list">
-            {sources.map((s) => (
-              <div
-                key={s.id}
-                className={`list-row source-row ${
-                  app.sourceId === s.id ? "selected" : ""
-                }`}
-                onClick={() => {
-                  app.setSourceId(s.id);
-                  app.setAlbumId(null);
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  app.setSourceId(s.id);
-                  setMenu({ x: e.clientX, y: e.clientY, sourceId: s.id });
-                }}
-              >
-                <span className="source-name">{s.alias ?? baseName(s.local_path)}</span>
-                <PathText path={s.local_path} />
-              </div>
-            ))}
-            {sources.length === 0 && <span className="placeholder">{t("common.noFile")}</span>}
+            {nodes.map((n) => renderNode(n, 0, n.source_id!))}
+            {nodes.length === 0 && (
+              <span className="placeholder">{t("common.noFile")}</span>
+            )}
           </div>
 
           {/* 右键上下文菜单 */}

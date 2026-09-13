@@ -14,6 +14,8 @@ export interface AppContextValue {
   setSourceId: (id: string | null) => void;
   albumId: string | null;
   setAlbumId: (id: string | null) => void;
+  dirPath: string | null;
+  setDirPath: (p: string | null) => void;
   selectedFile: FileItem | null;
   setSelectedFile: (f: FileItem | null) => void;
   refreshKey: number;

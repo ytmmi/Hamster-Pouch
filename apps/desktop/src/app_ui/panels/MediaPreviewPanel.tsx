@@ -77,6 +77,7 @@ export function MediaPreviewPanel(): JSX.Element {
           : api.fileQuery({
               repoId: app.repoId,
               sourceId: app.sourceId ?? undefined,
+              dirPrefix: app.dirPath ?? undefined,
               mediaType: typeFilter === "all" ? undefined : typeFilter,
               limit: 300,
             }),

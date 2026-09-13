@@ -106,3 +106,55 @@ fn file_upsert_get_and_media_info_migration() {
 
     db.close().expect("关闭失败");
 }
+
+/// 目录前缀过滤：`dir_prefix=Raw` 仅返回 `Raw/` 及其子孙，不含 `RawX/` 与根目录文件。
+#[test]
+fn query_files_dir_prefix_filter() {
+    let path = temp_path("dirprefix");
+    let mut db = RepoDb::create(&path, "仓库").expect("创建仓库失败");
+    let s = db
+        .mount_source("repo-1", "C:/photos", None, None)
+        .expect("挂载失败");
+
+    let make = |rel: &str| FileIndexRow {
+        id: FileId::generate(),
+        source_id: s.id.clone(),
+        relative_path: rel.to_string(),
+        media_type: MediaType::Image,
+        content_hash: Some(format!("h-{rel}")),
+        content_hash_algo: Some("BLAKE3".to_string()),
+        content_hash_algo_version: Some(1),
+        perceptual_hash: None,
+        perceptual_hash_algo: None,
+        perceptual_hash_algo_version: None,
+        size: 1,
+        mtime: "1".to_string(),
+        scan_time: "t".to_string(),
+        verify_status: VerifyStatus::Ok,
+        thumb_status: ThumbStatus::NotGenerated,
+        missing_status: 0,
+        media_info_json: None,
+    };
+    for rel in ["a.jpg", "Raw/b.jpg", "Raw/Sub/c.jpg", "RawX/d.jpg"] {
+        db.upsert_file(&make(rel)).expect("写入文件索引失败");
+    }
+
+    // 无前缀：返回全部 4 个
+    let all = db
+        .query_files("repo-1", None, Some(s.id.as_str()), None, 100, 0)
+        .expect("查询失败");
+    assert_eq!(all.len(), 4);
+
+    // 前缀 Raw：仅 Raw/b.jpg 与 Raw/Sub/c.jpg（不含 RawX/d.jpg、a.jpg）
+    let filtered = db
+        .query_files("repo-1", None, Some(s.id.as_str()), Some("Raw"), 100, 0)
+        .expect("查询失败");
+    let mut rels: Vec<&str> = filtered
+        .iter()
+        .map(|r| r.relative_path.as_str())
+        .collect();
+    rels.sort_unstable();
+    assert_eq!(rels, vec!["Raw/Sub/c.jpg", "Raw/b.jpg"]);
+
+    db.close().expect("关闭失败");
+}

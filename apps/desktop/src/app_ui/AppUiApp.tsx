@@ -13,6 +13,7 @@ import {
 import "dockview-react/dist/styles/dockview.css";
 
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 import * as api from "./api";
@@ -31,6 +32,7 @@ export function AppUiApp(): JSX.Element {
   const [repoId, setRepoId] = useState<string | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [albumId, setAlbumId] = useState<string | null>(null);
+  const [dirPath, setDirPath] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: StatusType } | null>(null);
@@ -154,6 +156,8 @@ export function AppUiApp(): JSX.Element {
       setSourceId,
       albumId,
       setAlbumId,
+      dirPath,
+      setDirPath,
       selectedFile,
       setSelectedFile,
       refreshKey,
@@ -168,6 +172,7 @@ export function AppUiApp(): JSX.Element {
       repoId,
       sourceId,
       albumId,
+      dirPath,
       selectedFile,
       refreshKey,
       refresh,
@@ -259,6 +264,11 @@ export function AppUiApp(): JSX.Element {
           }
         };
         document.addEventListener("pointerup", onUp, true);
+      });
+
+      // 首屏布局就绪后再显示窗口，避免白屏（窗口初始 visible=false）
+      requestAnimationFrame(() => {
+        void getCurrentWindow().show().catch(() => undefined);
       });
     },
     [detachPanel, t],
