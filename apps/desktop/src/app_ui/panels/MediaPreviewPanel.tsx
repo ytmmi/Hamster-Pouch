@@ -12,6 +12,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import * as api from "../shared/api";
 import { useApp } from "../core/AppContext";
 import { ContextMenu } from "../menu/ContextMenu";
+import type { Translate } from "../i18n";
 import type { FileItem, SourceItem } from "../shared/types";
 import { drawWaveform, extractWaveform } from "../shared/waveform";
 
@@ -35,7 +36,7 @@ function fileName(path: string): string {
 }
 
 /** 音频波形画布。 */
-function AudioWaveform({ url }: { url: string }): JSX.Element {
+function AudioWaveform({ url, t }: { url: string; t: Translate }): JSX.Element {
   const ref = useRef<HTMLCanvasElement>(null);
   const [failed, setFailed] = useState(false);
 
@@ -58,7 +59,7 @@ function AudioWaveform({ url }: { url: string }): JSX.Element {
   }, [url]);
 
   if (failed) {
-    return <span className="mp-fallback">波形不可用</span>;
+    return <span className="mp-fallback">{t("media.waveUnavailable")}</span>;
   }
   return <canvas ref={ref} className="mp-wave" />;
 }
@@ -115,6 +116,7 @@ function ThumbCell({
   onDoubleClick,
   onDragStart,
   onContextMenu,
+  t,
 }: {
   file: FileItem;
   repoId: string;
@@ -126,6 +128,8 @@ function ThumbCell({
   onDragStart: (file: FileItem, e: DragEvent) => void;
   /** 右键菜单：父级负责定位、选中和渲染菜单。 */
   onContextMenu: (file: FileItem, e: MouseEvent) => void;
+  /** 翻译函数（供占位/降级文案使用）。 */
+  t: Translate;
 }): JSX.Element {
   const cellRef = useRef<HTMLButtonElement>(null);
   const [visible, setVisible] = useState(false);
@@ -187,17 +191,17 @@ function ThumbCell({
     >
       <div className="mp-thumb">
         {!url ? (
-          <span className="mp-fallback">无路径</span>
+          <span className="mp-fallback">{t("media.noPath")}</span>
         ) : needsThumb ? (
           thumbUrl === undefined ? (
             <span className="mp-thumb-placeholder">{file.media_type}</span>
           ) : thumbUrl === null ? (
-            <span className="mp-fallback">不可用</span>
+            <span className="mp-fallback">{t("media.unavailable")}</span>
           ) : (
             <img src={thumbUrl} alt={file.relative_path} loading="lazy" />
           )
         ) : visible ? (
-          <AudioWaveform url={url} />
+          <AudioWaveform url={url} t={t} />
         ) : (
           <span className="mp-thumb-placeholder">audio</span>
         )}
@@ -250,7 +254,7 @@ export function MediaPreviewPanel(): JSX.Element {
       setFiles(list);
       setSources(srcs);
     } catch (e) {
-      app.status(`媒体预览加载失败: ${String(e)}`, "error");
+      app.status(app.t("media.loadFailed", { err: String(e) }), "error");
     }
   }, [app, typeFilter]);
 
@@ -430,15 +434,15 @@ export function MediaPreviewPanel(): JSX.Element {
           albumId: app.albumId,
           fileIds,
         });
-        app.status(`已移出相册 (${r.removed})`, "ok");
+        app.status(app.t("media.removedFromAlbum", { count: r.removed }), "ok");
       } else {
         const n = await api.fileTrash({ repoId: app.repoId, fileIds });
-        app.status(`已移入回收站 (${n})`, "ok");
+        app.status(app.t("media.trashed", { count: n }), "ok");
       }
       app.setSelectedIds(new Set());
       app.refresh();
     } catch (e) {
-      app.status(`删除失败: ${String(e)}`, "error");
+      app.status(app.t("media.deleteFailed", { err: String(e) }), "error");
     }
   }, [app]);
 
@@ -447,7 +451,7 @@ export function MediaPreviewPanel(): JSX.Element {
     if (!menu || !app.repoId) return;
     const newName = renameValue.trim();
     if (!newName) {
-      app.status("文件名不能为空", "error");
+      app.status(app.t("media.nameRequired"), "error");
       return;
     }
     try {
@@ -456,7 +460,7 @@ export function MediaPreviewPanel(): JSX.Element {
         fileId: menu.file.id,
         newName,
       });
-      app.status("已重命名", "ok");
+      app.status(app.t("media.renamed"), "ok");
       app.refresh();
     } catch (e) {
       app.status(String(e), "error");
@@ -475,9 +479,9 @@ export function MediaPreviewPanel(): JSX.Element {
         fileId: menu.file.id,
       });
       await navigator.clipboard.writeText(path);
-      app.status("已复制路径", "ok");
+      app.status(app.t("media.pathCopied"), "ok");
     } catch (e) {
-      app.status(`复制路径失败: ${String(e)}`, "error");
+      app.status(app.t("media.pathCopyFailed", { err: String(e) }), "error");
     }
   }, [menu, app]);
 
@@ -490,10 +494,10 @@ export function MediaPreviewPanel(): JSX.Element {
         repoId: app.repoId,
         fileId: menu.file.id,
       });
-      app.status("已重新分析", "ok");
+      app.status(app.t("media.reanalyzed"), "ok");
       app.refresh();
     } catch (e) {
-      app.status(`重新分析失败: ${String(e)}`, "error");
+      app.status(app.t("media.reanalyzeFailed", { err: String(e) }), "error");
     }
   }, [menu, app]);
 
@@ -505,32 +509,35 @@ export function MediaPreviewPanel(): JSX.Element {
             className={viewMode === "thumb" ? "active" : ""}
             onClick={() => setViewMode("thumb")}
           >
-            预览图
+            {app.t("media.viewThumb")}
           </button>
           <button
             className={viewMode === "name" ? "active" : ""}
             onClick={() => setViewMode("name")}
           >
-            文件名
+            {app.t("media.viewName")}
           </button>
         </div>
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}
         >
-          <option value="all">全部</option>
-          <option value="image">图像</option>
-          <option value="video">视频</option>
-          <option value="audio">音频</option>
+          <option value="all">{app.t("media.filter.all")}</option>
+          <option value="image">{app.t("media.filter.image")}</option>
+          <option value="video">{app.t("media.filter.video")}</option>
+          <option value="audio">{app.t("media.filter.audio")}</option>
         </select>
         <span className="mp-count">
           {selectedCount > 0
-            ? `已选 ${selectedCount} / ${items.length} 项`
-            : `${items.length} 项`}
+            ? app.t("media.selectedCount", {
+                selected: selectedCount,
+                total: items.length,
+              })
+            : app.t("media.itemCount", { count: items.length })}
         </span>
       </div>
 
-      {!repoId && <span className="placeholder">请先打开仓库</span>}
+      {!repoId && <span className="placeholder">{app.t("common.pleaseOpenRepo")}</span>}
 
       {repoId && viewMode === "thumb" && (
         <div
@@ -571,9 +578,12 @@ export function MediaPreviewPanel(): JSX.Element {
               }
               onDragStart={handleDragStart}
               onContextMenu={handleContextMenu}
+              t={app.t}
             />
           ))}
-          {items.length === 0 && <span className="placeholder">无文件</span>}
+          {items.length === 0 && (
+            <span className="placeholder">{app.t("media.noFiles")}</span>
+          )}
         </div>
       )}
 
@@ -620,7 +630,9 @@ export function MediaPreviewPanel(): JSX.Element {
               <span className="mp-row-size">{file.size}</span>
             </button>
           ))}
-          {items.length === 0 && <span className="placeholder">无文件</span>}
+          {items.length === 0 && (
+            <span className="placeholder">{app.t("media.noFiles")}</span>
+          )}
         </div>
       )}
 
@@ -661,7 +673,7 @@ export function MediaPreviewPanel(): JSX.Element {
                     setRenameValue(fileName(menu.file.relative_path));
                   }}
                 >
-                  重命名
+                  {app.t("common.rename")}
                 </button>
               )}
               {selectedCount === 1 && (
@@ -669,7 +681,7 @@ export function MediaPreviewPanel(): JSX.Element {
                   className="menu-item"
                   onClick={() => void copyPath()}
                 >
-                  复制文件路径
+                  {app.t("media.copyPath")}
                 </button>
               )}
               {selectedCount === 1 && (
@@ -677,7 +689,7 @@ export function MediaPreviewPanel(): JSX.Element {
                   className="menu-item"
                   onClick={() => void reanalyze()}
                 >
-                  重新分析该文件
+                  {app.t("media.reanalyzeFile")}
                 </button>
               )}
               <div className="menu-sep" />
@@ -685,7 +697,7 @@ export function MediaPreviewPanel(): JSX.Element {
                 className="menu-item danger"
                 onClick={() => void handleDelete()}
               >
-                删除
+                {app.t("media.delete")}
               </button>
             </>
           )}

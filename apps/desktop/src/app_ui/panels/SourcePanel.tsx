@@ -127,7 +127,7 @@ export function SourcePanel(): JSX.Element {
     try {
       setNodes(await api.sourceTree({ repoId: app.repoId }));
     } catch (e) {
-      app.status(`图像源目录树加载失败: ${String(e)}`, "error");
+      app.status(app.t("source.treeFailed", { err: String(e) }), "error");
     }
   }, [app]);
 
@@ -167,14 +167,18 @@ export function SourcePanel(): JSX.Element {
           ),
           await listen<ScanCompletedPayload>("scan.completed", (e) => {
             app.status(
-              `扫描完成: 索引 ${e.payload.indexed} / 变更 ${e.payload.changed} / 缺失 ${e.payload.missing}`,
+              app.t("source.scanCompleted", {
+                indexed: e.payload.indexed,
+                changed: e.payload.changed,
+                missing: e.payload.missing,
+              }),
               "ok",
             );
             setProgress(null);
             app.refresh();
           }),
           await listen<ScanErrorPayload>("scan.error", (e) => {
-            app.status(`扫描错误: ${e.payload.error}`, "error");
+            app.status(app.t("source.scanError", { err: e.payload.error }), "error");
             setProgress(null);
           }),
         );
@@ -227,7 +231,7 @@ export function SourcePanel(): JSX.Element {
       setOpenAdd(false);
       app.refresh();
     } catch (e) {
-      app.status(`挂载失败: ${String(e)}`, "error");
+      app.status(t("source.mountFailed", { err: String(e) }), "error");
     }
   };
 
@@ -239,7 +243,7 @@ export function SourcePanel(): JSX.Element {
       app.status(`${t("common.unmount")} \u2713`, "ok");
       app.refresh();
     } catch (e) {
-      app.status(`卸载失败: ${String(e)}`, "error");
+      app.status(t("source.unmountFailed", { err: String(e) }), "error");
     }
   };
 
@@ -248,9 +252,9 @@ export function SourcePanel(): JSX.Element {
     try {
       setProgress({ p: 0, t: 0 });
       await api.sourceScan({ repoId: app.repoId, sourceId, full });
-      app.status("扫描已启动", "info");
+      app.status(t("source.scanStarted"), "info");
     } catch (e) {
-      app.status(`启动扫描失败: ${String(e)}`, "error");
+      app.status(t("source.scanStartFailed", { err: String(e) }), "error");
       setProgress(null);
     }
   };
@@ -275,12 +279,12 @@ export function SourcePanel(): JSX.Element {
           : undefined,
       });
       await api.albumSync({ repoId: app.repoId, albumId: r.album_id });
-      app.status(`已复制为相册: ${name}`, "ok");
+      app.status(t("source.copiedAsAlbum", { name }), "ok");
       app.setAlbumId(r.album_id);
       app.setSourceId(null);
       app.refresh();
     } catch (e) {
-      app.status(`复制为相册失败: ${String(e)}`, "error");
+      app.status(t("source.copyAsAlbumFailed", { err: String(e) }), "error");
     }
   };
 

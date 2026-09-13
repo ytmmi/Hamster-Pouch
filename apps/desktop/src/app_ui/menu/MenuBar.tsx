@@ -129,12 +129,12 @@ export function MenuBar({
         height: 620,
       });
       void win.once("tauri://error", (e) => {
-        app.status(`${t("menubar.detach")}失败: ${String(e)}`, "error");
+        app.status(t("layout.detachFailed", { err: String(e) }), "error");
       });
       dv?.getPanel(id)?.api.close();
       app.status(`${panelTitle(id, t)} → ${t("menubar.detach")}`, "ok");
     } catch (e) {
-      app.status(`${t("menubar.detach")}失败: ${String(e)}`, "error");
+      app.status(t("layout.detachFailed", { err: String(e) }), "error");
     }
     closeMenus();
   };
@@ -152,7 +152,7 @@ export function MenuBar({
       app.status(`${t("menubar.layout.saved")}: ${name}`, "ok");
       closeMenus();
     } catch (e) {
-      app.status(`保存布局失败: ${String(e)}`, "error");
+      app.status(t("layout.saveFailed", { err: String(e) }), "error");
     }
   };
 
@@ -162,17 +162,17 @@ export function MenuBar({
     try {
       const raw = await api.layoutGet({ repoId, name });
       if (!raw) {
-        app.status(`布局不存在: ${name}`, "error");
+        app.status(t("layout.notFound", { name }), "error");
         return;
       }
       const layout = JSON.parse(raw);
       // 补齐最小尺寸约束（旧布局未记录会回退到 dockview 默认 100×100）；
       // 媒体预览强制 renderer=always，避免 tab 切换丢滚动位置。
       dv.fromJSON(normalizeLayoutJson(layout));
-      app.status(`已加载布局: ${name}`, "ok");
+      app.status(t("layout.loaded", { name }), "ok");
       closeMenus();
     } catch (e) {
-      app.status(`加载布局失败: ${String(e)}`, "error");
+      app.status(t("layout.loadFailed", { err: String(e) }), "error");
     }
   };
 
@@ -186,9 +186,9 @@ export function MenuBar({
     try {
       await api.layoutRename({ repoId, name, newName: trimmed });
       await loadLayoutNames();
-      app.status(`布局已重命名: ${trimmed}`, "ok");
+      app.status(t("layout.renamed", { name: trimmed }), "ok");
     } catch (e) {
-      app.status(`重命名布局失败: ${String(e)}`, "error");
+      app.status(t("layout.renameFailed", { err: String(e) }), "error");
     }
   };
 
@@ -200,9 +200,9 @@ export function MenuBar({
     try {
       await api.layoutDelete({ repoId, name });
       await loadLayoutNames();
-      app.status(`布局已删除: ${name}`, "ok");
+      app.status(t("layout.deleted", { name }), "ok");
     } catch (e) {
-      app.status(`删除布局失败: ${String(e)}`, "error");
+      app.status(t("layout.deleteFailed", { err: String(e) }), "error");
     }
   };
 
@@ -217,9 +217,9 @@ export function MenuBar({
       const json = JSON.stringify(dv.toJSON());
       await api.layoutSave({ repoId, name, layoutJson: json });
       await loadLayoutNames();
-      app.status(`布局已更新: ${name}`, "ok");
+      app.status(t("layout.updated", { name }), "ok");
     } catch (e) {
-      app.status(`更新布局失败: ${String(e)}`, "error");
+      app.status(t("layout.updateFailed", { err: String(e) }), "error");
     }
   };
 
@@ -227,9 +227,9 @@ export function MenuBar({
     setLayoutMenu(null);
     try {
       await api.layoutSetDefault({ repoId, name });
-      app.status(`已设为默认布局: ${name}`, "ok");
+      app.status(t("layout.defaultSet", { name }), "ok");
     } catch (e) {
-      app.status(`设置默认布局失败: ${String(e)}`, "error");
+      app.status(t("layout.defaultFailed", { err: String(e) }), "error");
     }
   };
 

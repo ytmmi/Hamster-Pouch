@@ -27,22 +27,22 @@ export function TaskPanel(): JSX.Element {
       try {
         unlistenRef.current.push(
           await listen("scan.progress", (e) =>
-            push(`扫描进度 ${JSON.stringify(e.payload)}`),
+            push(app.t("task.scanProgress", { payload: JSON.stringify(e.payload) })),
           ),
           await listen("scan.completed", (e) =>
-            push(`扫描完成 ${JSON.stringify(e.payload)}`),
+            push(app.t("task.scanCompleted", { payload: JSON.stringify(e.payload) })),
           ),
           await listen("scan.error", (e) =>
-            push(`扫描错误 ${JSON.stringify(e.payload)}`),
+            push(app.t("task.scanError", { payload: JSON.stringify(e.payload) })),
           ),
           await listen("album.sync.progress", (e) =>
-            push(`相册同步 ${JSON.stringify(e.payload)}`),
+            push(app.t("task.albumSync", { payload: JSON.stringify(e.payload) })),
           ),
           await listen("album.sync.conflict", (e) =>
-            push(`相册冲突 ${JSON.stringify(e.payload)}`),
+            push(app.t("task.albumConflict", { payload: JSON.stringify(e.payload) })),
           ),
           await listen("color.extracted", (e) =>
-            push(`色彩提取 ${JSON.stringify(e.payload)}`),
+            push(app.t("task.colorExtracted", { payload: JSON.stringify(e.payload) })),
           ),
         );
       } catch {
@@ -64,8 +64,10 @@ export function TaskPanel(): JSX.Element {
   return (
     <div className="panel">
       <div className="row">
-        <span className="dim">当前仓库: {app.repoId ?? "—"}</span>
-        <button onClick={() => setLines([])}>清空</button>
+        <span className="dim">
+          {app.t("task.currentRepo")}: {app.repoId ?? "—"}
+        </span>
+        <button onClick={() => setLines([])}>{app.t("common.clear")}</button>
       </div>
       <div className="list compact">
         {lines.map((l, i) => (
@@ -73,7 +75,7 @@ export function TaskPanel(): JSX.Element {
             [{l.time}] {l.text}
           </span>
         ))}
-        {lines.length === 0 && <span className="placeholder">暂无任务事件</span>}
+        {lines.length === 0 && <span className="placeholder">{app.t("task.empty")}</span>}
       </div>
     </div>
   );

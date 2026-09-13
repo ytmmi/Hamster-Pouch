@@ -22,7 +22,7 @@ export function MediaPlayerPanel(): JSX.Element {
     try {
       setStatus(await api.mediaProcessStatus());
     } catch (e) {
-      app.status(`媒体状态查询失败: ${String(e)}`, "error");
+      app.status(app.t("player.statusFailed", { err: String(e) }), "error");
     }
   }, [app]);
 
@@ -77,7 +77,7 @@ export function MediaPlayerPanel(): JSX.Element {
 
   const play = async () => {
     if (!app.repoId || !app.selectedFile) {
-      app.status("请先选中文件", "error");
+      app.status(app.t("player.selectFileFirst"), "error");
       return;
     }
     setBusy(true);
@@ -88,10 +88,10 @@ export function MediaPlayerPanel(): JSX.Element {
       });
       setSessionId(r.session_id);
       setPaused(false);
-      app.status("已在 mpv 中播放", "ok");
+      app.status(app.t("player.playingInMpv"), "ok");
       void refreshStatus();
     } catch (e) {
-      app.status(`播放失败: ${String(e)}`, "error");
+      app.status(app.t("player.playFailed", { err: String(e) }), "error");
     } finally {
       setBusy(false);
     }
@@ -102,9 +102,9 @@ export function MediaPlayerPanel(): JSX.Element {
     try {
       await api.mediaPause({ sessionId, paused: !paused });
       setPaused((p) => !p);
-      app.status(paused ? "已继续" : "已暂停", "info");
+      app.status(paused ? app.t("player.resumed") : app.t("player.paused"), "info");
     } catch (e) {
-      app.status(`暂停切换失败: ${String(e)}`, "error");
+      app.status(app.t("player.pauseToggleFailed", { err: String(e) }), "error");
     }
   };
 
@@ -112,14 +112,14 @@ export function MediaPlayerPanel(): JSX.Element {
     if (!sessionId) return;
     const ms = Number(positionMs);
     if (!Number.isFinite(ms) || ms < 0) {
-      app.status("定位值无效", "error");
+      app.status(app.t("player.invalidSeek"), "error");
       return;
     }
     try {
       await api.mediaSeek({ sessionId, positionMs: Math.floor(ms) });
-      app.status(`已定位到 ${Math.floor(ms)} ms`, "info");
+      app.status(app.t("player.seeked", { ms: Math.floor(ms) }), "info");
     } catch (e) {
-      app.status(`定位失败: ${String(e)}`, "error");
+      app.status(app.t("player.seekFailed", { err: String(e) }), "error");
     }
   };
 
@@ -127,16 +127,16 @@ export function MediaPlayerPanel(): JSX.Element {
     if (!sessionId) return;
     try {
       await api.mediaStop({ sessionId });
-      app.status("已停止", "info");
+      app.status(app.t("player.stopped"), "info");
     } catch (e) {
-      app.status(`停止失败: ${String(e)}`, "error");
+      app.status(app.t("player.stopFailed", { err: String(e) }), "error");
     }
   };
 
   return (
     <div className="panel">
       <div className="viewer-info">
-        <span>{app.selectedFile?.relative_path ?? "未选中文件"}</span>
+        <span>{app.selectedFile?.relative_path ?? app.t("common.noSelection")}</span>
         <span className="dim">{app.selectedFile?.media_type ?? "—"}</span>
       </div>
 
@@ -145,13 +145,13 @@ export function MediaPlayerPanel(): JSX.Element {
 
       <div className="row">
         <button disabled={busy || !app.selectedFile} onClick={play}>
-          播放
+          {app.t("common.play")}
         </button>
         <button disabled={!sessionId} onClick={togglePause}>
-          {paused ? "继续" : "暂停"}
+          {paused ? app.t("common.resume") : app.t("common.pause")}
         </button>
         <button className="danger" disabled={!sessionId} onClick={stop}>
-          停止
+          {app.t("common.stop")}
         </button>
       </div>
 
@@ -159,23 +159,25 @@ export function MediaPlayerPanel(): JSX.Element {
         <input
           value={positionMs}
           onChange={(e) => setPositionMs(e.target.value)}
-          placeholder="毫秒"
+          placeholder={app.t("player.seekPlaceholder")}
         />
         <button disabled={!sessionId} onClick={seek}>
-          定位
+          {app.t("common.seek")}
         </button>
-        <button onClick={() => void refreshStatus()}>刷新状态</button>
+        <button onClick={() => void refreshStatus()}>
+          {app.t("player.refreshStatus")}
+        </button>
       </div>
 
       <div className="kv">
-        <span>会话</span>
+        <span>{app.t("player.session")}</span>
         <span className="mono">{sessionId ?? "—"}</span>
-        <span>进程存活</span>
+        <span>{app.t("player.processAlive")}</span>
         <span>{status ? String(status.alive) : "—"}</span>
-        <span>IPC 管道</span>
-        <span className="mono">{status?.pipe || "（空）"}</span>
-        <span>面板嵌入</span>
-        <span>{embedded ? "已嵌入" : "独立窗口"}</span>
+        <span>{app.t("player.ipcPipe")}</span>
+        <span className="mono">{status?.pipe || app.t("common.empty")}</span>
+        <span>{app.t("player.panelEmbed")}</span>
+        <span>{embedded ? app.t("player.embedded") : app.t("player.detachedWindow")}</span>
       </div>
     </div>
   );

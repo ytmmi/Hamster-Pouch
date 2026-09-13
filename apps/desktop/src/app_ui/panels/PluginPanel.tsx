@@ -85,7 +85,11 @@ export function PluginPanel(): JSX.Element {
       try {
         const outcome = await api.pluginLoad(app.repoId, plugin.id);
         app.status(
-          `${plugin.id} · ${outcome.runtime_kind} · API ${outcome.api_version}`,
+          app.t("plugin.loadedInfo", {
+            id: plugin.id,
+            runtime: outcome.runtime_kind,
+            api: outcome.api_version,
+          }),
           "ok",
         );
       } catch (e) {

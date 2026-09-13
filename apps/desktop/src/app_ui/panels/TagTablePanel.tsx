@@ -85,7 +85,7 @@ export function TagTablePanel(): JSX.Element {
     try {
       setRoots(await api.tagTree(app.repoId));
     } catch (e) {
-      app.status(`tag表加载失败: ${String(e)}`, "error");
+      app.status(app.t("tagtable.loadFailed", { err: String(e) }), "error");
     }
   }, [app]);
 
@@ -147,7 +147,7 @@ export function TagTablePanel(): JSX.Element {
       setDraftValue("");
       app.refresh();
     } catch (e) {
-      app.status(`新建标签失败: ${String(e)}`, "error");
+      app.status(app.t("tagtable.createFailed", { err: String(e) }), "error");
       setDraft(null);
       setDraftValue("");
     }
@@ -165,7 +165,7 @@ export function TagTablePanel(): JSX.Element {
       setRenaming(null);
       app.refresh();
     } catch (e) {
-      app.status(`重命名失败: ${String(e)}`, "error");
+      app.status(app.t("tagtable.renameFailed", { err: String(e) }), "error");
     }
   };
 
@@ -178,7 +178,7 @@ export function TagTablePanel(): JSX.Element {
       setDropTargetId(null);
       app.refresh();
     } catch (e) {
-      app.status(`移动失败: ${String(e)}`, "error");
+      app.status(app.t("tagtable.moveFailed", { err: String(e) }), "error");
     }
   };
 
@@ -191,7 +191,7 @@ export function TagTablePanel(): JSX.Element {
       setDropTargetId(null);
       app.refresh();
     } catch (e) {
-      app.status(`移动失败: ${String(e)}`, "error");
+      app.status(app.t("tagtable.moveFailed", { err: String(e) }), "error");
     }
   };
 

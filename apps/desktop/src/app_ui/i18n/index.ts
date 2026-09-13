@@ -12,7 +12,10 @@ export type Language = "zh-CN" | "zh-TW" | "en";
 
 export type TranslationKey = keyof DictZhCN;
 
-export type Translate = (key: TranslationKey) => string;
+/** 插值参数（模板中以 `{name}` 引用）。 */
+export type TranslateParams = Record<string, string | number>;
+
+export type Translate = (key: TranslationKey, params?: TranslateParams) => string;
 
 const DICTIONARIES: Record<Language, Record<TranslationKey, string>> = {
   "zh-CN": zhCN,
@@ -34,13 +37,26 @@ export function isLanguage(value: string | null | undefined): value is Language 
   return value === "zh-CN" || value === "zh-TW" || value === "en";
 }
 
-/** 翻译：找不到时回退到简体中文，再回退到 key 本身。 */
-export function translate(language: Language, key: TranslationKey): string {
+/** 翻译：找不到时回退到简体中文，再回退到 key 本身；`params` 用于 `{name}` 插值。 */
+export function translate(
+  language: Language,
+  key: TranslationKey,
+  params?: TranslateParams,
+): string {
   const dict = DICTIONARIES[language] ?? DICTIONARIES[DEFAULT_LANGUAGE];
-  return dict[key] ?? DICTIONARIES[DEFAULT_LANGUAGE][key] ?? key;
+  const template = dict[key] ?? DICTIONARIES[DEFAULT_LANGUAGE][key] ?? key;
+  return params ? interpolate(template, params) : template;
+}
+
+/** 把 `{name}` 占位替换为参数值；缺失参数保留原占位。 */
+function interpolate(template: string, params: TranslateParams): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => {
+    const value = params[name];
+    return value === undefined ? match : String(value);
+  });
 }
 
 /** 生成指定语言的翻译函数。 */
 export function makeTranslator(language: Language): Translate {
-  return (key) => translate(language, key);
+  return (key, params) => translate(language, key, params);
 }

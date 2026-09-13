@@ -39,7 +39,7 @@ export function TagRatingPanel(): JSX.Element {
         })) ?? 0,
       );
     } catch (e) {
-      app.status(`tag/评分加载失败: ${String(e)}`, "error");
+      app.status(app.t("tag.loadFailed", { err: String(e) }), "error");
     }
   }, [app]);
 
@@ -55,10 +55,10 @@ export function TagRatingPanel(): JSX.Element {
         fileIds: [app.selectedFile.id],
         tagName: name,
       });
-      app.status("tag 已添加", "ok");
+      app.status(app.t("tag.added"), "ok");
       app.refresh();
     } catch (e) {
-      app.status(`添加 tag 失败: ${String(e)}`, "error");
+      app.status(app.t("tag.addFailed", { err: String(e) }), "error");
     }
   };
 
@@ -70,10 +70,10 @@ export function TagRatingPanel(): JSX.Element {
         fileIds: [app.selectedFile.id],
         tagName: name,
       });
-      app.status("tag 已移除", "ok");
+      app.status(app.t("tag.removed"), "ok");
       app.refresh();
     } catch (e) {
-      app.status(`移除 tag 失败: ${String(e)}`, "error");
+      app.status(app.t("tag.removeFailed", { err: String(e) }), "error");
     }
   };
 
@@ -86,19 +86,19 @@ export function TagRatingPanel(): JSX.Element {
         rating: value,
       });
       setRating(value);
-      app.status(`评分已设为 ${value}`, "ok");
+      app.status(app.t("tag.ratingSet", { value }), "ok");
     } catch (e) {
-      app.status(`设置评分失败: ${String(e)}`, "error");
+      app.status(app.t("tag.ratingFailed", { err: String(e) }), "error");
     }
   };
 
   return (
     <div className="panel">
-      {!app.selectedFile && <span className="placeholder">未选中文件</span>}
+      {!app.selectedFile && <span className="placeholder">{app.t("common.noSelection")}</span>}
       {app.selectedFile && (
         <>
           {/* 评分（置顶） */}
-          <div className="section-title">评分</div>
+          <div className="section-title">{app.t("tag.rating")}</div>
           <div className="stars">
             {[1, 2, 3, 4, 5].map((v) => (
               <button
@@ -110,7 +110,7 @@ export function TagRatingPanel(): JSX.Element {
               </button>
             ))}
             <button className="star off" onClick={() => setRatingValue(0)}>
-              清除
+              {app.t("tag.clear")}
             </button>
           </div>
 
@@ -119,6 +119,7 @@ export function TagRatingPanel(): JSX.Element {
           <TagInput
             tags={manualTags}
             placeholder={app.t("tag.addPlaceholder")}
+            removeTitle={app.t("tag.removeTitle")}
             onAdd={addTag}
             onRemove={removeTag}
           />

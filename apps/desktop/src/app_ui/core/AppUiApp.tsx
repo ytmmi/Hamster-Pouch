@@ -119,7 +119,7 @@ export function AppUiApp(): JSX.Element {
         apiRef.current?.getPanel(id)?.api.close();
         status(`${title} → ${t("menubar.detach")}`, "ok");
       } catch (e) {
-        status(`${t("menubar.detach")}失败: ${String(e)}`, "error");
+        status(t("layout.detachFailed", { err: String(e) }), "error");
       }
     },
     [status, t, language],

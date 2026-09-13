@@ -30,7 +30,7 @@ export function MetadataPanel(): JSX.Element {
     try {
       setMeta(await api.fileMetadata({ repoId: app.repoId, fileId: file.id }));
     } catch (e) {
-      app.status(`读取元数据失败: ${String(e)}`, "error");
+      app.status(app.t("metadata.readFailed", { err: String(e) }), "error");
     }
   }, [app]);
 
@@ -40,24 +40,24 @@ export function MetadataPanel(): JSX.Element {
 
   return (
     <div className="panel">
-      {!meta && <span className="placeholder">未选中文件</span>}
+      {!meta && <span className="placeholder">{app.t("common.noSelection")}</span>}
       {meta && (
         <>
           <div className="kv">
-            <span>类型</span>
+            <span>{app.t("metadata.type")}</span>
             <span>{meta.media_type}</span>
-            <span>大小</span>
+            <span>{app.t("metadata.size")}</span>
             <span>{meta.size} bytes</span>
-            <span>修改时间</span>
+            <span>{app.t("metadata.mtime")}</span>
             <span>{meta.mtime}</span>
-            <span>校验状态</span>
+            <span>{app.t("metadata.verifyStatus")}</span>
             <span>{meta.verify_status}</span>
-            <span>内容哈希</span>
+            <span>{app.t("metadata.contentHash")}</span>
             <span className="mono">{meta.content_hash ?? "—"}</span>
           </div>
-          <div className="section-title">EXIF</div>
+          <div className="section-title">{app.t("metadata.exif")}</div>
           <pre className="json-block">{pretty(meta.exif_json)}</pre>
-          <div className="section-title">媒体信息</div>
+          <div className="section-title">{app.t("metadata.mediaInfo")}</div>
           <pre className="json-block">{pretty(meta.media_info_json)}</pre>
         </>
       )}

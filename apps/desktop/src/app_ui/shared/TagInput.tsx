@@ -14,11 +14,19 @@ export interface TagInputItem {
 export interface TagInputProps {
   tags: TagInputItem[];
   placeholder: string;
+  /** 标签移除按钮的提示文字（由调用方注入 i18n 文案）。 */
+  removeTitle: string;
   onAdd: (name: string) => void;
   onRemove: (name: string) => void;
 }
 
-export function TagInput({ tags, placeholder, onAdd, onRemove }: TagInputProps): JSX.Element {
+export function TagInput({
+  tags,
+  placeholder,
+  removeTitle,
+  onAdd,
+  onRemove,
+}: TagInputProps): JSX.Element {
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -47,7 +55,7 @@ export function TagInput({ tags, placeholder, onAdd, onRemove }: TagInputProps):
           {t.name}
           <button
             className="tag-pill-x"
-            title="移除"
+            title={removeTitle}
             onClick={(e) => {
               e.stopPropagation();
               onRemove(t.name);

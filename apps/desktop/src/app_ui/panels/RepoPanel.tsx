@@ -27,7 +27,7 @@ export function RepoPanel(): JSX.Element {
     try {
       setRepos(await api.repoList());
     } catch (e) {
-      app.status(`仓库列表失败: ${String(e)}`, "error");
+      app.status(t("repo.listFailed", { err: String(e) }), "error");
     }
   }, [app]);
 
@@ -49,7 +49,7 @@ export function RepoPanel(): JSX.Element {
       setOpenCreate(false);
       app.refresh();
     } catch (e) {
-      app.status(`创建仓库失败: ${String(e)}`, "error");
+      app.status(t("repo.createFailed", { err: String(e) }), "error");
     }
   };
 
@@ -61,7 +61,7 @@ export function RepoPanel(): JSX.Element {
       setOpenSwitch(false);
       app.refresh();
     } catch (e) {
-      app.status(`切换仓库失败: ${String(e)}`, "error");
+      app.status(t("repo.switchFailed", { err: String(e) }), "error");
     }
   };
 
@@ -74,9 +74,9 @@ export function RepoPanel(): JSX.Element {
     try {
       await api.repoRename({ repoId: id, name: trimmed });
       await load();
-      app.status(`仓库已重命名: ${trimmed}`, "ok");
+      app.status(t("repo.renamed", { name: trimmed }), "ok");
     } catch (e) {
-      app.status(`重命名仓库失败: ${String(e)}`, "error");
+      app.status(t("repo.renameFailed", { err: String(e) }), "error");
     }
   };
 
@@ -91,10 +91,10 @@ export function RepoPanel(): JSX.Element {
         app.setRepoId(null);
       }
       await load();
-      app.status("仓库已删除", "ok");
+      app.status(t("repo.deleted"), "ok");
       app.refresh();
     } catch (e) {
-      app.status(`删除仓库失败: ${String(e)}`, "error");
+      app.status(t("repo.deleteFailed", { err: String(e) }), "error");
     }
   };
 
@@ -102,9 +102,9 @@ export function RepoPanel(): JSX.Element {
     setMenu(null);
     try {
       await api.repoSetDefault({ repoId: id });
-      app.status("已设为默认仓库", "ok");
+      app.status(t("repo.defaultSet"), "ok");
     } catch (e) {
-      app.status(`设置默认仓库失败: ${String(e)}`, "error");
+      app.status(t("repo.defaultFailed", { err: String(e) }), "error");
     }
   };
 

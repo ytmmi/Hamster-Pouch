@@ -26,7 +26,7 @@ export function ViewerPanel(): JSX.Element {
       } catch (e) {
         if (!cancelled) {
           setFailed(true);
-          app.status(`预览失败: ${String(e)}`, "error");
+          app.status(app.t("viewer.previewFailed", { err: String(e) }), "error");
         }
       }
     })();
@@ -39,7 +39,7 @@ export function ViewerPanel(): JSX.Element {
 
   return (
     <div className="panel viewer-panel">
-      {!file && <span className="placeholder">未选中文件</span>}
+      {!file && <span className="placeholder">{app.t("common.noSelection")}</span>}
       {file && (
         <>
           <div className="viewer-info">
@@ -49,7 +49,7 @@ export function ViewerPanel(): JSX.Element {
             </span>
           </div>
           <div className="viewer-stage">
-            {failed && <span className="placeholder">预览不可用</span>}
+            {failed && <span className="placeholder">{app.t("viewer.unavailable")}</span>}
             {!failed && url && file.media_type === "image" && (
               <img src={url} alt={file.relative_path} />
             )}
@@ -59,7 +59,9 @@ export function ViewerPanel(): JSX.Element {
             {!failed && url && file.media_type === "audio" && (
               <audio src={url} controls />
             )}
-            {!failed && !url && <span className="placeholder">加载中…</span>}
+            {!failed && !url && (
+              <span className="placeholder">{app.t("common.loading")}</span>
+            )}
           </div>
         </>
       )}

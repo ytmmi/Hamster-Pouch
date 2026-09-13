@@ -131,7 +131,7 @@ export function AlbumPanel(): JSX.Element {
     try {
       setAlbums(await api.albumList({ repoId: app.repoId }));
     } catch (e) {
-      app.status(`相册列表失败: ${String(e)}`, "error");
+      app.status(t("album.listFailed", { err: String(e) }), "error");
     }
   }, [app]);
 
@@ -168,7 +168,7 @@ export function AlbumPanel(): JSX.Element {
       app.setSourceId(null);
       app.refresh();
     } catch (e) {
-      app.status(`创建相册失败: ${String(e)}`, "error");
+      app.status(t("album.createFailed", { err: String(e) }), "error");
     }
   };
 
@@ -183,7 +183,7 @@ export function AlbumPanel(): JSX.Element {
       app.status(`${t("album.rename")}: ${newName.trim()}`, "ok");
       app.refresh();
     } catch (e) {
-      app.status(`重命名相册失败: ${String(e)}`, "error");
+      app.status(t("album.renameFailed", { err: String(e) }), "error");
     }
   };
 
@@ -205,7 +205,7 @@ export function AlbumPanel(): JSX.Element {
       app.setAlbumId(r.album_id);
       app.refresh();
     } catch (e) {
-      app.status(`创建子相册失败: ${String(e)}`, "error");
+      app.status(t("album.createChildFailed", { err: String(e) }), "error");
     }
   };
 
@@ -222,7 +222,7 @@ export function AlbumPanel(): JSX.Element {
       }
       app.refresh();
     } catch (e) {
-      app.status(`删除相册失败: ${String(e)}`, "error");
+      app.status(t("album.deleteFailed", { err: String(e) }), "error");
     }
   };
 
@@ -234,7 +234,7 @@ export function AlbumPanel(): JSX.Element {
       app.status(`${t("album.mediaType.set")}: ${mediaLabel(mt)}`, "ok");
       app.refresh();
     } catch (e) {
-      app.status(`设置媒体属性失败: ${String(e)}`, "error");
+      app.status(t("album.setMediaTypeFailed", { err: String(e) }), "error");
     }
   };
 
@@ -260,7 +260,7 @@ export function AlbumPanel(): JSX.Element {
       app.status(`${t("album.dropHint")}: +${r.added}`, "ok");
       app.refresh();
     } catch (err) {
-      app.status(`加入成员失败: ${String(err)}`, "error");
+      app.status(t("album.addMemberFailed", { err: String(err) }), "error");
     }
   };
 

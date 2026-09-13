@@ -54,7 +54,10 @@ export function ColorPanel(): JSX.Element {
       try {
         unlistenRef.current.push(
           await listen<ColorExtractedPayload>("color.extracted", (e) => {
-            app.status(`调色板已提取（${e.payload.palette.length} 色）`, "ok");
+            app.status(
+              app.t("color.paletteExtracted", { count: e.payload.palette.length }),
+              "ok",
+            );
             setColors(e.payload.palette);
             setLocked(false);
           }),
@@ -81,9 +84,9 @@ export function ColorPanel(): JSX.Element {
         repoId: app.repoId,
         fileId: app.selectedFile.id,
       });
-      app.status("调色板提取已启动", "info");
+      app.status(app.t("color.extractStarted"), "info");
     } catch (e) {
-      app.status(`提取失败: ${String(e)}`, "error");
+      app.status(app.t("color.extractFailed", { err: String(e) }), "error");
     }
   };
 
@@ -98,9 +101,9 @@ export function ColorPanel(): JSX.Element {
       });
       setColors([manual]);
       setLocked(true);
-      app.status("色值已锁定", "ok");
+      app.status(app.t("color.lockedToast"), "ok");
     } catch (e) {
-      app.status(`锁定失败: ${String(e)}`, "error");
+      app.status(app.t("color.lockFailed", { err: String(e) }), "error");
     }
   };
 
@@ -108,15 +111,17 @@ export function ColorPanel(): JSX.Element {
 
   return (
     <div className="panel">
-      {!app.selectedFile && <span className="placeholder">未选中文件</span>}
+      {!app.selectedFile && <span className="placeholder">{app.t("common.noSelection")}</span>}
       {app.selectedFile && !isImage && (
-        <span className="placeholder">色彩参考仅支持图片</span>
+        <span className="placeholder">{app.t("color.imageOnly")}</span>
       )}
       {isImage && (
         <>
           <div className="row">
-            <button onClick={extract}>提取调色板</button>
-            <span className="dim">{locked ? "已锁定" : "自动"}</span>
+            <button onClick={extract}>{app.t("color.extract")}</button>
+            <span className="dim">
+              {locked ? app.t("color.locked") : app.t("color.auto")}
+            </span>
           </div>
           <div className="palette">
             {colors.map((c, i) => (
@@ -127,7 +132,9 @@ export function ColorPanel(): JSX.Element {
                 title={c}
               />
             ))}
-            {colors.length === 0 && <span className="placeholder">无调色板</span>}
+            {colors.length === 0 && (
+              <span className="placeholder">{app.t("color.empty")}</span>
+            )}
           </div>
           <div className="row">
             <input
@@ -135,7 +142,7 @@ export function ColorPanel(): JSX.Element {
               value={manual}
               onChange={(e) => setManual(e.target.value)}
             />
-            <button onClick={lockManual}>锁定该色值</button>
+            <button onClick={lockManual}>{app.t("color.lockManual")}</button>
           </div>
         </>
       )}
