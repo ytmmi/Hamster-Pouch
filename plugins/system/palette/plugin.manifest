@@ -1,0 +1,12 @@
+{
+  "id": "dev.hamsterpouch.system.palette",
+  "name": "系统色彩面板",
+  "version": "0.1.0",
+  "min_host_version": 1,
+  "source": { "kind": "system" },
+  "runtime": { "kind": "external-process" },
+  "entry": "bin/palette.exe",
+  "capabilities": ["ui.panel", "repo.read"],
+  "contributions": ["panel"],
+  "trust": { "requested": "system" }
+}

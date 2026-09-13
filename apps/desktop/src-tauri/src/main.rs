@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use hp_ai::AiTaggingService;
 use hp_media::{MediaProcess, ThumbnailCache};
 use hp_scanner::Scanner;
 use hp_store::{GlobalDb, RepoDb};
@@ -30,6 +31,10 @@ pub(crate) struct AppState {
     pub(crate) media: Arc<Mutex<Option<MediaProcess>>>,
     /// 面板级嵌入的原生渲染子窗口（D14）。
     pub(crate) media_embed: Arc<Mutex<Option<EmbedWindow>>>,
+    /// 插件包存储根目录（RFC 0004）。
+    pub(crate) plugin_root: Arc<PathBuf>,
+    /// AI 打标任务队列（内存，D6/D17）。
+    pub(crate) ai: Arc<Mutex<AiTaggingService>>,
 }
 
 fn make_state(app: &tauri::AppHandle) -> AppState {
@@ -38,6 +43,12 @@ fn make_state(app: &tauri::AppHandle) -> AppState {
         .app_data_dir()
         .map(|d| d.join("thumbnails"))
         .unwrap_or_else(|_| PathBuf::from("thumbnails"));
+    let plugin_root = app
+        .path()
+        .app_data_dir()
+        .map(|d| d.join("plugins"))
+        .unwrap_or_else(|_| PathBuf::from("plugins"));
+    let _ = std::fs::create_dir_all(&plugin_root);
     AppState {
         global_db: Arc::new(Mutex::new(None)),
         open_repo: Arc::new(Mutex::new(None)),
@@ -47,6 +58,8 @@ fn make_state(app: &tauri::AppHandle) -> AppState {
         thumb_cache: Arc::new(ThumbnailCache::new(thumb_root)),
         media: Arc::new(Mutex::new(None)),
         media_embed: Arc::new(Mutex::new(None)),
+        plugin_root: Arc::new(plugin_root),
+        ai: Arc::new(Mutex::new(AiTaggingService::new())),
     }
 }
 
@@ -76,6 +89,7 @@ fn main() {
             commands::repo::repo_open,
             commands::repo::repo_close,
             commands::repo::repo_list,
+            commands::repo::repo_backup,
             commands::repo::setting_get,
             commands::repo::setting_set,
             commands::source::source_mount,
@@ -85,6 +99,8 @@ fn main() {
             commands::source::source_tree,
             commands::source::source_scan,
             commands::source::task_cancel,
+            commands::source::task_pause,
+            commands::source::task_resume,
             commands::album::album_create,
             commands::album::album_set_media_type,
             commands::album::album_add_member,
@@ -98,6 +114,11 @@ fn main() {
             commands::tag::tag_remove,
             commands::tag::tag_list,
             commands::tag::tag_for_file,
+            commands::tag::tag_relation_add,
+            commands::tag::tag_relation_remove,
+            commands::tag::tag_relation_list,
+            commands::tag::tag_relation_parents,
+            commands::tag::tag_relation_children,
             commands::rating::rating_set,
             commands::rating::rating_get,
             commands::color::color_get,
@@ -110,6 +131,24 @@ fn main() {
             commands::file::file_rename,
             commands::file::file_trash,
             commands::file::file_reanalyze,
+            commands::file::file_reverify,
+            commands::fsops::fsops_copy,
+            commands::fsops::fsops_move,
+            commands::plugin::plugin_list,
+            commands::plugin::plugin_discover,
+            commands::plugin::plugin_install_local,
+            commands::plugin::plugin_enable,
+            commands::plugin::plugin_disable,
+            commands::plugin::plugin_state,
+            commands::plugin::plugin_load,
+            commands::plugin::plugin_versions,
+            commands::plugin::plugin_rollback,
+            commands::ai::ai_config_create,
+            commands::ai::ai_config_list,
+            commands::ai::ai_config_remove,
+            commands::ai::ai_tagging_submit,
+            commands::ai::ai_tagging_status,
+            commands::ai::ai_tagging_run,
             commands::media::media_play,
             commands::media::media_pause,
             commands::media::media_seek,

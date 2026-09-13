@@ -40,6 +40,11 @@ pub struct GlobalDb {
 }
 
 impl GlobalDb {
+    /// 内部连接访问器（供 `plugin_repo` 等仓储扩展方法使用）。
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
     /// 打开（不存在则创建）全局配置库并应用迁移。
     pub fn open(path: impl AsRef<Path>) -> HpResult<Self> {
         let mut conn =

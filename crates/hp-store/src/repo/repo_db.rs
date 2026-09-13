@@ -12,6 +12,9 @@ use crate::util::{now_iso, require_nonempty, store_err};
 const REPO_MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/repo/0001_init.sql"),
     include_str!("../../migrations/repo/0002_media_info.sql"),
+    include_str!("../../migrations/repo/0003_plugin_ai.sql"),
+    include_str!("../../migrations/repo/0004_split_tag_tables.sql"),
+    include_str!("../../migrations/repo/0005_tag_relations.sql"),
 ];
 
 /// 仓库库句柄。

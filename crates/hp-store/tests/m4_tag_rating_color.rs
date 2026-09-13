@@ -2,7 +2,7 @@
 //! 对应 docs/roadmap/phase-1-top-level-plan.md 的 M4 范围。
 
 use hp_core::{
-    FileId, FileIndexRow, HpError, MediaType, SourceId, TagSource, ThumbStatus, VerifyStatus,
+    FileId, FileIndexRow, HpError, MediaType, SourceId, ThumbStatus, VerifyStatus,
 };
 use hp_store::RepoDb;
 
@@ -62,13 +62,12 @@ fn tag_crud_and_file_association() {
         .expect("tag 应存在");
     assert_eq!(found.id, tag.id);
 
-    db.add_file_tag(f1.as_str(), tag.id.as_str(), TagSource::User, None, None)
+    db.add_file_tag(f1.as_str(), tag.id.as_str())
         .expect("建立关联失败");
     assert_eq!(db.count_file_tags(tag.id.as_str()).expect("统计失败"), 1);
 
     let file_tags = db.list_file_tags(f1.as_str()).expect("查询文件 tag 失败");
     assert_eq!(file_tags.len(), 1);
-    assert_eq!(file_tags[0].source, TagSource::User);
 
     let tags = db.list_tags_for_file(f1.as_str()).expect("查询 tag 实体失败");
     assert_eq!(tags.len(), 1);
@@ -77,29 +76,41 @@ fn tag_crud_and_file_association() {
     let files = db.list_files_by_tag(tag.id.as_str()).expect("查询 tag 文件失败");
     assert_eq!(files.len(), 1);
 
-    // AI 来源覆盖更新
-    db.add_file_tag(
-        f1.as_str(),
-        tag.id.as_str(),
-        TagSource::Ai,
-        Some(0.9),
-        Some("demo-model"),
-    )
-    .expect("更新关联失败");
-    let file_tags = db.list_file_tags(f1.as_str()).expect("查询失败");
-    assert_eq!(file_tags[0].source, TagSource::Ai);
-    assert_eq!(file_tags[0].confidence, Some(0.9));
+    // D21：自动关联与人工关联为独立表，同名 tag 可共存（tag 实体共用）
+    db.add_file_auto_tag(f1.as_str(), tag.id.as_str(), Some(0.9), Some("demo-model"))
+        .expect("建立自动关联失败");
+    assert_eq!(
+        db.count_file_tags(tag.id.as_str()).expect("统计失败"),
+        1,
+        "人工关联数不受自动关联影响"
+    );
+    assert_eq!(db.count_file_auto_tags(tag.id.as_str()).expect("统计失败"), 1);
 
+    let manual = db.list_file_tags(f1.as_str()).expect("查询人工失败");
+    assert_eq!(manual.len(), 1);
+    let auto = db.list_file_auto_tags(f1.as_str()).expect("查询自动失败");
+    assert_eq!(auto.len(), 1);
+    assert_eq!(auto[0].confidence, Some(0.9));
+    assert_eq!(auto[0].tag_id, manual[0].tag_id, "tag 实体共用");
+
+    // 移除人工关联后自动关联保留
     db.remove_file_tag(f1.as_str(), tag.id.as_str())
-        .expect("移除关联失败");
+        .expect("移除人工关联失败");
     assert_eq!(db.count_file_tags(tag.id.as_str()).expect("统计失败"), 0);
+    assert_eq!(db.count_file_auto_tags(tag.id.as_str()).expect("统计失败"), 1);
+    db.remove_file_auto_tag(f1.as_str(), tag.id.as_str())
+        .expect("移除自动关联失败");
+    assert_eq!(db.count_file_auto_tags(tag.id.as_str()).expect("统计失败"), 0);
 
-    // 删除 tag 级联清除关联
-    db.add_file_tag(f1.as_str(), tag.id.as_str(), TagSource::User, None, None)
+    // 删除 tag 级联清除人工与自动关联
+    db.add_file_tag(f1.as_str(), tag.id.as_str())
         .expect("建立关联失败");
+    db.add_file_auto_tag(f1.as_str(), tag.id.as_str(), Some(0.5), Some("m"))
+        .expect("建立自动关联失败");
     db.delete_tag(tag.id.as_str()).expect("删除 tag 失败");
     assert!(db.get_tag(tag.id.as_str()).expect("查询失败").is_none());
     assert_eq!(db.count_file_tags(tag.id.as_str()).expect("统计失败"), 0);
+    assert_eq!(db.count_file_auto_tags(tag.id.as_str()).expect("统计失败"), 0);
 
     db.close().expect("关闭失败");
 }

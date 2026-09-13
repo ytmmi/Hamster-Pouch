@@ -1,10 +1,11 @@
 /**
- * M4：tag 命令封装。
+ * M4/M5：tag 命令封装。
  */
 
 import { invoke } from "@tauri-apps/api/core";
 
 import type {
+  FileTagsResult,
   TagAddArgs,
   TagForFileArgs,
   TagItem,
@@ -12,7 +13,7 @@ import type {
   TagRemoveArgs,
 } from "../types";
 
-/** 给文件批量添加 tag */
+/** 给文件批量添加人工 tag */
 export function tagAdd(args: TagAddArgs): Promise<void> {
   return invoke<void>("tag_add", {
     repoId: args.repoId,
@@ -21,7 +22,7 @@ export function tagAdd(args: TagAddArgs): Promise<void> {
   });
 }
 
-/** 从文件批量移除 tag */
+/** 从文件批量移除人工 tag */
 export function tagRemove(args: TagRemoveArgs): Promise<void> {
   return invoke<void>("tag_remove", {
     repoId: args.repoId,
@@ -30,14 +31,14 @@ export function tagRemove(args: TagRemoveArgs): Promise<void> {
   });
 }
 
-/** 列出仓库内全部 tag */
+/** 列出仓库内全部 tag 实体 */
 export function tagList(args: TagListArgs): Promise<TagItem[]> {
   return invoke<TagItem[]>("tag_list", { repoId: args.repoId });
 }
 
-/** 列出文件已关联的 tag */
-export function tagForFile(args: TagForFileArgs): Promise<TagItem[]> {
-  return invoke<TagItem[]>("tag_for_file", {
+/** 列出文件的人工 tag 与自动 tag 两组 */
+export function tagForFile(args: TagForFileArgs): Promise<FileTagsResult> {
+  return invoke<FileTagsResult>("tag_for_file", {
     repoId: args.repoId,
     fileId: args.fileId,
   });

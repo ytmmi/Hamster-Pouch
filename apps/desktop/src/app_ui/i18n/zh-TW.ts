@@ -109,4 +109,24 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "album.dropHint": "拖到相簿加入",
   "album.createChild": "建立子相簿",
   "album.members": "成員",
+
+  // 外掛面板（M5 / RFC 0004）
+  "panel.plugins": "外掛",
+  "plugin.installed": "外掛已安裝",
+  "plugin.none": "尚無已安裝外掛",
+  "plugin.install": "安裝本機外掛…",
+  "plugin.pathPlaceholder": "外掛套件目錄路徑",
+  "plugin.enable": "啟用",
+  "plugin.disable": "停用",
+  "plugin.load": "載入",
+  "plugin.grants": "能力授權",
+
+  // 標籤分組（D21：人工 / 自動獨立）
+  "tag.manual": "人工標籤",
+  "tag.auto": "自動標籤",
+  "tag.manual.empty": "尚無人工標籤",
+  "tag.auto.empty": "尚無自動標籤",
+  "tag.collapse": "收合",
+  "tag.expand": "展開",
+  "tag.confidence": "信心度",
 };

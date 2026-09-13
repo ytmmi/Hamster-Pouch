@@ -1,0 +1,10 @@
+[package]
+name = "hp-dto"
+version.workspace = true
+edition.workspace = true
+description = "仓鼠颊跨层 DTO：由 Rust 类型生成前端 TypeScript 类型（shared-types.md）"
+
+[dependencies]
+hp-core = { path = "../hp-core" }
+serde = { version = "1", features = ["derive"] }
+ts-rs = { version = "10", features = ["serde-compat"] }

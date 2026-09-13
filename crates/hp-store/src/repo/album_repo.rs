@@ -10,7 +10,7 @@ use hp_core::{
 use rusqlite::{params, OptionalExtension, Row};
 
 use crate::repo::repo_db::RepoDb;
-use crate::util::{now_iso, require_nonempty, store_err, uuid};
+use crate::util::{now_iso, require_nonempty, store_err};
 
 /// `albums` 表列清单（与迁移 0001 顺序一致）。
 const ALBUM_COLUMNS: &str =
@@ -257,6 +257,20 @@ impl RepoDb {
             .map_err(|e| store_err("统计相册成员数", e))
     }
 
+    /// 列出包含某文件的全部相册 ID（源间复制继承成员关系用，RFC 0001）。
+    pub fn list_album_ids_for_file(&self, file_id: &str) -> HpResult<Vec<String>> {
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT album_id FROM album_member WHERE file_id = ?1")
+            .map_err(|e| store_err("查询文件所属相册", e))?;
+        let rows = stmt
+            .query_map(params![file_id], |row| row.get::<_, String>(0))
+            .map_err(|e| store_err("读取文件所属相册", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析文件所属相册", e))?;
+        Ok(rows)
+    }
+
     /// 查询跟随源同步规则；不存在返回 `None`。
     pub fn get_sync_rule(&self, album_id: &str) -> HpResult<Option<AlbumSyncRule>> {
         self.conn()
@@ -333,27 +347,6 @@ impl RepoDb {
             )
             .map_err(|e| store_err("写入同步状态", e))?;
         Ok(())
-    }
-
-    /// 写入操作历史；返回记录 ID（相册属性变更移除成员时使用）。
-    pub fn insert_ops_history(
-        &mut self,
-        repo_id: &str,
-        op_type: &str,
-        payload_json: &str,
-        undo_json: Option<&str>,
-    ) -> HpResult<String> {
-        require_nonempty(repo_id, "仓库 ID")?;
-        require_nonempty(op_type, "操作类型")?;
-        let id = uuid();
-        self.conn()
-            .execute(
-                "INSERT INTO ops_history (id, repo_id, op_type, payload_json, undo_json, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![id, repo_id, op_type, payload_json, undo_json, now_iso()],
-            )
-            .map_err(|e| store_err("写入操作历史", e))?;
-        Ok(id)
     }
 }
 

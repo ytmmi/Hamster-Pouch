@@ -1,9 +1,7 @@
 //! M4 验收测试：仓库隔离（同一图像源挂载到两个仓库时 tag/评分互不可见）。
 //! 对应 docs/roadmap/phase-1-top-level-plan.md 的 M4 验证线。
 
-use hp_core::{
-    FileId, FileIndexRow, MediaType, SourceId, TagSource, ThumbStatus, VerifyStatus,
-};
+use hp_core::{FileId, FileIndexRow, MediaType, SourceId, ThumbStatus, VerifyStatus};
 use hp_store::RepoDb;
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
@@ -58,7 +56,7 @@ fn tag_and_rating_are_isolated_between_repos() {
     let tag = db1
         .create_tag("repo-1", "风景", Some("#00ff00"))
         .expect("创建 tag 失败");
-    db1.add_file_tag(f1.as_str(), tag.id.as_str(), TagSource::User, None, None)
+    db1.add_file_tag(f1.as_str(), tag.id.as_str())
         .expect("建立关联失败");
     db1.upsert_rating(f1.as_str(), 5).expect("写入评分失败");
 
@@ -93,7 +91,7 @@ fn tag_and_rating_are_isolated_between_repos() {
     let tag2 = db2
         .create_tag("repo-2", "风景", None)
         .expect("创建 tag 失败");
-    db2.add_file_tag(f2.as_str(), tag2.id.as_str(), TagSource::User, None, None)
+        db2.add_file_tag(f2.as_str(), tag2.id.as_str())
         .expect("建立关联失败");
     assert_eq!(db1.list_tags("repo-1").expect("列 tag 失败").len(), 1);
     assert_eq!(db1.count_file_tags(tag.id.as_str()).expect("统计失败"), 1);

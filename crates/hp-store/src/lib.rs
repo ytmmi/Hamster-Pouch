@@ -6,4 +6,4 @@ mod repo;
 mod util;
 
 pub use global::{GlobalDb, PanelLayoutRow, RepoRow};
-pub use repo::{build_source_tree, RepoDb, SourceTree, TreeNode};
+pub use repo::{build_source_tree, OpsHistoryRow, RepoDb, SourceTree, TreeNode};

@@ -113,6 +113,26 @@ export const zhCN = {
   "album.dropHint": "拖到相册加入",
   "album.createChild": "创建子相册",
   "album.members": "成员",
+
+  // 插件面板（M5 / RFC 0004）
+  "panel.plugins": "插件",
+  "plugin.installed": "插件已安装",
+  "plugin.none": "暂无已安装插件",
+  "plugin.install": "安装本地插件…",
+  "plugin.pathPlaceholder": "插件包目录路径",
+  "plugin.enable": "启用",
+  "plugin.disable": "禁用",
+  "plugin.load": "加载",
+  "plugin.grants": "能力授权",
+
+  // 标签分组（D21：人工 / 自动独立）
+  "tag.manual": "人工标签",
+  "tag.auto": "自动标签",
+  "tag.manual.empty": "暂无人工标签",
+  "tag.auto.empty": "暂无自动标签",
+  "tag.collapse": "折叠",
+  "tag.expand": "展开",
+  "tag.confidence": "置信度",
 } as const;
 
 export type DictZhCN = typeof zhCN;

@@ -9,6 +9,9 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@hamster-pouch/config": "workspace:*",
+    "@hamster-pouch/shared-types": "workspace:*",
+    "@hamster-pouch/ui": "workspace:*",
     "@tauri-apps/api": "^2",
     "dockview": "^8.3.1",
     "dockview-react": "^8.3.1",

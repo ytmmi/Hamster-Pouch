@@ -494,6 +494,13 @@ dependencies = [
 [[package]]
 name = "hp-ai"
 version = "0.1.0"
+dependencies = [
+ "hp-core",
+ "hp-store",
+ "tempfile",
+ "time",
+ "uuid",
+]
 
 [[package]]
 name = "hp-album"
@@ -514,8 +521,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "hp-dto"
+version = "0.1.0"
+dependencies = [
+ "hp-core",
+ "serde",
+ "ts-rs",
+]
+
+[[package]]
 name = "hp-fsops"
 version = "0.1.0"
+dependencies = [
+ "hp-core",
+ "hp-store",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "hp-hash"
@@ -539,6 +561,13 @@ dependencies = [
 [[package]]
 name = "hp-plugin-host"
 version = "0.1.0"
+dependencies = [
+ "hp-core",
+ "hp-store",
+ "serde_json",
+ "tempfile",
+ "time",
+]
 
 [[package]]
 name = "hp-scanner"
@@ -561,6 +590,7 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "rusqlite",
+ "serde_json",
  "tempfile",
  "time",
  "uuid",
@@ -701,6 +731,12 @@ dependencies = [
  "bitflags 2.13.1",
  "libc",
 ]
+
+[[package]]
+name = "lazy_static"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lebe"
@@ -1261,6 +1297,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]
@@ -1371,6 +1408,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "termcolor"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
+dependencies = [
+ "winapi-util",
+]
+
+[[package]]
 name = "thiserror"
 version = "2.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1432,6 +1478,29 @@ checksum = "7e689342a48d2ea927c87ea50cabf8594854bf940e9310208848d680d668ed85"
 dependencies = [
  "num-conv",
  "time-core",
+]
+
+[[package]]
+name = "ts-rs"
+version = "10.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e640d9b0964e9d39df633548591090ab92f7a4567bc31d3891af23471a3365c6"
+dependencies = [
+ "lazy_static",
+ "thiserror",
+ "ts-rs-macros",
+]
+
+[[package]]
+name = "ts-rs-macros"
+version = "10.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e9d8656589772eeec2cf7a8264d9cda40fb28b9bc53118ceb9e8c07f8f38730"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "termcolor",
 ]
 
 [[package]]

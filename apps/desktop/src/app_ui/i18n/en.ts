@@ -109,4 +109,24 @@ export const en: Record<keyof DictZhCN, string> = {
   "album.dropHint": "Drop to add",
   "album.createChild": "Create sub-album",
   "album.members": "Members",
+
+  // Plugins panel (M5 / RFC 0004)
+  "panel.plugins": "Plugins",
+  "plugin.installed": "Plugin installed",
+  "plugin.none": "No plugins installed",
+  "plugin.install": "Install local plugin…",
+  "plugin.pathPlaceholder": "Plugin package directory",
+  "plugin.enable": "Enable",
+  "plugin.disable": "Disable",
+  "plugin.load": "Load",
+  "plugin.grants": "Grants",
+
+  // Tag groups (D21: manual / auto independent)
+  "tag.manual": "Manual tags",
+  "tag.auto": "Auto tags",
+  "tag.manual.empty": "No manual tags",
+  "tag.auto.empty": "No auto tags",
+  "tag.collapse": "Collapse",
+  "tag.expand": "Expand",
+  "tag.confidence": "Confidence",
 };

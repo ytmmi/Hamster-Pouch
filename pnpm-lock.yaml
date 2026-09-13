@@ -10,6 +10,15 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@hamster-pouch/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@hamster-pouch/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+      '@hamster-pouch/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@tauri-apps/api':
         specifier: ^2
         version: 2.11.1

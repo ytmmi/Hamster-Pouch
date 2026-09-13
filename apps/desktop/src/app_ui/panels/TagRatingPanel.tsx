@@ -1,32 +1,39 @@
 /**
- * 标签 / 评分面板 — 选中文件的 tag 增删与 0-5 评分。
+ * 标签 / 评分面板 — 选中文件的人工 tag（在上）与自动 tag（在下，可折叠）分开显示，
+ * 以及 0-5 评分（D21：人工 / 自动为独立两组）。
  */
 
 import { useCallback, useEffect, useState } from "react";
 
 import * as api from "../shared/api";
 import { useApp } from "../core/AppContext";
-import type { TagItem } from "../shared/types";
+import type { FileTagItem, TagItem } from "../shared/types";
 
 export function TagRatingPanel(): JSX.Element {
   const app = useApp();
   const [tagName, setTagName] = useState("");
   const [repoTags, setRepoTags] = useState<TagItem[]>([]);
-  const [fileTags, setFileTags] = useState<TagItem[]>([]);
+  const [manualTags, setManualTags] = useState<FileTagItem[]>([]);
+  const [autoTags, setAutoTags] = useState<FileTagItem[]>([]);
+  const [autoCollapsed, setAutoCollapsed] = useState(false);
   const [rating, setRating] = useState(0);
 
   const load = useCallback(async () => {
     if (!app.repoId) {
       setRepoTags([]);
-      setFileTags([]);
+      setManualTags([]);
+      setAutoTags([]);
       return;
     }
     try {
       setRepoTags(await api.tagList({ repoId: app.repoId }));
       if (app.selectedFile) {
-        setFileTags(
-          await api.tagForFile({ repoId: app.repoId, fileId: app.selectedFile.id }),
-        );
+        const grouped = await api.tagForFile({
+          repoId: app.repoId,
+          fileId: app.selectedFile.id,
+        });
+        setManualTags(grouped.manual);
+        setAutoTags(grouped.auto);
         setRating(
           (await api.ratingGet({
             repoId: app.repoId,
@@ -34,7 +41,8 @@ export function TagRatingPanel(): JSX.Element {
           })) ?? 0,
         );
       } else {
-        setFileTags([]);
+        setManualTags([]);
+        setAutoTags([]);
         setRating(0);
       }
     } catch (e) {
@@ -106,15 +114,44 @@ export function TagRatingPanel(): JSX.Element {
             <button onClick={addTag}>添加</button>
           </div>
 
-          <div className="section-title">当前文件 tag</div>
+          {/* 人工标签（在上，可增删） */}
+          <div className="section-title">{app.t("tag.manual")}</div>
           <div className="chips">
-            {fileTags.map((t) => (
+            {manualTags.map((t) => (
               <button key={t.id} className="chip" onClick={() => removeTag(t.name)}>
                 {t.name} ✕
               </button>
             ))}
-            {fileTags.length === 0 && <span className="placeholder">无 tag</span>}
+            {manualTags.length === 0 && (
+              <span className="placeholder">{app.t("tag.manual.empty")}</span>
+            )}
           </div>
+
+          {/* 自动标签（在下，可折叠，只读） */}
+          <div className="section-title">
+            <button
+              className="collapse-toggle"
+              onClick={() => setAutoCollapsed((v) => !v)}
+              title={autoCollapsed ? app.t("tag.expand") : app.t("tag.collapse")}
+            >
+              {autoCollapsed ? "▸" : "▾"} {app.t("tag.auto")} ({autoTags.length})
+            </button>
+          </div>
+          {!autoCollapsed && (
+            <div className="chips">
+              {autoTags.map((t) => (
+                <span key={t.id} className="chip static" title={`${app.t("tag.confidence")}: ${t.confidence ?? "—"}`}>
+                  {t.name}
+                  {t.confidence != null && (
+                    <span className="dim"> {t.confidence.toFixed(2)}</span>
+                  )}
+                </span>
+              ))}
+              {autoTags.length === 0 && (
+                <span className="placeholder">{app.t("tag.auto.empty")}</span>
+              )}
+            </div>
+          )}
 
           <div className="section-title">评分</div>
           <div className="stars">

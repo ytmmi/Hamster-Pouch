@@ -9,6 +9,7 @@ members = [
   "crates/hp-plugin-host",
   "crates/hp-ai",
   "crates/hp-media",
+  "crates/hp-dto",
 ]
 resolver = "2"
 

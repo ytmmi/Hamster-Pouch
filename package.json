@@ -7,7 +7,8 @@
     "pnpm": ">=11.10.0"
   },
   "scripts": {
-    "generate:types": "echo placeholder",
+    "generate:types": "cargo run -p hp-dto --bin generate",
+    "check:types": "cargo run -p hp-dto --bin generate && git diff --exit-code -- packages/shared-types",
     "check:line-count": "node tools/check-line-count.mjs",
     "check:doc-status": "node tools/check-doc-status.mjs"
   }

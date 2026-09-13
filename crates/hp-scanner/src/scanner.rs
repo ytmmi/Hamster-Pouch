@@ -73,10 +73,11 @@ impl Default for ScanOptions {
     }
 }
 
-/// 图像源扫描器：可取消、可报告进度。
+/// 图像源扫描器：可取消、可暂停/恢复、可报告进度。
 #[derive(Clone)]
 pub struct Scanner {
     cancel: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
 }
 
 impl Default for Scanner {
@@ -89,21 +90,51 @@ impl Scanner {
     pub fn new() -> Self {
         Self {
             cancel: Arc::new(AtomicBool::new(false)),
+            paused: Arc::new(AtomicBool::new(false)),
         }
     }
 
     /// 请求取消当前扫描。
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::SeqCst);
+        // 取消同时解除暂停，避免扫描线程永久阻塞。
+        self.paused.store(false, Ordering::SeqCst);
     }
 
-    /// 重置取消标志（开始新任务前调用）。
+    /// 暂停当前扫描（在下一个文件处理前生效）。
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::SeqCst);
+    }
+
+    /// 恢复已暂停的扫描。
+    pub fn resume(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+    }
+
+    /// 是否处于暂停状态。
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::SeqCst)
+    }
+
+    /// 重置取消/暂停标志（开始新任务前调用）。
     pub fn reset(&self) {
         self.cancel.store(false, Ordering::SeqCst);
+        self.paused.store(false, Ordering::SeqCst);
     }
 
     fn is_cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
+    }
+
+    /// 暂停等待：若已请求取消则返回取消错误。
+    fn wait_if_paused(&self) -> HpResult<()> {
+        while self.is_paused() {
+            if self.is_cancelled() {
+                return Err(HpError::Io("扫描已取消".into()));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        Ok(())
     }
 
     /// 扫描单个图像源并更新仓库文件索引。
@@ -132,6 +163,7 @@ impl Scanner {
             if self.is_cancelled() {
                 return Err(HpError::Io("扫描已取消".into()));
             }
+            self.wait_if_paused()?;
             match entry {
                 Ok(e) if e.file_type().is_file() => entries.push(e.into_path()),
                 Ok(_) => {}
@@ -153,6 +185,7 @@ impl Scanner {
             if self.is_cancelled() {
                 return Err(HpError::Io("扫描已取消".into()));
             }
+            self.wait_if_paused()?;
             on_progress(&ScanProgress {
                 processed: i as u64,
                 total,

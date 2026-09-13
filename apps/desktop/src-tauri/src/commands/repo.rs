@@ -188,3 +188,34 @@ pub(crate) fn setting_set(
     let g = guard.as_ref().expect("ensure_global 已初始化");
     g.set_setting(&key, &value).map_err(hp_err_to_string)
 }
+
+/// repo.backup：把仓库库文件复制到目标路径；返回备份 ID。
+#[tauri::command]
+pub(crate) fn repo_backup(
+    repo_id: String,
+    dest_path: String,
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    if dest_path.trim().is_empty() {
+        return Err("备份目标路径不能为空".into());
+    }
+    ensure_global(&state, &app).map_err(hp_err_to_string)?;
+    let row = {
+        let guard = state
+            .global_db
+            .lock()
+            .map_err(|_| "全局库锁中毒".to_string())?;
+        let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
+        g.get_repo(&repo_id)
+            .map_err(hp_err_to_string)?
+            .ok_or_else(|| format!("仓库不存在: {repo_id}"))?
+    };
+
+    let dest = PathBuf::from(&dest_path);
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建备份目录失败: {e}"))?;
+    }
+    std::fs::copy(&row.repo_db_path, &dest).map_err(|e| format!("备份仓库库失败: {e}"))?;
+    Ok(uuid::Uuid::new_v4().to_string())
+}

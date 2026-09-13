@@ -320,3 +320,17 @@ pub(crate) fn task_cancel(state: State<AppState>) -> Result<(), String> {
     state.scanner.cancel();
     Ok(())
 }
+
+/// task.pause：暂停当前扫描（下一个文件处理前生效）。
+#[tauri::command]
+pub(crate) fn task_pause(state: State<AppState>) -> Result<(), String> {
+    state.scanner.pause();
+    Ok(())
+}
+
+/// task.resume：恢复已暂停的扫描。
+#[tauri::command]
+pub(crate) fn task_resume(state: State<AppState>) -> Result<(), String> {
+    state.scanner.resume();
+    Ok(())
+}

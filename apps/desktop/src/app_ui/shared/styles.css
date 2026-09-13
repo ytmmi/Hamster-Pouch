@@ -524,6 +524,21 @@ button.danger {
   font-size: 12px;
 }
 
+/* 可折叠分组标题（如自动标签组） */
+.collapse-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--fg-dim);
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.collapse-toggle:hover {
+  color: var(--fg);
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;

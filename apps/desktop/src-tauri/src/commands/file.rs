@@ -314,3 +314,44 @@ pub(crate) fn file_reanalyze(
         .ok_or_else(|| format!("文件不存在: {file_id}"))?;
     Ok(file_to_item(updated))
 }
+
+/// file.reverify：重新校验单个文件（重算内容哈希与状态），返回校验状态。
+#[tauri::command]
+pub(crate) fn file_reverify(
+    repo_id: String,
+    file_id: String,
+    state: State<AppState>,
+) -> Result<String, String> {
+    let _ = repo_id;
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    let file = db
+        .get_file(&file_id)
+        .map_err(hp_err_to_string)?
+        .ok_or_else(|| format!("文件不存在: {file_id}"))?;
+    let source = db
+        .get_source(file.source_id.as_str())
+        .map_err(hp_err_to_string)?
+        .ok_or_else(|| "图像源不存在".to_string())?;
+
+    let options = ScanOptions {
+        full: true,
+        ffmpeg_bin: state.ffmpeg_bin.as_ref().clone(),
+        ffprobe_bin: state.ffprobe_bin.as_ref().clone(),
+        thumbnail_cache: Some((*state.thumb_cache).clone()),
+        ..ScanOptions::default()
+    };
+    state
+        .scanner
+        .rescan_file(db, &source, &file.relative_path, &options)
+        .map_err(hp_err_to_string)?;
+
+    let updated = db
+        .get_file(&file_id)
+        .map_err(hp_err_to_string)?
+        .ok_or_else(|| format!("文件不存在: {file_id}"))?;
+    Ok(updated.verify_status.as_str().to_string())
+}

@@ -1499,15 +1499,19 @@ dependencies = [
 name = "hamster-pouch-desktop"
 version = "0.1.0"
 dependencies = [
+ "hp-ai",
  "hp-album",
  "hp-core",
+ "hp-fsops",
  "hp-media",
+ "hp-plugin-host",
  "hp-scanner",
  "hp-store",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "time",
  "trash",
  "uuid",
  "windows 0.61.3",
@@ -1562,6 +1566,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "hp-ai"
+version = "0.1.0"
+dependencies = [
+ "hp-core",
+ "hp-store",
+ "time",
+ "uuid",
+]
+
+[[package]]
 name = "hp-album"
 version = "0.1.0"
 dependencies = [
@@ -1576,6 +1590,15 @@ name = "hp-core"
 version = "0.1.0"
 dependencies = [
  "uuid",
+]
+
+[[package]]
+name = "hp-fsops"
+version = "0.1.0"
+dependencies = [
+ "hp-core",
+ "hp-store",
+ "serde_json",
 ]
 
 [[package]]
@@ -1598,6 +1621,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hp-plugin-host"
+version = "0.1.0"
+dependencies = [
+ "hp-core",
+ "hp-store",
+ "serde_json",
+ "time",
+]
+
+[[package]]
 name = "hp-scanner"
 version = "0.1.0"
 dependencies = [
@@ -1616,6 +1649,7 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "rusqlite",
+ "serde_json",
  "time",
  "uuid",
 ]

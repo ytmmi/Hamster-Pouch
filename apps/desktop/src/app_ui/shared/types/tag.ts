@@ -1,14 +1,10 @@
 /**
- * M4：tag 类型。
+ * M4/M5：tag 类型。
+ *
+ * 返回值类型由 Rust DTO 生成（@hamster-pouch/shared-types）；命令参数类型本地定义。
  */
 
-/** tag_list / tag_for_file 返回元素 */
-export interface TagItem {
-  id: string;
-  repo_id: string;
-  name: string;
-  color: string | null;
-}
+export type { FileTagItem, FileTagsResult, TagItem } from "@hamster-pouch/shared-types";
 
 export interface TagAddArgs {
   repoId: string;

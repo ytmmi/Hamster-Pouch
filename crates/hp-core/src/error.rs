@@ -15,6 +15,8 @@ pub enum HpError {
     Store(String),
     /// 输入输出错误（已在边界转为文本）。
     Io(String),
+    /// 权限不足（能力未授权、插件未启用等）。
+    Permission(String),
 }
 
 impl fmt::Display for HpError {
@@ -25,6 +27,7 @@ impl fmt::Display for HpError {
             HpError::InvalidArgument(m) => write!(f, "参数无效: {m}"),
             HpError::Store(m) => write!(f, "存储错误: {m}"),
             HpError::Io(m) => write!(f, "IO 错误: {m}"),
+            HpError::Permission(m) => write!(f, "权限不足: {m}"),
         }
     }
 }

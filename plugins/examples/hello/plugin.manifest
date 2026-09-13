@@ -1,0 +1,12 @@
+{
+  "id": "dev.hamsterpouch.example.hello",
+  "name": "Hello 示例插件",
+  "version": "0.1.0",
+  "min_host_version": 1,
+  "source": { "kind": "local-path" },
+  "runtime": { "kind": "external-process" },
+  "entry": "bin/hello.exe",
+  "capabilities": ["ui.panel", "repo.read"],
+  "contributions": ["panel"],
+  "trust": { "requested": "local-dev" }
+}

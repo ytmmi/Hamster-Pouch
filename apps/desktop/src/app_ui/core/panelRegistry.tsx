@@ -11,6 +11,7 @@ import { ColorPanel } from "../panels/ColorPanel";
 import { MediaPlayerPanel } from "../panels/MediaPlayerPanel";
 import { MediaPreviewPanel } from "../panels/MediaPreviewPanel";
 import { MetadataPanel } from "../panels/MetadataPanel";
+import { PluginPanel } from "../panels/PluginPanel";
 import { RepoPanel } from "../panels/RepoPanel";
 import { SourcePanel } from "../panels/SourcePanel";
 import { TagRatingPanel } from "../panels/TagRatingPanel";
@@ -34,6 +35,7 @@ export const PANEL_DEFS: PanelDef[] = [
   { id: "color", titleKey: "panel.color", render: () => <ColorPanel /> },
   { id: "player", titleKey: "panel.player", render: () => <MediaPlayerPanel /> },
   { id: "tasks", titleKey: "panel.tasks", render: () => <TaskPanel /> },
+  { id: "plugins", titleKey: "panel.plugins", render: () => <PluginPanel /> },
 ];
 
 export function panelTitle(id: string, t: Translate): string {

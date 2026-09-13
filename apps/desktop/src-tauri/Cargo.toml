@@ -15,11 +15,15 @@ tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
+time = { version = "0.3", features = ["formatting"] }
 hp-core = { path = "../../../crates/hp-core" }
 hp-store = { path = "../../../crates/hp-store" }
 hp-scanner = { path = "../../../crates/hp-scanner" }
 hp-media = { path = "../../../crates/hp-media" }
 hp-album = { path = "../../../crates/hp-album" }
+hp-fsops = { path = "../../../crates/hp-fsops" }
+hp-plugin-host = { path = "../../../crates/hp-plugin-host" }
+hp-ai = { path = "../../../crates/hp-ai" }
 trash = "5.2.8"
 
 # 仅 Windows：libmpv 面板级嵌入所需的 Win32 原生子窗口宿主（D14）。

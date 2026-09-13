@@ -15,6 +15,7 @@ import "dockview-react/dist/styles/dockview.css";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { SETTING_KEYS } from "@hamster-pouch/config";
 
 import * as api from "../shared/api";
 import { AppContext, type AppContextValue } from "./AppContext";
@@ -48,11 +49,11 @@ export function AppUiApp(): JSX.Element {
   useEffect(() => {
     void (async () => {
       try {
-        const savedTheme = await api.settingGet({ key: "ui.theme" });
+        const savedTheme = await api.settingGet({ key: SETTING_KEYS.theme });
         if (savedTheme === "dark" || savedTheme === "light") {
           setTheme(savedTheme);
         }
-        const savedLang = await api.settingGet({ key: "ui.language" });
+        const savedLang = await api.settingGet({ key: SETTING_KEYS.language });
         if (isLanguage(savedLang)) {
           setLanguageState(savedLang);
         }
@@ -64,12 +65,12 @@ export function AppUiApp(): JSX.Element {
 
   const changeTheme = useCallback((next: "light" | "dark") => {
     setTheme(next);
-    void api.settingSet({ key: "ui.theme", value: next }).catch(() => undefined);
+    void api.settingSet({ key: SETTING_KEYS.theme, value: next }).catch(() => undefined);
   }, []);
 
   const changeLanguage = useCallback((next: Language) => {
     setLanguageState(next);
-    void api.settingSet({ key: "ui.language", value: next }).catch(() => undefined);
+    void api.settingSet({ key: SETTING_KEYS.language, value: next }).catch(() => undefined);
   }, []);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
