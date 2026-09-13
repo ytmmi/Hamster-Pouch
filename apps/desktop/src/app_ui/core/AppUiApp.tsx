@@ -15,7 +15,7 @@ import "dockview-react/dist/styles/dockview.css";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { SETTING_KEYS } from "@hamster-pouch/config";
+import { PANEL_MIN_SIZE, SETTING_KEYS } from "@hamster-pouch/config";
 
 import * as api from "../shared/api";
 import { AppContext, type AppContextValue } from "./AppContext";
@@ -93,6 +93,7 @@ export function AppUiApp(): JSX.Element {
         return;
       }
       dv.addPanel({
+        ...PANEL_MIN_SIZE,
         id,
         component: id,
         title: panelTitle(id, t),
@@ -141,7 +142,7 @@ export function AppUiApp(): JSX.Element {
       const id = e.payload.id;
       const apiInstance = apiRef.current;
       if (apiInstance && !apiInstance.getPanel(id)) {
-        apiInstance.addPanel({ id, component: id, title: panelTitle(id, t) });
+        apiInstance.addPanel({ ...PANEL_MIN_SIZE, id, component: id, title: panelTitle(id, t) });
         status(`${panelTitle(id, t)} ← ${t("single.restore")}`, "ok");
       }
     });
@@ -194,20 +195,28 @@ export function AppUiApp(): JSX.Element {
       apiRef.current = event.api;
       const dv = event.api;
       // 默认布局：左侧功能栏 + 中央媒体预览 + 右侧检查器
-      dv.addPanel({ id: "repo", component: "repo", title: panelTitle("repo", t) });
       dv.addPanel({
+        ...PANEL_MIN_SIZE,
+        id: "repo",
+        component: "repo",
+        title: panelTitle("repo", t),
+      });
+      dv.addPanel({
+        ...PANEL_MIN_SIZE,
         id: "sources",
         component: "sources",
         title: panelTitle("sources", t),
         position: { referencePanel: "repo", direction: "below" },
       });
       dv.addPanel({
+        ...PANEL_MIN_SIZE,
         id: "albums",
         component: "albums",
         title: panelTitle("albums", t),
         position: { referencePanel: "sources", direction: "below" },
       });
       dv.addPanel({
+        ...PANEL_MIN_SIZE,
         id: "media",
         component: "media",
         title: panelTitle("media", t),
@@ -216,42 +225,49 @@ export function AppUiApp(): JSX.Element {
         position: { referencePanel: "repo", direction: "right" },
       });
       dv.addPanel({
+        ...PANEL_MIN_SIZE,
         id: "viewer",
         component: "viewer",
         title: panelTitle("viewer", t),
         position: { referencePanel: "media", direction: "below" },
       });
       dv.addPanel({
+        ...PANEL_MIN_SIZE,
         id: "metadata",
         component: "metadata",
         title: panelTitle("metadata", t),
         position: { referencePanel: "media", direction: "right" },
       });
       dv.addPanel({
+        ...PANEL_MIN_SIZE,
         id: "tags",
         component: "tags",
         title: panelTitle("tags", t),
         position: { referencePanel: "metadata", direction: "below" },
       });
       dv.addPanel({
+        ...PANEL_MIN_SIZE,
         id: "color",
         component: "color",
         title: panelTitle("color", t),
         position: { referencePanel: "tags", direction: "within" },
       });
       dv.addPanel({
+        ...PANEL_MIN_SIZE,
         id: "tagtable",
         component: "tagtable",
         title: panelTitle("tagtable", t),
         position: { referencePanel: "tags", direction: "below" },
       });
       dv.addPanel({
+        ...PANEL_MIN_SIZE,
         id: "player",
         component: "player",
         title: panelTitle("player", t),
         position: { referencePanel: "tagtable", direction: "below" },
       });
       dv.addPanel({
+        ...PANEL_MIN_SIZE,
         id: "tasks",
         component: "tasks",
         title: panelTitle("tasks", t),

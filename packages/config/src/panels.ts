@@ -27,3 +27,13 @@ export const PANEL_IDS = [
 ] as const;
 
 export type PanelId = (typeof PANEL_IDS)[number];
+
+/**
+ * 面板最小尺寸：允许收缩到近乎隐藏（6px）。
+ *
+ * dockview 默认最小为 100×100；此处放宽到 6px，使正文面板可拖到极窄/极扁。
+ */
+export const PANEL_MIN_SIZE = {
+  minimumWidth: 6,
+  minimumHeight: 6,
+} as const;

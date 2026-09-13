@@ -12,11 +12,14 @@ import * as api from "../shared/api";
 import { useApp } from "../core/AppContext";
 import { LANGUAGES, type Language } from "../i18n";
 import { PANEL_DEFS, panelTitle } from "../core/panelRegistry";
+import { PANEL_MIN_SIZE } from "@hamster-pouch/config";
 
 /** 媒体预览面板必须保持 DOM（renderer=always），否则同组 tab 切换会丢失滚动位置。 */
 const MEDIA_PANEL_ID = "media";
-const panelExtra = (id: string): { renderer?: "always" } =>
-  id === MEDIA_PANEL_ID ? { renderer: "always" } : {};
+const panelExtra = (id: string): { renderer?: "always"; minimumWidth: number; minimumHeight: number } => ({
+  ...PANEL_MIN_SIZE,
+  ...(id === MEDIA_PANEL_ID ? { renderer: "always" as const } : {}),
+});
 
 export interface MenuBarProps {
   apiRef: MutableRefObject<DockviewApi | null>;
