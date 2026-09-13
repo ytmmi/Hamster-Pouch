@@ -369,6 +369,11 @@ export function MenuBar({
                 {layouts.length === 0 && (
                   <span className="menu-item dim">{t("menubar.layout.empty")}</span>
                 )}
+                {/* 重置布局：置于布局子菜单最底部 */}
+                <div className="menu-sep" />
+                <button className="menu-item" onClick={resetLayout}>
+                  {t("menubar.resetLayout")}
+                </button>
               </div>
             )}
 
@@ -401,11 +406,6 @@ export function MenuBar({
                 })}
               </div>
             )}
-
-            <div className="menu-sep" />
-            <button className="menu-item" onClick={resetLayout}>
-              {t("menubar.resetLayout")}
-            </button>
           </div>
         )}
       </div>
