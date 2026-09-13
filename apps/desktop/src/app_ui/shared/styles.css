@@ -693,6 +693,11 @@ button.danger {
   background: var(--bg-3);
 }
 
+/* 空白临时标签行（输入命名，不命名则丢弃） */
+.tag-tree-row.draft {
+  outline: 1px dashed var(--border);
+}
+
 .tag-tree-arrow {
   width: 12px;
   text-align: center;

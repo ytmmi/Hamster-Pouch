@@ -3,7 +3,9 @@
  *
  * - 层级树：展开/折叠、缩进、tag 图标、右侧文件计数；
  * - 交叉关联：多父级 tag 在每个上级下各出现一次，名称以浅蓝色标示；
- * - 右键菜单：新增同级标签 / 新增子标签 / 重命名。
+ * - 右键菜单：新增同级标签 / 新增子标签 / 重命名；
+ * - 新增：先插入空白临时标签行并聚焦输入，回车确认；不命名则丢弃临时行；
+ * - 拖拽 = 移动（拖到 tag 上成为其子级，拖到空白移到根）。
  */
 
 import {
@@ -49,10 +51,9 @@ function TagIcon(): JSX.Element {
   );
 }
 
-interface CreateState {
+interface DraftState {
   mode: "root" | "sibling" | "child";
   refId?: string;
-  refName?: string;
 }
 
 interface MenuState {
@@ -69,11 +70,12 @@ export function TagTablePanel(): JSX.Element {
   const [crossOnly, setCrossOnly] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
-  const [creating, setCreating] = useState<CreateState | null>(null);
-  const [createValue, setCreateValue] = useState("");
+  const [draft, setDraft] = useState<DraftState | null>(null);
+  const [draftValue, setDraftValue] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
-  const createRef = useRef<HTMLInputElement>(null);
+  const draftRef = useRef<HTMLInputElement>(null);
+  const committedRef = useRef(false);
 
   const load = useCallback(async () => {
     if (!app.repoId) {
@@ -93,10 +95,10 @@ export function TagTablePanel(): JSX.Element {
   }, [app.repoId, app.refreshKey]);
 
   useEffect(() => {
-    if (creating) {
-      createRef.current?.focus();
+    if (draft) {
+      draftRef.current?.focus();
     }
-  }, [creating]);
+  }, [draft]);
 
   const toggleCollapse = (key: string) => {
     setCollapsed((prev) => {
@@ -113,31 +115,41 @@ export function TagTablePanel(): JSX.Element {
     setMenu({ x: e.clientX, y: e.clientY, node });
   };
 
-  const startCreate = (mode: CreateState["mode"], node?: TagTreeNode) => {
-    setCreating({ mode, refId: node?.id, refName: node?.name });
-    setCreateValue("");
+  /** 插入空白临时标签行（尚未落库）。 */
+  const startDraft = (mode: DraftState["mode"], node?: TagTreeNode) => {
+    committedRef.current = false;
+    setDraft({ mode, refId: node?.id });
+    setDraftValue("");
     setMenu(null);
   };
 
-  const commitCreate = async () => {
-    const name = createValue.trim();
-    if (!name || !app.repoId || !creating) {
-      setCreating(null);
+  /** 确认临时标签：有名字则创建；为空则丢弃（等价于删除临时标签）。 */
+  const commitDraft = async () => {
+    if (committedRef.current || !draft) {
+      return;
+    }
+    committedRef.current = true;
+    const name = draftValue.trim();
+    if (!name || !app.repoId) {
+      setDraft(null);
+      setDraftValue("");
       return;
     }
     try {
-      if (creating.mode === "root") {
+      if (draft.mode === "root") {
         await api.tagCreateRoot(app.repoId, name);
-      } else if (creating.mode === "child" && creating.refId) {
-        await api.tagCreateChild(app.repoId, creating.refId, name);
-      } else if (creating.mode === "sibling" && creating.refId) {
-        await api.tagCreateSibling(app.repoId, creating.refId, name);
+      } else if (draft.mode === "child" && draft.refId) {
+        await api.tagCreateChild(app.repoId, draft.refId, name);
+      } else if (draft.mode === "sibling" && draft.refId) {
+        await api.tagCreateSibling(app.repoId, draft.refId, name);
       }
-      setCreating(null);
-      setCreateValue("");
+      setDraft(null);
+      setDraftValue("");
       app.refresh();
     } catch (e) {
       app.status(`新建标签失败: ${String(e)}`, "error");
+      setDraft(null);
+      setDraftValue("");
     }
   };
 
@@ -183,6 +195,28 @@ export function TagTablePanel(): JSX.Element {
     }
   };
 
+  const draftRow = (depth: number) => (
+    <div className="tag-tree-row draft" style={{ paddingLeft: 6 + depth * 14 }}>
+      <span className="tag-tree-arrow" />
+      <TagIcon />
+      <input
+        ref={draftRef}
+        className="tag-tree-rename"
+        value={draftValue}
+        placeholder={app.t("tagtable.createHint")}
+        onChange={(e) => setDraftValue(e.target.value)}
+        onBlur={() => void commitDraft()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void commitDraft();
+          else if (e.key === "Escape") {
+            committedRef.current = true;
+            setDraft(null);
+          }
+        }}
+      />
+    </div>
+  );
+
   const kw = keyword.trim().toLowerCase();
   let shown = roots;
   if (kw) {
@@ -198,6 +232,8 @@ export function TagTablePanel(): JSX.Element {
       const hasKids = node.children.length > 0;
       const isCollapsed = collapsed.has(key);
       const isRenaming = renaming?.id === node.id;
+      const isSiblingDraft = draft?.mode === "sibling" && draft.refId === node.id;
+      const isChildDraft = draft?.mode === "child" && draft.refId === node.id;
       return (
         <div key={key}>
           <div
@@ -257,6 +293,10 @@ export function TagTablePanel(): JSX.Element {
             )}
             <span className="tag-tree-count">{node.count}</span>
           </div>
+          {/* 同级临时标签：紧跟该节点之后、同缩进 */}
+          {isSiblingDraft && draftRow(depth)}
+          {/* 子级临时标签：作为该节点的第一个子项 */}
+          {!isCollapsed && isChildDraft && draftRow(depth + 1)}
           {!isCollapsed && hasKids && renderNodes(node.children, depth + 1, key)}
         </div>
       );
@@ -290,34 +330,12 @@ export function TagTablePanel(): JSX.Element {
               <button
                 className="icon-btn"
                 title={app.t("tagtable.newRoot")}
-                onClick={() => startCreate("root")}
+                onClick={() => startDraft("root")}
               >
                 ＋
               </button>
             </span>
           </div>
-
-          {creating && (
-            <div className="tag-tree-create">
-              <span className="dim">
-                {creating.mode === "root"
-                  ? app.t("tagtable.newRoot")
-                  : creating.mode === "child"
-                    ? `${app.t("tagtable.newChild")} → ${creating.refName}`
-                    : `${app.t("tagtable.newSibling")} → ${creating.refName}`}
-              </span>
-              <input
-                ref={createRef}
-                value={createValue}
-                placeholder={app.t("tagtable.createHint")}
-                onChange={(e) => setCreateValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void commitCreate();
-                  else if (e.key === "Escape") setCreating(null);
-                }}
-              />
-            </div>
-          )}
 
           <div
             className="tag-tree-body"
@@ -327,8 +345,9 @@ export function TagTablePanel(): JSX.Element {
               void dropOnRoot();
             }}
           >
+            {draft?.mode === "root" && draftRow(0)}
             {renderNodes(shown, 0, "")}
-            {shown.length === 0 && (
+            {shown.length === 0 && draft?.mode !== "root" && (
               <span className="placeholder">{app.t("tagtable.empty")}</span>
             )}
           </div>
@@ -337,13 +356,13 @@ export function TagTablePanel(): JSX.Element {
             <ContextMenu x={menu.x} y={menu.y}>
               <button
                 className="menu-item"
-                onClick={() => startCreate("sibling", menu.node)}
+                onClick={() => startDraft("sibling", menu.node)}
               >
                 {app.t("tagtable.newSibling")}
               </button>
               <button
                 className="menu-item"
-                onClick={() => startCreate("child", menu.node)}
+                onClick={() => startDraft("child", menu.node)}
               >
                 {app.t("tagtable.newChild")}
               </button>
