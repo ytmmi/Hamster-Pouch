@@ -129,4 +129,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "tag.collapse": "收合",
   "tag.expand": "展開",
   "tag.confidence": "信心度",
+  "tag.addPlaceholder": "新增標籤",
+  "panel.tagtable": "tag表",
+  "tagtable.filter": "篩選 tag",
+  "tagtable.empty": "尚無 tag",
 };

@@ -10,6 +10,7 @@
   --fg-dim: #6b7280;
   --accent: #ffffff;
   --accent-border: #b8bcc2;
+  --focus-ring: #3b82f6;
   --sel-bg: #ffffff;
   --sel-border: #b8bcc2;
   --active-bg: #ffffff;
@@ -539,6 +540,64 @@ button.danger {
   color: var(--fg);
 }
 
+/* 标签输入框：chips + 内联输入（点击输入，回车成标签） */
+.tag-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  cursor: text;
+  background: var(--bg-2);
+}
+
+.tag-input:focus-within {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 1px var(--focus-ring);
+}
+
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.tag-pill-x {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.tag-pill-x:hover {
+  color: var(--fg);
+}
+
+.tag-input-field {
+  flex: 1 1 90px;
+  min-width: 90px;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.tag-input-field::placeholder {
+  color: var(--fg-dim);
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;
@@ -555,6 +614,21 @@ button.danger {
 
 .chip.static {
   opacity: 0.8;
+}
+
+/* tag表 行 */
+.tag-table-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 2px;
+}
+
+.tag-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
 }
 
 .stars {
@@ -850,6 +924,7 @@ button.danger {
   --fg-dim: #9aa1a8;
   --accent: #4aa3ff;
   --accent-border: #4aa3ff;
+  --focus-ring: #4aa3ff;
   --sel-bg: rgba(74, 163, 255, 0.12);
   --sel-border: #4aa3ff;
   --active-bg: #4aa3ff;

@@ -240,6 +240,12 @@ export function AppUiApp(): JSX.Element {
         position: { referencePanel: "tags", direction: "within" },
       });
       dv.addPanel({
+        id: "tagtable",
+        component: "tagtable",
+        title: panelTitle("tagtable", t),
+        position: { referencePanel: "tags", direction: "within" },
+      });
+      dv.addPanel({
         id: "player",
         component: "player",
         title: panelTitle("player", t),

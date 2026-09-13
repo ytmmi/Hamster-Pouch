@@ -15,6 +15,7 @@ import { PluginPanel } from "../panels/PluginPanel";
 import { RepoPanel } from "../panels/RepoPanel";
 import { SourcePanel } from "../panels/SourcePanel";
 import { TagRatingPanel } from "../panels/TagRatingPanel";
+import { TagTablePanel } from "../panels/TagTablePanel";
 import { TaskPanel } from "../panels/TaskPanel";
 import { ViewerPanel } from "../panels/ViewerPanel";
 
@@ -32,6 +33,7 @@ export const PANEL_DEFS: PanelDef[] = [
   { id: "viewer", titleKey: "panel.viewer", render: () => <ViewerPanel /> },
   { id: "metadata", titleKey: "panel.metadata", render: () => <MetadataPanel /> },
   { id: "tags", titleKey: "panel.tags", render: () => <TagRatingPanel /> },
+  { id: "tagtable", titleKey: "panel.tagtable", render: () => <TagTablePanel /> },
   { id: "color", titleKey: "panel.color", render: () => <ColorPanel /> },
   { id: "player", titleKey: "panel.player", render: () => <MediaPlayerPanel /> },
   { id: "tasks", titleKey: "panel.tasks", render: () => <TaskPanel /> },

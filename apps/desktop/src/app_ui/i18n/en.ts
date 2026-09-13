@@ -129,4 +129,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "tag.collapse": "Collapse",
   "tag.expand": "Expand",
   "tag.confidence": "Confidence",
+  "tag.addPlaceholder": "Add tag",
+  "panel.tagtable": "Tag Table",
+  "tagtable.filter": "Filter tags",
+  "tagtable.empty": "No tags",
 };

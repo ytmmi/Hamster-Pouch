@@ -19,6 +19,7 @@ export const PANEL_IDS = [
   "viewer",
   "metadata",
   "tags",
+  "tagtable",
   "color",
   "player",
   "tasks",

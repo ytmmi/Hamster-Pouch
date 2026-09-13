@@ -133,6 +133,10 @@ export const zhCN = {
   "tag.collapse": "折叠",
   "tag.expand": "展开",
   "tag.confidence": "置信度",
+  "tag.addPlaceholder": "添加标签",
+  "panel.tagtable": "tag表",
+  "tagtable.filter": "筛选 tag",
+  "tagtable.empty": "暂无 tag",
 } as const;
 
 export type DictZhCN = typeof zhCN;
