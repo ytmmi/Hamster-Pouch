@@ -16,6 +16,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { PANEL_MIN_SIZE, SETTING_KEYS } from "@hamster-pouch/config";
+import { normalizeLayoutJson } from "../shared/panelLayout";
 
 import * as api from "../shared/api";
 import { AppContext, type AppContextValue } from "./AppContext";
@@ -292,11 +293,8 @@ export function AppUiApp(): JSX.Element {
             return;
           }
           const layout = JSON.parse(raw);
-          // 媒体预览需保持 DOM（renderer=always），否则 tab 切换丢滚动位置。
-          if (layout?.panels?.media) {
-            layout.panels.media.renderer = "always";
-          }
-          dv.fromJSON(layout);
+          // 补齐最小尺寸约束并保持媒体预览 DOM（renderer=always）。
+          dv.fromJSON(normalizeLayoutJson(layout));
         } catch {
           /* 无默认仓库/布局或打开失败：保留默认布局 */
         }

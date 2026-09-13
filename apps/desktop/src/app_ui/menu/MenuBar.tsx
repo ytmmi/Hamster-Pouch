@@ -13,6 +13,7 @@ import { useApp } from "../core/AppContext";
 import { LANGUAGES, type Language } from "../i18n";
 import { PANEL_DEFS, panelTitle } from "../core/panelRegistry";
 import { ContextMenu } from "./ContextMenu";
+import { normalizeLayoutJson } from "../shared/panelLayout";
 import { PANEL_MIN_SIZE } from "@hamster-pouch/config";
 
 /** 媒体预览面板必须保持 DOM（renderer=always），否则同组 tab 切换会丢失滚动位置。 */
@@ -165,11 +166,9 @@ export function MenuBar({
         return;
       }
       const layout = JSON.parse(raw);
-      // 布局 JSON 不保存 renderer，加载后媒体预览会退回 onlyWhenVisible 导致滚动丢失
-      if (layout?.panels?.[MEDIA_PANEL_ID]) {
-        layout.panels[MEDIA_PANEL_ID].renderer = "always";
-      }
-      dv.fromJSON(layout);
+      // 补齐最小尺寸约束（旧布局未记录会回退到 dockview 默认 100×100）；
+      // 媒体预览强制 renderer=always，避免 tab 切换丢滚动位置。
+      dv.fromJSON(normalizeLayoutJson(layout));
       app.status(`已加载布局: ${name}`, "ok");
       closeMenus();
     } catch (e) {
