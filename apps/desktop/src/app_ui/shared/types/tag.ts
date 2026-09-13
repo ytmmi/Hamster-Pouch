@@ -6,6 +6,16 @@
 
 export type { FileTagItem, FileTagsResult, TagItem } from "@hamster-pouch/shared-types";
 
+/** tag 层级树节点（tag.tree 返回；`is_cross` 为交叉 tag，D22）。 */
+export interface TagTreeNode {
+  id: string;
+  name: string;
+  color: string | null;
+  count: number;
+  is_cross: boolean;
+  children: TagTreeNode[];
+}
+
 export interface TagAddArgs {
   repoId: string;
   fileIds: string[];

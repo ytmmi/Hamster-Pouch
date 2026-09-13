@@ -11,6 +11,7 @@
   --accent: #ffffff;
   --accent-border: #b8bcc2;
   --focus-ring: #3b82f6;
+  --cross-tag: #2f80ed;
   --sel-bg: #ffffff;
   --sel-border: #b8bcc2;
   --active-bg: #ffffff;
@@ -616,19 +617,116 @@ button.danger {
   opacity: 0.8;
 }
 
-/* tag表 行 */
-.tag-table-row {
+/* tag表：层级树 */
+.tag-tree-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.tag-tree-title {
+  font-weight: 600;
+}
+
+.tag-tree-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  padding: 0 3px;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.icon-btn:hover {
+  color: var(--fg);
+}
+
+.icon-btn.on {
+  color: var(--focus-ring);
+}
+
+.tag-tree-search {
+  width: 96px;
+  font-size: 11px;
+}
+
+.tag-tree-create {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 1px 2px;
+  font-size: 11px;
 }
 
-.tag-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
+.tag-tree-create input {
+  flex: 1;
+  font-size: 11px;
+}
+
+.tag-tree-body {
+  flex: 1;
+  overflow: auto;
+}
+
+.tag-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  border-radius: 3px;
+}
+
+.tag-tree-row:hover {
+  background: var(--bg-3);
+}
+
+/* 拖拽目标高亮（拖到该 tag 上组成层级） */
+.tag-tree-row[data-drop="1"] {
+  outline: 1px solid var(--focus-ring);
+  background: var(--bg-3);
+}
+
+.tag-tree-arrow {
+  width: 12px;
+  text-align: center;
+  font-size: 9px;
+  color: var(--fg-dim);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.tag-tree-icon {
+  color: var(--fg-dim);
+  flex: 0 0 auto;
+}
+
+.tag-tree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 交叉 tag（多父级）：浅蓝色 */
+.tag-tree-name.cross {
+  color: var(--cross-tag);
+}
+
+.tag-tree-count {
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.tag-tree-rename {
+  flex: 1;
+  font-size: 11px;
 }
 
 .stars {
@@ -925,6 +1023,7 @@ button.danger {
   --accent: #4aa3ff;
   --accent-border: #4aa3ff;
   --focus-ring: #4aa3ff;
+  --cross-tag: #7cc4ff;
   --sel-bg: rgba(74, 163, 255, 0.12);
   --sel-border: #4aa3ff;
   --active-bg: #4aa3ff;

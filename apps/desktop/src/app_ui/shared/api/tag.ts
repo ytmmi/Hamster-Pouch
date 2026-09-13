@@ -11,6 +11,7 @@ import type {
   TagItem,
   TagListArgs,
   TagRemoveArgs,
+  TagTreeNode,
 } from "../types";
 
 /** 给文件批量添加人工 tag */
@@ -42,4 +43,42 @@ export function tagForFile(args: TagForFileArgs): Promise<FileTagsResult> {
     repoId: args.repoId,
     fileId: args.fileId,
   });
+}
+
+/** 读取仓库 tag 层级树（交叉 tag 标记 is_cross） */
+export function tagTree(repoId: string): Promise<TagTreeNode[]> {
+  return invoke<TagTreeNode[]>("tag_tree", { repoId });
+}
+
+/** 重命名 tag */
+export function tagRename(tagId: string, name: string): Promise<void> {
+  return invoke<void>("tag_rename", { tagId, name });
+}
+
+/** 新建根 tag */
+export function tagCreateRoot(repoId: string, name: string): Promise<TagItem> {
+  return invoke<TagItem>("tag_create_root", { repoId, name });
+}
+
+/** 在父 tag 下新建子 tag */
+export function tagCreateChild(
+  repoId: string,
+  parentTagId: string,
+  name: string,
+): Promise<TagItem> {
+  return invoke<TagItem>("tag_create_child", { repoId, parentTagId, name });
+}
+
+/** 新建与参照 tag 同级的 tag（共享其全部上级） */
+export function tagCreateSibling(
+  repoId: string,
+  refTagId: string,
+  name: string,
+): Promise<TagItem> {
+  return invoke<TagItem>("tag_create_sibling", { repoId, refTagId, name });
+}
+
+/** 移动 tag（拖拽 = 移动）；newParentId 为空表示移到根。 */
+export function tagMove(tagId: string, newParentId: string | null): Promise<void> {
+  return invoke<void>("tag_move", { tagId, newParentId });
 }

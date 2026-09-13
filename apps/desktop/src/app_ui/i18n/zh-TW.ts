@@ -133,4 +133,11 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "panel.tagtable": "tag表",
   "tagtable.filter": "篩選 tag",
   "tagtable.empty": "尚無 tag",
+  "tagtable.search": "搜尋標籤",
+  "tagtable.newRoot": "新增根標籤",
+  "tagtable.newSibling": "新增同級標籤",
+  "tagtable.newChild": "新增子標籤",
+  "tagtable.rename": "重新命名",
+  "tagtable.createHint": "輸入標籤名，Enter 確認",
+  "tagtable.crossOnly": "只看交叉標籤",
 };

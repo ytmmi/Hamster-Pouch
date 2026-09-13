@@ -102,6 +102,29 @@ impl RepoDb {
         Ok(())
     }
 
+    /// 重命名 tag 实体（同仓库同名冲突返回 `AlreadyExists`）。
+    pub fn rename_tag(&mut self, tag_id: &str, name: &str) -> HpResult<()> {
+        require_nonempty(tag_id, "tag ID")?;
+        require_nonempty(name, "tag 名")?;
+        let n = self
+            .conn()
+            .execute(
+                "UPDATE tags SET name = ?2 WHERE id = ?1",
+                params![tag_id, name],
+            )
+            .map_err(|e| {
+                if e.to_string().contains("UNIQUE") {
+                    HpError::AlreadyExists(format!("同名 tag 已存在: {name}"))
+                } else {
+                    store_err("重命名 tag", e)
+                }
+            })?;
+        if n == 0 {
+            return Err(HpError::NotFound(format!("tag 不存在: {tag_id}")));
+        }
+        Ok(())
+    }
+
     /// 建立文件与人工 tag 的关联（已存在则忽略）。
     pub fn add_file_tag(&mut self, file_id: &str, tag_id: &str) -> HpResult<()> {
         require_nonempty(file_id, "文件 ID")?;
@@ -266,6 +289,21 @@ impl RepoDb {
                 |row| row.get(0),
             )
             .map_err(|e| store_err("统计自动 tag 文件数", e))
+    }
+
+    /// 统计关联到某 tag 的文件数（人工 + 自动关联去重，供 tag 树计数）。
+    pub fn count_tag_files(&self, tag_id: &str) -> HpResult<i64> {
+        self.conn()
+            .query_row(
+                "SELECT COUNT(*) FROM (
+                     SELECT file_id FROM file_tags WHERE tag_id = ?1
+                     UNION
+                     SELECT file_id FROM file_auto_tags WHERE tag_id = ?1
+                 )",
+                params![tag_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| store_err("统计 tag 文件数", e))
     }
 }
 

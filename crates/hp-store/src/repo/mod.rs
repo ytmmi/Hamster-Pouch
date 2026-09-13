@@ -11,7 +11,9 @@ mod source_repo;
 mod source_tree;
 mod tag_relation_repo;
 mod tag_repo;
+mod tag_tree;
 
 pub use ops_repo::OpsHistoryRow;
 pub use repo_db::RepoDb;
 pub use source_tree::{build_source_tree, SourceTree, TreeNode};
+pub use tag_tree::{build_tag_tree, TagTree, TagTreeNode};

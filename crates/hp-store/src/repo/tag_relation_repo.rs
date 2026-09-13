@@ -35,6 +35,12 @@ impl RepoDb {
                 "tag 关系两端必须属于同一仓库（tag 按仓库独立）".into(),
             ));
         }
+        // 环检测：child（to）不能已是 parent（from）的祖先，否则形成环。
+        if kind == TagRelationKind::Hierarchy && self.is_tag_ancestor(to_tag_id, from_tag_id)? {
+            return Err(HpError::InvalidArgument(
+                "不能建立该层级：会形成环".into(),
+            ));
+        }
         if let Some(existing) =
             self.find_tag_relation(repo_id, from_tag_id, to_tag_id, kind)?
         {
@@ -171,6 +177,71 @@ impl RepoDb {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| store_err("解析关联 tag", e))?;
         Ok(rows)
+    }
+
+    /// `candidate` 是否在 `node` 的祖先链上（含 `node` 自身；沿层级向上遍历）。
+    pub fn is_tag_ancestor(&self, candidate: &str, node: &str) -> HpResult<bool> {
+        let mut stack: Vec<String> = vec![node.to_string()];
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        while let Some(cur) = stack.pop() {
+            if !seen.insert(cur.clone()) {
+                continue;
+            }
+            if cur == candidate {
+                return Ok(true);
+            }
+            for parent in self.list_parent_tags(&cur)? {
+                stack.push(parent.id.as_str().to_string());
+            }
+        }
+        Ok(false)
+    }
+
+    /// 解除某 tag 的全部层级上级（拖到根区域时调用，使其成为根）。
+    pub fn detach_tag(&mut self, tag_id: &str) -> HpResult<()> {
+        require_nonempty(tag_id, "tag ID")?;
+        self.conn()
+            .execute(
+                "DELETE FROM tag_relations WHERE to_tag_id = ?1 AND relation_kind = 'hierarchy'",
+                params![tag_id],
+            )
+            .map_err(|e| store_err("解除 tag 层级", e))?;
+        Ok(())
+    }
+
+    /// 移动 tag：替换其层级上级（拖拽 = 移动）。
+    ///
+    /// `new_parent_id` 为 `None` 时解除全部上级（成为根）；为 `Some` 时先解除现有上级，
+    /// 再挂到新上级下。会校验跨仓库与成环。
+    pub fn move_tag(&mut self, tag_id: &str, new_parent_id: Option<&str>) -> HpResult<()> {
+        require_nonempty(tag_id, "tag ID")?;
+        let tag = self
+            .get_tag(tag_id)?
+            .ok_or_else(|| HpError::NotFound(format!("tag 不存在: {tag_id}")))?;
+        let repo_id = tag.repo_id.as_str().to_string();
+
+        // 先解除现有层级上级（移动语义：替换而非追加）。
+        self.detach_tag(tag_id)?;
+
+        if let Some(parent_id) = new_parent_id {
+            if parent_id == tag_id {
+                return Err(HpError::InvalidArgument("不能移动到自身".into()));
+            }
+            let parent = self
+                .get_tag(parent_id)?
+                .ok_or_else(|| HpError::NotFound(format!("tag 不存在: {parent_id}")))?;
+            if parent.repo_id.as_str() != repo_id {
+                return Err(HpError::InvalidArgument(
+                    "不能跨仓库移动（tag 按仓库独立）".into(),
+                ));
+            }
+            // 环检测：目标父级不能是本 tag 的后代。
+            if self.is_tag_ancestor(tag_id, parent_id)? {
+                return Err(HpError::InvalidArgument("不能移动到自己的下级".into()));
+            }
+            self.add_tag_relation(&repo_id, parent_id, tag_id, TagRelationKind::Hierarchy)?;
+        }
+        Ok(())
     }
 }
 

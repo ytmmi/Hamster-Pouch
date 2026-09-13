@@ -130,3 +130,47 @@ fn delete_tag_cleans_relations() {
         .is_empty());
     d.close().expect("关闭失败");
 }
+
+#[test]
+fn move_tag_replaces_parent_and_detaches_to_root() {
+    let mut d = db("tag-move");
+    let a = d.create_tag(REPO, "A", None).expect("创建失败");
+    let b = d.create_tag(REPO, "B", None).expect("创建失败");
+    let c = d.create_tag(REPO, "C", None).expect("创建失败");
+    d.add_tag_relation(REPO, a.id.as_str(), c.id.as_str(), TagRelationKind::Hierarchy)
+        .expect("建立层级失败");
+
+    // 移动：C 从 A 下移到 B 下（替换父级）。
+    d.move_tag(c.id.as_str(), Some(b.id.as_str()))
+        .expect("移动失败");
+    let parents = d.list_parent_tags(c.id.as_str()).expect("查询失败");
+    assert_eq!(parents.len(), 1);
+    assert_eq!(parents[0].name, "B");
+
+    // 拖到根：解除全部上级。
+    d.move_tag(c.id.as_str(), None).expect("移到根失败");
+    assert!(d.list_parent_tags(c.id.as_str()).expect("查询失败").is_empty());
+    d.close().expect("关闭失败");
+}
+
+#[test]
+fn move_to_own_descendant_is_rejected() {
+    let mut d = db("tag-cycle");
+    let a = d.create_tag(REPO, "A", None).expect("创建失败");
+    let b = d.create_tag(REPO, "B", None).expect("创建失败");
+    d.add_tag_relation(REPO, a.id.as_str(), b.id.as_str(), TagRelationKind::Hierarchy)
+        .expect("建立层级失败");
+
+    // 把 A 移到自己的下级 B 之下 → 会成环，拒绝。
+    let err = d
+        .move_tag(a.id.as_str(), Some(b.id.as_str()))
+        .expect_err("移动到自身下级应被拒绝");
+    assert!(matches!(err, hp_core::HpError::InvalidArgument(_)));
+
+    // 直接建立环关系也应被拒绝。
+    let err = d
+        .add_tag_relation(REPO, b.id.as_str(), a.id.as_str(), TagRelationKind::Hierarchy)
+        .expect_err("建立环应被拒绝");
+    assert!(matches!(err, hp_core::HpError::InvalidArgument(_)));
+    d.close().expect("关闭失败");
+}

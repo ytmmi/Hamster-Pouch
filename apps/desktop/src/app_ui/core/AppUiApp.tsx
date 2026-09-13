@@ -243,13 +243,13 @@ export function AppUiApp(): JSX.Element {
         id: "tagtable",
         component: "tagtable",
         title: panelTitle("tagtable", t),
-        position: { referencePanel: "tags", direction: "within" },
+        position: { referencePanel: "tags", direction: "below" },
       });
       dv.addPanel({
         id: "player",
         component: "player",
         title: panelTitle("player", t),
-        position: { referencePanel: "tags", direction: "below" },
+        position: { referencePanel: "tagtable", direction: "below" },
       });
       dv.addPanel({
         id: "tasks",

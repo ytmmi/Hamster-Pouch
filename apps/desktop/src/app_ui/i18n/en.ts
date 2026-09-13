@@ -133,4 +133,11 @@ export const en: Record<keyof DictZhCN, string> = {
   "panel.tagtable": "Tag Table",
   "tagtable.filter": "Filter tags",
   "tagtable.empty": "No tags",
+  "tagtable.search": "Search tags",
+  "tagtable.newRoot": "New root tag",
+  "tagtable.newSibling": "New sibling tag",
+  "tagtable.newChild": "New child tag",
+  "tagtable.rename": "Rename",
+  "tagtable.createHint": "Type a name, press Enter",
+  "tagtable.crossOnly": "Cross tags only",
 };

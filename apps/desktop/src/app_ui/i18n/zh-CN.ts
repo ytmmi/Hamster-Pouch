@@ -137,6 +137,13 @@ export const zhCN = {
   "panel.tagtable": "tag表",
   "tagtable.filter": "筛选 tag",
   "tagtable.empty": "暂无 tag",
+  "tagtable.search": "搜索标签",
+  "tagtable.newRoot": "新建根标签",
+  "tagtable.newSibling": "新增同级标签",
+  "tagtable.newChild": "新增子标签",
+  "tagtable.rename": "重命名",
+  "tagtable.createHint": "输入标签名，回车确认",
+  "tagtable.crossOnly": "只看交叉标签",
 } as const;
 
 export type DictZhCN = typeof zhCN;

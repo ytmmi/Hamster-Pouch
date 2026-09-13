@@ -256,3 +256,180 @@ pub(crate) fn tag_relation_children(
     let tags = db.list_child_tags(&tag_id).map_err(hp_err_to_string)?;
     Ok(tags.into_iter().map(tag_to_item).collect())
 }
+
+/// tag 树节点（前端树视图；`is_cross` 为交叉 tag，D22）。
+#[derive(Serialize)]
+pub(crate) struct TagTreeNodeItem {
+    id: String,
+    name: String,
+    color: Option<String>,
+    count: i64,
+    is_cross: bool,
+    children: Vec<TagTreeNodeItem>,
+}
+
+fn tree_node_to_item(n: hp_store::TagTreeNode) -> TagTreeNodeItem {
+    TagTreeNodeItem {
+        id: n.id,
+        name: n.name,
+        color: n.color,
+        count: n.count,
+        is_cross: n.is_cross,
+        children: n.children.into_iter().map(tree_node_to_item).collect(),
+    }
+}
+
+/// tag.tree：返回仓库 tag 层级树（多父级 tag 在各上级下各出现一次并标记交叉）。
+#[tauri::command]
+pub(crate) fn tag_tree(
+    repo_id: String,
+    state: State<AppState>,
+) -> Result<Vec<TagTreeNodeItem>, String> {
+    let guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+
+    let tags = db.list_tags(&repo_id).map_err(hp_err_to_string)?;
+    let relations = db.list_tag_relations(&repo_id).map_err(hp_err_to_string)?;
+    let mut counts = std::collections::HashMap::new();
+    for t in &tags {
+        let c = db.count_tag_files(t.id.as_str()).map_err(hp_err_to_string)?;
+        counts.insert(t.id.as_str().to_string(), c);
+    }
+    let tree = hp_store::build_tag_tree(&tags, &relations, &counts);
+    Ok(tree.roots.into_iter().map(tree_node_to_item).collect())
+}
+
+/// tag.rename：重命名 tag 实体。
+#[tauri::command]
+pub(crate) fn tag_rename(
+    tag_id: String,
+    name: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    db.rename_tag(&tag_id, &name).map_err(hp_err_to_string)
+}
+
+/// tag.createRoot：新建根 tag（同名已存在则复用，不重复创建）。
+#[tauri::command]
+pub(crate) fn tag_create_root(
+    repo_id: String,
+    name: String,
+    state: State<AppState>,
+) -> Result<TagItem, String> {
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    let tag = match db
+        .find_tag_by_name(&repo_id, &name)
+        .map_err(hp_err_to_string)?
+    {
+        Some(existing) => existing,
+        None => db
+            .create_tag(&repo_id, &name, None)
+            .map_err(hp_err_to_string)?,
+    };
+    Ok(tag_to_item(tag))
+}
+
+/// tag.createChild：在父 tag 下新建子 tag。
+///
+/// 若同名 tag 已存在则复用该实体并建立层级（即形成交叉关联，D22）。
+#[tauri::command]
+pub(crate) fn tag_create_child(
+    repo_id: String,
+    parent_tag_id: String,
+    name: String,
+    state: State<AppState>,
+) -> Result<TagItem, String> {
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    let tag = match db
+        .find_tag_by_name(&repo_id, &name)
+        .map_err(hp_err_to_string)?
+    {
+        Some(existing) => existing,
+        None => db
+            .create_tag(&repo_id, &name, None)
+            .map_err(hp_err_to_string)?,
+    };
+    db.add_tag_relation(&repo_id, &parent_tag_id, tag.id.as_str(), TagRelationKind::Hierarchy)
+        .map_err(hp_err_to_string)?;
+    Ok(tag_to_item(tag))
+}
+
+/// tag.createSibling：新建与参照 tag 同级的 tag（共享其全部层级上级；无上级则为根）。
+///
+/// 若同名 tag 已存在则复用该实体。
+#[tauri::command]
+pub(crate) fn tag_create_sibling(
+    repo_id: String,
+    ref_tag_id: String,
+    name: String,
+    state: State<AppState>,
+) -> Result<TagItem, String> {
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    let parents = db.list_parent_tags(&ref_tag_id).map_err(hp_err_to_string)?;
+    let tag = match db
+        .find_tag_by_name(&repo_id, &name)
+        .map_err(hp_err_to_string)?
+    {
+        Some(existing) => existing,
+        None => db
+            .create_tag(&repo_id, &name, None)
+            .map_err(hp_err_to_string)?,
+    };
+    for parent in parents {
+        db.add_tag_relation(
+            &repo_id,
+            parent.id.as_str(),
+            tag.id.as_str(),
+            TagRelationKind::Hierarchy,
+        )
+        .map_err(hp_err_to_string)?;
+    }
+    Ok(tag_to_item(tag))
+}
+
+/// tag.move：移动 tag（拖拽 = 移动）；`newParentId` 为空表示移到根。
+#[tauri::command]
+pub(crate) fn tag_move(
+    tag_id: String,
+    new_parent_id: Option<String>,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    db.move_tag(&tag_id, new_parent_id.as_deref())
+        .map_err(hp_err_to_string)
+}
+
+/// tag.detach：解除某 tag 的全部层级上级（拖到根区域 → 成为根）。
+#[tauri::command]
+pub(crate) fn tag_detach(tag_id: String, state: State<AppState>) -> Result<(), String> {
+    let mut guard = state
+        .open_repo
+        .lock()
+        .map_err(|_| "仓库锁中毒".to_string())?;
+    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    db.detach_tag(&tag_id).map_err(hp_err_to_string)
+}
