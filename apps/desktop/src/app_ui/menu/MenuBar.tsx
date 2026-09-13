@@ -250,34 +250,54 @@ export function MenuBar({
         </button>
         {open === "settings" && (
           <div className="menu-pop">
-            <div className="menu-item-row">
-              <span className="menu-label">{t("menubar.theme")}</span>
-              <button
-                className={`menu-item small ${theme === "light" ? "on" : ""}`}
-                onClick={() => onThemeChange("light")}
-              >
-                {t("menubar.theme.light")}
-              </button>
-              <button
-                className={`menu-item small ${theme === "dark" ? "on" : ""}`}
-                onClick={() => onThemeChange("dark")}
-              >
-                {t("menubar.theme.dark")}
-              </button>
-            </div>
-            <div className="menu-sep" />
-            <div className="menu-item-row">
-              <span className="menu-label">{t("menubar.language")}</span>
-              {LANGUAGES.map((lang) => (
-                <button
-                  key={lang.id}
-                  className={`menu-item small ${language === lang.id ? "on" : ""}`}
-                  onClick={() => onLanguageChange(lang.id)}
-                >
-                  {t(lang.labelKey)}
-                </button>
-              ))}
-            </div>
+            {/* 主题子菜单（与窗口菜单同款） */}
+            <button
+              className="menu-item has-sub"
+              onClick={() => setSubmenu(submenu === "theme" ? null : "theme")}
+            >
+              {t("menubar.theme")} <span className="sub-arrow">▸</span>
+            </button>
+            {submenu === "theme" && (
+              <div className="menu-sub">
+                {(
+                  [
+                    { id: "light" as const, labelKey: "menubar.theme.light" as const },
+                    { id: "dark" as const, labelKey: "menubar.theme.dark" as const },
+                  ]
+                ).map((item) => (
+                  <button
+                    key={item.id}
+                    className={`menu-item ${theme === item.id ? "first" : ""}`}
+                    onClick={() => onThemeChange(item.id)}
+                  >
+                    {theme === item.id ? "● " : "　"}
+                    {t(item.labelKey)}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* 语言子菜单（与窗口菜单同款） */}
+            <button
+              className="menu-item has-sub"
+              onClick={() => setSubmenu(submenu === "language" ? null : "language")}
+            >
+              {t("menubar.language")} <span className="sub-arrow">▸</span>
+            </button>
+            {submenu === "language" && (
+              <div className="menu-sub">
+                {LANGUAGES.map((lang) => (
+                  <button
+                    key={lang.id}
+                    className={`menu-item ${language === lang.id ? "first" : ""}`}
+                    onClick={() => onLanguageChange(lang.id)}
+                  >
+                    {language === lang.id ? "● " : "　"}
+                    {t(lang.labelKey)}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
