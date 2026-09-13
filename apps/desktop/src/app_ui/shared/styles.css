@@ -108,7 +108,8 @@ body {
 
 .menubar-brand {
   font-weight: 600;
-  color: var(--accent);
+  /* 注意：不能用 var(--accent)——浅色主题下 --accent 为白色，会白底白字不可见。 */
+  color: var(--fg);
   margin-right: 12px;
 }
 
