@@ -290,6 +290,7 @@ export function AppUiApp(): JSX.Element {
             onReady={onReady}
             disableFloatingGroups={false}
             dndStrategy="pointer"
+            defaultRenderer="always"
             theme={theme === "dark" ? themeDark : themeLight}
             popoutUrl="/popout.html"
             getTabContextMenuItems={(params) => [
