@@ -90,6 +90,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "source.pathPlaceholder": "Local folder path",
   "source.aliasPlaceholder": "Alias (optional)",
   "source.list": "Added Sources",
+  "source.copyAsAlbum": "Copy as album",
   "album.add": "Add Album",
   "album.list": "Added Albums",
   "album.name": "Album name",

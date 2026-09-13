@@ -1,17 +1,9 @@
 //! hp-store：SQLite 访问、迁移、事务、仓库库/全局库边界。
 
-mod album_repo;
-mod color_repo;
-mod file_repo;
-mod global_db;
+mod global;
 mod migrate;
-mod rating_repo;
-mod repo_db;
-mod source_repo;
-mod source_tree;
-mod tag_repo;
+mod repo;
 mod util;
 
-pub use global_db::{GlobalDb, RepoRow};
-pub use repo_db::RepoDb;
-pub use source_tree::{build_source_tree, SourceTree, TreeNode};
+pub use global::{GlobalDb, PanelLayoutRow, RepoRow};
+pub use repo::{build_source_tree, RepoDb, SourceTree, TreeNode};

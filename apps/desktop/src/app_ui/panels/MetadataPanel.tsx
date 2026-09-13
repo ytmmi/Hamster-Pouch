@@ -4,9 +4,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import * as api from "../api";
-import { useApp } from "../AppContext";
-import type { FileMetadataResult } from "../types";
+import * as api from "../shared/api";
+import { useApp } from "../core/AppContext";
+import type { FileMetadataResult } from "../shared/types";
 
 function pretty(json: string | null): string {
   if (!json) return "—";

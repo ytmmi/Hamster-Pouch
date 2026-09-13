@@ -5,9 +5,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import * as api from "../api";
-import { useApp } from "../AppContext";
-import type { ColorExtractedPayload } from "../types";
+import * as api from "../shared/api";
+import { useApp } from "../core/AppContext";
+import type { ColorExtractedPayload } from "../shared/types";
 
 interface PaletteJson {
   colors?: string[];

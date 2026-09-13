@@ -1,5 +1,5 @@
 /**
- * 相册组件 — 添加相册（子菜单）+ 已添加的相册列表（右键操作 / 拖放加入）+ 成员。
+ * 相册组件 — 添加相册（子菜单）+ 已添加的相册列表（右键操作 / 拖放加入）。
  */
 
 import {
@@ -11,9 +11,10 @@ import {
   type DragEvent,
 } from "react";
 
-import * as api from "../api";
-import { useApp } from "../AppContext";
-import type { AlbumItem, FileItem } from "../types";
+import * as api from "../shared/api";
+import { useApp } from "../core/AppContext";
+import { ContextMenu } from "../menu/ContextMenu";
+import type { AlbumItem } from "../shared/types";
 
 interface ContextMenuState {
   x: number;
@@ -91,12 +92,9 @@ export function AlbumPanel(): JSX.Element {
   const { t } = app;
   const [openAdd, setOpenAdd] = useState(false);
   const [albums, setAlbums] = useState<AlbumItem[]>([]);
-  const [members, setMembers] = useState<FileItem[]>([]);
   const selectedAlbum = app.albumId;
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [name, setName] = useState("");
-  const [kind, setKind] = useState("fixed");
-  const [mediaType, setMediaType] = useState("multimedia");
 
   // 拖放高亮：当前被悬停的相册 id
   const [dropAlbumId, setDropAlbumId] = useState<string | null>(null);
@@ -137,29 +135,9 @@ export function AlbumPanel(): JSX.Element {
     }
   }, [app]);
 
-  const loadMembers = useCallback(
-    async (albumId: string) => {
-      if (!app.repoId) return;
-      try {
-        setMembers(await api.albumMembers({ repoId: app.repoId, albumId }));
-      } catch (e) {
-        app.status(`相册成员失败: ${String(e)}`, "error");
-      }
-    },
-    [app],
-  );
-
   useEffect(() => {
     void loadAlbums();
   }, [loadAlbums, app.refreshKey]);
-
-  useEffect(() => {
-    if (selectedAlbum) {
-      void loadMembers(selectedAlbum);
-    } else {
-      setMembers([]);
-    }
-  }, [selectedAlbum, loadMembers, app.refreshKey]);
 
   // 点击菜单外任意处关闭右键菜单（菜单内部点击由 stopPropagation 阻止冒泡）
   useEffect(() => {
@@ -177,13 +155,11 @@ export function AlbumPanel(): JSX.Element {
       return;
     }
     try {
+      // 简化：只创建固定型相册（不指定 mediaType → 继承）
       const r = await api.albumCreate({
         repoId: app.repoId,
         name: name.trim(),
-        kind,
-        mediaType,
-        sourceId: kind === "follow_source" ? app.sourceId ?? undefined : undefined,
-        syncMode: kind === "follow_source" ? "mirror" : undefined,
+        kind: "fixed",
       });
       app.status(`${t("album.add")}: ${name.trim()}`, "ok");
       setName("");
@@ -401,22 +377,6 @@ export function AlbumPanel(): JSX.Element {
                     }
                   }}
                 />
-              </div>
-              <div className="menu-item-row">
-                <span className="menu-label">{t("album.kind")}</span>
-                <select value={kind} onChange={(e) => setKind(e.target.value)}>
-                  <option value="fixed">{t("album.kind.fixed")}</option>
-                  <option value="follow_source">{t("album.kind.follow")}</option>
-                </select>
-              </div>
-              <div className="menu-item-row">
-                <span className="menu-label">{t("album.mediaType")}</span>
-                <select value={mediaType} onChange={(e) => setMediaType(e.target.value)}>
-                  <option value="multimedia">{t("album.media.all")}</option>
-                  <option value="image">{t("album.media.image")}</option>
-                  <option value="video">{t("album.media.video")}</option>
-                  <option value="audio">{t("album.media.audio")}</option>
-                </select>
                 <button className="menu-item small" onClick={() => void create()}>
                   ✓
                 </button>
@@ -433,32 +393,9 @@ export function AlbumPanel(): JSX.Element {
             {albums.length === 0 && <span className="placeholder">{t("common.noFile")}</span>}
           </div>
 
-          {/* 选中相册的成员 */}
-          {selectedAlbum && (
-            <>
-              <div className="section-title">
-                {t("album.members")}（{members.length}）
-              </div>
-              <div className="list compact album-members">
-                {members.map((m) => (
-                  <span key={m.id} className="source-path" title={m.relative_path}>
-                    {m.relative_path}
-                  </span>
-                ))}
-                {members.length === 0 && (
-                  <span className="placeholder">{t("common.noFile")}</span>
-                )}
-              </div>
-            </>
-          )}
-
           {/* 右键上下文菜单 */}
           {menu && (
-            <div
-              className="context-menu"
-              style={{ left: menu.x, top: menu.y }}
-              onClick={(e) => e.stopPropagation()}
-            >
+            <ContextMenu x={menu.x} y={menu.y}>
               {/* 重命名相册：行内输入（Enter 或 ✓ 确认） */}
               {renaming ? (
                 <div className="menu-item-row">
@@ -591,7 +528,7 @@ export function AlbumPanel(): JSX.Element {
                   </button>
                 </div>
               )}
-            </div>
+            </ContextMenu>
           )}
         </>
       )}

@@ -1510,6 +1510,7 @@ dependencies = [
  "tauri-build",
  "trash",
  "uuid",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -1566,6 +1567,7 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "hp-store",
+ "serde_json",
  "time",
 ]
 

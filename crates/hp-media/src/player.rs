@@ -121,6 +121,11 @@ impl MediaProcess {
     pub fn pipe_path(&self) -> &str {
         &self.pipe_path
     }
+
+    /// 当前渲染目标窗口句柄（`--wid`）；`None` 表示独立窗口。
+    pub fn wid(&self) -> Option<i64> {
+        self.wid
+    }
 }
 
 impl Drop for MediaProcess {

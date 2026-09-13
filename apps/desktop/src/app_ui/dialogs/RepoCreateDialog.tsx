@@ -6,7 +6,7 @@ import { useState } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import * as api from "../api";
+import * as api from "../shared/api";
 import { DEFAULT_LANGUAGE, isLanguage, makeTranslator } from "../i18n";
 
 export function RepoCreateDialog({ lang }: { lang: string | null }): JSX.Element {

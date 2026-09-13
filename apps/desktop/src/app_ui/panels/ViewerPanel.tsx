@@ -5,8 +5,8 @@
 import { useEffect, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
-import * as api from "../api";
-import { useApp } from "../AppContext";
+import * as api from "../shared/api";
+import { useApp } from "../core/AppContext";
 
 export function ViewerPanel(): JSX.Element {
   const app = useApp();

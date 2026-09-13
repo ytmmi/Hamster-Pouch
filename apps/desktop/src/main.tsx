@@ -22,7 +22,7 @@ async function bootstrap(): Promise<void> {
   // 对话框窗口：仓库创建 / 切换
   const dialog = params.get("dialog");
   if (dialog === "repo-create" || dialog === "repo-switch") {
-    await import("./app_ui/styles.css");
+    await import("./app_ui/shared/styles.css");
     const [{ RepoCreateDialog }, { RepoSwitchDialog }] = await Promise.all([
       import("./app_ui/dialogs/RepoCreateDialog"),
       import("./app_ui/dialogs/RepoSwitchDialog"),
@@ -41,8 +41,8 @@ async function bootstrap(): Promise<void> {
   // 独立面板窗口：只加载 app_ui 的单面板宿主
   if (singlePanel) {
     const [{ SinglePanelHost }] = await Promise.all([
-      import("./app_ui/SinglePanelHost"),
-      import("./app_ui/styles.css"),
+      import("./app_ui/core/SinglePanelHost"),
+      import("./app_ui/shared/styles.css"),
     ]);
     root.render(
       <SinglePanelHost
@@ -58,8 +58,8 @@ async function bootstrap(): Promise<void> {
 
   if (variant === "app_ui") {
     const [{ AppUiApp }] = await Promise.all([
-      import("./app_ui/AppUiApp"),
-      import("./app_ui/styles.css"),
+      import("./app_ui/core/AppUiApp"),
+      import("./app_ui/shared/styles.css"),
     ]);
     root.render(<AppUiApp />);
     return;

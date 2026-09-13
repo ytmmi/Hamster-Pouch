@@ -323,3 +323,37 @@ fn nested_album_inherits_parent_media_type() {
         .expect_err("继承属性应拒绝 video");
     assert!(matches!(err, HpError::InvalidArgument(_)));
 }
+
+/// filter_json.dirPrefix：仅同步子目录内的文件（「复制为相册」子目录场景）。
+#[test]
+fn follow_source_dir_prefix_filters_subfolder() {
+    let mut db = temp_db("m3_dir_prefix");
+    let s = db
+        .mount_source("repo-1", "C:/photos", None, None)
+        .expect("挂载失败");
+    let inside = seed_file(&mut db, &s.id, "a/x.jpg", MediaType::Image);
+    let _outside = seed_file(&mut db, &s.id, "b/y.jpg", MediaType::Image);
+    let _sibling = seed_file(&mut db, &s.id, "ab/z.jpg", MediaType::Image);
+
+    let album = AlbumService::create_follow_source(
+        &mut db,
+        "repo-1",
+        "子目录",
+        Some(AlbumMediaType::Image),
+        None,
+        s.id.as_str(),
+        SyncMode::Mirror,
+        false,
+        Some("{\"dirPrefix\":\"a\"}".to_string()),
+    )
+    .expect("创建跟随源相册失败");
+
+    AlbumService::sync(&mut db, "repo-1", album.id.as_str()).expect("同步失败");
+
+    let members = db
+        .list_album_members(album.id.as_str())
+        .expect("成员查询失败");
+    let ids: Vec<&str> = members.iter().map(|m| m.file_id.as_str()).collect();
+    assert!(ids.contains(&inside.as_str()), "a/ 下的文件应被加入");
+    assert_eq!(ids.len(), 1, "只应加入 a/ 下的文件（ab/ 不应匹配）");
+}

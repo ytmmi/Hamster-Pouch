@@ -35,11 +35,18 @@ pub fn run_sync(db: &mut RepoDb, repo_id: &str, album_id: &str) -> HpResult<Sync
         rule.include_subsources,
     )?;
 
-    // 匹配同步规则媒体过滤的文件集合。
+    // 可选的目录前缀过滤（"copy as album" 子目录场景）。
+    let dir_prefix = parse_dir_prefix(rule.filter_json.as_deref());
+
+    // 匹配同步规则媒体过滤（以及可选目录前缀）的文件集合。
     let mut matched: Vec<String> = Vec::new();
     for source_id in &source_ids {
         for file in db.list_files_by_source(source_id)? {
-            if rule.media_type.contains(file.media_type) {
+            let media_ok = rule.media_type.contains(file.media_type);
+            let dir_ok = dir_prefix
+                .as_deref()
+                .map_or(true, |p| file.relative_path.starts_with(p));
+            if media_ok && dir_ok {
                 matched.push(file.id.as_str().to_string());
             }
         }
@@ -123,6 +130,23 @@ fn collect_source_ids(
         }
     }
     Ok(out)
+}
+
+/// 从 `filter_json` 解析可选的目录前缀（`{"dirPrefix":"<相对路径>"}`）。
+///
+/// 返回 `None` 当且仅当：`filter_json` 为 `None`、无法解析、没有 `dirPrefix`，
+/// 或归一化后为空。归一化规则：`\` 替换为 `/`，去除首尾 `/`。
+/// 返回 `Some("前缀/")`，确保前缀 `"a"` 匹配 `"a/x.jpg"` 但不匹配 `"ab/x.jpg"`。
+fn parse_dir_prefix(filter_json: Option<&str>) -> Option<String> {
+    let raw = filter_json?;
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let prefix = value.get("dirPrefix")?.as_str()?;
+    let normalized = prefix.replace('\\', "/").trim_matches('/').to_string();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(format!("{normalized}/"))
+    }
 }
 
 /// 当前 UTC 时间的 ISO 8601 文本。

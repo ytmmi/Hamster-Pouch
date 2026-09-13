@@ -4,9 +4,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import * as api from "../api";
-import { useApp } from "../AppContext";
-import type { RepoListItem } from "../types";
+import * as api from "../shared/api";
+import { useApp } from "../core/AppContext";
+import type { RepoListItem } from "../shared/types";
 
 export function RepoPanel(): JSX.Element {
   const app = useApp();

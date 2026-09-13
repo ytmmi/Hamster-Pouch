@@ -90,6 +90,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "source.pathPlaceholder": "本機資料夾路徑",
   "source.aliasPlaceholder": "別名（選填）",
   "source.list": "已新增的影像來源",
+  "source.copyAsAlbum": "複製為相簿",
   "album.add": "新增相簿",
   "album.list": "已新增的相簿",
   "album.name": "相簿名稱",

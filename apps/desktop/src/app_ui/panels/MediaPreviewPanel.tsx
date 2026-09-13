@@ -9,10 +9,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent, MouseEvent } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
-import * as api from "../api";
-import { useApp } from "../AppContext";
-import type { FileItem, SourceItem } from "../types";
-import { drawWaveform, extractWaveform } from "../waveform";
+import * as api from "../shared/api";
+import { useApp } from "../core/AppContext";
+import { ContextMenu } from "../menu/ContextMenu";
+import type { FileItem, SourceItem } from "../shared/types";
+import { drawWaveform, extractWaveform } from "../shared/waveform";
 
 type ViewMode = "thumb" | "name";
 type TypeFilter = "all" | "image" | "video" | "audio";
@@ -625,11 +626,7 @@ export function MediaPreviewPanel(): JSX.Element {
 
       {/* 右键上下文菜单 */}
       {menu && (
-        <div
-          className="context-menu"
-          style={{ left: menu.x, top: menu.y }}
-          onClick={(e) => e.stopPropagation()}
-        >
+        <ContextMenu x={menu.x} y={menu.y}>
           {renaming ? (
             <div className="menu-item-row">
               <input
@@ -692,7 +689,7 @@ export function MediaPreviewPanel(): JSX.Element {
               </button>
             </>
           )}
-        </div>
+        </ContextMenu>
       )}
     </div>
   );

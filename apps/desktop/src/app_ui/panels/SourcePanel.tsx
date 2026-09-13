@@ -5,14 +5,15 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import * as api from "../api";
-import { useApp } from "../AppContext";
+import * as api from "../shared/api";
+import { useApp } from "../core/AppContext";
+import { ContextMenu } from "../menu/ContextMenu";
 import type {
   ScanCompletedPayload,
   ScanErrorPayload,
   ScanProgressPayload,
   SourceTreeNode,
-} from "../types";
+} from "../shared/types";
 
 /** 取路径最后一段文件夹名。 */
 function baseName(path: string): string {
@@ -90,6 +91,10 @@ interface ContextMenuState {
   x: number;
   y: number;
   sourceId: string;
+  /** 右键目标相对路径：源根为 null，子文件夹为该节点 relative_path。 */
+  relativePath: string | null;
+  /** 右键目标显示名（用于「复制为相册」的相册名）。 */
+  name: string;
 }
 
 /** 递归移除指定 source_id 的节点（卸载后本地即时更新）。 */
@@ -250,6 +255,35 @@ export function SourcePanel(): JSX.Element {
     }
   };
 
+  // 复制为相册：基于源（或子文件夹）创建跟随源相册并立即同步
+  const copyAsAlbum = async (
+    sourceId: string,
+    relativePath: string | null,
+    name: string,
+  ) => {
+    if (!app.repoId) return;
+    try {
+      const r = await api.albumCreate({
+        repoId: app.repoId,
+        name,
+        kind: "follow_source",
+        sourceId,
+        syncMode: "mirror",
+        includeSubsources: false,
+        filterJson: relativePath
+          ? JSON.stringify({ dirPrefix: relativePath })
+          : undefined,
+      });
+      await api.albumSync({ repoId: app.repoId, albumId: r.album_id });
+      app.status(`已复制为相册: ${name}`, "ok");
+      app.setAlbumId(r.album_id);
+      app.setSourceId(null);
+      app.refresh();
+    } catch (e) {
+      app.status(`复制为相册失败: ${String(e)}`, "error");
+    }
+  };
+
   const pct =
     progress && progress.t > 0 ? Math.round((progress.p / progress.t) * 100) : 0;
 
@@ -286,20 +320,32 @@ export function SourcePanel(): JSX.Element {
                     app.setAlbumId(null);
                   }
             }
-            onContextMenu={
-              isSource
-                ? (e) => {
-                    e.preventDefault();
-                    app.setSourceId(node.source_id!);
-                    app.setDirPath(null);
-                    setMenu({
-                      x: e.clientX,
-                      y: e.clientY,
-                      sourceId: node.source_id!,
-                    });
-                  }
-                : undefined
-            }
+            onContextMenu={(e) => {
+              e.preventDefault();
+              if (isSource) {
+                // 源根节点：右键同步选中，不切换预览
+                app.setSourceId(node.source_id!);
+                app.setDirPath(null);
+                setMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  sourceId: node.source_id!,
+                  relativePath: null,
+                  name: node.name,
+                });
+              } else {
+                // 子文件夹节点：右键也打开同一菜单，sourceId 取所属源
+                app.setSourceId(ownerSourceId);
+                app.setDirPath(node.relative_path);
+                setMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  sourceId: ownerSourceId,
+                  relativePath: node.relative_path,
+                  name: node.name,
+                });
+              }
+            }}
           >
             <span
               className={`tree-arrow${hasChildren ? "" : " is-empty"}${
@@ -408,7 +454,7 @@ export function SourcePanel(): JSX.Element {
 
           {/* 右键上下文菜单 */}
           {menu && (
-            <div className="context-menu" style={{ left: menu.x, top: menu.y }}>
+            <ContextMenu x={menu.x} y={menu.y}>
               <button
                 className="menu-item"
                 onClick={() => {
@@ -429,15 +475,29 @@ export function SourcePanel(): JSX.Element {
               </button>
               <div className="menu-sep" />
               <button
-                className="menu-item danger"
+                className="menu-item"
                 onClick={() => {
-                  void unmount(menu.sourceId);
+                  void copyAsAlbum(menu.sourceId, menu.relativePath, menu.name);
                   setMenu(null);
                 }}
               >
-                {t("common.unmount")}
+                {t("source.copyAsAlbum")}
               </button>
-            </div>
+              {menu.relativePath === null && (
+                <>
+                  <div className="menu-sep" />
+                  <button
+                    className="menu-item danger"
+                    onClick={() => {
+                      void unmount(menu.sourceId);
+                      setMenu(null);
+                    }}
+                  >
+                    {t("common.unmount")}
+                  </button>
+                </>
+              )}
+            </ContextMenu>
           )}
         </>
       )}

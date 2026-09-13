@@ -94,6 +94,7 @@ export const zhCN = {
   "source.pathPlaceholder": "本地文件夹路径",
   "source.aliasPlaceholder": "别名（可选）",
   "source.list": "已添加的图像源",
+  "source.copyAsAlbum": "复制为相册",
   "album.add": "添加相册",
   "album.list": "已添加的相册",
   "album.name": "相册名称",

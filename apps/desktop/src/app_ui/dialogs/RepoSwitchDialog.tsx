@@ -6,9 +6,9 @@ import { useCallback, useEffect, useState } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import * as api from "../api";
+import * as api from "../shared/api";
 import { DEFAULT_LANGUAGE, isLanguage, makeTranslator } from "../i18n";
-import type { RepoListItem } from "../types";
+import type { RepoListItem } from "../shared/types";
 
 export function RepoSwitchDialog({ lang }: { lang: string | null }): JSX.Element {
   const t = makeTranslator(isLanguage(lang) ? lang : DEFAULT_LANGUAGE);
