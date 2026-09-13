@@ -16,6 +16,11 @@ import { PANEL_DEFS, panelTitle } from "./panelRegistry";
 const LAYOUT_NAMES_KEY = "layout.names";
 const layoutKey = (name: string) => `layout.${name}`;
 
+/** 媒体预览面板必须保持 DOM（renderer=always），否则同组 tab 切换会丢失滚动位置。 */
+const MEDIA_PANEL_ID = "media";
+const panelExtra = (id: string): { renderer?: "always" } =>
+  id === MEDIA_PANEL_ID ? { renderer: "always" } : {};
+
 export interface MenuBarProps {
   apiRef: MutableRefObject<DockviewApi | null>;
   theme: "light" | "dark";
@@ -82,7 +87,7 @@ export function MenuBar({
     if (existing) {
       existing.api.close();
     } else {
-      dv.addPanel({ id, component: id, title: panelTitle(id, t) });
+      dv.addPanel({ id, component: id, title: panelTitle(id, t), ...panelExtra(id) });
     }
   };
 
@@ -93,12 +98,13 @@ export function MenuBar({
     const order = PANEL_DEFS.map((p) => p.id);
     order.forEach((id, index) => {
       if (index === 0) {
-        dv.addPanel({ id, component: id, title: panelTitle(id, t) });
+        dv.addPanel({ id, component: id, title: panelTitle(id, t), ...panelExtra(id) });
       } else {
         dv.addPanel({
           id,
           component: id,
           title: panelTitle(id, t),
+          ...panelExtra(id),
           position: { referencePanel: order[0], direction: "within" },
         });
       }
@@ -155,7 +161,12 @@ export function MenuBar({
         app.status(`布局不存在: ${name}`, "error");
         return;
       }
-      dv.fromJSON(JSON.parse(raw));
+      const layout = JSON.parse(raw);
+      // 布局 JSON 不保存 renderer，加载后媒体预览会退回 onlyWhenVisible 导致滚动丢失
+      if (layout?.panels?.[MEDIA_PANEL_ID]) {
+        layout.panels[MEDIA_PANEL_ID].renderer = "always";
+      }
+      dv.fromJSON(layout);
       app.status(`已加载布局: ${name}`, "ok");
       closeMenus();
     } catch (e) {
