@@ -11,6 +11,7 @@ pub mod rating;
 pub mod repo;
 pub mod source;
 pub mod tag;
+pub mod tag_dict;
 
 pub use ai::{
     should_overwrite_user_tag, AiProviderConfig, AiProviderConfigId, AiTagCandidate, AiTagUndo,
@@ -31,3 +32,7 @@ pub use rating::{validate_rating, Rating, RATING_MAX, RATING_MIN};
 pub use repo::RepoId;
 pub use source::{MediaType, Source, SourceId};
 pub use tag::{FileAutoTag, FileTag, Tag, TagId, TagRelation, TagRelationKind, TagSource};
+pub use tag_dict::{
+    DictCategory, DictLang, DictSource, TagDictAlias, TagDictEntry, TagDictLookup,
+    TagDictSuggestion, TagDictTranslation, TranslationKind,
+};

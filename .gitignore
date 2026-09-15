@@ -42,3 +42,8 @@ ehthumbs.db
 # === 日志 ===
 *.log
 logs/
+
+# === tag 词库数据管线 ===
+# 下载的对照表缓存（ffdkj 每日更新，约 38MB）与生成的词库产物不提交 git
+tools/tagdict/data/
+tools/tagdict/output/
