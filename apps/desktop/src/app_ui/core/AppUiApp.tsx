@@ -119,12 +119,41 @@ export function AppUiApp(): JSX.Element {
   );
 
   // 蓝图引擎执行器：把求值动作映射到 dockview 与媒体命令（RFC 0007 决策 3）。
+  // 记录最近显示的面板，供 hide 判断是否同组（同组标签仅切换激活，不销毁/不收缩）。
+  const lastShownRef = useRef<string | null>(null);
   const blueprintExecutor = useMemo(
     () => ({
-      showPanel: (panelId: string, floating: boolean) =>
-        focusPanel(panelId, floating),
+      showPanel: (panelId: string, floating: boolean) => {
+        lastShownRef.current = panelId;
+        focusPanel(panelId, floating);
+      },
       hidePanel: (panelId: string) => {
-        apiRef.current?.getPanel(panelId)?.api.close();
+        const dv = apiRef.current;
+        if (!dv) {
+          return;
+        }
+        const panel = dv.getPanel(panelId);
+        if (!panel) {
+          return;
+        }
+        const shown = lastShownRef.current
+          ? dv.getPanel(lastShownRef.current)
+          : null;
+        if (shown && panel.api.group.id === shown.api.group.id) {
+          // 同 dockview 组：show 已把激活切到目标标签，保留其他标签即可。
+          return;
+        }
+        try {
+          // 组的隐藏 = 最小化至最小尺寸（正文 6px、标签条保留，D25/D29），
+          // 不销毁面板/标签；用户可随时再展开。
+          panel.api.setSize({
+            width: PANEL_MIN_SIZE.minimumWidth,
+            height: PANEL_MIN_SIZE.minimumHeight,
+          });
+        } catch {
+          // 兜底：无法最小化时关闭（如浮动面板受网格约束）。
+          panel.api.close();
+        }
       },
       togglePanel: (panelId: string, floating: boolean) => {
         const dv = apiRef.current;

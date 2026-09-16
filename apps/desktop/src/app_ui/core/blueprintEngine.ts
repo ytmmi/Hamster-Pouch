@@ -212,8 +212,10 @@ export class BlueprintEngine {
         if (target?.type !== "control" || !target.panel_id) {
           return;
         }
-        this.hideExclusiveSiblings(target.key, graph);
+        // 先显示目标，再隐藏互斥组内其他成员（避免把同组标签误关；
+        // 隐藏语义 = 最小化至最小尺寸，标签条保留，见 D29）。
         executor.showPanel(target.panel_id, true);
+        this.hideExclusiveSiblings(target.key, graph);
         break;
       }
       case "hide": {
