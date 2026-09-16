@@ -147,21 +147,23 @@ const hasEdge = (doc, from, to, kind) =>
 
 console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", ")}`);
 
-// ---- 8. 新建蓝图的结构骨架（布局块→标签组→控件）----
+// ---- 8. 新建蓝图的结构骨架（布局块 = 区域/栏）----
 {
   const structure = await import(
     pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintStructure.ts"))
       .href
   );
-  // 与默认「媒体-测试」布局同形的快照：左栏 3 个独立区域 + 中/右两个标签组。
+  // 与默认「媒体-测试」布局同形的快照：左栏 3 个独立面板、中栏 1 个三标签组、
+  // 右栏 2 个组（color 独立 + tags/metadata 同组）——共 **3 个布局块**（左/中/右）。
   const snapshot = {
     at: Date.now(),
     regions: [
-      ["repo"],
-      ["sources"],
-      ["albums"],
-      ["media", "viewer", "player"],
-      ["tags", "metadata"],
+      { panels: ["repo"], left: 0, right: 215, top: 0 },
+      { panels: ["sources"], left: 0, right: 215, top: 215 },
+      { panels: ["albums"], left: 0, right: 215, top: 430 },
+      { panels: ["media", "viewer", "player"], left: 215, right: 1048, top: 0 },
+      { panels: ["color"], left: 1048, right: 1280, top: 0 },
+      { panels: ["tags", "metadata"], left: 1048, right: 1280, top: 165 },
     ],
   };
   const doc = structure.structureBlueprint(snapshot);
@@ -170,7 +172,6 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
   const blocks = doc.nodes.filter((n) => n.type === "layout_block").length;
   const groups = doc.nodes.filter((n) => n.type === "group").length;
   const controls = doc.nodes.filter((n) => n.type === "control").length;
-  // 多面板区域：布局块只连标签组；单面板区域：布局块直连控件。
   const typeOf = (key) => doc.nodes.find((n) => n.key === key)?.type;
   const blockToGroup = doc.edges.filter(
     (e) => typeOf(e.from) === "layout_block" && typeOf(e.to) === "group",
@@ -183,12 +184,12 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
   ).length;
 
   check(
-    "结构骨架：5 区域（3 单面板 + 2 标签组）+ 8 控件，且标签组优先",
-    blocks === 5 &&
+    "结构骨架：默认布局聚成 **3 个布局块**（左/中/右），2 个标签组 + 9 个控件",
+    blocks === 3 &&
       groups === 2 &&
-      controls === 8 &&
+      controls === 9 &&
       blockToGroup === 2 &&
-      blockToControl === 3 &&
+      blockToControl === 4 &&
       groupToControl === 5,
     `blocks=${blocks} groups=${groups} controls=${controls} blk→grp=${blockToGroup} blk→ctl=${blockToControl} grp→ctl=${groupToControl}`,
   );
@@ -198,15 +199,23 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
       .filter((n) => n.type === "control")
       .every((n) => Boolean(n.panel_id) && Boolean(n.title_key)),
   );
-
-  // 单面板区域应直连控件
-  const single = structure.structureBlueprint({ at: Date.now(), regions: [["tasks"]] });
+  // 左栏 3 个单面板组都应挂在同一个布局块下
+  const leftBlock = doc.nodes.find((n) => n.key === "blk_1");
+  const leftChildren = doc.edges.filter((e) => e.from === leftBlock?.key).length;
   check(
-    "结构骨架：单面板区域不带标签组（布局块直连控件）",
-    single.nodes.filter((n) => n.type === "layout_block").length === 1 &&
-      single.nodes.filter((n) => n.type === "group").length === 0 &&
-      single.nodes.filter((n) => n.type === "control").length === 1 &&
-      single.edges.length === 1,
+    "结构骨架：左栏 3 个独立面板同属一个布局块",
+    leftChildren === 3,
+    `blk_1 子节点数=${leftChildren}`,
+  );
+
+  // 无几何信息（旧宿主）时退化为每组一块，仍能生成
+  const fallback = structure.structureBlueprint({
+    at: Date.now(),
+    regions: [{ panels: ["a"] }, { panels: ["b", "c"] }],
+  });
+  check(
+    "结构骨架：无几何信息时退化为每组一块（不崩溃）",
+    fallback.nodes.filter((n) => n.type === "layout_block").length === 2,
   );
   check(
     "结构骨架：空快照 / null → 空图",
@@ -244,25 +253,31 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
       .href
   );
 
-  const snap = { at: 123, regions: [["media", "viewer"], ["repo"]] };
+  const snap = {
+    at: 123,
+    regions: [
+      { panels: ["media", "viewer"], left: 0, right: 100, top: 0 },
+      { panels: ["repo"], left: 200, right: 300, top: 0 },
+    ],
+  };
   structure.publishStructure(snap);
   const read = structure.readStructure();
   check(
     "结构快照：发布后可被其它窗口读取",
-    read?.regions?.length === 2 && read.regions[0].join(",") === "media,viewer",
-    JSON.stringify(read?.regions ?? null),
+    read?.regions?.length === 2 && read.regions[0].panels.join(",") === "media,viewer",
+    JSON.stringify(read?.regions?.map((r) => r.panels) ?? null),
   );
 
   let seen = null;
   const unsubscribe = structure.subscribeStructure((s) => {
     seen = s;
   });
-  structure.publishStructure({ at: 456, regions: [["tasks"]] });
+  structure.publishStructure({ at: 456, regions: [{ panels: ["tasks"] }] });
   unsubscribe();
   check(
     "结构快照：订阅能收到更新且可取消",
-    seen?.regions?.[0]?.[0] === "tasks",
-    JSON.stringify(seen?.regions ?? null),
+    seen?.regions?.[0]?.panels?.[0] === "tasks",
+    JSON.stringify(seen?.regions?.map((r) => r.panels) ?? null),
   );
 }
 

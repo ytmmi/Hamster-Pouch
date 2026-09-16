@@ -2,15 +2,17 @@
  * 蓝图结构骨架生成（RFC 0007）：从**当前布局**推导「布局块 → 标签组 → 控件」三层结构，
  * 作为新建蓝图的基础。
  *
- * 为什么需要：新建蓝图若从空图起步，用户得先把布局结构（左/中/右栏、哪些面板同属一个
- * 标签组）手工搭一遍——而这些信息 dockview 里本来就有。这里把当前布局**读**成结构节点，
- * 用户随后只需补规则（对象→操作→状态）。
+ * 术语（与使用者口径一致）：
+ * - **布局块 = 界面上的一个区域（一栏）**，例如默认「媒体-测试」布局的左/中/右三栏。
+ *   一栏里可能堆叠**多个**标签组或独立面板，它们都属于这**一个**布局块。
+ * - **标签组 = 同一 dockview 组内的多个标签页**（如中栏的 媒体预览/查看器/媒体播放）。
+ * - **控件 = 单个面板**（一个标签页）。
  *
- * 口径与内置默认蓝图一致：
- * - 每个 dockview 组 → 一个**布局块**（顶层区域）；
- * - 组内多个面板 → 一个**标签组**（成员由 contains 边表示），布局块只连标签组；
- * - 组内单个面板 → 布局块直接连该**控件**；
- * - 每个面板 → 一个控件节点（panel_id + 本地化标题键）。
+ * 因此生成时先按 dockview 组的**几何位置**把组聚成区域（同一栏 = 水平区间重叠的组），
+ * 每个区域一个布局块；区域内的多面板组再生成标签组节点。
+ *
+ * 跨窗口：蓝图面板可能开在独立窗口（那里没有工作区 dockview），所以主窗口会把结构快照
+ * 发布到共享存储（`publishStructure`），结构生成只吃快照。
  */
 
 import type { BlueprintEdge, BlueprintGraph, BlueprintNode } from "@hamster-pouch/config";
@@ -28,10 +30,21 @@ const ORIGIN = 40;
 const STRUCTURE_KEY = "hp.layout.structure";
 const STRUCTURE_EVENT = "hp:layout-structure";
 
+/** 布局里的一个 dockview 组（一个标签组 / 单个面板）。 */
+export interface StructureRegion {
+  /** 面板 id 列表（顺序即标签顺序）。 */
+  panels: string[];
+  /** 该组在**屏幕上的**水平区间（用于把同栏的组聚成一个布局块）；取不到时为 undefined。 */
+  left?: number;
+  right?: number;
+  /** 垂直位置（用于同栏内的先后顺序）。 */
+  top?: number;
+}
+
 /** 布局结构快照（跨窗口共享的数据形状）。 */
 export interface StructureSnapshot {
-  /** 每个区域：面板 id 列表（顺序即标签顺序）。 */
-  regions: string[][];
+  /** 各 dockview 组（含几何），按容器顺序。 */
+  regions: StructureRegion[];
   /** 写入时间戳（用于判断新鲜度）。 */
   at: number;
 }
@@ -89,31 +102,73 @@ export function subscribeStructure(
   return () => host?.removeEventListener(STRUCTURE_EVENT, handler);
 }
 
-/** 从当前 dockview 布局抓取结构快照。 */
+/** 从当前 dockview 布局抓取结构快照（带几何，供区域聚类）。 */
 export function snapshotFromDockview(dv: DockviewApi): StructureSnapshot {
-  const regions = dv.groups
-    .filter((g) => g.api.location.type !== "floating")
-    .map((g) => g.panels.map((p) => p.id))
-    .filter((ids) => ids.length > 0);
+  const regions: StructureRegion[] = [];
+  for (const group of dv.groups) {
+    if (group.api.location.type === "floating") {
+      continue;
+    }
+    const panels = group.panels.map((p) => p.id);
+    if (panels.length === 0) {
+      continue;
+    }
+    const box = group.api.boundingBox;
+    regions.push({
+      panels,
+      ...(box ? { left: box.left, right: box.left + box.width, top: box.top } : {}),
+    });
+  }
   return { regions, at: Date.now() };
 }
 
 /**
- * 蓝图结构骨架生成（RFC 0007）：从**当前布局**推导「布局块 → 标签组 → 控件」三层结构，
- * 作为新建蓝图的基础。
+ * 把 dockview 组按**几何**聚成区域（布局块）：
+ * 水平区间显著重叠的组属于同一栏（同一布局块），再按垂直位置排序。
  *
- * 为什么需要：新建蓝图若从空图起步，用户得先把布局结构（左/中/右栏、哪些面板同属一个
- * 标签组）手工搭一遍——而这些信息 dockview 里本来就有。这里把当前布局**读**成结构节点，
- * 用户随后只需补规则（对象→操作→状态）。
- *
- * 口径与内置默认蓝图一致：
- * - 每个 dockview 组 → 一个**布局块**（顶层区域）；
- * - 组内多个面板 → 一个**标签组**（成员由 contains 边表示），布局块只连标签组；
- * - 组内单个面板 → 布局块直接连该**控件**；
- * - 每个面板 → 一个控件节点（panel_id + 本地化标题键）。
- *
- * 注意：蓝图面板可能开在**独立窗口**，那里没有工作区 dockview。因此主窗口会把结构快照
- * 发布到跨窗口共享存储（`publishStructure`），本函数优先用它，dockview 作为兜底。
+ * 取不到几何（旧宿主/未布局）时退化为"每组一个区域"，保证仍能生成结构。
+ */
+export function clusterRegions(
+  regions: StructureRegion[],
+): StructureRegion[][] {
+  const withBox = regions.filter(
+    (r) => r.left !== undefined && r.right !== undefined,
+  );
+  if (withBox.length !== regions.length) {
+    return regions.map((r) => [r]);
+  }
+  const sorted = [...regions].sort((a, b) => a.left! - b.left!);
+  const clusters: StructureRegion[][] = [];
+  for (const region of sorted) {
+    const width = Math.max(1, region.right! - region.left!);
+    const current = clusters[clusters.length - 1];
+    if (!current) {
+      clusters.push([region]);
+      continue;
+    }
+    // 与当前栏的水平区间重叠超过较小者宽度的一半 → 视为同一栏。
+    const overlap = Math.max(
+      0,
+      Math.min(current[0].right!, region.right!) -
+        Math.max(current[0].left!, region.left!),
+    );
+    const currentWidth = Math.max(1, current[0].right! - current[0].left!);
+    if (overlap > Math.min(width, currentWidth) * 0.5) {
+      current.push(region);
+    } else {
+      clusters.push([region]);
+    }
+  }
+  // 栏内按垂直位置（上 → 下）排序
+  for (const cluster of clusters) {
+    cluster.sort((a, b) => (a.top ?? 0) - (b.top ?? 0));
+  }
+  return clusters;
+}
+
+/**
+ * 生成结构骨架图文档：**每个区域（栏）一个布局块**；区域内多面板组 → 标签组节点
+ * （布局块只连标签组），单面板组 → 布局块直连控件。
  */
 export function structureBlueprint(snapshot: StructureSnapshot | null): BlueprintGraph {
   const doc = makeEmptyBlueprint();
@@ -128,11 +183,8 @@ export function structureBlueprint(snapshot: StructureSnapshot | null): Blueprin
     edges.push({ from, to, kind: "contains", order: edges.length + 1 });
   };
 
-  const regions = snapshot?.regions ?? [];
-  regions.forEach((panelIds, col) => {
-    if (panelIds.length === 0) {
-      return;
-    }
+  const clusters = clusterRegions(snapshot?.regions ?? []);
+  clusters.forEach((cluster, col) => {
     const x = ORIGIN + col * COL_W;
     const blockKey = add({
       key: uniqueKey(nodes, `blk_${col + 1}`),
@@ -141,39 +193,46 @@ export function structureBlueprint(snapshot: StructureSnapshot | null): Blueprin
       position: { x, y: ORIGIN },
     });
 
-    const controlKeys = panelIds.map((panelId, row) =>
-      add({
-        key: uniqueKey(nodes, `c_${panelId}`),
-        type: "control",
-        panel_id: panelId,
-        ...(PANEL_TITLES[panelId as PanelId]
-          ? { title_key: PANEL_TITLES[panelId as PanelId] }
-          : {}),
-        position: { x: x + COL_W, y: ORIGIN + (row + 1) * ROW_H },
-      }),
-    );
-
-    if (controlKeys.length === 1) {
-      // 单面板区域：布局块直接含控件（没有标签组语义）。
-      connect(blockKey, controlKeys[0]);
-      return;
-    }
-    // 多面板区域：布局块只连标签组，成员由标签组 contains（与默认蓝图口径一致）。
-    const groupKey = add({
-      key: uniqueKey(nodes, `g_${col + 1}`),
-      type: "group",
-      mode: "exclusive",
-      position: { x: x + COL_W, y: ORIGIN },
-    });
-    connect(blockKey, groupKey);
-    controlKeys.forEach((key) => {
-      edges.push({
-        from: groupKey,
-        to: key,
-        kind: "contains",
-        order: edges.length + 1,
+    // 区域内的每个组：多面板 → 标签组（成员控件），单面板 → 控件。
+    let row = 1;
+    for (const region of cluster) {
+      if (region.panels.length === 0) {
+        continue;
+      }
+      const controlKeys = region.panels.map((panelId) => {
+        const key = add({
+          key: uniqueKey(nodes, `c_${panelId}`),
+          type: "control",
+          panel_id: panelId,
+          ...(PANEL_TITLES[panelId as PanelId]
+            ? { title_key: PANEL_TITLES[panelId as PanelId] }
+            : {}),
+          position: { x: x + COL_W, y: ORIGIN + row * ROW_H },
+        });
+        row += 1;
+        return key;
       });
-    });
+      if (controlKeys.length === 1) {
+        connect(blockKey, controlKeys[0]);
+        continue;
+      }
+      const groupKey = add({
+        key: uniqueKey(nodes, `g_${col + 1}_${row}`),
+        type: "group",
+        mode: "exclusive",
+        position: { x: x + COL_W, y: ORIGIN + row * ROW_H },
+      });
+      row += 1;
+      connect(blockKey, groupKey);
+      controlKeys.forEach((key) => {
+        edges.push({
+          from: groupKey,
+          to: key,
+          kind: "contains",
+          order: edges.length + 1,
+        });
+      });
+    }
   });
 
   return { ...doc, nodes, edges };
