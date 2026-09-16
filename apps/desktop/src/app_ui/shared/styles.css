@@ -1558,6 +1558,20 @@ button.danger {
   color: #b45309;
 }
 
+.bp-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #666;
+  cursor: pointer;
+}
+
+.bp-check input {
+  width: auto;
+  margin: 0;
+}
+
 .bp-legend-hint {
   color: #ffb3b3;
 }

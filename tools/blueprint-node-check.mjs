@@ -147,6 +147,75 @@ const hasEdge = (doc, from, to, kind) =>
 
 console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", ")}`);
 
+// ---- 8. 新建蓝图的结构骨架（布局块→标签组→控件）----
+{
+  // 造一个与默认布局同形的 dockview 替身：
+  // 左栏 = 3 个独立面板（各自一个组），中栏/右栏 = 多标签组（媒体-测试布局的真实形状）。
+  const fakeGroup = (id, panels) => ({
+    id,
+    api: { location: { type: "grid" } },
+    panels: panels.map((pid) => ({ id: pid })),
+  });
+  const fakeDv = {
+    groups: [
+      fakeGroup("1", ["repo"]),
+      fakeGroup("2", ["sources"]),
+      fakeGroup("3", ["albums"]),
+      fakeGroup("4", ["media", "viewer", "player"]),
+      fakeGroup("7", ["tags", "metadata"]),
+    ],
+  };
+  const structure = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintStructure.ts"))
+      .href
+  );
+  const doc = structure.structureBlueprint(fakeDv);
+  writeFixture("structure_from_layout", doc);
+
+  const blocks = doc.nodes.filter((n) => n.type === "layout_block").length;
+  const groups = doc.nodes.filter((n) => n.type === "group").length;
+  const controls = doc.nodes.filter((n) => n.type === "control").length;
+  // 多面板组：布局块只连标签组；单面板区域：布局块直连控件。
+  const blockToGroup = doc.edges.filter(
+    (e) => doc.nodes.find((n) => n.key === e.from)?.type === "layout_block" &&
+      doc.nodes.find((n) => n.key === e.to)?.type === "group",
+  ).length;
+  const blockToControl = doc.edges.filter(
+    (e) => doc.nodes.find((n) => n.key === e.from)?.type === "layout_block" &&
+      doc.nodes.find((n) => n.key === e.to)?.type === "control",
+  ).length;
+  const groupToControl = doc.edges.filter(
+    (e) => doc.nodes.find((n) => n.key === e.from)?.type === "group" &&
+      doc.nodes.find((n) => n.key === e.to)?.type === "control",
+  ).length;
+
+  check(
+    "结构骨架：5 区域（3 单面板 + 2 标签组）+ 8 控件，且标签组优先",
+    blocks === 5 &&
+      groups === 2 &&
+      controls === 8 &&
+      blockToGroup === 2 &&
+      blockToControl === 3 &&
+      groupToControl === 5,
+    `blocks=${blocks} groups=${groups} controls=${controls} blk→grp=${blockToGroup} blk→ctl=${blockToControl} grp→ctl=${groupToControl}`,
+  );
+
+  // 单面板组应直连控件
+  const single = structure.structureBlueprint({
+    groups: [fakeGroup("9", ["tasks"])],
+  });
+  const singleOk =
+    single.nodes.filter((n) => n.type === "layout_block").length === 1 &&
+    single.nodes.filter((n) => n.type === "group").length === 0 &&
+    single.nodes.filter((n) => n.type === "control").length === 1 &&
+    single.edges.length === 1;
+  check("结构骨架：单面板区域不带标签组（布局块直连控件）", singleOk);
+  check(
+    "结构骨架：空布局 → 空图",
+    structure.structureBlueprint({ groups: [] }).nodes.length === 0,
+  );
+}
+
 // ---- 用 hp-core 真实校验器复核全部夹具 ----
 try {
   const out = execFileSync(

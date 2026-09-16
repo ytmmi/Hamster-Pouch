@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import {
   type BlueprintGraph,
   type BlueprintNode,
+  type BlueprintNodeType,
   CONDITION_EXPR_HINTS,
   HIDE_DIRECTIONS,
   PANEL_IDS,
@@ -60,8 +61,26 @@ function DerivedField({
   );
 }
 
-/** 节点属性检查器：只暴露**本节点必须设定**的字段；key 型引用一律只读展示。 */
-export function NodeInspector({
+/** 状态节点的目标候选：按动作类型给合法目标（show/hide→控件，collapse/expand→标签组）。 */
+function actionTargets(
+  doc: BlueprintGraph,
+  op: BlueprintNode["op"],
+): { v: string; l: string }[] {
+  const wanted: BlueprintNodeType[] =
+    op === "collapse" || op === "expand"
+      ? ["group"]
+      : op === "toggle"
+        ? ["control", "group"]
+        : ["control"];
+  return doc.nodes
+    .filter((n) => wanted.includes(n.type))
+    .map((n) => ({
+      v: n.key,
+      l: n.name?.trim() || `${n.type === "group" ? "标签组" : "控件"} ${n.key}`,
+    }));
+}
+
+/** 节点属性检查器：只暴露**本节点必须设定**的字段；key 型引用一律只读展示。 */export function NodeInspector({
   node,
   doc,
   onPatch,
@@ -311,13 +330,19 @@ export function NodeInspector({
           ACTION_OPS.map((op) => ({ v: op, l: opLabel(op, t) })),
           (v) => onPatch({ op: v as BlueprintNode["op"] }),
         )}
-      {node.type === "action" && (
-        <DerivedField
-          label={t("blueprint.target")}
-          value={node.target}
-          label_={derivedLabel(node.target)}
-          t={t}
-        />
+      {/* 状态：**目标手动指定**（控件 show/hide/toggle、标签组 collapse/expand/toggle） */}
+      {node.type === "action" &&
+        select(
+          t("blueprint.target"),
+          node.target ?? "",
+          [
+            { v: "", l: t("blueprint.targetUnset") },
+            ...actionTargets(doc, node.op),
+          ],
+          (v) => onPatch({ target: v || undefined }),
+        )}
+      {node.type === "action" && node.target === undefined && (
+        <span className="dim bp-hints">{t("blueprint.targetHint")}</span>
       )}
       {node.type === "action" &&
         row(

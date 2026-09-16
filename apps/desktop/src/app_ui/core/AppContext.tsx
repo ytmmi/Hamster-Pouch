@@ -3,6 +3,7 @@
  */
 
 import { createContext, useContext } from "react";
+import type { DockviewApi } from "dockview-react";
 
 import type { Language, Translate } from "../i18n";
 import type { FileItem, StatusType } from "../shared/types";
@@ -27,6 +28,8 @@ export interface AppContextValue {
   status: (message: string, type?: StatusType) => void;
   /** 聚焦/打开面板：已存在则激活（切换 tab），不存在则按 floating 创建。 */
   focusPanel: (id: string, floating?: boolean) => void;
+  /** 当前 dockview 实例（只读用途，如从布局推导蓝图结构骨架）。 */
+  getDockview: () => DockviewApi | null;
   /** 蓝图引擎事件分发（单击/双击/选中变化 → 显隐动作）。 */
   dispatch: (input: BlueprintDispatchInput) => void;
   language: Language;

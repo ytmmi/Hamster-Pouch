@@ -270,6 +270,9 @@ export function AppUiApp(): JSX.Element {
     blueprintEngine.dispatch(input);
   }, []);
 
+  /** 供蓝图编辑器从当前布局推导结构骨架（只读用途）。 */
+  const getDockview = useCallback(() => apiRef.current, []);
+
   const detachPanel = useCallback(
     (id: string) => {
       const title = panelTitle(id, t);
@@ -335,6 +338,7 @@ export function AppUiApp(): JSX.Element {
       status,
       focusPanel,
       dispatch,
+      getDockview,
       language,
       setLanguage: changeLanguage,
       t,
@@ -351,6 +355,7 @@ export function AppUiApp(): JSX.Element {
       status,
       focusPanel,
       dispatch,
+      getDockview,
       language,
       changeLanguage,
       t,

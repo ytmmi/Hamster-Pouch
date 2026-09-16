@@ -56,6 +56,8 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
       status,
       focusPanel: () => undefined,
       dispatch: (input) => blueprintEngine.dispatch(input),
+      // 独立单面板窗口没有工作区 dockview：结构骨架不可用（返回 null，面板会退化为空图）。
+      getDockview: () => null,
       language,
       setLanguage: () => undefined,
       t,

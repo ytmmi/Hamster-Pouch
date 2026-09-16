@@ -34,6 +34,7 @@ import { BlueprintCanvas } from "./BlueprintCanvas";
 import { softRemove } from "./blueprintDelete";
 import { NodeInspector } from "./BlueprintInspector";
 import { appendNode, parentHintFor } from "./blueprintNodeFactory";
+import { structureBlueprint } from "./blueprintStructure";
 import {
   canvasCenter,
   freeSlotPosition,
@@ -57,6 +58,8 @@ export function BlueprintPanel(): JSX.Element {
   const [busy, setBusy] = useState(false);
   /** 画布渲染视口中心（世界坐标）：新增节点落点用。 */
   const [viewCenter, setViewCenter] = useState<{ x: number; y: number } | null>(null);
+  /** 新建蓝图时是否带上当前布局的结构骨架（布局块→标签组→控件）。 */
+  const [withStructure, setWithStructure] = useState(true);
 
   const repoId = app.repoId;
 
@@ -275,6 +278,10 @@ export function BlueprintPanel(): JSX.Element {
     }
   }, [repoId, selectedId, doc, name, app, load]);
 
+  /**
+   * 新建蓝图：默认带上**当前布局的结构骨架**（布局块 → 标签组 → 控件），
+   * 用户只需在此基础上补规则；也可取消勾选从空图起步。
+   */
   const create = useCallback(async () => {
     if (!repoId) {
       return;
@@ -282,8 +289,25 @@ export function BlueprintPanel(): JSX.Element {
     const n = newName.trim() || app.t("blueprint.defaultName");
     setBusy(true);
     try {
-      const item = await api.blueprintCreate({ repoId, name: n });
-      app.status(app.t("blueprint.created", { name: n }), "ok");
+      const dockview = app.getDockview();
+      const skeleton =
+        withStructure && dockview ? structureBlueprint(dockview) : null;
+      const item = await api.blueprintCreate({
+        repoId,
+        name: n,
+        blueprintJson: skeleton
+          ? JSON.stringify(forUserSave(skeleton))
+          : undefined,
+      });
+      app.status(
+        skeleton
+          ? app.t("blueprint.createdWithStructure", {
+              name: n,
+              count: skeleton.nodes.length,
+            })
+          : app.t("blueprint.created", { name: n }),
+        "ok",
+      );
       await load();
       await select(item.id);
       setName(n);
@@ -293,7 +317,7 @@ export function BlueprintPanel(): JSX.Element {
     } finally {
       setBusy(false);
     }
-  }, [repoId, newName, app, load, select]);
+  }, [repoId, newName, app, load, select, withStructure]);
 
   const createFromTemplate = useCallback(
     async (tplId: string) => {
@@ -510,6 +534,14 @@ export function BlueprintPanel(): JSX.Element {
                 {app.t("blueprint.create")}
               </button>
             </div>
+            <label className="bp-check" title={app.t("blueprint.structureHint")}>
+              <input
+                type="checkbox"
+                checked={withStructure}
+                onChange={(e) => setWithStructure(e.target.checked)}
+              />
+              {app.t("blueprint.withStructure")}
+            </label>
             {items.map((it) => (
               <div
                 key={it.id}
