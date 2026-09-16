@@ -232,7 +232,7 @@ fn validate_rejects_all_spec_errors() {
     );
     assert!(errors.iter().any(|e| e.contains("default_visible 至多一个成员")));
 
-    // 非法 hide_direction（toward 指向非组）
+    // 非法 hide_direction（toward 指向存在但类型不是组）
     let errors = BlueprintGraph::validate_json(
         r#"{"schema_version":1,"nodes":[
           {"key":"c","type":"control","panel_id":"viewer"},
@@ -240,6 +240,13 @@ fn validate_rejects_all_spec_errors() {
         ],"edges":[]}"#,
     );
     assert!(errors.iter().any(|e| e.contains("必须是组节点")));
+    // 而指向**已删除**的组只是"未接通"（软），不阻塞保存
+    let soft = BlueprintGraph::validate_json(
+        r#"{"schema_version":1,"nodes":[
+          {"key":"g","type":"group","mode":"exclusive","hide_direction":"toward:gone"}
+        ],"edges":[]}"#,
+    );
+    assert!(soft.is_empty(), "{soft:?}");
 
     // 非法 hide_direction 值（解析层报错）
     let errors = BlueprintGraph::validate_json(
@@ -300,23 +307,56 @@ fn graph_document_roundtrip_preserves_semantics() {
 
 #[test]
 fn default_blueprint_fixture_validates() {
-    // 夹具由 packages/config DEFAULT_BLUEPRINT 生成（node 序列化导出）：
+    // 夹具由 packages/config DEFAULT_BLUEPRINT 生成：
+    // `pnpm generate:blueprint-fixture`（tools/generate-blueprint-fixture.mjs）。
     // 内置默认蓝图必须通过服务端校验，否则仓库种子默认蓝图会失败（表现为"没有默认蓝图"）。
     let json = include_str!("default_blueprint.json");
     let graph = BlueprintGraph::from_json(json).expect("解析默认蓝图失败");
     let errors = graph.validate();
     assert!(errors.is_empty(), "默认蓝图校验失败: {errors:?}");
-    assert_eq!(graph.nodes.len(), 28, "默认蓝图应有 28 个节点");
-    assert_eq!(graph.edges.len(), 25, "默认蓝图应有 25 条边");
-    // 结构：布局块 ⊃ 标签组/控件；标签组 ⊃ 控件（contains）
-    assert!(graph
-        .edges
-        .iter()
-        .any(|e| e.from == "g_tags" && e.to == "c_tags" && e.edge_kind == hp_core::EdgeKind::Contains));
-    assert!(graph
-        .edges
-        .iter()
-        .any(|e| e.from == "blk_right" && e.to == "g_player" && e.edge_kind == hp_core::EdgeKind::Contains));
+    assert_eq!(graph.nodes.len(), 26, "默认蓝图应有 26 个节点");
+    assert_eq!(graph.edges.len(), 23, "默认蓝图应有 23 条边");
+    assert_eq!(graph.default_version, Some(5));
+
+    // 结构：布局块 ⊃ 标签组 ⊃ 控件（**标签组优先**）
+    // 中栏只有一个标签组 g_media，布局块不直接连成员控件。
+    assert!(graph.edges.iter().any(|e| e.from == "blk_center"
+        && e.to == "g_media"
+        && e.edge_kind == hp_core::EdgeKind::Contains));
+    assert!(
+        !graph.edges.iter().any(|e| e.from == "blk_center"
+            && e.edge_kind == hp_core::EdgeKind::Contains
+            && e.to != "g_media"),
+        "中栏（blk_center）应只包含标签组，不应直接连控件"
+    );
+    for member in ["c_media", "c_viewer", "c_player"] {
+        assert!(
+            graph.edges.iter().any(|e| e.from == "g_media"
+                && e.to == member
+                && e.edge_kind == hp_core::EdgeKind::Contains),
+            "g_media 应包含 {member}"
+        );
+    }
+    // 右栏同理：只有一个标签组 g_inspector。
+    assert!(graph.edges.iter().any(|e| e.from == "blk_right"
+        && e.to == "g_inspector"
+        && e.edge_kind == hp_core::EdgeKind::Contains));
+    assert!(!graph.edges.iter().any(|e| e.from == "blk_right"
+        && e.edge_kind == hp_core::EdgeKind::Contains
+        && e.to != "g_inspector"));
+    for member in ["c_color", "c_tags", "c_metadata"] {
+        assert!(
+            graph.edges.iter().any(|e| e.from == "g_inspector"
+                && e.to == member
+                && e.edge_kind == hp_core::EdgeKind::Contains),
+            "g_inspector 应包含 {member}"
+        );
+    }
+    // 左栏是三个独立面板（无标签组）：布局块直接连控件。
+    assert!(graph.edges.iter().any(|e| e.from == "blk_left"
+        && e.to == "c_repo"
+        && e.edge_kind == hp_core::EdgeKind::Contains));
+
     // 规则三元组：对象 → 操作 → 状态（on 边 + fires 边，全部连线）
     assert!(graph
         .edges
@@ -329,7 +369,84 @@ fn default_blueprint_fixture_validates() {
     // 操作节点无 target 字段（靠 on 边驱动）
     let ev = graph.nodes.iter().find(|n| n.key == "e_dbl_img").expect("应有操作节点");
     assert!(ev.target.is_none());
-    assert_eq!(graph.default_version, Some(3));
+
+    // 如实表达当前默认「媒体-测试」布局：中栏 = 媒体预览 + 查看器/播放器；
+    // 右栏 = 色彩参考/标签·评分/元数据；左栏 = 仓库/图像源/相册。
+    let panel_ids: Vec<&str> = graph
+        .nodes
+        .iter()
+        .filter(|n| n.node_type == NodeType::Control)
+        .filter_map(|n| n.panel_id.as_deref())
+        .collect();
+    for expected in [
+        "repo", "sources", "albums", "media", "viewer", "player", "color", "tags", "metadata",
+    ] {
+        assert!(panel_ids.contains(&expected), "默认蓝图缺少面板控件: {expected}");
+    }
+    // 「媒体-测试」布局未挂载 tag表/任务，默认蓝图不表达它们。
+    assert!(!panel_ids.contains(&"tagtable"));
+    assert!(!panel_ids.contains(&"tasks"));
+}
+
+/// 默认蓝图的节点坐标必须互不重叠（打开编辑器即可读清结构；用户要求）。
+#[test]
+fn default_blueprint_nodes_do_not_overlap() {
+    let json = include_str!("default_blueprint.json");
+    let graph = BlueprintGraph::from_json(json).expect("解析默认蓝图失败");
+    // 画布节点卡片近似占位（宽 220、高 100），用于重叠判定。
+    const W: f64 = 220.0;
+    const H: f64 = 100.0;
+    let boxes: Vec<(&str, f64, f64)> = graph
+        .nodes
+        .iter()
+        .map(|n| {
+            let p = n.position.as_ref().expect("默认蓝图节点必须带 position");
+            (n.key.as_str(), p.x, p.y)
+        })
+        .collect();
+    for (i, (ka, xa, ya)) in boxes.iter().enumerate() {
+        for (kb, xb, yb) in boxes.iter().skip(i + 1) {
+            let overlap_x = (xa - xb).abs() < W;
+            let overlap_y = (ya - yb).abs() < H;
+            assert!(
+                !(overlap_x && overlap_y),
+                "默认蓝图节点重叠: {ka}({xa},{ya}) 与 {kb}({xb},{yb})"
+            );
+        }
+    }
+}
+
+/// 工厂夹具必须通过真实校验：`tools/blueprint-node-check.mjs` 用编辑器真实的
+/// "新增节点"工厂（`apps/desktop/src/app_ui/panels/blueprintNodeFactory.ts`）构造
+/// 文档并写入 `tests/blueprint_factory/`，这里逐份跑 hp-core 校验。
+///
+/// 守住的是真实故障：新增对象节点没有 `class` → 保存报
+/// "对象节点 o_1 的 class 必须是类节点 key（当前: ）"。
+#[test]
+fn factory_built_docs_validate() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("blueprint_factory");
+    let entries = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("读取工厂夹具目录失败 {}: {e}", dir.display()));
+    let mut checked = 0;
+    for entry in entries {
+        let path = entry.expect("读取夹具失败").path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let json = std::fs::read_to_string(&path).expect("读取夹具失败");
+        let graph = BlueprintGraph::from_json(&json)
+            .unwrap_or_else(|e| panic!("夹具解析失败 {}: {e}", path.display()));
+        let errors = graph.validate();
+        assert!(
+            errors.is_empty(),
+            "工厂产出的文档未通过校验 {}: {errors:?}",
+            path.display()
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "没有找到工厂夹具（先跑 pnpm check:blueprint-nodes）");
 }
 
 #[test]

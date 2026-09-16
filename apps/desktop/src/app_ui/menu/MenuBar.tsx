@@ -10,8 +10,12 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 import * as api from "../shared/api";
 import { useApp } from "../core/AppContext";
-import { BlueprintEngine, blueprintEngine } from "../core/blueprintEngine";
 import { syncBlueprintFromLayout } from "../shared/blueprintSync";
+import {
+  loadActiveBlueprint,
+  reconcileAfterLayoutApplied,
+  setActiveBlueprintId,
+} from "../shared/blueprintRuntime";
 import { LANGUAGES, type Language } from "../i18n";
 import { PANEL_DEFS, panelTitle } from "../core/panelRegistry";
 import { ContextMenu } from "./ContextMenu";
@@ -180,21 +184,22 @@ export function MenuBar({
       // 补齐最小尺寸约束（旧布局未记录会回退到 dockview 默认 100×100）；
       // 媒体预览强制 renderer=always，避免 tab 切换丢滚动位置。
       dv.fromJSON(normalizeLayoutJson(layout));
-      // 布局绑定蓝图：应用布局时激活其绑定的第一个蓝图（1 个布局可绑定多个蓝图）。
+      // 布局绑定蓝图：应用布局时激活其绑定的第一个蓝图（1 个布局可绑定多个蓝图），
+      // 随后立即把蓝图语义对账到新布局（默认可见标签 + 组收起/展开）。
+      let boundId: string | null = null;
       if (repoId) {
         const bound = await api
           .layoutBlueprints({ repoId, name })
           .catch(() => [] as string[]);
         if (bound[0]) {
-          const doc = await api.blueprintGet({
-            repoId,
-            blueprintId: bound[0],
-          });
-          if (doc) {
-            blueprintEngine.setGraph(BlueprintEngine.parse(doc));
-          }
+          const loaded = await loadActiveBlueprint(repoId, bound[0]);
+          boundId = loaded.loaded ? bound[0] : null;
         }
       }
+      if (!boundId) {
+        setActiveBlueprintId(null);
+      }
+      reconcileAfterLayoutApplied(dv);
       app.status(t("layout.loaded", { name }), "ok");
       closeMenus();
     } catch (e) {

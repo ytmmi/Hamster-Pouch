@@ -15,12 +15,20 @@ import "dockview-react/dist/styles/dockview.css";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { DEFAULT_BLUEPRINT, isObsoleteDefaultBlueprint, PANEL_MIN_SIZE, SETTING_KEYS } from "@hamster-pouch/config";
+import { PANEL_MIN_SIZE, SETTING_KEYS } from "@hamster-pouch/config";
 import { normalizeLayoutJson } from "../shared/panelLayout";
+import {
+  activeBlueprintId,
+  loadActiveBlueprint,
+  notifyBlueprintChangedLocally,
+  reconcileActiveBlueprint,
+  reconcileAfterLayoutApplied,
+  subscribeBlueprintHotReload,
+} from "../shared/blueprintRuntime";
 
 import * as api from "../shared/api";
 import { AppContext, type AppContextValue } from "./AppContext";
-import { BlueprintEngine, blueprintEngine, type BlueprintDispatchInput } from "./blueprintEngine";
+import { blueprintEngine, type BlueprintDispatchInput } from "./blueprintEngine";
 import {
   DEFAULT_LANGUAGE,
   isLanguage,
@@ -82,7 +90,8 @@ export function AppUiApp(): JSX.Element {
     [],
   );
 
-  // 语言切换时更新所有面板标签页标题（组件名随语言变化）
+  // 语言切换时更新所有面板标签页标题（组件名随语言变化），并按蓝图重新对账布局
+  // （默认可见/组收起状态与语言无关，但重渲染后需保持不漂移）。
   useEffect(() => {
     const dv = apiRef.current;
     if (!dv) {
@@ -91,6 +100,7 @@ export function AppUiApp(): JSX.Element {
     for (const panel of dv.panels) {
       panel.setTitle(panelTitle(panel.id, t));
     }
+    reconcileActiveBlueprint(dv);
   }, [t, language]);
 
   // 双击预览：已存在的目标面板 → 激活（切换 tab）；不存在 → 创建（可按需浮动）
@@ -125,6 +135,8 @@ export function AppUiApp(): JSX.Element {
     () => ({
       showPanel: (panelId: string, floating: boolean) => {
         lastShownRef.current = panelId;
+        // 显示控件：面板已存在则激活其标签（同组即切换标签，其余标签保留），不存在则
+        // 按 `floating` 创建（蓝图动作默认以标签方式加入；`payload.floating=true` 才浮动）。
         focusPanel(panelId, floating);
       },
       hidePanel: (panelId: string) => {
@@ -221,8 +233,10 @@ export function AppUiApp(): JSX.Element {
     blueprintEngine.setExecutor(blueprintExecutor);
   }, [blueprintExecutor]);
 
-  // 装载当前仓库生效蓝图（无默认 → 种子内置默认蓝图，保证零回归）；
-  // 旧版内置默认蓝图自动升级为新版；蓝图编辑保存后通过 refresh() 触发重载，立即生效。
+  // 仓库切换：装载生效蓝图（无默认 → 种子内置默认，保证零回归）；装载后把蓝图语义
+  // 对账到当前布局（默认可见标签 + 组收起/展开）。
+  // 注意：依赖里不含 `t`——蓝图文档与语言无关，刷新不重装，避免热更新被语言变化打断；
+  // 语言变化只由下面的标题 effect 触发一次重新对账。
   useEffect(() => {
     if (!repoId) {
       blueprintEngine.setGraph(null);
@@ -230,53 +244,27 @@ export function AppUiApp(): JSX.Element {
     }
     let cancelled = false;
     void (async () => {
-      try {
-        let doc = await api.blueprintGetDefault({ repoId });
-        if (!doc) {
-          // 无默认蓝图：无论是否已有其他蓝图，都补种子内置默认（默认蓝图是运行时
-          // 行为来源，必须存在）；create 返回新项 id，直接设为默认。
-          const created = await api.blueprintCreate({
-            repoId,
-            name: t("blueprint.defaultName"),
-            blueprintJson: JSON.stringify(DEFAULT_BLUEPRINT),
-          });
-          await api.blueprintSetDefault({
-            repoId,
-            blueprintId: created.id,
-          });
-          doc = await api.blueprintGetDefault({ repoId });
-        }
-        if (cancelled) {
-          return;
-        }
-        const parsed = doc ? BlueprintEngine.parse(doc) : null;
-        if (parsed && isObsoleteDefaultBlueprint(parsed)) {
-          // 旧库存默认蓝图 → 静默升级为新版内置默认（仅命中旧默认特征，不动用户图）。
-          const list = await api.blueprintList({ repoId });
-          const def = list.find((i) => i.is_default);
-          if (def) {
-            await api.blueprintSave({
-              repoId,
-              blueprintId: def.id,
-              name: def.name,
-              blueprintJson: JSON.stringify(DEFAULT_BLUEPRINT),
-            });
-            status(t("blueprint.defaultUpdated"), "ok");
-          }
-          blueprintEngine.setGraph(DEFAULT_BLUEPRINT);
-          return;
-        }
-        blueprintEngine.setGraph(parsed ?? DEFAULT_BLUEPRINT);
-      } catch {
-        if (!cancelled) {
-          blueprintEngine.setGraph(DEFAULT_BLUEPRINT);
-        }
+      // 重新装载"当前生效蓝图"（可能是布局绑定的蓝图，而非仓库默认）。
+      await loadActiveBlueprint(repoId, activeBlueprintId());
+      if (cancelled) {
+        return;
       }
+      reconcileActiveBlueprint(apiRef.current);
     })();
     return () => {
       cancelled = true;
     };
-  }, [repoId, refreshKey, t, status]);
+  }, [repoId, refreshKey]);
+
+  // 蓝图热更新：保存/设为默认/删除（本窗口或其它窗口）→ 重载生效蓝图并对账布局。
+  useEffect(
+    () =>
+      subscribeBlueprintHotReload(
+        () => repoId,
+        () => apiRef.current,
+      ),
+    [repoId],
+  );
 
   const dispatch = useCallback((input: BlueprintDispatchInput) => {
     blueprintEngine.dispatch(input);

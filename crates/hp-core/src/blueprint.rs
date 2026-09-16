@@ -450,15 +450,15 @@ impl BlueprintGraph {
         let by_key: HashMap<&str, &BlueprintNode> =
             self.nodes.iter().map(|n| (n.key.as_str(), n)).collect();
 
-        // 各节点类型字段校验
+        // 各节点类型字段校验（硬错误）
         for node in &self.nodes {
-            validate_node(node, &by_key, &mut errors);
+            blueprint_validate::validate_node(node, &by_key, &mut errors);
         }
 
         // 边校验
         let mut edge_seen = HashSet::new();
         for edge in &self.edges {
-            validate_edge(edge, &by_key, &mut errors);
+            blueprint_validate::validate_edge(edge, &by_key, &mut errors);
             if !edge_seen.insert((edge.from.clone(), edge.to.clone(), edge.edge_kind)) {
                 errors.push(format!(
                     "重复边: {} --{}--> {}",
@@ -484,7 +484,7 @@ impl BlueprintGraph {
         }
 
         // fires/guards 求值子图必须无环（DAG）
-        if let Some(cycle) = find_cycle(&self.edges) {
+        if let Some(cycle) = blueprint_validate::find_cycle(&self.edges) {
             errors.push(format!(
                 "fires/guards 求值链存在环: {}",
                 cycle
@@ -495,285 +495,351 @@ impl BlueprintGraph {
             ));
         }
 
-        // 操作（事件）必须有对象来源：`target` 字段或至少一条 `on` 入边（规则三元组
-        // 对象→操作→状态连起来；二者取一即可）。
+        // 操作（事件）必须有对象来源、状态必须有触发来源、条件必须有 fires 入边，
+        // 以及必填引用缺失——这些都属**软问题**（未接通），由 `warnings` 报告，
+        // 不阻塞保存（删除关联节点后允许先存下中间状态，画布以灰色呈现）。
+
+        errors
+    }
+
+    /// 语义校验的"软问题"清单（未接通类）：不阻塞保存，仅供编辑提示与画布呈现。
+    ///
+    /// 设计意图（RFC 0007）：删除节点/断线后**不级联删除关联节点**，允许先保存中间
+    /// 状态；不生效的部分由画布灰色表示，用户接回去即恢复。
+    pub fn warnings(&self) -> Vec<String> {
+        let by_key: HashMap<&str, &BlueprintNode> =
+            self.nodes.iter().map(|n| (n.key.as_str(), n)).collect();
+        let mut warnings = Vec::new();
+
         for node in &self.nodes {
-            if node.node_type != NodeType::Event {
-                continue;
+            match node.node_type {
+                NodeType::Event => {
+                    let has_target = node.target.is_some();
+                    let has_on_edge = self
+                        .edges
+                        .iter()
+                        .any(|e| e.edge_kind == EdgeKind::On && e.to == node.key);
+                    if !has_target && !has_on_edge {
+                        warnings.push(format!(
+                            "操作节点 {key} 暂未接通：缺对象来源（连线 对象→操作）",
+                            key = node.key
+                        ));
+                    }
+                }
+                NodeType::Condition => {
+                    let has_source = self
+                        .edges
+                        .iter()
+                        .any(|e| e.edge_kind == EdgeKind::Fires && e.to == node.key);
+                    if !has_source {
+                        warnings.push(format!(
+                            "条件节点 {key} 暂未接通：缺触发来源（连线 操作→条件）",
+                            key = node.key
+                        ));
+                    }
+                }
+                NodeType::Action => {
+                    let has_trigger = self.edges.iter().any(|e| {
+                        e.to == node.key
+                            && (e.edge_kind == EdgeKind::Fires
+                                || e.edge_kind == EdgeKind::Guards)
+                    });
+                    if !has_trigger {
+                        warnings.push(format!(
+                            "状态节点 {key} 暂未接通：缺触发来源（连线 操作/条件→状态）",
+                            key = node.key
+                        ));
+                    }
+                }
+                _ => {}
             }
-            let has_target = node.target.is_some();
-            let has_on_edge = self
-                .edges
-                .iter()
-                .any(|e| e.edge_kind == EdgeKind::On && e.to == node.key);
-            if !has_target && !has_on_edge {
-                errors.push(format!(
-                    "操作节点 {key} 缺少对象来源：请连线 对象→操作（on 边）或填写 target",
+
+            let missing_ref = match node.node_type {
+                NodeType::Control => node.panel_id.as_deref().unwrap_or("").trim().is_empty(),
+                NodeType::Class => match node.control.as_deref() {
+                    Some(ck) => !by_key.contains_key(ck),
+                    None => true,
+                },
+                NodeType::Object => match node.class.as_deref() {
+                    Some(ck) => !by_key.contains_key(ck),
+                    None => true,
+                },
+                NodeType::Action => match node.target.as_deref() {
+                    Some(t) => !by_key.contains_key(t),
+                    None => true,
+                },
+                _ => false,
+            };
+            if missing_ref {
+                warnings.push(format!(
+                    "节点 {key} 暂未接通：缺少必要引用或引用已被删除",
                     key = node.key
                 ));
             }
         }
-
-        errors
+        warnings
     }
 }
 
-/// 校验单个节点字段与引用。
-fn validate_node(
-    node: &BlueprintNode,
-    by_key: &HashMap<&str, &BlueprintNode>,
-    errors: &mut Vec<String>,
-) {
-    let key = &node.key;
-    match node.node_type {
-        NodeType::LayoutBlock => {
-            // 布局块：结构节点，仅要求 key 非空（name/position 可选）。
-        }
-        NodeType::Control => {
-            if node.panel_id.as_deref().unwrap_or("").trim().is_empty() {
-                errors.push(format!("控件节点 {key} 缺少 panel_id"));
+/// 校验算法（硬错误 + 软问题/未接通）；数据模型在父模块。
+mod blueprint_validate {
+    use super::*;
+
+    /// 校验单个节点字段与引用（硬错误）。
+    pub(super) fn validate_node(
+        node: &BlueprintNode,
+        by_key: &HashMap<&str, &BlueprintNode>,
+        errors: &mut Vec<String>,
+    ) {
+        let key = &node.key;
+        match node.node_type {
+            NodeType::LayoutBlock => {
+                // 布局块：结构节点，仅要求 key 非空（name/position 可选）。
             }
-        }
-        NodeType::Class => {
-            let control_key = node.control.as_deref();
-            match control_key {
-                Some(ck) if by_key.get(ck).map(|n| n.node_type) == Some(NodeType::Control) => {}
-                _ => errors.push(format!(
-                    "类节点 {key} 的 control 必须是控件节点 key（当前: {}）",
-                    control_key.unwrap_or("")
-                )),
+            NodeType::Control => {
+                // panel_id 缺失 → 未接通（软），不阻塞保存。
             }
-            match node.media_type.as_deref() {
-                Some("image") | Some("video") | Some("audio") => {}
-                _ => errors.push(format!(
-                    "类节点 {key} 的 media_type 必须是 image/video/audio（当前: {}）",
-                    node.media_type.as_deref().unwrap_or("")
-                )),
-            }
-        }
-        NodeType::Object => {
-            let class_key = node.class.as_deref();
-            match class_key {
-                Some(ck) if by_key.get(ck).map(|n| n.node_type) == Some(NodeType::Class) => {}
-                _ => errors.push(format!(
-                    "对象节点 {key} 的 class 必须是类节点 key（当前: {}）",
-                    class_key.unwrap_or("")
-                )),
-            }
-            if node.scope.as_deref().unwrap_or("").trim().is_empty() {
-                errors.push(format!("对象节点 {key} 缺少 scope"));
-            }
-        }
-        NodeType::Group => {
-            if node.mode.is_none() {
-                errors.push(format!("组节点 {key} 缺少 mode"));
-            }
-            if let Some(visible) = &node.default_visible {
-                for vk in visible {
-                    if by_key.get(vk.as_str()).map(|n| n.node_type) != Some(NodeType::Control) {
-                        errors.push(format!(
-                            "组节点 {key} 的 default_visible 成员 {vk} 必须是控件节点"
-                        ));
+            NodeType::Class => {
+                // control 缺失/指向已删除节点 → 未接通（软）；指向存在但类型不符 → 硬错误。
+                if let Some(ck) = node.control.as_deref() {
+                    if let Some(target) = by_key.get(ck) {
+                        if target.node_type != NodeType::Control {
+                            errors.push(format!(
+                                "类节点 {key} 的 control 必须指向控件节点（当前指向 {}）",
+                                target.node_type
+                            ));
+                        }
                     }
                 }
-            }
-            if let Some(dir) = &node.hide_direction {
-                if let Some(target) = dir.toward_target() {
-                    if by_key.get(target).map(|n| n.node_type) != Some(NodeType::Group) {
-                        errors.push(format!(
-                            "组节点 {key} 的 hide_direction 指向的 {target} 必须是组节点"
-                        ));
-                    }
-                }
-            }
-        }
-        NodeType::Event => {
-            if node.trigger.is_none() {
-                errors.push(format!("操作节点 {key} 缺少 trigger"));
-            }
-            // target 可选：规则三元组要求 对象→操作 连线（on 边）或 target 字段二选一，
-            // 该约束在边校验后的第二遍检查。
-            if let Some(t) = node.target.as_deref() {
-                match by_key.get(t) {
-                    Some(n)
-                        if matches!(
-                            n.node_type,
-                            NodeType::Control | NodeType::Class | NodeType::Object
-                        ) => {}
+                match node.media_type.as_deref() {
+                    Some("image") | Some("video") | Some("audio") => {}
                     _ => errors.push(format!(
-                        "操作节点 {key} 的 target 必须是控件/类/对象节点 key（当前: {t}）"
+                        "类节点 {key} 的 media_type 必须是 image/video/audio（当前: {}）",
+                        node.media_type.as_deref().unwrap_or("")
                     )),
                 }
             }
-        }
-        NodeType::Condition => {
-            if let Some(expr) = &node.expr {
-                if let Some(msg) = validate_expr(expr) {
-                    errors.push(format!("条件节点 {key}: {msg}"));
-                }
-            } else {
-                errors.push(format!("条件节点 {key} 缺少 expr"));
-            }
-        }
-        NodeType::Action => {
-            let op = node.op;
-            if op.is_none() {
-                errors.push(format!("动作节点 {key} 缺少 op"));
-            }
-            let target_key = node.target.as_deref();
-            let target_type = target_key.and_then(|t| by_key.get(t)).map(|n| n.node_type);
-            match op {
-                Some(ActionOp::Show) | Some(ActionOp::Hide) => {
-                    if target_type != Some(NodeType::Control) {
-                        errors.push(format!(
-                            "动作节点 {key} 的 target 必须是控件节点（当前: {}）",
-                            target_key.unwrap_or("")
-                        ));
+            NodeType::Object => {
+                if let Some(class_key) = node.class.as_deref() {
+                    if let Some(target) = by_key.get(class_key) {
+                        if target.node_type != NodeType::Class {
+                            errors.push(format!(
+                                "对象节点 {key} 的 class 必须指向类节点（当前指向 {}）",
+                                target.node_type
+                            ));
+                        }
                     }
                 }
-                Some(ActionOp::Collapse) | Some(ActionOp::Expand) => {
-                    if target_type != Some(NodeType::Group) {
-                        errors.push(format!(
-                            "动作节点 {key} 的 target 必须是组节点（当前: {}）",
-                            target_key.unwrap_or("")
-                        ));
+                if node.scope.as_deref().unwrap_or("").trim().is_empty() {
+                    errors.push(format!("对象节点 {key} 缺少 scope"));
+                }
+            }
+            NodeType::Group => {
+                if node.mode.is_none() {
+                    errors.push(format!("组节点 {key} 缺少 mode"));
+                }
+                if let Some(visible) = &node.default_visible {
+                    for vk in visible {
+                        if let Some(target) = by_key.get(vk.as_str()) {
+                            if target.node_type != NodeType::Control {
+                                errors.push(format!(
+                                    "组节点 {key} 的 default_visible 成员 {vk} 必须是控件节点"
+                                ));
+                            }
+                        }
                     }
                 }
-                Some(ActionOp::Toggle) => {
-                    if !matches!(target_type, Some(NodeType::Control) | Some(NodeType::Group)) {
-                        errors.push(format!(
-                            "动作节点 {key} 的 target 必须是控件或组节点（当前: {}）",
-                            target_key.unwrap_or("")
-                        ));
+                if let Some(dir) = &node.hide_direction {
+                    if let Some(target_key) = dir.toward_target() {
+                        if let Some(target) = by_key.get(target_key) {
+                            if target.node_type != NodeType::Group {
+                                errors.push(format!(
+                                    "组节点 {key} 的 hide_direction 指向的 {target_key} 必须是组节点"
+                                ));
+                            }
+                        }
                     }
                 }
-                None => {}
+            }
+            NodeType::Event => {
+                if node.trigger.is_none() {
+                    errors.push(format!("操作节点 {key} 缺少 trigger"));
+                }
+                if let Some(t) = node.target.as_deref() {
+                    if let Some(target) = by_key.get(t) {
+                        if !matches!(
+                            target.node_type,
+                            NodeType::Control | NodeType::Class | NodeType::Object
+                        ) {
+                            errors.push(format!(
+                                "操作节点 {key} 的 target 必须指向控件/类/对象节点（当前指向 {}）",
+                                target.node_type
+                            ));
+                        }
+                    }
+                }
+            }
+            NodeType::Condition => {
+                if let Some(expr) = &node.expr {
+                    if let Some(msg) = validate_expr(expr) {
+                        errors.push(format!("条件节点 {key}: {msg}"));
+                    }
+                } else {
+                    errors.push(format!("条件节点 {key} 缺少 expr"));
+                }
+            }
+            NodeType::Action => {
+                let op = node.op;
+                if op.is_none() {
+                    errors.push(format!("动作节点 {key} 缺少 op"));
+                }
+                if let Some(target_key) = node.target.as_deref() {
+                    if let Some(target) = by_key.get(target_key) {
+                        let actual = target.node_type;
+                        let ok = match op {
+                            Some(ActionOp::Show) | Some(ActionOp::Hide) => {
+                                actual == NodeType::Control
+                            }
+                            Some(ActionOp::Collapse) | Some(ActionOp::Expand) => {
+                                actual == NodeType::Group
+                            }
+                            Some(ActionOp::Toggle) => {
+                                matches!(actual, NodeType::Control | NodeType::Group)
+                            }
+                            None => true,
+                        };
+                        if !ok {
+                            errors.push(format!(
+                                "动作节点 {key} 的 target 类型不符：{} 不能指向 {}",
+                                op.map(|o| o.as_str()).unwrap_or("?"),
+                                actual
+                            ));
+                        }
+                    }
+                }
             }
         }
     }
-}
 
-/// 校验边：端点存在性 + 端点类型与边类型匹配。
-fn validate_edge(
-    edge: &BlueprintEdge,
-    by_key: &HashMap<&str, &BlueprintNode>,
-    errors: &mut Vec<String>,
-) {
-    let from = by_key.get(edge.from.as_str()).map(|n| n.node_type);
-    let to = by_key.get(edge.to.as_str()).map(|n| n.node_type);
-    if from.is_none() {
-        errors.push(format!("边引用不存在的起点: {}", edge.from));
-    }
-    if to.is_none() {
-        errors.push(format!("边引用不存在的终点: {}", edge.to));
-    }
-    let ok = match (edge.edge_kind, from, to) {
-        (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Group))
-        | (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Control))
-        | (EdgeKind::Contains, Some(NodeType::Group), Some(NodeType::Control))
-        | (EdgeKind::Contains, Some(NodeType::Control), Some(NodeType::Class))
-        | (EdgeKind::Contains, Some(NodeType::Class), Some(NodeType::Object)) => true,
-        (EdgeKind::MemberOf, Some(NodeType::Control), Some(NodeType::Group)) => true,
-        (EdgeKind::On, Some(NodeType::Control | NodeType::Class | NodeType::Object), Some(NodeType::Event)) => {
-            true
+    /// 校验边：端点存在性 + 端点类型与边类型匹配。
+    pub(super) fn validate_edge(
+        edge: &BlueprintEdge,
+        by_key: &HashMap<&str, &BlueprintNode>,
+        errors: &mut Vec<String>,
+    ) {
+        let from = by_key.get(edge.from.as_str()).map(|n| n.node_type);
+        let to = by_key.get(edge.to.as_str()).map(|n| n.node_type);
+        if from.is_none() {
+            errors.push(format!("边引用不存在的起点: {}", edge.from));
         }
-        (EdgeKind::Fires, Some(NodeType::Event), Some(NodeType::Condition | NodeType::Action)) => {
-            true
+        if to.is_none() {
+            errors.push(format!("边引用不存在的终点: {}", edge.to));
         }
-        (EdgeKind::Guards, Some(NodeType::Condition), Some(NodeType::Action)) => true,
-        _ => false,
-    };
-    if !ok {
-        errors.push(format!(
-            "非法边: {} --{}--> {}（端点类型不匹配或引用缺失）",
-            edge.from, edge.edge_kind, edge.to
-        ));
-    }
-}
-
-/// 条件表达式校验（基础集，RFC 0007 决策 1）。
-fn validate_expr(expr: &str) -> Option<String> {
-    let tokens: Vec<&str> = expr.split_whitespace().collect();
-    if tokens.len() != 3 {
-        return Some(format!("条件表达式应为「字段 操作符 值」三段: {expr}"));
-    }
-    let lhs = tokens[0];
-    let op = tokens[1];
-    let rhs = tokens[2];
-    match (lhs, op) {
-        ("media_type", "==") => match rhs {
-            "image" | "video" | "audio" => None,
-            _ => Some(format!("media_type 值必须是 image/video/audio: {expr}")),
-        },
-        ("selection", "!=") if rhs == "empty" => None,
-        ("selection", _) => Some(format!("selection 仅支持 `selection != empty`: {expr}")),
-        ("rating", ">=") => match rhs.parse::<u32>() {
-            Ok(v) if v <= 5 => None,
-            _ => Some(format!("rating 值必须是 0..=5 的整数: {expr}")),
-        },
-        ("has_tag", "==") if !rhs.is_empty() => None,
-        ("has_tag", _) => Some(format!("has_tag 值不能为空: {expr}")),
-        _ => Some(format!("不支持的条件表达式: {expr}")),
-    }
-}
-
-/// 在 fires/guards 子图上找环（求值链必须为 DAG）。
-fn find_cycle(edges: &[BlueprintEdge]) -> Option<Vec<NodeKey>> {
-    // 只保留求值链边
-    let eval_edges: Vec<&BlueprintEdge> = edges
-        .iter()
-        .filter(|e| matches!(e.edge_kind, EdgeKind::Fires | EdgeKind::Guards))
-        .collect();
-    let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
-    for e in &eval_edges {
-        adj.entry(e.from.as_str()).or_default().push(e.to.as_str());
-    }
-    // 0=未访问 1=访问中 2=已结束；记录路径用于还原环。
-    let mut state: HashMap<&str, u8> = HashMap::new();
-    let mut path: Vec<&str> = Vec::new();
-    for start in adj.keys() {
-        if state.get(start) == Some(&2) {
-            continue;
-        }
-        if let Some(cycle) = dfs_cycle(start, &adj, &mut state, &mut path) {
-            return Some(cycle);
+        let ok = match (edge.edge_kind, from, to) {
+            (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Group))
+            | (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Control))
+            | (EdgeKind::Contains, Some(NodeType::Group), Some(NodeType::Control))
+            | (EdgeKind::Contains, Some(NodeType::Control), Some(NodeType::Class))
+            | (EdgeKind::Contains, Some(NodeType::Class), Some(NodeType::Object)) => true,
+            (EdgeKind::MemberOf, Some(NodeType::Control), Some(NodeType::Group)) => true,
+            (EdgeKind::On, Some(NodeType::Control | NodeType::Class | NodeType::Object), Some(NodeType::Event)) => {
+                true
+            }
+            (EdgeKind::Fires, Some(NodeType::Event), Some(NodeType::Condition | NodeType::Action)) => {
+                true
+            }
+            (EdgeKind::Guards, Some(NodeType::Condition), Some(NodeType::Action)) => true,
+            _ => false,
+        };
+        if !ok {
+            errors.push(format!(
+                "非法边: {} --{}--> {}（端点类型不匹配或引用缺失）",
+                edge.from, edge.edge_kind, edge.to
+            ));
         }
     }
-    None
-}
 
-fn dfs_cycle<'a>(
-    node: &'a str,
-    adj: &HashMap<&'a str, Vec<&'a str>>,
-    state: &mut HashMap<&'a str, u8>,
-    path: &mut Vec<&'a str>,
-) -> Option<Vec<NodeKey>> {
-    state.insert(node, 1);
-    path.push(node);
-    if let Some(nexts) = adj.get(node) {
-        for &next in nexts {
-            match state.get(next) {
-                Some(&1) => {
-                    // 找到环：从 next 到 path 末尾截取
-                    let start = path.iter().position(|k| *k == next)?;
-                    let cycle = path[start..]
-                        .iter()
-                        .map(|k| k.to_string())
-                        .collect::<Vec<_>>();
-                    return Some(cycle);
-                }
-                Some(&2) => {}
-                _ => {
-                    if let Some(cycle) = dfs_cycle(next, adj, state, path) {
+    /// 条件表达式校验（基础集，RFC 0007 决策 1）。
+    pub(super) fn validate_expr(expr: &str) -> Option<String> {
+        let tokens: Vec<&str> = expr.split_whitespace().collect();
+        if tokens.len() != 3 {
+            return Some(format!("条件表达式应为「字段 操作符 值」三段: {expr}"));
+        }
+        let lhs = tokens[0];
+        let op = tokens[1];
+        let rhs = tokens[2];
+        match (lhs, op) {
+            ("media_type", "==") => match rhs {
+                "image" | "video" | "audio" => None,
+                _ => Some(format!("media_type 值必须是 image/video/audio: {expr}")),
+            },
+            ("selection", "!=") if rhs == "empty" => None,
+            ("selection", _) => Some(format!("selection 仅支持 `selection != empty`: {expr}")),
+            ("rating", ">=") => match rhs.parse::<u32>() {
+                Ok(v) if v <= 5 => None,
+                _ => Some(format!("rating 值必须是 0..=5 的整数: {expr}")),
+            },
+            ("has_tag", "==") if !rhs.is_empty() => None,
+            ("has_tag", _) => Some(format!("has_tag 值不能为空: {expr}")),
+            _ => Some(format!("不支持的条件表达式: {expr}")),
+        }
+    }
+
+    /// 在 fires/guards 子图上找环（求值链必须为 DAG）。
+    pub(super) fn find_cycle(edges: &[BlueprintEdge]) -> Option<Vec<NodeKey>> {
+        let eval_edges: Vec<&BlueprintEdge> = edges
+            .iter()
+            .filter(|e| matches!(e.edge_kind, EdgeKind::Fires | EdgeKind::Guards))
+            .collect();
+        let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        for e in &eval_edges {
+            adj.entry(e.from.as_str()).or_default().push(e.to.as_str());
+        }
+        let mut state: HashMap<&str, u8> = HashMap::new();
+        let mut path: Vec<&str> = Vec::new();
+        for start in adj.keys() {
+            if state.get(start) == Some(&2) {
+                continue;
+            }
+            if let Some(cycle) = dfs_cycle(start, &adj, &mut state, &mut path) {
+                return Some(cycle);
+            }
+        }
+        None
+    }
+
+    fn dfs_cycle<'a>(
+        node: &'a str,
+        adj: &HashMap<&'a str, Vec<&'a str>>,
+        state: &mut HashMap<&'a str, u8>,
+        path: &mut Vec<&'a str>,
+    ) -> Option<Vec<NodeKey>> {
+        state.insert(node, 1);
+        path.push(node);
+        if let Some(nexts) = adj.get(node) {
+            for &next in nexts {
+                match state.get(next) {
+                    Some(&1) => {
+                        let start = path.iter().position(|k| *k == next)?;
+                        let cycle = path[start..]
+                            .iter()
+                            .map(|k| k.to_string())
+                            .collect::<Vec<_>>();
                         return Some(cycle);
                     }
+                    Some(&2) => {}
+                    _ => {
+                        if let Some(cycle) = dfs_cycle(next, adj, state, path) {
+                            return Some(cycle);
+                        }
+                    }
                 }
             }
         }
+        state.insert(node, 2);
+        path.pop();
+        None
     }
-    state.insert(node, 2);
-    path.pop();
-    None
 }
 
 // ============================== 存储行 ==============================
@@ -803,291 +869,6 @@ pub struct BlueprintTemplateRow {
     pub updated_at: String,
 }
 
+
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn control(key: &str, panel_id: &str) -> BlueprintNode {
-        BlueprintNode {
-            key: key.into(),
-            node_type: NodeType::Control,
-            name: None,
-            panel_id: Some(panel_id.into()),
-            title_key: None,
-            control: None,
-            media_type: None,
-            class: None,
-            scope: None,
-            mode: None,
-            default_visible: None,
-            hide_direction: None,
-            position: None,
-            trigger: None,
-            target: None,
-            expr: None,
-            op: None,
-            payload: None,
-        }
-    }
-
-    fn node_of(key: &str, node_type: NodeType) -> BlueprintNode {
-        BlueprintNode {
-            key: key.into(),
-            node_type,
-            ..control("placeholder", "p")
-        }
-    }
-
-    #[test]
-    fn enums_roundtrip() {
-        for v in [
-            NodeType::LayoutBlock,
-            NodeType::Control,
-            NodeType::Class,
-            NodeType::Object,
-            NodeType::Group,
-            NodeType::Event,
-            NodeType::Condition,
-            NodeType::Action,
-        ] {
-            assert_eq!(NodeType::from_str(v.as_str()), Some(v));
-        }
-        for v in [GroupMode::Exclusive, GroupMode::Independent] {
-            assert_eq!(GroupMode::from_str(v.as_str()), Some(v));
-        }
-        for v in [
-            Trigger::Click,
-            Trigger::DoubleClick,
-            Trigger::SelectionChange,
-        ] {
-            assert_eq!(Trigger::from_str(v.as_str()), Some(v));
-        }
-        for v in [
-            ActionOp::Show,
-            ActionOp::Hide,
-            ActionOp::Toggle,
-            ActionOp::Collapse,
-            ActionOp::Expand,
-        ] {
-            assert_eq!(ActionOp::from_str(v.as_str()), Some(v));
-            assert_eq!(v.is_group_op(), matches!(v, ActionOp::Collapse | ActionOp::Expand));
-        }
-        for v in [
-            EdgeKind::Contains,
-            EdgeKind::MemberOf,
-            EdgeKind::On,
-            EdgeKind::Fires,
-            EdgeKind::Guards,
-        ] {
-            assert_eq!(EdgeKind::from_str(v.as_str()), Some(v));
-        }
-    }
-
-    #[test]
-    fn hide_direction_roundtrip_including_toward() {
-        for d in [
-            HideDirection::Left,
-            HideDirection::Right,
-            HideDirection::Up,
-            HideDirection::Down,
-            HideDirection::Toward("g_other".into()),
-        ] {
-            assert_eq!(HideDirection::from_str(&d.as_str()), Some(d));
-        }
-        assert_eq!(HideDirection::from_str("toward:"), None);
-        assert_eq!(HideDirection::from_str("unknown"), None);
-        assert_eq!(
-            HideDirection::Toward("g".into()).toward_target(),
-            Some("g")
-        );
-        assert_eq!(HideDirection::Left.toward_target(), None);
-    }
-
-    #[test]
-    fn hide_direction_serde_json() {
-        let json = serde_json::to_string(&HideDirection::Toward("g_x".into())).unwrap();
-        assert_eq!(json, "\"toward:g_x\"");
-        let back: HideDirection = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, HideDirection::Toward("g_x".into()));
-    }
-
-    #[test]
-    fn graph_json_roundtrip() {
-        let json = r#"{
-          "schema_version": 1,
-          "nodes": [
-            {"key":"c_v","type":"control","panel_id":"viewer","title_key":"panel.viewer"},
-            {"key":"k_i","type":"class","control":"c_v","media_type":"image"},
-            {"key":"o_1","type":"object","class":"k_i","scope":"double_clicked"},
-            {"key":"g_1","type":"group","mode":"exclusive","default_visible":[],
-             "hide_direction":"left","position":{"x":10,"y":20}},
-            {"key":"e_1","type":"event","trigger":"double_click","target":"o_1"},
-            {"key":"c_1","type":"condition","expr":"media_type == image"},
-            {"key":"a_1","type":"action","op":"show","target":"c_v"}
-          ],
-          "edges": [
-            {"from":"e_1","to":"c_1","kind":"fires","order":1},
-            {"from":"c_1","to":"a_1","kind":"guards","order":1},
-            {"from":"c_v","to":"k_i","kind":"contains","order":1},
-            {"from":"k_i","to":"o_1","kind":"contains","order":1},
-            {"from":"c_v","to":"g_1","kind":"memberOf","order":1}
-          ]
-        }"#;
-        let graph = BlueprintGraph::from_json(json).expect("解析失败");
-        assert_eq!(graph.nodes.len(), 7);
-        assert_eq!(graph.edges.len(), 5);
-        assert!(graph.validate().is_empty(), "{:?}", graph.validate());
-        let back = BlueprintGraph::from_json(&graph.to_json()).expect("再解析失败");
-        assert_eq!(back, graph);
-    }
-
-    #[test]
-    fn validate_rejects_duplicate_key() {
-        let mut graph = BlueprintGraph::from_json(
-            r#"{"schema_version":1,"nodes":[
-              {"key":"c","type":"control","panel_id":"viewer"},
-              {"key":"c","type":"control","panel_id":"player"}
-            ],"edges":[]}"#,
-        )
-        .unwrap();
-        let errors = graph.validate();
-        assert!(errors.iter().any(|e| e.contains("key 重复")));
-        graph.nodes.pop();
-        assert!(graph.validate().is_empty());
-    }
-
-    #[test]
-    fn validate_accepts_layout_block_contains_group_and_control() {
-        let graph = BlueprintGraph::from_json(
-            r#"{"schema_version":1,"nodes":[
-              {"key":"blk","type":"layout_block","name":"右栏"},
-              {"key":"g","type":"group","mode":"exclusive"},
-              {"key":"c","type":"control","panel_id":"viewer"}
-            ],"edges":[
-              {"from":"blk","to":"g","kind":"contains","order":1},
-              {"from":"blk","to":"c","kind":"contains","order":1}
-            ]}"#,
-        )
-        .unwrap();
-        assert!(graph.validate().is_empty(), "{:?}", graph.validate());
-        // 反向：控件 contains 布局块 → 非法
-        let bad = BlueprintGraph::from_json(
-            r#"{"schema_version":1,"nodes":[
-              {"key":"blk","type":"layout_block"},
-              {"key":"c","type":"control","panel_id":"viewer"}
-            ],"edges":[{"from":"c","to":"blk","kind":"contains","order":1}]}"#,
-        )
-        .unwrap();
-        assert!(bad.validate().iter().any(|e| e.contains("非法边")));
-    }
-
-    #[test]
-    fn validate_rejects_dangling_edge() {
-        let graph = BlueprintGraph::from_json(
-            r#"{"schema_version":1,"nodes":[
-              {"key":"c","type":"control","panel_id":"viewer"},
-              {"key":"a","type":"action","op":"show","target":"c"}
-            ],"edges":[{"from":"e_missing","to":"a","kind":"fires","order":1}]}"#,
-        )
-        .unwrap();
-        assert!(graph.validate().iter().any(|e| e.contains("不存在的起点")));
-    }
-
-    #[test]
-    fn node_name_field_roundtrip_and_optional() {
-        let json = r#"{"schema_version":1,"nodes":[
-          {"key":"c","type":"control","name":"媒体预览","panel_id":"media"}
-        ],"edges":[]}"#;
-        let graph = BlueprintGraph::from_json(json).expect("解析失败");
-        assert_eq!(graph.nodes[0].name.as_deref(), Some("媒体预览"));
-        assert!(graph.validate().is_empty());
-        let back = BlueprintGraph::from_json(&graph.to_json()).expect("再解析失败");
-        assert_eq!(back.nodes[0].name.as_deref(), Some("媒体预览"));
-
-        // 缺省 name → None（旧文档兼容）
-        let legacy = BlueprintGraph::from_json(
-            r#"{"schema_version":1,"nodes":[
-              {"key":"c","type":"control","panel_id":"media"}
-            ],"edges":[]}"#,
-        )
-        .expect("解析失败");
-        assert_eq!(legacy.nodes[0].name, None);
-        assert!(legacy.validate().is_empty());
-    }
-
-    #[test]
-    fn validate_rejects_illegal_edge_endpoints() {
-        // fires 的起点必须是事件节点
-        let graph = BlueprintGraph::from_json(
-            r#"{"schema_version":1,"nodes":[
-              {"key":"c","type":"control","panel_id":"viewer"},
-              {"key":"a","type":"action","op":"show","target":"c"}
-            ],"edges":[{"from":"c","to":"a","kind":"fires","order":1}]}"#,
-        )
-        .unwrap();
-        assert!(graph.validate().iter().any(|e| e.contains("非法边")));
-    }
-
-    #[test]
-    fn validate_rejects_cycle_in_fires_guards() {
-        // 人为构造：条件 A fires 条件 B，B fires A → 环
-        let graph = BlueprintGraph::from_json(
-            r#"{"schema_version":1,"nodes":[
-              {"key":"c","type":"control","panel_id":"viewer"},
-              {"key":"ca","type":"condition","expr":"media_type == image"},
-              {"key":"cb","type":"condition","expr":"media_type == video"},
-              {"key":"a","type":"action","op":"show","target":"c"}
-            ],"edges":[
-              {"from":"ca","to":"cb","kind":"fires","order":1},
-              {"from":"cb","to":"ca","kind":"fires","order":1},
-              {"from":"cb","to":"a","kind":"guards","order":1}
-            ]}"#,
-        )
-        .unwrap();
-        let errors = graph.validate();
-        assert!(errors.iter().any(|e| e.contains("存在环")), "{errors:?}");
-    }
-
-    #[test]
-    fn validate_rejects_exclusive_group_multi_default_visible() {
-        let graph = BlueprintGraph::from_json(
-            r#"{"schema_version":1,"nodes":[
-              {"key":"c1","type":"control","panel_id":"viewer"},
-              {"key":"c2","type":"control","panel_id":"player"},
-              {"key":"g","type":"group","mode":"exclusive","default_visible":["c1","c2"]}
-            ],"edges":[]}"#,
-        )
-        .unwrap();
-        assert!(graph
-            .validate()
-            .iter()
-            .any(|e| e.contains("default_visible 至多一个成员")));
-    }
-
-    #[test]
-    fn validate_rejects_class_control_not_control_node() {
-        let graph = BlueprintGraph::from_json(
-            r#"{"schema_version":1,"nodes":[
-              {"key":"k","type":"class","control":"g","media_type":"image"},
-              {"key":"g","type":"group","mode":"exclusive"}
-            ],"edges":[]}"#,
-        )
-        .unwrap();
-        assert!(graph.validate().iter().any(|e| e.contains("必须是控件节点")));
-    }
-
-    #[test]
-    fn validate_rejects_bad_expr_and_action_target() {
-        let graph = BlueprintGraph::from_json(
-            r#"{"schema_version":1,"nodes":[
-              {"key":"c","type":"control","panel_id":"viewer"},
-              {"key":"cond","type":"condition","expr":"rating == 3"},
-              {"key":"a","type":"action","op":"collapse","target":"c"}
-            ],"edges":[]}"#,
-        )
-        .unwrap();
-        let errors = graph.validate();
-        assert!(errors.iter().any(|e| e.contains("不支持的条件")), "{errors:?}");
-        assert!(errors.iter().any(|e| e.contains("必须是组节点")), "{errors:?}");
-    }
-}
+include!("blueprint_tests.rs");

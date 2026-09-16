@@ -8,7 +8,7 @@
  */
 
 import type { BlueprintGraph, BlueprintNode, BlueprintEdge } from "@hamster-pouch/config";
-import { makeEmptyBlueprint, PANEL_TITLES } from "@hamster-pouch/config";
+import { forUserSave, makeEmptyBlueprint, PANEL_TITLES } from "@hamster-pouch/config";
 import type { DockviewApi } from "dockview-react";
 
 import * as api from "./api";
@@ -153,7 +153,8 @@ export async function syncBlueprintFromLayout(
       repoId,
       blueprintId: defaultItem.id,
       name: defaultItem.name,
-      blueprintJson: JSON.stringify(doc),
+      // 同步布局结构后的文档已含用户/布局信息：去掉内置默认标记，停止自动升级覆盖。
+      blueprintJson: JSON.stringify(forUserSave(doc)),
     });
     return defaultItem.id;
   } catch {

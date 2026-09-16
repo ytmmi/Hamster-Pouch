@@ -2,13 +2,36 @@
 //!
 //! 职责边界：只做参数校验、状态装配、调用 hp-store / hp-core；业务规则在 crate 层。
 //! 蓝图文档整 JSON 存储；保存前必须通过语义校验（`BlueprintGraph::validate`）。
+//!
+//! 变更广播：凡改动仓库蓝图（新建/保存/删除/设默认/模板安装）的命令都发出
+//! `blueprint.changed` 事件（载荷 `{ repoId, blueprintId }`），前端据此重载生效蓝图
+//! 并把蓝图语义热更新到当前 dockview 布局（RFC 0007「命令与事件」）。
 
 use hp_core::{BlueprintGraph, BlueprintRow, HpError, HpResult};
 use serde::Serialize;
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::commands::shared::{ensure_global, hp_err_to_string};
 use crate::AppState;
+
+/// 蓝图变更事件载荷（RFC 0007 命令与事件）。
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BlueprintChanged {
+    repo_id: String,
+    blueprint_id: Option<String>,
+}
+
+/// 广播蓝图变更：前端重载当前生效蓝图并重新对账布局（失败不影响命令结果）。
+fn emit_changed(app: &tauri::AppHandle, repo_id: &str, blueprint_id: Option<&str>) {
+    let _ = app.emit(
+        "blueprint.changed",
+        BlueprintChanged {
+            repo_id: repo_id.to_string(),
+            blueprint_id: blueprint_id.map(|s| s.to_string()),
+        },
+    );
+}
 
 /// blueprint.list / create / save / template.install 返回项。
 #[derive(Serialize)]
@@ -156,6 +179,7 @@ pub(crate) fn blueprint_create(
     let row = db
         .create_blueprint(&repo_id, name.trim(), &template_json)
         .map_err(hp_err_to_string)?;
+    emit_changed(&app, &repo_id, Some(&row.id));
     Ok(to_item(row))
 }
 
@@ -167,6 +191,7 @@ pub(crate) fn blueprint_save(
     name: Option<String>,
     blueprint_json: String,
     state: State<AppState>,
+    app: tauri::AppHandle,
 ) -> Result<BlueprintItem, String> {
     parse_valid(&blueprint_json).map_err(hp_err_to_string)?;
     let name = name.unwrap_or_default();
@@ -178,6 +203,7 @@ pub(crate) fn blueprint_save(
     let row = db
         .save_blueprint(&repo_id, &blueprint_id, name.trim(), &blueprint_json)
         .map_err(hp_err_to_string)?;
+    emit_changed(&app, &repo_id, Some(&blueprint_id));
     Ok(to_item(row))
 }
 
@@ -187,11 +213,13 @@ pub(crate) fn blueprint_delete(
     repo_id: String,
     blueprint_id: String,
     state: State<AppState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let _ = repo_id;
     let mut guard = repo_guard(&state)?;
     let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    db.delete_blueprint(&blueprint_id).map_err(hp_err_to_string)
+    db.delete_blueprint(&blueprint_id).map_err(hp_err_to_string)?;
+    emit_changed(&app, &repo_id, Some(&blueprint_id));
+    Ok(())
 }
 
 /// blueprint.setDefault：设为仓库默认蓝图。
@@ -200,11 +228,14 @@ pub(crate) fn blueprint_set_default(
     repo_id: String,
     blueprint_id: String,
     state: State<AppState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     let mut guard = repo_guard(&state)?;
     let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
     db.set_default_blueprint(&repo_id, &blueprint_id)
-        .map_err(hp_err_to_string)
+        .map_err(hp_err_to_string)?;
+    emit_changed(&app, &repo_id, Some(&blueprint_id));
+    Ok(())
 }
 
 /// blueprint.validate：校验图文档，返回错误列表（空 = 有效）。
@@ -281,5 +312,6 @@ pub(crate) fn blueprint_template_install(
             &template_json,
         )
         .map_err(hp_err_to_string)?;
+    emit_changed(&app, &repo_id, Some(&row.id));
     Ok(to_item(row))
 }

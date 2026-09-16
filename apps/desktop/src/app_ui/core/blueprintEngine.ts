@@ -61,6 +61,17 @@ const SCOPE_FOR_TRIGGER: Record<BlueprintTrigger, string> = {
 export class BlueprintEngine {
   private graph: BlueprintGraph | null = null;
   private executor: BlueprintExecutor | null = null;
+  /** 诊断日志回调（应用装配层注入；null = 不记录）。 */
+  private logger: ((message: string) => void) | null = null;
+
+  /** 注入诊断日志回调（用于打包运行下排查"某操作为何仍有/没有联动"）。 */
+  setLogger(logger: ((message: string) => void) | null): void {
+    this.logger = logger;
+  }
+
+  private log(message: string): void {
+    this.logger?.(message);
+  }
 
   /** 注入执行器（应用装配层调用）。 */
   setExecutor(executor: BlueprintExecutor | null): void {
@@ -70,6 +81,16 @@ export class BlueprintEngine {
   /** 设置当前生效蓝图（仓库默认或内置默认；null = 无蓝图）。 */
   setGraph(graph: BlueprintGraph | null): void {
     this.graph = graph;
+    this.log(
+      `[engine] setGraph nodes=${graph?.nodes.length ?? "null"} edges=${graph?.edges.length ?? "-"} events=${
+        graph
+          ? graph.nodes
+              .filter((n) => n.type === "event")
+              .map((n) => `${n.key}:${n.trigger ?? "-"}`)
+              .join("|") || "(none)"
+          : "-"
+      }`,
+    );
   }
 
   /** 当前是否已装载蓝图。 */
@@ -82,6 +103,9 @@ export class BlueprintEngine {
     const graph = this.graph;
     const executor = this.executor;
     if (!graph || !executor) {
+      this.log(
+        `[engine] dispatch ${input.trigger}/${input.target.mediaType ?? "-"} → 跳过（graph=${!!graph} executor=${!!executor}）`,
+      );
       return;
     }
     const scope = input.target.scope ?? SCOPE_FOR_TRIGGER[input.trigger];
@@ -90,6 +114,11 @@ export class BlueprintEngine {
         n.type === "event" &&
         n.trigger === input.trigger &&
         this.eventMatches(n, input.target, scope, graph),
+    );
+    this.log(
+      `[engine] dispatch ${input.trigger}/${input.target.mediaType ?? "-"} → 命中事件=[${
+        events.map((e) => e.key).join(", ") || "无"
+      }]`,
     );
     for (const ev of events) {
       this.evalChain(ev.key, new Set<string>(), graph, input);
@@ -229,16 +258,24 @@ export class BlueprintEngine {
     }
     const target = graph.nodes.find((n) => n.key === action.target);
 
+    this.log(
+      `[engine] 执行动作 ${action.key}: ${op} → ${action.target}${
+        action.payload ? ` payload=${JSON.stringify(action.payload)}` : ""
+      }`,
+    );
+
     switch (op) {
       case "show": {
         if (target?.type !== "control" || !target.panel_id) {
           return;
         }
-        // 显示目标控件：已存在则激活，不存在则创建。
+        // 显示目标控件：已存在则激活，不存在则创建。默认以标签方式加入（避免默认
+        // 布局被浮窗堆满）；动作 `payload.floating = true` 时浮动创建。
         // 互斥组不在此处自动隐藏其他成员：同 dockview 组的成员共享显示区域，
         // 标签激活天然保证同一时间仅一个激活；跨 dockview 组的成员不做自动
         // 隐藏/收缩（避免破坏用户布局）。如需隐藏/收起请用显式 hide/collapse 动作。
-        executor.showPanel(target.panel_id, true);
+        const floating = (action.payload as { floating?: boolean } | undefined)?.floating === true;
+        executor.showPanel(target.panel_id, floating);
         break;
       }
       case "hide": {
