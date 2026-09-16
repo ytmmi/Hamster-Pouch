@@ -359,4 +359,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.payload": "載荷",
   "blueprint.target": "目標",
   "blueprint.deleteNode": "刪除節點",
+  "blueprint.name": "名稱",
+  "blueprint.arrange": "整理",
+  "blueprint.arrangeHint": "以選中節點為根，樹狀展開佈局（未選中則取第一個節點）",
 };

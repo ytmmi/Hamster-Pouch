@@ -234,7 +234,7 @@ export function BlueprintPanel(): JSX.Element {
     [doc, mutate],
   );
 
-  /** 校验并保存整文档。 */
+  /** 校验并保存整文档（显式保存）。 */
   const save = useCallback(async () => {
     if (!repoId || !selectedId) {
       return;
@@ -360,6 +360,83 @@ export function BlueprintPanel(): JSX.Element {
     }
   }, [jsonText]);
 
+  /** 静默持久化整文档（节点位置拖拽结束/一键整理后自动保存，不打扰用户）。 */
+  const persistDoc = useCallback(
+    (next: BlueprintGraph) => {
+      if (!repoId || !selectedId) {
+        return;
+      }
+      void api
+        .blueprintSave({
+          repoId,
+          blueprintId: selectedId,
+          name: name.trim() || undefined,
+          blueprintJson: JSON.stringify(next),
+        })
+        .catch(() => undefined);
+    },
+    [repoId, selectedId, name],
+  );
+
+  /** 一键整理：以选中节点为根，沿边（任意类型）BFS 分层树状展开并落位。 */
+  const arrangeTree = useCallback(
+    (rootKey: string) => {
+      const adj = new Map<string, string[]>();
+      for (const e of doc.edges) {
+        if (!adj.has(e.from)) {
+          adj.set(e.from, []);
+        }
+        adj.get(e.from)!.push(e.to);
+      }
+      const depth = new Map<string, number>();
+      const order: string[] = [];
+      const seen = new Set<string>([rootKey]);
+      const queue: { key: string; d: number }[] = [{ key: rootKey, d: 0 }];
+      depth.set(rootKey, 0);
+      order.push(rootKey);
+      while (queue.length > 0) {
+        const { key, d } = queue.shift()!;
+        for (const next of adj.get(key) ?? []) {
+          if (!seen.has(next)) {
+            seen.add(next);
+            depth.set(next, d + 1);
+            order.push(next);
+            queue.push({ key: next, d: d + 1 });
+          }
+        }
+      }
+      const H_GAP = 260;
+      const V_GAP = 84;
+      const colY = new Map<number, number>();
+      const positions = new Map<string, { x: number; y: number }>();
+      for (const key of order) {
+        const d = depth.get(key) ?? 0;
+        const y = colY.get(d) ?? 0;
+        colY.set(d, y + V_GAP);
+        positions.set(key, { x: 40 + d * H_GAP, y: 40 + y });
+      }
+      const next: BlueprintGraph = {
+        ...doc,
+        nodes: doc.nodes.map((n) =>
+          positions.has(n.key)
+            ? { ...n, position: positions.get(n.key)! }
+            : n,
+        ),
+      };
+      mutate(next);
+      persistDoc(next);
+    },
+    [doc, mutate, persistDoc],
+  );
+
+  const onArrange = useCallback(() => {
+    const root = selectedKey ?? doc.nodes[0]?.key;
+    if (!root) {
+      return;
+    }
+    arrangeTree(root);
+  }, [selectedKey, doc.nodes, arrangeTree]);
+
   // 派生选项列表
   const controlKeys = useMemo(
     () => doc.nodes.filter((n) => n.type === "control").map((n) => n.key),
@@ -449,7 +526,7 @@ export function BlueprintPanel(): JSX.Element {
             <span className="placeholder">{app.t("blueprint.noSelection")}</span>
           ) : (
             <>
-              {/* 名称 + 保存/删除 + 视图切换 */}
+              {/* 名称 + 保存/删除/一键整理 + 视图切换 */}
               <div className="row bp-toolbar">
                 <input
                   value={name}
@@ -458,6 +535,12 @@ export function BlueprintPanel(): JSX.Element {
                 />
                 <button disabled={busy} onClick={() => void save()}>
                   {app.t("common.confirm")}
+                </button>
+                <button
+                  title={app.t("blueprint.arrangeHint")}
+                  onClick={onArrange}
+                >
+                  {app.t("blueprint.arrange")}
                 </button>
                 <button className="danger" onClick={() => void remove()}>
                   {app.t("blueprint.removeNode")}
@@ -515,8 +598,10 @@ export function BlueprintPanel(): JSX.Element {
                     <BlueprintCanvas
                       doc={doc}
                       onChange={mutate}
+                      onPersist={persistDoc}
                       selectedKey={selectedKey}
                       onSelect={setSelectedKey}
+                      t={app.t}
                     />
                     <NodeInspector
                       node={selectedNode}
@@ -660,6 +745,9 @@ function NodeInspector({
         "key",
         node.key,
         (v) => onRename(v),
+      )}
+      {field(t("blueprint.name"), "name", node.name ?? "", (v) =>
+        onPatch({ name: v }),
       )}
       {node.type === "control" &&
         select(

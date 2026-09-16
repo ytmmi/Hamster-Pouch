@@ -376,6 +376,9 @@ export const zhCN = {
   "blueprint.payload": "载荷",
   "blueprint.target": "目标",
   "blueprint.deleteNode": "删除节点",
+  "blueprint.name": "名称",
+  "blueprint.arrange": "整理",
+  "blueprint.arrangeHint": "以选中节点为根，树状展开布局（未选中则取第一个节点）",
 } as const;
 
 export type DictZhCN = typeof zhCN;

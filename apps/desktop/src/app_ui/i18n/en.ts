@@ -359,4 +359,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.payload": "Payload",
   "blueprint.target": "Target",
   "blueprint.deleteNode": "Delete node",
+  "blueprint.name": "Name",
+  "blueprint.arrange": "Arrange",
+  "blueprint.arrangeHint": "Expand as a tree rooted at the selected node (falls back to the first node when none is selected)",
 };

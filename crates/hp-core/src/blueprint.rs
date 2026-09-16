@@ -320,6 +320,9 @@ pub struct BlueprintNode {
     pub key: NodeKey,
     #[serde(rename = "type")]
     pub node_type: NodeType,
+    /// 显示名称（用户自定义）；缺省时由前端按类型本地化生成（如「控件 1」）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     // control
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub panel_id: Option<String>,
@@ -762,6 +765,7 @@ mod tests {
         BlueprintNode {
             key: key.into(),
             node_type: NodeType::Control,
+            name: None,
             panel_id: Some(panel_id.into()),
             title_key: None,
             control: None,
@@ -914,6 +918,28 @@ mod tests {
         )
         .unwrap();
         assert!(graph.validate().iter().any(|e| e.contains("不存在的起点")));
+    }
+
+    #[test]
+    fn node_name_field_roundtrip_and_optional() {
+        let json = r#"{"schema_version":1,"nodes":[
+          {"key":"c","type":"control","name":"媒体预览","panel_id":"media"}
+        ],"edges":[]}"#;
+        let graph = BlueprintGraph::from_json(json).expect("解析失败");
+        assert_eq!(graph.nodes[0].name.as_deref(), Some("媒体预览"));
+        assert!(graph.validate().is_empty());
+        let back = BlueprintGraph::from_json(&graph.to_json()).expect("再解析失败");
+        assert_eq!(back.nodes[0].name.as_deref(), Some("媒体预览"));
+
+        // 缺省 name → None（旧文档兼容）
+        let legacy = BlueprintGraph::from_json(
+            r#"{"schema_version":1,"nodes":[
+              {"key":"c","type":"control","panel_id":"media"}
+            ],"edges":[]}"#,
+        )
+        .expect("解析失败");
+        assert_eq!(legacy.nodes[0].name, None);
+        assert!(legacy.validate().is_empty());
     }
 
     #[test]

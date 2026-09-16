@@ -16,6 +16,7 @@ import type {
   BlueprintNode,
   BlueprintNodeType,
 } from "@hamster-pouch/config";
+import type { Translate } from "../i18n";
 
 /** 节点类型 → 头部颜色（ComfyUI 风格高对比色板）。 */
 export const NODE_TYPE_COLORS: Record<BlueprintNodeType, string> = {
@@ -148,11 +149,31 @@ function nodePos(node: BlueprintNode): { x: number; y: number } {
   return node.position ?? { x: 0, y: 0 };
 }
 
+/**
+ * 节点显示名称：用户自定义 `name` 优先；缺省按类型本地化生成
+ * （如 zh-CN 下「控件 1」「事件 2」，随语言切换）。
+ */
+export function nodeDisplayName(
+  node: BlueprintNode,
+  t: Translate,
+  nodes: BlueprintNode[],
+): string {
+  if (node.name?.trim()) {
+    return node.name.trim();
+  }
+  const sameType = nodes.filter((n) => n.type === node.type);
+  const idx = sameType.findIndex((n) => n.key === node.key);
+  return `${t(`blueprint.type.${node.type}`)} ${idx + 1}`;
+}
+
 export interface BlueprintCanvasProps {
   doc: BlueprintGraph;
   onChange: (doc: BlueprintGraph) => void;
+  /** 节点拖拽结束/一键整理后，由面板持久化位置（保存整个文档）。 */
+  onPersist?: (doc: BlueprintGraph) => void;
   selectedKey: string | null;
   onSelect: (key: string | null) => void;
+  t: Translate;
 }
 
 const MIN_ZOOM = 0.3;
@@ -162,8 +183,10 @@ const MAX_ZOOM = 2.5;
 export function BlueprintCanvas({
   doc,
   onChange,
+  onPersist,
   selectedKey,
   onSelect,
+  t,
 }: BlueprintCanvasProps): JSX.Element {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
@@ -176,6 +199,8 @@ export function BlueprintCanvas({
   const [selectedEdge, setSelectedEdge] = useState<number | null>(null);
   const [, setTick] = useState(0);
   const portMap = useRef<Map<string, { x: number; y: number }>>(new Map());
+  /** 最近一次节点拖拽计算出的文档（拖拽结束用于持久化位置）。 */
+  const lastDragDoc = useRef<BlueprintGraph | null>(null);
   const dragRef = useRef<
     | { kind: "node"; key: string; offX: number; offY: number }
     | { kind: "pan"; startX: number; startY: number; viewX: number; viewY: number }
@@ -297,12 +322,14 @@ export function BlueprintCanvas({
         x: Math.round(wp.x - drag.offX),
         y: Math.round(wp.y - drag.offY),
       };
-      onChange({
+      const nextDoc: BlueprintGraph = {
         ...doc,
         nodes: doc.nodes.map((n) =>
           n.key === drag.key ? { ...n, position: next } : n,
         ),
-      });
+      };
+      lastDragDoc.current = nextDoc;
+      onChange(nextDoc);
     } else if (drag.kind === "pan") {
       setView({
         ...view,
@@ -350,6 +377,15 @@ export function BlueprintCanvas({
       }
       setTempEdge(null);
       return;
+    }
+    // 节点拖拽结束：位置已变更，持久化（保存文档，用户无需手动保存）。
+    const drag = dragRef.current;
+    if (drag?.kind === "node") {
+      const settled = lastDragDoc.current;
+      lastDragDoc.current = null;
+      if (settled && onPersist) {
+        onPersist(settled);
+      }
     }
     dragRef.current = null;
   };
@@ -432,7 +468,9 @@ export function BlueprintCanvas({
                 className="bp-node-header"
                 style={{ background: NODE_TYPE_COLORS[node.type] }}
               >
-                <span className="bp-node-key">{node.key}</span>
+                <span className="bp-node-key" title={node.key}>
+                  {nodeDisplayName(node, t, doc.nodes)}
+                </span>
                 <span className="bp-node-type">{node.type}</span>
               </div>
               <div className="bp-node-body">{nodeSummary(node)}</div>

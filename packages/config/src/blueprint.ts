@@ -39,6 +39,8 @@ export interface BlueprintPosition {
 export interface BlueprintNode {
   key: string;
   type: BlueprintNodeType;
+  /** 显示名称（用户自定义）；缺省时前端按类型本地化生成（如「控件 1」）。 */
+  name?: string;
   // control
   panel_id?: string;
   title_key?: string;
