@@ -89,14 +89,15 @@ export function diffLayoutIntoBlueprint(
       if (!controlKey) {
         continue;
       }
+      // 结构：标签组包含控件（contains 组→控件）
       const exists = edges.some(
-        (e) => e.from === controlKey && e.to === groupKey && e.kind === "memberOf",
+        (e) => e.from === groupKey && e.to === controlKey && e.kind === "contains",
       );
       if (!exists) {
         edges.push({
-          from: controlKey,
-          to: groupKey,
-          kind: "memberOf",
+          from: groupKey,
+          to: controlKey,
+          kind: "contains",
           order: edges.length + 1,
         });
       }

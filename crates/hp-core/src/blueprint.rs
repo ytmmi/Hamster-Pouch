@@ -271,14 +271,16 @@ impl fmt::Display for ActionOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeKind {
-    /// 包含：控件 → 类 → 对象。
+    /// 包含：布局块 → 标签组/控件；标签组 → 控件；控件 → 类 → 对象。
     Contains,
-    /// 归属：控件 → 组（契约字段为 `memberOf`，与 rename_all=snake_case 冲突故显式指定）。
+    /// 归属：控件 → 组（兼容旧图）。
     #[serde(rename = "memberOf")]
     MemberOf,
-    /// 触发：事件 → 条件/动作。
+    /// 规则三元组之「对象 → 操作」：在对象（控件/类/对象）上发生操作。
+    On,
+    /// 触发：操作 → 条件/状态。
     Fires,
-    /// 守卫：条件 → 动作。
+    /// 守卫：条件 → 状态。
     Guards,
 }
 
@@ -287,6 +289,7 @@ impl EdgeKind {
         match self {
             EdgeKind::Contains => "contains",
             EdgeKind::MemberOf => "memberOf",
+            EdgeKind::On => "on",
             EdgeKind::Fires => "fires",
             EdgeKind::Guards => "guards",
         }
@@ -296,6 +299,7 @@ impl EdgeKind {
         match s {
             "contains" => Some(EdgeKind::Contains),
             "memberOf" => Some(EdgeKind::MemberOf),
+            "on" => Some(EdgeKind::On),
             "fires" => Some(EdgeKind::Fires),
             "guards" => Some(EdgeKind::Guards),
             _ => None,
@@ -491,6 +495,25 @@ impl BlueprintGraph {
             ));
         }
 
+        // 操作（事件）必须有对象来源：`target` 字段或至少一条 `on` 入边（规则三元组
+        // 对象→操作→状态连起来；二者取一即可）。
+        for node in &self.nodes {
+            if node.node_type != NodeType::Event {
+                continue;
+            }
+            let has_target = node.target.is_some();
+            let has_on_edge = self
+                .edges
+                .iter()
+                .any(|e| e.edge_kind == EdgeKind::On && e.to == node.key);
+            if !has_target && !has_on_edge {
+                errors.push(format!(
+                    "操作节点 {key} 缺少对象来源：请连线 对象→操作（on 边）或填写 target",
+                    key = node.key
+                ));
+            }
+        }
+
         errors
     }
 }
@@ -566,14 +589,21 @@ fn validate_node(
         }
         NodeType::Event => {
             if node.trigger.is_none() {
-                errors.push(format!("事件节点 {key} 缺少 trigger"));
+                errors.push(format!("操作节点 {key} 缺少 trigger"));
             }
-            match node.target.as_deref().and_then(|t| by_key.get(t)) {
-                Some(t) if matches!(t.node_type, NodeType::Class | NodeType::Object) => {}
-                _ => errors.push(format!(
-                    "事件节点 {key} 的 target 必须是类或对象节点 key（当前: {}）",
-                    node.target.as_deref().unwrap_or("")
-                )),
+            // target 可选：规则三元组要求 对象→操作 连线（on 边）或 target 字段二选一，
+            // 该约束在边校验后的第二遍检查。
+            if let Some(t) = node.target.as_deref() {
+                match by_key.get(t) {
+                    Some(n)
+                        if matches!(
+                            n.node_type,
+                            NodeType::Control | NodeType::Class | NodeType::Object
+                        ) => {}
+                    _ => errors.push(format!(
+                        "操作节点 {key} 的 target 必须是控件/类/对象节点 key（当前: {t}）"
+                    )),
+                }
             }
         }
         NodeType::Condition => {
@@ -640,9 +670,13 @@ fn validate_edge(
     let ok = match (edge.edge_kind, from, to) {
         (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Group))
         | (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Control))
+        | (EdgeKind::Contains, Some(NodeType::Group), Some(NodeType::Control))
         | (EdgeKind::Contains, Some(NodeType::Control), Some(NodeType::Class))
         | (EdgeKind::Contains, Some(NodeType::Class), Some(NodeType::Object)) => true,
         (EdgeKind::MemberOf, Some(NodeType::Control), Some(NodeType::Group)) => true,
+        (EdgeKind::On, Some(NodeType::Control | NodeType::Class | NodeType::Object), Some(NodeType::Event)) => {
+            true
+        }
         (EdgeKind::Fires, Some(NodeType::Event), Some(NodeType::Condition | NodeType::Action)) => {
             true
         }
@@ -841,6 +875,7 @@ mod tests {
         for v in [
             EdgeKind::Contains,
             EdgeKind::MemberOf,
+            EdgeKind::On,
             EdgeKind::Fires,
             EdgeKind::Guards,
         ] {

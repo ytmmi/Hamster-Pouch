@@ -96,19 +96,39 @@ export class BlueprintEngine {
     }
   }
 
-  /** 事件 target（类或对象）与上报目标是否匹配。 */
+  /** 事件 target（控件/类/对象）与上报目标是否匹配。 */
   private eventMatches(
     event: BlueprintNode,
     target: BlueprintTargetRef,
     scope: string,
     graph: BlueprintGraph,
   ): boolean {
-    if (!event.target) {
-      return false;
-    }
-    const node = graph.nodes.find((n) => n.key === event.target);
-    if (!node) {
-      return false;
+    // 规则三元组：对象 → 操作 → 状态。操作节点的对象来源 = on 入边（优先），
+    // 兼容旧图回退 target 字段。
+    const objectKeys = graph.edges
+      .filter((e) => e.kind === "on" && e.to === event.key)
+      .map((e) => e.from);
+    const candidates =
+      objectKeys.length > 0
+        ? objectKeys.map((k) => graph.nodes.find((n) => n.key === k))
+        : event.target
+          ? [graph.nodes.find((n) => n.key === event.target)]
+          : [];
+    return candidates.some(
+      (node) => node && this.objectNodeMatches(node, target, scope, graph),
+    );
+  }
+
+  /** 对象节点（控件/类/对象）是否命中上报目标。 */
+  private objectNodeMatches(
+    node: BlueprintNode,
+    target: BlueprintTargetRef,
+    scope: string,
+    graph: BlueprintGraph,
+  ): boolean {
+    if (node.type === "control") {
+      // 对象 = 控件本身（面板级操作）：无媒体类型的上报即命中。
+      return !target.mediaType;
     }
     if (node.type === "class") {
       return node.media_type === target.mediaType;
@@ -265,15 +285,22 @@ export class BlueprintEngine {
     }
   }
 
-  /** 组内成员控件对应的面板 ID 列表。 */
+  /** 标签组内成员控件对应的面板 ID 列表（contains 组→控件；兼容旧 memberOf）。 */
   private groupMemberPanelIds(groupKey: string, graph: BlueprintGraph): string[] {
     const ids: string[] = [];
+    const seen = new Set<string>();
     for (const edge of graph.edges) {
-      if (edge.kind !== "memberOf" || edge.to !== groupKey) {
+      const isGroupContains =
+        edge.kind === "contains" && edge.from === groupKey;
+      const isMemberOf =
+        edge.kind === "memberOf" && edge.to === groupKey;
+      const controlKey = isGroupContains ? edge.to : isMemberOf ? edge.from : null;
+      if (!controlKey || seen.has(controlKey)) {
         continue;
       }
+      seen.add(controlKey);
       const node = graph.nodes.find(
-        (n) => n.key === edge.from && n.type === "control",
+        (n) => n.key === controlKey && n.type === "control",
       );
       if (node?.panel_id) {
         ids.push(node.panel_id);

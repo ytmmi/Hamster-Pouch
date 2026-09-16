@@ -741,7 +741,6 @@ function NodeInspector({
   const optionsOf = (keys: string[]): { v: string; l: string }[] =>
     keys.map((k) => ({ v: k, l: labelOf(k) }));
 
-  const eventTargetKeys = [...classKeys, ...objectKeys];
   const actionTargetKeys =
     node.op === "collapse" || node.op === "expand"
       ? groupKeys
@@ -898,13 +897,12 @@ function NodeInspector({
           ],
           (v) => onPatch({ trigger: v as BlueprintNode["trigger"] }),
         )}
-      {node.type === "event" &&
-        select(
-          t("blueprint.target"),
-          node.target ?? "",
-          optionsOf(eventTargetKeys),
-          (v) => onPatch({ target: v }),
-        )}
+      {node.type === "event" && (
+        <span className="dim bp-hints">
+          对象 → {t("blueprint.port.on")} → {t("blueprint.port.fires")} → 状态
+          （从左侧「对象」端口拖线连入）
+        </span>
+      )}
       {node.type === "condition" &&
         field(t("blueprint.conditionExpr"), "expr", node.expr ?? "", (v) =>
           onPatch({ expr: v }),

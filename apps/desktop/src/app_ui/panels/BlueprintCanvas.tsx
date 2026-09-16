@@ -34,6 +34,7 @@ export const NODE_TYPE_COLORS: Record<BlueprintNodeType, string> = {
 export const EDGE_COLORS: Record<BlueprintEdge["kind"], string> = {
   contains: "#9aa0a6",
   memberOf: "#c98bdb",
+  on: "#7ec3ff",
   fires: "#e0655a",
   guards: "#e2a94f",
 };
@@ -50,14 +51,25 @@ const PORT_DEFS: Record<BlueprintNodeType, PortDef[]> = {
     { id: "in", side: "in" },
     { id: "contains", side: "out" },
     { id: "memberOf", side: "out" },
+    { id: "on", side: "out" },
   ],
   class: [
     { id: "contains", side: "in" },
     { id: "contains", side: "out" },
+    { id: "on", side: "out" },
   ],
-  object: [{ id: "contains", side: "in" }],
-  group: [{ id: "memberOf", side: "in" }],
-  event: [{ id: "fires", side: "out" }],
+  object: [
+    { id: "contains", side: "in" },
+    { id: "on", side: "out" },
+  ],
+  group: [
+    { id: "contains", side: "in" },
+    { id: "contains", side: "out" },
+  ],
+  event: [
+    { id: "on", side: "in" },
+    { id: "fires", side: "out" },
+  ],
   condition: [
     { id: "fires", side: "in" },
     { id: "guards", side: "out" },
@@ -65,7 +77,7 @@ const PORT_DEFS: Record<BlueprintNodeType, PortDef[]> = {
   action: [{ id: "in", side: "in" }],
 };
 
-/** 端口标签（多语言）：contains/memberOf/fires/guards；action 输入口为「触发/守卫」。 */
+/** 端口标签（多语言）：contains/memberOf/fires/guards/on；action 输入口为「触发/守卫」。 */
 export function portLabel(
   type: BlueprintNodeType,
   portId: string,
@@ -90,6 +102,7 @@ export function kindForEdge(
       if (fromType === "layout_block" && (toType === "group" || toType === "control")) {
         return "contains";
       }
+      if (fromType === "group" && toType === "control") return "contains";
       if (fromType === "control" && toType === "class") return "contains";
       if (fromType === "class" && toType === "object") return "contains";
       return null;
@@ -101,6 +114,15 @@ export function kindForEdge(
         : null;
     case "guards":
       return fromType === "condition" && toType === "action" ? "guards" : null;
+    case "on":
+      return (
+        (fromType === "control" ||
+          fromType === "class" ||
+          fromType === "object") &&
+        toType === "event"
+      )
+        ? "on"
+        : null;
     default:
       return null;
   }
@@ -120,7 +142,9 @@ function portIdFor(
       case "object":
         return "contains";
       case "group":
-        return "memberOf";
+        return "contains";
+      case "event":
+        return "on";
       case "condition":
         return "fires";
       case "action":
@@ -129,8 +153,13 @@ function portIdFor(
         return "";
     }
   }
+  // 输出侧：对象→操作 的 on 边取 on 端口
+  if (kind === "on") {
+    return type === "control" || type === "class" || type === "object" ? "on" : "";
+  }
   switch (type) {
     case "layout_block":
+    case "group":
     case "control":
       return kind === "memberOf" ? "memberOf" : "contains";
     case "class":
@@ -145,10 +174,19 @@ function portIdFor(
 }
 
 /** 节点正文摘要（画布卡片展示关键字段；全部中文/多语言，不暴露底层 key）。 */
-export function nodeSummary(node: BlueprintNode, t: Translate, nodes: BlueprintNode[]): string {
+export function nodeSummary(
+  node: BlueprintNode,
+  t: Translate,
+  graph: BlueprintGraph,
+): string {
+  const nodes = graph.nodes;
+  const nameOf = (key: string): string => {
+    const n = nodes.find((x) => x.key === key);
+    return n ? nodeDisplayName(n, t, nodes) : key;
+  };
   switch (node.type) {
     case "layout_block":
-      return `${t("blueprint.port.contains")} 组/控件`;
+      return `${t("blueprint.port.contains")} 标签组/控件`;
     case "control":
       return resolveControlTitle(node, t) || "—";
     case "class":
@@ -167,9 +205,14 @@ export function nodeSummary(node: BlueprintNode, t: Translate, nodes: BlueprintN
       return dir ? `${mode} · ${dir}` : mode;
     }
     case "event": {
-      const target = node.target ? nodes.find((n) => n.key === node.target) : undefined;
-      const targetName = target ? nodeDisplayName(target, t, nodes) : node.target ?? "?";
-      return `${triggerLabel(node.trigger ?? "", t)} → ${targetName}`;
+      // 规则三元组：对象 → 操作 → 状态（on 入边对象 → fires 出边状态）
+      const objs = graph.edges
+        .filter((e) => e.kind === "on" && e.to === node.key)
+        .map((e) => nameOf(e.from));
+      const states = graph.edges
+        .filter((e) => e.kind === "fires" && e.from === node.key)
+        .map((e) => nameOf(e.to));
+      return `${triggerLabel(node.trigger ?? "", t)}：${objs.join("、") || "?"} → ${states.join("、") || "?"}`;
     }
     case "condition":
       return node.expr ?? "—";
@@ -568,7 +611,7 @@ export function BlueprintCanvas({
                   {t(`blueprint.type.${node.type}`)}
                 </span>
               </div>
-              <div className="bp-node-body">{nodeSummary(node, t, doc.nodes)}</div>
+              <div className="bp-node-body">{nodeSummary(node, t, doc)}</div>
               <div className="bp-node-ports">
                 <div className="bp-ports-in">
                   {ins.map((p) => (

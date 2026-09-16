@@ -307,7 +307,28 @@ fn default_blueprint_fixture_validates() {
     let errors = graph.validate();
     assert!(errors.is_empty(), "默认蓝图校验失败: {errors:?}");
     assert_eq!(graph.nodes.len(), 23, "默认蓝图应有 23 个节点");
-    assert_eq!(graph.edges.len(), 16, "默认蓝图应有 16 条边");
+    assert_eq!(graph.edges.len(), 20, "默认蓝图应有 20 条边");
+    // 结构：布局块 ⊃ 标签组/控件；标签组 ⊃ 控件（contains）
+    assert!(graph
+        .edges
+        .iter()
+        .any(|e| e.from == "g_viewers" && e.to == "c_viewer" && e.edge_kind == hp_core::EdgeKind::Contains));
+    assert!(graph
+        .edges
+        .iter()
+        .any(|e| e.from == "blk_right" && e.to == "c_meta" && e.edge_kind == hp_core::EdgeKind::Contains));
+    // 规则三元组：对象 → 操作 → 状态（on 边 + fires 边，全部连线）
+    assert!(graph
+        .edges
+        .iter()
+        .any(|e| e.from == "o_img" && e.to == "e_dbl_img" && e.edge_kind == hp_core::EdgeKind::On));
+    assert!(graph
+        .edges
+        .iter()
+        .any(|e| e.from == "e_dbl_img" && e.to == "a_show_viewer" && e.edge_kind == hp_core::EdgeKind::Fires));
+    // 操作节点无 target 字段（靠 on 边驱动）
+    let ev = graph.nodes.iter().find(|n| n.key == "e_dbl_img").expect("应有操作节点");
+    assert!(ev.target.is_none());
     assert_eq!(graph.default_version, Some(2));
 }
 

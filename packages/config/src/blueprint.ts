@@ -26,7 +26,7 @@ export type BlueprintActionOp = "show" | "hide" | "toggle" | "collapse" | "expan
 
 export type BlueprintGroupMode = "exclusive" | "independent";
 
-export type BlueprintEdgeKind = "contains" | "memberOf" | "fires" | "guards";
+export type BlueprintEdgeKind = "contains" | "memberOf" | "on" | "fires" | "guards";
 
 export type BlueprintMediaType = "image" | "video" | "audio";
 
@@ -151,40 +151,44 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { key: "c_player", type: "control", panel_id: "player", title_key: "panel.player" },
     { key: "c_meta", type: "control", panel_id: "metadata", title_key: "panel.metadata" },
 
-    // 事件与动作（双击联动）
-    { key: "e_dbl_img", type: "event", trigger: "double_click", target: "o_img" },
-    { key: "e_dbl_vid", type: "event", trigger: "double_click", target: "o_vid" },
-    { key: "e_dbl_aud", type: "event", trigger: "double_click", target: "o_aud" },
+    // 操作与状态（规则三元组：对象 → 操作 → 状态，全部连线）
+    { key: "e_dbl_img", type: "event", trigger: "double_click" },
+    { key: "e_dbl_vid", type: "event", trigger: "double_click" },
+    { key: "e_dbl_aud", type: "event", trigger: "double_click" },
     { key: "a_show_viewer", type: "action", op: "show", target: "c_viewer" },
     { key: "a_show_player", type: "action", op: "show", target: "c_player" },
     { key: "a_show_meta", type: "action", op: "show", target: "c_meta" },
   ],
   edges: [
-    // 布局块 → 内容（左/中/右均有归属）
+    // 布局块 → 内容（布局块包含标签组与控件）
     { from: "blk_left", to: "c_repo", kind: "contains", order: 1 },
     { from: "blk_left", to: "c_sources", kind: "contains", order: 2 },
     { from: "blk_left", to: "c_albums", kind: "contains", order: 3 },
     { from: "blk_center", to: "c_preview", kind: "contains", order: 4 },
     { from: "blk_right", to: "g_viewers", kind: "contains", order: 5 },
+    { from: "blk_right", to: "c_meta", kind: "contains", order: 6 },
 
-    // 控件 → 类（三条完整）
-    { from: "c_preview", to: "k_image", kind: "contains", order: 6 },
-    { from: "c_preview", to: "k_video", kind: "contains", order: 7 },
-    { from: "c_preview", to: "k_audio", kind: "contains", order: 8 },
+    // 标签组 → 控件（标签组包含控件）
+    { from: "g_viewers", to: "c_viewer", kind: "contains", order: 7 },
+    { from: "g_viewers", to: "c_player", kind: "contains", order: 8 },
 
-    // 类 → 对象（三条完整）
-    { from: "k_image", to: "o_img", kind: "contains", order: 9 },
-    { from: "k_video", to: "o_vid", kind: "contains", order: 10 },
-    { from: "k_audio", to: "o_aud", kind: "contains", order: 11 },
+    // 控件 → 类（控件内的类）
+    { from: "c_preview", to: "k_image", kind: "contains", order: 9 },
+    { from: "c_preview", to: "k_video", kind: "contains", order: 10 },
+    { from: "c_preview", to: "k_audio", kind: "contains", order: 11 },
 
-    // 控件 → 查看器标签组（元数据为详情面板，不在该组）
-    { from: "c_viewer", to: "g_viewers", kind: "memberOf", order: 12 },
-    { from: "c_player", to: "g_viewers", kind: "memberOf", order: 13 },
+    // 类 → 对象（类内的对象）
+    { from: "k_image", to: "o_img", kind: "contains", order: 12 },
+    { from: "k_video", to: "o_vid", kind: "contains", order: 13 },
+    { from: "k_audio", to: "o_aud", kind: "contains", order: 14 },
 
-    // 事件 → 动作（双击联动）
-    { from: "e_dbl_img", to: "a_show_viewer", kind: "fires", order: 14 },
-    { from: "e_dbl_vid", to: "a_show_player", kind: "fires", order: 15 },
-    { from: "e_dbl_aud", to: "a_show_meta", kind: "fires", order: 16 },
+    // 规则三元组：对象 → 操作 → 状态（全部连线）
+    { from: "o_img", to: "e_dbl_img", kind: "on", order: 15 },
+    { from: "o_vid", to: "e_dbl_vid", kind: "on", order: 16 },
+    { from: "o_aud", to: "e_dbl_aud", kind: "on", order: 17 },
+    { from: "e_dbl_img", to: "a_show_viewer", kind: "fires", order: 18 },
+    { from: "e_dbl_vid", to: "a_show_player", kind: "fires", order: 19 },
+    { from: "e_dbl_aud", to: "a_show_meta", kind: "fires", order: 20 },
   ],
 };
 
@@ -195,11 +199,15 @@ export function makeEmptyBlueprint(): BlueprintGraph {
 
 /**
  * 旧版内置默认蓝图识别（用于自动升级为新版）。
- * 旧库存默认图唯一的特征：左布局块曾 contains 到右栏标签组（`blk_left → g_viewers`）；
- * 新版已移除该边。命中即视为旧库存默认，由引擎自动替换，不影响用户编辑的图。
+ * 旧库存默认图特征：① 曾存在 `blk_left → g_viewers` 边（带布局块但结构错误的版本）；
+ * ② 有 `g_viewers` 标签组但没有任何布局块节点（更早的版本）。命中即视为旧库存默认，
+ * 由引擎自动替换，不影响用户编辑的图。
  */
 export function isObsoleteDefaultBlueprint(g: BlueprintGraph): boolean {
-  return g.edges.some(
+  const hasBlocks = g.nodes.some((n) => n.type === "layout_block");
+  const hasViewerGroup = g.nodes.some((n) => n.key === "g_viewers");
+  const badBlockEdge = g.edges.some(
     (e) => e.from === "blk_left" && e.to === "g_viewers" && e.kind === "contains",
   );
+  return badBlockEdge || (!hasBlocks && hasViewerGroup);
 }
