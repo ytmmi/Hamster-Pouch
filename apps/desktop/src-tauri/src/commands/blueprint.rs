@@ -141,6 +141,7 @@ pub(crate) fn blueprint_create(
                 // 无模板：以空图文档起步（用户在编辑器中构建）。
                 BlueprintGraph {
                     schema_version: hp_core::BLUEPRINT_SCHEMA_VERSION,
+                    default_version: None,
                     nodes: vec![],
                     edges: vec![],
                 }

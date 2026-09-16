@@ -77,6 +77,8 @@ export interface BlueprintEdge {
 /** 蓝图图文档（整 JSON 存储）。 */
 export interface BlueprintGraph {
   schema_version: number;
+  /** 内置默认蓝图版本（仅 DEFAULT_BLUEPRINT 携带；旧库存默认无此字段）。 */
+  default_version?: number;
   nodes: BlueprintNode[];
   edges: BlueprintEdge[];
 }
@@ -109,64 +111,96 @@ export const CONDITION_EXPR_HINTS = [
 // ============================== 内置默认蓝图 ==============================
 
 /**
- * 内置默认蓝图：复现现状硬编码联动（RFC 0007 决策 5），保持零回归——
- * 双击预览图像 → 显示图像查看器（互斥组保证播放器/元数据隐藏）；
- * 双击视频 → 显示播放器；双击音频 → 显示元数据。
+ * 内置默认蓝图（重写版）：完整、自洽、零回归（RFC 0007 决策 5）。
  *
- * 注意：默认蓝图仅含现状行为（双击联动）；「单击→元数据」「双击视频自动播放」等
- * 增强行为不属于现状，用户可在编辑器中添加（互斥组与基础条件已就绪）。
+ * 结构（左/中/右 3 个布局块，块内包含标签组与控件）：
+ * - 左栏：仓库 / 图像源 / 相册 三个控件；
+ * - 中栏：媒体预览控件 → 图像/视频/音频 三个类 → 各类一个「双击」对象；
+ * - 右栏：互斥标签组（查看器 / 媒体播放 / 元数据）。
+ *
+ * 行为（复现现状硬编码联动）：
+ * - 双击图像对象 → 显示查看器；双击视频对象 → 显示播放器；双击音频对象 → 显示元数据。
+ * 「单击→元数据」「双击自动播放」等增强行为不属于现状，用户在编辑器中自行添加。
  */
 export const DEFAULT_BLUEPRINT: BlueprintGraph = {
   schema_version: BLUEPRINT_SCHEMA_VERSION,
+  default_version: 2,
   nodes: [
-    // 布局块：默认自定义布局 = 左中右 3 块（块内包含标签组与控件）
-    { key: "blk_left", type: "layout_block", position: { x: 0, y: 0 } },
-    { key: "blk_center", type: "layout_block", position: { x: 360, y: 0 } },
-    { key: "blk_right", type: "layout_block", position: { x: 720, y: 0 } },
+    // 布局块（左/中/右）
+    { key: "blk_left", type: "layout_block", position: { x: 40, y: 40 } },
+    { key: "blk_center", type: "layout_block", position: { x: 400, y: 40 } },
+    { key: "blk_right", type: "layout_block", position: { x: 800, y: 40 } },
 
+    // 左栏控件
+    { key: "c_repo", type: "control", panel_id: "repo", title_key: "panel.repo" },
+    { key: "c_sources", type: "control", panel_id: "sources", title_key: "panel.sources" },
+    { key: "c_albums", type: "control", panel_id: "albums", title_key: "panel.albums" },
+
+    // 中栏：媒体预览（控件 → 类 → 对象，包含链完整）
     { key: "c_preview", type: "control", panel_id: "media", title_key: "panel.media" },
-    { key: "c_viewer", type: "control", panel_id: "viewer", title_key: "panel.viewer" },
-    { key: "c_player", type: "control", panel_id: "player", title_key: "panel.player" },
-    { key: "c_meta", type: "control", panel_id: "metadata", title_key: "panel.metadata" },
-
     { key: "k_image", type: "class", control: "c_preview", media_type: "image" },
     { key: "k_video", type: "class", control: "c_preview", media_type: "video" },
     { key: "k_audio", type: "class", control: "c_preview", media_type: "audio" },
-
     { key: "o_img", type: "object", class: "k_image", scope: "double_clicked" },
     { key: "o_vid", type: "object", class: "k_video", scope: "double_clicked" },
     { key: "o_aud", type: "object", class: "k_audio", scope: "double_clicked" },
 
-    { key: "g_viewers", type: "group", mode: "exclusive", default_visible: [], hide_direction: "left", position: { x: 0, y: 0 } },
+    // 右栏：互斥标签组（查看器/媒体播放/元数据）
+    { key: "g_viewers", type: "group", mode: "exclusive", default_visible: [], hide_direction: "left", position: { x: 760, y: 160 } },
+    { key: "c_viewer", type: "control", panel_id: "viewer", title_key: "panel.viewer" },
+    { key: "c_player", type: "control", panel_id: "player", title_key: "panel.player" },
+    { key: "c_meta", type: "control", panel_id: "metadata", title_key: "panel.metadata" },
 
+    // 事件与动作（双击联动）
     { key: "e_dbl_img", type: "event", trigger: "double_click", target: "o_img" },
     { key: "e_dbl_vid", type: "event", trigger: "double_click", target: "o_vid" },
     { key: "e_dbl_aud", type: "event", trigger: "double_click", target: "o_aud" },
-
     { key: "a_show_viewer", type: "action", op: "show", target: "c_viewer" },
     { key: "a_show_player", type: "action", op: "show", target: "c_player" },
     { key: "a_show_meta", type: "action", op: "show", target: "c_meta" },
   ],
   edges: [
-    // 布局块包含关系（块 → 组/控件）：左块(未建模控件)/中块=媒体预览/右块=查看器标签组
-    { from: "blk_center", to: "c_preview", kind: "contains", order: 1 },
-    { from: "blk_right", to: "g_viewers", kind: "contains", order: 1 },
+    // 布局块 → 内容（左/中/右均有归属）
+    { from: "blk_left", to: "c_repo", kind: "contains", order: 1 },
+    { from: "blk_left", to: "c_sources", kind: "contains", order: 2 },
+    { from: "blk_left", to: "c_albums", kind: "contains", order: 3 },
+    { from: "blk_center", to: "c_preview", kind: "contains", order: 4 },
+    { from: "blk_right", to: "g_viewers", kind: "contains", order: 5 },
 
-    { from: "e_dbl_img", to: "a_show_viewer", kind: "fires", order: 1 },
-    { from: "e_dbl_vid", to: "a_show_player", kind: "fires", order: 1 },
-    { from: "e_dbl_aud", to: "a_show_meta", kind: "fires", order: 1 },
+    // 控件 → 类（三条完整）
+    { from: "c_preview", to: "k_image", kind: "contains", order: 6 },
+    { from: "c_preview", to: "k_video", kind: "contains", order: 7 },
+    { from: "c_preview", to: "k_audio", kind: "contains", order: 8 },
 
-    { from: "c_preview", to: "k_image", kind: "contains", order: 1 },
-    { from: "k_image", to: "o_img", kind: "contains", order: 1 },
-    { from: "k_video", to: "o_vid", kind: "contains", order: 1 },
-    { from: "k_audio", to: "o_aud", kind: "contains", order: 1 },
-    { from: "c_viewer", to: "g_viewers", kind: "memberOf", order: 1 },
-    { from: "c_player", to: "g_viewers", kind: "memberOf", order: 1 },
-    { from: "c_meta", to: "g_viewers", kind: "memberOf", order: 1 },
+    // 类 → 对象（三条完整）
+    { from: "k_image", to: "o_img", kind: "contains", order: 9 },
+    { from: "k_video", to: "o_vid", kind: "contains", order: 10 },
+    { from: "k_audio", to: "o_aud", kind: "contains", order: 11 },
+
+    // 控件 → 互斥标签组
+    { from: "c_viewer", to: "g_viewers", kind: "memberOf", order: 12 },
+    { from: "c_player", to: "g_viewers", kind: "memberOf", order: 13 },
+    { from: "c_meta", to: "g_viewers", kind: "memberOf", order: 14 },
+
+    // 事件 → 动作（双击联动）
+    { from: "e_dbl_img", to: "a_show_viewer", kind: "fires", order: 15 },
+    { from: "e_dbl_vid", to: "a_show_player", kind: "fires", order: 16 },
+    { from: "e_dbl_aud", to: "a_show_meta", kind: "fires", order: 17 },
   ],
 };
 
 /** 空蓝图文档（新建蓝图起步用）。 */
 export function makeEmptyBlueprint(): BlueprintGraph {
   return { schema_version: BLUEPRINT_SCHEMA_VERSION, nodes: [], edges: [] };
+}
+
+/**
+ * 旧版内置默认蓝图识别（用于自动升级为新版）。
+ * 旧库存默认图唯一的特征：左布局块曾 contains 到右栏标签组（`blk_left → g_viewers`）；
+ * 新版已移除该边。命中即视为旧库存默认，由引擎自动替换，不影响用户编辑的图。
+ */
+export function isObsoleteDefaultBlueprint(g: BlueprintGraph): boolean {
+  return g.edges.some(
+    (e) => e.from === "blk_left" && e.to === "g_viewers" && e.kind === "contains",
+  );
 }

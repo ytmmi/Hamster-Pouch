@@ -363,6 +363,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.name": "名稱",
   "blueprint.arrange": "整理",
   "blueprint.arrangeHint": "以選中節點為根，樹狀展開佈局（未選中則取第一個節點）",
+  "blueprint.defaultUpdated": "預設藍圖已更新為新版",
   "blueprint.tabTitle": "標籤名",
   "blueprint.port.contains": "包含",
   "blueprint.port.memberOf": "歸屬",

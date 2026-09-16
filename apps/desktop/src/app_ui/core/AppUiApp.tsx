@@ -15,7 +15,7 @@ import "dockview-react/dist/styles/dockview.css";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { DEFAULT_BLUEPRINT, PANEL_MIN_SIZE, SETTING_KEYS } from "@hamster-pouch/config";
+import { DEFAULT_BLUEPRINT, isObsoleteDefaultBlueprint, PANEL_MIN_SIZE, SETTING_KEYS } from "@hamster-pouch/config";
 import { normalizeLayoutJson } from "../shared/panelLayout";
 
 import * as api from "../shared/api";
@@ -222,7 +222,7 @@ export function AppUiApp(): JSX.Element {
   }, [blueprintExecutor]);
 
   // 装载当前仓库生效蓝图（无默认 → 种子内置默认蓝图，保证零回归）；
-  // 蓝图编辑保存后通过 refresh() 触发重载，立即生效。
+  // 旧版内置默认蓝图自动升级为新版；蓝图编辑保存后通过 refresh() 触发重载，立即生效。
   useEffect(() => {
     if (!repoId) {
       blueprintEngine.setGraph(null);
@@ -253,9 +253,24 @@ export function AppUiApp(): JSX.Element {
         if (cancelled) {
           return;
         }
-        blueprintEngine.setGraph(
-          doc ? BlueprintEngine.parse(doc) : DEFAULT_BLUEPRINT,
-        );
+        const parsed = doc ? BlueprintEngine.parse(doc) : null;
+        if (parsed && isObsoleteDefaultBlueprint(parsed)) {
+          // 旧库存默认蓝图 → 静默升级为新版内置默认（仅命中旧默认特征，不动用户图）。
+          const list = await api.blueprintList({ repoId });
+          const def = list.find((i) => i.is_default);
+          if (def) {
+            await api.blueprintSave({
+              repoId,
+              blueprintId: def.id,
+              name: def.name,
+              blueprintJson: JSON.stringify(DEFAULT_BLUEPRINT),
+            });
+            status(t("blueprint.defaultUpdated"), "ok");
+          }
+          blueprintEngine.setGraph(DEFAULT_BLUEPRINT);
+          return;
+        }
+        blueprintEngine.setGraph(parsed ?? DEFAULT_BLUEPRINT);
       } catch {
         if (!cancelled) {
           blueprintEngine.setGraph(DEFAULT_BLUEPRINT);
@@ -265,7 +280,7 @@ export function AppUiApp(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [repoId, refreshKey, t]);
+  }, [repoId, refreshKey, t, status]);
 
   const dispatch = useCallback((input: BlueprintDispatchInput) => {
     blueprintEngine.dispatch(input);

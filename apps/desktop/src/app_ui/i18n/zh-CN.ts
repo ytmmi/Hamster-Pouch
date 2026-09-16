@@ -380,6 +380,7 @@ export const zhCN = {
   "blueprint.name": "名称",
   "blueprint.arrange": "整理",
   "blueprint.arrangeHint": "以选中节点为根，树状展开布局（未选中则取第一个节点）",
+  "blueprint.defaultUpdated": "默认蓝图已更新为新版",
   "blueprint.tabTitle": "标签名",
   "blueprint.port.contains": "包含",
   "blueprint.port.memberOf": "归属",

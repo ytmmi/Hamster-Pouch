@@ -622,6 +622,12 @@ export function MediaPreviewPanel(): JSX.Element {
                   ctrl: e.ctrlKey || e.metaKey,
                 })
               }
+              onDoubleClick={() =>
+                app.dispatch({
+                  trigger: "double_click",
+                  target: { mediaType: file.media_type, fileId: file.id },
+                })
+              }
               onDragStart={(e) => handleDragStart(file, e)}
               onContextMenu={(e) => {
                 e.preventDefault();

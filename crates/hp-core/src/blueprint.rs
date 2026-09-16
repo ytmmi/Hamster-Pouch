@@ -383,6 +383,9 @@ pub struct BlueprintEdge {
 pub struct BlueprintGraph {
     #[serde(default = "default_schema_version")]
     pub schema_version: i64,
+    /// 内置默认蓝图版本（仅内置默认图携带；用户图无此字段）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_version: Option<i64>,
     #[serde(default)]
     pub nodes: Vec<BlueprintNode>,
     #[serde(default)]
