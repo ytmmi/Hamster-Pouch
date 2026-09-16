@@ -1299,3 +1299,281 @@ button.danger {
   color: var(--danger);
   font-size: 12px;
 }
+
+/* ===== M6 节点式编辑器（画布拖拽连线，仿 ComfyUI，D31） ===== */
+
+.bp-toolbar {
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.bp-palette {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.bp-palette-btn {
+  padding: 2px 8px;
+  background: #2b2b2b;
+  color: #e8e8e8;
+  border: 1px solid #4a4a4a;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.bp-palette-btn:hover {
+  border-color: #7ec3ff;
+  color: #fff;
+}
+
+.bp-main {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  min-height: 260px;
+}
+
+/* 画布：深色 + 点阵网格 */
+.bp-canvas {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  background-color: #1a1a1a;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.09) 1px, transparent 1px);
+  background-size: 22px 22px;
+  border: 1px solid #333;
+  border-radius: 6px;
+  outline: none;
+  touch-action: none;
+}
+
+.bp-canvas-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+/* 节点卡片 */
+.bp-node {
+  position: absolute;
+  min-width: 168px;
+  background: #2b2b2b;
+  border: 1px solid #4a4a4a;
+  border-radius: 8px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.bp-node.selected {
+  outline: 1.5px solid #ffffff;
+  outline-offset: 1px;
+  box-shadow: 0 3px 14px rgba(126, 195, 255, 0.35);
+}
+
+.bp-node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 7px 7px 0 0;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bp-node-key {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bp-node-type {
+  font-size: 10px;
+  opacity: 0.85;
+  text-transform: uppercase;
+}
+
+.bp-node-body {
+  padding: 5px 10px;
+  color: #d5d5d5;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  min-height: 14px;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.bp-node-ports {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+
+.bp-ports-in,
+.bp-ports-out {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bp-port-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: #aaa;
+}
+
+.bp-port-row.right {
+  justify-content: flex-end;
+}
+
+.bp-port {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #151515;
+  box-sizing: border-box;
+  cursor: crosshair;
+}
+
+.bp-port-in {
+  background: #dcdcdc;
+  margin-left: -7px;
+}
+
+.bp-port-out {
+  background: #7ec3ff;
+  margin-right: -7px;
+}
+
+.bp-port:hover {
+  transform: scale(1.25);
+}
+
+/* 边层 */
+.bp-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.bp-edge {
+  fill: none;
+  stroke-width: 3;
+  opacity: 0.85;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.bp-edge:hover {
+  stroke-width: 4;
+  opacity: 1;
+}
+
+.bp-edge.selected {
+  stroke-width: 4;
+  opacity: 1;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.8));
+}
+
+.bp-edge.temp {
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+
+/* 图例 */
+.bp-legend {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 5px;
+  font-size: 10px;
+  color: #ccc;
+  pointer-events: none;
+}
+
+.bp-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bp-legend-item i {
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+/* 属性检查器 */
+.bp-inspector {
+  width: 232px;
+  flex-shrink: 0;
+  overflow: auto;
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #ddd;
+}
+
+.bp-inspector-title {
+  font-weight: 600;
+  color: #fff;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.bp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bp-field label {
+  font-size: 10px;
+  color: #9aa0a6;
+}
+
+.bp-field input,
+.bp-field select,
+.bp-inspector textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: #2f2f2f;
+  color: #e8e8e8;
+  border: 1px solid #4a4a4a;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+.bp-field-pair {
+  display: flex;
+  gap: 4px;
+}
+
+.bp-payload {
+  height: 52px;
+  resize: vertical;
+  font-family: var(--font-mono, monospace);
+}
+
+.bp-hints {
+  font-size: 10px;
+  word-break: break-all;
+}
