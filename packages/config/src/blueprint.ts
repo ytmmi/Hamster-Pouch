@@ -158,6 +158,8 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
 
     { from: "c_preview", to: "k_image", kind: "contains", order: 1 },
     { from: "k_image", to: "o_img", kind: "contains", order: 1 },
+    { from: "k_video", to: "o_vid", kind: "contains", order: 1 },
+    { from: "k_audio", to: "o_aud", kind: "contains", order: 1 },
     { from: "c_viewer", to: "g_viewers", kind: "memberOf", order: 1 },
     { from: "c_player", to: "g_viewers", kind: "memberOf", order: 1 },
     { from: "c_meta", to: "g_viewers", kind: "memberOf", order: 1 },

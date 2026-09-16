@@ -213,6 +213,8 @@ export interface BlueprintCanvasProps {
   onChange: (doc: BlueprintGraph) => void;
   /** 节点拖拽结束/一键整理后，由面板持久化位置（保存整个文档）。 */
   onPersist?: (doc: BlueprintGraph) => void;
+  /** 删除节点（Delete/Backspace 键触发；面板负责 mutate + 清理关联边）。 */
+  onRemoveNode?: (key: string) => void;
   selectedKey: string | null;
   onSelect: (key: string | null) => void;
   t: Translate;
@@ -226,6 +228,7 @@ export function BlueprintCanvas({
   doc,
   onChange,
   onPersist,
+  onRemoveNode,
   selectedKey,
   onSelect,
   t,
@@ -310,6 +313,8 @@ export function BlueprintCanvas({
 
   /** 画布级指针按下：节点拖动 / 端口连线 / 画布平移 / 空白取消选中。 */
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // 确保画布获得焦点，Delete/Backspace 键可删除选中节点/边。
+    canvasRef.current?.focus();
     const target = e.target as HTMLElement;
     const local = toLocal(e.clientX, e.clientY);
     const nodeKey = target.closest("[data-node]")?.getAttribute("data-node");
@@ -460,7 +465,12 @@ export function BlueprintCanvas({
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
-      removeSelectedEdge();
+      // 优先删除选中的边；无选边时删除选中的节点。
+      if (selectedEdge !== null) {
+        removeSelectedEdge();
+      } else if (selectedKey) {
+        onRemoveNode?.(selectedKey);
+      }
     }
   };
 

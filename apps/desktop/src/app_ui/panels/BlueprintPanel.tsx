@@ -603,6 +603,7 @@ export function BlueprintPanel(): JSX.Element {
                       doc={doc}
                       onChange={mutate}
                       onPersist={persistDoc}
+                      onRemoveNode={removeNode}
                       selectedKey={selectedKey}
                       onSelect={setSelectedKey}
                       t={app.t}
