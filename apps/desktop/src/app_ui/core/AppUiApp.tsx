@@ -233,21 +233,17 @@ export function AppUiApp(): JSX.Element {
       try {
         let doc = await api.blueprintGetDefault({ repoId });
         if (!doc) {
-          const list = await api.blueprintList({ repoId });
-          if (list.length === 0) {
-            await api.blueprintCreate({
-              repoId,
-              name: t("blueprint.defaultName"),
-              blueprintJson: JSON.stringify(DEFAULT_BLUEPRINT),
-            });
-            const after = await api.blueprintList({ repoId });
-            if (after[0]) {
-              await api.blueprintSetDefault({
-                repoId,
-                blueprintId: after[0].id,
-              });
-            }
-          }
+          // 无默认蓝图：无论是否已有其他蓝图，都补种子内置默认（默认蓝图是运行时
+          // 行为来源，必须存在）；create 返回新项 id，直接设为默认。
+          const created = await api.blueprintCreate({
+            repoId,
+            name: t("blueprint.defaultName"),
+            blueprintJson: JSON.stringify(DEFAULT_BLUEPRINT),
+          });
+          await api.blueprintSetDefault({
+            repoId,
+            blueprintId: created.id,
+          });
           doc = await api.blueprintGetDefault({ repoId });
         }
         if (cancelled) {

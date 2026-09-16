@@ -299,6 +299,19 @@ fn graph_document_roundtrip_preserves_semantics() {
 }
 
 #[test]
+fn default_blueprint_fixture_validates() {
+    // 夹具由 packages/config DEFAULT_BLUEPRINT 生成（node 序列化导出）：
+    // 内置默认蓝图必须通过服务端校验，否则仓库种子默认蓝图会失败（表现为"没有默认蓝图"）。
+    let json = include_str!("default_blueprint.json");
+    let graph = BlueprintGraph::from_json(json).expect("解析默认蓝图失败");
+    let errors = graph.validate();
+    assert!(errors.is_empty(), "默认蓝图校验失败: {errors:?}");
+    assert_eq!(graph.nodes.len(), 23, "默认蓝图应有 23 个节点");
+    assert_eq!(graph.edges.len(), 17, "默认蓝图应有 17 条边");
+    assert_eq!(graph.default_version, Some(2));
+}
+
+#[test]
 fn builtin_template_row_crud() {
     let global_path = temp_global_path("tpl-row");
     let mut g = GlobalDb::open(&global_path).expect("打开全局库失败");
