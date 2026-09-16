@@ -30,7 +30,7 @@ fn create_two_repos_files_are_separate() {
     assert_ne!(a, b, "两个仓库库文件必须是不同路径");
     assert!(a.exists() && b.exists(), "两个仓库库文件都应存在");
 
-    assert_eq!(da.schema_version().expect("读版本失败"), 5);
+    assert_eq!(da.schema_version().expect("读版本失败"), 6);
     assert_eq!(db.meta("name").expect("读名失败").as_deref(), Some("仓库B"));
     da.close().expect("关闭A失败");
     db.close().expect("关闭B失败");
@@ -81,13 +81,13 @@ fn registry_survives_reopen() {
 fn repo_meta_roundtrip_and_version() {
     let path = temp_repo_path("meta");
     let db = RepoDb::create(&path, "元信息仓库").expect("创建失败");
-    assert_eq!(db.schema_version().expect("读版本失败"), 5);
+    assert_eq!(db.schema_version().expect("读版本失败"), 6);
     assert_eq!(db.meta("name").expect("读名失败").as_deref(), Some("元信息仓库"));
     assert!(db.meta("schema_version").expect("读版本失败").is_some());
     db.close().expect("关闭失败");
 
     let db = RepoDb::open(&path).expect("重开失败");
-    assert_eq!(db.schema_version().expect("读版本失败"), 5);
+    assert_eq!(db.schema_version().expect("读版本失败"), 6);
     db.close().expect("关闭失败");
 }
 

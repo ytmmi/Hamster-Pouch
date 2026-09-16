@@ -182,3 +182,30 @@ pub struct TagRelationItem {
     pub relation_kind: String,
     pub created_at: String,
 }
+
+/// blueprint.list 返回元素（RFC 0007 / D30）。
+#[derive(Serialize, TS)]
+pub struct BlueprintItem {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+    #[ts(type = "number")]
+    pub schema_version: i64,
+    pub updated_at: String,
+}
+
+/// blueprint.validate 返回（RFC 0007 决策 6；errors 为空 = 有效）。
+#[derive(Serialize, TS)]
+pub struct BlueprintValidateResult {
+    pub errors: Vec<String>,
+}
+
+/// blueprint.template.list 返回元素（RFC 0007 / D30）。
+#[derive(Serialize, TS)]
+pub struct BlueprintTemplateItem {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    #[ts(type = "number")]
+    pub schema_version: i64,
+}

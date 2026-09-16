@@ -1,11 +1,12 @@
 /**
- * app_ui 全局状态上下文 — 仓库 / 选中源 / 选中文件 / 刷新 / 状态栏。
+ * app_ui 全局状态上下文 — 仓库 / 选中源 / 选中文件 / 刷新 / 状态栏 / 蓝图分发。
  */
 
 import { createContext, useContext } from "react";
 
 import type { Language, Translate } from "../i18n";
 import type { FileItem, StatusType } from "../shared/types";
+import type { BlueprintDispatchInput } from "./blueprintEngine";
 
 export interface AppContextValue {
   repoId: string | null;
@@ -26,6 +27,8 @@ export interface AppContextValue {
   status: (message: string, type?: StatusType) => void;
   /** 聚焦/打开面板：已存在则激活（切换 tab），不存在则按 floating 创建。 */
   focusPanel: (id: string, floating?: boolean) => void;
+  /** 蓝图引擎事件分发（单击/双击/选中变化 → 显隐动作）。 */
+  dispatch: (input: BlueprintDispatchInput) => void;
   language: Language;
   setLanguage: (lang: Language) => void;
   t: Translate;

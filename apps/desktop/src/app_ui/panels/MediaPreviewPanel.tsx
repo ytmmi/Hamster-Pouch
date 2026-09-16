@@ -354,6 +354,11 @@ export function MediaPreviewPanel(): JSX.Element {
       anchorRef.current = file.id;
       app.setSelectedIds(new Set([file.id]));
       app.setSelectedFile(file);
+      // 单击事件上报蓝图引擎（默认蓝图无单击规则，行为不变；用户蓝图可响应）。
+      app.dispatch({
+        trigger: "click",
+        target: { mediaType: file.media_type, fileId: file.id },
+      });
     },
     [app, items],
   );
@@ -571,10 +576,10 @@ export function MediaPreviewPanel(): JSX.Element {
               selected={app.selectedIds.has(file.id)}
               onSelect={handleSelect}
               onDoubleClick={() =>
-                app.focusPanel(
-                  file.media_type === "image" ? "viewer" : "player",
-                  true,
-                )
+                app.dispatch({
+                  trigger: "double_click",
+                  target: { mediaType: file.media_type, fileId: file.id },
+                })
               }
               onDragStart={handleDragStart}
               onContextMenu={handleContextMenu}

@@ -5,4 +5,7 @@ edition.workspace = true
 
 [dependencies]
 # hp-core 保持纯净：不依赖 Tauri/SQLite/文件系统；uuid 仅用于领域标识生成。
+# serde/serde_json 仅用于蓝图（Blueprint）文档的纯数据序列化与校验（RFC 0007）。
 uuid = { version = "1", features = ["v4"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

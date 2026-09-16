@@ -17,3 +17,4 @@ export * from "./color";
 export * from "./tag";
 export * from "./rating";
 export * from "./layout";
+export * from "./blueprint";

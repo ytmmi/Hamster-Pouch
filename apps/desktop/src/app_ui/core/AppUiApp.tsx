@@ -15,11 +15,12 @@ import "dockview-react/dist/styles/dockview.css";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { PANEL_MIN_SIZE, SETTING_KEYS } from "@hamster-pouch/config";
+import { DEFAULT_BLUEPRINT, PANEL_MIN_SIZE, SETTING_KEYS } from "@hamster-pouch/config";
 import { normalizeLayoutJson } from "../shared/panelLayout";
 
 import * as api from "../shared/api";
 import { AppContext, type AppContextValue } from "./AppContext";
+import { BlueprintEngine, blueprintEngine, type BlueprintDispatchInput } from "./blueprintEngine";
 import {
   DEFAULT_LANGUAGE,
   isLanguage,
@@ -117,6 +118,132 @@ export function AppUiApp(): JSX.Element {
     [t],
   );
 
+  // 蓝图引擎执行器：把求值动作映射到 dockview 与媒体命令（RFC 0007 决策 3）。
+  const blueprintExecutor = useMemo(
+    () => ({
+      showPanel: (panelId: string, floating: boolean) =>
+        focusPanel(panelId, floating),
+      hidePanel: (panelId: string) => {
+        apiRef.current?.getPanel(panelId)?.api.close();
+      },
+      togglePanel: (panelId: string, floating: boolean) => {
+        const dv = apiRef.current;
+        if (!dv) {
+          return;
+        }
+        if (dv.getPanel(panelId)) {
+          dv.getPanel(panelId)!.api.close();
+        } else {
+          focusPanel(panelId, floating);
+        }
+      },
+      collapsePanels: (panelIds: string[]) => {
+        const dv = apiRef.current;
+        if (!dv) {
+          return;
+        }
+        for (const id of panelIds) {
+          const panel = dv.getPanel(id);
+          if (!panel) {
+            continue;
+          }
+          try {
+            // 组的隐藏 = 最小化至最小尺寸（正文 6px、标签条保留，D25）；
+            // 隐藏方向/相邻组拉伸的 dockview 映射属实现期开放点（RFC 0007）。
+            panel.api.setSize({
+              width: PANEL_MIN_SIZE.minimumWidth,
+              height: PANEL_MIN_SIZE.minimumHeight,
+            });
+          } catch {
+            /* dockview 网格约束下忽略 */
+          }
+        }
+      },
+      expandPanels: (panelIds: string[]) => {
+        const dv = apiRef.current;
+        if (!dv) {
+          return;
+        }
+        for (const id of panelIds) {
+          const panel = dv.getPanel(id);
+          if (!panel) {
+            continue;
+          }
+          try {
+            panel.api.setSize({ width: 480, height: 320 });
+          } catch {
+            /* 忽略 */
+          }
+        }
+      },
+      playFile: (fileId: string) => {
+        if (!repoId) {
+          return;
+        }
+        void api
+          .mediaPlay({ repoId, fileId })
+          .then(() => status(t("player.playingInMpv"), "ok"))
+          .catch((e) => status(t("player.playFailed", { err: String(e) }), "error"));
+      },
+    }),
+    [focusPanel, repoId, status, t],
+  );
+
+  // 装配引擎：executor 变更时注入。
+  useEffect(() => {
+    blueprintEngine.setExecutor(blueprintExecutor);
+  }, [blueprintExecutor]);
+
+  // 装载当前仓库生效蓝图（无默认 → 种子内置默认蓝图，保证零回归）；
+  // 蓝图编辑保存后通过 refresh() 触发重载，立即生效。
+  useEffect(() => {
+    if (!repoId) {
+      blueprintEngine.setGraph(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        let doc = await api.blueprintGetDefault({ repoId });
+        if (!doc) {
+          const list = await api.blueprintList({ repoId });
+          if (list.length === 0) {
+            await api.blueprintCreate({
+              repoId,
+              name: t("blueprint.defaultName"),
+              blueprintJson: JSON.stringify(DEFAULT_BLUEPRINT),
+            });
+            const after = await api.blueprintList({ repoId });
+            if (after[0]) {
+              await api.blueprintSetDefault({
+                repoId,
+                blueprintId: after[0].id,
+              });
+            }
+          }
+          doc = await api.blueprintGetDefault({ repoId });
+        }
+        if (cancelled) {
+          return;
+        }
+        blueprintEngine.setGraph(
+          doc ? BlueprintEngine.parse(doc) : DEFAULT_BLUEPRINT,
+        );
+      } catch {
+        if (!cancelled) {
+          blueprintEngine.setGraph(DEFAULT_BLUEPRINT);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [repoId, refreshKey, t]);
+
+  const dispatch = useCallback((input: BlueprintDispatchInput) => {
+    blueprintEngine.dispatch(input);
+  }, []);
+
   const detachPanel = useCallback(
     (id: string) => {
       const title = panelTitle(id, t);
@@ -181,6 +308,7 @@ export function AppUiApp(): JSX.Element {
       refresh,
       status,
       focusPanel,
+      dispatch,
       language,
       setLanguage: changeLanguage,
       t,
@@ -196,6 +324,7 @@ export function AppUiApp(): JSX.Element {
       refresh,
       status,
       focusPanel,
+      dispatch,
       language,
       changeLanguage,
       t,

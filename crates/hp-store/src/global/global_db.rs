@@ -11,7 +11,10 @@ use crate::migrate;
 use crate::util::{now_iso, require_nonempty, store_err, uuid};
 
 /// 全局配置库迁移脚本（按版本升序）。
-const GLOBAL_MIGRATIONS: &[&str] = &[include_str!("../../migrations/global/0001_init.sql")];
+const GLOBAL_MIGRATIONS: &[&str] = &[
+    include_str!("../../migrations/global/0001_init.sql"),
+    include_str!("../../migrations/global/0002_blueprint_templates.sql"),
+];
 
 /// 仓库注册表行。
 #[derive(Debug, Clone, PartialEq)]

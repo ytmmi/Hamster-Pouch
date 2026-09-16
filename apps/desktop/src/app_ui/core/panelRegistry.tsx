@@ -7,6 +7,7 @@ import type { IDockviewPanelProps } from "dockview-react";
 
 import type { Translate, TranslationKey } from "../i18n";
 import { AlbumPanel } from "../panels/AlbumPanel";
+import { BlueprintPanel } from "../panels/BlueprintPanel";
 import { ColorPanel } from "../panels/ColorPanel";
 import { MediaPlayerPanel } from "../panels/MediaPlayerPanel";
 import { MediaPreviewPanel } from "../panels/MediaPreviewPanel";
@@ -38,6 +39,7 @@ export const PANEL_DEFS: PanelDef[] = [
   { id: "player", titleKey: "panel.player", render: () => <MediaPlayerPanel /> },
   { id: "tasks", titleKey: "panel.tasks", render: () => <TaskPanel /> },
   { id: "plugins", titleKey: "panel.plugins", render: () => <PluginPanel /> },
+  { id: "blueprint", titleKey: "panel.blueprint", render: () => <BlueprintPanel /> },
 ];
 
 export function panelTitle(id: string, t: Translate): string {

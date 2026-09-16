@@ -3,6 +3,7 @@
 
 pub mod ai;
 pub mod album;
+pub mod blueprint;
 pub mod color;
 pub mod error;
 pub mod file;
@@ -20,6 +21,11 @@ pub use ai::{
 pub use album::{
     AddedBy, Album, AlbumId, AlbumKind, AlbumMediaType, AlbumMember, AlbumSyncRule, AlbumSyncState,
     SyncMode,
+};
+pub use blueprint::{
+    ActionOp, BlueprintEdge, BlueprintGraph, BlueprintNode, BlueprintPosition, BlueprintRow,
+    BlueprintTemplateRow, EdgeKind, GroupMode, HideDirection, NodeType, Trigger,
+    BLUEPRINT_SCHEMA_VERSION,
 };
 pub use color::ColorRef;
 pub use error::{HpError, HpResult};

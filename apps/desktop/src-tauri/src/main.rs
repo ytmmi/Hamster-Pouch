@@ -176,7 +176,17 @@ fn main() {
             commands::layout::layout_rename,
             commands::layout::layout_delete,
             commands::layout::layout_set_default,
-            commands::layout::layout_get_default
+            commands::layout::layout_get_default,
+            commands::blueprint::blueprint_list,
+            commands::blueprint::blueprint_get,
+            commands::blueprint::blueprint_get_default,
+            commands::blueprint::blueprint_create,
+            commands::blueprint::blueprint_save,
+            commands::blueprint::blueprint_delete,
+            commands::blueprint::blueprint_set_default,
+            commands::blueprint::blueprint_validate,
+            commands::blueprint::blueprint_template_list,
+            commands::blueprint::blueprint_template_install
         ])
         .run(tauri::generate_context!())
         .expect("仓鼠颊启动失败");

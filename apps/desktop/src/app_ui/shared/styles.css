@@ -1203,3 +1203,99 @@ button.danger {
   background: #000;
   border-radius: 4px;
 }
+
+/* ===== M6：蓝图过渡编辑器（RFC 0007） ===== */
+
+.bp-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: auto;
+}
+
+.bp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+
+.bp-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bp-item-main {
+  flex: 1;
+  text-align: left;
+  padding: 2px 6px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+
+.bp-item.selected .bp-item-main {
+  background: var(--accent-soft, rgba(90, 130, 255, 0.15));
+  border-color: var(--accent);
+}
+
+.bp-item-action {
+  padding: 0 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+}
+
+.bp-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.bp-tabs button {
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+}
+
+.bp-tabs button.active {
+  background: var(--accent-soft, rgba(90, 130, 255, 0.15));
+  border-color: var(--accent);
+}
+
+.bp-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.panel-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bp-json {
+  min-height: 220px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  resize: vertical;
+  background: var(--bg-soft, #fafafa);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px;
+}
+
+.bp-errors {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--danger);
+  font-size: 12px;
+}

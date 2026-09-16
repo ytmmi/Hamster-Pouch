@@ -18,3 +18,7 @@ export type { FsOpsResult } from "./FsOpsResult";
 export type { TagItem } from "./TagItem";
 export type { FileTagItem } from "./FileTagItem";
 export type { FileTagsResult } from "./FileTagsResult";
+export type { TagRelationItem } from "./TagRelationItem";
+export type { BlueprintItem } from "./BlueprintItem";
+export type { BlueprintValidateResult } from "./BlueprintValidateResult";
+export type { BlueprintTemplateItem } from "./BlueprintTemplateItem";

@@ -8,6 +8,7 @@ import { useCallback, useMemo, useState } from "react";
 import { emit } from "@tauri-apps/api/event";
 
 import { AppContext, type AppContextValue } from "./AppContext";
+import { blueprintEngine } from "./blueprintEngine";
 import { DEFAULT_LANGUAGE, isLanguage, makeTranslator, type Language } from "../i18n";
 import { panelRender, panelTitle } from "./panelRegistry";
 import type { FileItem, StatusType } from "../shared/types";
@@ -54,6 +55,7 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
       refresh,
       status,
       focusPanel: () => undefined,
+      dispatch: (input) => blueprintEngine.dispatch(input),
       language,
       setLanguage: () => undefined,
       t,
