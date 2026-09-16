@@ -380,6 +380,12 @@ export const zhCN = {
   "blueprint.name": "名称",
   "blueprint.arrange": "整理",
   "blueprint.arrangeHint": "以选中节点为根，树状展开布局（未选中则取第一个节点）",
+  "blueprint.tabTitle": "标签名",
+  "blueprint.port.contains": "包含",
+  "blueprint.port.memberOf": "归属",
+  "blueprint.port.fires": "触发",
+  "blueprint.port.guards": "守卫",
+  "blueprint.port.firesGuards": "触发/守卫",
 } as const;
 
 export type DictZhCN = typeof zhCN;

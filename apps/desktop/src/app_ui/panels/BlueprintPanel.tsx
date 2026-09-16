@@ -27,7 +27,7 @@ import type {
 import * as api from "../shared/api";
 import { useApp } from "../core/AppContext";
 import type { Translate } from "../i18n";
-import { BlueprintCanvas } from "./BlueprintCanvas";
+import { BlueprintCanvas, resolveControlTitle } from "./BlueprintCanvas";
 
 const TYPE_PREFIX: Record<string, string> = {
   layout_block: "blk",
@@ -764,6 +764,11 @@ function NodeInspector({
         field(t("blueprint.titleKey"), "title_key", node.title_key ?? "", (v) =>
           onPatch({ title_key: v }),
         )}
+      {node.type === "control" && (
+        <span className="dim bp-hints">
+          {t("blueprint.tabTitle")}: {resolveControlTitle(node, t) || "—"}
+        </span>
+      )}
       {node.type === "class" &&
         select(
           t("blueprint.tab.controls"),

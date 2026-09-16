@@ -363,4 +363,10 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.name": "Name",
   "blueprint.arrange": "Arrange",
   "blueprint.arrangeHint": "Expand as a tree rooted at the selected node (falls back to the first node when none is selected)",
+  "blueprint.tabTitle": "Tab title",
+  "blueprint.port.contains": "Contains",
+  "blueprint.port.memberOf": "Member of",
+  "blueprint.port.fires": "Fires",
+  "blueprint.port.guards": "Guards",
+  "blueprint.port.firesGuards": "Fires/Guards",
 };

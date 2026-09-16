@@ -16,7 +16,7 @@ import type {
   BlueprintNode,
   BlueprintNodeType,
 } from "@hamster-pouch/config";
-import type { Translate } from "../i18n";
+import type { Translate, TranslationKey } from "../i18n";
 
 /** 节点类型 → 头部颜色（ComfyUI 风格高对比色板）。 */
 export const NODE_TYPE_COLORS: Record<BlueprintNodeType, string> = {
@@ -41,30 +41,43 @@ export const EDGE_COLORS: Record<BlueprintEdge["kind"], string> = {
 export interface PortDef {
   id: string;
   side: "in" | "out";
-  label: string;
 }
 
-/** 每类节点的端口定义（输入在左、输出在右）。 */
+/** 每类节点的端口定义（输入在左、输出在右）；标签文案走 i18n（portLabel）。 */
 const PORT_DEFS: Record<BlueprintNodeType, PortDef[]> = {
-  layout_block: [{ id: "contains", side: "out", label: "contains" }],
+  layout_block: [{ id: "contains", side: "out" }],
   control: [
-    { id: "in", side: "in", label: "contains" },
-    { id: "contains", side: "out", label: "contains" },
-    { id: "memberOf", side: "out", label: "memberOf" },
+    { id: "in", side: "in" },
+    { id: "contains", side: "out" },
+    { id: "memberOf", side: "out" },
   ],
   class: [
-    { id: "contains", side: "in", label: "contains" },
-    { id: "contains", side: "out", label: "contains" },
+    { id: "contains", side: "in" },
+    { id: "contains", side: "out" },
   ],
-  object: [{ id: "contains", side: "in", label: "contains" }],
-  group: [{ id: "memberOf", side: "in", label: "memberOf" }],
-  event: [{ id: "fires", side: "out", label: "fires" }],
+  object: [{ id: "contains", side: "in" }],
+  group: [{ id: "memberOf", side: "in" }],
+  event: [{ id: "fires", side: "out" }],
   condition: [
-    { id: "fires", side: "in", label: "fires" },
-    { id: "guards", side: "out", label: "guards" },
+    { id: "fires", side: "in" },
+    { id: "guards", side: "out" },
   ],
-  action: [{ id: "in", side: "in", label: "fires/guards" }],
+  action: [{ id: "in", side: "in" }],
 };
+
+/** 端口标签（多语言）：contains/memberOf/fires/guards；action 输入口为「触发/守卫」。 */
+export function portLabel(
+  type: BlueprintNodeType,
+  portId: string,
+  t: Translate,
+): string {
+  if (portId === "in") {
+    return type === "action"
+      ? t("blueprint.port.firesGuards")
+      : t("blueprint.port.contains");
+  }
+  return t(`blueprint.port.${portId}` as TranslationKey);
+}
 
 /** 由输出端口 → 目标节点类型推导边类型；不兼容返回 null。 */
 export function kindForEdge(
@@ -131,13 +144,13 @@ function portIdFor(
   }
 }
 
-/** 节点正文摘要（画布卡片展示关键字段）。 */
-export function nodeSummary(node: BlueprintNode): string {
+/** 节点正文摘要（画布卡片展示关键字段；文案多语言）。 */
+export function nodeSummary(node: BlueprintNode, t: Translate): string {
   switch (node.type) {
     case "layout_block":
-      return "contains 组/控件";
+      return `${t("blueprint.port.contains")} 组/控件`;
     case "control":
-      return node.panel_id ?? "—";
+      return resolveControlTitle(node, t) || node.panel_id || "—";
     case "class":
       return node.media_type ?? "—";
     case "object":
@@ -161,8 +174,9 @@ function nodePos(node: BlueprintNode): { x: number; y: number } {
 }
 
 /**
- * 节点显示名称：用户自定义 `name` 优先；缺省按类型本地化生成
- * （如 zh-CN 下「控件 1」「事件 2」，随语言切换）。
+ * 节点显示名称：用户自定义 `name` 优先；控件节点回退到本地化标签名
+ * （`title_key` → 「媒体预览」等，随语言切换）；其余按类型本地化生成
+ * （如 zh-CN 下「控件 1」「事件 2」）。
  */
 export function nodeDisplayName(
   node: BlueprintNode,
@@ -172,9 +186,26 @@ export function nodeDisplayName(
   if (node.name?.trim()) {
     return node.name.trim();
   }
+  if (node.type === "control") {
+    const title = resolveControlTitle(node, t);
+    if (title) {
+      return title;
+    }
+  }
   const sameType = nodes.filter((n) => n.type === node.type);
   const idx = sameType.findIndex((n) => n.key === node.key);
   return `${t(`blueprint.type.${node.type}`)} ${idx + 1}`;
+}
+
+/** 控件本地化标签名（`title_key` 解析；失败回退 `panel_id`）。 */
+export function resolveControlTitle(node: BlueprintNode, t: Translate): string {
+  if (node.title_key) {
+    const resolved = t(node.title_key as TranslationKey);
+    if (resolved && resolved !== node.title_key) {
+      return resolved;
+    }
+  }
+  return node.panel_id ?? "";
 }
 
 export interface BlueprintCanvasProps {
@@ -484,7 +515,7 @@ export function BlueprintCanvas({
                 </span>
                 <span className="bp-node-type">{node.type}</span>
               </div>
-              <div className="bp-node-body">{nodeSummary(node)}</div>
+              <div className="bp-node-body">{nodeSummary(node, t)}</div>
               <div className="bp-node-ports">
                 <div className="bp-ports-in">
                   {ins.map((p) => (
@@ -493,14 +524,18 @@ export function BlueprintCanvas({
                         className="bp-port bp-port-in"
                         data-port={`${node.key}::in:${p.id}`}
                       />
-                      <span className="bp-port-label">{p.label}</span>
+                      <span className="bp-port-label">
+                        {portLabel(node.type, p.id, t)}
+                      </span>
                     </div>
                   ))}
                 </div>
                 <div className="bp-ports-out">
                   {outs.map((p) => (
                     <div className="bp-port-row right" key={`out:${p.id}`}>
-                      <span className="bp-port-label">{p.label}</span>
+                      <span className="bp-port-label">
+                        {portLabel(node.type, p.id, t)}
+                      </span>
                       <span
                         className="bp-port bp-port-out"
                         data-port={`${node.key}::out:${p.id}`}
@@ -557,12 +592,12 @@ export function BlueprintCanvas({
         )}
       </svg>
 
-      {/* 图例 */}
+      {/* 图例（多语言） */}
       <div className="bp-legend">
         {(Object.keys(EDGE_COLORS) as BlueprintEdge["kind"][]).map((k) => (
           <span key={k} className="bp-legend-item">
             <i style={{ background: EDGE_COLORS[k] }} />
-            {k}
+            {t(`blueprint.port.${k}` as TranslationKey)}
           </span>
         ))}
       </div>
