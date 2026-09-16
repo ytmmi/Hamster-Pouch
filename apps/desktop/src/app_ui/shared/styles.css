@@ -1488,6 +1488,80 @@ button.danger {
   pointer-events: none;
 }
 
+/* 刀痕划中的连线：标红加粗（放开右键即删除）。 */
+.bp-edge.bladed {
+  stroke-width: 5;
+  opacity: 1;
+  stroke-dasharray: 10 5;
+  filter: drop-shadow(0 0 4px rgba(255, 77, 79, 0.9));
+}
+
+/* ── 刀痕（右键长按拖拽删除） ── */
+.bp-blade {
+  pointer-events: none;
+}
+
+.bp-blade-core {
+  stroke: #ff4d4f;
+  stroke-linecap: round;
+  opacity: 0.95;
+}
+
+.bp-blade-glow {
+  stroke: #ff4d4f;
+  stroke-linecap: round;
+  opacity: 0.22;
+  filter: blur(3px);
+}
+
+.bp-blade-head {
+  fill: #fff;
+  stroke: #ff4d4f;
+  stroke-width: 3;
+}
+
+.bp-blade-head-glow {
+  fill: rgba(255, 77, 79, 0.35);
+  stroke: none;
+  filter: blur(4px);
+}
+
+/* 刀尾：跟随指针的小圆点 */
+.bp-blade-tail {
+  fill: #ff4d4f;
+  opacity: 0.9;
+}
+
+/* 刀痕划中的节点：红框高亮（放开右键即删除；关联节点会变灰） */
+.bp-node.bladed {
+  outline: 3px solid #ff4d4f;
+  outline-offset: 2px;
+  box-shadow: 0 0 16px rgba(255, 77, 79, 0.75);
+}
+
+/* 未接通（引用断开/无触发来源）：灰色表示"不通"，不生效，不落库 */
+.bp-node.unlinked {
+  opacity: 0.62;
+  filter: grayscale(0.85);
+  border-style: dashed;
+}
+
+.bp-node-flag {
+  margin-right: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.45);
+  font-size: 9px;
+}
+
+.bp-unlinked-hint {
+  color: #b45309;
+}
+
+.bp-legend-hint {
+  color: #ffb3b3;
+}
+
 /* 图例 */
 .bp-legend {
   position: absolute;

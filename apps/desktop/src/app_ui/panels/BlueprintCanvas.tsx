@@ -17,6 +17,12 @@ import type {
   BlueprintNodeType,
 } from "@hamster-pouch/config";
 import type { Translate, TranslationKey } from "../i18n";
+import {
+  sampleEdgeCurve,
+  segmentHitsPolyline,
+  segmentHitsRect,
+  type Point,
+} from "./blueprintGeometry";
 
 /** 节点类型 → 头部颜色（ComfyUI 风格高对比色板）。 */
 export const NODE_TYPE_COLORS: Record<BlueprintNodeType, string> = {
@@ -297,15 +303,40 @@ export interface BlueprintCanvasProps {
   onChange: (doc: BlueprintGraph) => void;
   /** 节点拖拽结束/一键整理后，由面板持久化位置（保存整个文档）。 */
   onPersist?: (doc: BlueprintGraph) => void;
-  /** 删除节点（Delete/Backspace 键触发；面板负责 mutate + 清理关联边）。 */
+  /** 删除节点（Delete/Backspace 键或刀痕划中触发；面板负责软删除）。 */
   onRemoveNode?: (key: string) => void;
+  /** 删除一条边（刀痕划过连线后放开触发）。 */
+  onRemoveEdge?: (index: number) => void;
+  /**
+   * 建立连线后的回调：面板据此把**子节点的引用字段自动落好**
+   * （控件→类 写 `class.control`；类→对象 写 `object.class`；对象→操作 写 `event.target`…），
+   * 用户不需要手填这些 key。
+   */
+  onConnect?: (edge: { from: string; to: string; kind: BlueprintEdge["kind"] }) => void;
   selectedKey: string | null;
   onSelect: (key: string | null) => void;
+  /** 未接通节点 key（画布灰显"不通"；由面板用 `blueprintLint` 计算）。 */
+  unlinked?: ReadonlySet<string>;
   t: Translate;
 }
 
 const MIN_ZOOM = 0.3;
 const MAX_ZOOM = 2.5;
+
+/** 刀痕命中容差（画布本地像素）：线段到连线的容许距离。 */
+const BLADE_HIT_TOLERANCE = 10;
+
+/** 节点卡片近似尺寸（刀痕命中用；与样式中的卡片尺寸一致）。 */
+const NODE_CARD = { w: 216, h: 110 };
+
+/** 刀痕状态：起点固定为右键按下处，终点跟随指针（**直线**）。 */
+interface BladeState {
+  from: Point;
+  to: Point;
+  /** 当前扫中的连线索引 / 节点 key（跟随指针即时重算，移开即取消）。 */
+  edges: number[];
+  nodes: string[];
+}
 
 /** 节点画布（纯展示与交互，数据变更通过 onChange 上抛）。 */
 export function BlueprintCanvas({
@@ -313,8 +344,11 @@ export function BlueprintCanvas({
   onChange,
   onPersist,
   onRemoveNode,
+  onRemoveEdge,
+  onConnect,
   selectedKey,
   onSelect,
+  unlinked,
   t,
 }: BlueprintCanvasProps): JSX.Element {
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -326,6 +360,8 @@ export function BlueprintCanvas({
     y: number;
   } | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<number | null>(null);
+  /** 刀痕状态：右键长按拖拽（起点固定，终点跟随指针的**直线**删除线）。 */
+  const [blade, setBlade] = useState<BladeState | null>(null);
   const [, setTick] = useState(0);
   const portMap = useRef<Map<string, { x: number; y: number }>>(new Map());
   /** 最近一次节点拖拽计算出的文档（拖拽结束用于持久化位置）。 */
@@ -333,6 +369,7 @@ export function BlueprintCanvas({
   const dragRef = useRef<
     | { kind: "node"; key: string; offX: number; offY: number }
     | { kind: "pan"; startX: number; startY: number; viewX: number; viewY: number }
+    | { kind: "blade" }
     | null
   >(null);
 
@@ -395,7 +432,57 @@ export function BlueprintCanvas({
     [],
   );
 
-  /** 画布级指针按下：节点拖动 / 端口连线 / 画布平移 / 空白取消选中。 */
+  /**
+   * 计算刀痕（直线段 from→to）当前扫中的边与节点。
+   * 每次指针移动重算，因此**移开即取消**；边按端口连线的贝塞尔采样折线判定，
+   * 节点按卡片矩形判定。
+   */
+  const bladeHits = useCallback(
+    (from: Point, to: Point) => {
+      const edges: number[] = [];
+      doc.edges.forEach((edge, index) => {
+        const a = portMap.current.get(
+          `${edge.from}::out::${portIdFor(
+            doc.nodes.find((n) => n.key === edge.from)?.type ?? "control",
+            "out",
+            edge.kind,
+          )}`,
+        );
+        const b = portMap.current.get(
+          `${edge.to}::in::${portIdFor(
+            doc.nodes.find((n) => n.key === edge.to)?.type ?? "control",
+            "in",
+            edge.kind,
+          )}`,
+        );
+        if (!a || !b) {
+          return;
+        }
+        if (segmentHitsPolyline(from, to, sampleEdgeCurve(a, b), BLADE_HIT_TOLERANCE)) {
+          edges.push(index);
+        }
+      });
+
+      const nodes: string[] = [];
+      for (const node of doc.nodes) {
+        const pos = nodePos(node);
+        // 刀痕在视口坐标、节点在世界坐标：把节点矩形换算到视口坐标后再判交。
+        const screenRect = {
+          x: view.x + pos.x * view.zoom,
+          y: view.y + pos.y * view.zoom,
+          w: NODE_CARD.w * view.zoom,
+          h: NODE_CARD.h * view.zoom,
+        };
+        if (segmentHitsRect(from, to, screenRect)) {
+          nodes.push(node.key);
+        }
+      }
+      return { edges, nodes };
+    },
+    [doc.edges, doc.nodes, view],
+  );
+
+  /** 画布级指针按下：右键=刀痕删除，左键=端口连线 / 节点拖动 / 画布平移。 */
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     // 确保画布获得焦点，Delete/Backspace 键可删除选中节点/边。
     canvasRef.current?.focus();
@@ -403,6 +490,19 @@ export function BlueprintCanvas({
     const local = toLocal(e.clientX, e.clientY);
     const nodeKey = target.closest("[data-node]")?.getAttribute("data-node");
     const port = target.closest("[data-port]")?.getAttribute("data-port");
+
+    // 右键长按：刀痕删除（起点固定、终点跟随指针，穿过连线/节点即标红，放开即删）。
+    if (e.button === 2) {
+      e.preventDefault();
+      dragRef.current = { kind: "blade" };
+      const hits = bladeHits(local, local);
+      setBlade({ from: local, to: local, edges: hits.edges, nodes: hits.nodes });
+      canvasRef.current?.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (e.button !== 0) {
+      return;
+    }
     if (port) {
       const [key, side, portId] = port.split("::");
       if (side === "out") {
@@ -447,6 +547,17 @@ export function BlueprintCanvas({
     if (!drag) {
       return;
     }
+    if (drag.kind === "blade") {
+      setBlade((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        // 每次移动**重算**命中：指针移开就取消标记（不是留下轨迹）。
+        const hits = bladeHits(prev.from, local);
+        return { from: prev.from, to: local, edges: hits.edges, nodes: hits.nodes };
+      });
+      return;
+    }
     if (drag.kind === "node") {
       const wp = toWorld(local);
       const next = {
@@ -471,6 +582,22 @@ export function BlueprintCanvas({
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    // 刀痕放开：删除划中的边与节点（节点为软删除，关联节点保留并灰显）。
+    if (dragRef.current?.kind === "blade") {
+      const hits = blade;
+      dragRef.current = null;
+      setBlade(null);
+      if (hits) {
+        // 先删边再删节点：节点删除会移除其关联边，避免索引错位。
+        for (const index of [...hits.edges].sort((a, b) => b - a)) {
+          onRemoveEdge?.(index);
+        }
+        for (const key of hits.nodes) {
+          onRemoveNode?.(key);
+        }
+      }
+      return;
+    }
     if (tempEdge) {
       const target = document
         .elementFromPoint(e.clientX, e.clientY)
@@ -495,13 +622,13 @@ export function BlueprintCanvas({
             ) {
               const order =
                 Math.max(0, ...doc.edges.map((ed) => ed.order)) + 1;
+              const created = { from: tempEdge.fromKey, to: toKey, kind, order };
               onChange({
                 ...doc,
-                edges: [
-                  ...doc.edges,
-                  { from: tempEdge.fromKey, to: toKey, kind, order },
-                ],
+                edges: [...doc.edges, created],
               });
+              // 连线同时把子节点的引用落好（用户不必手填 key）。
+              onConnect?.(created);
             }
           }
         }
@@ -580,6 +707,7 @@ export function BlueprintCanvas({
       onPointerUp={onPointerUp}
       onWheel={onWheel}
       onKeyDown={onKeyDown}
+      onContextMenu={(e) => e.preventDefault()}
       tabIndex={0}
     >
       {/* 变换层：节点（世界坐标） */}
@@ -593,21 +721,28 @@ export function BlueprintCanvas({
           const pos = nodePos(node);
           const ins = nodePorts(node).filter((p) => p.side === "in");
           const outs = nodePorts(node).filter((p) => p.side === "out");
+          const isUnlinked = unlinked?.has(node.key) ?? false;
+          const bladed = blade?.nodes.includes(node.key) ?? false;
           return (
             <div
               key={node.key}
               data-node={node.key}
-              className={`bp-node ${selectedKey === node.key ? "selected" : ""}`}
+              className={`bp-node ${selectedKey === node.key ? "selected" : ""} ${
+                isUnlinked ? "unlinked" : ""
+              } ${bladed ? "bladed" : ""}`}
               style={{ left: pos.x, top: pos.y }}
             >
               <div
                 className="bp-node-header"
-                style={{ background: NODE_TYPE_COLORS[node.type] }}
+                style={{
+                  background: isUnlinked ? "#6b7280" : NODE_TYPE_COLORS[node.type],
+                }}
               >
                 <span className="bp-node-key" title={node.key}>
                   {nodeDisplayName(node, t, doc.nodes)}
                 </span>
                 <span className="bp-node-type">
+                  {isUnlinked && <span className="bp-node-flag">{t("blueprint.unlinkedTag")}</span>}
                   {t(`blueprint.type.${node.type}`)}
                 </span>
               </div>
@@ -670,8 +805,10 @@ export function BlueprintCanvas({
               key={i}
               d={edgePath(a, b)}
               data-edge={i}
-              className={`bp-edge ${selectedEdge === i ? "selected" : ""}`}
-              stroke={EDGE_COLORS[edge.kind]}
+              className={`bp-edge ${selectedEdge === i ? "selected" : ""} ${
+                blade?.edges.includes(i) ? "bladed" : ""
+              }`}
+              stroke={blade?.edges.includes(i) ? "#ff4d4f" : EDGE_COLORS[edge.kind]}
               onPointerDown={(ev) => {
                 ev.stopPropagation();
                 setSelectedEdge(i);
@@ -686,6 +823,32 @@ export function BlueprintCanvas({
             stroke="#ffffff"
           />
         )}
+        {/* 刀痕：**直线**，起点为右键按下处（刀头），终点跟随指针（刀尾）。 */}
+        {blade && (
+          <g className="bp-blade">
+            <line
+              x1={blade.from.x}
+              y1={blade.from.y}
+              x2={blade.to.x}
+              y2={blade.to.y}
+              className="bp-blade-glow"
+              strokeWidth={14}
+            />
+            <line
+              x1={blade.from.x}
+              y1={blade.from.y}
+              x2={blade.to.x}
+              y2={blade.to.y}
+              className="bp-blade-core"
+              strokeWidth={3}
+            />
+            {/* 刀头：右键按下处（固定） */}
+            <circle cx={blade.from.x} cy={blade.from.y} r={6} className="bp-blade-head" />
+            <circle cx={blade.from.x} cy={blade.from.y} r={14} className="bp-blade-head-glow" />
+            {/* 刀尾：跟随指针 */}
+            <circle cx={blade.to.x} cy={blade.to.y} r={3.5} className="bp-blade-tail" />
+          </g>
+        )}
       </svg>
 
       {/* 图例（多语言） */}
@@ -696,6 +859,7 @@ export function BlueprintCanvas({
             {t(`blueprint.port.${k}` as TranslationKey)}
           </span>
         ))}
+        <span className="bp-legend-item bp-legend-hint">{t("blueprint.bladeHint")}</span>
       </div>
     </div>
   );
