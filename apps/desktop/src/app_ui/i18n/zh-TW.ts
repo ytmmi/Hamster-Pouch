@@ -354,6 +354,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.type.event": "事件",
   "blueprint.type.condition": "條件",
   "blueprint.type.action": "動作",
+  "blueprint.type.layout_block": "佈局塊",
   "blueprint.inspector": "屬性",
   "blueprint.position": "位置",
   "blueprint.payload": "載荷",

@@ -371,6 +371,7 @@ export const zhCN = {
   "blueprint.type.event": "事件",
   "blueprint.type.condition": "条件",
   "blueprint.type.action": "动作",
+  "blueprint.type.layout_block": "布局块",
   "blueprint.inspector": "属性",
   "blueprint.position": "位置",
   "blueprint.payload": "载荷",

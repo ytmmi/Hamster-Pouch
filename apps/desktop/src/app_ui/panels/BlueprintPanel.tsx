@@ -30,6 +30,7 @@ import type { Translate } from "../i18n";
 import { BlueprintCanvas } from "./BlueprintCanvas";
 
 const TYPE_PREFIX: Record<string, string> = {
+  layout_block: "blk",
   control: "c",
   class: "k",
   object: "o",
@@ -141,6 +142,8 @@ export function BlueprintPanel(): JSX.Element {
         },
       };
       switch (type) {
+        case "layout_block":
+          break;
         case "control":
           base.panel_id = PANEL_IDS[0];
           break;
@@ -574,6 +577,7 @@ export function BlueprintPanel(): JSX.Element {
                   <div className="bp-palette">
                     {(
                       [
+                        "layout_block",
                         "control",
                         "class",
                         "object",
@@ -815,7 +819,7 @@ function NodeInspector({
         field(t("blueprint.hideDirection"), "hide_direction", node.hide_direction ?? "", (v) =>
           onPatch({ hide_direction: v }),
         )}
-      {node.type === "group" &&
+      {(node.type === "group" || node.type === "layout_block") &&
         row(
           t("blueprint.position"),
           <span className="bp-field-pair">

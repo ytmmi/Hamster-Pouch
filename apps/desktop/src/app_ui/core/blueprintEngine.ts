@@ -2,13 +2,15 @@
  * 蓝图运行时引擎（RFC 0007 决策 3 / D29）。
  *
  * 职责：加载当前生效蓝图（仓库默认或内置默认），订阅 UI 事件（单击/双击/选中），
- * 按图求值（fires/guards DAG）→ 输出 dockview 操作序列（面板显隐 + 互斥组事务性 +
- * 组收起/展开），由外部注入的 Executor 执行。
+ * 按图求值（fires/guards DAG）→ 输出 dockview 操作序列（面板显隐 + 组收起/展开），
+ * 由外部注入的 Executor 执行。
  *
  * 求值语义：
  * - 事件节点按 trigger + target（类/对象）匹配 dispatch 上报的目标；
  * - 沿 fires/guards 边按 order 升序执行；条件为真才继续；
- * - `show` 前先隐藏该控件所在互斥组内其他非 default_visible 成员（其余默认隐藏）；
+ * - 互斥组不自动隐藏成员：同 dockview 组的成员共享显示区域，标签激活天然保证
+ *   同一时间仅一个激活；跨 dockview 组的成员不做自动隐藏/收缩（避免破坏用户布局），
+ *   如需隐藏/收起请用显式 hide/collapse 动作；
  * - 幂等：重复触发不产生额外副作用（show 已存在面板 = 激活）。
  *
  * 组收起/拉伸（collapse/expand）与隐藏方向（hide_direction）的 dockview 映射属于
@@ -212,10 +214,11 @@ export class BlueprintEngine {
         if (target?.type !== "control" || !target.panel_id) {
           return;
         }
-        // 先显示目标，再隐藏互斥组内其他成员（避免把同组标签误关；
-        // 隐藏语义 = 最小化至最小尺寸，标签条保留，见 D29）。
+        // 显示目标控件：已存在则激活，不存在则创建。
+        // 互斥组不在此处自动隐藏其他成员：同 dockview 组的成员共享显示区域，
+        // 标签激活天然保证同一时间仅一个激活；跨 dockview 组的成员不做自动
+        // 隐藏/收缩（避免破坏用户布局）。如需隐藏/收起请用显式 hide/collapse 动作。
         executor.showPanel(target.panel_id, true);
-        this.hideExclusiveSiblings(target.key, graph);
         break;
       }
       case "hide": {
@@ -259,40 +262,6 @@ export class BlueprintEngine {
     const payload = action.payload as { play?: boolean } | undefined;
     if (payload?.play && input.target.fileId) {
       executor.playFile(input.target.fileId);
-    }
-  }
-
-  /** 互斥组事务性：隐藏目标控件所在互斥组内其他非 default_visible 成员。 */
-  private hideExclusiveSiblings(controlKey: string, graph: BlueprintGraph): void {
-    const executor = this.executor;
-    if (!executor) {
-      return;
-    }
-    const groupKeys = graph.edges
-      .filter((e) => e.kind === "memberOf" && e.from === controlKey)
-      .map((e) => e.to);
-    for (const groupKey of groupKeys) {
-      const group = graph.nodes.find(
-        (n) => n.key === groupKey && n.type === "group",
-      );
-      if (!group || group.mode !== "exclusive") {
-        continue;
-      }
-      const defaultVisible = new Set(group.default_visible ?? []);
-      const members = graph.edges
-        .filter((e) => e.kind === "memberOf" && e.to === groupKey)
-        .map((e) => e.from);
-      for (const member of members) {
-        if (member === controlKey || defaultVisible.has(member)) {
-          continue;
-        }
-        const node = graph.nodes.find(
-          (n) => n.key === member && n.type === "control",
-        );
-        if (node?.panel_id) {
-          executor.hidePanel(node.panel_id);
-        }
-      }
     }
   }
 

@@ -20,6 +20,7 @@ import type { Translate } from "../i18n";
 
 /** 节点类型 → 头部颜色（ComfyUI 风格高对比色板）。 */
 export const NODE_TYPE_COLORS: Record<BlueprintNodeType, string> = {
+  layout_block: "#b085f5",
   control: "#4a90d9",
   class: "#6bbf59",
   object: "#d9b45b",
@@ -45,7 +46,9 @@ export interface PortDef {
 
 /** 每类节点的端口定义（输入在左、输出在右）。 */
 const PORT_DEFS: Record<BlueprintNodeType, PortDef[]> = {
+  layout_block: [{ id: "contains", side: "out", label: "contains" }],
   control: [
+    { id: "in", side: "in", label: "contains" },
     { id: "contains", side: "out", label: "contains" },
     { id: "memberOf", side: "out", label: "memberOf" },
   ],
@@ -71,6 +74,9 @@ export function kindForEdge(
 ): BlueprintEdge["kind"] | null {
   switch (fromPort) {
     case "contains":
+      if (fromType === "layout_block" && (toType === "group" || toType === "control")) {
+        return "contains";
+      }
       if (fromType === "control" && toType === "class") return "contains";
       if (fromType === "class" && toType === "object") return "contains";
       return null;
@@ -95,6 +101,8 @@ function portIdFor(
 ): string {
   if (side === "in") {
     switch (type) {
+      case "control":
+        return "in";
       case "class":
       case "object":
         return "contains";
@@ -109,6 +117,7 @@ function portIdFor(
     }
   }
   switch (type) {
+    case "layout_block":
     case "control":
       return kind === "memberOf" ? "memberOf" : "contains";
     case "class":
@@ -125,6 +134,8 @@ function portIdFor(
 /** 节点正文摘要（画布卡片展示关键字段）。 */
 export function nodeSummary(node: BlueprintNode): string {
   switch (node.type) {
+    case "layout_block":
+      return "contains 组/控件";
     case "control":
       return node.panel_id ?? "—";
     case "class":

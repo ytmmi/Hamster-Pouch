@@ -25,13 +25,15 @@ pub type NodeKey = String;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeType {
+    /// 布局块：顶层布局区域（如左/中/右三栏），包含标签组与控件。
+    LayoutBlock,
     /// 控件：UI 组件实例，绑定 dockview 面板。
     Control,
     /// 类：控件内部条目分类（按 media_type）。
     Class,
     /// 对象：类内条目实例。
     Object,
-    /// 组：控件容器（互斥/独立）+ 收起行为。
+    /// 组：控件容器（互斥/独立）。
     Group,
     /// 事件：触发求值。
     Event,
@@ -44,6 +46,7 @@ pub enum NodeType {
 impl NodeType {
     pub fn as_str(&self) -> &'static str {
         match self {
+            NodeType::LayoutBlock => "layout_block",
             NodeType::Control => "control",
             NodeType::Class => "class",
             NodeType::Object => "object",
@@ -56,6 +59,7 @@ impl NodeType {
 
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
+            "layout_block" => Some(NodeType::LayoutBlock),
             "control" => Some(NodeType::Control),
             "class" => Some(NodeType::Class),
             "object" => Some(NodeType::Object),
@@ -496,6 +500,9 @@ fn validate_node(
 ) {
     let key = &node.key;
     match node.node_type {
+        NodeType::LayoutBlock => {
+            // 布局块：结构节点，仅要求 key 非空（name/position 可选）。
+        }
         NodeType::Control => {
             if node.panel_id.as_deref().unwrap_or("").trim().is_empty() {
                 errors.push(format!("控件节点 {key} 缺少 panel_id"));
@@ -628,7 +635,9 @@ fn validate_edge(
         errors.push(format!("边引用不存在的终点: {}", edge.to));
     }
     let ok = match (edge.edge_kind, from, to) {
-        (EdgeKind::Contains, Some(NodeType::Control), Some(NodeType::Class))
+        (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Group))
+        | (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Control))
+        | (EdgeKind::Contains, Some(NodeType::Control), Some(NodeType::Class))
         | (EdgeKind::Contains, Some(NodeType::Class), Some(NodeType::Object)) => true,
         (EdgeKind::MemberOf, Some(NodeType::Control), Some(NodeType::Group)) => true,
         (EdgeKind::Fires, Some(NodeType::Event), Some(NodeType::Condition | NodeType::Action)) => {
@@ -795,6 +804,7 @@ mod tests {
     #[test]
     fn enums_roundtrip() {
         for v in [
+            NodeType::LayoutBlock,
             NodeType::Control,
             NodeType::Class,
             NodeType::Object,
@@ -906,6 +916,31 @@ mod tests {
         assert!(errors.iter().any(|e| e.contains("key 重复")));
         graph.nodes.pop();
         assert!(graph.validate().is_empty());
+    }
+
+    #[test]
+    fn validate_accepts_layout_block_contains_group_and_control() {
+        let graph = BlueprintGraph::from_json(
+            r#"{"schema_version":1,"nodes":[
+              {"key":"blk","type":"layout_block","name":"右栏"},
+              {"key":"g","type":"group","mode":"exclusive"},
+              {"key":"c","type":"control","panel_id":"viewer"}
+            ],"edges":[
+              {"from":"blk","to":"g","kind":"contains","order":1},
+              {"from":"blk","to":"c","kind":"contains","order":1}
+            ]}"#,
+        )
+        .unwrap();
+        assert!(graph.validate().is_empty(), "{:?}", graph.validate());
+        // 反向：控件 contains 布局块 → 非法
+        let bad = BlueprintGraph::from_json(
+            r#"{"schema_version":1,"nodes":[
+              {"key":"blk","type":"layout_block"},
+              {"key":"c","type":"control","panel_id":"viewer"}
+            ],"edges":[{"from":"c","to":"blk","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(bad.validate().iter().any(|e| e.contains("非法边")));
     }
 
     #[test]

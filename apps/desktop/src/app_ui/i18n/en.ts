@@ -354,6 +354,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.type.event": "Event",
   "blueprint.type.condition": "Condition",
   "blueprint.type.action": "Action",
+  "blueprint.type.layout_block": "Layout block",
   "blueprint.inspector": "Inspector",
   "blueprint.position": "Position",
   "blueprint.payload": "Payload",

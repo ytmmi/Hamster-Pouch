@@ -128,6 +128,8 @@ export function AppUiApp(): JSX.Element {
         focusPanel(panelId, floating);
       },
       hidePanel: (panelId: string) => {
+        // 显式 hide 动作（用户蓝图规则）：与最近显示面板同 dockview 组时跳过
+        // （标签激活已切换）；跨组则收缩至最小尺寸（标签条保留，D25/D29）。
         const dv = apiRef.current;
         if (!dv) {
           return;
@@ -140,18 +142,14 @@ export function AppUiApp(): JSX.Element {
           ? dv.getPanel(lastShownRef.current)
           : null;
         if (shown && panel.api.group.id === shown.api.group.id) {
-          // 同 dockview 组：show 已把激活切到目标标签，保留其他标签即可。
           return;
         }
         try {
-          // 组的隐藏 = 最小化至最小尺寸（正文 6px、标签条保留，D25/D29），
-          // 不销毁面板/标签；用户可随时再展开。
           panel.api.setSize({
             width: PANEL_MIN_SIZE.minimumWidth,
             height: PANEL_MIN_SIZE.minimumHeight,
           });
         } catch {
-          // 兜底：无法最小化时关闭（如浮动面板受网格约束）。
           panel.api.close();
         }
       },

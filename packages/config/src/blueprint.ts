@@ -11,6 +11,7 @@ export const BLUEPRINT_SCHEMA_VERSION = 1;
 // ============================== 类型 ==============================
 
 export type BlueprintNodeType =
+  | "layout_block"
   | "control"
   | "class"
   | "object"
@@ -118,6 +119,11 @@ export const CONDITION_EXPR_HINTS = [
 export const DEFAULT_BLUEPRINT: BlueprintGraph = {
   schema_version: BLUEPRINT_SCHEMA_VERSION,
   nodes: [
+    // 布局块：默认自定义布局 = 左中右 3 块（块内包含标签组与控件）
+    { key: "blk_left", type: "layout_block", position: { x: 0, y: 0 } },
+    { key: "blk_center", type: "layout_block", position: { x: 360, y: 0 } },
+    { key: "blk_right", type: "layout_block", position: { x: 720, y: 0 } },
+
     { key: "c_preview", type: "control", panel_id: "media", title_key: "panel.media" },
     { key: "c_viewer", type: "control", panel_id: "viewer", title_key: "panel.viewer" },
     { key: "c_player", type: "control", panel_id: "player", title_key: "panel.player" },
@@ -142,6 +148,10 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { key: "a_show_meta", type: "action", op: "show", target: "c_meta" },
   ],
   edges: [
+    // 布局块包含关系（块 → 组/控件）：左块(未建模控件)/中块=媒体预览/右块=查看器标签组
+    { from: "blk_center", to: "c_preview", kind: "contains", order: 1 },
+    { from: "blk_right", to: "g_viewers", kind: "contains", order: 1 },
+
     { from: "e_dbl_img", to: "a_show_viewer", kind: "fires", order: 1 },
     { from: "e_dbl_vid", to: "a_show_player", kind: "fires", order: 1 },
     { from: "e_dbl_aud", to: "a_show_meta", kind: "fires", order: 1 },
