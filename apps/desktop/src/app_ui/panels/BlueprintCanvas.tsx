@@ -525,7 +525,7 @@ export function BlueprintCanvas({
   };
 
   const tempFrom = tempEdge
-    ? portMap.current.get(`${tempEdge.fromKey}::out:${tempEdge.fromPort}`)
+    ? portMap.current.get(`${tempEdge.fromKey}::out::${tempEdge.fromPort}`)
     : null;
 
   return (
@@ -575,7 +575,7 @@ export function BlueprintCanvas({
                     <div className="bp-port-row" key={`in:${p.id}`}>
                       <span
                         className="bp-port bp-port-in"
-                        data-port={`${node.key}::in:${p.id}`}
+                        data-port={`${node.key}::in::${p.id}`}
                       />
                       <span className="bp-port-label">
                         {portLabel(node.type, p.id, t)}
@@ -591,7 +591,7 @@ export function BlueprintCanvas({
                       </span>
                       <span
                         className="bp-port bp-port-out"
-                        data-port={`${node.key}::out:${p.id}`}
+                        data-port={`${node.key}::out::${p.id}`}
                       />
                     </div>
                   ))}
@@ -606,14 +606,14 @@ export function BlueprintCanvas({
       <svg className="bp-edges">
         {doc.edges.map((edge, i) => {
           const a = portMap.current.get(
-            `${edge.from}::out:${portIdFor(
+            `${edge.from}::out::${portIdFor(
               doc.nodes.find((n) => n.key === edge.from)?.type ?? "control",
               "out",
               edge.kind,
             )}`,
           );
           const b = portMap.current.get(
-            `${edge.to}::in:${portIdFor(
+            `${edge.to}::in::${portIdFor(
               doc.nodes.find((n) => n.key === edge.to)?.type ?? "control",
               "in",
               edge.kind,
