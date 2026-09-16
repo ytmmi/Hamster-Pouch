@@ -61,10 +61,14 @@ function DerivedField({
   );
 }
 
-/** 状态节点的目标候选：按动作类型给合法目标（show/hide→控件，collapse/expand→标签组）。 */
+/**
+ * 状态节点的目标候选：按动作类型给合法目标（show/hide→控件，collapse/expand→标签组），
+ * 名称用**本地化显示名**（控件→面板标题、标签组→自定义名/「标签组 N」），不暴露裸 key。
+ */
 function actionTargets(
   doc: BlueprintGraph,
   op: BlueprintNode["op"],
+  t: Translate,
 ): { v: string; l: string }[] {
   const wanted: BlueprintNodeType[] =
     op === "collapse" || op === "expand"
@@ -74,13 +78,11 @@ function actionTargets(
         : ["control"];
   return doc.nodes
     .filter((n) => wanted.includes(n.type))
-    .map((n) => ({
-      v: n.key,
-      l: n.name?.trim() || `${n.type === "group" ? "标签组" : "控件"} ${n.key}`,
-    }));
+    .map((n) => ({ v: n.key, l: nodeDisplayName(n, t, doc.nodes) }));
 }
 
-/** 节点属性检查器：只暴露**本节点必须设定**的字段；key 型引用一律只读展示。 */export function NodeInspector({
+/** 节点属性检查器：只暴露**本节点必须设定**的字段；key 型引用一律只读展示。 */
+export function NodeInspector({
   node,
   doc,
   onPatch,
@@ -337,7 +339,7 @@ function actionTargets(
           node.target ?? "",
           [
             { v: "", l: t("blueprint.targetUnset") },
-            ...actionTargets(doc, node.op),
+            ...actionTargets(doc, node.op, t),
           ],
           (v) => onPatch({ target: v || undefined }),
         )}

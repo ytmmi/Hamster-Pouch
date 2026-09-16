@@ -149,44 +149,37 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
 
 // ---- 8. 新建蓝图的结构骨架（布局块→标签组→控件）----
 {
-  // 造一个与默认布局同形的 dockview 替身：
-  // 左栏 = 3 个独立面板（各自一个组），中栏/右栏 = 多标签组（媒体-测试布局的真实形状）。
-  const fakeGroup = (id, panels) => ({
-    id,
-    api: { location: { type: "grid" } },
-    panels: panels.map((pid) => ({ id: pid })),
-  });
-  const fakeDv = {
-    groups: [
-      fakeGroup("1", ["repo"]),
-      fakeGroup("2", ["sources"]),
-      fakeGroup("3", ["albums"]),
-      fakeGroup("4", ["media", "viewer", "player"]),
-      fakeGroup("7", ["tags", "metadata"]),
-    ],
-  };
   const structure = await import(
     pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintStructure.ts"))
       .href
   );
-  const doc = structure.structureBlueprint(fakeDv);
+  // 与默认「媒体-测试」布局同形的快照：左栏 3 个独立区域 + 中/右两个标签组。
+  const snapshot = {
+    at: Date.now(),
+    regions: [
+      ["repo"],
+      ["sources"],
+      ["albums"],
+      ["media", "viewer", "player"],
+      ["tags", "metadata"],
+    ],
+  };
+  const doc = structure.structureBlueprint(snapshot);
   writeFixture("structure_from_layout", doc);
 
   const blocks = doc.nodes.filter((n) => n.type === "layout_block").length;
   const groups = doc.nodes.filter((n) => n.type === "group").length;
   const controls = doc.nodes.filter((n) => n.type === "control").length;
-  // 多面板组：布局块只连标签组；单面板区域：布局块直连控件。
+  // 多面板区域：布局块只连标签组；单面板区域：布局块直连控件。
+  const typeOf = (key) => doc.nodes.find((n) => n.key === key)?.type;
   const blockToGroup = doc.edges.filter(
-    (e) => doc.nodes.find((n) => n.key === e.from)?.type === "layout_block" &&
-      doc.nodes.find((n) => n.key === e.to)?.type === "group",
+    (e) => typeOf(e.from) === "layout_block" && typeOf(e.to) === "group",
   ).length;
   const blockToControl = doc.edges.filter(
-    (e) => doc.nodes.find((n) => n.key === e.from)?.type === "layout_block" &&
-      doc.nodes.find((n) => n.key === e.to)?.type === "control",
+    (e) => typeOf(e.from) === "layout_block" && typeOf(e.to) === "control",
   ).length;
   const groupToControl = doc.edges.filter(
-    (e) => doc.nodes.find((n) => n.key === e.from)?.type === "group" &&
-      doc.nodes.find((n) => n.key === e.to)?.type === "control",
+    (e) => typeOf(e.from) === "group" && typeOf(e.to) === "control",
   ).length;
 
   check(
@@ -199,20 +192,77 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
       groupToControl === 5,
     `blocks=${blocks} groups=${groups} controls=${controls} blk→grp=${blockToGroup} blk→ctl=${blockToControl} grp→ctl=${groupToControl}`,
   );
-
-  // 单面板组应直连控件
-  const single = structure.structureBlueprint({
-    groups: [fakeGroup("9", ["tasks"])],
-  });
-  const singleOk =
-    single.nodes.filter((n) => n.type === "layout_block").length === 1 &&
-    single.nodes.filter((n) => n.type === "group").length === 0 &&
-    single.nodes.filter((n) => n.type === "control").length === 1 &&
-    single.edges.length === 1;
-  check("结构骨架：单面板区域不带标签组（布局块直连控件）", singleOk);
   check(
-    "结构骨架：空布局 → 空图",
-    structure.structureBlueprint({ groups: [] }).nodes.length === 0,
+    "结构骨架：控件带 panel_id 与本地化标题键",
+    doc.nodes
+      .filter((n) => n.type === "control")
+      .every((n) => Boolean(n.panel_id) && Boolean(n.title_key)),
+  );
+
+  // 单面板区域应直连控件
+  const single = structure.structureBlueprint({ at: Date.now(), regions: [["tasks"]] });
+  check(
+    "结构骨架：单面板区域不带标签组（布局块直连控件）",
+    single.nodes.filter((n) => n.type === "layout_block").length === 1 &&
+      single.nodes.filter((n) => n.type === "group").length === 0 &&
+      single.nodes.filter((n) => n.type === "control").length === 1 &&
+      single.edges.length === 1,
+  );
+  check(
+    "结构骨架：空快照 / null → 空图",
+    structure.structureBlueprint({ at: Date.now(), regions: [] }).nodes.length === 0 &&
+      structure.structureBlueprint(null).nodes.length === 0,
+  );
+}
+
+// ---- 9. 布局结构快照（主窗口发布 → 任何窗口可读）----
+{
+  // 用内存 localStorage 替身验证"发布-读取"往返与订阅。
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+  };
+  globalThis.CustomEvent = class {
+    constructor(type, init) {
+      this.type = type;
+      this.detail = init?.detail;
+    }
+  };
+  const listeners = new Map();
+  globalThis.document = {
+    addEventListener: (t, fn) => listeners.set(t, fn),
+    removeEventListener: (t) => listeners.delete(t),
+    dispatchEvent: (e) => {
+      listeners.get(e.type)?.(e);
+      return true;
+    },
+  };
+  const structure = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintStructure.ts"))
+      .href
+  );
+
+  const snap = { at: 123, regions: [["media", "viewer"], ["repo"]] };
+  structure.publishStructure(snap);
+  const read = structure.readStructure();
+  check(
+    "结构快照：发布后可被其它窗口读取",
+    read?.regions?.length === 2 && read.regions[0].join(",") === "media,viewer",
+    JSON.stringify(read?.regions ?? null),
+  );
+
+  let seen = null;
+  const unsubscribe = structure.subscribeStructure((s) => {
+    seen = s;
+  });
+  structure.publishStructure({ at: 456, regions: [["tasks"]] });
+  unsubscribe();
+  check(
+    "结构快照：订阅能收到更新且可取消",
+    seen?.regions?.[0]?.[0] === "tasks",
+    JSON.stringify(seen?.regions ?? null),
   );
 }
 

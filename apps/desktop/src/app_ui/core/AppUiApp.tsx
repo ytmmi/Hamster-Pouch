@@ -25,6 +25,10 @@ import {
   reconcileAfterLayoutApplied,
   subscribeBlueprintHotReload,
 } from "../shared/blueprintRuntime";
+import {
+  publishStructure,
+  snapshotFromDockview,
+} from "../panels/blueprintStructure";
 
 import * as api from "../shared/api";
 import { AppContext, type AppContextValue } from "./AppContext";
@@ -272,7 +276,6 @@ export function AppUiApp(): JSX.Element {
 
   /** 供蓝图编辑器从当前布局推导结构骨架（只读用途）。 */
   const getDockview = useCallback(() => apiRef.current, []);
-
   const detachPanel = useCallback(
     (id: string) => {
       const title = panelTitle(id, t);
@@ -499,6 +502,21 @@ export function AppUiApp(): JSX.Element {
     },
     [detachPanel, t],
   );
+
+  /**
+   * 把当前工作区布局结构发布到**跨窗口共享存储**：蓝图面板可能开在独立窗口，
+   * 那里没有 dockview 实例，需要靠这份快照才能生成"布局块→标签组→控件"结构骨架。
+   */
+  useEffect(() => {
+    const dv = apiRef.current;
+    if (!dv) {
+      return;
+    }
+    const publish = () => publishStructure(snapshotFromDockview(dv));
+    publish();
+    const disposable = dv.onDidLayoutChange(publish);
+    return () => disposable.dispose();
+  }, [repoId, refreshKey, theme]);
 
   return (
     <AppContext.Provider value={ctxValue}>

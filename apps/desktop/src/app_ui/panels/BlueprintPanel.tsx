@@ -27,14 +27,18 @@ import type {
 } from "@hamster-pouch/shared-types";
 
 import * as api from "../shared/api";
-import { notifyBlueprintChangedLocally } from "../shared/blueprintRuntime";
+import { notifyBlueprintChangedLocally, traceBlueprint } from "../shared/blueprintRuntime";
 import { analyzeUnlinked } from "../shared/blueprintLint";
 import { useApp } from "../core/AppContext";
 import { BlueprintCanvas } from "./BlueprintCanvas";
 import { softRemove } from "./blueprintDelete";
 import { NodeInspector } from "./BlueprintInspector";
 import { appendNode, parentHintFor } from "./blueprintNodeFactory";
-import { structureBlueprint } from "./blueprintStructure";
+import {
+  readStructure,
+  snapshotFromDockview,
+  structureBlueprint,
+} from "./blueprintStructure";
 import {
   canvasCenter,
   freeSlotPosition,
@@ -289,9 +293,19 @@ export function BlueprintPanel(): JSX.Element {
     const n = newName.trim() || app.t("blueprint.defaultName");
     setBusy(true);
     try {
+      // 结构快照：优先用主窗口发布的跨窗口共享布局结构（本面板可能开在独立窗口，
+      // 那里没有 dockview）；拿不到再退回本窗口的 dockview。
       const dockview = app.getDockview();
+      const snapshot = dockview
+        ? snapshotFromDockview(dockview)
+        : readStructure();
       const skeleton =
-        withStructure && dockview ? structureBlueprint(dockview) : null;
+        withStructure && snapshot && snapshot.regions.length > 0
+          ? structureBlueprint(snapshot)
+          : null;
+      traceBlueprint(
+        `[structure] 新建蓝图 withStructure=${withStructure} dockview=${!!dockview} 快照区域=${snapshot?.regions.length ?? 0} 结构节点=${skeleton?.nodes.length ?? 0}`,
+      );
       const item = await api.blueprintCreate({
         repoId,
         name: n,

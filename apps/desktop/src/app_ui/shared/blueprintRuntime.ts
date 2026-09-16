@@ -87,6 +87,9 @@ function trace(message: string): void {
     .catch(() => undefined);
 }
 
+/** 供编辑器/布局模块复用的诊断打点（同 `trace`，语义化别名）。 */
+export const traceBlueprint = trace;
+
 // 模块装载即打点：区分"前端没跑到蓝图链路"与"跑到了但分支不对"。
 trace(`[blueprint] runtime module imported at ${new Date().toISOString()} hw=${navigator.hardwareConcurrency}`);
 
