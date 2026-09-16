@@ -307,7 +307,7 @@ fn default_blueprint_fixture_validates() {
     let errors = graph.validate();
     assert!(errors.is_empty(), "默认蓝图校验失败: {errors:?}");
     assert_eq!(graph.nodes.len(), 23, "默认蓝图应有 23 个节点");
-    assert_eq!(graph.edges.len(), 17, "默认蓝图应有 17 条边");
+    assert_eq!(graph.edges.len(), 16, "默认蓝图应有 16 条边");
     assert_eq!(graph.default_version, Some(2));
 }
 

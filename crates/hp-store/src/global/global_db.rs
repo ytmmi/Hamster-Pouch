@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use hp_core::{HpError, HpResult};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::migrate;
 use crate::util::{now_iso, require_nonempty, store_err, uuid};
@@ -14,6 +14,7 @@ use crate::util::{now_iso, require_nonempty, store_err, uuid};
 const GLOBAL_MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/global/0001_init.sql"),
     include_str!("../../migrations/global/0002_blueprint_templates.sql"),
+    include_str!("../../migrations/global/0003_layout_blueprints.sql"),
 ];
 
 /// 仓库注册表行。
@@ -34,6 +35,8 @@ pub struct PanelLayoutRow {
     /// 命名布局标识（承载“布局名”）。
     pub workspace: String,
     pub layout_json: String,
+    /// 布局绑定的蓝图 ID 列表（1 个布局可绑定多个蓝图）。
+    pub blueprint_ids: Vec<String>,
     pub updated_at: String,
 }
 
@@ -185,6 +188,7 @@ impl GlobalDb {
     /// 决策 D1：布局存全局库、每行带 `repo_id`，按仓库隔离。
     /// `repo_id` 允许为空串（表示未打开仓库 / 全局默认布局）。
     /// `workspace` 承载命名布局标识（布局名）；同 `(repo_id, workspace)` 覆盖旧值。
+    /// 蓝图绑定初始为空；绑定/追加走 `set_layout_blueprints`。
     pub fn save_panel_layout(
         &mut self,
         repo_id: &str,
@@ -218,6 +222,7 @@ impl GlobalDb {
                     repo_id: repo_id.to_string(),
                     workspace: workspace.to_string(),
                     layout_json: layout_json.to_string(),
+                    blueprint_ids: vec![],
                     updated_at,
                 }
             }
@@ -227,17 +232,19 @@ impl GlobalDb {
                     repo_id: repo_id.to_string(),
                     workspace: workspace.to_string(),
                     layout_json: layout_json.to_string(),
+                    blueprint_ids: vec![],
                     updated_at: now_iso(),
                 };
                 self.conn
                     .execute(
-                        "INSERT INTO panel_layouts (id, repo_id, workspace, layout_json, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        "INSERT INTO panel_layouts (id, repo_id, workspace, layout_json, blueprint_ids_json, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                         params![
                             row.id,
                             row.repo_id,
                             row.workspace,
                             row.layout_json,
+                            "[]",
                             row.updated_at
                         ],
                     )
@@ -248,25 +255,41 @@ impl GlobalDb {
         Ok(row)
     }
 
+    /// 设置（覆盖）某布局绑定的蓝图 ID 列表（1 个布局可绑定多个蓝图）。
+    pub fn set_layout_blueprints(
+        &mut self,
+        repo_id: &str,
+        workspace: &str,
+        blueprint_ids: &[String],
+    ) -> HpResult<()> {
+        require_nonempty(workspace, "布局名")?;
+        let json = serde_json::to_string(blueprint_ids)
+            .map_err(|e| HpError::Store(format!("序列化蓝图绑定失败: {e}")))?;
+        let n = self
+            .conn
+            .execute(
+                "UPDATE panel_layouts SET blueprint_ids_json = ?3, updated_at = ?4
+                 WHERE repo_id = ?1 AND workspace = ?2",
+                params![repo_id, workspace, json, now_iso()],
+            )
+            .map_err(|e| store_err("写入布局蓝图绑定", e))?;
+        if n == 0 {
+            return Err(HpError::NotFound(format!("布局不存在: {workspace}")));
+        }
+        Ok(())
+    }
+
     /// 列出某仓库下全部命名面板布局（按 `updated_at` 倒序，最新在前）。
     pub fn list_panel_layouts(&self, repo_id: &str) -> HpResult<Vec<PanelLayoutRow>> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, repo_id, workspace, layout_json, updated_at
+                "SELECT id, repo_id, workspace, layout_json, blueprint_ids_json, updated_at
                  FROM panel_layouts WHERE repo_id = ?1 ORDER BY updated_at DESC",
             )
             .map_err(|e| store_err("查询面板布局列表", e))?;
         let rows = stmt
-            .query_map(params![repo_id], |row| {
-                Ok(PanelLayoutRow {
-                    id: row.get(0)?,
-                    repo_id: row.get(1)?,
-                    workspace: row.get(2)?,
-                    layout_json: row.get(3)?,
-                    updated_at: row.get(4)?,
-                })
-            })
+            .query_map(params![repo_id], row_to_layout)
             .map_err(|e| store_err("读取面板布局列表", e))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| store_err("解析面板布局列表", e))?;
@@ -282,18 +305,10 @@ impl GlobalDb {
         let row = self
             .conn
             .query_row(
-                "SELECT id, repo_id, workspace, layout_json, updated_at
+                "SELECT id, repo_id, workspace, layout_json, blueprint_ids_json, updated_at
                  FROM panel_layouts WHERE repo_id = ?1 AND workspace = ?2 LIMIT 1",
                 params![repo_id, workspace],
-                |row| {
-                    Ok(PanelLayoutRow {
-                        id: row.get(0)?,
-                        repo_id: row.get(1)?,
-                        workspace: row.get(2)?,
-                        layout_json: row.get(3)?,
-                        updated_at: row.get(4)?,
-                    })
-                },
+                row_to_layout,
             )
             .optional()
             .map_err(|e| store_err("查询面板布局", e))?;
@@ -394,4 +409,20 @@ impl std::fmt::Debug for GlobalDb {
 fn _assert_send() {
     fn assert_send<T: Send>() {}
     assert_send::<GlobalDb>();
+}
+
+/// `panel_layouts` 行解析（含蓝图绑定 JSON）。
+fn row_to_layout(row: &Row) -> rusqlite::Result<PanelLayoutRow> {
+    let raw: Option<String> = row.get(4)?;
+    let blueprint_ids = raw
+        .and_then(|r| serde_json::from_str::<Vec<String>>(&r).ok())
+        .unwrap_or_default();
+    Ok(PanelLayoutRow {
+        id: row.get(0)?,
+        repo_id: row.get(1)?,
+        workspace: row.get(2)?,
+        layout_json: row.get(3)?,
+        blueprint_ids,
+        updated_at: row.get(5)?,
+    })
 }

@@ -145,8 +145,8 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { key: "o_vid", type: "object", class: "k_video", scope: "double_clicked" },
     { key: "o_aud", type: "object", class: "k_audio", scope: "double_clicked" },
 
-    // 右栏：互斥标签组（查看器/媒体播放/元数据）
-    { key: "g_viewers", type: "group", mode: "exclusive", default_visible: [], hide_direction: "left", position: { x: 760, y: 160 } },
+    // 右栏：查看器标签组（查看器/媒体播放 互斥标签；元数据是详情面板，不属于该组）
+    { key: "g_viewers", type: "group", mode: "exclusive", default_visible: [], hide_direction: "left", name: "查看器", position: { x: 760, y: 160 } },
     { key: "c_viewer", type: "control", panel_id: "viewer", title_key: "panel.viewer" },
     { key: "c_player", type: "control", panel_id: "player", title_key: "panel.player" },
     { key: "c_meta", type: "control", panel_id: "metadata", title_key: "panel.metadata" },
@@ -177,15 +177,14 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { from: "k_video", to: "o_vid", kind: "contains", order: 10 },
     { from: "k_audio", to: "o_aud", kind: "contains", order: 11 },
 
-    // 控件 → 互斥标签组
+    // 控件 → 查看器标签组（元数据为详情面板，不在该组）
     { from: "c_viewer", to: "g_viewers", kind: "memberOf", order: 12 },
     { from: "c_player", to: "g_viewers", kind: "memberOf", order: 13 },
-    { from: "c_meta", to: "g_viewers", kind: "memberOf", order: 14 },
 
     // 事件 → 动作（双击联动）
-    { from: "e_dbl_img", to: "a_show_viewer", kind: "fires", order: 15 },
-    { from: "e_dbl_vid", to: "a_show_player", kind: "fires", order: 16 },
-    { from: "e_dbl_aud", to: "a_show_meta", kind: "fires", order: 17 },
+    { from: "e_dbl_img", to: "a_show_viewer", kind: "fires", order: 14 },
+    { from: "e_dbl_vid", to: "a_show_player", kind: "fires", order: 15 },
+    { from: "e_dbl_aud", to: "a_show_meta", kind: "fires", order: 16 },
   ],
 };
 

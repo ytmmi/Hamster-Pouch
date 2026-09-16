@@ -14,6 +14,8 @@ use crate::AppState;
 pub struct LayoutItem {
     id: String,
     name: String,
+    /// 布局绑定的蓝图 ID 列表（1 个布局可绑定多个蓝图）。
+    blueprint_ids: Vec<String>,
     updated_at: String,
 }
 
@@ -21,16 +23,19 @@ fn to_item(row: PanelLayoutRow) -> LayoutItem {
     LayoutItem {
         id: row.id,
         name: row.workspace,
+        blueprint_ids: row.blueprint_ids,
         updated_at: row.updated_at,
     }
 }
 
 /// layout.save：保存（同 `(repo_id, name)` 覆盖）某仓库下的命名布局。
+/// `blueprintIds` 可选：给定则作为该布局的蓝图绑定。
 #[tauri::command]
 pub fn layout_save(
     repo_id: String,
     name: String,
     layout_json: String,
+    blueprint_ids: Option<Vec<String>>,
     state: State<AppState>,
     app: tauri::AppHandle,
 ) -> Result<LayoutItem, String> {
@@ -43,6 +48,12 @@ pub fn layout_save(
     let row = g
         .save_panel_layout(&repo_id, &name, &layout_json)
         .map_err(hp_err_to_string)?;
+    if let Some(ids) = blueprint_ids {
+        if !ids.is_empty() {
+            g.set_layout_blueprints(&repo_id, &name, &ids)
+                .map_err(hp_err_to_string)?;
+        }
+    }
     Ok(to_item(row))
 }
 
@@ -177,6 +188,27 @@ pub fn layout_get_default(
         .get_setting(&layout_default_key(&repo_id))
         .map_err(hp_err_to_string)?;
     Ok(value.filter(|v| !v.is_empty()))
+}
+
+/// layout.blueprints：读取某布局绑定的蓝图 ID 列表（1 个布局可绑定多个蓝图）。
+#[tauri::command]
+pub fn layout_blueprints(
+    repo_id: String,
+    name: String,
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<Vec<String>, String> {
+    ensure_global(&state, &app).map_err(hp_err_to_string)?;
+    let guard = state
+        .global_db
+        .lock()
+        .map_err(|_| "全局库锁中毒".to_string())?;
+    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
+    let row = g
+        .get_panel_layout(&repo_id, &name)
+        .map_err(hp_err_to_string)?
+        .ok_or_else(|| format!("布局不存在: {name}"))?;
+    Ok(row.blueprint_ids)
 }
 
 /// 某仓库默认布局的设置键。

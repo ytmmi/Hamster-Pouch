@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type {
+  LayoutBlueprintsArgs,
   LayoutDeleteArgs,
   LayoutGetArgs,
   LayoutGetDefaultArgs,
@@ -15,12 +16,21 @@ import type {
   LayoutSetDefaultArgs,
 } from "../types";
 
-/** 保存（同 (repoId, name) 覆盖）某仓库下的命名布局 */
+/** 保存（同 (repoId, name) 覆盖）某仓库下的命名布局；可选绑定蓝图 ID 列表 */
 export function layoutSave(args: LayoutSaveArgs): Promise<LayoutItem> {
   return invoke<LayoutItem>("layout_save", {
     repoId: args.repoId,
     name: args.name,
     layoutJson: args.layoutJson,
+    blueprintIds: args.blueprintIds ?? null,
+  });
+}
+
+/** 读取某布局绑定的蓝图 ID 列表（1 个布局可绑定多个蓝图）。 */
+export function layoutBlueprints(args: LayoutBlueprintsArgs): Promise<string[]> {
+  return invoke<string[]>("layout_blueprints", {
+    repoId: args.repoId,
+    name: args.name,
   });
 }
 

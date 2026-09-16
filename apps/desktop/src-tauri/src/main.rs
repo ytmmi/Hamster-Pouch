@@ -177,6 +177,7 @@ fn main() {
             commands::layout::layout_delete,
             commands::layout::layout_set_default,
             commands::layout::layout_get_default,
+            commands::layout::layout_blueprints,
             commands::blueprint::blueprint_list,
             commands::blueprint::blueprint_get,
             commands::blueprint::blueprint_get_default,

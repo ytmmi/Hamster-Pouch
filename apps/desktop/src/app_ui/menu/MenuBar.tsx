@@ -10,6 +10,8 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 import * as api from "../shared/api";
 import { useApp } from "../core/AppContext";
+import { BlueprintEngine, blueprintEngine } from "../core/blueprintEngine";
+import { syncBlueprintFromLayout } from "../shared/blueprintSync";
 import { LANGUAGES, type Language } from "../i18n";
 import { PANEL_DEFS, panelTitle } from "../core/panelRegistry";
 import { ContextMenu } from "./ContextMenu";
@@ -146,10 +148,19 @@ export function MenuBar({
       return;
     }
     try {
+      // 布局内调整组后：把当前 dockview 组结构自动同步进默认蓝图（自动生成对应节点），
+      // 并把默认蓝图绑定到该布局（1 个布局可绑定多个蓝图）。
+      const boundId = repoId ? await syncBlueprintFromLayout(repoId, dv) : null;
       const json = JSON.stringify(dv.toJSON());
-      await api.layoutSave({ repoId, name, layoutJson: json });
+      await api.layoutSave({
+        repoId,
+        name,
+        layoutJson: json,
+        blueprintIds: boundId ? [boundId] : undefined,
+      });
       await loadLayoutNames();
       app.status(`${t("menubar.layout.saved")}: ${name}`, "ok");
+      app.refresh();
       closeMenus();
     } catch (e) {
       app.status(t("layout.saveFailed", { err: String(e) }), "error");
@@ -169,6 +180,21 @@ export function MenuBar({
       // 补齐最小尺寸约束（旧布局未记录会回退到 dockview 默认 100×100）；
       // 媒体预览强制 renderer=always，避免 tab 切换丢滚动位置。
       dv.fromJSON(normalizeLayoutJson(layout));
+      // 布局绑定蓝图：应用布局时激活其绑定的第一个蓝图（1 个布局可绑定多个蓝图）。
+      if (repoId) {
+        const bound = await api
+          .layoutBlueprints({ repoId, name })
+          .catch(() => [] as string[]);
+        if (bound[0]) {
+          const doc = await api.blueprintGet({
+            repoId,
+            blueprintId: bound[0],
+          });
+          if (doc) {
+            blueprintEngine.setGraph(BlueprintEngine.parse(doc));
+          }
+        }
+      }
       app.status(t("layout.loaded", { name }), "ok");
       closeMenus();
     } catch (e) {
@@ -206,7 +232,7 @@ export function MenuBar({
     }
   };
 
-  /** 用当前布局覆盖该预设。 */
+  /** 用当前布局覆盖该预设（同步蓝图并保持/更新绑定）。 */
   const updateLayout = async (name: string) => {
     setLayoutMenu(null);
     const dv = apiRef.current;
@@ -214,10 +240,18 @@ export function MenuBar({
       return;
     }
     try {
+      // 与保存一致：调整组后自动同步进默认蓝图并绑定。
+      const boundId = repoId ? await syncBlueprintFromLayout(repoId, dv) : null;
       const json = JSON.stringify(dv.toJSON());
-      await api.layoutSave({ repoId, name, layoutJson: json });
+      await api.layoutSave({
+        repoId,
+        name,
+        layoutJson: json,
+        blueprintIds: boundId ? [boundId] : undefined,
+      });
       await loadLayoutNames();
       app.status(t("layout.updated", { name }), "ok");
+      app.refresh();
     } catch (e) {
       app.status(t("layout.updateFailed", { err: String(e) }), "error");
     }
