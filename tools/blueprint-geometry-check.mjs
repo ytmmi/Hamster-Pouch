@@ -121,6 +121,35 @@ const curve = geo.sampleEdgeCurve({ x: 100, y: 100 }, { x: 400, y: 100 });
   );
 }
 
+// ---- 7. 视口中心 → 世界坐标（新增节点落点） ----
+{
+  // 未平移未缩放：视口中心即世界中心
+  const base = geo.viewportCenterToWorld(
+    { width: 1000, height: 600 },
+    { x: 0, y: 0, zoom: 1 },
+  );
+  // 视图平移 (200, 100)：可见区域中心落到世界坐标 (-100, 25)…即跟着视图走
+  const panned = geo.viewportCenterToWorld(
+    { width: 1000, height: 600 },
+    { x: 200, y: 100, zoom: 1 },
+  );
+  // 放大 2 倍：中心世界坐标减半
+  const zoomed = geo.viewportCenterToWorld(
+    { width: 1000, height: 600 },
+    { x: 0, y: 0, zoom: 2 },
+  );
+  check(
+    "视口中心→世界坐标：平移与缩放都正确换算",
+    base.x === 500 &&
+      base.y === 300 &&
+      panned.x === 300 &&
+      panned.y === 200 &&
+      zoomed.x === 250 &&
+      zoomed.y === 150,
+    `base=${JSON.stringify(base)} panned=${JSON.stringify(panned)} zoomed=${JSON.stringify(zoomed)}`,
+  );
+}
+
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} 通过`);
 process.exit(failed.length === 0 ? 0 : 1);

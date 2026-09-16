@@ -97,6 +97,24 @@ export function segmentHitsPolyline(
 }
 
 /**
+ * 画布视口中心对应的世界坐标（新增节点应落在这里——**渲染出来的可见区域**中间，
+ * 而不是世界原点）。
+ *
+ * 画布把世界坐标按 `translate(view.x, view.y) scale(zoom)` 渲染，
+ * 因此视口中心 `(w/2, h/2)` 反解为世界坐标即 `((w/2 - view.x)/zoom, (h/2 - view.y)/zoom)`。
+ */
+export function viewportCenterToWorld(
+  viewport: { width: number; height: number },
+  view: { x: number; y: number; zoom: number },
+): Point {
+  const zoom = view.zoom || 1;
+  return {
+    x: (viewport.width / 2 - view.x) / zoom,
+    y: (viewport.height / 2 - view.y) / zoom,
+  };
+}
+
+/**
  * 把画布上的贝塞尔连线采样成折线。
  * 控制点与 `BlueprintCanvas.edgePath` 保持一致（水平外扩 `max(24, |dx|/2)`）。
  */

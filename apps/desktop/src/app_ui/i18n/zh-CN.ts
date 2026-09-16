@@ -393,6 +393,7 @@ export const zhCN = {
   "blueprint.autoTag": "自动",
   "blueprint.derivedEmpty": "未接通（连线后自动获取）",
   "blueprint.derivedHint": "带「自动」的字段由上级节点/连线推导，不需手填。",
+  "blueprint.panHint": "中键按住拖动 = 平移画布",
   "blueprint.arrange": "整理",
   "blueprint.arrangeHint": "以选中节点为根，树状展开布局（未选中则取第一个节点）",
   "blueprint.defaultUpdated": "默认蓝图已更新为新版",

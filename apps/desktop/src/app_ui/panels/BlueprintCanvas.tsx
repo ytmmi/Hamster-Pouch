@@ -21,6 +21,7 @@ import {
   sampleEdgeCurve,
   segmentHitsPolyline,
   segmentHitsRect,
+  viewportCenterToWorld,
   type Point,
 } from "./blueprintGeometry";
 
@@ -313,6 +314,11 @@ export interface BlueprintCanvasProps {
    * 用户不需要手填这些 key。
    */
   onConnect?: (edge: { from: string; to: string; kind: BlueprintEdge["kind"] }) => void;
+  /**
+   * 画布视口（**渲染出来的可见区域**）中心的世界坐标：新增节点应落在这里，
+   * 而不是隐藏的世界原点。
+   */
+  onViewCenterChange?: (world: Point) => void;
   selectedKey: string | null;
   onSelect: (key: string | null) => void;
   /** 未接通节点 key（画布灰显"不通"；由面板用 `blueprintLint` 计算）。 */
@@ -346,6 +352,7 @@ export function BlueprintCanvas({
   onRemoveNode,
   onRemoveEdge,
   onConnect,
+  onViewCenterChange,
   selectedKey,
   onSelect,
   unlinked,
@@ -413,16 +420,41 @@ export function BlueprintCanvas({
     measurePorts();
   }, [doc, view, selectedKey, measurePorts]);
 
+  /**
+   * 上报**渲染画布**的视口中心（世界坐标）：新增节点据此落在当前可见区域中间，
+   * 而不是世界原点/隐藏区域。容器尺寸变化与平移缩放都会重新上报。
+   */
+  const reportViewCenter = useCallback(() => {
+    const el = canvasRef.current;
+    if (!el || !onViewCenterChange) {
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      return;
+    }
+    onViewCenterChange(
+      viewportCenterToWorld({ width: rect.width, height: rect.height }, view),
+    );
+  }, [onViewCenterChange, view]);
+
+  useLayoutEffect(() => {
+    reportViewCenter();
+  }, [reportViewCenter]);
+
   // 容器尺寸变化时重测端口。
   useLayoutEffect(() => {
     const el = canvasRef.current;
     if (!el) {
       return;
     }
-    const obs = new ResizeObserver(() => measurePorts());
+    const obs = new ResizeObserver(() => {
+      measurePorts();
+      reportViewCenter();
+    });
     obs.observe(el);
     return () => obs.disconnect();
-  }, [measurePorts]);
+  }, [measurePorts, reportViewCenter]);
 
   const edgePath = useCallback(
     (a: { x: number; y: number }, b: { x: number; y: number }) => {
@@ -491,6 +523,19 @@ export function BlueprintCanvas({
     const nodeKey = target.closest("[data-node]")?.getAttribute("data-node");
     const port = target.closest("[data-port]")?.getAttribute("data-port");
 
+    // 中键按住：平移画布（与空白处左键拖动同效，且不受节点/连线位置影响）。
+    if (e.button === 1) {
+      e.preventDefault();
+      dragRef.current = {
+        kind: "pan",
+        startX: e.clientX,
+        startY: e.clientY,
+        viewX: view.x,
+        viewY: view.y,
+      };
+      canvasRef.current?.setPointerCapture(e.pointerId);
+      return;
+    }
     // 右键长按：刀痕删除（起点固定、终点跟随指针，穿过连线/节点即标红，放开即删）。
     if (e.button === 2) {
       e.preventDefault();
@@ -708,6 +753,13 @@ export function BlueprintCanvas({
       onWheel={onWheel}
       onKeyDown={onKeyDown}
       onContextMenu={(e) => e.preventDefault()}
+      onAuxClick={(e) => e.preventDefault()}
+      onMouseDown={(e) => {
+        // 中键：阻止浏览器进入自动滚动模式（否则平移时会弹出滚动光标）。
+        if (e.button === 1) {
+          e.preventDefault();
+        }
+      }}
       tabIndex={0}
     >
       {/* 变换层：节点（世界坐标） */}
@@ -860,6 +912,7 @@ export function BlueprintCanvas({
           </span>
         ))}
         <span className="bp-legend-item bp-legend-hint">{t("blueprint.bladeHint")}</span>
+        <span className="bp-legend-item bp-legend-hint">{t("blueprint.panHint")}</span>
       </div>
     </div>
   );

@@ -55,6 +55,8 @@ export function BlueprintPanel(): JSX.Element {
   const [viewMode, setViewMode] = useState<"canvas" | "json">("canvas");
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  /** 画布渲染视口中心（世界坐标）：新增节点落点用。 */
+  const [viewCenter, setViewCenter] = useState<{ x: number; y: number } | null>(null);
 
   const repoId = app.repoId;
 
@@ -126,12 +128,14 @@ export function BlueprintPanel(): JSX.Element {
   }, []);
 
   /**
-   * 在画布中部附近新增节点；避开已占用槽位，节点不堆叠。
-   * **key 与引用从上级推导**（选中节点的类型决定用谁当上级，见 `blueprintNodeFactory`）。
+   * 在**当前渲染画布的中心**附近新增节点（避开已占用槽位，节点不堆叠）。
+   * key 与引用从上级推导（选中节点的类型决定用谁当上级，见 `blueprintNodeFactory`）。
    */
   const addNode = useCallback(
     (type: BlueprintNodeType) => {
-      const position = freeSlotPosition(doc.nodes, canvasCenter(doc.nodes));
+      // 视口中心（世界坐标）由画布上报；未上报前退回已有节点附近。
+      const center = viewCenter ?? canvasCenter(doc.nodes);
+      const position = freeSlotPosition(doc.nodes, center);
       const { doc: next, node } = appendNode(
         doc,
         type,
@@ -141,7 +145,7 @@ export function BlueprintPanel(): JSX.Element {
       mutate(next);
       setSelectedKey(node.key);
     },
-    [doc, mutate, selectedKey],
+    [doc, mutate, selectedKey, viewCenter],
   );
 
   const updateNode = useCallback(
@@ -633,6 +637,7 @@ export function BlueprintPanel(): JSX.Element {
                       onRemoveNode={removeNode}
                       onRemoveEdge={removeEdgeAt}
                       onConnect={onConnect}
+                      onViewCenterChange={setViewCenter}
                       selectedKey={selectedKey}
                       onSelect={setSelectedKey}
                       unlinked={unlinkedKeys}

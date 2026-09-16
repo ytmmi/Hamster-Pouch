@@ -376,6 +376,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.autoTag": "auto",
   "blueprint.derivedEmpty": "unlinked (filled automatically when connected)",
   "blueprint.derivedHint": "Fields marked \u201cauto\u201d are derived from the parent node / connection.",
+  "blueprint.panHint": "Hold middle button and drag to pan the canvas",
   "blueprint.arrange": "Arrange",
   "blueprint.arrangeHint": "Expand as a tree rooted at the selected node (falls back to the first node when none is selected)",
   "blueprint.defaultUpdated": "Default blueprint updated to the new version",
