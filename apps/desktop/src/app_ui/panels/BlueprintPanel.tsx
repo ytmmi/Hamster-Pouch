@@ -18,6 +18,7 @@ import {
   HIDE_DIRECTIONS,
   makeEmptyBlueprint,
   PANEL_IDS,
+  PANEL_TITLES,
 } from "@hamster-pouch/config";
 import type {
   BlueprintItem,
@@ -26,8 +27,17 @@ import type {
 
 import * as api from "../shared/api";
 import { useApp } from "../core/AppContext";
-import type { Translate } from "../i18n";
-import { BlueprintCanvas, resolveControlTitle } from "./BlueprintCanvas";
+import type { Translate, TranslationKey } from "../i18n";
+import {
+  BlueprintCanvas,
+  hideDirLabel,
+  mediaTypeLabel,
+  nodeDisplayName,
+  opLabel,
+  resolveControlTitle,
+  scopeLabel,
+  triggerLabel,
+} from "./BlueprintCanvas";
 
 const TYPE_PREFIX: Record<string, string> = {
   layout_block: "blk",
@@ -184,53 +194,49 @@ export function BlueprintPanel(): JSX.Element {
     [doc, mutate],
   );
 
-  /** 重命名节点 key：联动更新边与其余节点对该 key 的引用。 */
-  const renameNode = useCallback(
-    (oldKey: string, newKey: string) => {
-      const clean = newKey.trim();
-      if (!clean || clean === oldKey) {
-        return;
-      }
-      if (doc.nodes.some((n) => n.key === clean)) {
-        setErrors([`节点 key 已存在: ${clean}`]);
-        return;
-      }
-      const patchRef = (v: string) => (v === oldKey ? clean : v);
-      mutate({
-        ...doc,
-        nodes: doc.nodes.map((n) => {
-          if (n.key === oldKey) {
-            return { ...n, key: clean };
-          }
-          const p: Partial<BlueprintNode> = {};
-          if (n.control === oldKey) p.control = clean;
-          if (n.class === oldKey) p.class = clean;
-          if (n.target === oldKey) p.target = clean;
-          if (n.default_visible?.includes(oldKey)) {
-            p.default_visible = n.default_visible.map(patchRef);
-          }
-          if (n.hide_direction === `toward:${oldKey}`) {
-            p.hide_direction = `toward:${clean}`;
-          }
-          return Object.keys(p).length ? { ...n, ...p } : n;
-        }),
-        edges: doc.edges.map((e) => ({
-          ...e,
-          from: e.from === oldKey ? clean : e.from,
-          to: e.to === oldKey ? clean : e.to,
-        })),
-      });
-      setSelectedKey(clean);
-    },
-    [doc, mutate],
-  );
-
+  /**
+   * 删除节点（级联）：除边外，凡「必填引用」指向被删节点的节点一并删除
+   * （类的 control、对象的 class、事件的 target、动作的 target），保证保存不再因
+   * 悬空引用报错；「可选引用」就地清理（组 default_visible、hide_direction toward）。
+   */
   const removeNode = useCallback(
     (key: string) => {
+      const toRemove = new Set<string>([key]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const n of doc.nodes) {
+          if (toRemove.has(n.key)) {
+            continue;
+          }
+          const depends =
+            (n.control !== undefined && toRemove.has(n.control)) ||
+            (n.class !== undefined && toRemove.has(n.class)) ||
+            (n.target !== undefined && toRemove.has(n.target));
+          if (depends) {
+            toRemove.add(n.key);
+            changed = true;
+          }
+        }
+      }
+      // 可选引用就地清理（不级联删除宿主节点）
+      const patchOptional = (n: BlueprintNode): BlueprintNode => {
+        const p: Partial<BlueprintNode> = {};
+        const dv = (n.default_visible ?? []).filter((k) => !toRemove.has(k));
+        if (dv.length !== (n.default_visible ?? []).length) {
+          p.default_visible = dv;
+        }
+        if (n.hide_direction?.startsWith("toward:") && toRemove.has(n.hide_direction.slice(7))) {
+          p.hide_direction = undefined;
+        }
+        return Object.keys(p).length ? { ...n, ...p } : n;
+      };
       mutate({
         ...doc,
-        nodes: doc.nodes.filter((n) => n.key !== key),
-        edges: doc.edges.filter((e) => e.from !== key && e.to !== key),
+        nodes: doc.nodes
+          .filter((n) => !toRemove.has(n.key))
+          .map(patchOptional),
+        edges: doc.edges.filter((e) => !toRemove.has(e.from) && !toRemove.has(e.to)),
       });
       setSelectedKey(null);
     },
@@ -620,11 +626,6 @@ export function BlueprintPanel(): JSX.Element {
                           updateNode(selectedKey, patch);
                         }
                       }}
-                      onRename={(newKey) => {
-                        if (selectedKey) {
-                          renameNode(selectedKey, newKey);
-                        }
-                      }}
                       onRemove={() => {
                         if (selectedKey) {
                           removeNode(selectedKey);
@@ -670,7 +671,7 @@ function normalizePositions(doc: BlueprintGraph): BlueprintGraph {
   };
 }
 
-/** 节点属性检查器（编辑全部字段 + 重命名 + 删除）。 */
+/** 节点属性检查器（编辑全部参数 + 删除；参数与选项均中文/多语言，不暴露底层 key）。 */
 function NodeInspector({
   node,
   doc,
@@ -679,7 +680,6 @@ function NodeInspector({
   objectKeys,
   groupKeys,
   onPatch,
-  onRename,
   onRemove,
   t,
 }: {
@@ -690,7 +690,6 @@ function NodeInspector({
   objectKeys: string[];
   groupKeys: string[];
   onPatch: (patch: Partial<BlueprintNode>) => void;
-  onRename: (newKey: string) => void;
   onRemove: () => void;
   t: Translate;
 }): JSX.Element {
@@ -734,23 +733,38 @@ function NodeInspector({
       </select>,
     );
 
+  /** 节点 key → 中文显示名（供下拉选项，不暴露 key）。 */
+  const labelOf = (key: string): string => {
+    const n = doc.nodes.find((x) => x.key === key);
+    return n ? nodeDisplayName(n, t, doc.nodes) : key;
+  };
+  const optionsOf = (keys: string[]): { v: string; l: string }[] =>
+    keys.map((k) => ({ v: k, l: labelOf(k) }));
+
   const eventTargetKeys = [...classKeys, ...objectKeys];
   const actionTargetKeys =
     node.op === "collapse" || node.op === "expand"
       ? groupKeys
       : [...controlKeys, ...groupKeys];
 
+  // 隐藏方向：4 方向中文 + 已有 toward:<组> 值保留为选项
+  const hideDirOptions = [
+    { v: "", l: "—" },
+    ...HIDE_DIRECTIONS.map((d) => ({ v: d, l: hideDirLabel(d, t) })),
+  ];
+  const hideDirValue = node.hide_direction ?? "";
+  if (
+    hideDirValue.startsWith("toward:") &&
+    !hideDirOptions.some((o) => o.v === hideDirValue)
+  ) {
+    hideDirOptions.push({ v: hideDirValue, l: hideDirValue });
+  }
+
   return (
     <div className="bp-inspector">
       <div className="bp-inspector-title">
         {t(`blueprint.type.${node.type}`)} · {t("blueprint.inspector")}
       </div>
-      {field(
-        t("blueprint.key"),
-        "key",
-        node.key,
-        (v) => onRename(v),
-      )}
       {field(t("blueprint.name"), "name", node.name ?? "", (v) =>
         onPatch({ name: v }),
       )}
@@ -758,7 +772,10 @@ function NodeInspector({
         select(
           t("blueprint.panelId"),
           node.panel_id ?? "",
-          PANEL_IDS.map((id) => ({ v: id, l: id })),
+          PANEL_IDS.map((id) => ({
+            v: id,
+            l: t(PANEL_TITLES[id] as TranslationKey),
+          })),
           (v) => onPatch({ panel_id: v }),
         )}
       {node.type === "control" &&
@@ -774,28 +791,28 @@ function NodeInspector({
         select(
           t("blueprint.tab.controls"),
           node.control ?? "",
-          controlKeys.map((k) => ({ v: k, l: k })),
+          optionsOf(controlKeys),
           (v) => onPatch({ control: v }),
         )}
       {node.type === "class" &&
         select(
           t("blueprint.mediaType"),
           node.media_type ?? "",
-          MEDIA_TYPES.map((m) => ({ v: m, l: m })),
+          MEDIA_TYPES.map((m) => ({ v: m, l: mediaTypeLabel(m, t) })),
           (v) => onPatch({ media_type: v }),
         )}
       {node.type === "object" &&
         select(
           t("blueprint.tab.classes"),
           node.class ?? "",
-          classKeys.map((k) => ({ v: k, l: k })),
+          optionsOf(classKeys),
           (v) => onPatch({ class: v }),
         )}
       {node.type === "object" &&
         select(
           t("blueprint.scope"),
           node.scope ?? "",
-          SCOPES.map((s) => ({ v: s, l: s })),
+          SCOPES.map((s) => ({ v: s, l: scopeLabel(s, t) })),
           (v) => onPatch({ scope: v }),
         )}
       {node.type === "group" &&
@@ -809,21 +826,36 @@ function NodeInspector({
           (v) => onPatch({ mode: v as BlueprintNode["mode"] }),
         )}
       {node.type === "group" &&
-        field(
+        row(
           t("blueprint.defaultVisible"),
-          "default_visible",
-          (node.default_visible ?? []).join(","),
-          (v) =>
-            onPatch({
-              default_visible: v
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean),
-            }),
+          <span className="bp-field-multi">
+            {controlKeys.length === 0 && <span className="dim">—</span>}
+            {controlKeys.map((k) => {
+              const on = node.default_visible?.includes(k) ?? false;
+              return (
+                <button
+                  key={k}
+                  className={on ? "on" : ""}
+                  onClick={() =>
+                    onPatch({
+                      default_visible: on
+                        ? (node.default_visible ?? []).filter((x) => x !== k)
+                        : [...(node.default_visible ?? []), k],
+                    })
+                  }
+                >
+                  {labelOf(k)}
+                </button>
+              );
+            })}
+          </span>,
         )}
       {node.type === "group" &&
-        field(t("blueprint.hideDirection"), "hide_direction", node.hide_direction ?? "", (v) =>
-          onPatch({ hide_direction: v }),
+        select(
+          t("blueprint.hideDirection"),
+          hideDirValue,
+          hideDirOptions,
+          (v) => onPatch({ hide_direction: v || undefined }),
         )}
       {(node.type === "group" || node.type === "layout_block") &&
         row(
@@ -860,9 +892,9 @@ function NodeInspector({
           t("blueprint.trigger"),
           node.trigger ?? "",
           [
-            { v: "click", l: "click" },
-            { v: "double_click", l: "double_click" },
-            { v: "selection_change", l: "selection_change" },
+            { v: "click", l: triggerLabel("click", t) },
+            { v: "double_click", l: triggerLabel("double_click", t) },
+            { v: "selection_change", l: triggerLabel("selection_change", t) },
           ],
           (v) => onPatch({ trigger: v as BlueprintNode["trigger"] }),
         )}
@@ -870,7 +902,7 @@ function NodeInspector({
         select(
           t("blueprint.target"),
           node.target ?? "",
-          eventTargetKeys.map((k) => ({ v: k, l: k })),
+          optionsOf(eventTargetKeys),
           (v) => onPatch({ target: v }),
         )}
       {node.type === "condition" &&
@@ -886,14 +918,14 @@ function NodeInspector({
         select(
           t("blueprint.op"),
           node.op ?? "",
-          ACTION_OPS.map((op) => ({ v: op, l: op })),
+          ACTION_OPS.map((op) => ({ v: op, l: opLabel(op, t) })),
           (v) => onPatch({ op: v as BlueprintNode["op"] }),
         )}
       {node.type === "action" &&
         select(
           t("blueprint.target"),
           node.target ?? "",
-          actionTargetKeys.map((k) => ({ v: k, l: k })),
+          optionsOf(actionTargetKeys),
           (v) => onPatch({ target: v }),
         )}
       {node.type === "action" &&
@@ -926,9 +958,12 @@ function NodeInspector({
         </button>
       </div>
       <span className="dim bp-hints">
-        {HIDE_DIRECTIONS.join(" / ")} / toward:&lt;groupKey&gt;
+        {HIDE_DIRECTIONS.map((d) => hideDirLabel(d, t)).join(" / ")} / toward:&lt;组&gt;
       </span>
-      <span className="dim bp-hints">{doc.nodes.length} nodes · {doc.edges.length} edges</span>
+      <span className="dim bp-hints">
+        {t("blueprint.port.contains")} · {t("blueprint.port.memberOf")} ·{" "}
+        {t("blueprint.port.fires")} · {t("blueprint.port.guards")}
+      </span>
     </div>
   );
 }

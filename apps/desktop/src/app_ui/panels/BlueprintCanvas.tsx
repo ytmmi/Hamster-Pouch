@@ -144,27 +144,40 @@ function portIdFor(
   }
 }
 
-/** 节点正文摘要（画布卡片展示关键字段；文案多语言）。 */
-export function nodeSummary(node: BlueprintNode, t: Translate): string {
+/** 节点正文摘要（画布卡片展示关键字段；全部中文/多语言，不暴露底层 key）。 */
+export function nodeSummary(node: BlueprintNode, t: Translate, nodes: BlueprintNode[]): string {
   switch (node.type) {
     case "layout_block":
       return `${t("blueprint.port.contains")} 组/控件`;
     case "control":
-      return resolveControlTitle(node, t) || node.panel_id || "—";
+      return resolveControlTitle(node, t) || "—";
     case "class":
-      return node.media_type ?? "—";
-    case "object":
-      return `${node.class ?? "?"} · ${node.scope ?? "?"}`;
-    case "group":
-      return `${node.mode ?? "exclusive"}${
-        node.hide_direction ? ` · ${node.hide_direction}` : ""
-      }`;
-    case "event":
-      return `${node.trigger ?? "?"} → ${node.target ?? "?"}`;
+      return mediaTypeLabel(node.media_type ?? "", t);
+    case "object": {
+      const cls = node.class ? nodes.find((n) => n.key === node.class) : undefined;
+      const clsName = cls ? nodeDisplayName(cls, t, nodes) : node.class ?? "?";
+      return `${clsName} · ${scopeLabel(node.scope ?? "", t)}`;
+    }
+    case "group": {
+      const mode =
+        node.mode === "independent"
+          ? t("blueprint.mode.independent")
+          : t("blueprint.mode.exclusive");
+      const dir = node.hide_direction ? hideDirLabel(node.hide_direction, t) : "";
+      return dir ? `${mode} · ${dir}` : mode;
+    }
+    case "event": {
+      const target = node.target ? nodes.find((n) => n.key === node.target) : undefined;
+      const targetName = target ? nodeDisplayName(target, t, nodes) : node.target ?? "?";
+      return `${triggerLabel(node.trigger ?? "", t)} → ${targetName}`;
+    }
     case "condition":
       return node.expr ?? "—";
-    case "action":
-      return `${node.op ?? "?"} → ${node.target ?? "?"}`;
+    case "action": {
+      const target = node.target ? nodes.find((n) => n.key === node.target) : undefined;
+      const targetName = target ? nodeDisplayName(target, t, nodes) : node.target ?? "?";
+      return `${opLabel(node.op ?? "", t)} → ${targetName}`;
+    }
   }
 }
 
@@ -197,7 +210,7 @@ export function nodeDisplayName(
   return `${t(`blueprint.type.${node.type}`)} ${idx + 1}`;
 }
 
-/** 控件本地化标签名（`title_key` 解析；失败回退 `panel_id`）。 */
+/** 控件本地化标签名（`title_key` 解析；失败返回空，交由默认名兜底，不暴露 panel_id）。 */
 export function resolveControlTitle(node: BlueprintNode, t: Translate): string {
   if (node.title_key) {
     const resolved = t(node.title_key as TranslationKey);
@@ -205,7 +218,35 @@ export function resolveControlTitle(node: BlueprintNode, t: Translate): string {
       return resolved;
     }
   }
-  return node.panel_id ?? "";
+  return "";
+}
+
+/** 媒体类型中文标签（图像/视频/音频；未知值原样返回）。 */
+export function mediaTypeLabel(value: string, t: Translate): string {
+  return t(`blueprint.mediaType.${value}` as TranslationKey);
+}
+
+/** 对象范围中文标签（单击/双击/选中；未知值原样返回）。 */
+export function scopeLabel(value: string, t: Translate): string {
+  return t(`blueprint.scope.${value}` as TranslationKey);
+}
+
+/** 事件触发中文标签（单击/双击/选中变化；未知值原样返回）。 */
+export function triggerLabel(value: string, t: Translate): string {
+  return t(`blueprint.trigger.${value}` as TranslationKey);
+}
+
+/** 动作中文标签（显示/隐藏/切换/收起组/展开组；未知值原样返回）。 */
+export function opLabel(value: string, t: Translate): string {
+  return t(`blueprint.op.${value}` as TranslationKey);
+}
+
+/** 隐藏方向中文标签（左/右/上/下；`toward:<key>` 显示为箭头+key）。 */
+export function hideDirLabel(value: string, t: Translate): string {
+  if (value.startsWith("toward:")) {
+    return `→ ${value.slice(7)}`;
+  }
+  return t(`blueprint.hideDir.${value}` as TranslationKey);
 }
 
 export interface BlueprintCanvasProps {
@@ -523,9 +564,11 @@ export function BlueprintCanvas({
                 <span className="bp-node-key" title={node.key}>
                   {nodeDisplayName(node, t, doc.nodes)}
                 </span>
-                <span className="bp-node-type">{node.type}</span>
+                <span className="bp-node-type">
+                  {t(`blueprint.type.${node.type}`)}
+                </span>
               </div>
-              <div className="bp-node-body">{nodeSummary(node, t)}</div>
+              <div className="bp-node-body">{nodeSummary(node, t, doc.nodes)}</div>
               <div className="bp-node-ports">
                 <div className="bp-ports-in">
                   {ins.map((p) => (

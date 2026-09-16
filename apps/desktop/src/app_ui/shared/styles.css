@@ -1567,6 +1567,27 @@ button.danger {
   gap: 4px;
 }
 
+.bp-field-multi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.bp-field-multi button {
+  padding: 2px 8px;
+  background: #2f2f2f;
+  color: #ccc;
+  border: 1px solid #4a4a4a;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+.bp-field-multi button.on {
+  background: rgba(126, 195, 255, 0.25);
+  border-color: #7ec3ff;
+  color: #fff;
+}
+
 .bp-payload {
   height: 52px;
   resize: vertical;

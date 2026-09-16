@@ -24,9 +24,30 @@ export const PANEL_IDS = [
   "player",
   "tasks",
   "plugins",
+  "blueprint",
 ] as const;
 
 export type PanelId = (typeof PANEL_IDS)[number];
+
+/**
+ * 面板 ID → 标题翻译键（供蓝图编辑器等展示中文面板名）。
+ * 需与 app_ui 面板注册表（panelRegistry）的 titleKey 保持一致，新增面板时同步。
+ */
+export const PANEL_TITLES: Record<PanelId, string> = {
+  repo: "panel.repo",
+  sources: "panel.sources",
+  albums: "panel.albums",
+  media: "panel.media",
+  viewer: "panel.viewer",
+  metadata: "panel.metadata",
+  tags: "panel.tags",
+  tagtable: "panel.tagtable",
+  color: "panel.color",
+  player: "panel.player",
+  tasks: "panel.tasks",
+  plugins: "panel.plugins",
+  blueprint: "panel.blueprint",
+};
 
 /**
  * 面板标签条高度（与 CSS 变量 `--dv-tabs-and-actions-container-height` 一致）。
