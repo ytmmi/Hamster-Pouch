@@ -18,6 +18,7 @@
     "check:blueprint-engine": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/blueprint-engine-check.mjs",
     "check:blueprint-nodes": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/blueprint-node-check.mjs",
     "check:blueprint-geometry": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/blueprint-geometry-check.mjs",
+    "check:blueprint-slots": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/blueprint-slots-check.mjs",
     "check:types": "cargo run -p hp-dto --bin generate && git diff --exit-code -- packages/shared-types",
     "check:line-count": "node tools/check-line-count.mjs",
     "check:doc-status": "node tools/check-doc-status.mjs"

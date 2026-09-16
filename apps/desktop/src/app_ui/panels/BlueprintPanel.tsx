@@ -144,8 +144,12 @@ export function BlueprintPanel(): JSX.Element {
       );
       mutate(next);
       setSelectedKey(node.key);
+      app.status(
+        app.t("blueprint.nodeAdded", { x: position.x, y: position.y }),
+        "ok",
+      );
     },
-    [doc, mutate, selectedKey, viewCenter],
+    [doc, mutate, selectedKey, viewCenter, app],
   );
 
   const updateNode = useCallback(

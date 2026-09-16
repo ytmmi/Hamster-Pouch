@@ -1,14 +1,15 @@
-/**
+﻿/**
  * 蓝图新节点工厂（RFC 0007 D31）：**本节点只定"类型 + 自身必备字段"，其余从上级推导**。
  *
- * 设计规则（用户拍板）：
- * - **引用自动**：类节点的 `control`、对象节点的 `class`、状态/操作的 `target` 等
- *   key 型引用**不由用户填写**，一律从上级节点推导（画布上把线连上去也会自动落字段）；
- * - **key 自动且可读**：节点 key 由「上级 key + 自身类型标识」生成
- *   （如 `c_media` 下的图像类 → `c_media_image`，其下双击对象 → `c_media_image_dbl`），
- *   同名冲突才追加序号；
- * - **新增即合法**：空图里新增任一类型都会补齐最小可用链路（控件→类→对象、操作→状态），
- *   一保存就能通过校验。
+ * 设计规则：
+ * - **引用自动**：类节点的 `control`、对象节点的 `class`、操作的对象来源、状态的 `target`
+ *   等 key 型引用**不由用户填写**，一律从**上级**推导；画布上连线也会自动落字段。
+ * - **只认上级，不悄悄挂钩**：新增节点只会连到"上级"（显式指定的父节点，或图中已有的
+ *   同类上级）。**绝不会把新节点自动接到一条已存在的规则上**——那是使用者没有表达过的
+ *   意图，会出现"新增节点莫名被连上线"。需要接入某条链路时，选中那条链路的节点再新增，
+ *   或者直接拖线。
+ * - **key 自动且可读**：由「上级 key + 自身类型标识」生成（如 `c_media` 下的图像类 →
+ *   `c_media_image`，其下双击对象 → `c_media_image_dbl`），冲突才追加序号。
  *
  * 纯函数，便于脱离宿主验证（见 tools/blueprint-node-check.mjs）。
  */
@@ -29,17 +30,15 @@ export const TYPE_PREFIX: Record<string, string> = {
   action: "a",
 };
 
-/**
- * 规则三元组的三类节点（RFC 0007：对象 → 操作 → 状态）。这三类节点**必须有入边**
- * 才算合法（后端校验：操作需 `on` 入边或 `target`、状态需 `fires`/`guards` 入边、
- * 条件需 `fires` 入边），因此新增时必须把链路一次连好，否则一保存就报
- * "缺少对象来源 / 缺少触发来源"。
- */
-const CHAIN_TYPES: BlueprintNodeType[] = ["event", "condition", "action"];
-
-/** 该节点类型是否依赖入边才合法。 */
-export function needsIncomingEdge(type: BlueprintNodeType): boolean {
-  return CHAIN_TYPES.includes(type);
+/** 新增节点的**上级**：由使用者显式给出（选中某节点后新增，或在某节点上连线）。 */
+export interface ParentHint {
+  /** 上级节点 key。 */
+  key: string;
+  /**
+   * 是否"仅用给定上级"：为 true 时不做任何兜底复用——没有上级就新建一个最小上级链，
+   * 从而**不会**把新节点挂到别的既有节点上。
+   */
+  explicit?: boolean;
 }
 
 function firstOf(nodes: BlueprintNode[], type: BlueprintNodeType): string | undefined {
@@ -59,7 +58,7 @@ export function uniqueKey(nodes: BlueprintNode[], base: string): string {
   return `${safe}_${i}`;
 }
 
-/** 节点的"上级" key：按类型取它所属的父节点（类→控件、对象→类、状态/操作→对象）。 */
+/** 节点的"上级" key：按类型取它所属的父节点（类→控件、对象→类、操作/状态→对象/操作）。 */
 export function parentKeyOf(
   graph: BlueprintGraph,
   node: BlueprintNode,
@@ -68,7 +67,6 @@ export function parentKeyOf(
   if (explicit) {
     return explicit;
   }
-  // 画布上先连线、后落字段时，用入边推断上级（控件/组 → 类；类 → 对象）。
   const parentTypes: BlueprintNodeType[] =
     node.type === "class"
       ? ["control"]
@@ -91,7 +89,6 @@ export function parentKeyOf(
 
 /**
  * 自动生成节点 key：优先「上级 key + 自身类型标识」，没有上级时退回类型前缀 + 序号。
- * 例：`c_media` 下的图像类 → `c_media_image`；其下双击对象 → `c_media_image_dbl`。
  */
 export function nextNodeKey(
   nodes: BlueprintNode[],
@@ -110,313 +107,332 @@ export function nextNodeKey(
   return uniqueKey(nodes, base);
 }
 
-/** 找或建一个控件节点（默认指向第一个规范面板）：让动作有合法的 show/hide 目标。 */
-function ensureControl(doc: BlueprintGraph): { doc: BlueprintGraph; key?: string } {
-  const existing = firstOf(doc.nodes, "control");
-  if (existing) {
-    return { doc, key: existing };
-  }
+/** 新增节点时的临时落点（最终由画布槽位决定；这里只保证不在原点堆叠）。 */
+function tempPosition(doc: BlueprintGraph): { x: number; y: number } {
+  return { x: 40 + doc.nodes.length * 260, y: 40 };
+}
+
+/** 建一个控件节点（指向第一个规范面板）。 */
+function createControl(doc: BlueprintGraph, key?: string): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
-    key: uniqueKey(doc.nodes, `${TYPE_PREFIX.control}_1`),
+    key: key ?? uniqueKey(doc.nodes, `${TYPE_PREFIX.control}_1`),
     type: "control",
     panel_id: PANEL_IDS[0] as PanelId,
-    position: { x: 40 + doc.nodes.length * 260, y: 40 },
+    position: tempPosition(doc),
   };
   return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
-/** 找或建一个类节点（默认媒体类型 image）：对象必须挂在类上。 */
-function ensureClass(doc: BlueprintGraph): { doc: BlueprintGraph; key?: string } {
-  const existing = firstOf(doc.nodes, "class");
-  if (existing) {
-    return { doc, key: existing };
-  }
-  const withControl = ensureControl(doc);
-  if (!withControl.key) {
-    return { doc: withControl.doc };
-  }
+/** 建一个类节点（默认媒体类型 image），挂在 `controlKey` 上。 */
+function createClass(
+  doc: BlueprintGraph,
+  controlKey: string,
+  parentKeyForName?: string,
+): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
-    key: nextNodeKey(withControl.doc.nodes, "class", withControl.key),
+    key: nextNodeKey(doc.nodes, "class", parentKeyForName ?? controlKey),
     type: "class",
-    control: withControl.key,
+    control: controlKey,
     media_type: "image",
-    position: { x: 40 + withControl.doc.nodes.length * 260, y: 40 },
+    position: tempPosition(doc),
   };
-  return {
-    doc: { ...withControl.doc, nodes: [...withControl.doc.nodes, node] },
-    key: node.key,
-  };
+  return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
-/** 找或建一个"对象"节点（挂在某个类节点上）：让操作/状态有现成的对象来源。 */
-function ensureObject(doc: BlueprintGraph): { doc: BlueprintGraph; key?: string } {
-  const existing = doc.nodes.find((n) => n.type === "object");
-  if (existing) {
-    return { doc, key: existing.key };
-  }
-  const withClass = ensureClass(doc);
-  if (!withClass.key) {
-    return { doc: withClass.doc };
-  }
+/** 建一个对象节点（默认双击），挂在 `classKey` 上。 */
+function createObject(
+  doc: BlueprintGraph,
+  classKey: string,
+  parentKeyForName?: string,
+): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
-    key: nextNodeKey(withClass.doc.nodes, "object", withClass.key),
+    key: nextNodeKey(doc.nodes, "object", parentKeyForName ?? classKey),
     type: "object",
-    class: withClass.key,
+    class: classKey,
     scope: "double_clicked",
-    position: { x: 40 + withClass.doc.nodes.length * 260, y: 40 },
+    position: tempPosition(doc),
   };
-  return {
-    doc: { ...withClass.doc, nodes: [...withClass.doc.nodes, node] },
-    key: node.key,
-  };
+  return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
-/** 找或建一个"操作"节点（只需 `on` 入边；若得新建，则连一个最小合法状态）。 */
-function ensureEvent(doc: BlueprintGraph): { doc: BlueprintGraph; key?: string } {
-  const existing = doc.nodes.find(
-    (n) => n.type === "event" && n.trigger === "double_click",
-  );
-  if (existing) {
-    return { doc, key: existing.key };
-  }
-  const withObject = ensureObject(doc);
-  if (!withObject.key) {
-    return { doc: withObject.doc };
-  }
-  const base = withObject.doc;
+/** 建一个操作节点并连上 `objectKey`（对象 → 操作 的 on 边）。 */
+function createEvent(
+  doc: BlueprintGraph,
+  objectKey: string,
+  parentKeyForName?: string,
+): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
-    key: nextNodeKey(base.nodes, "event", withObject.key),
+    key: nextNodeKey(doc.nodes, "event", parentKeyForName ?? objectKey),
     type: "event",
     trigger: "double_click",
-    position: { x: 40 + base.nodes.length * 260, y: 40 },
+    position: tempPosition(doc),
   };
   const edges = [
-    ...base.edges,
-    {
-      from: withObject.key,
-      to: node.key,
-      kind: "on" as const,
-      order: base.edges.length + 1,
-    },
+    ...doc.edges,
+    { from: objectKey, to: node.key, kind: "on" as const, order: doc.edges.length + 1 },
   ];
-  // 操作至少要指向一个状态（否则它就是死节点），一并补一个 show 状态。
-  const withControl = ensureControl(base);
-  const target = withControl.key ?? firstOf(withControl.doc.nodes, "group");
-  const action: BlueprintNode = {
-    key: nextNodeKey(
-      withControl.doc.nodes,
-      "action",
-      withControl.key ?? withObject.key,
-    ),
+  return { doc: { ...doc, nodes: [...doc.nodes, node], edges }, key: node.key };
+}
+
+/** 建一个状态节点并连上 `eventKey`（操作 → 状态 的 fires 边），target 指向 `targetKey`。 */
+function createAction(
+  doc: BlueprintGraph,
+  eventKey: string,
+  targetKey: string | undefined,
+  parentKeyForName?: string,
+): { doc: BlueprintGraph; key: string } {
+  const node: BlueprintNode = {
+    key: nextNodeKey(doc.nodes, "action", parentKeyForName ?? eventKey),
     type: "action",
     op: "show",
-    ...(target ? { target } : {}),
-    position: { x: 40 + (withControl.doc.nodes.length + 1) * 260, y: 40 },
+    ...(targetKey ? { target: targetKey } : {}),
+    position: tempPosition(doc),
   };
-  edges.push({
-    from: node.key,
-    to: action.key,
-    kind: "fires" as const,
-    order: edges.length + 1,
-  });
+  const edges = [
+    ...doc.edges,
+    { from: eventKey, to: node.key, kind: "fires" as const, order: doc.edges.length + 1 },
+  ];
+  return { doc: { ...doc, nodes: [...doc.nodes, node], edges }, key: node.key };
+}
+
+/**
+ * 取"可作为 type 上级"的既有节点 key。
+ *
+ * 只有**层级**关系允许兜底复用（类→控件、对象→类：这属于"放在哪个容器/父级下"，
+ * 使用者心里有数）；**规则链**（操作/条件/状态）一律不兜底——否则新节点会被悄悄
+ * 接到一条既有规则上，表现为"新增节点自动被连上线"。
+ */
+function fallbackParent(
+  doc: BlueprintGraph,
+  type: BlueprintNodeType,
+): string | undefined {
+  switch (type) {
+    case "class":
+      return firstOf(doc.nodes, "control");
+    case "object":
+      return firstOf(doc.nodes, "class");
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * 构造并接入一个新节点：只连到"上级"，不做跨链路自动挂钩。
+ * 返回值是追加后的文档（可能为补链路而新建了上级节点）与新节点 key。
+ */
+export function appendNode(
+  doc: BlueprintGraph,
+  type: BlueprintNodeType,
+  position: { x: number; y: number },
+  parent?: ParentHint | null,
+): { doc: BlueprintGraph; node: BlueprintNode } {
+  const hinted =
+    parent?.key && doc.nodes.some((n) => n.key === parent.key)
+      ? parent.key
+      : undefined;
+  // 显式指定上级时不兜底：没有可用上级就新建一条最小链，避免挂到别的节点上。
+    let work = doc;
+  let key: string;
+
+  switch (type) {
+    case "control": {
+      const created = createControl(work);
+      work = created.doc;
+      key = created.key;
+      break;
+    }
+    case "class": {
+      const controlKey = hinted ?? fallbackParent(work, "class");
+      const parentForName = hinted;
+      if (!controlKey) {
+        const control = createControl(work);
+        work = control.doc;
+        const created = createClass(work, control.key, parentForName ?? control.key);
+        work = created.doc;
+        key = created.key;
+      } else {
+        const created = createClass(work, controlKey, parentForName ?? controlKey);
+        work = created.doc;
+        key = created.key;
+      }
+      break;
+    }
+    case "object": {
+      const classKey = hinted ?? fallbackParent(work, "object");
+      if (!classKey) {
+        // 独立新增：补 控件 → 类 → 对象 一条最小链
+        const control = createControl(work);
+        work = control.doc;
+        const cls = createClass(work, control.key, control.key);
+        work = cls.doc;
+        const created = createObject(work, cls.key, cls.key);
+        work = created.doc;
+        key = created.key;
+      } else {
+        const created = createObject(work, classKey, hinted ?? classKey);
+        work = created.doc;
+        key = created.key;
+      }
+      break;
+    }
+    case "event": {
+      // 上级 = 对象；状态一并补上（否则操作是死节点）。
+      const objectKey = hinted ?? fallbackParent(work, "event");
+      let objectForName = objectKey;
+      if (!objectKey) {
+        const control = createControl(work);
+        work = control.doc;
+        const cls = createClass(work, control.key, control.key);
+        work = cls.doc;
+        const obj = createObject(work, cls.key, cls.key);
+        work = obj.doc;
+        objectForName = obj.key;
+      }
+      const event = createEvent(work, objectForName!, hinted ?? objectForName);
+      work = event.doc;
+      key = event.key;
+      if (!work.nodes.some((n) => n.type === "control")) {
+        const control = createControl(work);
+        work = control.doc;
+      }
+      const targetKey = firstOf(work.nodes, "control");
+      const action = createAction(work, event.key, targetKey, event.key);
+      work = action.doc;
+      break;
+    }
+    case "condition": {
+      const eventKey = hinted ?? fallbackParent(work, "condition");
+      let sourceEvent = eventKey;
+      if (!sourceEvent) {
+        const control = createControl(work);
+        work = control.doc;
+        const cls = createClass(work, control.key, control.key);
+        work = cls.doc;
+        const obj = createObject(work, cls.key, cls.key);
+        work = obj.doc;
+        const evt = createEvent(work, obj.key, obj.key);
+        work = evt.doc;
+        sourceEvent = evt.key;
+      }
+      const node: BlueprintNode = {
+        key: nextNodeKey(work.nodes, "condition", hinted ?? sourceEvent),
+        type: "condition",
+        expr: "media_type == image",
+        position: tempPosition(work),
+      };
+      work = {
+        ...work,
+        nodes: [...work.nodes, node],
+        edges: [
+          ...work.edges,
+          {
+            from: sourceEvent,
+            to: node.key,
+            kind: "fires",
+            order: work.edges.length + 1,
+          },
+        ],
+      };
+      key = node.key;
+      break;
+    }
+    case "action": {
+      const eventKey = hinted ?? fallbackParent(work, "action");
+      let sourceEvent = eventKey;
+      if (!sourceEvent) {
+        const control = createControl(work);
+        work = control.doc;
+        const cls = createClass(work, control.key, control.key);
+        work = cls.doc;
+        const obj = createObject(work, cls.key, cls.key);
+        work = obj.doc;
+        const evt = createEvent(work, obj.key, obj.key);
+        work = evt.doc;
+        sourceEvent = evt.key;
+      }
+      if (!work.nodes.some((n) => n.type === "control")) {
+        const control = createControl(work);
+        work = control.doc;
+      }
+      const targetKey = firstOf(work.nodes, "control");
+      const action = createAction(work, sourceEvent, targetKey, hinted ?? sourceEvent);
+      work = action.doc;
+      key = action.key;
+      break;
+    }
+    default: {
+      // 组 / 布局块 / 未知类型：只追加自身，不做任何连线。
+      const node: BlueprintNode = {
+        key: nextNodeKey(work.nodes, type, hinted),
+        type,
+        position: tempPosition(work),
+        ...(type === "group" ? { mode: "exclusive" as const } : {}),
+      };
+      work = { ...work, nodes: [...work.nodes, node] };
+      key = node.key;
+      break;
+    }
+  }
+
+  const node = work.nodes.find((n) => n.key === key)!;
   return {
     doc: {
-      ...withControl.doc,
-      nodes: [...withControl.doc.nodes, node, action],
-      edges,
+      ...work,
+      nodes: work.nodes.map((n) => (n.key === key ? { ...n, position } : n)),
     },
-    key: node.key,
+    node: { ...node, position },
   };
 }
 
 /**
- * 把新节点接入链路，使其一保存即合法：
- * - 新增 **操作**：缺对象来源 → 复用/新建一个对象并连 `on` 边；
- * - 新增 **状态**：先补合法目标（缺控件就建一个默认控件），再复用/新建操作并连 `fires` 边；
- * - 新增 **条件**：缺触发来源 → 复用/新建操作并连 `fires` 边。
- */
-function wireNewNode(doc: BlueprintGraph, node: BlueprintNode): BlueprintGraph {
-  if (node.type === "event") {
-    const needsSource =
-      node.target === undefined &&
-      !doc.edges.some((e) => e.kind === "on" && e.to === node.key);
-    if (!needsSource) {
-      return doc;
-    }
-    const withObject = ensureObject(doc);
-    if (!withObject.key) {
-      return withObject.doc;
-    }
-    return {
-      ...withObject.doc,
-      edges: [
-        ...withObject.doc.edges,
-        {
-          from: withObject.key,
-          to: node.key,
-          kind: "on",
-          order: withObject.doc.edges.length + 1,
-        },
-      ],
-    };
-  }
-  if (node.type === "action" || node.type === "condition") {
-    let work = doc;
-    if (
-      node.type === "action" &&
-      node.target === undefined &&
-      node.op !== "collapse" &&
-      node.op !== "expand"
-    ) {
-      const withControl = ensureControl(work);
-      work = withControl.doc;
-      if (withControl.key) {
-        work = {
-          ...work,
-          nodes: work.nodes.map((n) =>
-            n.key === node.key ? { ...n, target: withControl.key } : n,
-          ),
-        };
-      }
-    }
-    if (work.edges.some((e) => e.kind === "fires" && e.to === node.key)) {
-      return work;
-    }
-    const withEvent = ensureEvent(work);
-    if (!withEvent.key) {
-      return withEvent.doc;
-    }
-    return {
-      ...withEvent.doc,
-      edges: [
-        ...withEvent.doc.edges,
-        {
-          from: withEvent.key,
-          to: node.key,
-          kind: "fires",
-          order: withEvent.doc.edges.length + 1,
-        },
-      ],
-    };
-  }
-  return doc;
-}
-
-/**
- * 推断新增节点该用谁当"上级"（决定自动 key 与自动引用）：
- * - 新增 **类**：选中的控件 → 否则第一个控件 → 否则选中节点所属控件；
- * - 新增 **对象**：选中的类 → 否则第一个类 → 否则选中节点的类；
- * - 新增 **组/控件**：选中布局块（仅用于 key 语义，不写引用）。
- * 返回值只是"建议"，`newBlueprintNode` 会再校验类型是否匹配。
+ * 推断新增节点该用谁当"上级"（决定自动 key 与自动引用）：由**当前选中节点**沿上级链找
+ * 第一个类型匹配的节点。返回 `explicit` 标记，表示"这是使用者表达过的意图"，
+ * 工厂据此**不做**跨链路兜底复用。
  */
 export function parentHintFor(
   type: BlueprintNodeType,
   selectedKey: string | null,
   doc: BlueprintGraph,
-): string | undefined {
-  const selected = selectedKey
-    ? doc.nodes.find((n) => n.key === selectedKey)
-    : undefined;
-  const nearest = (
-    wanted: BlueprintNodeType[],
-  ): string | undefined => {
-    // 先看选中节点本身，再看它所属链上的上级，最后退回图中第一个。
-    let cursor: BlueprintNode | undefined = selected;
-    const seen = new Set<string>();
-    while (cursor && !seen.has(cursor.key)) {
-      seen.add(cursor.key);
-      if (wanted.includes(cursor.type)) {
-        return cursor.key;
-      }
-      const parentKey = parentKeyOf(doc, cursor);
-      cursor = parentKey
-        ? doc.nodes.find((n) => n.key === parentKey)
-        : undefined;
+): ParentHint | null {
+  if (!selectedKey) {
+    // 未选中：普通层级（类/对象）可以兜底挂到已有控件/类；规则链节点不兜底，
+    // 免得新节点被接到一条既有规则上。
+    const allowed: BlueprintNodeType[] =
+      type === "class"
+        ? ["control"]
+        : type === "object"
+          ? ["class"]
+          : [];
+    if (allowed.length === 0) {
+      return null;
     }
-    return firstOf(doc.nodes, wanted[0]);
-  };
-  if (type === "class") {
-    return nearest(["control"]);
+    const key = firstOf(doc.nodes, allowed[0]);
+    return key ? { key } : null;
   }
-  if (type === "object") {
-    return nearest(["class"]);
+  const wanted: BlueprintNodeType[] =
+    type === "class"
+      ? ["control"]
+      : type === "object"
+        ? ["class"]
+        : type === "event"
+          ? ["object"]
+          : type === "condition" || type === "action"
+            ? ["event", "condition"]
+            : type === "group"
+              ? ["layout_block"]
+              : [];
+  if (wanted.length === 0) {
+    return null;
   }
-  if (type === "group") {
-    return nearest(["layout_block"]);
+  let cursor = doc.nodes.find((n) => n.key === selectedKey);
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor.key)) {
+    seen.add(cursor.key);
+    if (wanted.includes(cursor.type)) {
+      return { key: cursor.key, explicit: true };
+    }
+    const parentKey = parentKeyOf(doc, cursor);
+    cursor = parentKey ? doc.nodes.find((n) => n.key === parentKey) : undefined;
   }
-  if (type === "event" || type === "condition" || type === "action") {
-    return nearest(["control", "class", "object", "event"]);
-  }
-  return nearest(["layout_block"]);
-}
-
-/**
- * 构造一个新节点：**只定类型与自身必备字段**（媒体类型 / 触发 / 动作 / 表达式 /
- * 面板 id / 组模式），key 与所有引用从上级推导。
- */
-export function newBlueprintNode(
-  type: BlueprintNodeType,
-  doc: BlueprintGraph,
-  position: { x: number; y: number },
-  parentKey?: string,
-): BlueprintNode {
-  const nodes = doc.nodes;
-  const explicitParent =
-    parentKey && nodes.some((n) => n.key === parentKey) ? parentKey : undefined;
-  const parent = explicitParent;
-  const node: BlueprintNode = {
-    key: nextNodeKey(nodes, type, parent),
-    type,
-    position,
-  };
-  switch (type) {
-    case "control":
-      node.panel_id = PANEL_IDS[0] as PanelId;
-      break;
-    case "class":
-      node.media_type = "image";
-      // 上级：显式给定时优先；否则取图中第一个控件（或由画布连线后续补齐）。
-      node.control =
-        (explicitParent &&
-          nodes.find((n) => n.key === explicitParent)?.type === "control" &&
-          explicitParent) ||
-        firstOf(nodes, "control");
-      break;
-    case "object":
-      node.scope = "clicked";
-      node.class =
-        (explicitParent &&
-          nodes.find((n) => n.key === explicitParent)?.type === "class" &&
-          explicitParent) ||
-        firstOf(nodes, "class");
-      break;
-    case "group":
-      node.mode = "exclusive";
-      break;
-    case "event":
-      node.trigger = "double_click";
-      break;
-    case "condition":
-      node.expr = "media_type == image";
-      break;
-    case "action":
-      node.op = "show";
-      node.target = firstOf(nodes, "control") ?? firstOf(nodes, "group");
-      break;
-    default:
-      break;
-  }
-  return node;
-}
-
-/** 供面板使用的便捷包装：产出"追加 + 自动连线"后的文档与新节点。 */
-export function appendNode(
-  doc: BlueprintGraph,
-  type: BlueprintNodeType,
-  position: { x: number; y: number },
-  parentKey?: string,
-): { doc: BlueprintGraph; node: BlueprintNode } {
-  const node = newBlueprintNode(type, doc, position, parentKey);
-  const withNode: BlueprintGraph = { ...doc, nodes: [...doc.nodes, node] };
-  return { doc: wireNewNode(withNode, node), node };
+  return null;
 }

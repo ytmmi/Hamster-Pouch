@@ -55,26 +55,54 @@ function assignedNodes(
   }));
 }
 
-/** 距给定基准点最近的空闲槽位（新增节点不堆叠）。 */
+/**
+ * 距给定基准点**最近**的空闲槽位：以基准点为中心一圈圈向外找（先上后下、左右对称），
+ * 保证新增节点一定落在你指定的位置附近，而不是被推到很远的地方。
+ *
+ * 之前按"已有节点的列数"循环取模、且只向下搜：基准点在视口中心（可能远离世界原点）
+ * 时会把节点绕回左上角或一路下推，表现为"新增节点跑到看不见的地方"。
+ */
 export function freeSlotPosition(
   nodes: BlueprintNode[],
   base: { x: number; y: number },
   ignoreKey?: string,
 ): { x: number; y: number } {
-  const cols = slotColumns(nodes);
-  const baseCol = Math.max(0, Math.round((base.x - ORIGIN) / SLOT_W));
-  for (let i = 0; i < 400; i += 1) {
-    // 从基准列起，逐行向下、向右绕圈找空槽。
-    const col = (baseCol + (i % cols)) % cols;
-    const row = Math.floor(i / cols);
-    const x = ORIGIN + col * SLOT_W;
-    const y = base.y + row * SLOT_H;
-    if (slotFree(nodes, x, y, ignoreKey)) {
-      return { x, y };
+  // 把基准点对齐到最近的槽位格，既能落在基准点附近，坐标也保持规整。
+  const baseCol = Math.round((base.x - ORIGIN) / SLOT_W);
+  const baseRow = Math.round((base.y - ORIGIN) / SLOT_H);
+  const at = (col: number, row: number) => ({
+    x: ORIGIN + col * SLOT_W,
+    y: ORIGIN + row * SLOT_H,
+  });
+
+  const first = at(baseCol, baseRow);
+  if (slotFree(nodes, first.x, first.y, ignoreKey)) {
+    return first;
+  }
+  // 环形扩张：半径 r 上的整圈（含上下左右四个方向），逐圈直到命中。
+  for (let r = 1; r <= RING_LIMIT; r += 1) {
+    for (let dc = -r; dc <= r; dc += 1) {
+      for (const dr of [-r, r]) {
+        const p = at(baseCol + dc, baseRow + dr);
+        if (slotFree(nodes, p.x, p.y, ignoreKey)) {
+          return p;
+        }
+      }
+    }
+    for (let dr = -r + 1; dr <= r - 1; dr += 1) {
+      for (const dc of [-r, r]) {
+        const p = at(baseCol + dc, baseRow + dr);
+        if (slotFree(nodes, p.x, p.y, ignoreKey)) {
+          return p;
+        }
+      }
     }
   }
-  return { x: base.x, y: base.y + 400 * SLOT_H };
+  return { x: base.x, y: base.y + (RING_LIMIT + 1) * SLOT_H };
 }
+
+/** 环形搜索的最大半径（槽位数），超出则退回基准点下方。 */
+const RING_LIMIT = 40;
 
 /** 画布中心附近（供新增节点起始搜索）。 */
 export function canvasCenter(nodes: BlueprintNode[]): { x: number; y: number } {

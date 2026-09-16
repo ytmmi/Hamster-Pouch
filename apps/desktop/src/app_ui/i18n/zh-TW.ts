@@ -377,6 +377,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.derivedEmpty": "未接通（連線後自動取得）",
   "blueprint.derivedHint": "帶「自動」的欄位由上级節點/連線推導，不需手填。",
   "blueprint.panHint": "按住中鍵拖曳 = 平移畫布",
+  "blueprint.nodeAdded": "已新增節點於 ({x}, {y})",
   "blueprint.arrange": "整理",
   "blueprint.arrangeHint": "以選中節點為根，樹狀展開佈局（未選中則取第一個節點）",
   "blueprint.defaultUpdated": "預設藍圖已更新為新版",
