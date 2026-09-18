@@ -249,6 +249,48 @@ const hasEdge = (doc, from, to, kind) =>
   );
 }
 
+// ---- 5d. 端口/连线规则一致性（回归：界面连不上布局块/浮层）----
+// 真实缺陷：`portIdFor` 漏了 layout_block/overlay 的输入口 → 画布落点校验比对失败，
+// 表现为"界面节点连不上布局块/浮层"。这里用**同一份**纯模块断言三者一致：
+// `CONTAINMENT`（允许的父子关系）应能被 `kindForEdge` 推导为 contains，
+// 并且父节点确有对应输出口、子节点确有对应输入口（落点校验用的 portIdFor）。
+{
+  const ports = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintPorts.ts")).href
+  );
+  const problems = [];
+  for (const { parent, children } of ports.CONTAINMENT) {
+    for (const child of children) {
+      const kind = ports.kindForEdge(parent, "contains", child);
+      if (kind !== "contains") {
+        problems.push(`${parent} --contains--> ${child}：kindForEdge 返回 ${kind}`);
+        continue;
+      }
+      const outPort = ports.portIdFor(parent, "out", "contains");
+      const inPort = ports.portIdFor(child, "in", "contains");
+      if (!outPort || !ports.nodeHasPort(parent, "out", outPort)) {
+        problems.push(`${parent} 缺输出口（portIdFor=${outPort || "空"}）`);
+      }
+      if (!inPort || !ports.nodeHasPort(child, "in", inPort)) {
+        problems.push(`${child} 缺输入口（portIdFor=${inPort || "空"}）—— 无法被 ${parent} 连入`);
+      }
+    }
+  }
+  check(
+    "端口一致性：每种允许的 contains 关系都能在画布上连出来（含 界面→布局块/浮层、浮层→控件/标签组）",
+    problems.length === 0,
+    problems.join("；") || `${ports.CONTAINMENT.length} 组父子关系全部可连`,
+  );
+
+  // 反向：界面不得直接连面板控件/标签组（层级规则）
+  check(
+    "端口一致性：界面 → 面板控件/标签组 仍被判为非法边",
+    ports.kindForEdge("interface", "contains", "control") === null &&
+      ports.kindForEdge("interface", "contains", "group") === null,
+    `control=${ports.kindForEdge("interface", "contains", "control")} group=${ports.kindForEdge("interface", "contains", "group")}`,
+  );
+}
+
 // ---- 6. 空图只加一个"状态"（最苛刻：无任何上级可复用）----
 {
   const r = factory.appendNode(config.makeEmptyBlueprint(), "action", { x: 40, y: 40 }, null);

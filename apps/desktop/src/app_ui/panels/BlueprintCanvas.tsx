@@ -20,6 +20,13 @@ import type {
 import { nodeLayerKey } from "@hamster-pouch/config";
 import type { Translate, TranslationKey } from "../i18n";
 import {
+  kindForEdge,
+  portIdFor,
+  portLabel,
+  PORT_DEFS,
+  type PortDef,
+} from "./blueprintPorts";
+import {
   sampleEdgeCurve,
   segmentHitsPolyline,
   segmentHitsRect,
@@ -50,158 +57,9 @@ export const EDGE_COLORS: Record<BlueprintEdge["kind"], string> = {
   guards: "#e2a94f",
 };
 
-export interface PortDef {
-  id: string;
-  side: "in" | "out";
-}
-
-/** 每类节点的端口定义（输入在左、输出在右）；标签文案走 i18n（portLabel）。 */
-const PORT_DEFS: Record<BlueprintNodeType, PortDef[]> = {
-  interface: [{ id: "contains", side: "out" }],
-  layout_block: [{ id: "contains", side: "out" }],
-  // 浮层（D50 修订）：与布局块同级、且是**容器**（可含面板控件/标签组），
-  // 因此既有输入端口（接收界面的 contains），也有输出端口（连向内部控件/标签组）。
-  overlay: [
-    { id: "contains", side: "in" },
-    { id: "contains", side: "out" },
-  ],
-  control: [
-    { id: "in", side: "in" },
-    { id: "contains", side: "out" },
-    { id: "memberOf", side: "out" },
-    { id: "on", side: "out" },
-  ],
-  class: [
-    { id: "contains", side: "in" },
-    { id: "contains", side: "out" },
-    { id: "on", side: "out" },
-  ],
-  object: [
-    { id: "contains", side: "in" },
-    { id: "on", side: "out" },
-  ],
-  group: [
-    { id: "contains", side: "in" },
-    { id: "contains", side: "out" },
-  ],
-  event: [
-    { id: "on", side: "in" },
-    { id: "fires", side: "out" },
-  ],
-  condition: [
-    { id: "fires", side: "in" },
-    { id: "guards", side: "out" },
-  ],
-  action: [{ id: "in", side: "in" }],
-};
-
-/** 端口标签（多语言）：contains/memberOf/fires/guards/on；action 输入口为「触发/守卫」。 */
-export function portLabel(
-  type: BlueprintNodeType,
-  portId: string,
-  t: Translate,
-): string {
-  if (portId === "in") {
-    return type === "action"
-      ? t("blueprint.port.firesGuards")
-      : t("blueprint.port.contains");
-  }
-  return t(`blueprint.port.${portId}` as TranslationKey);
-}
-
-/** 由输出端口 → 目标节点类型推导边类型；不兼容返回 null。 */
-export function kindForEdge(
-  fromType: BlueprintNodeType,
-  fromPort: string,
-  toType: BlueprintNodeType,
-): BlueprintEdge["kind"] | null {
-  switch (fromPort) {
-    case "contains":
-      // 层级：界面 → 布局块/浮层 → 标签组/面板控件 → 类 → 对象（RFC 0007 决策 1 / D50）
-      if (
-        fromType === "interface" &&
-        (toType === "layout_block" || toType === "overlay")
-      ) {
-        return "contains";
-      }
-      // 浮层是容器（D50 修订）：可包含面板控件与标签组。
-      if (fromType === "overlay" && (toType === "control" || toType === "group")) {
-        return "contains";
-      }
-      if (fromType === "layout_block" && (toType === "group" || toType === "control")) {
-        return "contains";
-      }
-      if (fromType === "group" && toType === "control") return "contains";
-      if (fromType === "control" && toType === "class") return "contains";
-      if (fromType === "class" && toType === "object") return "contains";
-      return null;
-    case "memberOf":
-      return fromType === "control" && toType === "group" ? "memberOf" : null;
-    case "fires":
-      return fromType === "event" && (toType === "condition" || toType === "action")
-        ? "fires"
-        : null;
-    case "guards":
-      return fromType === "condition" && toType === "action" ? "guards" : null;
-    case "on":
-      return (
-        (fromType === "control" ||
-          fromType === "class" ||
-          fromType === "object") &&
-        toType === "event"
-      )
-        ? "on"
-        : null;
-    default:
-      return null;
-  }
-}
-
-/** 端口在边上的 ID：输入/输出 + 类型决定。 */
-function portIdFor(
-  type: BlueprintNodeType,
-  side: "in" | "out",
-  kind: BlueprintEdge["kind"],
-): string {
-  if (side === "in") {
-    switch (type) {
-      case "control":
-        return "in";
-      case "class":
-      case "object":
-        return "contains";
-      case "group":
-        return "contains";
-      case "event":
-        return "on";
-      case "condition":
-        return "fires";
-      case "action":
-        return "in";
-      default:
-        return "";
-    }
-  }
-  // 输出侧：对象→操作 的 on 边取 on 端口
-  if (kind === "on") {
-    return type === "control" || type === "class" || type === "object" ? "on" : "";
-  }
-  switch (type) {
-    case "interface":
-    case "layout_block":
-    case "group":
-    case "control":
-      return kind === "memberOf" ? "memberOf" : "contains";
-    case "class":
-      return "contains";
-    case "event":
-      return "fires";
-    case "condition":
-      return "guards";
-    default:
-      return "";
-  }
-}
+/** 端口/连线规则由纯模块 `blueprintPorts` 承载（可被自检脚本导入断言）；此处只做再导出。 */
+export { kindForEdge, portIdFor, portLabel, nodeHasPort, PORT_DEFS, CONTAINMENT } from "./blueprintPorts";
+export type { PortDef } from "./blueprintPorts";
 
 /** 节点正文摘要（画布卡片展示关键字段；全部中文/多语言，不暴露底层 key）。 */
 export function nodeSummary(
