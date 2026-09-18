@@ -83,9 +83,11 @@ export function parentKeyOf(
             ? ["event", "condition"]
             : node.type === "overlay" || node.type === "layout_block"
               ? ["interface"]
-              : node.type === "group"
-                ? ["layout_block"]
-                : [];
+              : node.type === "control"
+                ? ["layout_block", "overlay", "group"]
+                : node.type === "group"
+                  ? ["layout_block", "overlay"]
+                  : [];
   const edge = graph.edges.find((e) => {
     if (e.to !== node.key) {
       return false;
@@ -138,6 +140,18 @@ function createControl(
     type: "control",
     layer,
     panel_id: PANEL_IDS[0] as PanelId,
+    position: tempPosition(doc),
+  };
+  return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
+}
+
+/** 建一个标签组节点（默认互斥组）。 */
+function createGroup(doc: BlueprintGraph, layer: string): { doc: BlueprintGraph; key: string } {
+  const node: BlueprintNode = {
+    key: uniqueKey(doc.nodes, `${TYPE_PREFIX.group}_1`),
+    type: "group",
+    layer,
+    mode: "exclusive",
     position: tempPosition(doc),
   };
   return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
@@ -245,6 +259,38 @@ function fallbackParent(
 }
 
 /**
+ * 各类型的"容器上级"（显式选中这类上级时，新增节点落进它里面并自动连 `contains`）。
+ *
+ * 与校验的层级规则一致：界面 ⊃ 布局块/浮层；布局块 ⊃ 标签组/面板控件；
+ * **浮层 ⊃ 面板控件/标签组**（D50 修订）；标签组 ⊃ 面板控件。
+ * 只认**使用者显式选中的上级**，没有上级就不连线（不跨链路挂钩）。
+ */
+const PARENT_CONTAINERS: Partial<Record<BlueprintNodeType, BlueprintNodeType[]>> = {
+  layout_block: ["interface"],
+  overlay: ["interface"],
+  control: ["layout_block", "overlay", "group"],
+  group: ["layout_block", "overlay"],
+};
+
+/** 建立 `from --contains--> to` 边（已存在则不加）。 */
+function addContainsEdge(
+  doc: BlueprintGraph,
+  from: string,
+  to: string,
+): BlueprintGraph {
+  if (doc.edges.some((e) => e.from === from && e.to === to && e.kind === "contains")) {
+    return doc;
+  }
+  return {
+    ...doc,
+    edges: [
+      ...doc.edges,
+      { from, to, kind: "contains" as const, order: doc.edges.length + 1 },
+    ],
+  };
+}
+
+/**
  * 构造并接入一个新节点：只连到"上级"，不做跨链路自动挂钩。
  * 返回值是追加后的文档（可能为补链路而新建了上级节点）与新节点 key。
  *
@@ -262,6 +308,12 @@ export function appendNode(
     parent?.key && doc.nodes.some((n) => n.key === parent.key)
       ? parent.key
       : undefined;
+  // 显式指定的上级若是该类型的**容器**，新节点就落进它里面（界面/布局块/浮层/标签组）。
+  const parentNode = hinted ? doc.nodes.find((n) => n.key === hinted) : undefined;
+  const container =
+    parentNode && (PARENT_CONTAINERS[type] ?? []).includes(parentNode.type)
+      ? parentNode.key
+      : undefined;
   // 显式指定上级时不兜底：没有可用上级就新建一条最小链，避免挂到别的节点上。
   let work = doc;
   let key: string;
@@ -271,6 +323,19 @@ export function appendNode(
       const created = createControl(work, layer);
       work = created.doc;
       key = created.key;
+      // D50 修订：浮层/布局块/标签组是容器，显式选中它新增面板控件即落进该容器。
+      if (container) {
+        work = addContainsEdge(work, container, key);
+      }
+      break;
+    }
+    case "group": {
+      const created = createGroup(work, layer);
+      work = created.doc;
+      key = created.key;
+      if (container) {
+        work = addContainsEdge(work, container, key);
+      }
       break;
     }
     case "class": {
@@ -394,19 +459,22 @@ export function appendNode(
       break;
     }
     default: {
-      // 组 / 布局块 / 浮层 / 未知类型：只追加自身，不做任何连线。
-      // 浮层（D50）与布局块同级、是叶子节点；`control_id` 由使用者在属性面板绑定，
-      // 缺失时按"未接通"灰显（软告警，不阻塞保存）。
+      // 布局块 / 浮层 / 未知类型：只追加自身。
+      // 浮层（D50 修订）与布局块同级、是**容器**（可 contains 面板控件与标签组）；
+      // `control_id` 与外观档位由使用者在属性面板设定，缺失绑定按"未接通"灰显。
       const node: BlueprintNode = {
         key: nextNodeKey(work.nodes, type, hinted),
         type,
         layer,
         position: tempPosition(work),
-        ...(type === "group" ? { mode: "exclusive" as const } : {}),
         ...(type === "overlay" ? { height: 1 } : {}),
       };
       work = { ...work, nodes: [...work.nodes, node] };
       key = node.key;
+      // 显式选中界面时新增布局块/浮层 → 落进该界面（contains）。
+      if (container) {
+        work = addContainsEdge(work, container, key);
+      }
       break;
     }
   }
@@ -455,13 +523,16 @@ export function parentHintFor(
           ? ["object"]
           : type === "condition" || type === "action"
             ? ["event", "condition"]
-            : type === "overlay"
-              ? ["interface"]
-              : type === "group" || type === "layout_block"
-                ? type === "group"
-                  ? ["layout_block"]
-                  : ["interface"]
-                : [];
+            // 面板控件/标签组的"上级"是容器：布局块、浮层（D50 修订）或标签组。
+            : type === "control"
+              ? ["layout_block", "overlay", "group"]
+              : type === "group"
+                ? ["layout_block", "overlay"]
+                : type === "overlay"
+                  ? ["interface"]
+                  : type === "layout_block"
+                    ? ["interface"]
+                    : [];
   if (wanted.length === 0) {
     return null;
   }

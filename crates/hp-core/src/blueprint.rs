@@ -1,10 +1,10 @@
 //! 蓝图领域模型（RFC 0007 / D28-D32 / D46-D60）。
 //!
 //! 蓝图是仓库内节点式「面板控件显隐 + 组布局控制」配置文档（一个 JSON 图 + schema 版本）。
-//! 节点分：界面（Interface，层的根与页面）/ 布局块（LayoutBlock）/ 浮层（Overlay，D50）/
-//! 标签组（Group）/ 面板控件（Control，旧称「控件」）/ 面板控件内部的类（Class）/
-//! 类内的对象（Object），以及事件、条件、动作等逻辑节点；
-//! 边语义含 contains / memberOf / fires / guards。
+//! 节点分：界面（Interface，层的根与页面）/ 布局块（LayoutBlock）/
+//! 浮层（Overlay，与布局块同级的**浮层容器**，D50 修订）/ 标签组（Group）/
+//! 面板控件（Control，旧称「控件」）/ 面板控件内部的类（Class）/ 类内的对象（Object），
+//! 以及事件、条件、动作等逻辑节点；边语义含 contains / memberOf / fires / guards。
 //!
 //! **分层（D51）**：一个层 = 一张画布 = 一个界面（页面）；`BlueprintGraph.layers` 列出层，
 //! 每个节点用 `layer` 归属某一层；跨层只允许 `navigate`（界面跳转，字段引用，不是边）。
@@ -43,7 +43,8 @@ pub enum NodeType {
     Interface,
     /// 布局块：界面上的一个区域（如左/中/右三栏），包含标签组与面板控件。
     LayoutBlock,
-    /// 浮层：浮动控件的显隐载体（D50）；与布局块同级、是叶子节点。
+    /// 浮层：浮动控件的显隐载体（D50）；与布局块同级、且是**容器**
+    /// （可 contains 面板控件与标签组），可设定阴影/圆角/标签隐藏等外观档位。
     Overlay,
     /// 面板控件：dockview 面板实例（UI 组件实例，旧称「控件」）。
     Control,
@@ -346,6 +347,48 @@ impl fmt::Display for EdgeKind {
 
 // ============================== 节点 ==============================
 
+/// 浮层外观档位（D50 修订 / D44）：阴影与圆角只允许取**宿主设计 token 档位**，
+/// 具体像素由 `packages/ui` 的设计 token 决定，蓝图不写死像素（保证浅色/深色一致）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenLevel {
+    /// 无（无阴影 / 直角）。
+    None,
+    /// 小档。
+    Sm,
+    /// 中档。
+    Md,
+    /// 大档。
+    Lg,
+}
+
+impl TokenLevel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TokenLevel::None => "none",
+            TokenLevel::Sm => "sm",
+            TokenLevel::Md => "md",
+            TokenLevel::Lg => "lg",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "none" => Some(TokenLevel::None),
+            "sm" => Some(TokenLevel::Sm),
+            "md" => Some(TokenLevel::Md),
+            "lg" => Some(TokenLevel::Lg),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for TokenLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// 组/控件的目标锚点（画布编辑器定位 + 浮动/停靠；RFC 0007 / D29）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlueprintPosition {
@@ -431,6 +474,15 @@ pub struct BlueprintNode {
     /// 浮层高度参数（D57：1–10，默认 1，值大者在上）；不是像素高度。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<i64>,
+    /// 浮层阴影档位（取宿主设计 token；非法档位在解析层报错）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<TokenLevel>,
+    /// 浮层圆角档位（取宿主设计 token；非法档位在解析层报错）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<TokenLevel>,
+    /// 是否隐藏浮层自带的标签/标题（只显示内容）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hide_label: Option<bool>,
 }
 
 /// 蓝图边（RFC 0007 决策 1）。

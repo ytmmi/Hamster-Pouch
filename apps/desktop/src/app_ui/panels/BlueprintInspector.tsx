@@ -1,10 +1,10 @@
 /**
- * 蓝图节点属性检查器（RFC 0007 决策 7 / D31 / D50）。
+ * 蓝图节点属性检查器（RFC 0007 决策 7 / D31 / D50 修订）。
  *
  * 选中画布节点后，在侧栏编辑该节点的全部字段：控件 `panel_id`/`title_key`、
  * 类 `control`/`media_type`、对象 `class`/`scope`、组 `mode`/`default_visible`/
- * `hide_direction`/`position`、浮层 `control_id`/`visible`/`height`、操作 `trigger`、
- * 条件 `expr`、状态 `op`/`target`/`payload`；
+ * `hide_direction`/`position`、浮层（容器）`control_id`/`visible`/`height`/
+ * `shadow`/`radius`/`hide_label`、操作 `trigger`、条件 `expr`、状态 `op`/`target`/`payload`；
  * 并支持重命名节点 key（联动更新引用与边，由面板负责唯一性校验）与删除节点。
  *
  * 展示层：参数与选项一律用本地化文案，不向用户暴露底层 key。
@@ -22,6 +22,7 @@ import {
   OVERLAY_HEIGHT_MIN,
   PANEL_IDS,
   PANEL_TITLES,
+  TOKEN_LEVELS,
 } from "@hamster-pouch/config";
 
 import type { Translate, TranslationKey } from "../i18n";
@@ -252,9 +253,34 @@ export function NodeInspector({
           />,
         )}
       {node.type === "overlay" && (
-        <span className="dim bp-hints">
-          {OVERLAY_HEIGHT_MIN}–{OVERLAY_HEIGHT_MAX}
-        </span>
+        <span className="dim bp-hints">{OVERLAY_HEIGHT_MIN}–{OVERLAY_HEIGHT_MAX}</span>
+      )}
+      {/* 浮层外观（D50 修订 / D44）：只选宿主设计 token 档位，像素由宿主决定 */}
+      {node.type === "overlay" &&
+        select(
+          t("blueprint.shadow"),
+          node.shadow ?? "none",
+          TOKEN_LEVELS.map((v) => ({ v, l: v })),
+          (v) => onPatch({ shadow: v as BlueprintNode["shadow"] }),
+        )}
+      {node.type === "overlay" &&
+        select(
+          t("blueprint.radius"),
+          node.radius ?? "none",
+          TOKEN_LEVELS.map((v) => ({ v, l: v })),
+          (v) => onPatch({ radius: v as BlueprintNode["radius"] }),
+        )}
+      {node.type === "overlay" &&
+        row(
+          t("blueprint.hideLabel"),
+          <input
+            type="checkbox"
+            checked={node.hide_label ?? false}
+            onChange={(e) => onPatch({ hide_label: e.target.checked })}
+          />,
+        )}
+      {node.type === "overlay" && (
+        <span className="dim bp-hints">{t("blueprint.overlayContainerHint")}</span>
       )}
       {node.type === "group" &&
         select(

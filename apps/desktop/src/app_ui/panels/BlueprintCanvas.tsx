@@ -59,8 +59,12 @@ export interface PortDef {
 const PORT_DEFS: Record<BlueprintNodeType, PortDef[]> = {
   interface: [{ id: "contains", side: "out" }],
   layout_block: [{ id: "contains", side: "out" }],
-  // 浮层（D50）：与布局块同级、是叶子节点，只接收界面的 contains（无输出端口）。
-  overlay: [{ id: "contains", side: "in" }],
+  // 浮层（D50 修订）：与布局块同级、且是**容器**（可含面板控件/标签组），
+  // 因此既有输入端口（接收界面的 contains），也有输出端口（连向内部控件/标签组）。
+  overlay: [
+    { id: "contains", side: "in" },
+    { id: "contains", side: "out" },
+  ],
   control: [
     { id: "in", side: "in" },
     { id: "contains", side: "out" },
@@ -118,6 +122,10 @@ export function kindForEdge(
         fromType === "interface" &&
         (toType === "layout_block" || toType === "overlay")
       ) {
+        return "contains";
+      }
+      // 浮层是容器（D50 修订）：可包含面板控件与标签组。
+      if (fromType === "overlay" && (toType === "control" || toType === "group")) {
         return "contains";
       }
       if (fromType === "layout_block" && (toType === "group" || toType === "control")) {
@@ -212,12 +220,21 @@ export function nodeSummary(
     case "layout_block":
       return t("blueprint.summary.layoutBlock");
     case "overlay": {
-      // 浮层（D50/D56/D57）：绑定键 + 叠放高度；未绑定即"未接通"。
+      // 浮层（D50/D56/D57）：绑定键 + 叠放高度 + 外观档位；未绑定即"未接通"。
       const binding = node.control_id?.trim()
         ? node.control_id.trim()
         : t("blueprint.summary.overlayUnbound");
-      const height = node.height ?? 1;
-      return `${binding} · ${t("blueprint.overlayHeight")} ${height}`;
+      const parts = [binding, `${t("blueprint.overlayHeight")} ${node.height ?? 1}`];
+      if (node.shadow) {
+        parts.push(`${t("blueprint.shadow")} ${node.shadow}`);
+      }
+      if (node.radius) {
+        parts.push(`${t("blueprint.radius")} ${node.radius}`);
+      }
+      if (node.hide_label) {
+        parts.push(t("blueprint.hideLabel"));
+      }
+      return parts.join(" · ");
     }
     case "control":
       return resolveControlTitle(node, t) || "—";

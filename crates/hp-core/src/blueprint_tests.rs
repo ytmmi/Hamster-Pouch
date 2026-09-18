@@ -51,6 +51,14 @@ mod tests {
         ] {
             assert_eq!(EdgeKind::from_str(v.as_str()), Some(v));
         }
+        for v in [
+            TokenLevel::None,
+            TokenLevel::Sm,
+            TokenLevel::Md,
+            TokenLevel::Lg,
+        ] {
+            assert_eq!(TokenLevel::from_str(v.as_str()), Some(v));
+        }
     }
 
     #[test]
@@ -440,6 +448,74 @@ mod tests {
     }
 
     #[test]
+    fn overlay_is_a_container_for_controls_and_groups() {
+        // D50 修订：浮层是**容器**（与布局块同级），可 contains 面板控件与标签组；
+        // 标签组再 contains 面板控件（组内标签页）。外观取宿主 token 档位。
+        let graph = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"主界面"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"ov","type":"overlay","layer":"l_a","control_id":"demo.float",
+                   "name":"浮层 1","visible":true,"height":2,
+                   "shadow":"lg","radius":"md","hide_label":true},
+                  {"key":"c_tip","type":"control","layer":"l_a","panel_id":"metadata",
+                   "title_key":"panel.metadata"},
+                  {"key":"g_float","type":"group","layer":"l_a","mode":"exclusive"},
+                  {"key":"c_alt","type":"control","layer":"l_a","panel_id":"color"}
+                ],
+                "edges":[
+                  {"from":"ui","to":"ov","kind":"contains","order":1},
+                  {"from":"ov","to":"c_tip","kind":"contains","order":2},
+                  {"from":"ov","to":"g_float","kind":"contains","order":3},
+                  {"from":"g_float","to":"c_alt","kind":"contains","order":4}
+                ]}"#,
+        )
+        .unwrap();
+        assert!(graph.validate().is_empty(), "{:?}", graph.validate());
+        let ov = graph.nodes.iter().find(|n| n.key == "ov").unwrap();
+        assert_eq!(ov.shadow, Some(TokenLevel::Lg));
+        assert_eq!(ov.radius, Some(TokenLevel::Md));
+        assert_eq!(ov.hide_label, Some(true));
+
+        // 序列化往返：外观档位不丢
+        let back = BlueprintGraph::from_json(&graph.to_json()).unwrap();
+        assert_eq!(back, graph);
+
+        // 浮层**不能** contains 类/对象（层级：浮层 → 标签组/面板控件 → 类 → 对象）
+        let bad = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"ov","type":"overlay","layer":"l_a","control_id":"x"},
+                  {"key":"k","type":"class","layer":"l_a","media_type":"image"}
+                ],
+                "edges":[
+                  {"from":"ui","to":"ov","kind":"contains","order":1},
+                  {"from":"ov","to":"k","kind":"contains","order":2}
+                ]}"#,
+        )
+        .unwrap();
+        assert!(
+            bad.validate().iter().any(|e| e.contains("非法边")),
+            "{:?}",
+            bad.validate()
+        );
+
+        // 非法外观档位（解析层报错）
+        assert!(
+            !BlueprintGraph::validate_json(
+                r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
+                    "nodes":[
+                      {"key":"ui","type":"interface","layer":"l_a"},
+                      {"key":"ov","type":"overlay","layer":"l_a","shadow":"huge"}
+                    ],"edges":[]}"#
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
     fn schema_version_gate_is_greater_than_only() {
         // 低于当前版本 → 不拒绝（走迁移，D58）
         let old = BlueprintGraph::from_json(
@@ -517,8 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn effective_layers_falls_back_to_single_layer() {
-        // 无 layers 的旧文档 → 单层兜底（层名取界面 name）
+    fn effective_layers_falls_back_to_single_layer() {        // 无 layers 的旧文档 → 单层兜底（层名取界面 name）
         let legacy = BlueprintGraph::from_json(
             r#"{"schema_version":1,"nodes":[
               {"key":"ui","type":"interface","name":"我的界面"}

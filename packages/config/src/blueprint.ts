@@ -15,6 +15,13 @@ export const DEFAULT_BLUEPRINT_VERSION = 7;
 export const OVERLAY_HEIGHT_MIN = 1;
 export const OVERLAY_HEIGHT_MAX = 10;
 
+/**
+ * 浮层外观档位可选值（D50 修订 / D44）：只允许取**宿主设计 token 档位**，
+ * 像素由 `packages/ui` 的设计 token 决定，蓝图不写死像素（保证浅色/深色一致）。
+ */
+export const TOKEN_LEVELS = ["none", "sm", "md", "lg"] as const;
+export type TokenLevel = (typeof TOKEN_LEVELS)[number];
+
 /** 单层兜底时使用的层 key / 层名（与 hp-core `BlueprintGraph::FALLBACK_LAYER_*` 一致）。 */
 export const FALLBACK_LAYER_KEY = "l_main";
 export const FALLBACK_LAYER_NAME = "主界面";
@@ -103,6 +110,12 @@ export interface BlueprintNode {
   visible?: boolean;
   /** 浮层高度参数（D57：1–10，默认 1，值大者在上）。 */
   height?: number;
+  /** 浮层阴影档位（取宿主设计 token，D50 修订）。 */
+  shadow?: TokenLevel;
+  /** 浮层圆角档位（取宿主设计 token）。 */
+  radius?: TokenLevel;
+  /** 是否隐藏浮层自带的标签/标题（只显示内容）。 */
+  hide_label?: boolean;
   /**
    * 未接通（画布渲染用的**派生标记**，不落库）：
    * 删除/断线后节点自身缺少必要引用或触发来源，因而**不生效**，

@@ -196,6 +196,59 @@ const hasEdge = (doc, from, to, kind) =>
   );
 }
 
+// ---- 5c. 浮层容器（D50 修订）：浮层可含面板控件/标签组，并带外观档位 ----
+{
+  let doc = defaults(); // 内置默认：单层 l_main + 界面节点 ui
+  const ui = doc.nodes.find((n) => n.type === "interface");
+
+  // 选中界面 → 新增浮层：落进界面（contains）
+  const ov = factory.appendNode(doc, "overlay", { x: 40, y: -130 }, { key: ui.key, explicit: true }, "l_main");
+  doc = ov.doc;
+  check(
+    "浮层：选中界面新增 → 界面 contains 浮层，且带层归属",
+    hasEdge(doc, ui.key, ov.node.key, "contains") && ov.node.layer === "l_main",
+    `edges=${doc.edges.length} overlay=${ov.node.key}`,
+  );
+
+  // 选中浮层 → 新增面板控件：落进浮层（浮层是容器）
+  const ctl = factory.appendNode(doc, "control", { x: 40, y: 0 }, { key: ov.node.key, explicit: true }, "l_main");
+  doc = ctl.doc;
+  check(
+    "浮层是容器：选中浮层新增面板控件 → 浮层 contains 面板控件",
+    hasEdge(doc, ov.node.key, ctl.node.key, "contains") &&
+      ctl.node.layer === "l_main" &&
+      doc.nodes.find((n) => n.key === ctl.node.key).type === "control",
+    `${ov.node.key} --contains--> ${ctl.node.key}`,
+  );
+
+  // 选中浮层 → 新增标签组：也落进浮层（Q1=B：面板控件 + 标签组）
+  const grp = factory.appendNode(doc, "group", { x: 300, y: 0 }, { key: ov.node.key, explicit: true }, "l_main");
+  doc = grp.doc;
+  check(
+    "浮层是容器：选中浮层新增标签组 → 浮层 contains 标签组",
+    hasEdge(doc, ov.node.key, grp.node.key, "contains") &&
+      doc.nodes.find((n) => n.key === grp.node.key).mode === "exclusive",
+    `${ov.node.key} --contains--> ${grp.node.key}`,
+  );
+
+  // 外观档位与绑定：写进浮层节点（D50 修订 / D44 token 档位）
+  doc = {
+    ...doc,
+    nodes: doc.nodes.map((n) =>
+      n.key === ov.node.key
+        ? { ...n, control_id: "demo.floating", visible: true, shadow: "lg", radius: "md", hide_label: true }
+        : n,
+    ),
+  };
+  writeFixture("overlay_container", doc);
+  const saved = doc.nodes.find((n) => n.key === ov.node.key);
+  check(
+    "浮层外观：shadow/radius 取 token 档位、hide_label 为布尔",
+    saved.shadow === "lg" && saved.radius === "md" && saved.hide_label === true,
+    `shadow=${saved.shadow} radius=${saved.radius} hide_label=${saved.hide_label}`,
+  );
+}
+
 // ---- 6. 空图只加一个"状态"（最苛刻：无任何上级可复用）----
 {
   const r = factory.appendNode(config.makeEmptyBlueprint(), "action", { x: 40, y: 40 }, null);

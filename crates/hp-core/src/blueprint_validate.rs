@@ -27,7 +27,8 @@ pub(crate) fn validate_node(
             // 布局块：结构节点，仅要求 key 非空（name/position 可选）。
         }
         NodeType::Overlay => {
-            // 浮层（D50/D56/D57）：叶子节点，只承载浮动控件的显隐与叠放。
+            // 浮层（D50 修订）：**容器**——与布局块同级，可 contains **面板控件与标签组**；
+            // 并承载外观档位（阴影/圆角/标签隐藏，取宿主设计 token，像素由宿主决定）。
             // control_id 缺失/指向不存在的 schema → 未接通（软告警），不阻塞保存。
             if let Some(h) = node.height {
                 if !(OVERLAY_HEIGHT_MIN..=OVERLAY_HEIGHT_MAX).contains(&h) {
@@ -187,6 +188,9 @@ pub(crate) fn validate_edge(
         // 界面 → 布局块 / 浮层（浮层与布局块同级，D49/D50）。
         (EdgeKind::Contains, Some(NodeType::Interface), Some(NodeType::LayoutBlock))
         | (EdgeKind::Contains, Some(NodeType::Interface), Some(NodeType::Overlay))
+        // 浮层是**容器**（D50 修订）：可包含面板控件与标签组；标签组再包含面板控件。
+        | (EdgeKind::Contains, Some(NodeType::Overlay), Some(NodeType::Control))
+        | (EdgeKind::Contains, Some(NodeType::Overlay), Some(NodeType::Group))
         | (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Group))
         | (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Control))
         | (EdgeKind::Contains, Some(NodeType::Group), Some(NodeType::Control))
