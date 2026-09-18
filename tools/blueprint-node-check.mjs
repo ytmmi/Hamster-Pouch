@@ -144,12 +144,12 @@ const hasEdge = (doc, from, to, kind) =>
     doc.nodes.every((n) => n.layer === "l_main"),
     doc.nodes.map((n) => `${n.key}:${n.layer ?? "(none)"}`).join(", "),
   );
-  // D50：浮层节点默认 height=1，未绑定 control_id（画布灰显"未接通"）。
+  // D50：浮层节点默认 height=1（默认单层叠放），且**不再有浮动控件绑定**。
   const ov = doc.nodes.find((n) => n.type === "overlay");
   check(
-    "浮层节点默认 height=1 且未绑定 control_id",
+    "浮层节点默认 height=1，且无已取消的 control_id 字段",
     ov?.height === 1 && ov?.control_id === undefined,
-    `height=${ov?.height} control_id=${ov?.control_id ?? "(none)"}`,
+    `height=${ov?.height} control_id=${ov?.control_id ?? "(无，已取消)"}`,
   );
 }
 
@@ -231,21 +231,36 @@ const hasEdge = (doc, from, to, kind) =>
     `${ov.node.key} --contains--> ${grp.node.key}`,
   );
 
-  // 外观档位与绑定：写进浮层节点（D50 修订 / D44 token 档位）
+  // 外观档位 + 相对定位：写进浮层节点（D50 修订 / D44 token 档位）；已取消浮动控件绑定。
   doc = {
     ...doc,
     nodes: doc.nodes.map((n) =>
       n.key === ov.node.key
-        ? { ...n, control_id: "demo.floating", visible: true, shadow: "lg", radius: "md", hide_label: true }
+        ? {
+            ...n,
+            visible: true,
+            shadow: "lg",
+            radius: "md",
+            hide_label: true,
+            anchor: "bottom_right",
+            offset_x: -0.25,
+            offset_y: 24,
+          }
         : n,
     ),
   };
   writeFixture("overlay_container", doc);
   const saved = doc.nodes.find((n) => n.key === ov.node.key);
   check(
-    "浮层外观：shadow/radius 取 token 档位、hide_label 为布尔",
-    saved.shadow === "lg" && saved.radius === "md" && saved.hide_label === true,
-    `shadow=${saved.shadow} radius=${saved.radius} hide_label=${saved.hide_label}`,
+    "浮层外观与定位：档位取 token、锚点取九宫格、偏移为数值（无浮动控件绑定）",
+    saved.shadow === "lg" &&
+      saved.radius === "md" &&
+      saved.hide_label === true &&
+      saved.anchor === "bottom_right" &&
+      saved.offset_x === -0.25 &&
+      saved.offset_y === 24 &&
+      saved.control_id === undefined,
+    `shadow=${saved.shadow} radius=${saved.radius} hide_label=${saved.hide_label} anchor=${saved.anchor} offset=(${saved.offset_x}, ${saved.offset_y})`,
   );
 }
 
@@ -288,6 +303,70 @@ const hasEdge = (doc, from, to, kind) =>
     ports.kindForEdge("interface", "contains", "control") === null &&
       ports.kindForEdge("interface", "contains", "group") === null,
     `control=${ports.kindForEdge("interface", "contains", "control")} group=${ports.kindForEdge("interface", "contains", "group")}`,
+  );
+}
+
+// ---- 5e. 浮层相对定位：九宫格锚点 + 双模式偏移（0–1 比例 / >1 像素）----
+{
+  const { resolveOverlayPosition, overlayOffsetToPx, overlayOffsetLabel, anchorAxis } = config;
+
+  check(
+    "偏移双模式：|v| ≤ 1 视为比例、|v| > 1 视为像素（可为负）",
+    overlayOffsetToPx(0.25, 1000) === 250 &&
+      overlayOffsetToPx(24, 1000) === 24 &&
+      overlayOffsetToPx(-16, 1000) === -16 &&
+      overlayOffsetToPx(-0.5, 800) === -400,
+    `0.25→${overlayOffsetToPx(0.25, 1000)} 24→${overlayOffsetToPx(24, 1000)} -16→${overlayOffsetToPx(-16, 1000)} -0.5→${overlayOffsetToPx(-0.5, 800)}`,
+  );
+  check(
+    "偏移展示：比例显示百分比、像素显示 px",
+    overlayOffsetLabel(0.25) === "25%" &&
+      overlayOffsetLabel(24) === "24px" &&
+      overlayOffsetLabel(0) === "0" &&
+      overlayOffsetLabel(undefined) === "0",
+    `${overlayOffsetLabel(0.25)} / ${overlayOffsetLabel(24)} / ${overlayOffsetLabel(0)}`,
+  );
+
+  const area = { width: 1000, height: 800 };
+  const size = { width: 200, height: 100 };
+  const at = (anchor, offsetX = 0, offsetY = 0) =>
+    resolveOverlayPosition({ anchor, offsetX, offsetY, area, size });
+
+  check(
+    "九宫格：左上/居中/右下的基准位置正确",
+    JSON.stringify(at("top_left")) === JSON.stringify({ x: 0, y: 0 }) &&
+      JSON.stringify(at("center")) === JSON.stringify({ x: 400, y: 350 }) &&
+      JSON.stringify(at("bottom_right")) === JSON.stringify({ x: 800, y: 700 }),
+    `左上=${JSON.stringify(at("top_left"))} 居中=${JSON.stringify(at("center"))} 右下=${JSON.stringify(at("bottom_right"))}`,
+  );
+  check(
+    "九宫格：上中/左中/下中/右中 的边界对齐正确",
+    JSON.stringify(at("top_center")) === JSON.stringify({ x: 400, y: 0 }) &&
+      JSON.stringify(at("middle_left")) === JSON.stringify({ x: 0, y: 350 }) &&
+      JSON.stringify(at("bottom_center")) === JSON.stringify({ x: 400, y: 700 }) &&
+      JSON.stringify(at("middle_right")) === JSON.stringify({ x: 800, y: 350 }),
+    `上中=${JSON.stringify(at("top_center"))} 左中=${JSON.stringify(at("middle_left"))} 下中=${JSON.stringify(at("bottom_center"))} 右中=${JSON.stringify(at("middle_right"))}`,
+  );
+  check(
+    "偏移叠加：右下 + 像素(-24) + 比例(-0.25) → x=776, y=500",
+    JSON.stringify(at("bottom_right", -24, -0.25)) === JSON.stringify({ x: 776, y: 500 }),
+    JSON.stringify(at("bottom_right", -24, -0.25)),
+  );
+  check(
+    "越界贴边收拢：比例越界后仍落在界面内容区内",
+    JSON.stringify(at("top_left", -0.5, -0.5)) === JSON.stringify({ x: 0, y: 0 }) &&
+      JSON.stringify(at("bottom_right", 0.5, 0.5)) === JSON.stringify({ x: 800, y: 700 }),
+    `左上越界=${JSON.stringify(at("top_left", -0.5, -0.5))} 右下越界=${JSON.stringify(at("bottom_right", 0.5, 0.5))}`,
+  );
+  check(
+    "缺省锚点 = 居中（未写 anchor 时按 center 处理）",
+    config.DEFAULT_OVERLAY_ANCHOR === "center" &&
+      JSON.stringify(
+        resolveOverlayPosition({ area, size }),
+      ) === JSON.stringify({ x: 400, y: 350 }) &&
+      anchorAxis("center").horizontal === "middle" &&
+      anchorAxis("bottom_right").vertical === "end",
+    `默认=${config.DEFAULT_OVERLAY_ANCHOR}`,
   );
 }
 

@@ -28,8 +28,11 @@ pub(crate) fn validate_node(
         }
         NodeType::Overlay => {
             // 浮层（D50 修订）：**容器**——与布局块同级，可 contains **面板控件与标签组**；
-            // 并承载外观档位（阴影/圆角/标签隐藏，取宿主设计 token，像素由宿主决定）。
-            // control_id 缺失/指向不存在的 schema → 未接通（软告警），不阻塞保存。
+            // 并承载外观档位（阴影/圆角/标签隐藏，取宿主设计 token，像素由宿主决定）
+            // 与**相对定位**（九宫格锚点 + 双模式偏移）。
+            // 2026-09 取消「浮动控件」绑定，浮层不再有 `control_id`。
+            // 锚点与偏移的取值合法性由解析层保证（枚举 + 数字）；
+            // JSON 的 f64 由 serde_json 保证有限，不会出现 NaN/∞。
             if let Some(h) = node.height {
                 if !(OVERLAY_HEIGHT_MIN..=OVERLAY_HEIGHT_MAX).contains(&h) {
                     errors.push(format!(

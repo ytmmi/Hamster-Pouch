@@ -59,6 +59,51 @@ mod tests {
         ] {
             assert_eq!(TokenLevel::from_str(v.as_str()), Some(v));
         }
+        for v in OverlayAnchor::ALL {
+            assert_eq!(OverlayAnchor::from_str(v.as_str()), Some(v));
+        }
+        assert_eq!(OverlayAnchor::ALL.len(), 9, "井字锚点应为 9 个");
+        assert_eq!(OverlayAnchor::TopLeft.horizontal(), AnchorAxis::Start);
+        assert_eq!(OverlayAnchor::TopLeft.vertical(), AnchorAxis::Start);
+        assert_eq!(OverlayAnchor::Center.horizontal(), AnchorAxis::Middle);
+        assert_eq!(OverlayAnchor::Center.vertical(), AnchorAxis::Middle);
+        assert_eq!(OverlayAnchor::BottomRight.horizontal(), AnchorAxis::End);
+        assert_eq!(OverlayAnchor::BottomRight.vertical(), AnchorAxis::End);
+        assert_eq!(OverlayAnchor::from_str("middle"), None);
+    }
+
+    #[test]
+    fn overlay_anchor_and_offset_roundtrip() {
+        // 相对定位：九宫格锚点 + 双模式偏移（|v| ≤ 1 比例、|v| > 1 像素）
+        let graph = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"ov","type":"overlay","layer":"l_a","anchor":"bottom_right",
+                   "offset_x":0.25,"offset_y":-16,"visible":true,"height":4}
+                ],
+                "edges":[{"from":"ui","to":"ov","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(graph.validate().is_empty(), "{:?}", graph.validate());
+        let ov = graph.nodes.iter().find(|n| n.key == "ov").unwrap();
+        assert_eq!(ov.anchor, Some(OverlayAnchor::BottomRight));
+        assert_eq!(ov.offset_x, Some(0.25));
+        assert_eq!(ov.offset_y, Some(-16.0));
+        let back = BlueprintGraph::from_json(&graph.to_json()).unwrap();
+        assert_eq!(back, graph, "锚点与偏移必须往返不丢");
+
+        // 未知锚点 → 解析层报错（硬错误）
+        assert!(
+            !BlueprintGraph::validate_json(
+                r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
+                    "nodes":[
+                      {"key":"ui","type":"interface","layer":"l_a"},
+                      {"key":"ov","type":"overlay","layer":"l_a","anchor":"middle"}
+                    ],"edges":[]}"#
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -338,7 +383,7 @@ mod tests {
             rootless.warnings()
         );
 
-        // 浮层未绑定（D56）：缺 control_id → 软告警
+        // 浮层：**取消「浮动控件」绑定后**不再有 control_id 相关软告警（空浮层也可保存）
         let overlay = BlueprintGraph::from_json(
             r#"{"schema_version":2,
                 "layers":[{"key":"l_a","name":"A"}],
@@ -351,22 +396,22 @@ mod tests {
         .unwrap();
         assert!(overlay.validate().is_empty(), "{:?}", overlay.validate());
         assert!(
-            overlay.warnings().iter().any(|w| w.contains("control_id")),
-            "{:?}",
+            overlay.warnings().is_empty(),
+            "空浮层不应再产生未接通告警：{:?}",
             overlay.warnings()
         );
     }
 
     #[test]
     fn validate_accepts_overlay_and_rejects_illegal_overlay_actions() {
-        // 浮层：interface --contains--> overlay 合法；是叶子节点（不 contains 任何节点）
+        // 浮层：interface --contains--> overlay 合法（浮层是容器，见另一条用例）
         let graph = BlueprintGraph::from_json(
             r#"{"schema_version":2,
                 "layers":[{"key":"l_a","name":"主界面"}],
                 "nodes":[
                   {"key":"ui","type":"interface","layer":"l_a"},
                   {"key":"ov","type":"overlay","layer":"l_a",
-                   "control_id":"demo.floating","name":"浮层 1","visible":true,"height":5},
+                   "name":"浮层 1","visible":true,"height":5},
                   {"key":"c","type":"control","panel_id":"viewer","layer":"l_a"},
                   {"key":"e","type":"event","trigger":"click","layer":"l_a"},
                   {"key":"g","type":"group","mode":"exclusive","layer":"l_a"},
@@ -392,7 +437,7 @@ mod tests {
             r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
                 "nodes":[
                   {"key":"ui","type":"interface","layer":"l_a"},
-                  {"key":"ov","type":"overlay","layer":"l_a","control_id":"x"},
+                  {"key":"ov","type":"overlay","layer":"l_a"},
                   {"key":"a","type":"action","op":"collapse","target":"ov","layer":"l_a"}
                 ],
                 "edges":[{"from":"ui","to":"ov","kind":"contains","order":1}]}"#,
@@ -412,7 +457,7 @@ mod tests {
             r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
                 "nodes":[
                   {"key":"ui","type":"interface","layer":"l_a"},
-                  {"key":"ov","type":"overlay","layer":"l_a","control_id":"x"},
+                  {"key":"ov","type":"overlay","layer":"l_a","name":"浮层"},
                   {"key":"a","type":"action","op":"navigate","target":"ov","layer":"l_a"}
                 ],
                 "edges":[{"from":"ui","to":"ov","kind":"contains","order":1}]}"#,
@@ -432,7 +477,7 @@ mod tests {
             r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
                 "nodes":[
                   {"key":"ui","type":"interface","layer":"l_a"},
-                  {"key":"ov","type":"overlay","layer":"l_a","control_id":"x","height":11}
+                  {"key":"ov","type":"overlay","layer":"l_a","name":"浮层","height":11}
                 ],
                 "edges":[{"from":"ui","to":"ov","kind":"contains","order":1}]}"#,
         )
@@ -456,7 +501,7 @@ mod tests {
                 "layers":[{"key":"l_a","name":"主界面"}],
                 "nodes":[
                   {"key":"ui","type":"interface","layer":"l_a"},
-                  {"key":"ov","type":"overlay","layer":"l_a","control_id":"demo.float",
+                  {"key":"ov","type":"overlay","layer":"l_a",
                    "name":"浮层 1","visible":true,"height":2,
                    "shadow":"lg","radius":"md","hide_label":true},
                   {"key":"c_tip","type":"control","layer":"l_a","panel_id":"metadata",
@@ -487,7 +532,7 @@ mod tests {
             r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
                 "nodes":[
                   {"key":"ui","type":"interface","layer":"l_a"},
-                  {"key":"ov","type":"overlay","layer":"l_a","control_id":"x"},
+                  {"key":"ov","type":"overlay","layer":"l_a","name":"浮层"},
                   {"key":"k","type":"class","layer":"l_a","media_type":"image"}
                 ],
                 "edges":[

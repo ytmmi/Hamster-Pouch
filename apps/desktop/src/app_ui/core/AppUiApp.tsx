@@ -58,7 +58,7 @@ export function AppUiApp(): JSX.Element {
   const [language, setLanguageState] = useState<Language>(DEFAULT_LANGUAGE);
   const apiRef = useRef<DockviewApi | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
-  /** 浮层期望可见态（D50）：控件标准落地前先由宿主记录，供浮层宿主直接消费。 */
+  /** 浮层容器期望可见态（D50）：按浮层节点 key 记录，供浮层宿主消费。 */
   const overlayStateRef = useRef<Map<string, boolean>>(new Map());
 
   const t = useMemo(() => makeTranslator(language), [language]);
@@ -244,14 +244,14 @@ export function AppUiApp(): JSX.Element {
           );
         });
       },
-      // 浮层显隐（D50/D56）：浮动控件由控件标准落地后渲染（`docs/spec/control-standard.md`
-      // 第 4–5 步）。当前先记录**期望可见态**并把结果写进诊断日志，宿主接管后即可直接消费。
-      setOverlayVisible: (controlId: string, visible: boolean) => {
-        overlayStateRef.current.set(controlId, visible);
+      // 浮层容器显隐（D50）：内容面板已由引擎按浮动方式显示/隐藏；这里只记录**浮层容器**
+      // 的期望可见态，供后续的浮层宿主按外观档位（圆角/阴影/标签隐藏）渲染容器本身。
+      setOverlayVisible: (overlayKey: string, visible: boolean) => {
+        overlayStateRef.current.set(overlayKey, visible);
         void import("../shared/blueprintRuntime")
           .then((m) =>
             m.traceBlueprint(
-              `[overlay] ${controlId} → ${visible ? "显示" : "隐藏"}（浮动控件渲染待控件标准落地）`,
+              `[overlay] 浮层 ${overlayKey} → ${visible ? "显示" : "隐藏"}（容器外观渲染待控件标准落地）`,
             ),
           )
           .catch(() => undefined);

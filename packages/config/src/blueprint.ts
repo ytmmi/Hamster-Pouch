@@ -22,6 +22,105 @@ export const OVERLAY_HEIGHT_MAX = 10;
 export const TOKEN_LEVELS = ["none", "sm", "md", "lg"] as const;
 export type TokenLevel = (typeof TOKEN_LEVELS)[number];
 
+/**
+ * 浮层锚点（3×3 井字，D50 修订）：浮层相对**界面（宿主内容区）**的对齐位置。
+ *
+ * `top_*` 表示浮层上边贴界面上边、`*_center` 表示水平居中、`bottom_*` 表示下边贴界面下边
+ * …… 依此类推。默认 `center`（居中）。
+ */
+export const OVERLAY_ANCHORS = [
+  "top_left",
+  "top_center",
+  "top_right",
+  "middle_left",
+  "center",
+  "middle_right",
+  "bottom_left",
+  "bottom_center",
+  "bottom_right",
+] as const;
+export type OverlayAnchor = (typeof OVERLAY_ANCHORS)[number];
+
+/** 缺省锚点（未写 `anchor` 时按居中处理）。 */
+export const DEFAULT_OVERLAY_ANCHOR: OverlayAnchor = "center";
+
+/** 锚点的水平/垂直分量：起 / 中 / 末。 */
+export function anchorAxis(
+  anchor: OverlayAnchor,
+): { horizontal: "start" | "middle" | "end"; vertical: "start" | "middle" | "end" } {
+  const horizontal = anchor.endsWith("_left")
+    ? "start"
+    : anchor.endsWith("_right")
+      ? "end"
+      : "middle";
+  const vertical = anchor.startsWith("top_")
+    ? "start"
+    : anchor.startsWith("bottom_")
+      ? "end"
+      : "middle";
+  return { horizontal, vertical };
+}
+
+/**
+ * 偏移量 → 像素（**双模式**，用户规定的口径）：
+ * - `|value| ≤ 1` → 视为**参照系尺寸的比例**（0.25 = 25% 宽/高，可为负）；
+ * - `|value| > 1` → 视为**像素**（24 = 24px，可为负）。
+ */
+export function overlayOffsetToPx(value: number, span: number): number {
+  return Math.abs(value) <= 1 ? value * span : value;
+}
+
+/** 偏移量的展示文案（比例显示为百分比，像素显示为 `Npx`）。 */
+export function overlayOffsetLabel(value: number | undefined): string {
+  if (value === undefined || value === 0) {
+    return "0";
+  }
+  return Math.abs(value) <= 1
+    ? `${Math.round(value * 100)}%`
+    : `${Math.round(value)}px`;
+}
+
+/**
+ * 按锚点 + 偏移算出浮层在界面内容区里的**左上角坐标**（px）。
+ *
+ * 计算顺序：先按锚点对齐（起=0、中=居中、末=贴另一侧），再叠加偏移
+ * （比例偏移相对**界面内容区**的宽 / 高换算），最后**贴边收拢**——浮层不得溢出界面。
+ * 浮层自身尺寸由宿主按内容与设计 token 决定，因此作为入参传入。
+ */
+export function resolveOverlayPosition(input: {
+  anchor?: OverlayAnchor;
+  offsetX?: number;
+  offsetY?: number;
+  /** 参照系（界面内容区）尺寸，px。 */
+  area: { width: number; height: number };
+  /** 浮层自身尺寸，px。 */
+  size: { width: number; height: number };
+}): { x: number; y: number } {
+  const { area, size } = input;
+  const { horizontal, vertical } = anchorAxis(input.anchor ?? DEFAULT_OVERLAY_ANCHOR);
+  const baseX =
+    horizontal === "start"
+      ? 0
+      : horizontal === "middle"
+        ? (area.width - size.width) / 2
+        : area.width - size.width;
+  const baseY =
+    vertical === "start"
+      ? 0
+      : vertical === "middle"
+        ? (area.height - size.height) / 2
+        : area.height - size.height;
+  const x = baseX + overlayOffsetToPx(input.offsetX ?? 0, area.width);
+  const y = baseY + overlayOffsetToPx(input.offsetY ?? 0, area.height);
+  // 越界贴边收拢（控件标准：浮层不得溢出宿主窗口）。
+  const maxX = Math.max(0, area.width - size.width);
+  const maxY = Math.max(0, area.height - size.height);
+  return {
+    x: Math.round(Math.min(maxX, Math.max(0, x))),
+    y: Math.round(Math.min(maxY, Math.max(0, y))),
+  };
+}
+
 /** 单层兜底时使用的层 key / 层名（与 hp-core `BlueprintGraph::FALLBACK_LAYER_*` 一致）。 */
 export const FALLBACK_LAYER_KEY = "l_main";
 export const FALLBACK_LAYER_NAME = "主界面";
@@ -103,13 +202,20 @@ export interface BlueprintNode {
   // action
   op?: BlueprintActionOp;
   payload?: unknown;
-  // overlay（浮层，D50/D56/D57）
-  /** 绑定的浮动控件 schema id（D56）；缺失或指向不存在的 schema → 未接通。 */
-  control_id?: string;
-  /** 初始显隐（D50）；缺省由插件声明的初始状态决定。 */
+  // overlay（浮层，D50：**容器**；2026-09 取消「浮动控件」绑定）
+  /** 初始显隐（D50）；缺省视为不显示。 */
   visible?: boolean;
   /** 浮层高度参数（D57：1–10，默认 1，值大者在上）。 */
   height?: number;
+  /** 相对定位锚点（3×3 井字；缺省 = 居中 `center`）。 */
+  anchor?: OverlayAnchor;
+  /**
+   * 水平偏移（双模式）：`|v| ≤ 1` = **界面宽度的比例**（0.25 → 右移 25%），
+   * `|v| > 1` = **像素**（24 → 右移 24px）；负值反向。
+   */
+  offset_x?: number;
+  /** 垂直偏移（双模式，同 `offset_x`，比例相对**界面高度**）。 */
+  offset_y?: number;
   /** 浮层阴影档位（取宿主设计 token，D50 修订）。 */
   shadow?: TokenLevel;
   /** 浮层圆角档位（取宿主设计 token）。 */
@@ -130,8 +236,7 @@ export type BlueprintUnlinkedReason =
   | "missing-class"
   | "missing-target"
   | "missing-object-source"
-  | "missing-trigger"
-  | "missing-control-id";
+  | "missing-trigger";
 
 /** 派生分析结果：未接通节点 key → 原因。 */
 export type BlueprintUnlinkedMap = Record<string, BlueprintUnlinkedReason>;
@@ -305,7 +410,8 @@ export function normalizeLayersForSave(doc: BlueprintGraph): BlueprintGraph {
  *
  * 术语（D46）：节点类型 `control` 在文档与 UI 中显示为**面板控件**，
  * 与 `docs/spec/control-standard.md` 的「控件」（宿主标准 UI 单元）区分；
- * 浮层（`overlay`，D50）承载浮动控件的显隐，与布局块同级，默认蓝图不含浮层。
+ * 浮层（`overlay`，D50）是**容器**，直接包含面板控件/标签组（2026-09 取消「浮动控件」绑定），
+ * 默认蓝图不含浮层。
  *
  * 规则（对象 → 操作 → 状态，全部连线）：
  * - 双击 图像·双击对象 → 显示 查看器；
@@ -421,17 +527,28 @@ export function makeEmptyBlueprint(): BlueprintGraph {
 }
 
 /**
- * 用户保存前的规范化：**去掉内置默认标记 `default_version`**。
+ * 用户保存前的规范化：**去掉内置默认标记 `default_version`**，
+ * 并清掉已取消的旧字段（`control_id`：2026-09 取消「浮动控件」绑定后不再有意义）。
  *
- * 该字段语义是"这份文档是随应用分发的内置默认蓝图、可按版本自动升级"。
+ * `default_version` 的语义是"这份文档是随应用分发的内置默认蓝图、可按版本自动升级"。
  * 用户一旦在编辑器中编辑并保存（哪怕编辑的就是默认蓝图），它就不再是内置默认，
  * 必须停止自动升级，否则下次装载会被新版内置默认静默覆盖，用户改动白丢。
  */
 export function forUserSave(doc: BlueprintGraph): BlueprintGraph {
-  if (doc.default_version === undefined) {
-    return doc;
+  const nodes = doc.nodes.map((node) => {
+    if (!("control_id" in node)) {
+      return node;
+    }
+    const { control_id: _retired, ...rest } = node as BlueprintNode & {
+      control_id?: string;
+    };
+    return rest as BlueprintNode;
+  });
+  const cleaned: BlueprintGraph = { ...doc, nodes };
+  if (cleaned.default_version === undefined) {
+    return cleaned;
   }
-  const { default_version: _ignored, ...rest } = doc;
+  const { default_version: _ignored, ...rest } = cleaned;
   return rest;
 }
 

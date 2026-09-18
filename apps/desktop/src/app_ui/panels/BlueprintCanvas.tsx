@@ -18,6 +18,10 @@ import type {
   BlueprintNodeType,
 } from "@hamster-pouch/config";
 import { nodeLayerKey } from "@hamster-pouch/config";
+import {
+  DEFAULT_OVERLAY_ANCHOR,
+  overlayOffsetLabel,
+} from "@hamster-pouch/config";
 import type { Translate, TranslationKey } from "../i18n";
 import {
   kindForEdge,
@@ -78,11 +82,16 @@ export function nodeSummary(
     case "layout_block":
       return t("blueprint.summary.layoutBlock");
     case "overlay": {
-      // 浮层（D50/D56/D57）：绑定键 + 叠放高度 + 外观档位；未绑定即"未接通"。
-      const binding = node.control_id?.trim()
-        ? node.control_id.trim()
-        : t("blueprint.summary.overlayUnbound");
-      const parts = [binding, `${t("blueprint.overlayHeight")} ${node.height ?? 1}`];
+      // 浮层（D50）：容器（内容由连进来的面板控件/标签组表达）+ 叠放高度 + 定位 + 外观档位。
+      const anchor = node.anchor ?? DEFAULT_OVERLAY_ANCHOR;
+      const placement =
+        node.offset_x === undefined && node.offset_y === undefined
+          ? t(`blueprint.anchor.${anchor}` as TranslationKey)
+          : `${t(`blueprint.anchor.${anchor}` as TranslationKey)} ${overlayOffsetLabel(node.offset_x)}, ${overlayOffsetLabel(node.offset_y)}`;
+      const parts = [
+        `${t("blueprint.overlayHeight")} ${node.height ?? 1}`,
+        placement,
+      ];
       if (node.shadow) {
         parts.push(`${t("blueprint.shadow")} ${node.shadow}`);
       }

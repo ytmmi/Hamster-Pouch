@@ -53,7 +53,8 @@ function syntheticGraph() {
       { key: "e_dbl", type: "event", layer: "l_main", trigger: "double_click", position: { x: 1540, y: 300 } },
       { key: "e_click", type: "event", layer: "l_main", trigger: "click", position: { x: 1540, y: 430 } },
       { key: "e_edit_dbl", type: "event", layer: "l_edit", trigger: "double_click", position: { x: 1540, y: 300 } },
-      { key: "ov_float", type: "overlay", layer: "l_edit", control_id: "demo.floating", name: "浮层 1", visible: false, height: 3, position: { x: 940, y: 560 } },
+      { key: "ov_float", type: "overlay", layer: "l_edit", name: "浮层 1", visible: false, height: 3, shadow: "lg", radius: "md", hide_label: true, position: { x: 940, y: 560 } },
+      { key: "c_float", type: "control", layer: "l_edit", panel_id: "tasks", title_key: "panel.tasks", position: { x: 1240, y: 560 } },
       { key: "a_show_viewer", type: "action", layer: "l_main", op: "show", target: "c_viewer", position: { x: 1840, y: 300 } },
       { key: "a_navigate", type: "action", layer: "l_main", op: "navigate", target: "ui_edit", position: { x: 1840, y: 430 } },
       { key: "a_collapse", type: "action", layer: "l_main", op: "collapse", target: "g_main", position: { x: 1840, y: 560 } },
@@ -75,6 +76,7 @@ function syntheticGraph() {
       { from: "k_image", to: "o_img", kind: "contains", order: 10 },
       { from: "k_image", to: "o_img_click", kind: "contains", order: 11 },
       { from: "ui_edit", to: "ov_float", kind: "contains", order: 12 },
+      { from: "ov_float", to: "c_float", kind: "contains", order: 22 },
       { from: "o_img", to: "e_dbl", kind: "on", order: 13 },
       { from: "o_img_click", to: "e_click", kind: "on", order: 14 },
       { from: "e_dbl", to: "a_show_viewer", kind: "fires", order: 15 },
@@ -99,8 +101,8 @@ function run(graph, layer, trigger, mediaType) {
     expandPanels: (ids) => ops.push(`expand [${ids.join(", ")}]`),
     playFile: (fileId) => ops.push(`play ${fileId}`),
     navigateLayer: (layerKey) => ops.push(`navigate ${layerKey}`),
-    setOverlayVisible: (controlId, visible) =>
-      ops.push(`overlay ${controlId} ${visible ? "show" : "hide"}`),
+    setOverlayVisible: (overlayKey, visible) =>
+      ops.push(`overlay ${overlayKey} ${visible ? "show" : "hide"}`),
   });
   engine.dispatch({ trigger, target: { mediaType, fileId: "file-1" } });
   return ops;
@@ -133,20 +135,38 @@ function run(graph, layer, trigger, mediaType) {
 
   const edit = run(graph, "l_edit", "double_click", "image");
   check(
-    "D50：当前层 l_edit 的动作 → 浮层按 control_id 显示（未绑定则不执行）",
-    edit.includes("overlay demo.floating show"),
+    "D50：浮层是容器 → 显示浮层 = 把内容面板以浮动方式显示 + 通知宿主刷新容器",
+    edit.includes("show tasks (floating)") && edit.includes("overlay ov_float show"),
     edit.join(" ; ") || "（无动作）",
   );
 
-  // 未绑定 control_id 的浮层：动作执行但引擎不产出宿主操作（未接通，D56）。
-  const unbound = syntheticGraph();
-  unbound.nodes.find((n) => n.key === "ov_float").control_id = undefined;
-  const editUnbound = run(unbound, "l_edit", "double_click", "image");
-  check(
-    "D56：浮层未绑定 control_id → 不产出宿主操作（未接通软告警）",
-    !editUnbound.some((op) => op.startsWith("overlay")),
-    editUnbound.join(" ; ") || "（无动作）",
-  );
+  // 隐藏浮层：关闭其内容面板，并通知宿主（取消「浮动控件」后不再需要绑定 id）
+  {
+    const engine = new BlueprintEngine();
+    engine.setGraph(graph);
+    engine.setLayer("l_edit");
+    const ops = [];
+    engine.setExecutor({
+      showPanel: (id, floating) => ops.push(`show ${id}${floating ? " (floating)" : ""}`),
+      hidePanel: (id) => ops.push(`hide ${id}`),
+      togglePanel: (id) => ops.push(`toggle ${id}`),
+      collapsePanels: (ids) => ops.push(`collapse [${ids.join(", ")}]`),
+      expandPanels: (ids) => ops.push(`expand [${ids.join(", ")}]`),
+      playFile: (id) => ops.push(`play ${id}`),
+      navigateLayer: (key) => ops.push(`navigate ${key}`),
+      setOverlayVisible: (key, visible) =>
+        ops.push(`overlay ${key} ${visible ? "show" : "hide"}`),
+    });
+    const hideDoc = graph;
+    const hideAction = hideDoc.nodes.find((n) => n.key === "a_overlay");
+    hideAction.op = "hide";
+    engine.dispatch({ trigger: "double_click", target: { mediaType: "image", fileId: "f" } });
+    check(
+      "D50：隐藏浮层 → 关闭其内容面板（浮动控件概念已取消，无需绑定）",
+      ops.includes("hide tasks") && ops.includes("overlay ov_float hide"),
+      ops.join(" ; ") || "（无动作）",
+    );
+  }
 }
 
 // ---- 诊断（可选）：对给定仓库库跑一遍典型交互 ----

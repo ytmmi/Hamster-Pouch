@@ -43,8 +43,8 @@ pub enum NodeType {
     Interface,
     /// 布局块：界面上的一个区域（如左/中/右三栏），包含标签组与面板控件。
     LayoutBlock,
-    /// 浮层：浮动控件的显隐载体（D50）；与布局块同级、且是**容器**
-    /// （可 contains 面板控件与标签组），可设定阴影/圆角/标签隐藏等外观档位。
+    /// 浮层：与布局块同级的**容器**（可 contains 面板控件与标签组），
+    /// 并承载阴影/圆角/标签隐藏等外观档位。**不再有「浮动控件」绑定**（2026-09 取消）。
     Overlay,
     /// 面板控件：dockview 面板实例（UI 组件实例，旧称「控件」）。
     Control,
@@ -389,6 +389,112 @@ impl fmt::Display for TokenLevel {
     }
 }
 
+/// 浮层锚点（3×3 井字位置，D50 修订）：浮层相对**界面（宿主内容区）**的对齐位置。
+///
+/// 语义：`top_*` 表示浮层**上边**贴界面上边、`*_center` 表示水平居中 … 依此类推；
+/// 再叠加 `offset_x` / `offset_y` 微调（见 `BlueprintNode::offset_x`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OverlayAnchor {
+    TopLeft,
+    TopCenter,
+    TopRight,
+    MiddleLeft,
+    Center,
+    MiddleRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight,
+}
+
+impl OverlayAnchor {
+    /// 全部锚点（按井字顺序：上排 → 中排 → 下排），供编辑器下拉与校验使用。
+    pub const ALL: [OverlayAnchor; 9] = [
+        OverlayAnchor::TopLeft,
+        OverlayAnchor::TopCenter,
+        OverlayAnchor::TopRight,
+        OverlayAnchor::MiddleLeft,
+        OverlayAnchor::Center,
+        OverlayAnchor::MiddleRight,
+        OverlayAnchor::BottomLeft,
+        OverlayAnchor::BottomCenter,
+        OverlayAnchor::BottomRight,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            OverlayAnchor::TopLeft => "top_left",
+            OverlayAnchor::TopCenter => "top_center",
+            OverlayAnchor::TopRight => "top_right",
+            OverlayAnchor::MiddleLeft => "middle_left",
+            OverlayAnchor::Center => "center",
+            OverlayAnchor::MiddleRight => "middle_right",
+            OverlayAnchor::BottomLeft => "bottom_left",
+            OverlayAnchor::BottomCenter => "bottom_center",
+            OverlayAnchor::BottomRight => "bottom_right",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "top_left" => Some(OverlayAnchor::TopLeft),
+            "top_center" => Some(OverlayAnchor::TopCenter),
+            "top_right" => Some(OverlayAnchor::TopRight),
+            "middle_left" => Some(OverlayAnchor::MiddleLeft),
+            "center" => Some(OverlayAnchor::Center),
+            "middle_right" => Some(OverlayAnchor::MiddleRight),
+            "bottom_left" => Some(OverlayAnchor::BottomLeft),
+            "bottom_center" => Some(OverlayAnchor::BottomCenter),
+            "bottom_right" => Some(OverlayAnchor::BottomRight),
+            _ => None,
+        }
+    }
+
+    /// 水平分量：左 / 中 / 右。
+    pub fn horizontal(&self) -> AnchorAxis {
+        match self {
+            OverlayAnchor::TopLeft | OverlayAnchor::MiddleLeft | OverlayAnchor::BottomLeft => {
+                AnchorAxis::Start
+            }
+            OverlayAnchor::TopCenter | OverlayAnchor::Center | OverlayAnchor::BottomCenter => {
+                AnchorAxis::Middle
+            }
+            OverlayAnchor::TopRight | OverlayAnchor::MiddleRight | OverlayAnchor::BottomRight => {
+                AnchorAxis::End
+            }
+        }
+    }
+
+    /// 垂直分量：上 / 中 / 下。
+    pub fn vertical(&self) -> AnchorAxis {
+        match self {
+            OverlayAnchor::TopLeft | OverlayAnchor::TopCenter | OverlayAnchor::TopRight => {
+                AnchorAxis::Start
+            }
+            OverlayAnchor::MiddleLeft | OverlayAnchor::Center | OverlayAnchor::MiddleRight => {
+                AnchorAxis::Middle
+            }
+            OverlayAnchor::BottomLeft | OverlayAnchor::BottomCenter | OverlayAnchor::BottomRight => {
+                AnchorAxis::End
+            }
+        }
+    }
+}
+
+/// 锚点在某一轴上的分量（起 / 中 / 末）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnchorAxis {
+    Start,
+    Middle,
+    End,
+}
+
+impl fmt::Display for OverlayAnchor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// 组/控件的目标锚点（画布编辑器定位 + 浮动/停靠；RFC 0007 / D29）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlueprintPosition {
@@ -464,16 +570,22 @@ pub struct BlueprintNode {
     pub op: Option<ActionOp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Value>,
-    // overlay（浮层，D50/D56/D57）
-    /// 绑定的浮动控件 schema id（D56）；缺失或指向不存在的 schema → 未接通（软告警）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub control_id: Option<String>,
-    /// 初始显隐（D50）；缺省由插件声明的初始状态决定。
+    // overlay（浮层，D50：**容器**，2026-09 取消「浮动控件」绑定）
+    /// 初始显隐（D50）；缺省视为不显示。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible: Option<bool>,
     /// 浮层高度参数（D57：1–10，默认 1，值大者在上）；不是像素高度。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<i64>,
+    /// 相对定位锚点（3×3 井字，缺省 = 居中 `center`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<OverlayAnchor>,
+    /// 水平偏移：`|v| ≤ 1` 视为**界面宽度的比例**（0.25 = 右移 25%），`|v| > 1` 视为**像素**（24 = 右移 24px）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_x: Option<f64>,
+    /// 垂直偏移：`|v| ≤ 1` 视为**界面高度的比例**，`|v| > 1` 视为**像素**。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_y: Option<f64>,
     /// 浮层阴影档位（取宿主设计 token；非法档位在解析层报错）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow: Option<TokenLevel>,
@@ -748,19 +860,9 @@ impl BlueprintGraph {
                     }
                 }
                 NodeType::Overlay => {
-                    // D56：control_id 缺失 → 未接通（指向不存在的 schema 需控件标准落地后校验）。
-                    if node
-                        .control_id
-                        .as_deref()
-                        .unwrap_or("")
-                        .trim()
-                        .is_empty()
-                    {
-                        warnings.push(format!(
-                            "浮层节点 {key} 暂未接通：缺少 control_id（未绑定浮动控件，D56）",
-                            key = node.key
-                        ));
-                    }
+                    // 浮层是容器：内容是**面板控件/标签组**（由 contains 边表达），
+                    // 因此不再有"未绑定浮动控件"这类软告警（2026-09 取消浮动控件概念）；
+                    // 浮层没有子节点也只是"空浮层"，仍可保存。
                 }
                 _ => {}
             }

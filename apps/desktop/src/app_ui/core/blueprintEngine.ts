@@ -13,7 +13,8 @@
  *   同一时间仅一个激活；跨 dockview 组的成员不做自动隐藏/收缩（避免破坏用户布局），
  *   如需隐藏/收起请用显式 hide/collapse 动作；
  * - `navigate`（D48）= 切换到目标界面（层），幂等（已在该层无操作）；
- * - `show`/`hide`/`toggle` 指向**浮层**（D50）时驱动浮动控件宿主（不销毁、不卸载）；
+ * - `show`/`hide`/`toggle` 指向**浮层**（D50，容器）时，驱动浮层内容（它 contains 的
+ *   面板控件）以**浮动**方式显示/隐藏，并把容器期望可见态告知宿主；
  * - 幂等：重复触发不产生额外副作用（show 已存在面板 = 激活）。
  *
  * 组收起/拉伸（collapse/expand）与隐藏方向（hide_direction）的 dockview 映射属于
@@ -47,8 +48,12 @@ export interface BlueprintExecutor {
   playFile: (fileId: string) => void;
   /** 界面跳转（D48）：切换到目标层（页面）；执行方负责持久化当前层并套用其布局。 */
   navigateLayer: (layerKey: string) => void;
-  /** 浮层显隐（D50）：`controlId` = 绑定的浮动控件 schema id；不销毁、不卸载控件。 */
-  setOverlayVisible: (controlId: string, visible: boolean) => void;
+  /**
+   * 浮层容器显隐（D50）：`overlayKey` = 浮层节点 key（2026-09 取消「浮动控件」，不再有绑定 id）。
+   * 引擎已按浮动面板显示/隐藏浮层**内容**（它 contains 的面板控件）；宿主据此刷新浮层容器本身
+   * （外观档位：圆角/阴影/标签隐藏）。
+   */
+  setOverlayVisible: (overlayKey: string, visible: boolean) => void;
 }
 
 /** dispatch 入参（单击/双击/选中变化 + 目标条目）。 */
@@ -71,6 +76,8 @@ export class BlueprintEngine {
   private executor: BlueprintExecutor | null = null;
   /** 当前层（D51/D54）：只求值该层的事件；null = 不限层（单层兜底文档）。 */
   private layer: string | null = null;
+  /** 浮层期望可见态（`visible` 只是初始值；`toggle` 需要运行时当前态）。 */
+  private readonly overlayState = new Map<string, boolean>();
   /** 诊断日志回调（应用装配层注入；null = 不记录）。 */
   private logger: ((message: string) => void) | null = null;
 
@@ -299,8 +306,8 @@ export class BlueprintEngine {
     switch (op) {
       case "show": {
         if (target?.type === "overlay") {
-          // 浮层（D50）：显示 = 进入叠加显示；未绑定 control_id 时不执行（未接通）。
-          this.setOverlay(target, true);
+          // 浮层（D50，容器）：显示 = 把浮层内容（它 contains 的面板控件）以**浮动**方式显示。
+          this.setOverlay(target, true, graph);
           break;
         }
         if (target?.type !== "control" || !target.panel_id) {
@@ -317,7 +324,7 @@ export class BlueprintEngine {
       }
       case "hide": {
         if (target?.type === "overlay") {
-          this.setOverlay(target, false);
+          this.setOverlay(target, false, graph);
         } else if (target?.type === "control" && target.panel_id) {
           executor.hidePanel(target.panel_id);
         }
@@ -325,8 +332,7 @@ export class BlueprintEngine {
       }
       case "toggle": {
         if (target?.type === "overlay") {
-          // 切换需要宿主/插件声明的当前可见态；引擎侧按"取反"交给宿主处理。
-          this.toggleOverlay(target);
+          this.toggleOverlay(target, graph);
         } else if (target?.type === "control" && target.panel_id) {
           executor.togglePanel(target.panel_id, true);
         } else if (target?.type === "group") {
@@ -381,24 +387,68 @@ export class BlueprintEngine {
     }
   }
 
-  /** 浮层显示（D50/D56）：未绑定 control_id 时不执行（未接通软告警）。 */
-  private setOverlay(node: BlueprintNode, visible: boolean): void {
-    const controlId = node.control_id?.trim();
-    if (!controlId) {
-      this.log(`[engine] 浮层 ${node.key} 未绑定浮动控件（缺 control_id）→ 不执行`);
-      return;
+  /**
+   * 浮层显隐（D50，容器语义 / 2026-09 取消「浮动控件」）：
+   * 浮层的内容就是它 `contains` 的**面板控件**（含经标签组间接包含的），
+   * 因此 `show` = 把这些面板以浮动方式显示、`hide` = 关闭它们；
+   * 同时把浮层容器的期望可见态告诉宿主（宿主负责容器本身的外观档位渲染）。
+   */
+  private setOverlay(node: BlueprintNode, visible: boolean, graph: BlueprintGraph): void {
+    this.overlayState.set(node.key, visible);
+    const panelIds = this.overlayPanelIds(node.key, graph);
+    for (const panelId of panelIds) {
+      if (visible) {
+        // 浮层 = 浮动层：内容面板以浮动方式显示（已存在则激活）。
+        this.executor?.showPanel(panelId, true);
+      } else {
+        this.executor?.hidePanel(panelId);
+      }
     }
-    this.executor?.setOverlayVisible(controlId, visible);
+    this.executor?.setOverlayVisible(node.key, visible);
+    this.log(
+      `[engine] 浮层 ${node.key} ${visible ? "显示" : "隐藏"}：内容面板=[${panelIds.join(", ") || "（空浮层）"}]`,
+    );
   }
 
-  /** 浮层切换：宿主记录可见态时按取反执行；宿主不知道时按"显示"处理（幂等）。 */
-  private toggleOverlay(node: BlueprintNode): void {
-    const controlId = node.control_id?.trim();
-    if (!controlId) {
-      this.log(`[engine] 浮层 ${node.key} 未绑定浮动控件（缺 control_id）→ 不执行`);
-      return;
-    }
-    this.executor?.setOverlayVisible(controlId, !(node.visible ?? false));
+  /** 浮层切换：以引擎记录的期望可见态为准（`visible` 只是初始值）。 */
+  private toggleOverlay(node: BlueprintNode, graph: BlueprintGraph): void {
+    const current = this.overlayState.get(node.key) ?? node.visible ?? false;
+    this.setOverlay(node, !current, graph);
+  }
+
+  /** 浮层内容：它 contains 的面板控件（也支持 浮层→标签组→面板控件 的间接包含）。 */
+  private overlayPanelIds(overlayKey: string, graph: BlueprintGraph): string[] {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    const walk = (keys: string[]): void => {
+      for (const key of keys) {
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        const node = graph.nodes.find((n) => n.key === key);
+        if (!node) {
+          continue;
+        }
+        if (node.type === "control") {
+          if (node.panel_id) {
+            ids.push(node.panel_id);
+          }
+        } else if (node.type === "group") {
+          walk(
+            graph.edges
+              .filter((e) => e.kind === "contains" && e.from === key)
+              .map((e) => e.to),
+          );
+        }
+      }
+    };
+    walk(
+      graph.edges
+        .filter((e) => e.kind === "contains" && e.from === overlayKey)
+        .map((e) => e.to),
+    );
+    return ids;
   }
 
   /** 标签组内成员控件对应的面板 ID 列表（contains 组→控件；兼容旧 memberOf）。 */

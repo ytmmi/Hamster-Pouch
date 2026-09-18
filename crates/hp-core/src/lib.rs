@@ -25,9 +25,10 @@ pub use album::{
     SyncMode,
 };
 pub use blueprint::{
-    ActionOp, BlueprintEdge, BlueprintGraph, BlueprintLayer, BlueprintNode, BlueprintPosition,
-    BlueprintRow, BlueprintTemplateRow, EdgeKind, GroupMode, HideDirection, NodeType, TokenLevel,
-    Trigger, BLUEPRINT_SCHEMA_VERSION, OVERLAY_HEIGHT_MAX, OVERLAY_HEIGHT_MIN,
+    ActionOp, AnchorAxis, BlueprintEdge, BlueprintGraph, BlueprintLayer, BlueprintNode,
+    BlueprintPosition, BlueprintRow, BlueprintTemplateRow, EdgeKind, GroupMode, HideDirection,
+    NodeType, OverlayAnchor, TokenLevel, Trigger, BLUEPRINT_SCHEMA_VERSION, OVERLAY_HEIGHT_MAX,
+    OVERLAY_HEIGHT_MIN,
 };
 pub use blueprint_migrate::{
     migrate_document, migrate_graph, normalize_document, MigratedDocument,

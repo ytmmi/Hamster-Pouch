@@ -3,8 +3,8 @@
  *
  * 选中画布节点后，在侧栏编辑该节点的全部字段：控件 `panel_id`/`title_key`、
  * 类 `control`/`media_type`、对象 `class`/`scope`、组 `mode`/`default_visible`/
- * `hide_direction`/`position`、浮层（容器）`control_id`/`visible`/`height`/
- * `shadow`/`radius`/`hide_label`、操作 `trigger`、条件 `expr`、状态 `op`/`target`/`payload`；
+ * `hide_direction`/`position`、浮层（容器）`visible`/`height`/`shadow`/`radius`/`hide_label`、
+ * 操作 `trigger`、条件 `expr`、状态 `op`/`target`/`payload`；
  * 并支持重命名节点 key（联动更新引用与边，由面板负责唯一性校验）与删除节点。
  *
  * 展示层：参数与选项一律用本地化文案，不向用户暴露底层 key。
@@ -17,9 +17,12 @@ import {
   type BlueprintNode,
   type BlueprintNodeType,
   CONDITION_EXPR_HINTS,
+  DEFAULT_OVERLAY_ANCHOR,
   HIDE_DIRECTIONS,
+  OVERLAY_ANCHORS,
   OVERLAY_HEIGHT_MAX,
   OVERLAY_HEIGHT_MIN,
+  overlayOffsetLabel,
   PANEL_IDS,
   PANEL_TITLES,
   TOKEN_LEVELS,
@@ -225,11 +228,7 @@ export function NodeInspector({
           t={t}
         />
       )}
-      {/* 浮层（D50/D56/D57）：绑定浮动控件 schema id + 初始显隐 + 叠放高度 */}
-      {node.type === "overlay" &&
-        field(t("blueprint.controlId"), node.control_id ?? "", (v) =>
-          onPatch({ control_id: v.trim() ? v : undefined }),
-        )}
+      {/* 浮层（D50）：容器——内容由连进来的面板控件/标签组表达；这里只设显隐/叠放/外观 */}
       {node.type === "overlay" &&
         row(
           t("blueprint.visible"),
@@ -254,6 +253,40 @@ export function NodeInspector({
         )}
       {node.type === "overlay" && (
         <span className="dim bp-hints">{OVERLAY_HEIGHT_MIN}–{OVERLAY_HEIGHT_MAX}</span>
+      )}
+      {/* 相对定位（D50 修订）：九宫格锚点 + 双模式偏移（0–1 = 比例，>1 = 像素） */}
+      {node.type === "overlay" &&
+        select(
+          t("blueprint.anchor"),
+          node.anchor ?? DEFAULT_OVERLAY_ANCHOR,
+          OVERLAY_ANCHORS.map((a) => ({ v: a, l: t(`blueprint.anchor.${a}` as TranslationKey) })),
+          (v) => onPatch({ anchor: v as BlueprintNode["anchor"] }),
+        )}
+      {node.type === "overlay" &&
+        row(
+          t("blueprint.offset"),
+          <span className="bp-field-pair">
+            <input
+              type="number"
+              step="0.05"
+              value={node.offset_x ?? 0}
+              onChange={(e) => onPatch({ offset_x: Number(e.target.value) || 0 })}
+            />
+            <input
+              type="number"
+              step="0.05"
+              value={node.offset_y ?? 0}
+              onChange={(e) => onPatch({ offset_y: Number(e.target.value) || 0 })}
+            />
+          </span>,
+        )}
+      {node.type === "overlay" && (
+        <span className="dim bp-hints">
+          {t("blueprint.offsetHint", {
+            x: overlayOffsetLabel(node.offset_x),
+            y: overlayOffsetLabel(node.offset_y),
+          })}
+        </span>
       )}
       {/* 浮层外观（D50 修订 / D44）：只选宿主设计 token 档位，像素由宿主决定 */}
       {node.type === "overlay" &&

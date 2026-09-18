@@ -461,7 +461,7 @@ export function appendNode(
     default: {
       // 布局块 / 浮层 / 未知类型：只追加自身。
       // 浮层（D50 修订）与布局块同级、是**容器**（可 contains 面板控件与标签组）；
-      // `control_id` 与外观档位由使用者在属性面板设定，缺失绑定按"未接通"灰显。
+      // 外观档位（阴影/圆角/隐藏标签）由使用者在属性面板设定（2026-09 取消浮动控件绑定）。
       const node: BlueprintNode = {
         key: nextNodeKey(work.nodes, type, hinted),
         type,
