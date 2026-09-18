@@ -234,6 +234,9 @@ export function reconcileActiveBlueprint(dv: DockviewApi | null): void {
 /** 套用布局：清空收起尺寸记忆后重新对账（布局基准已变，旧记忆失效）。 */
 export function reconcileAfterLayoutApplied(dv: DockviewApi | null): void {
   resetLayoutReconcileState();
+  // 套用布局会**重建整个 dockview 内容**（`fromJSON`），浮动面板随之消失 →
+  // 浮层的"已应用"记忆必须一起清空，否则 visible=true 的浮层不会再被显示（真实缺陷）。
+  blueprintEngine.resetOverlayState();
   reconcileLayout(activeGraph, dv);
   if (activeGraph) {
     blueprintEngine.applyOverlayDefaults(activeGraph, activeLayer);

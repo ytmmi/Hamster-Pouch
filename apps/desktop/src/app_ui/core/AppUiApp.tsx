@@ -15,7 +15,7 @@ import "dockview-react/dist/styles/dockview.css";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { PANEL_MIN_SIZE, SETTING_KEYS } from "@hamster-pouch/config";
+import { PANEL_MIN_SIZE, resolveOverlayPosition, SETTING_KEYS } from "@hamster-pouch/config";
 import { normalizeLayoutJson } from "../shared/panelLayout";
 import {
   activeBlueprintId,
@@ -148,48 +148,80 @@ export function AppUiApp(): JSX.Element {
         focusPanel(panelId, floating);
       },
       /**
-       * 浮层内容面板：**必须浮动**（浮层是浮在布局之上的一层）。
+       * 浮层内容面板：**必须浮动**（浮层是浮在布局之上的一层），并按蓝图定位/尺寸摆好。
        * - 不存在 → 按给定尺寸浮动创建；
        * - 已停靠 → 移入浮动组（`addFloatingGroup`）并置顶；
        * - 已是浮动 → 直接置顶并按尺寸调整。
+       * 位置由蓝图的九宫格锚点 + 双模式偏移相对**工作区**换算（`resolveOverlayPosition`）。
        */
-      showOverlayPanel: (panelId: string, size: { width: number; height: number }) => {
+      showOverlayPanel: (
+        panelId: string,
+        box: {
+          width: number;
+          height: number;
+          anchor: string;
+          offsetX: number;
+          offsetY: number;
+        },
+      ) => {
         const dv = apiRef.current;
         if (!dv) {
+          void import("../shared/blueprintRuntime").then((m) =>
+            m.traceBlueprint(`[overlay] ${panelId} 跳过：dockview 尚未就绪`),
+          );
           return;
         }
         lastShownRef.current = panelId;
+        const rect = workspaceRef.current?.getBoundingClientRect();
+        const area = {
+          width: Math.round(rect?.width ?? 1200),
+          height: Math.round(rect?.height ?? 800),
+        };
+        const at = resolveOverlayPosition({
+          anchor: box.anchor as never,
+          offsetX: box.offsetX,
+          offsetY: box.offsetY,
+          area,
+          size: { width: box.width, height: box.height },
+        });
+        const floating = { x: at.x, y: at.y, width: box.width, height: box.height };
         const existing = dv.getPanel(panelId);
-        if (!existing) {
-          dv.addPanel({
-            ...PANEL_MIN_SIZE,
-            id: panelId,
-            component: panelId,
-            title: panelTitle(panelId, t),
-            floating: {
-              width: size.width,
-              height: size.height,
-              x: 160,
-              y: 120,
-            },
-          });
-          return;
-        }
         try {
-          if (existing.api.location.type !== "floating") {
-            dv.addFloatingGroup(existing, {
-              width: size.width,
-              height: size.height,
-              x: 160,
-              y: 120,
+          if (!existing) {
+            dv.addPanel({
+              ...PANEL_MIN_SIZE,
+              id: panelId,
+              component: panelId,
+              title: panelTitle(panelId, t),
+              floating,
             });
+            void import("../shared/blueprintRuntime").then((m) =>
+              m.traceBlueprint(
+                `[overlay] ${panelId} 浮动创建 ${box.width}×${box.height} @(${at.x}, ${at.y}) 区域=${area.width}×${area.height}`,
+              ),
+            );
+            return;
+          }
+          if (existing.api.location.type !== "floating") {
+            dv.addFloatingGroup(existing, floating);
+            void import("../shared/blueprintRuntime").then((m) =>
+              m.traceBlueprint(
+                `[overlay] ${panelId} 由停靠移入浮动组 ${box.width}×${box.height} @(${at.x}, ${at.y})`,
+              ),
+            );
           } else {
-            existing.api.setSize({ width: size.width, height: size.height });
+            existing.api.setSize({ width: box.width, height: box.height });
+            void import("../shared/blueprintRuntime").then((m) =>
+              m.traceBlueprint(`[overlay] ${panelId} 已是浮动，调整尺寸 ${box.width}×${box.height}`),
+            );
           }
           existing.api.setActive();
-        } catch {
-          // dockview 网格约束下失败时退化为"激活已存在面板"
-          existing.api.setActive();
+        } catch (e) {
+          // dockview 网格约束下失败时退化为"激活已存在面板"，并把原因写进诊断日志。
+          void import("../shared/blueprintRuntime").then((m) =>
+            m.traceBlueprint(`[overlay] ${panelId} 浮动失败，退化为激活：${String(e)}`),
+          );
+          existing?.api.setActive();
         }
       },
       hidePanel: (panelId: string) => {

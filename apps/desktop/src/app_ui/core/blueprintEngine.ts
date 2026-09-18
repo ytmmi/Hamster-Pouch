@@ -30,7 +30,11 @@ import type {
   BlueprintTargetRef,
   BlueprintTrigger,
 } from "@hamster-pouch/config";
-import { nodeLayerKey, resolveOverlaySize } from "@hamster-pouch/config";
+import {
+  DEFAULT_OVERLAY_ANCHOR,
+  nodeLayerKey,
+  resolveOverlaySize,
+} from "@hamster-pouch/config";
 
 /** 引擎对外执行器（由应用装配层注入，与 dockview/媒体命令解耦）。 */
 export interface BlueprintExecutor {
@@ -51,11 +55,19 @@ export interface BlueprintExecutor {
   /**
    * 浮层内容面板的显示（D50，容器语义）：
    * 与普通 `showPanel` 的区别是**必须浮动**——浮层是浮在布局之上的一层，
-   * 因此已停靠的面板要移入浮动组、不存在则按浮动创建，并按蓝图尺寸设置框体。
+   * 因此已停靠的面板要移入浮动组、不存在则按浮动创建，并按蓝图的定位与尺寸摆好。
+   * 定位换算需要"界面内容区"的实际像素尺寸，属宿主知识，因此由执行器完成
+   * （引擎只把蓝图里的锚点/偏移/尺寸原样传下去）。
    */
   showOverlayPanel: (
     panelId: string,
-    size: { width: number; height: number },
+    box: {
+      width: number;
+      height: number;
+      anchor: string;
+      offsetX: number;
+      offsetY: number;
+    },
   ) => void;
   /**
    * 浮层容器显隐（D50）：`overlayKey` = 浮层节点 key（2026-09 取消「浮动控件」，不再有绑定 id）。
@@ -87,6 +99,18 @@ export class BlueprintEngine {
   private layer: string | null = null;
   /** 浮层期望可见态（`visible` 只是初始值；`toggle` 需要运行时当前态）。 */
   private readonly overlayState = new Map<string, boolean>();
+
+  /**
+   * 清空浮层"已应用"记忆。
+   *
+   * **套用布局（`dv.fromJSON`）会重建整个 dockview 内容**，浮动面板随之消失，
+   * 此时旧记忆会让 `applyOverlayDefaults` 误判为"已在目标状态"而不再重显
+   * （真实缺陷：`visible: true` 的浮层内容在启动时先被显示、又被随后套用的布局抹掉，之后再不出现）。
+   * 与 `resetLayoutReconcileState()` 同理：布局基准已变，旧记忆失效。
+   */
+  resetOverlayState(): void {
+    this.overlayState.clear();
+  }
   /** 诊断日志回调（应用装配层注入；null = 不记录）。 */
   private logger: ((message: string) => void) | null = null;
 
@@ -406,18 +430,25 @@ export class BlueprintEngine {
     this.overlayState.set(node.key, visible);
     const panelIds = this.overlayPanelIds(node.key, graph);
     const size = resolveOverlaySize(node.size);
+    const box = {
+      width: size.width,
+      height: size.height,
+      anchor: node.anchor ?? DEFAULT_OVERLAY_ANCHOR,
+      offsetX: node.offset_x ?? 0,
+      offsetY: node.offset_y ?? 0,
+    };
     for (const panelId of panelIds) {
       if (visible) {
         // 浮层 = 浮动层：内容面板以**浮动**方式显示（已停靠的移入浮动组，不存在则浮动创建），
-        // 并按蓝图尺寸设置框体（尺寸不足最小值时按最小值）。
-        this.executor?.showOverlayPanel(panelId, size);
+        // 并按蓝图定位/尺寸摆好（尺寸不足最小值时按最小值）。
+        this.executor?.showOverlayPanel(panelId, box);
       } else {
         this.executor?.hidePanel(panelId);
       }
     }
     this.executor?.setOverlayVisible(node.key, visible);
     this.log(
-      `[engine] 浮层 ${node.key} ${visible ? "显示" : "隐藏"}：内容面板=[${panelIds.join(", ") || "（空浮层）"}] 尺寸=${size.width}×${size.height}`,
+      `[engine] 浮层 ${node.key} ${visible ? "显示" : "隐藏"}：内容面板=[${panelIds.join(", ") || "（空浮层）"}] ${size.width}×${size.height} @${box.anchor}(${box.offsetX}, ${box.offsetY})`,
     );
   }
 

@@ -103,8 +103,8 @@ function run(graph, layer, trigger, mediaType) {
     navigateLayer: (layerKey) => ops.push(`navigate ${layerKey}`),
     setOverlayVisible: (overlayKey, visible) =>
       ops.push(`overlay ${overlayKey} ${visible ? "show" : "hide"}`),
-    showOverlayPanel: (panelId, size) =>
-      ops.push(`float ${panelId} ${size.width}×${size.height}`),
+    showOverlayPanel: (panelId, box) =>
+      ops.push(`float ${panelId} ${box.width}×${box.height} @${box.anchor}(${box.offsetX}, ${box.offsetY})`),
   });
   engine.dispatch({ trigger, target: { mediaType, fileId: "file-1" } });
   return ops;
@@ -137,8 +137,9 @@ function run(graph, layer, trigger, mediaType) {
 
   const edit = run(graph, "l_edit", "double_click", "image");
   check(
-    "D50：浮层是容器 → 显示浮层 = 内容面板以浮动方式显示（未写尺寸时取默认最小 240×160）+ 通知宿主刷新容器",
-    edit.includes("float tasks 240×160") && edit.includes("overlay ov_float show"),
+    "D50：浮层是容器 → 显示浮层 = 内容面板以浮动方式显示（未写尺寸/定位时取默认最小与居中）+ 通知宿主",
+    edit.includes("float tasks 240×160 @center(0, 0)") &&
+      edit.includes("overlay ov_float show"),
     edit.join(" ; ") || "（无动作）",
   );
 
@@ -159,17 +160,21 @@ function run(graph, layer, trigger, mediaType) {
       navigateLayer: (key) => ops.push(`navigate ${key}`),
       setOverlayVisible: (key, visible) =>
         ops.push(`overlay ${key} ${visible ? "show" : "hide"}`),
-      showOverlayPanel: (id, size) => ops.push(`float ${id} ${size.width}×${size.height}`),
+      showOverlayPanel: (id, box) =>
+        ops.push(`float ${id} ${box.width}×${box.height} @${box.anchor}(${box.offsetX}, ${box.offsetY})`),
     });
     const visibleGraph = syntheticGraph();
     const ov = visibleGraph.nodes.find((n) => n.key === "ov_float");
     ov.visible = true;
     ov.size = { width: 420, height: 300 };
+    ov.anchor = "bottom_right";
+    ov.offset_x = -24;
     // 初始对账：只有 visible===true 的浮层会自动显示
     engine.applyOverlayDefaults(visibleGraph, "l_edit");
     check(
-      "浮层初始显隐对账：visible=true 的浮层在装载时即显示内容（含尺寸 420×300）",
-      ops.includes("float tasks 420×300") && ops.includes("overlay ov_float show"),
+      "浮层初始显隐对账：visible=true 的浮层在装载时即显示内容（含尺寸与九宫格定位）",
+      ops.includes("float tasks 420×300 @bottom_right(-24, 0)") &&
+        ops.includes("overlay ov_float show"),
       ops.join(" ; ") || "（无动作）",
     );
     // 再对账一次：状态未变 → 不重复执行（幂等，不打扰使用者）
@@ -178,6 +183,16 @@ function run(graph, layer, trigger, mediaType) {
     check(
       "浮层初始显隐对账是幂等的（状态未变不重复显示）",
       ops.length === 0,
+      ops.join(" ; ") || "（无动作）",
+    );
+    // **回归**：套用布局会重建 dockview 内容 → 必须清空记忆后重新显示浮层
+    // （真实缺陷：先显示、再被 fromJSON 抹掉，之后因"已在目标状态"永不重显）。
+    engine.resetOverlayState();
+    ops.length = 0;
+    engine.applyOverlayDefaults(visibleGraph, "l_edit");
+    check(
+      "套用布局后重新对账浮层：清空记忆 → visible=true 的浮层内容被重新显示",
+      ops.includes("float tasks 420×300 @bottom_right(-24, 0)"),
       ops.join(" ; ") || "（无动作）",
     );
     // 蓝图改成不显示 → 收敛为隐藏
@@ -207,7 +222,8 @@ function run(graph, layer, trigger, mediaType) {
       navigateLayer: (key) => ops.push(`navigate ${key}`),
       setOverlayVisible: (key, visible) =>
         ops.push(`overlay ${key} ${visible ? "show" : "hide"}`),
-      showOverlayPanel: (id, size) => ops.push(`float ${id} ${size.width}×${size.height}`),
+      showOverlayPanel: (id, box) =>
+        ops.push(`float ${id} ${box.width}×${box.height} @${box.anchor}(${box.offsetX}, ${box.offsetY})`),
     });
     const hideDoc = graph;
     const hideAction = hideDoc.nodes.find((n) => n.key === "a_overlay");
