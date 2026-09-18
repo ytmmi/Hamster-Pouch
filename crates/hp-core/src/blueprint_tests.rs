@@ -477,8 +477,30 @@ mod tests {
         assert!(overlay.validate().is_empty(), "{:?}", overlay.validate());
         assert!(
             overlay.warnings().is_empty(),
-            "空浮层不应再产生未接通告警：{:?}",
+            "已连到界面的空浮层不应产生未接通告警：{:?}",
             overlay.warnings()
+        );
+
+        // 断开 界面→浮层：浮层"未接通"（软告警，不阻塞保存；运行时不应显示）
+        let detached = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"ov","type":"overlay","layer":"l_a","visible":true},
+                  {"key":"c","type":"control","layer":"l_a","panel_id":"tasks"}
+                ],
+                "edges":[{"from":"ov","to":"c","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(detached.validate().is_empty(), "{:?}", detached.validate());
+        assert!(
+            detached
+                .warnings()
+                .iter()
+                .any(|w| w.contains("未连接到界面")),
+            "断开界面连接应报未接通：{:?}",
+            detached.warnings()
         );
     }
 

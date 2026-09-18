@@ -901,6 +901,23 @@ impl BlueprintGraph {
                     // 浮层是容器：内容是**面板控件/标签组**（由 contains 边表达），
                     // 因此不再有"未绑定浮动控件"这类软告警（2026-09 取消浮动控件概念）；
                     // 浮层没有子节点也只是"空浮层"，仍可保存。
+                    //
+                    // **未连接到界面 = 未接通**：界面的直接子级才有"属于本页"的含义，
+                    // 断开 `界面 --contains--> 浮层` 后该浮层不应再显示（运行时同样按此判定）。
+                    let attached = self.edges.iter().any(|e| {
+                        e.edge_kind == EdgeKind::Contains
+                            && e.to == node.key
+                            && self
+                                .node(&e.from)
+                                .map(|n| n.node_type == NodeType::Interface)
+                                .unwrap_or(false)
+                    });
+                    if !attached {
+                        warnings.push(format!(
+                            "浮层节点 {key} 暂未接通：未连接到界面（连线 界面→浮层）",
+                            key = node.key
+                        ));
+                    }
                     // 尺寸小于最小尺寸 → 只是被夹紧，提示一下即可（不阻塞保存）。
                     if let Some(size) = &node.size {
                         if size.below_minimum() {

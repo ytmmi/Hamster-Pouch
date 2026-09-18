@@ -78,6 +78,20 @@ export function analyzeUnlinked(graph: BlueprintGraph): BlueprintUnlinkedMap {
           mark(node.key, "missing-target");
         }
         break;
+      case "overlay":
+        // 浮层必须连在界面上（`界面 --contains--> 浮层`）才算"属于本页"；
+        // 断开连接 = 未接通（与 hp-core `warnings` 口径一致），运行时也不显示。
+        if (
+          !graph.edges.some((e) => {
+            if (e.kind !== "contains" || e.to !== node.key) {
+              return false;
+            }
+            return graph.nodes.find((n) => n.key === e.from)?.type === "interface";
+          })
+        ) {
+          mark(node.key, "missing-interface");
+        }
+        break;
       default:
         break;
     }

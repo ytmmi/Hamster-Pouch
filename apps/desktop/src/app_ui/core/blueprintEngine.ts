@@ -427,6 +427,11 @@ export class BlueprintEngine {
    * 同时把浮层容器的期望可见态告诉宿主（宿主负责容器本身的外观档位渲染）。
    */
   private setOverlay(node: BlueprintNode, visible: boolean, graph: BlueprintGraph): void {
+    // 未连接到界面（未接通）时**不允许显示**；隐藏仍然执行，用于断开连接后的收尾。
+    if (visible && !this.isOverlayAttached(graph, node)) {
+      this.log(`[engine] 浮层 ${node.key} 未连接到界面（未接通）→ 不显示`);
+      return;
+    }
     this.overlayState.set(node.key, visible);
     const panelIds = this.overlayPanelIds(node.key, graph);
     const size = resolveOverlaySize(node.size);
@@ -457,8 +462,9 @@ export class BlueprintEngine {
    *
    * 这是"浮层不会自己出现"缺陷的修复：`visible` 过去只是数据，没有任何一处在装载时应用它。
    * 对账规则（保守，不打扰使用者）：
-   * - 首次见到某浮层且 `visible === true` → 显示它；
-   * - 之前显示过、蓝图改成不显示 → 隐藏它；
+   * - **未连接到界面**（没有 `界面 --contains--> 浮层`）= 未接通 → 视为"不显示"；
+   * - 首次见到某浮层且 `visible === true`（且已连到界面）→ 显示它；
+   * - 之前显示过、现在不该显示（蓝图改成不显示，或**连接被断开**）→ 隐藏它；
    * - `visible !== true` 且从未显示过 → **什么都不做**（不去关掉使用者布局里本来就有的面板）。
    */
   applyOverlayDefaults(graph: BlueprintGraph, layerKey: string | null): void {
@@ -469,14 +475,32 @@ export class BlueprintEngine {
       if (layerKey && nodeLayerKey(graph, node) !== layerKey) {
         continue;
       }
-      const desired = node.visible === true;
+      const attached = this.isOverlayAttached(graph, node);
+      const desired = attached && node.visible === true;
       const prev = this.overlayState.get(node.key);
       if (prev === undefined && desired) {
         this.setOverlay(node, true, graph);
       } else if (prev !== undefined && prev !== desired) {
+        // 覆盖"蓝图改为不显示"与"**界面断开与浮层的连接**"两种情况：都要收起来。
         this.setOverlay(node, desired, graph);
       }
     }
+  }
+
+  /**
+   * 浮层是否仍属于该页：必须存在 `界面 --contains--> 浮层`。
+   *
+   * 断开连接后浮层就是"未接通"（与 hp-core 的 `warnings` 口径一致），
+   * 因此既不能显示，也不能响应显隐动作。
+   */
+  private isOverlayAttached(graph: BlueprintGraph, node: BlueprintNode): boolean {
+    return graph.edges.some((e) => {
+      if (e.kind !== "contains" || e.to !== node.key) {
+        return false;
+      }
+      const from = graph.nodes.find((n) => n.key === e.from);
+      return from?.type === "interface";
+    });
   }
 
   /** 浮层切换：以引擎记录的期望可见态为准（`visible` 只是初始值）。 */

@@ -275,7 +275,9 @@ export type BlueprintUnlinkedReason =
   | "missing-class"
   | "missing-target"
   | "missing-object-source"
-  | "missing-trigger";
+  | "missing-trigger"
+  /** 浮层没有连到界面（`界面 --contains--> 浮层`），不属于任何页面。 */
+  | "missing-interface";
 
 /** 派生分析结果：未接通节点 key → 原因。 */
 export type BlueprintUnlinkedMap = Record<string, BlueprintUnlinkedReason>;

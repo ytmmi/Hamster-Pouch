@@ -204,6 +204,65 @@ function run(graph, layer, trigger, mediaType) {
       ops.includes("hide tasks") && ops.includes("overlay ov_float hide"),
       ops.join(" ; ") || "（无动作）",
     );
+
+    // **回归**：断开「界面 --contains--> 浮层」后，浮层不能再显示（用户报告：
+    // 断开连接后浮层还在）。已显示的要收起来，未显示的不许显示。
+    {
+      engine.resetOverlayState();
+      const attachedGraph = syntheticGraph();
+      const a = attachedGraph.nodes.find((n) => n.key === "ov_float");
+      a.visible = true;
+      engine.applyOverlayDefaults(attachedGraph, "l_edit");
+      ops.length = 0;
+      // 用户删掉 ui_edit → ov_float 这条 contains 边
+      const detachedGraph = {
+        ...attachedGraph,
+        edges: attachedGraph.edges.filter((e) => e.to !== "ov_float"),
+      };
+      engine.applyOverlayDefaults(detachedGraph, "l_edit");
+      check(
+        "回归：断开 界面→浮层 连接后 → 浮层收起（hide）且不再显示",
+        ops.includes("hide tasks") &&
+          ops.includes("overlay ov_float hide") &&
+          !ops.some((op) => op.startsWith("float ")),
+        ops.join(" ; ") || "（无动作）",
+      );
+
+      // 未连接 + 从未显示过 + visible=true → 什么都不做（不许显示）
+      const fresh = new BlueprintEngine();
+      fresh.setGraph(detachedGraph);
+      fresh.setLayer("l_edit");
+      const ops2 = [];
+      fresh.setExecutor({
+        showPanel: (id) => ops2.push(`show ${id}`),
+        hidePanel: (id) => ops2.push(`hide ${id}`),
+        togglePanel: (id) => ops2.push(`toggle ${id}`),
+        collapsePanels: () => undefined,
+        expandPanels: () => undefined,
+        playFile: () => undefined,
+        navigateLayer: (k) => ops2.push(`navigate ${k}`),
+        setOverlayVisible: (k, v) => ops2.push(`overlay ${k} ${v ? "show" : "hide"}`),
+        showOverlayPanel: (id) => ops2.push(`float ${id}`),
+      });
+      fresh.applyOverlayDefaults(detachedGraph, "l_edit");
+      check(
+        "回归：从未连接界面的浮层（visible=true）在装载时不显示",
+        ops2.length === 0,
+        ops2.join(" ; ") || "（无动作）",
+      );
+
+      // 显式动作指向未连接的浮层 → 也不显示
+      const g3 = syntheticGraph();
+      g3.nodes.find((n) => n.key === "ov_float").visible = false;
+      const detached3 = { ...g3, edges: g3.edges.filter((e) => e.to !== "ov_float") };
+      const ops3 = run(detached3, "l_edit", "double_click", "image");
+      check(
+        "回归：show 动作指向未连接界面的浮层 → 不显示（未接通）",
+        !ops3.some((op) => op.startsWith("float ")) &&
+          !ops3.includes("overlay ov_float show"),
+        ops3.join(" ; ") || "（无动作）",
+      );
+    }
   }
 
   // 隐藏浮层：关闭其内容面板，并通知宿主（取消「浮动控件」后不再需要绑定 id）
