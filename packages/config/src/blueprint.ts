@@ -44,6 +44,40 @@ export type OverlayAnchor = (typeof OVERLAY_ANCHORS)[number];
 /** 缺省锚点（未写 `anchor` 时按居中处理）。 */
 export const DEFAULT_OVERLAY_ANCHOR: OverlayAnchor = "center";
 
+/**
+ * 浮层**默认最小尺寸**（px，2026-09 用户规定）：未指定尺寸时按此值，
+ * 指定值小于它时按此值夹紧（不阻塞保存，宿主按最小尺寸显示）。
+ */
+export const OVERLAY_MIN_SIZE = { width: 240, height: 160 } as const;
+
+/** 浮层尺寸上限（px）：超过即后端硬错误。 */
+export const OVERLAY_MAX_SIZE = 10000;
+
+/**
+ * 解析浮层的实际框体尺寸：缺省取**默认最小尺寸**，不足最小值时夹紧到最小值。
+ * （与 `height` 区分：`height` 是叠放高度参数 1–10，不是像素。）
+ */
+export function resolveOverlaySize(size?: {
+  width?: number;
+  height?: number;
+}): { width: number; height: number } {
+  const width = Number.isFinite(size?.width) ? (size!.width as number) : 0;
+  const height = Number.isFinite(size?.height) ? (size!.height as number) : 0;
+  return {
+    width: Math.max(OVERLAY_MIN_SIZE.width, Math.round(width)),
+    height: Math.max(OVERLAY_MIN_SIZE.height, Math.round(height)),
+  };
+}
+
+/** 尺寸展示文案（如 `420×300`）。 */
+export function overlaySizeLabel(size?: { width?: number; height?: number }): string {
+  if (!size || (!Number.isFinite(size.width) && !Number.isFinite(size.height))) {
+    return `${OVERLAY_MIN_SIZE.width}×${OVERLAY_MIN_SIZE.height}`;
+  }
+  const resolved = resolveOverlaySize(size);
+  return `${resolved.width}×${resolved.height}`;
+}
+
 /** 锚点的水平/垂直分量：起 / 中 / 末。 */
 export function anchorAxis(
   anchor: OverlayAnchor,
@@ -216,6 +250,11 @@ export interface BlueprintNode {
   offset_x?: number;
   /** 垂直偏移（双模式，同 `offset_x`，比例相对**界面高度**）。 */
   offset_y?: number;
+  /**
+   * 浮层框体尺寸（px）：不写 = 取默认最小尺寸（`OVERLAY_MIN_SIZE`）；
+   * 小于最小值时按最小值夹紧。**与 `height`（叠放高度 1–10）不是一回事。**
+   */
+  size?: { width?: number; height?: number };
   /** 浮层阴影档位（取宿主设计 token，D50 修订）。 */
   shadow?: TokenLevel;
   /** 浮层圆角档位（取宿主设计 token）。 */

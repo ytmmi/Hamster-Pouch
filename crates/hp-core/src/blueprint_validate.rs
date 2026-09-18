@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::blueprint::{
     ActionOp, BlueprintEdge, BlueprintGraph, BlueprintNode, EdgeKind, NodeType,
-    OVERLAY_HEIGHT_MAX, OVERLAY_HEIGHT_MIN,
+    OVERLAY_HEIGHT_MAX, OVERLAY_HEIGHT_MIN, OVERLAY_MAX_SIZE,
 };
 
 /// 校验单个节点字段与引用（硬错误）。
@@ -37,6 +37,20 @@ pub(crate) fn validate_node(
                 if !(OVERLAY_HEIGHT_MIN..=OVERLAY_HEIGHT_MAX).contains(&h) {
                     errors.push(format!(
                         "浮层节点 {key} 的 height 必须在 {OVERLAY_HEIGHT_MIN}-{OVERLAY_HEIGHT_MAX}（当前: {h}）"
+                    ));
+                }
+            }
+            // 框体尺寸：必须为正且不超过上限；小于最小尺寸只夹紧（软告警，见 warnings）。
+            if let Some(size) = &node.size {
+                if size.width <= 0.0 || size.height <= 0.0 {
+                    errors.push(format!(
+                        "浮层节点 {key} 的 size 宽高必须为正数（当前: {}×{}）",
+                        size.width, size.height
+                    ));
+                } else if size.width > OVERLAY_MAX_SIZE || size.height > OVERLAY_MAX_SIZE {
+                    errors.push(format!(
+                        "浮层节点 {key} 的 size 宽高不得超过 {OVERLAY_MAX_SIZE}（当前: {}×{}）",
+                        size.width, size.height
                     ));
                 }
             }

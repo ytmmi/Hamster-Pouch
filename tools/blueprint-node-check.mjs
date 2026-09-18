@@ -368,6 +368,21 @@ const hasEdge = (doc, from, to, kind) =>
       anchorAxis("bottom_right").vertical === "end",
     `默认=${config.DEFAULT_OVERLAY_ANCHOR}`,
   );
+
+  // 尺寸：不写 = 默认最小尺寸；小于最小值按最小值夹紧；展示为 宽×高
+  const min = config.OVERLAY_MIN_SIZE;
+  check(
+    "浮层尺寸：不写取默认最小尺寸、小于最小值夹紧、展示为 宽×高",
+    JSON.stringify(config.resolveOverlaySize(undefined)) ===
+      JSON.stringify({ width: min.width, height: min.height }) &&
+      JSON.stringify(config.resolveOverlaySize({ width: 80, height: 40 })) ===
+        JSON.stringify({ width: min.width, height: min.height }) &&
+      JSON.stringify(config.resolveOverlaySize({ width: 420, height: 300 })) ===
+        JSON.stringify({ width: 420, height: 300 }) &&
+      config.overlaySizeLabel(undefined) === `${min.width}×${min.height}` &&
+      config.overlaySizeLabel({ width: 420, height: 300 }) === "420×300",
+    `默认最小=${min.width}×${min.height} 80×40→${JSON.stringify(config.resolveOverlaySize({ width: 80, height: 40 }))} 展示=${config.overlaySizeLabel({ width: 420, height: 300 })}`,
+  );
 }
 
 // ---- 6. 空图只加一个"状态"（最苛刻：无任何上级可复用）----

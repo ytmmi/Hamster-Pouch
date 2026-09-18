@@ -30,6 +30,15 @@ pub const OVERLAY_HEIGHT_MIN: i64 = 1;
 /// 浮层高度参数上界（D57：1–10，值大者在上）。
 pub const OVERLAY_HEIGHT_MAX: i64 = 10;
 
+/// 浮层**默认最小宽**（px）：未指定尺寸时按此值，指定值小于它时按此值夹紧。
+pub const OVERLAY_MIN_WIDTH: f64 = 240.0;
+
+/// 浮层**默认最小高**（px）：未指定尺寸时按此值，指定值小于它时按此值夹紧。
+pub const OVERLAY_MIN_HEIGHT: f64 = 160.0;
+
+/// 浮层尺寸上限（px）：防止写出无意义的巨大数值（超过即硬错误）。
+pub const OVERLAY_MAX_SIZE: f64 = 10000.0;
+
 /// 节点 key（蓝图内唯一，边引用寻址依据）。
 pub type NodeKey = String;
 
@@ -495,6 +504,32 @@ impl fmt::Display for OverlayAnchor {
     }
 }
 
+/// 浮层尺寸（px，2026-09 用户新增）。
+///
+/// 与 `BlueprintNode::height`（**叠放高度参数**，1–10）区分：本结构是**框体宽高**。
+/// 未指定的分量按 `OVERLAY_MIN_WIDTH` / `OVERLAY_MIN_HEIGHT` 取默认值；
+/// 小于最小值时由宿主按最小值夹紧（软告警提示），大于 `OVERLAY_MAX_SIZE` 为硬错误。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OverlaySize {
+    pub width: f64,
+    pub height: f64,
+}
+
+impl OverlaySize {
+    /// 解析后的实际尺寸：不足最小值则夹紧到最小值（**默认最小尺寸**语义）。
+    pub fn resolved(&self) -> (f64, f64) {
+        (
+            self.width.max(OVERLAY_MIN_WIDTH),
+            self.height.max(OVERLAY_MIN_HEIGHT),
+        )
+    }
+
+    /// 是否小于最小尺寸（用于软告警提示）。
+    pub fn below_minimum(&self) -> bool {
+        self.width < OVERLAY_MIN_WIDTH || self.height < OVERLAY_MIN_HEIGHT
+    }
+}
+
 /// 组/控件的目标锚点（画布编辑器定位 + 浮动/停靠；RFC 0007 / D29）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlueprintPosition {
@@ -586,6 +621,9 @@ pub struct BlueprintNode {
     /// 垂直偏移：`|v| ≤ 1` 视为**界面高度的比例**，`|v| > 1` 视为**像素**。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset_y: Option<f64>,
+    /// 浮层框体尺寸（px；不写 = 取默认最小尺寸 `240×160`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<OverlaySize>,
     /// 浮层阴影档位（取宿主设计 token；非法档位在解析层报错）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow: Option<TokenLevel>,
@@ -863,6 +901,15 @@ impl BlueprintGraph {
                     // 浮层是容器：内容是**面板控件/标签组**（由 contains 边表达），
                     // 因此不再有"未绑定浮动控件"这类软告警（2026-09 取消浮动控件概念）；
                     // 浮层没有子节点也只是"空浮层"，仍可保存。
+                    // 尺寸小于最小尺寸 → 只是被夹紧，提示一下即可（不阻塞保存）。
+                    if let Some(size) = &node.size {
+                        if size.below_minimum() {
+                            warnings.push(format!(
+                                "浮层 {key} 的尺寸小于最小尺寸（{OVERLAY_MIN_WIDTH}×{OVERLAY_MIN_HEIGHT}），将按最小尺寸显示",
+                                key = node.key
+                            ));
+                        }
+                    }
                 }
                 _ => {}
             }

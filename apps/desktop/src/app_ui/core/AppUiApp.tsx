@@ -147,6 +147,51 @@ export function AppUiApp(): JSX.Element {
         // 按 `floating` 创建（蓝图动作默认以标签方式加入；`payload.floating=true` 才浮动）。
         focusPanel(panelId, floating);
       },
+      /**
+       * 浮层内容面板：**必须浮动**（浮层是浮在布局之上的一层）。
+       * - 不存在 → 按给定尺寸浮动创建；
+       * - 已停靠 → 移入浮动组（`addFloatingGroup`）并置顶；
+       * - 已是浮动 → 直接置顶并按尺寸调整。
+       */
+      showOverlayPanel: (panelId: string, size: { width: number; height: number }) => {
+        const dv = apiRef.current;
+        if (!dv) {
+          return;
+        }
+        lastShownRef.current = panelId;
+        const existing = dv.getPanel(panelId);
+        if (!existing) {
+          dv.addPanel({
+            ...PANEL_MIN_SIZE,
+            id: panelId,
+            component: panelId,
+            title: panelTitle(panelId, t),
+            floating: {
+              width: size.width,
+              height: size.height,
+              x: 160,
+              y: 120,
+            },
+          });
+          return;
+        }
+        try {
+          if (existing.api.location.type !== "floating") {
+            dv.addFloatingGroup(existing, {
+              width: size.width,
+              height: size.height,
+              x: 160,
+              y: 120,
+            });
+          } else {
+            existing.api.setSize({ width: size.width, height: size.height });
+          }
+          existing.api.setActive();
+        } catch {
+          // dockview 网格约束下失败时退化为"激活已存在面板"
+          existing.api.setActive();
+        }
+      },
       hidePanel: (panelId: string) => {
         // 显式 hide 动作（用户蓝图规则）：与最近显示面板同 dockview 组时跳过
         // （标签激活已切换）；跨组则收缩至最小尺寸（标签条保留，D25/D29）。

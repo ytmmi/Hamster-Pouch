@@ -107,6 +107,86 @@ mod tests {
     }
 
     #[test]
+    fn overlay_size_defaults_to_minimum_and_rejects_invalid() {
+        // 未写尺寸 → 默认最小尺寸（240×160）
+        let plain = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"ov","type":"overlay","layer":"l_a"}
+                ],
+                "edges":[{"from":"ui","to":"ov","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(plain.validate().is_empty(), "{:?}", plain.validate());
+        assert!(
+            plain.warnings().is_empty(),
+            "未写尺寸不算告警：{:?}",
+            plain.warnings()
+        );
+        let ov = plain.nodes.iter().find(|n| n.key == "ov").unwrap();
+        assert!(ov.size.is_none());
+
+        // 写了尺寸：往返不丢，且解析出的实际尺寸 = 给定值
+        let sized = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"ov","type":"overlay","layer":"l_a","size":{"width":420,"height":300}}
+                ],
+                "edges":[{"from":"ui","to":"ov","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(sized.validate().is_empty(), "{:?}", sized.validate());
+        let size = sized.nodes[1].size.clone().unwrap();
+        assert_eq!(size.resolved(), (420.0, 300.0));
+        assert!(!size.below_minimum());
+        assert_eq!(BlueprintGraph::from_json(&sized.to_json()).unwrap(), sized);
+
+        // 小于最小尺寸 → 不阻塞保存，但夹紧 + 软告警
+        let small = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"ov","type":"overlay","layer":"l_a","size":{"width":80,"height":40}}
+                ],
+                "edges":[{"from":"ui","to":"ov","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(small.validate().is_empty(), "{:?}", small.validate());
+        let s = small.nodes[1].size.clone().unwrap();
+        assert_eq!(
+            s.resolved(),
+            (OVERLAY_MIN_WIDTH, OVERLAY_MIN_HEIGHT),
+            "小于最小值应按默认最小尺寸夹紧"
+        );
+        assert!(
+            small.warnings().iter().any(|w| w.contains("最小尺寸")),
+            "{:?}",
+            small.warnings()
+        );
+
+        // 非正数 / 超大 → 硬错误
+        for bad in [
+            r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
+                "nodes":[{"key":"ui","type":"interface","layer":"l_a"},
+                         {"key":"ov","type":"overlay","layer":"l_a","size":{"width":0,"height":100}}],
+                "edges":[]}"#,
+            r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
+                "nodes":[{"key":"ui","type":"interface","layer":"l_a"},
+                         {"key":"ov","type":"overlay","layer":"l_a","size":{"width":100,"height":99999}}],
+                "edges":[]}"#,
+        ] {
+            let g = BlueprintGraph::from_json(bad).unwrap();
+            assert!(
+                g.validate().iter().any(|e| e.contains("size")),
+                "非法尺寸应为硬错误：{:?}",
+                g.validate()
+            );
+        }
+    }
+
+    #[test]
     fn hide_direction_roundtrip_including_toward() {
         for d in [
             HideDirection::Left,

@@ -423,6 +423,8 @@ export const zhCN = {
   "blueprint.overlayHeight": "叠放高度",
   "blueprint.visible": "初始可见",
   "blueprint.anchor": "定位",
+  "blueprint.overlaySize": "宽×高(px)",
+  "blueprint.overlaySizeHint": "不填按默认最小 {w}×{h}；小于最小值会自动夹紧到最小值。当前：{current}",
   "blueprint.offset": "偏移（X / Y）",
   "blueprint.offsetHint": "当前 X={x}、Y={y}：0–1 为界面宽/高的比例（0.25=25%，可为负），大于 1 按像素（24=24px）；越界自动贴边。",
   "blueprint.anchor.top_left": "左上",

@@ -406,6 +406,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.visible": "Initially visible",
   "blueprint.overlayHeight": "Stack order",
   "blueprint.anchor": "Position",
+  "blueprint.overlaySize": "W\u00d7H (px)",
+  "blueprint.overlaySizeHint": "Empty = default minimum {w}\u00d7{h}; smaller values are clamped to the minimum. Current: {current}",
   "blueprint.offset": "Offset (X / Y)",
   "blueprint.offsetHint": "X={x}, Y={y}: 0\u20131 is a ratio of the interface width/height (0.25 = 25%, may be negative); above 1 is pixels (24 = 24px); clamped to the edges.",
   "blueprint.anchor.top_left": "Top left",

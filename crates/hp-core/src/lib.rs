@@ -27,8 +27,9 @@ pub use album::{
 pub use blueprint::{
     ActionOp, AnchorAxis, BlueprintEdge, BlueprintGraph, BlueprintLayer, BlueprintNode,
     BlueprintPosition, BlueprintRow, BlueprintTemplateRow, EdgeKind, GroupMode, HideDirection,
-    NodeType, OverlayAnchor, TokenLevel, Trigger, BLUEPRINT_SCHEMA_VERSION, OVERLAY_HEIGHT_MAX,
-    OVERLAY_HEIGHT_MIN,
+    NodeType, OverlayAnchor, OverlaySize, TokenLevel, Trigger, BLUEPRINT_SCHEMA_VERSION,
+    OVERLAY_HEIGHT_MAX, OVERLAY_HEIGHT_MIN, OVERLAY_MAX_SIZE, OVERLAY_MIN_HEIGHT,
+    OVERLAY_MIN_WIDTH,
 };
 pub use blueprint_migrate::{
     migrate_document, migrate_graph, normalize_document, MigratedDocument,

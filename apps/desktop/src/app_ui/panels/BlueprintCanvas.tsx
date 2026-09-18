@@ -21,6 +21,7 @@ import { nodeLayerKey } from "@hamster-pouch/config";
 import {
   DEFAULT_OVERLAY_ANCHOR,
   overlayOffsetLabel,
+  overlaySizeLabel,
 } from "@hamster-pouch/config";
 import type { Translate, TranslationKey } from "../i18n";
 import {
@@ -90,6 +91,7 @@ export function nodeSummary(
           : `${t(`blueprint.anchor.${anchor}` as TranslationKey)} ${overlayOffsetLabel(node.offset_x)}, ${overlayOffsetLabel(node.offset_y)}`;
       const parts = [
         `${t("blueprint.overlayHeight")} ${node.height ?? 1}`,
+        `${t("blueprint.overlaySize")} ${overlaySizeLabel(node.size)}`,
         placement,
       ];
       if (node.shadow) {

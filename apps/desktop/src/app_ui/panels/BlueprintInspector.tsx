@@ -22,7 +22,10 @@ import {
   OVERLAY_ANCHORS,
   OVERLAY_HEIGHT_MAX,
   OVERLAY_HEIGHT_MIN,
+  OVERLAY_MAX_SIZE,
+  OVERLAY_MIN_SIZE,
   overlayOffsetLabel,
+  overlaySizeLabel,
   PANEL_IDS,
   PANEL_TITLES,
   TOKEN_LEVELS,
@@ -285,6 +288,52 @@ export function NodeInspector({
           {t("blueprint.offsetHint", {
             x: overlayOffsetLabel(node.offset_x),
             y: overlayOffsetLabel(node.offset_y),
+          })}
+        </span>
+      )}
+      {/* 浮层框体尺寸（px，2026-09 用户新增）：不写 = 默认最小尺寸；小于最小值按最小值夹紧 */}
+      {node.type === "overlay" &&
+        row(
+          t("blueprint.overlaySize"),
+          <span className="bp-field-pair">
+            <input
+              type="number"
+              min={OVERLAY_MIN_SIZE.width}
+              max={OVERLAY_MAX_SIZE}
+              step="10"
+              value={node.size?.width ?? OVERLAY_MIN_SIZE.width}
+              onChange={(e) =>
+                onPatch({
+                  size: {
+                    width: Number(e.target.value) || OVERLAY_MIN_SIZE.width,
+                    height: node.size?.height ?? OVERLAY_MIN_SIZE.height,
+                  },
+                })
+              }
+            />
+            <input
+              type="number"
+              min={OVERLAY_MIN_SIZE.height}
+              max={OVERLAY_MAX_SIZE}
+              step="10"
+              value={node.size?.height ?? OVERLAY_MIN_SIZE.height}
+              onChange={(e) =>
+                onPatch({
+                  size: {
+                    width: node.size?.width ?? OVERLAY_MIN_SIZE.width,
+                    height: Number(e.target.value) || OVERLAY_MIN_SIZE.height,
+                  },
+                })
+              }
+            />
+          </span>,
+        )}
+      {node.type === "overlay" && (
+        <span className="dim bp-hints">
+          {t("blueprint.overlaySizeHint", {
+            w: OVERLAY_MIN_SIZE.width,
+            h: OVERLAY_MIN_SIZE.height,
+            current: overlaySizeLabel(node.size),
           })}
         </span>
       )}

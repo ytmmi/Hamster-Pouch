@@ -30,7 +30,7 @@ import type {
   BlueprintTargetRef,
   BlueprintTrigger,
 } from "@hamster-pouch/config";
-import { nodeLayerKey } from "@hamster-pouch/config";
+import { nodeLayerKey, resolveOverlaySize } from "@hamster-pouch/config";
 
 /** 引擎对外执行器（由应用装配层注入，与 dockview/媒体命令解耦）。 */
 export interface BlueprintExecutor {
@@ -49,9 +49,18 @@ export interface BlueprintExecutor {
   /** 界面跳转（D48）：切换到目标层（页面）；执行方负责持久化当前层并套用其布局。 */
   navigateLayer: (layerKey: string) => void;
   /**
+   * 浮层内容面板的显示（D50，容器语义）：
+   * 与普通 `showPanel` 的区别是**必须浮动**——浮层是浮在布局之上的一层，
+   * 因此已停靠的面板要移入浮动组、不存在则按浮动创建，并按蓝图尺寸设置框体。
+   */
+  showOverlayPanel: (
+    panelId: string,
+    size: { width: number; height: number },
+  ) => void;
+  /**
    * 浮层容器显隐（D50）：`overlayKey` = 浮层节点 key（2026-09 取消「浮动控件」，不再有绑定 id）。
    * 引擎已按浮动面板显示/隐藏浮层**内容**（它 contains 的面板控件）；宿主据此刷新浮层容器本身
-   * （外观档位：圆角/阴影/标签隐藏）。
+   * （定位/外观档位：圆角/阴影/标签隐藏）。
    */
   setOverlayVisible: (overlayKey: string, visible: boolean) => void;
 }
@@ -396,18 +405,47 @@ export class BlueprintEngine {
   private setOverlay(node: BlueprintNode, visible: boolean, graph: BlueprintGraph): void {
     this.overlayState.set(node.key, visible);
     const panelIds = this.overlayPanelIds(node.key, graph);
+    const size = resolveOverlaySize(node.size);
     for (const panelId of panelIds) {
       if (visible) {
-        // 浮层 = 浮动层：内容面板以浮动方式显示（已存在则激活）。
-        this.executor?.showPanel(panelId, true);
+        // 浮层 = 浮动层：内容面板以**浮动**方式显示（已停靠的移入浮动组，不存在则浮动创建），
+        // 并按蓝图尺寸设置框体（尺寸不足最小值时按最小值）。
+        this.executor?.showOverlayPanel(panelId, size);
       } else {
         this.executor?.hidePanel(panelId);
       }
     }
     this.executor?.setOverlayVisible(node.key, visible);
     this.log(
-      `[engine] 浮层 ${node.key} ${visible ? "显示" : "隐藏"}：内容面板=[${panelIds.join(", ") || "（空浮层）"}]`,
+      `[engine] 浮层 ${node.key} ${visible ? "显示" : "隐藏"}：内容面板=[${panelIds.join(", ") || "（空浮层）"}] 尺寸=${size.width}×${size.height}`,
     );
+  }
+
+  /**
+   * 按蓝图对账**浮层的初始显隐**（装载/套用布局/切层时调用）。
+   *
+   * 这是"浮层不会自己出现"缺陷的修复：`visible` 过去只是数据，没有任何一处在装载时应用它。
+   * 对账规则（保守，不打扰使用者）：
+   * - 首次见到某浮层且 `visible === true` → 显示它；
+   * - 之前显示过、蓝图改成不显示 → 隐藏它；
+   * - `visible !== true` 且从未显示过 → **什么都不做**（不去关掉使用者布局里本来就有的面板）。
+   */
+  applyOverlayDefaults(graph: BlueprintGraph, layerKey: string | null): void {
+    for (const node of graph.nodes) {
+      if (node.type !== "overlay") {
+        continue;
+      }
+      if (layerKey && nodeLayerKey(graph, node) !== layerKey) {
+        continue;
+      }
+      const desired = node.visible === true;
+      const prev = this.overlayState.get(node.key);
+      if (prev === undefined && desired) {
+        this.setOverlay(node, true, graph);
+      } else if (prev !== undefined && prev !== desired) {
+        this.setOverlay(node, desired, graph);
+      }
+    }
   }
 
   /** 浮层切换：以引擎记录的期望可见态为准（`visible` 只是初始值）。 */

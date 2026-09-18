@@ -103,6 +103,8 @@ function run(graph, layer, trigger, mediaType) {
     navigateLayer: (layerKey) => ops.push(`navigate ${layerKey}`),
     setOverlayVisible: (overlayKey, visible) =>
       ops.push(`overlay ${overlayKey} ${visible ? "show" : "hide"}`),
+    showOverlayPanel: (panelId, size) =>
+      ops.push(`float ${panelId} ${size.width}×${size.height}`),
   });
   engine.dispatch({ trigger, target: { mediaType, fileId: "file-1" } });
   return ops;
@@ -135,10 +137,59 @@ function run(graph, layer, trigger, mediaType) {
 
   const edit = run(graph, "l_edit", "double_click", "image");
   check(
-    "D50：浮层是容器 → 显示浮层 = 把内容面板以浮动方式显示 + 通知宿主刷新容器",
-    edit.includes("show tasks (floating)") && edit.includes("overlay ov_float show"),
+    "D50：浮层是容器 → 显示浮层 = 内容面板以浮动方式显示（未写尺寸时取默认最小 240×160）+ 通知宿主刷新容器",
+    edit.includes("float tasks 240×160") && edit.includes("overlay ov_float show"),
     edit.join(" ; ") || "（无动作）",
   );
+
+  // 回归：`visible: true` 的浮层必须在**装载对账**时就显示其内容
+  // （旧缺陷：只在事件动作里显隐，浮层内容永远不出现）。
+  {
+    const engine = new BlueprintEngine();
+    engine.setGraph(graph);
+    engine.setLayer("l_edit");
+    const ops = [];
+    engine.setExecutor({
+      showPanel: (id, floating) => ops.push(`show ${id}${floating ? " (floating)" : ""}`),
+      hidePanel: (id) => ops.push(`hide ${id}`),
+      togglePanel: (id) => ops.push(`toggle ${id}`),
+      collapsePanels: (ids) => ops.push(`collapse [${ids.join(", ")}]`),
+      expandPanels: (ids) => ops.push(`expand [${ids.join(", ")}]`),
+      playFile: (id) => ops.push(`play ${id}`),
+      navigateLayer: (key) => ops.push(`navigate ${key}`),
+      setOverlayVisible: (key, visible) =>
+        ops.push(`overlay ${key} ${visible ? "show" : "hide"}`),
+      showOverlayPanel: (id, size) => ops.push(`float ${id} ${size.width}×${size.height}`),
+    });
+    const visibleGraph = syntheticGraph();
+    const ov = visibleGraph.nodes.find((n) => n.key === "ov_float");
+    ov.visible = true;
+    ov.size = { width: 420, height: 300 };
+    // 初始对账：只有 visible===true 的浮层会自动显示
+    engine.applyOverlayDefaults(visibleGraph, "l_edit");
+    check(
+      "浮层初始显隐对账：visible=true 的浮层在装载时即显示内容（含尺寸 420×300）",
+      ops.includes("float tasks 420×300") && ops.includes("overlay ov_float show"),
+      ops.join(" ; ") || "（无动作）",
+    );
+    // 再对账一次：状态未变 → 不重复执行（幂等，不打扰使用者）
+    ops.length = 0;
+    engine.applyOverlayDefaults(visibleGraph, "l_edit");
+    check(
+      "浮层初始显隐对账是幂等的（状态未变不重复显示）",
+      ops.length === 0,
+      ops.join(" ; ") || "（无动作）",
+    );
+    // 蓝图改成不显示 → 收敛为隐藏
+    const hiddenGraph = syntheticGraph();
+    hiddenGraph.nodes.find((n) => n.key === "ov_float").visible = false;
+    engine.applyOverlayDefaults(hiddenGraph, "l_edit");
+    check(
+      "浮层初始显隐对账：蓝图改为不显示 → 隐藏其内容",
+      ops.includes("hide tasks") && ops.includes("overlay ov_float hide"),
+      ops.join(" ; ") || "（无动作）",
+    );
+  }
 
   // 隐藏浮层：关闭其内容面板，并通知宿主（取消「浮动控件」后不再需要绑定 id）
   {
@@ -156,6 +207,7 @@ function run(graph, layer, trigger, mediaType) {
       navigateLayer: (key) => ops.push(`navigate ${key}`),
       setOverlayVisible: (key, visible) =>
         ops.push(`overlay ${key} ${visible ? "show" : "hide"}`),
+      showOverlayPanel: (id, size) => ops.push(`float ${id} ${size.width}×${size.height}`),
     });
     const hideDoc = graph;
     const hideAction = hideDoc.nodes.find((n) => n.key === "a_overlay");

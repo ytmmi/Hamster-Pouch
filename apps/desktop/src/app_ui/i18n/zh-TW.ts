@@ -406,6 +406,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.visible": "初始可見",
   "blueprint.overlayHeight": "疊放高度",
   "blueprint.anchor": "定位",
+  "blueprint.overlaySize": "寬×高(px)",
+  "blueprint.overlaySizeHint": "不填按預設最小 {w}×{h}；小於最小值會自動夾緊到最小值。目前：{current}",
   "blueprint.offset": "偏移（X / Y）",
   "blueprint.offsetHint": "目前 X={x}、Y={y}：0–1 為介面寬/高的比例（0.25=25%，可為負），大於 1 按像素（24=24px）；越界自動貼邊。",
   "blueprint.anchor.top_left": "左上",

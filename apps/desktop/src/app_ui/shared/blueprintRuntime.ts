@@ -224,12 +224,20 @@ async function loadActiveBlueprintInner(
 /** 把当前生效蓝图对账到 dockview 布局（保存后/套用布局后/语言变化后调用）。 */
 export function reconcileActiveBlueprint(dv: DockviewApi | null): void {
   reconcileLayout(activeGraph, dv);
+  // 浮层的**初始显隐**也要对账（过去只在事件动作里显隐，导致 `visible: true` 的浮层
+  // 内容永远不出现）。放在布局对账之后、按当前层执行。
+  if (activeGraph) {
+    blueprintEngine.applyOverlayDefaults(activeGraph, activeLayer);
+  }
 }
 
 /** 套用布局：清空收起尺寸记忆后重新对账（布局基准已变，旧记忆失效）。 */
 export function reconcileAfterLayoutApplied(dv: DockviewApi | null): void {
   resetLayoutReconcileState();
   reconcileLayout(activeGraph, dv);
+  if (activeGraph) {
+    blueprintEngine.applyOverlayDefaults(activeGraph, activeLayer);
+  }
 }
 
 // ============================== 当前层（D53/D54） ==============================
