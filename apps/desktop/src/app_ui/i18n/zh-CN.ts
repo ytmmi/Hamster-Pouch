@@ -416,6 +416,7 @@ export const zhCN = {
   "blueprint.layer.removeLast": "至少保留一层，无法删除最后一层",
   "blueprint.layer.removed": "已删除层「{name}」",
   "blueprint.layer.rootless": "无界面（未接通）",
+  "blueprint.layer.rootRepaired": "已用「界面」补出该层的界面根节点（不再是无根层）",
   "blueprint.layer.moveUp": "上移",
   "blueprint.layer.moveDown": "下移",
   "blueprint.layer.newPrompt": "新层名",

@@ -45,6 +45,7 @@ import { removeLayer, softRemove } from "./blueprintDelete";
 import { NodeInspector } from "./BlueprintInspector";
 import {
   addLayer,
+  ensureInterface,
   moveLayer,
   renameLayer,
 } from "./blueprintLayers";
@@ -183,8 +184,16 @@ export function BlueprintPanel(): JSX.Element {
   const addNode = useCallback(
     (type: BlueprintNodeType) => {
       // 「界面」= 一个页面 = 一个层（D51）：不在当前层里再塞第二个界面节点
-      // （那是硬错误"每层至多一个界面"），而是**新增一个层**（并自动带出界面根节点）。
+      // （那是硬错误"每层至多一个界面"）。
+      // - 当前层**还没有**界面节点（无根层，D55）→ 为它补出根（修复未接通）；
+      // - 当前层已有根 → 新增一个层（新页面，自动带出界面根节点）。
       if (type === "interface") {
+        const current = layerKey ?? effectiveLayers(doc)[0].key;
+        if (!interfaceOfLayer(doc, current)) {
+          mutate(ensureInterface(doc, current, viewCenter ?? undefined));
+          app.status(app.t("blueprint.layer.rootRepaired"), "ok");
+          return;
+        }
         addNewLayer();
         return;
       }

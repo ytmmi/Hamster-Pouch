@@ -399,6 +399,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.layer.removeLast": "至少保留一層，無法刪除最後一層",
   "blueprint.layer.removed": "已刪除層「{name}」",
   "blueprint.layer.rootless": "無介面（未接通）",
+  "blueprint.layer.rootRepaired": "已用「介面」補出該層的介面根節點（不再是無根層）",
   "blueprint.layer.moveUp": "上移",
   "blueprint.layer.moveDown": "下移",
   "blueprint.layer.newPrompt": "新層名",

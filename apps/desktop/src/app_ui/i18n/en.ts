@@ -399,6 +399,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.layer.removeLast": "At least one layer must remain; the last layer cannot be deleted",
   "blueprint.layer.removed": "Layer \u201c{name}\u201d deleted",
   "blueprint.layer.rootless": "No interface (unlinked)",
+  "blueprint.layer.rootRepaired": "Added an interface root for this layer (it is no longer rootless)",
   "blueprint.layer.moveUp": "Move up",
   "blueprint.layer.moveDown": "Move down",
   "blueprint.layer.newPrompt": "New layer name",
