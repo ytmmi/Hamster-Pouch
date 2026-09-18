@@ -32,7 +32,7 @@ const { BlueprintEngine } = await import(
   pathToFileURL(`${ROOT}/apps/desktop/src/app_ui/core/blueprintEngine.ts`).href
 );
 const config = await import(
-  pathToFileURL(`${ROOT}/packages/config/src/blueprint.ts`).href
+  pathToFileURL(`${ROOT}/packages/config/src/index.ts`).href
 );
 
 const results = [];

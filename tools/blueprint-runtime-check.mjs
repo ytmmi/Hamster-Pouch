@@ -28,7 +28,7 @@ const { loadActiveBlueprint } = await import(
   pathToFileURL(`${ROOT}/apps/desktop/src/app_ui/shared/blueprintRuntime.ts`).href
 );
 const config = await import(
-  pathToFileURL(`${ROOT}/packages/config/src/blueprint.ts`).href
+  pathToFileURL(`${ROOT}/packages/config/src/index.ts`).href
 );
 
 /** 用临时库副本造一个蓝图命令替身。 */

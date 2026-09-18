@@ -13,7 +13,10 @@
 import { useEffect, useState } from "react";
 
 import {
+  BLUEPRINT_ACTION_OPS,
+  BLUEPRINT_MEDIA_TYPES,
   type BlueprintGraph,
+  type BlueprintHideDirection,
   type BlueprintNode,
   type BlueprintNodeType,
   CONDITION_EXPR_HINTS,
@@ -26,6 +29,7 @@ import {
   OVERLAY_MIN_SIZE,
   overlayOffsetLabel,
   overlaySizeLabel,
+  nodeLayerKey,
   PANEL_IDS,
   PANEL_TITLES,
   TOKEN_LEVELS,
@@ -40,11 +44,10 @@ import {
   resolveControlTitle,
   scopeLabel,
   triggerLabel,
-} from "./BlueprintCanvas";
+} from "./blueprintLabels";
 
-const MEDIA_TYPES = ["image", "video", "audio"] as const;
+/** 对象作用范围：三个交互关键字（RFC 0007 决策 1 亦允许填具体 `file_id`，高级用户可手改 JSON）。 */
 const SCOPES = ["clicked", "double_clicked", "selected"] as const;
-const ACTION_OPS = ["show", "hide", "toggle", "collapse", "expand", "navigate"] as const;
 
 /**
  * 只读的"从上级推导"字段：展示由连线/上级自动落定的引用（key），不可手填。
@@ -76,10 +79,14 @@ function DerivedField({
  * （show/hide→面板控件/浮层，collapse/expand→标签组，toggle→面板控件/标签组/浮层，
  * navigate→界面），名称用**本地化显示名**（面板控件→面板标题、标签组→自定义名/
  * 「标签组 N」、界面→层名、浮层→自定义名/「浮层 N」），不暴露裸 key。
+ *
+ * **层级口径（RFC 0007 决策 6）**：跨层只允许 `navigate` 引用，其余动作的目标必须与
+ * 状态节点**同层**——否则编辑器会产出被后端以"跨层引用"拒绝的文档。
  */
 function actionTargets(
   doc: BlueprintGraph,
   op: BlueprintNode["op"],
+  layerKey: string,
   t: Translate,
 ): { v: string; l: string }[] {
   const wanted: BlueprintNodeType[] =
@@ -90,8 +97,11 @@ function actionTargets(
         : op === "toggle"
           ? ["control", "group", "overlay"]
           : ["control", "overlay"];
+  // navigate 是跨层跳转（界面与层 1:1），因此它的候选**不**按层过滤。
+  const crossLayer = op === "navigate";
   return doc.nodes
     .filter((n) => wanted.includes(n.type))
+    .filter((n) => crossLayer || nodeLayerKey(doc, n) === layerKey)
     .map((n) => ({ v: n.key, l: nodeDisplayName(n, t, doc.nodes, doc.layers) }));
 }
 
@@ -116,6 +126,15 @@ export function NodeInspector({
       </div>
     );
   }
+  const layerKey = nodeLayerKey(doc, node);
+  /** 同层判定（跨层只允许 `navigate` 引用，RFC 0007 决策 6）。 */
+  const inSameLayer = (n: BlueprintNode): boolean =>
+    nodeLayerKey(doc, n) === layerKey;
+  /** 本层的面板控件（组的默认可见成员候选；跨层成员会被校验拒绝）。 */
+  const layerControls = doc.nodes.filter(
+    (n) => n.type === "control" && inSameLayer(n),
+  );
+
   const row = (label: string, control: JSX.Element): JSX.Element => (
     <div className="bp-field">
       <label>{label}</label>
@@ -128,15 +147,16 @@ export function NodeInspector({
     set: (v: string) => void,
   ): JSX.Element =>
     row(label, <input value={value} onChange={(e) => set(e.target.value)} />);
-  const select = (
+  /** 下拉框（泛型取值：调用方传字面量清单时，回填值自动收窄为字面量联合）。 */
+  function select<T extends string>(
     label: string,
     value: string,
-    options: { v: string; l: string }[],
-    set: (v: string) => void,
-  ): JSX.Element =>
-    row(
+    options: { v: T; l: string }[],
+    set: (v: T) => void,
+  ): JSX.Element {
+    return row(
       label,
-      <select value={value} onChange={(e) => set(e.target.value)}>
+      <select value={value} onChange={(e) => set(e.target.value as T)}>
         {options.map((o) => (
           <option key={o.v} value={o.v}>
             {o.l}
@@ -144,6 +164,7 @@ export function NodeInspector({
         ))}
       </select>,
     );
+  }
 
   /** 节点 key → 本地化显示名（供下拉选项，不暴露 key）。 */
   const labelOf = (key: string): string => {
@@ -154,11 +175,18 @@ export function NodeInspector({
   const derivedLabel = (key: string | undefined): string =>
     key ? labelOf(key) : "";
 
-  // 隐藏方向：4 方向本地化 + 已有 toward:<组> 值保留为选项
-  const hideDirOptions = [
+  // 隐藏方向：4 个轴向值（本地化）+ 同层标签组的 `toward:<组>` 候选 + 保留已有取值
+  const hideDirOptions: { v: string; l: string }[] = [
     { v: "", l: "—" },
-    ...HIDE_DIRECTIONS.map((d) => ({ v: d, l: hideDirLabel(d, t) })),
+    ...HIDE_DIRECTIONS.map((d) => ({ v: d as string, l: hideDirLabel(d, t) })),
   ];
+  // `toward:<同层标签组>`（D29）：让编辑器也能产出"精确指定由哪个邻居吸收空间"的取值。
+  for (const other of doc.nodes) {
+    if (other.type !== "group" || other.key === node.key || !inSameLayer(other)) {
+      continue;
+    }
+    hideDirOptions.push({ v: `toward:${other.key}`, l: `→ ${labelOf(other.key)}` });
+  }
   const hideDirValue = node.hide_direction ?? "";
   if (
     hideDirValue.startsWith("toward:") &&
@@ -204,7 +232,7 @@ export function NodeInspector({
         select(
           t("blueprint.mediaType"),
           node.media_type ?? "",
-          MEDIA_TYPES.map((m) => ({ v: m, l: mediaTypeLabel(m, t) })),
+          BLUEPRINT_MEDIA_TYPES.map((m) => ({ v: m, l: mediaTypeLabel(m, t) })),
           (v) => onPatch({ media_type: v }),
         )}
       {node.type === "class" && (
@@ -378,11 +406,8 @@ export function NodeInspector({
         row(
           t("blueprint.defaultVisible"),
           <span className="bp-field-multi">
-            {doc.nodes.filter((n) => n.type === "control").length === 0 && (
-              <span className="dim">—</span>
-            )}
-            {doc.nodes
-              .filter((n) => n.type === "control")
+            {layerControls.length === 0 && <span className="dim">—</span>}
+            {layerControls
               .map((c) => c.key)
               .map((k) => {
                 const on = node.default_visible?.includes(k) ?? false;
@@ -409,7 +434,7 @@ export function NodeInspector({
           t("blueprint.hideDirection"),
           hideDirValue,
           hideDirOptions,
-          (v) => onPatch({ hide_direction: v || undefined }),
+          (v) => onPatch({ hide_direction: (v || undefined) as BlueprintNode["hide_direction"] }),
         )}
       {(node.type === "group" || node.type === "layout_block") &&
         row(
@@ -463,8 +488,10 @@ export function NodeInspector({
       )}
       {node.type === "event" && (
         <span className="dim bp-hints">
-          对象 → {t("blueprint.port.on")} → {t("blueprint.port.fires")} → 状态
-          （从左侧「对象」端口拖线连入）
+          {t("blueprint.hint.objectChain", {
+            on: t("blueprint.port.on"),
+            fires: t("blueprint.port.fires"),
+          })}
         </span>
       )}
       {node.type === "condition" &&
@@ -480,7 +507,7 @@ export function NodeInspector({
         select(
           t("blueprint.op"),
           node.op ?? "",
-          ACTION_OPS.map((op) => ({ v: op, l: opLabel(op, t) })),
+          BLUEPRINT_ACTION_OPS.map((op) => ({ v: op, l: opLabel(op, t) })),
           (v) => onPatch({ op: v as BlueprintNode["op"] }),
         )}
       {/* 状态：**目标手动指定**（控件 show/hide/toggle、标签组 collapse/expand/toggle） */}
@@ -490,7 +517,7 @@ export function NodeInspector({
           node.target ?? "",
           [
             { v: "", l: t("blueprint.targetUnset") },
-            ...actionTargets(doc, node.op, t),
+            ...actionTargets(doc, node.op, layerKey, t),
           ],
           (v) => onPatch({ target: v || undefined }),
         )}
@@ -524,9 +551,13 @@ export function NodeInspector({
           {t("blueprint.deleteNode")}
         </button>
       </div>
-      <span className="dim bp-hints">
-        {HIDE_DIRECTIONS.map((d) => hideDirLabel(d, t)).join(" / ")} / toward:&lt;组&gt;
-      </span>
+      {node.type === "group" && (
+        <span className="dim bp-hints">
+          {t("blueprint.hint.hideDirection", {
+            dirs: HIDE_DIRECTIONS.map((d) => hideDirLabel(d, t)).join(" / "),
+          })}
+        </span>
+      )}
       <span className="dim bp-hints">
         {t("blueprint.port.contains")} · {t("blueprint.port.memberOf")} ·{" "}
         {t("blueprint.port.fires")} · {t("blueprint.port.guards")}

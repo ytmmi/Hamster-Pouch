@@ -92,17 +92,29 @@ function trace(message: string): void {
 /** 供编辑器/布局模块复用的诊断打点（同 `trace`，语义化别名）。 */
 export const traceBlueprint = trace;
 
+/**
+ * 蓝图装载"回退内置默认"的用户提示回调（应用装配层注入 → `app.status`）。
+ *
+ * RFC 0007 决策 3：**加载时发现已存文档无效 → 回退内置默认蓝图并向用户提示**。
+ * 这里只上报事件码，文案由装配层按 i18n 生成（本模块不持有 `t`，也不做 UI）。
+ */
+export type BlueprintFallbackReason = "invalid-document" | "load-failed";
+
+let fallbackNotifier: ((reason: BlueprintFallbackReason) => void) | null = null;
+
+/** 注入回退提示回调（null = 不提示；非宿主环境/自检脚本无需提示）。 */
+export function setBlueprintFallbackNotifier(
+  next: ((reason: BlueprintFallbackReason) => void) | null,
+): void {
+  fallbackNotifier = next;
+}
+
 // 模块装载即打点：区分"前端没跑到蓝图链路"与"跑到了但分支不对"。
 trace(`[blueprint] runtime module imported at ${new Date().toISOString()} hw=${navigator.hardwareConcurrency}`);
 
 /** 当前生效蓝图 ID（列表刷新、状态展示用）。 */
 export function activeBlueprintId(): string | null {
   return activeId;
-}
-
-/** 当前生效蓝图图文档。 */
-export function activeBlueprintGraph(): BlueprintGraph | null {
-  return activeGraph;
 }
 
 /**
@@ -181,7 +193,9 @@ async function loadActiveBlueprintInner(
     }
     const parsed = BlueprintEngine.parse(doc);
     if (!parsed) {
-      trace("[blueprint] parse failed → built-in default");
+      // 解析层非法（未知节点类型/op/trigger/边类型、版本高于当前…）→ 回退内置默认并提示用户。
+      trace("[blueprint] parse/解析层校验失败 → built-in default");
+      fallbackNotifier?.("invalid-document");
       return { graph: activate(null), loaded: false };
     }
     const digest = digestOf(doc, parsed);
@@ -217,13 +231,15 @@ async function loadActiveBlueprintInner(
     return { graph: activate(parsed, digest), loaded: true };
   } catch (e) {
     trace(`[blueprint] load failed repo=${repoId}: ${String(e)}`);
+    fallbackNotifier?.("load-failed");
     return { graph: activate(null), loaded: false };
   }
 }
 
 /** 把当前生效蓝图对账到 dockview 布局（保存后/套用布局后/语言变化后调用）。 */
 export function reconcileActiveBlueprint(dv: DockviewApi | null): void {
-  reconcileLayout(activeGraph, dv);
+  // 只对账**当前层**（D51/D54）：别的层的组结构不属于正在显示的页面。
+  reconcileLayout(activeGraph, dv, activeLayer);
   // 浮层的**初始显隐**也要对账（过去只在事件动作里显隐，导致 `visible: true` 的浮层
   // 内容永远不出现）。放在布局对账之后、按当前层执行。
   if (activeGraph) {
@@ -237,7 +253,7 @@ export function reconcileAfterLayoutApplied(dv: DockviewApi | null): void {
   // 套用布局会**重建整个 dockview 内容**（`fromJSON`），浮动面板随之消失 →
   // 浮层的"已应用"记忆必须一起清空，否则 visible=true 的浮层不会再被显示（真实缺陷）。
   blueprintEngine.resetOverlayState();
-  reconcileLayout(activeGraph, dv);
+  reconcileLayout(activeGraph, dv, activeLayer);
   if (activeGraph) {
     blueprintEngine.applyOverlayDefaults(activeGraph, activeLayer);
   }
@@ -257,11 +273,6 @@ export function currentLayerKey(): string | null {
 export function setCurrentLayerKey(layerKey: string | null): void {
   activeLayer = layerKey;
   blueprintEngine.setLayer(layerKey);
-}
-
-/** 生效蓝图的有效层清单（含单层兜底）。 */
-export function activeLayers() {
-  return activeGraph ? effectiveLayers(activeGraph) : [];
 }
 
 /**

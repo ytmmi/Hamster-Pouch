@@ -50,6 +50,7 @@ import {
   renameLayer,
 } from "./blueprintLayers";
 import { appendNode, parentHintFor } from "./blueprintNodeFactory";
+import { arrangeTree } from "./blueprintArrange";
 import {
   readStructure,
   snapshotFromDockview,
@@ -140,12 +141,15 @@ export function BlueprintPanel(): JSX.Element {
         // 保证"保存后热更新到布局"与"画布可读"对旧文档同样成立。
         const normalized = normalizePositions(parsed);
         if (normalized !== parsed) {
+          // 自动补齐坐标属于**装载期归一化**，不是用户编辑：必须保留内置默认标记
+          // （`default_version`），否则"打开一次编辑器"就会把库存默认蓝图变成用户图、
+          // 从而永久失去自动升级（RFC 0007：只有用户保存才移除该标记）。
           void api
             .blueprintSave({
               repoId,
               blueprintId: id,
               name: items.find((i) => i.id === id)?.name,
-              blueprintJson: JSON.stringify(forUserSave(normalized)),
+              blueprintJson: JSON.stringify(normalizeLayersForSave(normalized)),
             })
             .catch(() => undefined);
         }
@@ -266,12 +270,14 @@ export function BlueprintPanel(): JSX.Element {
         return;
       }
       const remaining = effectiveLayers(result.doc);
+      const removedName =
+        effectiveLayers(doc).find((l) => l.key === key)?.name ?? key;
       mutate(result.doc);
       const next = remaining[0]?.key ?? null;
       setLayerKey(next);
       setCurrentLayerKey(next);
       setSelectedKey(null);
-      app.status(app.t("blueprint.layer.removed", { name: key }), "ok");
+      app.status(app.t("blueprint.layer.removed", { name: removedName }), "ok");
     },
     [doc, mutate, app],
   );
@@ -517,20 +523,27 @@ export function BlueprintPanel(): JSX.Element {
     }
   }, [repoId, selectedId, app, load]);
 
-  const setDefault = useCallback(async () => {
-    if (!repoId || !selectedId) {
-      return;
-    }
-    try {
-      await api.blueprintSetDefault({ repoId, blueprintId: selectedId });
-      app.status(app.t("blueprint.defaultSet"), "ok");
-      // 默认蓝图变更 = 运行时生效蓝图变更 → 立即热更新。
-      notifyBlueprintChangedLocally();
-      await load();
-    } catch (e) {
-      app.status(app.t("blueprint.defaultFailed", { err: String(e) }), "error");
-    }
-  }, [repoId, selectedId, app, load]);
+  /**
+   * 设为默认蓝图。**必须显式传入目标 id**：点击"★"时 `selectedId` 还是上一个选中项
+   * （`select` 是异步的），读 state 会把默认蓝图设到错误的蓝图行上。
+   */
+  const setDefault = useCallback(
+    async (blueprintId: string) => {
+      if (!repoId) {
+        return;
+      }
+      try {
+        await api.blueprintSetDefault({ repoId, blueprintId });
+        app.status(app.t("blueprint.defaultSet"), "ok");
+        // 默认蓝图变更 = 运行时生效蓝图变更 → 立即热更新。
+        notifyBlueprintChangedLocally();
+        await load();
+      } catch (e) {
+        app.status(app.t("blueprint.defaultFailed", { err: String(e) }), "error");
+      }
+    },
+    [repoId, app, load],
+  );
 
   /**
    * 恢复内置默认蓝图：把**当前选中蓝图的内容**替换为随应用分发的内置默认图。
@@ -594,64 +607,16 @@ export function BlueprintPanel(): JSX.Element {
     [repoId, selectedId, name],
   );
 
-  /** 一键整理：以选中节点为根，沿边（任意类型）BFS 分层树状展开并落位。 */
-  const arrangeTree = useCallback(
-    (rootKey: string) => {
-      const adj = new Map<string, string[]>();
-      for (const e of doc.edges) {
-        if (!adj.has(e.from)) {
-          adj.set(e.from, []);
-        }
-        adj.get(e.from)!.push(e.to);
-      }
-      const depth = new Map<string, number>();
-      const order: string[] = [];
-      const seen = new Set<string>([rootKey]);
-      const queue: { key: string; d: number }[] = [{ key: rootKey, d: 0 }];
-      depth.set(rootKey, 0);
-      order.push(rootKey);
-      while (queue.length > 0) {
-        const { key, d } = queue.shift()!;
-        for (const next of adj.get(key) ?? []) {
-          if (!seen.has(next)) {
-            seen.add(next);
-            depth.set(next, d + 1);
-            order.push(next);
-            queue.push({ key: next, d: d + 1 });
-          }
-        }
-      }
-      const H_GAP = 260;
-      const V_GAP = 84;
-      const colY = new Map<number, number>();
-      const positions = new Map<string, { x: number; y: number }>();
-      for (const key of order) {
-        const d = depth.get(key) ?? 0;
-        const y = colY.get(d) ?? 0;
-        colY.set(d, y + V_GAP);
-        positions.set(key, { x: 40 + d * H_GAP, y: 40 + y });
-      }
-      const next: BlueprintGraph = {
-        ...doc,
-        nodes: doc.nodes.map((n) =>
-          positions.has(n.key)
-            ? { ...n, position: positions.get(n.key)! }
-            : n,
-        ),
-      };
-      mutate(next);
-      persistDoc(next);
-    },
-    [doc, mutate, persistDoc],
-  );
-
+  /** 一键整理：以选中节点为根树状展开（纯算法在 `blueprintArrange`），随后静默落库。 */
   const onArrange = useCallback(() => {
     const root = selectedKey ?? doc.nodes[0]?.key;
     if (!root) {
       return;
     }
-    arrangeTree(root);
-  }, [selectedKey, doc.nodes, arrangeTree]);
+    const next = arrangeTree(doc, root);
+    mutate(next);
+    persistDoc(next);
+  }, [selectedKey, doc, mutate, persistDoc]);
 
   const selectedNode = useMemo(
     () => doc.nodes.find((n) => n.key === selectedKey) ?? null,
@@ -704,7 +669,7 @@ export function BlueprintPanel(): JSX.Element {
                 <button
                   className="bp-item-action"
                   disabled={it.is_default}
-                  onClick={() => void select(it.id).then(() => setDefault())}
+                  onClick={() => void select(it.id).then(() => setDefault(it.id))}
                   title={app.t("blueprint.setDefault")}
                 >
                   ★

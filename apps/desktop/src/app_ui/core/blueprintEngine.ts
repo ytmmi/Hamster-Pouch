@@ -24,7 +24,6 @@
 
 import type {
   BlueprintActionOp,
-  BlueprintEdge,
   BlueprintGraph,
   BlueprintNode,
   BlueprintTargetRef,
@@ -33,6 +32,7 @@ import type {
 import {
   DEFAULT_OVERLAY_ANCHOR,
   nodeLayerKey,
+  parseBlueprintDocument,
   resolveOverlaySize,
 } from "@hamster-pouch/config";
 
@@ -40,9 +40,9 @@ import {
 export interface BlueprintExecutor {
   /** 显示控件：已存在则激活，不存在则按浮动创建。 */
   showPanel: (panelId: string, floating: boolean) => void;
-  /** 隐藏控件（关闭面板）。 */
+  /** 隐藏控件：**收起至最小尺寸**（正文 6px、标签条保留，RFC 0007 决策 3，不是关闭）。 */
   hidePanel: (panelId: string) => void;
-  /** 切换控件显隐。 */
+  /** 切换控件显隐（取反：不存在则显示、已存在则关闭）。 */
   togglePanel: (panelId: string, floating: boolean) => void;
   /** 收起组：把组内成员面板最小化至最小尺寸（标签条保留，D25）。 */
   collapsePanels: (panelIds: string[]) => void;
@@ -99,6 +99,11 @@ export class BlueprintEngine {
   private layer: string | null = null;
   /** 浮层期望可见态（`visible` 只是初始值；`toggle` 需要运行时当前态）。 */
   private readonly overlayState = new Map<string, boolean>();
+  /**
+   * 组收起态记忆（`toggle` 指向标签组时需要"当前态"才能取反；
+   * `collapse`/`expand` 会同步它，避免 toggle 与显式动作互相打架）。
+   */
+  private readonly groupCollapsed = new Map<string, boolean>();
 
   /**
    * 清空浮层"已应用"记忆。
@@ -134,11 +139,6 @@ export class BlueprintEngine {
     this.log(`[engine] setLayer ${layerKey ?? "(all)"}`);
   }
 
-  /** 当前层 key。 */
-  currentLayer(): string | null {
-    return this.layer;
-  }
-
   /** 设置当前生效蓝图（仓库默认或内置默认；null = 无蓝图）。 */
   setGraph(graph: BlueprintGraph | null): void {
     this.graph = graph;
@@ -154,11 +154,6 @@ export class BlueprintEngine {
           : "-"
       }`,
     );
-  }
-
-  /** 当前是否已装载蓝图。 */
-  hasGraph(): boolean {
-    return this.graph !== null;
   }
 
   /** 事件分发入口：按 trigger + target 匹配**当前层**的事件节点并求值。 */
@@ -235,7 +230,13 @@ export class BlueprintEngine {
       return node.media_type === target.mediaType;
     }
     if (node.type === "object") {
-      if (node.scope && node.scope !== scope) {
+      // `scope` 既可以是三个交互关键字（clicked / double_clicked / selected），
+      // 也可以是**具体 file_id**（RFC 0007 决策 1）：后者只对上报的那个文件生效。
+      const scopeMatches =
+        !node.scope ||
+        node.scope === scope ||
+        (target.fileId !== undefined && node.scope === target.fileId);
+      if (!scopeMatches) {
         return false;
       }
       const classNode = node.class
@@ -369,15 +370,24 @@ export class BlueprintEngine {
         } else if (target?.type === "control" && target.panel_id) {
           executor.togglePanel(target.panel_id, true);
         } else if (target?.type === "group") {
+          // 标签组的 toggle = 收起/展开**取反**（RFC 0007 决策 7：切换→面板控件/标签组）。
+          // 取反需要"当前态"，因此按组记忆（显式 collapse/expand 会同步该记忆）。
+          const nextCollapsed = !(this.groupCollapsed.get(target.key) ?? false);
+          this.groupCollapsed.set(target.key, nextCollapsed);
           const members = this.groupMemberPanelIds(target.key, graph);
           if (members.length > 0) {
-            executor.collapsePanels(members);
+            if (nextCollapsed) {
+              executor.collapsePanels(members);
+            } else {
+              executor.expandPanels(members);
+            }
           }
         }
         break;
       }
       case "collapse": {
         if (target?.type === "group") {
+          this.groupCollapsed.set(target.key, true);
           const members = this.groupMemberPanelIds(target.key, graph);
           if (members.length > 0) {
             executor.collapsePanels(members);
@@ -387,6 +397,7 @@ export class BlueprintEngine {
       }
       case "expand": {
         if (target?.type === "group") {
+          this.groupCollapsed.set(target.key, false);
           const members = this.groupMemberPanelIds(target.key, graph);
           if (members.length > 0) {
             executor.expandPanels(members);
@@ -396,13 +407,10 @@ export class BlueprintEngine {
       }
       case "navigate": {
         // 界面跳转（D48）：目标是界面节点；界面与层 1:1（D51），因此跳转 = 切到该层。
-        // 未接通（界面被软删除/层无根）时不执行——由校验/画布灰显提示。
+        // 层归属走 `nodeLayerKey`（含单层兜底，D58）：旧/兜底文档的界面节点可以没有 `layer`
+        // 字段，直接读裸字段会把这类文档的跳转误判为"未接通"。
         if (target?.type === "interface") {
-          const layerKey = target.layer;
-          if (!layerKey) {
-            this.log(`[engine] navigate 跳过：界面 ${target.key} 缺 layer（未接通）`);
-            break;
-          }
+          const layerKey = nodeLayerKey(graph, target);
           if (this.layer === layerKey) {
             this.log(`[engine] navigate 幂等：已在层 ${layerKey}`);
             break;
@@ -568,20 +576,16 @@ export class BlueprintEngine {
     return ids;
   }
 
-  /** 蓝图图文档解析（容错：失败返回 null）。 */
+  /**
+   * 蓝图图文档解析（**解析层校验**，RFC 0007 决策 6）。
+   *
+   * 非法文档返回 `null`：调用方（`blueprintRuntime`）据此回退内置默认蓝图并提示用户，
+   * 而不是把一个取值域非法的文档直接执行（RFC 0007 决策 3）。
+   */
   static parse(json: string): BlueprintGraph | null {
-    try {
-      return JSON.parse(json) as BlueprintGraph;
-    } catch {
-      return null;
-    }
+    return parseBlueprintDocument(json);
   }
 }
 
 /** 全局单例引擎（应用装配层注入 executor，仓库切换时装载蓝图）。 */
 export const blueprintEngine = new BlueprintEngine();
-
-/** 供调试/测试：边按 (from, kind, to) 定位。 */
-export function edgeSignature(e: BlueprintEdge): string {
-  return `${e.from}--${e.kind}-->${e.to}`;
-}

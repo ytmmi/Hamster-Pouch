@@ -1,22 +1,25 @@
 /**
- * 蓝图 → dockview 布局对账（RFC 0007 决策 3 / D29）。
+ * 蓝图 → dockview 布局对账（RFC 0007 决策 3 / D29 / D51）。
  *
  * 蓝图在 `layout.*`（D1）给出的面板位置/大小/分组结构**基准**之上叠加：
  * 标签组（互斥组）默认可见成员、组的收起/展开（= 最小化至 `PANEL_MIN_SIZE`，
  * 标签条保留、组结构不删除）。本模块只做"对账"：把蓝图语义套到**当前** dockview
  * 布局上，不重写布局持久化机制本身。
  *
- * 对账时机（防漂移）：仓库切换 / 蓝图保存后热更新 / 套用布局 / 语言或主题引起的重渲染。
+ * 对账时机（防漂移）：仓库切换 / 蓝图保存后热更新 / 套用布局 / 切层 / 语言或主题引起的重渲染。
+ * **只对账当前层**（D51/D54）：非当前层的组与动作属于别的页面，套到当前布局上就是漂移。
  *
  * 设计取舍：
  * - 收起（collapse）由 `group.api.setSize(PANEL_MIN_SIZE)` 表达：dockview 会把释放的
  *   空间按网格规则分给相邻组（D29「组拉伸」）；`hide_direction` 的精确邻居选择属
  *   实现期开放点，当前映射为"缩小本组 → 由网格吸收"。
  * - 只动成员面板齐全的组；不碰浮动组（避免把用户浮动出来的面板塞回网格）。
+ * - 收起/展开的尺寸记忆集中在 `collapseGroup` / `expandGroup`，供引擎的
+ *   `collapse`/`expand`/`hide` 动作共用（同一份实现，避免"恢复不了原尺寸"）。
  */
 
 import type { BlueprintGraph, BlueprintNode } from "@hamster-pouch/config";
-import { PANEL_MIN_SIZE } from "@hamster-pouch/config";
+import { PANEL_MIN_SIZE, edgesOfLayer, nodeLayerKey, nodesOfLayer } from "@hamster-pouch/config";
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 
 /** 收起前的组尺寸（按 dockview 组 id 记忆，`expand` 时恢复）。 */
@@ -40,6 +43,25 @@ const COLLAPSED_SIZE = {
 
 /** 展开时的兜底尺寸（无记录时使用）。 */
 const EXPAND_FALLBACK = { width: 480, height: 320 };
+
+/**
+ * 取**某一层**的图视图（`layerKey` 为空 = 不限层，单层兜底文档与旧调用照旧）。
+ *
+ * 对账只作用于当前层：别的层的组节点与动作节点不属于正在显示的页面（D51/D54）。
+ */
+function scopedGraph(
+  graph: BlueprintGraph,
+  layerKey: string | null | undefined,
+): BlueprintGraph {
+  if (!layerKey) {
+    return graph;
+  }
+  return {
+    ...graph,
+    nodes: nodesOfLayer(graph, layerKey),
+    edges: edgesOfLayer(graph, layerKey),
+  };
+}
 
 /** 蓝图组 → 当前 dockview 组的映射（取命中成员最多的那个组）。 */
 function matchGroups(
@@ -144,22 +166,29 @@ function declaredGroupStates(graph: BlueprintGraph): {
   return { collapsed, expanded };
 }
 
-/** 收起一个 dockview 组：记忆原尺寸并压到 `PANEL_MIN_SIZE`（正文 6px、标签条保留）。 */
-function collapseGroup(group: DockviewGroupPanel): void {
+/**
+ * 收起一个 dockview 组：记忆原尺寸并压到 `PANEL_MIN_SIZE`（正文 6px、标签条保留）。
+ *
+ * 供本模块的对账与引擎的 `collapse` / `hide` 动作**共用**（同一份尺寸记忆，
+ * 否则 `expand` 恢复不到收起前的尺寸分布，RFC 0007 决策 3）。
+ * 重复收起不会覆盖已记忆的原尺寸（第二次的 boundingBox 已经是收起后的）。
+ */
+export function collapseGroup(group: DockviewGroupPanel): void {
   const box = group.api.boundingBox;
-  if (box && box.width > 0 && box.height > 0) {
+  if (!expandedSizes.has(group.id) && box && box.width > 0 && box.height > 0) {
     expandedSizes.set(group.id, { width: box.width, height: box.height });
   }
   try {
     group.api.setSize({ ...COLLAPSED_SIZE });
   } catch {
-    /* dockview 网格约束下忽略 */
+    // dockview 网格约束下忽略：**不关闭面板**（RFC 0007：隐藏 = 收起，不是关闭）。
   }
 }
 
-/** 展开一个 dockview 组：恢复收起前尺寸（无记录用兜底尺寸）。 */
-function expandGroup(group: DockviewGroupPanel): void {
+/** 展开一个 dockview 组：恢复收起前的尺寸（无记录用兜底尺寸），并清掉记忆。 */
+export function expandGroup(group: DockviewGroupPanel): void {
   const saved = expandedSizes.get(group.id) ?? EXPAND_FALLBACK;
+  expandedSizes.delete(group.id);
   try {
     group.api.setSize({ width: saved.width, height: saved.height });
   } catch {
@@ -169,9 +198,16 @@ function expandGroup(group: DockviewGroupPanel): void {
 
 /**
  * 按蓝图对账当前布局（幂等；无蓝图或无可映射组时不动布局）。
+ *
+ * `layerKey` = 当前层（D51/D54）：只对账该层的组；`null`/省略 = 不限层
+ * （单层兜底文档，或调用方明确要对账整篇文档）。
  * 返回对账摘要（供状态栏/调试，不参与业务）。
  */
-export function reconcileLayout(graph: BlueprintGraph | null, dv: DockviewApi | null): {
+export function reconcileLayout(
+  graph: BlueprintGraph | null,
+  dv: DockviewApi | null,
+  layerKey?: string | null,
+): {
   groups: number;
   activated: number;
   collapsed: number;
@@ -179,8 +215,9 @@ export function reconcileLayout(graph: BlueprintGraph | null, dv: DockviewApi | 
   if (!graph || !dv) {
     return { groups: 0, activated: 0, collapsed: 0 };
   }
-  const matched = matchGroups(graph, dv);
-  const { collapsed, expanded } = declaredGroupStates(graph);
+  const scoped = scopedGraph(graph, layerKey);
+  const matched = matchGroups(scoped, dv);
+  const { collapsed, expanded } = declaredGroupStates(scoped);
 
   let activated = 0;
   let collapsedCount = 0;
@@ -189,7 +226,7 @@ export function reconcileLayout(graph: BlueprintGraph | null, dv: DockviewApi | 
     const activeBefore = group.activePanel?.id ?? "-";
     if (node.mode === "exclusive" && (node.default_visible?.length ?? 0) > 0) {
       for (const key of node.default_visible ?? []) {
-        const panelId = graph.nodes.find((n) => n.key === key)?.panel_id;
+        const panelId = scoped.nodes.find((n) => n.key === key)?.panel_id;
         const panel = panelId ? group.panels.find((p) => p.id === panelId) : undefined;
         if (panel) {
           panel.api.setActive();
@@ -199,7 +236,7 @@ export function reconcileLayout(graph: BlueprintGraph | null, dv: DockviewApi | 
       }
     }
     logger?.(
-      `[reconcile] group=${node.key} mode=${node.mode ?? "-"} default=${(node.default_visible ?? []).join("|") || "-"} dockviewGroup=${group.id} active=${activeBefore}→${group.activePanel?.id ?? "-"} members=[${group.panels
+      `[reconcile] layer=${layerKey ?? "(all)"} group=${node.key} mode=${node.mode ?? "-"} default=${(node.default_visible ?? []).join("|") || "-"} dockviewGroup=${group.id} active=${activeBefore}→${group.activePanel?.id ?? "-"} members=[${group.panels
         .map((p) => p.id)
         .join(", ")}] collapse=${collapsed.has(node.key)} expand=${expanded.has(node.key)}`,
     );
@@ -212,6 +249,26 @@ export function reconcileLayout(graph: BlueprintGraph | null, dv: DockviewApi | 
     }
   }
   return { groups: matched.length, activated, collapsed: collapsedCount };
+}
+
+/** 某层的组节点数（供状态/调试；不计入对账副作用）。 */
+export function groupCountOfLayer(
+  graph: BlueprintGraph | null,
+  layerKey: string | null | undefined,
+): number {
+  if (!graph) {
+    return 0;
+  }
+  return scopedGraph(graph, layerKey).nodes.filter((n) => n.type === "group").length;
+}
+
+/** 当前层内"某节点是否属于该层"（供面板按层过滤候选时复用同一口径）。 */
+export function isInLayer(
+  graph: BlueprintGraph,
+  node: BlueprintNode,
+  layerKey: string | null | undefined,
+): boolean {
+  return !layerKey || nodeLayerKey(graph, node) === layerKey;
 }
 
 /** 清空收起尺寸记忆（仓库切换 / 套用布局后调用）。 */

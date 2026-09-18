@@ -17,6 +17,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { PANEL_MIN_SIZE, resolveOverlayPosition, SETTING_KEYS } from "@hamster-pouch/config";
 import { normalizeLayoutJson } from "../shared/panelLayout";
+import { collapseGroup, expandGroup } from "../shared/blueprintLayout";
 import {
   activeBlueprintId,
   loadActiveBlueprint,
@@ -24,6 +25,7 @@ import {
   notifyBlueprintChangedLocally,
   reconcileActiveBlueprint,
   reconcileAfterLayoutApplied,
+  setBlueprintFallbackNotifier,
   subscribeBlueprintHotReload,
   switchLayer,
 } from "../shared/blueprintRuntime";
@@ -226,7 +228,8 @@ export function AppUiApp(): JSX.Element {
       },
       hidePanel: (panelId: string) => {
         // 显式 hide 动作（用户蓝图规则）：与最近显示面板同 dockview 组时跳过
-        // （标签激活已切换）；跨组则收缩至最小尺寸（标签条保留，D25/D29）。
+        // （标签激活已切换）；跨组则**收起至最小尺寸**（正文 6px、标签条保留，D25/D29）。
+        // RFC 0007 决策 3：隐藏 = 收起，**不是关闭**，不销毁面板/标签。
         const dv = apiRef.current;
         if (!dv) {
           return;
@@ -241,16 +244,12 @@ export function AppUiApp(): JSX.Element {
         if (shown && panel.api.group.id === shown.api.group.id) {
           return;
         }
-        try {
-          panel.api.setSize({
-            width: PANEL_MIN_SIZE.minimumWidth,
-            height: PANEL_MIN_SIZE.minimumHeight,
-          });
-        } catch {
-          panel.api.close();
-        }
+        collapseGroup(panel.api.group);
       },
       togglePanel: (panelId: string, floating: boolean) => {
+        // toggle 语义（RFC 0007）：**取反**。面板不存在 → 显示；已存在 → 关闭。
+        // 与 hide（收起、不销毁）区分：toggle 需要一个"存在/不存在"的判据，
+        // 引擎无面板状态记忆，因此此处以 dockview 的存在性作为当前态。
         const dv = apiRef.current;
         if (!dv) {
           return;
@@ -271,16 +270,10 @@ export function AppUiApp(): JSX.Element {
           if (!panel) {
             continue;
           }
-          try {
-            // 组的隐藏 = 最小化至最小尺寸（正文 6px、标签条保留，D25）；
-            // 隐藏方向/相邻组拉伸的 dockview 映射属实现期开放点（RFC 0007）。
-            panel.api.setSize({
-              width: PANEL_MIN_SIZE.minimumWidth,
-              height: PANEL_MIN_SIZE.minimumHeight,
-            });
-          } catch {
-            /* dockview 网格约束下忽略 */
-          }
+          // 组的隐藏 = 最小化至最小尺寸（正文 6px、标签条保留，D25）；
+          // 与布局对账共用同一份"收起前尺寸"记忆，保证 expand 能恢复（RFC 0007 决策 3）。
+          // 隐藏方向/相邻组拉伸的 dockview 映射属实现期开放点。
+          collapseGroup(panel.api.group);
         }
       },
       expandPanels: (panelIds: string[]) => {
@@ -293,11 +286,7 @@ export function AppUiApp(): JSX.Element {
           if (!panel) {
             continue;
           }
-          try {
-            panel.api.setSize({ width: 480, height: 320 });
-          } catch {
-            /* 忽略 */
-          }
+          expandGroup(panel.api.group);
         }
       },
       playFile: (fileId: string) => {
@@ -341,6 +330,21 @@ export function AppUiApp(): JSX.Element {
   useEffect(() => {
     blueprintEngine.setExecutor(blueprintExecutor);
   }, [blueprintExecutor]);
+
+  // 蓝图装载回退提示（RFC 0007 决策 3：无效文档回退内置默认时**必须提示用户**）。
+  useEffect(() => {
+    setBlueprintFallbackNotifier((reason) => {
+      status(
+        t(
+          reason === "invalid-document"
+            ? "blueprint.fallbackInvalid"
+            : "blueprint.fallbackFailed",
+        ),
+        "error",
+      );
+    });
+    return () => setBlueprintFallbackNotifier(null);
+  }, [status, t]);
 
   // 仓库切换：装载生效蓝图（无默认 → 种子内置默认，保证零回归）；装载后把蓝图语义
   // 对账到当前布局（默认可见标签 + 组收起/展开）。

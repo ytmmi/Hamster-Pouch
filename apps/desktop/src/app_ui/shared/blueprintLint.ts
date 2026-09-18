@@ -104,20 +104,3 @@ export function analyzeUnlinked(graph: BlueprintGraph): BlueprintUnlinkedMap {
   }
   return result;
 }
-
-/** 便捷：把分析结果写回节点（供画布渲染，返回新文档；不落库）。 */
-export function withUnlinkedFlags(graph: BlueprintGraph): BlueprintGraph {
-  const unlinked = analyzeUnlinked(graph);
-  return {
-    ...graph,
-    nodes: graph.nodes.map((n) => {
-      const next = { ...n, unlinked: undefined } as BlueprintNode;
-      if (unlinked[n.key]) {
-        next.unlinked = true;
-      } else {
-        delete next.unlinked;
-      }
-      return next;
-    }),
-  };
-}

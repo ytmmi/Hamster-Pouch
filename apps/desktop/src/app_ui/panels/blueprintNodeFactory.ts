@@ -46,8 +46,19 @@ export interface ParentHint {
   explicit?: boolean;
 }
 
-function firstOf(nodes: BlueprintNode[], type: BlueprintNodeType): string | undefined {
-  return nodes.find((n) => n.type === type)?.key;
+/**
+ * 取**同层**第一个指定类型节点的 key（跨层引用会被校验以硬错误拒绝，RFC 0007 决策 6）。
+ *
+ * `layer` 为空 = 不限层（旧调用/单层兜底文档）；节点缺 `layer` 时按该层归属看待，
+ * 与 `blueprintRuntime` 的当前层口径一致。
+ */
+function firstOfInLayer(
+  nodes: BlueprintNode[],
+  type: BlueprintNodeType,
+  layer: string | undefined,
+): string | undefined {
+  const pool = layer ? nodes.filter((n) => (n.layer ?? layer) === layer) : nodes;
+  return pool.find((n) => n.type === type)?.key;
 }
 
 /** 全局唯一的 key：`base` 已被占用则追加 `_2`、`_3`… */
@@ -238,7 +249,7 @@ function createAction(
 }
 
 /**
- * 取"可作为 type 上级"的既有节点 key。
+ * 取"可作为 type 上级"的既有节点 key（**只在同一层内兜底**）。
  *
  * 只有**层级**关系允许兜底复用（类→控件、对象→类：这属于"放在哪个容器/父级下"，
  * 使用者心里有数）；**规则链**（操作/条件/状态）一律不兜底——否则新节点会被悄悄
@@ -247,12 +258,13 @@ function createAction(
 function fallbackParent(
   doc: BlueprintGraph,
   type: BlueprintNodeType,
+  layer: string,
 ): string | undefined {
   switch (type) {
     case "class":
-      return firstOf(doc.nodes, "control");
+      return firstOfInLayer(doc.nodes, "control", layer);
     case "object":
-      return firstOf(doc.nodes, "class");
+      return firstOfInLayer(doc.nodes, "class", layer);
     default:
       return undefined;
   }
@@ -339,7 +351,7 @@ export function appendNode(
       break;
     }
     case "class": {
-      const controlKey = hinted ?? fallbackParent(work, "class");
+      const controlKey = hinted ?? fallbackParent(work, "class", layer);
       const parentForName = hinted;
       if (!controlKey) {
         const control = createControl(work, layer);
@@ -355,7 +367,7 @@ export function appendNode(
       break;
     }
     case "object": {
-      const classKey = hinted ?? fallbackParent(work, "object");
+      const classKey = hinted ?? fallbackParent(work, "object", layer);
       if (!classKey) {
         // 独立新增：补 控件 → 类 → 对象 一条最小链
         const control = createControl(work, layer);
@@ -374,7 +386,7 @@ export function appendNode(
     }
     case "event": {
       // 上级 = 对象；状态一并补上（否则操作是死节点）。
-      const objectKey = hinted ?? fallbackParent(work, "event");
+      const objectKey = hinted ?? fallbackParent(work, "event", layer);
       let objectForName = objectKey;
       if (!objectKey) {
         const control = createControl(work, layer);
@@ -392,13 +404,13 @@ export function appendNode(
         const control = createControl(work, layer);
         work = control.doc;
       }
-      const targetKey = firstOf(work.nodes, "control");
+      const targetKey = firstOfInLayer(work.nodes, "control", layer);
       const action = createAction(work, event.key, targetKey, layer, event.key);
       work = action.doc;
       break;
     }
     case "condition": {
-      const eventKey = hinted ?? fallbackParent(work, "condition");
+      const eventKey = hinted ?? fallbackParent(work, "condition", layer);
       let sourceEvent = eventKey;
       if (!sourceEvent) {
         const control = createControl(work, layer);
@@ -435,7 +447,7 @@ export function appendNode(
       break;
     }
     case "action": {
-      const eventKey = hinted ?? fallbackParent(work, "action");
+      const eventKey = hinted ?? fallbackParent(work, "action", layer);
       let sourceEvent = eventKey;
       if (!sourceEvent) {
         const control = createControl(work, layer);
@@ -452,7 +464,7 @@ export function appendNode(
         const control = createControl(work, layer);
         work = control.doc;
       }
-      const targetKey = firstOf(work.nodes, "control");
+      const targetKey = firstOfInLayer(work.nodes, "control", layer);
       const action = createAction(work, sourceEvent, targetKey, layer, hinted ?? sourceEvent);
       work = action.doc;
       key = action.key;
@@ -493,11 +505,15 @@ export function appendNode(
  * 推断新增节点该用谁当"上级"（决定自动 key 与自动引用）：由**当前选中节点**沿上级链找
  * 第一个类型匹配的节点。返回 `explicit` 标记，表示"这是使用者表达过的意图"，
  * 工厂据此**不做**跨链路兜底复用。
+ *
+ * `layerKey` = 当前层（D51）：未选中时的层内兜底只在该层里找，
+ * 避免在多层文档里把新节点挂到别的层（跨层引用是硬错误，RFC 0007 决策 6）。
  */
 export function parentHintFor(
   type: BlueprintNodeType,
   selectedKey: string | null,
   doc: BlueprintGraph,
+  layerKey?: string | null,
 ): ParentHint | null {
   if (!selectedKey) {
     // 未选中：普通层级（类/对象）可以兜底挂到已有控件/类；规则链节点不兜底，
@@ -511,7 +527,7 @@ export function parentHintFor(
     if (allowed.length === 0) {
       return null;
     }
-    const key = firstOf(doc.nodes, allowed[0]);
+    const key = firstOfInLayer(doc.nodes, allowed[0], layerKey?.trim() || undefined);
     return key ? { key } : null;
   }
   const wanted: BlueprintNodeType[] =

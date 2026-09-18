@@ -12,7 +12,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -24,7 +24,7 @@ const factory = await import(
     .href
 );
 const config = await import(
-  pathToFileURL(join(ROOT, "packages/config/src/blueprint.ts")).href
+  pathToFileURL(join(ROOT, "packages/config/src/index.ts")).href
 );
 
 const results = [];
@@ -34,6 +34,15 @@ const check = (label, ok, detail = "") => {
 };
 
 mkdirSync(FIXTURE_DIR, { recursive: true });
+// 夹具目录**只由本脚本产出**（RFC 0007「验证」：夹具由脚本写盘，两侧不手工维护）：
+// 先清掉旧文件，避免上一次运行留下、这一次不再生成的陈旧夹具被
+// `crates/hp-store/tests/m6_blueprint.rs` 的目录扫描当成有效夹具反复校验
+// （历史残留过 4 份 v1 文档，即 D47/D51 之前的形状）。
+for (const stale of readdirSync(FIXTURE_DIR)) {
+  if (stale.endsWith(".json")) {
+    rmSync(join(FIXTURE_DIR, stale));
+  }
+}
 const written = [];
 const writeFixture = (name, doc) => {
   // 夹具是"用户图"样本，必须去掉内置默认标记 `default_version`：

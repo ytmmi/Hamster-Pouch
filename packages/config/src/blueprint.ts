@@ -1,9 +1,13 @@
 /**
- * 蓝图（RFC 0007 / D28-D60）前端共享配置：
- * 节点/边类型、常量、分层与浮层辅助函数、内置默认蓝图（复现现状硬编码联动，保证零回归）。
+ * 蓝图（RFC 0007 / D28-D60）前端共享配置：**图文档类型、取值域常量、分层工具、
+ * 解析层校验、用户保存/旧默认识别**。
  *
- * 蓝图文档整 JSON 存储（save = 整文档替换），语义校验由后端 `blueprint.validate` 承担；
- * 本文件只承载图结构类型、枚举常量、分层/浮层工具与内置默认图。
+ * 蓝图文档整 JSON 存储（save = 整文档替换），**业务级**校验由后端 `blueprint.validate`
+ * 承担；本文件承担的是**解析层**（取值域/结构）校验与编辑器共用的纯函数。
+ *
+ * 同一功能域的其余部分按职责分文件（`file-structure.md`：单文件单一职责）：
+ * - `blueprintOverlay.ts` —— 浮层外观档位与相对定位纯函数（RFC 0007 浮层节点）；
+ * - `blueprintDefault.ts` —— 内置默认图与空图（Rust 夹具的权威来源）。
  */
 
 export const BLUEPRINT_SCHEMA_VERSION = 2;
@@ -11,149 +15,18 @@ export const BLUEPRINT_SCHEMA_VERSION = 2;
 /** 当前内置默认蓝图版本（引擎据此自动升级旧库存默认）。 */
 export const DEFAULT_BLUEPRINT_VERSION = 7;
 
+// 浮层的取值域与几何纯函数在 `blueprintOverlay.ts`：这里只消费其取值域做解析层校验。
+import {
+  OVERLAY_ANCHORS,
+  TOKEN_LEVELS,
+  type OverlayAnchor,
+  type TokenLevel,
+} from "./blueprintOverlay";
+
 /** 浮层高度参数范围（D57：默认 1，范围 1–10，值大者在上；不是像素高度）。 */
 export const OVERLAY_HEIGHT_MIN = 1;
 export const OVERLAY_HEIGHT_MAX = 10;
 
-/**
- * 浮层外观档位可选值（D50 修订 / D44）：只允许取**宿主设计 token 档位**，
- * 像素由 `packages/ui` 的设计 token 决定，蓝图不写死像素（保证浅色/深色一致）。
- */
-export const TOKEN_LEVELS = ["none", "sm", "md", "lg"] as const;
-export type TokenLevel = (typeof TOKEN_LEVELS)[number];
-
-/**
- * 浮层锚点（3×3 井字，D50 修订）：浮层相对**界面（宿主内容区）**的对齐位置。
- *
- * `top_*` 表示浮层上边贴界面上边、`*_center` 表示水平居中、`bottom_*` 表示下边贴界面下边
- * …… 依此类推。默认 `center`（居中）。
- */
-export const OVERLAY_ANCHORS = [
-  "top_left",
-  "top_center",
-  "top_right",
-  "middle_left",
-  "center",
-  "middle_right",
-  "bottom_left",
-  "bottom_center",
-  "bottom_right",
-] as const;
-export type OverlayAnchor = (typeof OVERLAY_ANCHORS)[number];
-
-/** 缺省锚点（未写 `anchor` 时按居中处理）。 */
-export const DEFAULT_OVERLAY_ANCHOR: OverlayAnchor = "center";
-
-/**
- * 浮层**默认最小尺寸**（px，2026-09 用户规定）：未指定尺寸时按此值，
- * 指定值小于它时按此值夹紧（不阻塞保存，宿主按最小尺寸显示）。
- */
-export const OVERLAY_MIN_SIZE = { width: 240, height: 160 } as const;
-
-/** 浮层尺寸上限（px）：超过即后端硬错误。 */
-export const OVERLAY_MAX_SIZE = 10000;
-
-/**
- * 解析浮层的实际框体尺寸：缺省取**默认最小尺寸**，不足最小值时夹紧到最小值。
- * （与 `height` 区分：`height` 是叠放高度参数 1–10，不是像素。）
- */
-export function resolveOverlaySize(size?: {
-  width?: number;
-  height?: number;
-}): { width: number; height: number } {
-  const width = Number.isFinite(size?.width) ? (size!.width as number) : 0;
-  const height = Number.isFinite(size?.height) ? (size!.height as number) : 0;
-  return {
-    width: Math.max(OVERLAY_MIN_SIZE.width, Math.round(width)),
-    height: Math.max(OVERLAY_MIN_SIZE.height, Math.round(height)),
-  };
-}
-
-/** 尺寸展示文案（如 `420×300`）。 */
-export function overlaySizeLabel(size?: { width?: number; height?: number }): string {
-  if (!size || (!Number.isFinite(size.width) && !Number.isFinite(size.height))) {
-    return `${OVERLAY_MIN_SIZE.width}×${OVERLAY_MIN_SIZE.height}`;
-  }
-  const resolved = resolveOverlaySize(size);
-  return `${resolved.width}×${resolved.height}`;
-}
-
-/** 锚点的水平/垂直分量：起 / 中 / 末。 */
-export function anchorAxis(
-  anchor: OverlayAnchor,
-): { horizontal: "start" | "middle" | "end"; vertical: "start" | "middle" | "end" } {
-  const horizontal = anchor.endsWith("_left")
-    ? "start"
-    : anchor.endsWith("_right")
-      ? "end"
-      : "middle";
-  const vertical = anchor.startsWith("top_")
-    ? "start"
-    : anchor.startsWith("bottom_")
-      ? "end"
-      : "middle";
-  return { horizontal, vertical };
-}
-
-/**
- * 偏移量 → 像素（**双模式**，用户规定的口径）：
- * - `|value| ≤ 1` → 视为**参照系尺寸的比例**（0.25 = 25% 宽/高，可为负）；
- * - `|value| > 1` → 视为**像素**（24 = 24px，可为负）。
- */
-export function overlayOffsetToPx(value: number, span: number): number {
-  return Math.abs(value) <= 1 ? value * span : value;
-}
-
-/** 偏移量的展示文案（比例显示为百分比，像素显示为 `Npx`）。 */
-export function overlayOffsetLabel(value: number | undefined): string {
-  if (value === undefined || value === 0) {
-    return "0";
-  }
-  return Math.abs(value) <= 1
-    ? `${Math.round(value * 100)}%`
-    : `${Math.round(value)}px`;
-}
-
-/**
- * 按锚点 + 偏移算出浮层在界面内容区里的**左上角坐标**（px）。
- *
- * 计算顺序：先按锚点对齐（起=0、中=居中、末=贴另一侧），再叠加偏移
- * （比例偏移相对**界面内容区**的宽 / 高换算），最后**贴边收拢**——浮层不得溢出界面。
- * 浮层自身尺寸由宿主按内容与设计 token 决定，因此作为入参传入。
- */
-export function resolveOverlayPosition(input: {
-  anchor?: OverlayAnchor;
-  offsetX?: number;
-  offsetY?: number;
-  /** 参照系（界面内容区）尺寸，px。 */
-  area: { width: number; height: number };
-  /** 浮层自身尺寸，px。 */
-  size: { width: number; height: number };
-}): { x: number; y: number } {
-  const { area, size } = input;
-  const { horizontal, vertical } = anchorAxis(input.anchor ?? DEFAULT_OVERLAY_ANCHOR);
-  const baseX =
-    horizontal === "start"
-      ? 0
-      : horizontal === "middle"
-        ? (area.width - size.width) / 2
-        : area.width - size.width;
-  const baseY =
-    vertical === "start"
-      ? 0
-      : vertical === "middle"
-        ? (area.height - size.height) / 2
-        : area.height - size.height;
-  const x = baseX + overlayOffsetToPx(input.offsetX ?? 0, area.width);
-  const y = baseY + overlayOffsetToPx(input.offsetY ?? 0, area.height);
-  // 越界贴边收拢（控件标准：浮层不得溢出宿主窗口）。
-  const maxX = Math.max(0, area.width - size.width);
-  const maxY = Math.max(0, area.height - size.height);
-  return {
-    x: Math.round(Math.min(maxX, Math.max(0, x))),
-    y: Math.round(Math.min(maxY, Math.max(0, y))),
-  };
-}
 
 /** 单层兜底时使用的层 key / 层名（与 hp-core `BlueprintGraph::FALLBACK_LAYER_*` 一致）。 */
 export const FALLBACK_LAYER_KEY = "l_main";
@@ -161,35 +34,55 @@ export const FALLBACK_LAYER_NAME = "主界面";
 
 // ============================== 类型 ==============================
 
-export type BlueprintNodeType =
-  | "interface"
-  | "layout_block"
-  /** 浮层（D50）：浮动控件的显隐载体，与布局块同级、是叶子节点。 */
-  | "overlay"
-  | "control"
-  | "class"
-  | "object"
-  | "group"
-  | "event"
-  | "condition"
-  | "action";
+/**
+ * 节点类型取值域（RFC 0007 决策 1 / D46/D47/D50）——编辑器下拉、画布端口表与
+ * **解析层校验**（`parseBlueprintDocument`）共用同一份清单，避免三处各写一遍。
+ */
+export const BLUEPRINT_NODE_TYPES = [
+  "interface",
+  "layout_block",
+  /**
+   * 浮层（D50 修订）：与布局块同级的**容器**（界面 ⊃ 浮层 ⊃ 面板控件/标签组），
+   * 承载外观档位与相对定位；2026-09 取消「浮动控件」绑定。
+   */
+  "overlay",
+  "control",
+  "class",
+  "object",
+  "group",
+  "event",
+  "condition",
+  "action",
+] as const;
 
-export type BlueprintTrigger = "click" | "double_click" | "selection_change";
+export type BlueprintNodeType = (typeof BLUEPRINT_NODE_TYPES)[number];
 
-export type BlueprintActionOp =
-  | "show"
-  | "hide"
-  | "toggle"
-  | "collapse"
-  | "expand"
-  /** 界面跳转：切换到目标界面（页面），D48。 */
-  | "navigate";
+/** 触发取值域（事件节点 `trigger`）。 */
+export const BLUEPRINT_TRIGGERS = ["click", "double_click", "selection_change"] as const;
+export type BlueprintTrigger = (typeof BLUEPRINT_TRIGGERS)[number];
 
-export type BlueprintGroupMode = "exclusive" | "independent";
+/** 动作取值域（动作节点 `op`；含界面跳转 `navigate`，D48）。 */
+export const BLUEPRINT_ACTION_OPS = [
+  "show",
+  "hide",
+  "toggle",
+  "collapse",
+  "expand",
+  "navigate",
+] as const;
+export type BlueprintActionOp = (typeof BLUEPRINT_ACTION_OPS)[number];
 
-export type BlueprintEdgeKind = "contains" | "memberOf" | "on" | "fires" | "guards";
+/** 组模式取值域（组节点 `mode`）。 */
+export const BLUEPRINT_GROUP_MODES = ["exclusive", "independent"] as const;
+export type BlueprintGroupMode = (typeof BLUEPRINT_GROUP_MODES)[number];
 
-export type BlueprintMediaType = "image" | "video" | "audio";
+/** 边类型取值域（RFC 0007 决策 1）。 */
+export const BLUEPRINT_EDGE_KINDS = ["contains", "memberOf", "on", "fires", "guards"] as const;
+export type BlueprintEdgeKind = (typeof BLUEPRINT_EDGE_KINDS)[number];
+
+/** 媒体类型取值域（类节点 `media_type`；与后端校验同一最小集）。 */
+export const BLUEPRINT_MEDIA_TYPES = ["image", "video", "audio"] as const;
+export type BlueprintMediaType = (typeof BLUEPRINT_MEDIA_TYPES)[number];
 
 /** 组/控件目标锚点（画布编辑器定位 + 浮动/停靠）。 */
 export interface BlueprintPosition {
@@ -219,14 +112,14 @@ export interface BlueprintNode {
   title_key?: string;
   // class
   control?: string;
-  media_type?: string;
+  media_type?: BlueprintMediaType;
   // object
   class?: string;
   scope?: string;
   // group
   mode?: BlueprintGroupMode;
   default_visible?: string[];
-  hide_direction?: string;
+  hide_direction?: BlueprintHideDirection;
   position?: BlueprintPosition;
   // event
   trigger?: BlueprintTrigger;
@@ -315,6 +208,17 @@ export interface BlueprintTargetRef {
 
 /** 隐藏方向可选值（用于编辑器下拉）。 */
 export const HIDE_DIRECTIONS = ["left", "right", "up", "down"] as const;
+
+/** 隐藏方向的轴向取值（编辑器下拉提供的四个值）。 */
+export type HideDirectionAxis = (typeof HIDE_DIRECTIONS)[number];
+
+/**
+ * 组隐藏方向（D29）：轴向值，或 `toward:<groupKey>` 精确指定由哪个邻居吸收空间。
+ *
+ * 下拉只提供四个轴向值；`toward:<组 key>` 同样合法，由属性面板按同层标签组补充候选，
+ * 解析层与后端都接受该两种形态。
+ */
+export type BlueprintHideDirection = HideDirectionAxis | `toward:${string}`;
 
 /** 条件表达式支持的前缀（用于编辑器提示）。 */
 export const CONDITION_EXPR_HINTS = [
@@ -430,189 +334,184 @@ export function normalizeLayersForSave(doc: BlueprintGraph): BlueprintGraph {
 }
 
 
-// ============================== 内置默认蓝图 ==============================
+// ============================== 解析层校验（RFC 0007 决策 6） ==============================
 
-/**
- * 内置默认蓝图 v7：如实表达当前默认「媒体-测试」布局（RFC 0007 决策 5 / D32 / D47 / D51）。
- *
- * 结构（**单层**「主界面」：层 ⊃ 界面 ⊃ 布局块 ⊃ 标签组 ⊃ 面板控件；面板控件 ⊃ 类 ⊃ 对象）
- * —— 与仓库默认布局逐栏对应：
- * - 分层（D51）：`layers = [{ key: "l_main", name: "主界面" }]`，**每个节点都带 `layer`**；
- *   一个层 = 一张画布 = 一个界面（页面）；多页面由用户新增层与界面节点，
- *   并用 `navigate`（界面跳转，D48）连接；
- * - 层内的根是**界面节点** `ui`（界面显示名取自层名，D51：不再另存 `name`）；
- * - 左栏（blk_left）：**三个独立面板**，故直接含 仓库、图像源、相册 三个面板控件
- *   （该栏没有 dockview 标签组）；
- * - 中栏（blk_center）：**只有一个标签组** `g_media`，其成员为 媒体预览 / 查看器 /
- *   媒体播放（布局里就是同一个 leaf 的三个标签页）；媒体预览内部再分
- *   图像/视频/音频 类 → 各一个「双击」对象；
- * - 右栏（blk_right）：**只有一个标签组** `g_inspector`，成员为 色彩参考 /
- *   标签·评分 / 元数据（布局里同样是同一个 leaf 的三个标签页）。
- *
- * 术语（D46）：节点类型 `control` 在文档与 UI 中显示为**面板控件**，
- * 与 `docs/spec/control-standard.md` 的「控件」（宿主标准 UI 单元）区分；
- * 浮层（`overlay`，D50）是**容器**，直接包含面板控件/标签组（2026-09 取消「浮动控件」绑定），
- * 默认蓝图不含浮层。
- *
- * 规则（对象 → 操作 → 状态，全部连线）：
- * - 双击 图像·双击对象 → 显示 查看器；
- * - 双击 视频·双击对象 → 显示 播放器并播放（`payload.play`）；
- * - 双击 音频·双击对象 → 显示 元数据。
- *
- * 说明：
- * - **标签组优先**：某栏在布局里是一个 dockview 标签组时，布局块只连标签组，
- *   成员面板控件由标签组 `contains`；只有该栏由多个独立面板组成（如左栏）时，
- *   布局块才直接连面板控件。
- * - **界面节点只连布局块**（`ui → blk_left/blk_center/blk_right`），不直接连标签组/面板控件。
- * - 「媒体-测试」默认布局中 `tagtable`（tag表）与 `tasks`（任务）未挂载，故默认蓝图
- *   不含它们；用户需要时在编辑器中加 `control` 节点并放进标签组即可。
- * - `default_visible` 留空（不指定默认可见成员）：对账时保留布局自身的激活标签；
- *   `media` 与查看器/播放器同属 `g_media`，双击动作由「激活已存在面板」完成，
- *   不会因切换标签而把面板销毁。
- * - 节点 `position` 为画布世界坐标（界面一行、布局块一行、各栏一列），**互不重叠**，
- *   打开编辑器即可读清结构；拖拽后位置随文档落库（D30）。
- * - 旧版内置默认由引擎按 `default_version` 自动升级（v6 → v7 即引入分层那次升级）；
- *   不保留旧模式兼容。
- */
-export const DEFAULT_BLUEPRINT: BlueprintGraph = {
-  schema_version: BLUEPRINT_SCHEMA_VERSION,
-  default_version: DEFAULT_BLUEPRINT_VERSION,
-  layers: [{ key: "l_main", name: "主界面" }],
-  nodes: [
-    // 界面（顶层容器 / 页面）：一行，居中于三栏之上
-    { key: "ui", type: "interface", layer: "l_main", position: { x: 460, y: 40 } },
-
-    // 布局块（各栏一列，位于界面之下）
-    { key: "blk_left", type: "layout_block", layer: "l_main", name: "左栏", position: { x: 40, y: 170 } },
-    { key: "blk_center", type: "layout_block", layer: "l_main", name: "中栏", position: { x: 460, y: 170 } },
-    { key: "blk_right", type: "layout_block", layer: "l_main", name: "右栏", position: { x: 880, y: 170 } },
-
-    // 左栏面板控件（仓库 / 图像源 / 相册）
-    { key: "c_repo", type: "control", layer: "l_main", panel_id: "repo", title_key: "panel.repo", position: { x: 40, y: 300 } },
-    { key: "c_sources", type: "control", layer: "l_main", panel_id: "sources", title_key: "panel.sources", position: { x: 40, y: 430 } },
-    { key: "c_albums", type: "control", layer: "l_main", panel_id: "albums", title_key: "panel.albums", position: { x: 40, y: 560 } },
-
-    // 中栏：**只有标签组** g_media（媒体预览 / 查看器 / 媒体播放同属一个 dockview
-    // 标签组，对应布局里的一个 leaf），媒体预览内部再分 图像/视频/音频 类 → 对象。
-    { key: "g_media", type: "group", layer: "l_main", mode: "exclusive", name: "媒体·查看器·播放", position: { x: 460, y: 300 } },
-    { key: "c_media", type: "control", layer: "l_main", panel_id: "media", title_key: "panel.media", position: { x: 760, y: 300 } },
-    { key: "c_viewer", type: "control", layer: "l_main", panel_id: "viewer", title_key: "panel.viewer", position: { x: 760, y: 430 } },
-    { key: "c_player", type: "control", layer: "l_main", panel_id: "player", title_key: "panel.player", position: { x: 760, y: 560 } },
-    { key: "k_image", type: "class", layer: "l_main", control: "c_media", media_type: "image", position: { x: 1060, y: 300 } },
-    { key: "k_video", type: "class", layer: "l_main", control: "c_media", media_type: "video", position: { x: 1060, y: 430 } },
-    { key: "k_audio", type: "class", layer: "l_main", control: "c_media", media_type: "audio", position: { x: 1060, y: 560 } },
-    { key: "o_img", type: "object", layer: "l_main", class: "k_image", scope: "double_clicked", position: { x: 1360, y: 300 } },
-    { key: "o_vid", type: "object", layer: "l_main", class: "k_video", scope: "double_clicked", position: { x: 1360, y: 430 } },
-    { key: "o_aud", type: "object", layer: "l_main", class: "k_audio", scope: "double_clicked", position: { x: 1360, y: 560 } },
-
-    // 右栏：**只有标签组** g_inspector（色彩参考 / 标签·评分 / 元数据同属一个 dockview 标签组）
-    { key: "g_inspector", type: "group", layer: "l_main", mode: "exclusive", name: "色彩·标签·元数据", position: { x: 460, y: 720 } },
-    { key: "c_color", type: "control", layer: "l_main", panel_id: "color", title_key: "panel.color", position: { x: 760, y: 720 } },
-    { key: "c_tags", type: "control", layer: "l_main", panel_id: "tags", title_key: "panel.tags", position: { x: 760, y: 850 } },
-    { key: "c_metadata", type: "control", layer: "l_main", panel_id: "metadata", title_key: "panel.metadata", position: { x: 760, y: 980 } },
-
-    // 规则三元组：操作（由对象 on 边驱动）→ 状态
-    { key: "e_dbl_img", type: "event", layer: "l_main", trigger: "double_click", position: { x: 1660, y: 300 } },
-    { key: "e_dbl_vid", type: "event", layer: "l_main", trigger: "double_click", position: { x: 1660, y: 430 } },
-    { key: "e_dbl_aud", type: "event", layer: "l_main", trigger: "double_click", position: { x: 1660, y: 560 } },
-    { key: "a_show_viewer", type: "action", layer: "l_main", op: "show", target: "c_viewer", position: { x: 1960, y: 300 } },
-    { key: "a_show_player", type: "action", layer: "l_main", op: "show", target: "c_player", payload: { play: true }, position: { x: 1960, y: 430 } },
-    { key: "a_show_meta", type: "action", layer: "l_main", op: "show", target: "c_metadata", position: { x: 1960, y: 560 } },
-  ],
-  edges: [
-    // 界面 → 布局块（顶层容器收纳区域）
-    { from: "ui", to: "blk_left", kind: "contains", order: 1 },
-    { from: "ui", to: "blk_center", kind: "contains", order: 2 },
-    { from: "ui", to: "blk_right", kind: "contains", order: 3 },
-
-    // 布局块 → 内容（**标签组优先**：某栏在布局里就是一个 dockview 标签组时，
-    // 布局块只连该组，成员面板控件由标签组 contains；只有该栏由多个独立面板组成时，
-    // 布局块才直接连面板控件，如左栏）
-    { from: "blk_left", to: "c_repo", kind: "contains", order: 4 },
-    { from: "blk_left", to: "c_sources", kind: "contains", order: 5 },
-    { from: "blk_left", to: "c_albums", kind: "contains", order: 6 },
-    { from: "blk_center", to: "g_media", kind: "contains", order: 7 },
-    { from: "blk_right", to: "g_inspector", kind: "contains", order: 8 },
-
-    // 标签组 → 面板控件（标签组包含面板控件；中栏的媒体预览/查看器/播放同属一个标签组）
-    { from: "g_media", to: "c_media", kind: "contains", order: 9 },
-    { from: "g_media", to: "c_viewer", kind: "contains", order: 10 },
-    { from: "g_media", to: "c_player", kind: "contains", order: 11 },
-    { from: "g_inspector", to: "c_color", kind: "contains", order: 12 },
-    { from: "g_inspector", to: "c_tags", kind: "contains", order: 13 },
-    { from: "g_inspector", to: "c_metadata", kind: "contains", order: 14 },
-
-    // 面板控件 → 类（媒体预览内的类）
-    { from: "c_media", to: "k_image", kind: "contains", order: 15 },
-    { from: "c_media", to: "k_video", kind: "contains", order: 16 },
-    { from: "c_media", to: "k_audio", kind: "contains", order: 17 },
-
-    // 类 → 对象（类内的对象）
-    { from: "k_image", to: "o_img", kind: "contains", order: 18 },
-    { from: "k_video", to: "o_vid", kind: "contains", order: 19 },
-    { from: "k_audio", to: "o_aud", kind: "contains", order: 20 },
-
-    // 规则：对象 → 操作（on）→ 状态（fires）
-    { from: "o_img", to: "e_dbl_img", kind: "on", order: 21 },
-    { from: "o_vid", to: "e_dbl_vid", kind: "on", order: 22 },
-    { from: "o_aud", to: "e_dbl_aud", kind: "on", order: 23 },
-    { from: "e_dbl_img", to: "a_show_viewer", kind: "fires", order: 24 },
-    { from: "e_dbl_vid", to: "a_show_player", kind: "fires", order: 25 },
-    { from: "e_dbl_aud", to: "a_show_meta", kind: "fires", order: 26 },
-  ],
-};
-
-/** 空蓝图文档（新建蓝图起步用）。 */
-export function makeEmptyBlueprint(): BlueprintGraph {
-  return { schema_version: BLUEPRINT_SCHEMA_VERSION, nodes: [], edges: [] };
+/** 取值是否在给定清单内（解析层校验用）。 */
+function inList<T extends string>(list: readonly T[], value: unknown): value is T {
+  return typeof value === "string" && (list as readonly string[]).includes(value);
 }
 
 /**
- * 用户保存前的规范化：**去掉内置默认标记 `default_version`**，
- * 并清掉已取消的旧字段（`control_id`：2026-09 取消「浮动控件」绑定后不再有意义）。
+ * `hide_direction` 是否合法：`left` / `right` / `up` / `down`，或 `toward:<groupKey>`（D29）。
  *
- * `default_version` 的语义是"这份文档是随应用分发的内置默认蓝图、可按版本自动升级"。
- * 用户一旦在编辑器中编辑并保存（哪怕编辑的就是默认蓝图），它就不再是内置默认，
- * 必须停止自动升级，否则下次装载会被新版内置默认静默覆盖，用户改动白丢。
+ * `HIDE_DIRECTIONS` 只是编辑器下拉提供的四个轴向值；`toward:<组 key>` 属合法取值，
+ * 编辑器会原样保留（不认识的取值不允许进文档）。
  */
-export function forUserSave(doc: BlueprintGraph): BlueprintGraph {
-  const nodes = doc.nodes.map((node) => {
-    if (!("control_id" in node)) {
-      return node;
-    }
-    const { control_id: _retired, ...rest } = node as BlueprintNode & {
-      control_id?: string;
-    };
-    return rest as BlueprintNode;
-  });
-  const cleaned: BlueprintGraph = { ...doc, nodes };
-  if (cleaned.default_version === undefined) {
-    return cleaned;
-  }
-  const { default_version: _ignored, ...rest } = cleaned;
-  return rest;
-}
-
-/**
- * 旧版内置默认蓝图识别（用于自动升级为新版）。
- *
- * 规则：
- * - 带 `default_version` 且小于当前版本 → 旧库存内置默认（引擎种子写入，仅内置默认携带）；
- *   **v6 → v7** 的差异是引入**分层**（`layers` + 每个节点的 `layer`，D51），
- *   因此 v6 库存默认会被升级补齐分层；**v5 → v6** 是引入界面节点（D47）；
- * - 无版本号时只在**结构特征明确指向旧默认**（存在 `blk_*` → 旧分组 key 的 contains 边）
- *   才判定为旧默认。仅"有分组但无布局块"不算——那是用户自建的合法图，
- *   不能被静默覆盖；用户一旦在编辑器保存，`default_version` 会被移除（`forUserSave`）。
- */
-export function isObsoleteDefaultBlueprint(g: BlueprintGraph): boolean {
-  if (g.default_version !== undefined) {
-    return g.default_version < DEFAULT_BLUEPRINT_VERSION;
-  }
-  const legacyGroupKeys = ["g_viewers", "g_tags", "g_player"];
-  return g.edges.some(
-    (e) =>
-      e.kind === "contains" &&
-      e.from.startsWith("blk_") &&
-      legacyGroupKeys.includes(e.to),
+function isHideDirection(value: unknown): boolean {
+  return (
+    inList(HIDE_DIRECTIONS, value) ||
+    (typeof value === "string" &&
+      value.startsWith("toward:") &&
+      value.length > "toward:".length)
   );
 }
+
+/** 解析层校验单个节点（取值域非法返回 `null`）。 */
+function parseNode(value: unknown): BlueprintNode | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const node = value as Record<string, unknown>;
+  if (typeof node.key !== "string" || !node.key.trim()) {
+    return null;
+  }
+  if (!inList(BLUEPRINT_NODE_TYPES, node.type)) {
+    return null;
+  }
+  if (node.layer !== undefined && typeof node.layer !== "string") {
+    return null;
+  }
+  if (node.trigger !== undefined && !inList(BLUEPRINT_TRIGGERS, node.trigger)) {
+    return null;
+  }
+  if (node.op !== undefined && !inList(BLUEPRINT_ACTION_OPS, node.op)) {
+    return null;
+  }
+  if (node.mode !== undefined && !inList(BLUEPRINT_GROUP_MODES, node.mode)) {
+    return null;
+  }
+  if (node.media_type !== undefined && !inList(BLUEPRINT_MEDIA_TYPES, node.media_type)) {
+    return null;
+  }
+  if (node.hide_direction !== undefined && !isHideDirection(node.hide_direction)) {
+    return null;
+  }
+  if (node.anchor !== undefined && !inList(OVERLAY_ANCHORS, node.anchor)) {
+    return null;
+  }
+  if (node.shadow !== undefined && !inList(TOKEN_LEVELS, node.shadow)) {
+    return null;
+  }
+  if (node.radius !== undefined && !inList(TOKEN_LEVELS, node.radius)) {
+    return null;
+  }
+  return node as unknown as BlueprintNode;
+}
+
+/** 解析层校验单条边（取值域非法返回 `null`）。 */
+function parseEdge(value: unknown): BlueprintEdge | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const edge = value as Record<string, unknown>;
+  if (typeof edge.from !== "string" || typeof edge.to !== "string") {
+    return null;
+  }
+  if (!inList(BLUEPRINT_EDGE_KINDS, edge.kind)) {
+    return null;
+  }
+  return {
+    from: edge.from,
+    to: edge.to,
+    kind: edge.kind,
+    order: typeof edge.order === "number" ? edge.order : 0,
+  };
+}
+
+/** 解析层校验层清单（缺失返回 `undefined`，非法返回 `null`）。 */
+function parseLayers(value: unknown): BlueprintLayer[] | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const layers: BlueprintLayer[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") {
+      return null;
+    }
+    const layer = raw as Record<string, unknown>;
+    if (typeof layer.key !== "string" || !layer.key.trim()) {
+      return null;
+    }
+    if (typeof layer.name !== "string" || !layer.name.trim()) {
+      return null;
+    }
+    layers.push({ key: layer.key, name: layer.name });
+  }
+  return layers;
+}
+
+/**
+ * **解析层校验**（RFC 0007 决策 6）：把蓝图 JSON 文本解析为图文档；解析层非法返回 `null`。
+ *
+ * 承担责任的范围（与后端"解析层"口径一致）：
+ * - 文本不是 JSON 对象、`nodes`/`edges`/`layers` 结构不对；
+ * - 节点类型、`trigger`、`op`、`mode`、`media_type`、`hide_direction`、浮层锚点与
+ *   外观档位取值未知；
+ * - 边类型未知、端点不是字符串；
+ * - `schema_version` **高于**当前版本（更低版本由迁移处理，D58；缺失按当前版本兜底，
+ *   与 hp-core `#[serde(default)]` 一致）。
+ *
+ * **不**承担业务级硬错误（悬空边、环、引用存在但类型不符、每层多个界面…）：
+ * 那些由后端 `blueprint.validate` 在**保存前**判定；装载路径只做解析层拦截，
+ * 无法通过时由运行时回退内置默认蓝图（RFC 0007 决策 3：无效 → 回退 + 提示用户）。
+ */
+export function parseBlueprintDocument(json: string): BlueprintGraph | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const doc = value as Record<string, unknown>;
+  const schemaVersion =
+    doc.schema_version === undefined ? BLUEPRINT_SCHEMA_VERSION : doc.schema_version;
+  if (typeof schemaVersion !== "number" || !Number.isFinite(schemaVersion)) {
+    return null;
+  }
+  if (schemaVersion > BLUEPRINT_SCHEMA_VERSION) {
+    return null;
+  }
+  const rawNodes = doc.nodes ?? [];
+  const rawEdges = doc.edges ?? [];
+  if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) {
+    return null;
+  }
+  const nodes: BlueprintNode[] = [];
+  for (const raw of rawNodes) {
+    const node = parseNode(raw);
+    if (!node) {
+      return null;
+    }
+    nodes.push(node);
+  }
+  const edges: BlueprintEdge[] = [];
+  for (const raw of rawEdges) {
+    const edge = parseEdge(raw);
+    if (!edge) {
+      return null;
+    }
+    edges.push(edge);
+  }
+  const layers = parseLayers(doc.layers);
+  if (layers === null) {
+    return null;
+  }
+  const defaultVersion =
+    typeof doc.default_version === "number" ? doc.default_version : undefined;
+  const graph: BlueprintGraph = {
+    schema_version: schemaVersion,
+    nodes,
+    edges,
+    ...(layers ? { layers } : {}),
+    ...(defaultVersion !== undefined ? { default_version: defaultVersion } : {}),
+  };
+  return graph;
+}
+
+
