@@ -1,14 +1,102 @@
 //! 蓝图语义校验算法（RFC 0007 决策 6 / D28-D60）。
 //!
-//! 只承载**硬错误**（拒绝保存）的判定：节点字段、引用类型、边端点类型、求值链成环、
-//! 分层规则。数据模型在 `blueprint.rs`，未接通类**软告警**在 `BlueprintGraph::warnings`。
+//! 只承载**硬错误**（拒绝保存）的判定，且**全部**集中在本模块：节点字段、引用类型、
+//! 边端点类型、重复边、互斥组默认可见、求值链成环、分层规则。
+//! 图级入口是 `validate_graph`（由 `BlueprintGraph::validate` 转发）。
+//! 未接通类**软告警**（不阻塞保存）在 `blueprint_warnings.rs`；
+//! 数据模型在 `blueprint.rs` / `blueprint_node.rs` / `blueprint_types.rs`。
 
 use std::collections::{HashMap, HashSet};
 
 use crate::blueprint::{
-    ActionOp, BlueprintEdge, BlueprintGraph, BlueprintNode, EdgeKind, NodeType,
-    OVERLAY_HEIGHT_MAX, OVERLAY_HEIGHT_MIN, OVERLAY_MAX_SIZE,
+    BlueprintGraph, BLUEPRINT_SCHEMA_VERSION, OVERLAY_HEIGHT_MAX, OVERLAY_HEIGHT_MIN,
+    OVERLAY_MAX_SIZE,
 };
+use crate::blueprint_node::{BlueprintEdge, BlueprintNode};
+use crate::blueprint_types::{ActionOp, EdgeKind, GroupMode, NodeType};
+
+/// 图级校验入口：返回全部硬错误（空 = 有效，可保存）。
+///
+/// 判定顺序（与 RFC 0007 决策 6 的条目顺序一致）：版本闸门 → 节点 key 唯一 →
+/// 各节点字段/引用 → 边端点与类型 → 分层规则 → 互斥组默认可见 → 求值链无环。
+pub(crate) fn validate_graph(graph: &BlueprintGraph) -> Vec<String> {
+    let mut errors = Vec::new();
+
+    // 版本闸门：`>` 当前版本才是硬错误；更低版本先走迁移（D58），迁移后再校验。
+    if graph.schema_version > BLUEPRINT_SCHEMA_VERSION {
+        errors.push(format!(
+            "不支持的蓝图 schema 版本: {}（当前为 {}）",
+            graph.schema_version, BLUEPRINT_SCHEMA_VERSION
+        ));
+    }
+
+    // 节点 key 唯一
+    let mut seen = HashSet::new();
+    for node in &graph.nodes {
+        if node.key.trim().is_empty() {
+            errors.push("存在空 key 的节点".into());
+            continue;
+        }
+        if !seen.insert(node.key.clone()) {
+            errors.push(format!("节点 key 重复: {}", node.key));
+        }
+    }
+
+    let by_key: HashMap<&str, &BlueprintNode> =
+        graph.nodes.iter().map(|n| (n.key.as_str(), n)).collect();
+
+    // 各节点类型字段校验（硬错误）
+    for node in &graph.nodes {
+        validate_node(node, &by_key, &mut errors);
+    }
+
+    // 边校验（悬空、端点类型不符、重复）
+    let mut edge_seen = HashSet::new();
+    for edge in &graph.edges {
+        validate_edge(edge, &by_key, &mut errors);
+        if !edge_seen.insert((edge.from.clone(), edge.to.clone(), edge.edge_kind)) {
+            errors.push(format!(
+                "重复边: {} --{}--> {}",
+                edge.from, edge.edge_kind, edge.to
+            ));
+        }
+    }
+
+    // 分层规则（D51/D58/D60）：层 key/名、每层至多一个界面、节点 layer 归属、跨层边。
+    validate_layers(graph, &mut errors);
+
+    // 互斥组 default_visible 至多一个成员。
+    for node in &graph.nodes {
+        if node.node_type != NodeType::Group || node.mode != Some(GroupMode::Exclusive) {
+            continue;
+        }
+        if let Some(visible) = &node.default_visible {
+            if visible.len() > 1 {
+                errors.push(format!(
+                    "互斥组 {} 的 default_visible 至多一个成员（当前 {} 个）",
+                    node.key,
+                    visible.len()
+                ));
+            }
+        }
+    }
+
+    // fires/guards 求值子图必须无环（DAG）。
+    if let Some(cycle) = find_cycle(&graph.edges) {
+        errors.push(format!(
+            "fires/guards 求值链存在环: {}",
+            cycle
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(" -> ")
+        ));
+    }
+
+    // 「未接通」类软问题（缺引用、缺触发来源、无根层、浮层未连界面）不在此处报错，
+    // 见 `blueprint_warnings::collect`：删除关联节点后允许先存下中间状态。
+    errors
+}
 
 /// 校验单个节点字段与引用（硬错误）。
 pub(crate) fn validate_node(
@@ -301,10 +389,9 @@ pub(crate) fn validate_layers(graph: &BlueprintGraph, errors: &mut Vec<String>) 
                 "节点 {} 的 layer 不能为空（文档已分层，D51/D58）",
                 node.key
             )),
-            Some(k) if !seen_keys.contains(k) => errors.push(format!(
-                "节点 {} 的 layer 指向不存在的层: {k}",
-                node.key
-            )),
+            Some(k) if !seen_keys.contains(k) => {
+                errors.push(format!("节点 {} 的 layer 指向不存在的层: {k}", node.key))
+            }
             Some(_) => {}
         }
     }

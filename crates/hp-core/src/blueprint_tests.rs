@@ -1,3 +1,11 @@
+// 蓝图领域测试夹具（RFC 0007 / D28-D60），由 `blueprint.rs` 以 `include!` 挂载。
+//
+// 覆盖范围 = **蓝图这一个功能域**的全部纯逻辑：枚举往返、节点/边/层的 JSON 形态、
+// 图级校验（硬错误）、未接通软告警、分层兜底与 v1 → v2 迁移。
+// 因此本文件是一个功能域的单一测试文件，不按被测子模块再拆
+// （`file-structure.md`：是否需要拆分取决于职责是否杂乱，与行数无关）。
+//
+// 注：本文件用 `include!` 内联展开，故不使用内层文档注释（`//!`）。
 
 #[cfg(test)]
 mod tests {
@@ -442,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn warnings_report_layer_without_interface_and_unbound_overlay() {
+    fn warnings_report_rootless_layer_and_detached_overlay() {
         // 无根层（D55）：层内界面被软删除 → 软告警，不阻塞保存
         let rootless = BlueprintGraph::from_json(
             r#"{"schema_version":2,
@@ -740,7 +748,8 @@ mod tests {
     }
 
     #[test]
-    fn effective_layers_falls_back_to_single_layer() {        // 无 layers 的旧文档 → 单层兜底（层名取界面 name）
+    fn effective_layers_falls_back_to_single_layer() {
+        // 无 layers 的旧文档 → 单层兜底（层名取界面 name）
         let legacy = BlueprintGraph::from_json(
             r#"{"schema_version":1,"nodes":[
               {"key":"ui","type":"interface","name":"我的界面"}

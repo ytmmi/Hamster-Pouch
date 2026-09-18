@@ -18,6 +18,9 @@ uuid = { version = "1", features = ["v4"] }
 time = { version = "0.3", features = ["formatting"] }
 hp-core = { path = "../../../crates/hp-core" }
 hp-store = { path = "../../../crates/hp-store" }
+# 跨层 DTO：命令返回值/事件载荷的**单一事实来源**（docs/spec/shared-types.md），
+# 前端 packages/shared-types 由同一批类型生成，桥接层不得另起同形结构体。
+hp-dto = { path = "../../../crates/hp-dto" }
 hp-scanner = { path = "../../../crates/hp-scanner" }
 hp-media = { path = "../../../crates/hp-media" }
 hp-album = { path = "../../../crates/hp-album" }

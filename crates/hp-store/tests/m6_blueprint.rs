@@ -130,7 +130,7 @@ fn blueprint_crud_roundtrip_and_default() {
 
 #[test]
 fn blueprint_repo_isolation_across_repos() {
-    // 两个仓库库文件各自的蓝图互不可见（D30：定义按仓库持久化）。
+    // 1) 两个仓库库文件各自的蓝图互不可见（D30：定义按仓库持久化）。
     let mut db_a = RepoDb::create(temp_repo_path("iso-a"), "仓库A").expect("创建A失败");
     let row = db_a
         .create_blueprint("repo-a", "A 的蓝图", &valid_blueprint_json())
@@ -141,6 +141,93 @@ fn blueprint_repo_isolation_across_repos() {
     assert_eq!(db_b.list_blueprints("repo-b").expect("列出失败").len(), 0);
     assert!(db_b.get_blueprint(&row.id).expect("查询失败").is_none());
     db_b.close().expect("关闭失败");
+
+    // 2) **同一张表里的两个 repo_id** 必须互相不可见：真正跑一遍 `WHERE repo_id` 过滤。
+    //    只用两个库文件时，过滤条件一次都没被验证过（空库怎么查都是 0 行）。
+    let mut db = RepoDb::create(temp_repo_path("iso-same-db"), "同库双仓库").expect("创建失败");
+    let a = db
+        .create_blueprint("repo-a", "A 的蓝图", &valid_blueprint_json())
+        .expect("创建 A 失败");
+    let b = db
+        .create_blueprint("repo-b", "B 的蓝图", &valid_blueprint_json())
+        .expect("创建 B 失败");
+    db.set_default_blueprint("repo-a", &a.id).expect("设 A 默认失败");
+    db.set_default_blueprint("repo-b", &b.id).expect("设 B 默认失败");
+
+    let listed_a = db.list_blueprints("repo-a").expect("列出 A 失败");
+    assert_eq!(listed_a.len(), 1, "只应看到本仓库的蓝图");
+    assert_eq!(listed_a[0].id, a.id);
+    let listed_b = db.list_blueprints("repo-b").expect("列出 B 失败");
+    assert_eq!(listed_b.len(), 1, "只应看到本仓库的蓝图");
+    assert_eq!(listed_b[0].id, b.id);
+
+    assert_eq!(
+        db.get_default_blueprint("repo-a")
+            .expect("查询 A 默认失败")
+            .map(|r| r.id),
+        Some(a.id),
+        "默认蓝图按仓库隔离（D30）"
+    );
+    assert_eq!(
+        db.get_default_blueprint("repo-b")
+            .expect("查询 B 默认失败")
+            .map(|r| r.id),
+        Some(b.id),
+        "默认蓝图按仓库隔离（D30）"
+    );
+    db.close().expect("关闭失败");
+}
+
+#[test]
+fn save_path_normalizes_document_and_version_column() {
+    // D58：文档内 `schema_version` 为权威，列必须**同步**——save 路径也要归一化，
+    // 不能只在 create 路径归一化（否则"保存旧文档"会把 v1 与列 2 写在一起）。
+    let path = temp_repo_path("save-version");
+    let mut db = RepoDb::create(&path, "版本仓库").expect("创建失败");
+    let row = db
+        .create_blueprint("repo-s", "旧图", &valid_blueprint_json())
+        .expect("创建失败");
+
+    let v1 = r#"{"schema_version":1,"nodes":[{"key":"ui","type":"interface","name":"主界面"}],"edges":[]}"#;
+    let saved = db
+        .save_blueprint("repo-s", &row.id, "旧图", v1)
+        .expect("保存失败");
+    assert_eq!(saved.schema_version, BLUEPRINT_SCHEMA_VERSION);
+    let graph = BlueprintGraph::from_json(&saved.blueprint_json).expect("解析失败");
+    assert_eq!(
+        graph.schema_version, BLUEPRINT_SCHEMA_VERSION,
+        "保存后文档内版本应为当前版本（D58）"
+    );
+    assert_eq!(graph.layers.len(), 1, "v1 → v2 迁移应补出层（D51）");
+
+    let stored = db
+        .get_blueprint(&row.id)
+        .expect("查询失败")
+        .expect("蓝图应存在");
+    assert_eq!(
+        stored.schema_version, BLUEPRINT_SCHEMA_VERSION,
+        "列版本必须与文档内版本一致（D58）"
+    );
+    db.close().expect("关闭失败");
+}
+
+#[test]
+fn document_without_schema_version_gets_it_injected() {
+    // "文档内 schema_version 为权威" 的前提是文档里**确实有**这个字段：
+    // 缺字段的输入（旧调用/手写 JSON）在写库时必须补上，否则列写 2、文档没有版本，
+    // 读取端（前端 `BlueprintGraph.schema_version`）会拿到 undefined。
+    let path = temp_repo_path("normalize-version");
+    let mut db = RepoDb::create(&path, "归一化仓库").expect("创建失败");
+    let row = db
+        .create_blueprint("repo-n", "无版本图", r#"{"nodes":[],"edges":[]}"#)
+        .expect("创建失败");
+    assert_eq!(row.schema_version, BLUEPRINT_SCHEMA_VERSION);
+    assert!(
+        row.blueprint_json.contains("\"schema_version\""),
+        "写库后文档必须显式带 schema_version：{}",
+        row.blueprint_json
+    );
+    db.close().expect("关闭失败");
 }
 
 #[test]

@@ -10,15 +10,20 @@
 //!
 //! 当前层（D54）：`blueprint_current_layer_get/set` 按仓库持久化"当前层"。
 //! 它属于应用设置（全局配置库 `settings`），应用重启后回到该层。
+//!
+//! DTO：返回值直接使用 `hp-dto` 的类型（`BlueprintItem` / `BlueprintValidateResult` /
+//! `BlueprintTemplateItem`），前端 `packages/shared-types` 与它们是同一份生成的契约；
+//! 桥接层**不得**再定义同形结构体，否则两边会静默分叉（RFC 0007「模块边界」）。
 
 use hp_core::{BlueprintGraph, BlueprintRow, HpError, HpResult};
+use hp_dto::{BlueprintItem, BlueprintTemplateItem, BlueprintValidateResult};
 use serde::Serialize;
 use tauri::{Emitter, State};
 
 use crate::commands::shared::{ensure_global, hp_err_to_string};
 use crate::AppState;
 
-/// 蓝图变更事件载荷（RFC 0007 命令与事件）。
+/// 蓝图变更事件载荷（RFC 0007 命令与事件；字段口径见 `docs/spec/commands-events.md`）。
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BlueprintChanged {
@@ -35,34 +40,6 @@ fn emit_changed(app: &tauri::AppHandle, repo_id: &str, blueprint_id: Option<&str
             blueprint_id: blueprint_id.map(|s| s.to_string()),
         },
     );
-}
-
-/// blueprint.list / create / save / template.install 返回项。
-#[derive(Serialize)]
-pub(crate) struct BlueprintItem {
-    id: String,
-    name: String,
-    is_default: bool,
-    schema_version: i64,
-    updated_at: String,
-}
-
-/// blueprint.validate 返回。
-#[derive(Serialize)]
-pub(crate) struct BlueprintValidateResult {
-    /// 硬错误（拒绝保存）。
-    errors: Vec<String>,
-    /// 未接通软告警（不阻塞保存）：缺引用、无根层（D55）、浮层未绑定（D56）等。
-    warnings: Vec<String>,
-}
-
-/// blueprint.template.list 返回项。
-#[derive(Serialize)]
-pub(crate) struct BlueprintTemplateItem {
-    id: String,
-    name: String,
-    description: Option<String>,
-    schema_version: i64,
 }
 
 fn to_item(row: BlueprintRow) -> BlueprintItem {
@@ -112,17 +89,21 @@ pub(crate) fn blueprint_list(
 }
 
 /// blueprint.get：读取蓝图文档 JSON；不存在返回 `None`。
+///
+/// `repo_id` 用于**归属校验**：仓库库本身按仓库分文件（每个仓库一个 SQLite），
+/// 这里再确认一次行的 `repo_id`，避免脏参数拿到别的仓库的蓝图。
 #[tauri::command]
 pub(crate) fn blueprint_get(
     repo_id: String,
     blueprint_id: String,
     state: State<AppState>,
 ) -> Result<Option<String>, String> {
-    let _ = repo_id;
     let guard = repo_guard(&state)?;
     let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
     let row = db.get_blueprint(&blueprint_id).map_err(hp_err_to_string)?;
-    Ok(row.map(|r| r.blueprint_json))
+    Ok(row
+        .filter(|r| r.repo_id == repo_id)
+        .map(|r| r.blueprint_json))
 }
 
 /// blueprint.getDefault：读取仓库默认蓝图文档；
@@ -196,6 +177,9 @@ pub(crate) fn blueprint_create(
 }
 
 /// blueprint.save：整文档保存（校验后，可改名）。
+///
+/// `name` 为可选（RFC 0007 命令表：`name?`）：未提供或空白时**沿用库中现有名称**，
+/// 否则"只改文档不改名"的保存会被无辜拒绝。
 #[tauri::command]
 pub(crate) fn blueprint_save(
     repo_id: String,
@@ -206,20 +190,27 @@ pub(crate) fn blueprint_save(
     app: tauri::AppHandle,
 ) -> Result<BlueprintItem, String> {
     parse_valid(&blueprint_json).map_err(hp_err_to_string)?;
-    let name = name.unwrap_or_default();
-    if name.trim().is_empty() {
-        return Err("蓝图名不能为空".into());
-    }
     let mut guard = repo_guard(&state)?;
     let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    let name = match name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()) {
+        Some(n) => n,
+        None => db
+            .get_blueprint(&blueprint_id)
+            .map_err(hp_err_to_string)?
+            .filter(|r| r.repo_id == repo_id)
+            .ok_or_else(|| format!("蓝图不存在: {blueprint_id}"))?
+            .name,
+    };
     let row = db
-        .save_blueprint(&repo_id, &blueprint_id, name.trim(), &blueprint_json)
+        .save_blueprint(&repo_id, &blueprint_id, &name, &blueprint_json)
         .map_err(hp_err_to_string)?;
     emit_changed(&app, &repo_id, Some(&blueprint_id));
     Ok(to_item(row))
 }
 
 /// blueprint.delete：删除蓝图（删默认后消费层回退内置默认）。
+///
+/// 与 `get` 同样做归属校验（行必须属于当前仓库）。
 #[tauri::command]
 pub(crate) fn blueprint_delete(
     repo_id: String,
@@ -229,6 +220,14 @@ pub(crate) fn blueprint_delete(
 ) -> Result<(), String> {
     let mut guard = repo_guard(&state)?;
     let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
+    let owned = db
+        .get_blueprint(&blueprint_id)
+        .map_err(hp_err_to_string)?
+        .map(|r| r.repo_id == repo_id)
+        .unwrap_or(false);
+    if !owned {
+        return Err(format!("蓝图不存在: {blueprint_id}"));
+    }
     db.delete_blueprint(&blueprint_id).map_err(hp_err_to_string)?;
     emit_changed(&app, &repo_id, Some(&blueprint_id));
     Ok(())

@@ -7,7 +7,7 @@
 //! 模板同样整文档存储，因此**低版本文档在写库前归一化到当前版本**，并在打开全局库时
 //! 一次性遍历回写（D52/D58：文档内 `schema_version` 为权威，列同步写入）。
 
-use hp_core::{BlueprintGraph, BlueprintTemplateRow, HpError, HpResult};
+use hp_core::{BlueprintTemplateRow, HpError, HpResult};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use super::global_db::GlobalDb;
@@ -17,13 +17,7 @@ use crate::util::{now_iso, require_nonempty, store_err, uuid};
 const TEMPLATE_COLUMNS: &str =
     "id, name, description, schema_version, blueprint_json, created_at, updated_at";
 
-fn doc_schema_version(json: &str) -> i64 {
-    BlueprintGraph::from_json(json)
-        .map(|g| g.schema_version)
-        .unwrap_or(0)
-}
-
-/// 归一化到当前 schema 版本（低版本文档走迁移，D52/D58）。
+/// 归一化到当前 schema 版本（低版本文档走迁移，D58）。
 fn normalize_blueprint_json(json: &str) -> HpResult<(String, i64)> {
     hp_core::normalize_document(json).map_err(HpError::InvalidArgument)
 }
@@ -141,6 +135,9 @@ impl GlobalDb {
     }
 
     /// 新增蓝图模板（生成新 ID）。
+    ///
+    /// 低版本文档先归一化，**返回行与落库行完全一致**（D58：文档内版本为权威，
+    /// 且调用方拿到的 `schema_version` 必须就是列里的值，不能是归一化前的旧版本）。
     pub fn create_blueprint_template(
         &mut self,
         name: &str,
@@ -149,13 +146,14 @@ impl GlobalDb {
     ) -> HpResult<BlueprintTemplateRow> {
         require_nonempty(name, "模板名")?;
         require_nonempty(blueprint_json, "模板内容")?;
+        let (blueprint_json, schema_version) = normalize_blueprint_json(blueprint_json)?;
         let now = now_iso();
         let row = BlueprintTemplateRow {
             id: uuid(),
             name: name.to_string(),
             description: description.map(|d| d.to_string()),
-            schema_version: doc_schema_version(blueprint_json),
-            blueprint_json: blueprint_json.to_string(),
+            schema_version,
+            blueprint_json,
             created_at: now.clone(),
             updated_at: now,
         };

@@ -36,15 +36,43 @@ pub fn migrate_document(json: &str) -> Result<Option<MigratedDocument>, String> 
 /// 归一化到当前版本：已是当前版本时原样返回，否则返回迁移后的 JSON 与权威版本。
 ///
 /// 写库路径（`blueprint.create` / `blueprint.save` / 模板安装）用它保证
-/// "文档内版本 = 数据库列版本 = 当前版本"（D58），避免列与文档分叉。
+/// "文档内版本 = 数据库列版本"（D58），避免列与文档分叉。
+///
+/// 已是当前版本时**不重写用户文档**（保留未知/前向字段与原始排版），
+/// 但会补上缺失的 `schema_version` 字段——否则列里写 2、文档里却没有版本，
+/// 读取端（前端 `BlueprintGraph.schema_version`）会拿到 `undefined`，
+/// "文档内版本为权威"就不成立。
 pub fn normalize_document(json: &str) -> Result<(String, i64), String> {
     match migrate_document(json)? {
         Some(migrated) => Ok((migrated.json, migrated.schema_version)),
         None => {
             let graph = BlueprintGraph::from_json(json)?;
-            Ok((json.to_string(), graph.schema_version))
+            Ok((
+                ensure_document_version(json, graph.schema_version)?,
+                graph.schema_version,
+            ))
         }
     }
+}
+
+/// 确保文档文本**显式**带 `schema_version`（权威版本，D58）；已有则原样返回。
+///
+/// 只补这一个字段：文档的其余内容（含未知/前向字段）原样保留，不做重新序列化。
+fn ensure_document_version(json: &str, version: i64) -> Result<String, String> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("蓝图 JSON 解析失败: {e}"))?;
+    let Some(object) = value.as_object_mut() else {
+        // 非对象文档由 `BlueprintGraph::from_json` 拦下，这里只做防御性返回。
+        return Ok(json.to_string());
+    };
+    if object.contains_key("schema_version") {
+        return Ok(json.to_string());
+    }
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::from(version),
+    );
+    serde_json::to_string(&value).map_err(|e| format!("蓝图 JSON 序列化失败: {e}"))
 }
 
 /// 就地迁移（v1 → v2）；已是当前版本时不动。
