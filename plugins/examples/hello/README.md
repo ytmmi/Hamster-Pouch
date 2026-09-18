@@ -21,7 +21,7 @@
 
 ```text
 hello/
-  plugin.manifest   # 清单（ID / 版本 / 来源 / 运行形态 / 能力 / 贡献点 / 信任）
+  plugin.manifest   # 清单（ID / 版本 / 运行形态 / 能力 / 贡献点 / 信任；来源由宿主判定）
   bin/              # 外部进程入口（示例为占位说明）
   README.md
 ```

@@ -24,6 +24,9 @@ const { DEFAULT_BLUEPRINT } = mod;
 if (!DEFAULT_BLUEPRINT || !Array.isArray(DEFAULT_BLUEPRINT.nodes)) {
   throw new Error(`未从 ${sourcePath} 读到 DEFAULT_BLUEPRINT`);
 }
+if (DEFAULT_BLUEPRINT.default_version === undefined) {
+  throw new Error("DEFAULT_BLUEPRINT 缺少 default_version：内置默认图必须携带该标记");
+}
 
 // 与 hp-core 的序列化风格一致：紧凑 JSON（字段顺序按对象字面量顺序）。
 const json = JSON.stringify(DEFAULT_BLUEPRINT);

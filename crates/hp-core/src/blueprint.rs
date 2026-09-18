@@ -1,9 +1,10 @@
-//! 蓝图领域模型（RFC 0007 / D28-D32）。
+//! 蓝图领域模型（RFC 0007 / D28-D32 / D46-D48）。
 //!
-//! 蓝图是仓库内节点式「控件显隐 + 组布局控制」配置文档（一个 JSON 图 + schema 版本）。
-//! 节点分：控件（Control）/ 控件内部的类（Class）/ 控件内的对象（Object），以及
-//! 组（互斥/独立）、事件、条件、动作等逻辑节点；边语义含 contains / memberOf /
-//! fires / guards。
+//! 蓝图是仓库内节点式「面板控件显隐 + 组布局控制」配置文档（一个 JSON 图 + schema 版本）。
+//! 节点分：界面（Interface，顶层容器与页面）/ 布局块（LayoutBlock）/ 标签组（Group）/
+//! 面板控件（Control，旧称「控件」）/ 面板控件内部的类（Class）/ 类内的对象（Object），
+//! 以及事件、条件、动作等逻辑节点；边语义含 contains / memberOf / fires / guards。
+//! 界面节点可有多个（多页面），页面之间用 `navigate` 动作（界面跳转）连接。
 //!
 //! 本模块只承载纯数据模型与校验（`validate`），不依赖 Tauri/SQLite/文件系统；
 //! 存储与命令桥接分别位于 hp-store 与 src-tauri。
@@ -21,31 +22,34 @@ pub type NodeKey = String;
 
 // ============================== 枚举 ==============================
 
-/// 节点类型（RFC 0007 决策 1）。
+/// 节点类型（RFC 0007 决策 1；D46/D47）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeType {
-    /// 布局块：顶层布局区域（如左/中/右三栏），包含标签组与控件。
+    /// 界面：顶层容器 + 页面（一个界面 = 一个页面，可有多个，多页面基础）。
+    Interface,
+    /// 布局块：界面上的一个区域（如左/中/右三栏），包含标签组与面板控件。
     LayoutBlock,
-    /// 控件：UI 组件实例，绑定 dockview 面板。
+    /// 面板控件：dockview 面板实例（UI 组件实例，旧称「控件」）。
     Control,
-    /// 类：控件内部条目分类（按 media_type）。
+    /// 类：面板控件内部条目分类（按 media_type）。
     Class,
     /// 对象：类内条目实例。
     Object,
-    /// 组：控件容器（互斥/独立）。
+    /// 组：面板控件容器（互斥/独立）。
     Group,
     /// 事件：触发求值。
     Event,
     /// 条件：基础判定。
     Condition,
-    /// 动作：显隐/收起操作。
+    /// 动作：显隐/收起/界面跳转操作。
     Action,
 }
 
 impl NodeType {
     pub fn as_str(&self) -> &'static str {
         match self {
+            NodeType::Interface => "interface",
             NodeType::LayoutBlock => "layout_block",
             NodeType::Control => "control",
             NodeType::Class => "class",
@@ -59,6 +63,7 @@ impl NodeType {
 
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
+            "interface" => Some(NodeType::Interface),
             "layout_block" => Some(NodeType::LayoutBlock),
             "control" => Some(NodeType::Control),
             "class" => Some(NodeType::Class),
@@ -217,20 +222,22 @@ impl fmt::Display for Trigger {
     }
 }
 
-/// 动作操作（RFC 0007 决策 1 / D29：show/hide/toggle + collapse/expand）。
+/// 动作操作（RFC 0007 决策 1 / D29 / D48：show/hide/toggle + collapse/expand + navigate）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActionOp {
-    /// 显示控件。
+    /// 显示面板控件。
     Show,
-    /// 隐藏控件。
+    /// 隐藏面板控件。
     Hide,
-    /// 切换（控件或组）。
+    /// 切换（面板控件或组）。
     Toggle,
     /// 收起组（组的隐藏 = 最小化至 6px，标签条保留）。
     Collapse,
     /// 展开组（恢复收起前尺寸）。
     Expand,
+    /// 界面跳转：切换到目标界面（页面）。
+    Navigate,
 }
 
 impl ActionOp {
@@ -241,6 +248,7 @@ impl ActionOp {
             ActionOp::Toggle => "toggle",
             ActionOp::Collapse => "collapse",
             ActionOp::Expand => "expand",
+            ActionOp::Navigate => "navigate",
         }
     }
 
@@ -251,6 +259,7 @@ impl ActionOp {
             "toggle" => Some(ActionOp::Toggle),
             "collapse" => Some(ActionOp::Collapse),
             "expand" => Some(ActionOp::Expand),
+            "navigate" => Some(ActionOp::Navigate),
             _ => None,
         }
     }
@@ -258,6 +267,11 @@ impl ActionOp {
     /// 是否为组级操作（目标必须是组节点）。
     pub fn is_group_op(&self) -> bool {
         matches!(self, ActionOp::Collapse | ActionOp::Expand)
+    }
+
+    /// 是否为界面跳转（界面级操作，目标必须是界面节点，D48）。
+    pub fn is_interface_op(&self) -> bool {
+        matches!(self, ActionOp::Navigate)
     }
 }
 
@@ -271,12 +285,12 @@ impl fmt::Display for ActionOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeKind {
-    /// 包含：布局块 → 标签组/控件；标签组 → 控件；控件 → 类 → 对象。
+    /// 包含：界面 → 布局块；布局块 → 标签组/面板控件；标签组 → 面板控件；面板控件 → 类 → 对象。
     Contains,
-    /// 归属：控件 → 组（兼容旧图）。
+    /// 归属：面板控件 → 组（兼容旧图）。
     #[serde(rename = "memberOf")]
     MemberOf,
-    /// 规则三元组之「对象 → 操作」：在对象（控件/类/对象）上发生操作。
+    /// 规则三元组之「对象 → 操作」：在对象（面板控件/类/对象）上发生操作。
     On,
     /// 触发：操作 → 条件/状态。
     Fires,
@@ -565,6 +579,11 @@ impl BlueprintGraph {
                     None => true,
                 },
                 NodeType::Action => match node.target.as_deref() {
+                    // 界面跳转的目标是界面节点；指向已删除界面属未接通（软告警，D48）。
+                    Some(t) if node.op == Some(ActionOp::Navigate) => !matches!(
+                        by_key.get(t).map(|n| n.node_type),
+                        Some(NodeType::Interface)
+                    ),
                     Some(t) => !by_key.contains_key(t),
                     None => true,
                 },
@@ -593,6 +612,10 @@ mod blueprint_validate {
     ) {
         let key = &node.key;
         match node.node_type {
+            NodeType::Interface => {
+                // 界面（页面）：结构节点，仅要求 key 非空（name/position 可选）。
+                // 可有多个界面（多页面，D47），不限制唯一。
+            }
             NodeType::LayoutBlock => {
                 // 布局块：结构节点，仅要求 key 非空（name/position 可选）。
             }
@@ -605,7 +628,7 @@ mod blueprint_validate {
                     if let Some(target) = by_key.get(ck) {
                         if target.node_type != NodeType::Control {
                             errors.push(format!(
-                                "类节点 {key} 的 control 必须指向控件节点（当前指向 {}）",
+                                "类节点 {key} 的 control 必须指向面板控件节点（当前指向 {}）",
                                 target.node_type
                             ));
                         }
@@ -643,7 +666,7 @@ mod blueprint_validate {
                         if let Some(target) = by_key.get(vk.as_str()) {
                             if target.node_type != NodeType::Control {
                                 errors.push(format!(
-                                    "组节点 {key} 的 default_visible 成员 {vk} 必须是控件节点"
+                                    "组节点 {key} 的 default_visible 成员 {vk} 必须是面板控件节点"
                                 ));
                             }
                         }
@@ -672,7 +695,7 @@ mod blueprint_validate {
                             NodeType::Control | NodeType::Class | NodeType::Object
                         ) {
                             errors.push(format!(
-                                "操作节点 {key} 的 target 必须指向控件/类/对象节点（当前指向 {}）",
+                                "操作节点 {key} 的 target 必须指向面板控件/类/对象节点（当前指向 {}）",
                                 target.node_type
                             ));
                         }
@@ -706,6 +729,8 @@ mod blueprint_validate {
                             Some(ActionOp::Toggle) => {
                                 matches!(actual, NodeType::Control | NodeType::Group)
                             }
+                            // 界面跳转：目标必须是界面节点（D48）。
+                            Some(ActionOp::Navigate) => actual == NodeType::Interface,
                             None => true,
                         };
                         if !ok {
@@ -736,7 +761,8 @@ mod blueprint_validate {
             errors.push(format!("边引用不存在的终点: {}", edge.to));
         }
         let ok = match (edge.edge_kind, from, to) {
-            (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Group))
+            (EdgeKind::Contains, Some(NodeType::Interface), Some(NodeType::LayoutBlock))
+            | (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Group))
             | (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Control))
             | (EdgeKind::Contains, Some(NodeType::Group), Some(NodeType::Control))
             | (EdgeKind::Contains, Some(NodeType::Control), Some(NodeType::Class))

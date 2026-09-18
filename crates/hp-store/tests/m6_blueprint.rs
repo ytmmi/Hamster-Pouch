@@ -314,9 +314,35 @@ fn default_blueprint_fixture_validates() {
     let graph = BlueprintGraph::from_json(json).expect("解析默认蓝图失败");
     let errors = graph.validate();
     assert!(errors.is_empty(), "默认蓝图校验失败: {errors:?}");
-    assert_eq!(graph.nodes.len(), 26, "默认蓝图应有 26 个节点");
-    assert_eq!(graph.edges.len(), 23, "默认蓝图应有 23 条边");
-    assert_eq!(graph.default_version, Some(5));
+    assert_eq!(graph.nodes.len(), 27, "默认蓝图应有 27 个节点");
+    assert_eq!(graph.edges.len(), 26, "默认蓝图应有 26 条边");
+    assert_eq!(graph.default_version, Some(6));
+
+    // 顶层界面节点（页面，D47）：只连布局块，不直接连标签组/面板控件。
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|n| n.node_type == NodeType::Interface)
+            .count(),
+        1,
+        "默认蓝图应有且仅有一个界面节点（ui）"
+    );
+    for block in ["blk_left", "blk_center", "blk_right"] {
+        assert!(
+            graph.edges.iter().any(|e| e.from == "ui"
+                && e.to == block
+                && e.edge_kind == hp_core::EdgeKind::Contains),
+            "界面节点应包含 {block}"
+        );
+    }
+    assert!(
+        !graph
+            .edges
+            .iter()
+            .any(|e| e.from == "ui" && !e.to.starts_with("blk_")),
+        "界面节点只应连布局块"
+    );
 
     // 结构：布局块 ⊃ 标签组 ⊃ 控件（**标签组优先**）
     // 中栏只有一个标签组 g_media，布局块不直接连成员控件。

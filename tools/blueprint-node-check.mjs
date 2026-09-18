@@ -36,7 +36,10 @@ const check = (label, ok, detail = "") => {
 mkdirSync(FIXTURE_DIR, { recursive: true });
 const written = [];
 const writeFixture = (name, doc) => {
-  writeFileSync(join(FIXTURE_DIR, `${name}.json`), JSON.stringify(doc), "utf8");
+  // 夹具是"用户图"样本，必须去掉内置默认标记 `default_version`：
+  // 否则夹具一旦被真实装载，引擎会按版本判为"旧库存默认"并整篇覆盖为内置默认（丢内容）。
+  const clean = config.forUserSave(doc);
+  writeFileSync(join(FIXTURE_DIR, `${name}.json`), JSON.stringify(clean), "utf8");
   written.push(name);
 };
 
@@ -114,10 +117,12 @@ const hasEdge = (doc, from, to, kind) =>
 }
 
 // ---- 5. 空图新增各类型仍合法（不依赖既有节点）----
+// 首个新增的是**界面节点**（顶层容器 / 页面，D47）：`appendNode` 对 interface 走默认分支
+// （只追加自身、不连线），因此后续布局块不会因缺界面上级而产生非法边。
 {
   let doc = config.makeEmptyBlueprint();
   const keys = [];
-  for (const type of ["layout_block", "control", "class", "object", "group", "event", "condition", "action"]) {
+  for (const type of ["interface", "layout_block", "control", "class", "object", "group", "event", "condition", "action"]) {
     const r = factory.appendNode(doc, type, { x: 40 + doc.nodes.length * 260, y: 40 }, null);
     doc = r.doc;
     keys.push(r.node.key);
@@ -128,6 +133,11 @@ const hasEdge = (doc, from, to, kind) =>
     new Set(doc.nodes.map((n) => n.key)).size === doc.nodes.length,
     keys.join(", "),
   );
+  check(
+    "空图新增界面节点 → key 为 ui_1（独立节点用类型前缀）",
+    doc.nodes.some((n) => n.type === "interface" && n.key === "ui_1"),
+    doc.nodes.map((n) => `${n.type}:${n.key}`).join(", "),
+  );
 }
 
 // ---- 6. 空图只加一个"状态"（最苛刻：无任何上级可复用）----
@@ -137,9 +147,11 @@ const hasEdge = (doc, from, to, kind) =>
 }
 
 // ---- 7. 默认蓝图上批量新增（回归：仍能保存）----
+// 默认蓝图已含界面节点 `ui`，新增布局块按"不跨链路挂钩"规则不会自动连线
+// （需要时由使用者在画布上拖线），因此文档结构仍合法。
 {
   let doc = defaults();
-  for (const type of ["class", "object", "action", "condition", "event", "group", "control"]) {
+  for (const type of ["interface", "class", "object", "action", "condition", "event", "group", "control", "layout_block"]) {
     doc = factory.appendNode(doc, type, { x: 40 + doc.nodes.length * 260, y: 40 }, null).doc;
   }
   writeFixture("default_plus_new", doc);
@@ -300,9 +312,20 @@ try {
   process.stdout.write(out);
   check("工厂产出的文档全部通过 hp-core 真实校验", true);
 } catch (e) {
+  // 关键：把真实原因打出来（退出码 / 信号 / 解析错误），否则只看到"见上方 cargo 输出"而无从排查。
+  const status = e?.status ?? null;
+  const signal = e?.signal ?? null;
+  const code = e?.code ?? null;
+  process.stderr.write(
+    `[cargo] spawn/exec 失败: status=${status} signal=${signal} code=${code} message=${e?.message ?? e}\n`,
+  );
   if (e.stdout) process.stdout.write(String(e.stdout));
   if (e.stderr) process.stderr.write(String(e.stderr));
-  check("工厂产出的文档全部通过 hp-core 真实校验", false, "见上方 cargo 输出");
+  check(
+    "工厂产出的文档全部通过 hp-core 真实校验",
+    false,
+    `cargo 未成功执行（status=${status} signal=${signal} code=${code}）`,
+  );
 }
 
 const failed = results.filter((r) => !r.ok);

@@ -7,6 +7,7 @@ mod tests {
     #[test]
     fn enums_roundtrip() {
         for v in [
+            NodeType::Interface,
             NodeType::LayoutBlock,
             NodeType::Control,
             NodeType::Class,
@@ -34,9 +35,11 @@ mod tests {
             ActionOp::Toggle,
             ActionOp::Collapse,
             ActionOp::Expand,
+            ActionOp::Navigate,
         ] {
             assert_eq!(ActionOp::from_str(v.as_str()), Some(v));
             assert_eq!(v.is_group_op(), matches!(v, ActionOp::Collapse | ActionOp::Expand));
+            assert_eq!(v.is_interface_op(), matches!(v, ActionOp::Navigate));
         }
         for v in [
             EdgeKind::Contains,
@@ -123,20 +126,22 @@ mod tests {
     }
 
     #[test]
-    fn validate_accepts_layout_block_contains_group_and_control() {
+    fn validate_accepts_interface_layout_block_group_and_control() {
         let graph = BlueprintGraph::from_json(
             r#"{"schema_version":1,"nodes":[
+              {"key":"ui","type":"interface","name":"主界面"},
               {"key":"blk","type":"layout_block","name":"右栏"},
               {"key":"g","type":"group","mode":"exclusive"},
               {"key":"c","type":"control","panel_id":"viewer"}
             ],"edges":[
+              {"from":"ui","to":"blk","kind":"contains","order":1},
               {"from":"blk","to":"g","kind":"contains","order":1},
               {"from":"blk","to":"c","kind":"contains","order":1}
             ]}"#,
         )
         .unwrap();
         assert!(graph.validate().is_empty(), "{:?}", graph.validate());
-        // 反向：控件 contains 布局块 → 非法
+        // 反向：面板控件 contains 布局块 → 非法
         let bad = BlueprintGraph::from_json(
             r#"{"schema_version":1,"nodes":[
               {"key":"blk","type":"layout_block"},
@@ -145,6 +150,76 @@ mod tests {
         )
         .unwrap();
         assert!(bad.validate().iter().any(|e| e.contains("非法边")));
+        // 界面不得直接连面板控件（层级：界面 → 布局块 → ...，RFC 0007 决策 1）
+        let skip_level = BlueprintGraph::from_json(
+            r#"{"schema_version":1,"nodes":[
+              {"key":"ui","type":"interface"},
+              {"key":"c","type":"control","panel_id":"viewer"}
+            ],"edges":[{"from":"ui","to":"c","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(skip_level.validate().iter().any(|e| e.contains("非法边")));
+    }
+
+    #[test]
+    fn validate_accepts_navigate_to_interface_and_rejects_other_types() {
+        // 界面跳转：目标为界面节点 → 合法（D48）
+        let graph = BlueprintGraph::from_json(
+            r#"{"schema_version":1,"nodes":[
+              {"key":"ui_main","type":"interface","name":"主界面"},
+              {"key":"ui_edit","type":"interface","name":"编辑界面"},
+              {"key":"c","type":"control","panel_id":"viewer"},
+              {"key":"e","type":"event","trigger":"click"},
+              {"key":"a","type":"action","op":"navigate","target":"ui_edit"}
+            ],"edges":[
+              {"from":"c","to":"e","kind":"on","order":1},
+              {"from":"e","to":"a","kind":"fires","order":1}
+            ]}"#,
+        )
+        .unwrap();
+        assert!(graph.validate().is_empty(), "{:?}", graph.validate());
+        assert!(graph.warnings().is_empty(), "{:?}", graph.warnings());
+
+        // 目标为面板控件 → 硬错误
+        let bad = BlueprintGraph::from_json(
+            r#"{"schema_version":1,"nodes":[
+              {"key":"c","type":"control","panel_id":"viewer"},
+              {"key":"a","type":"action","op":"navigate","target":"c"}
+            ],"edges":[]}"#,
+        )
+        .unwrap();
+        assert!(
+            bad.validate().iter().any(|e| e.contains("navigate")),
+            "{:?}",
+            bad.validate()
+        );
+
+        // 目标界面已删除 → 未接通（软告警，不阻塞保存）
+        let dangling = BlueprintGraph::from_json(
+            r#"{"schema_version":1,"nodes":[
+              {"key":"a","type":"action","op":"navigate","target":"ui_gone"}
+            ],"edges":[]}"#,
+        )
+        .unwrap();
+        assert!(dangling.validate().is_empty(), "{:?}", dangling.validate());
+        assert!(
+            dangling.warnings().iter().any(|w| w.contains("暂未接通")),
+            "{:?}",
+            dangling.warnings()
+        );
+    }
+
+    #[test]
+    fn multiple_interfaces_are_allowed() {
+        // 界面 = 页面，可有多个（多页面基础，D47）
+        let graph = BlueprintGraph::from_json(
+            r#"{"schema_version":1,"nodes":[
+              {"key":"ui_a","type":"interface","name":"浏览界面"},
+              {"key":"ui_b","type":"interface","name":"编辑界面"}
+            ],"edges":[]}"#,
+        )
+        .unwrap();
+        assert!(graph.validate().is_empty(), "{:?}", graph.validate());
     }
 
     #[test]
@@ -326,7 +401,7 @@ mod tests {
         .unwrap();
         let errors = graph.validate();
         assert!(
-            errors.iter().any(|e| e.contains("必须指向控件节点")),
+            errors.iter().any(|e| e.contains("必须指向面板控件节点")),
             "{errors:?}"
         );
 

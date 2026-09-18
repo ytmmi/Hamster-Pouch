@@ -658,6 +658,7 @@ export function BlueprintPanel(): JSX.Element {
                   <div className="bp-palette">
                     {(
                       [
+                        "interface",
                         "layout_block",
                         "control",
                         "class",

@@ -1,6 +1,9 @@
 //! 插件包发现与 manifest 解析（RFC 0004「插件包模型草案」）。
 //!
 //! 插件包目录包含 `plugin.manifest`（JSON）；宿主负责解析并强制校验。
+//!
+//! 注意：`source` **不是**信任依据。来源由宿主按实际安装方式判定（RFC 0004 决策 17 /
+//! RFC 0009），manifest 中若出现 `source` 仅用于本地路径场景的兼容解析，不得据此提升信任等级。
 
 use std::path::{Path, PathBuf};
 
@@ -102,6 +105,7 @@ fn nested_str(v: &Value, obj: &str, key: &str) -> Option<String> {
 }
 
 fn parse_source_kind(v: &Value) -> HpResult<SourceKind> {
+    // 兼容解析：`source` 不作为信任依据（RFC 0009「来源与信任判定」）。
     let raw = nested_str(v, "source", "kind").unwrap_or_else(|| "local-path".into());
     SourceKind::from_str(&raw)
         .ok_or_else(|| HpError::InvalidArgument(format!("未知插件来源: {raw}")))

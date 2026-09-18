@@ -167,8 +167,9 @@ export function clusterRegions(
 }
 
 /**
- * 生成结构骨架图文档：**每个区域（栏）一个布局块**；区域内多面板组 → 标签组节点
- * （布局块只连标签组），单面板组 → 布局块直连控件。
+ * 生成结构骨架图文档：顶层一个**界面节点**（页面，收纳布局块）；**每个区域（栏）一个
+ * 布局块**（界面 contains 布局块）；区域内多面板组 → 标签组节点（布局块只连标签组），
+ * 单面板组 → 布局块直连面板控件。
  */
 export function structureBlueprint(snapshot: StructureSnapshot | null): BlueprintGraph {
   const doc = makeEmptyBlueprint();
@@ -184,17 +185,32 @@ export function structureBlueprint(snapshot: StructureSnapshot | null): Blueprin
   };
 
   const clusters = clusterRegions(snapshot?.regions ?? []);
+
+  // 空快照 / 无区域 → 空图（不凭空空造界面节点，保持"从空图起步"语义）。
+  if (clusters.length === 0) {
+    return { ...doc, nodes, edges };
+  }
+
+  // 顶层界面节点（页面；只连布局块，RFC 0007 决策 1 / D47）。
+  const structureX = ORIGIN + ((clusters.length - 1) * COL_W) / 2;
+  const interfaceKey = add({
+    key: uniqueKey(nodes, "ui"),
+    type: "interface",
+    position: { x: structureX, y: ORIGIN },
+  });
+
   clusters.forEach((cluster, col) => {
     const x = ORIGIN + col * COL_W;
     const blockKey = add({
       key: uniqueKey(nodes, `blk_${col + 1}`),
       type: "layout_block",
       name: `区域 ${col + 1}`,
-      position: { x, y: ORIGIN },
+      position: { x, y: ORIGIN + ROW_H },
     });
+    connect(interfaceKey, blockKey);
 
-    // 区域内的每个组：多面板 → 标签组（成员控件），单面板 → 控件。
-    let row = 1;
+    // 区域内的每个组：多面板 → 标签组（成员面板控件），单面板 → 面板控件。
+    let row = 2;
     for (const region of cluster) {
       if (region.panels.length === 0) {
         continue;

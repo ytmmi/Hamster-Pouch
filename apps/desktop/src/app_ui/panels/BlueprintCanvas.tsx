@@ -27,6 +27,7 @@ import {
 
 /** 节点类型 → 头部颜色（ComfyUI 风格高对比色板）。 */
 export const NODE_TYPE_COLORS: Record<BlueprintNodeType, string> = {
+  interface: "#7f8cff",
   layout_block: "#b085f5",
   control: "#4a90d9",
   class: "#6bbf59",
@@ -53,6 +54,7 @@ export interface PortDef {
 
 /** 每类节点的端口定义（输入在左、输出在右）；标签文案走 i18n（portLabel）。 */
 const PORT_DEFS: Record<BlueprintNodeType, PortDef[]> = {
+  interface: [{ id: "contains", side: "out" }],
   layout_block: [{ id: "contains", side: "out" }],
   control: [
     { id: "in", side: "in" },
@@ -106,6 +108,8 @@ export function kindForEdge(
 ): BlueprintEdge["kind"] | null {
   switch (fromPort) {
     case "contains":
+      // 层级：界面 → 布局块 → 标签组/面板控件 → 类 → 对象（RFC 0007 决策 1）
+      if (fromType === "interface" && toType === "layout_block") return "contains";
       if (fromType === "layout_block" && (toType === "group" || toType === "control")) {
         return "contains";
       }
@@ -165,6 +169,7 @@ function portIdFor(
     return type === "control" || type === "class" || type === "object" ? "on" : "";
   }
   switch (type) {
+    case "interface":
     case "layout_block":
     case "group":
     case "control":
@@ -192,8 +197,10 @@ export function nodeSummary(
     return n ? nodeDisplayName(n, t, nodes) : key;
   };
   switch (node.type) {
+    case "interface":
+      return t("blueprint.summary.interface");
     case "layout_block":
-      return `${t("blueprint.port.contains")} 标签组/控件`;
+      return t("blueprint.summary.layoutBlock");
     case "control":
       return resolveControlTitle(node, t) || "—";
     case "class":

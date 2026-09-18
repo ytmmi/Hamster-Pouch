@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 蓝图新节点工厂（RFC 0007 D31）：**本节点只定"类型 + 自身必备字段"，其余从上级推导**。
  *
  * 设计规则：
@@ -20,6 +20,7 @@ import { PANEL_IDS } from "@hamster-pouch/config";
 
 /** 节点 key 前缀（独立节点，无上级时用）。 */
 export const TYPE_PREFIX: Record<string, string> = {
+  interface: "ui",
   layout_block: "blk",
   control: "c",
   class: "k",
@@ -418,8 +419,10 @@ export function parentHintFor(
           ? ["object"]
           : type === "condition" || type === "action"
             ? ["event", "condition"]
-            : type === "group"
-              ? ["layout_block"]
+            : type === "group" || type === "layout_block"
+              ? type === "group"
+                ? ["layout_block"]
+                : ["interface"]
               : [];
   if (wanted.length === 0) {
     return null;

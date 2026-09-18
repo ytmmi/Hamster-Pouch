@@ -34,7 +34,7 @@ import {
 
 const MEDIA_TYPES = ["image", "video", "audio"] as const;
 const SCOPES = ["clicked", "double_clicked", "selected"] as const;
-const ACTION_OPS = ["show", "hide", "toggle", "collapse", "expand"] as const;
+const ACTION_OPS = ["show", "hide", "toggle", "collapse", "expand", "navigate"] as const;
 
 /**
  * 只读的"从上级推导"字段：展示由连线/上级自动落定的引用（key），不可手填。
@@ -62,8 +62,10 @@ function DerivedField({
 }
 
 /**
- * 状态节点的目标候选：按动作类型给合法目标（show/hide→控件，collapse/expand→标签组），
- * 名称用**本地化显示名**（控件→面板标题、标签组→自定义名/「标签组 N」），不暴露裸 key。
+ * 状态节点的目标候选：按动作类型给合法目标
+ * （show/hide→面板控件，collapse/expand→标签组，toggle→面板控件/标签组，navigate→界面），
+ * 名称用**本地化显示名**（面板控件→面板标题、标签组→自定义名/「标签组 N」、界面→界面名/「界面 N」），
+ * 不暴露裸 key。
  */
 function actionTargets(
   doc: BlueprintGraph,
@@ -71,11 +73,13 @@ function actionTargets(
   t: Translate,
 ): { v: string; l: string }[] {
   const wanted: BlueprintNodeType[] =
-    op === "collapse" || op === "expand"
-      ? ["group"]
-      : op === "toggle"
-        ? ["control", "group"]
-        : ["control"];
+    op === "navigate"
+      ? ["interface"]
+      : op === "collapse" || op === "expand"
+        ? ["group"]
+        : op === "toggle"
+          ? ["control", "group"]
+          : ["control"];
   return doc.nodes
     .filter((n) => wanted.includes(n.type))
     .map((n) => ({ v: n.key, l: nodeDisplayName(n, t, doc.nodes) }));
