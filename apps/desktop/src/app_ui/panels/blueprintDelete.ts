@@ -10,10 +10,14 @@
  * 这样"删除"不会连带清掉用户辛苦搭的其它节点，未接通状态也一目了然；后端校验把
  * 未接通类问题降级为软告警（不阻塞保存），所以删除后可以直接保存。
  *
+ * **例外是"删除层"（D55）**：删除层 = **直接删除该层**（连同层内节点），语义类似删除蓝图，
+ * **不是软删除**；禁止删除最后一层（至少保留一层）。见 `removeLayer`。
+ *
  * 纯函数，便于脱离宿主验证（见 tools/blueprint-delete-check.mjs）。
  */
 
 import type { BlueprintGraph, BlueprintNode } from "@hamster-pouch/config";
+import { effectiveLayers, nodeLayerKey } from "@hamster-pouch/config";
 
 export interface SoftRemoveResult {
   doc: BlueprintGraph;
@@ -71,5 +75,87 @@ export function softRemove(doc: BlueprintGraph, rootKey: string): SoftRemoveResu
     },
     removed: [rootKey],
     unlinked: cleared,
+  };
+}
+
+export interface RemoveLayerResult {
+  doc: BlueprintGraph;
+  /** 实际删除的层 key（最后一层被拒绝时为空）。 */
+  removed: string[];
+  /** 拒绝原因（成功时 `null`）。 */
+  rejected: "last-layer" | "missing-layer" | null;
+}
+
+/**
+ * 删除层（D55）：**直接删除该层**（连同层内节点与相关边），不是软删除。
+ *
+ * - 禁止删除最后一层（至少保留一层）；
+ * - 指向被删层内节点的字段引用**就地清空**（与软删除同口径，避免脏 key）；
+ * - 指向被删层界面的 `navigate` 由引用清空降级为"未接通"（软告警，不阻塞保存）。
+ */
+export function removeLayer(doc: BlueprintGraph, layerKey: string): RemoveLayerResult {
+  const layers = effectiveLayers(doc);
+  if (!layers.some((l) => l.key === layerKey)) {
+    return { doc, removed: [], rejected: "missing-layer" };
+  }
+  if (layers.length <= 1) {
+    return { doc, removed: [], rejected: "last-layer" };
+  }
+  const doomed = new Set(
+    doc.nodes.filter((n) => nodeLayerKey(doc, n) === layerKey).map((n) => n.key),
+  );
+  if (doomed.size === 0) {
+    // 层内没有节点：只移除层声明本身。
+    return {
+      doc: { ...doc, layers: layers.filter((l) => l.key !== layerKey) },
+      removed: [layerKey],
+      rejected: null,
+    };
+  }
+
+  const nodes: BlueprintNode[] = [];
+  for (const node of doc.nodes) {
+    if (doomed.has(node.key)) {
+      continue;
+    }
+    let next = node;
+    if (
+      (node.control && doomed.has(node.control)) ||
+      (node.class && doomed.has(node.class)) ||
+      (node.target && doomed.has(node.target))
+    ) {
+      next = { ...next };
+      if (next.control && doomed.has(next.control)) {
+        next.control = undefined;
+      }
+      if (next.class && doomed.has(next.class)) {
+        next.class = undefined;
+      }
+      if (next.target && doomed.has(next.target)) {
+        next.target = undefined;
+      }
+    }
+    const visible = (next.default_visible ?? []).filter((k) => !doomed.has(k));
+    if (visible.length !== (next.default_visible ?? []).length) {
+      next = { ...next, default_visible: visible };
+    }
+    if (next.hide_direction?.startsWith("toward:")) {
+      const target = next.hide_direction.slice("toward:".length);
+      if (doomed.has(target)) {
+        next = { ...next, hide_direction: undefined };
+      }
+    }
+    nodes.push(next);
+  }
+
+  return {
+    doc: {
+      ...doc,
+      layers: layers.filter((l) => l.key !== layerKey),
+      nodes,
+      edges: doc.edges.filter((e) => !doomed.has(e.from) && !doomed.has(e.to)),
+    },
+    removed: [layerKey],
+    rejected: null,
   };
 }

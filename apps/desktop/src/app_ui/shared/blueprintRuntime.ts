@@ -14,6 +14,7 @@
 
 import {
   DEFAULT_BLUEPRINT,
+  effectiveLayers,
   isObsoleteDefaultBlueprint,
   type BlueprintGraph,
 } from "@hamster-pouch/config";
@@ -22,6 +23,7 @@ import type { DockviewApi } from "dockview-react";
 import * as api from "./api";
 import { BlueprintEngine, blueprintEngine } from "../core/blueprintEngine";
 import { reconcileLayout, resetLayoutReconcileState, setLayoutReconcileLogger } from "./blueprintLayout";
+import { normalizeLayoutJson } from "./panelLayout";
 import {
   publishBlueprintRevision,
   readBlueprintRevision,
@@ -118,6 +120,12 @@ function activate(graph: BlueprintGraph | null, digest?: string): BlueprintGraph
     activeDigest = digest;
   }
   blueprintEngine.setGraph(activeGraph);
+  // 当前层随生效蓝图变化：仍存在则保留，否则回退第一个层（D54）。
+  const layers = effectiveLayers(activeGraph);
+  if (!activeLayer || !layers.some((l) => l.key === activeLayer)) {
+    activeLayer = layers[0]?.key ?? null;
+  }
+  blueprintEngine.setLayer(activeLayer);
   return activeGraph;
 }
 
@@ -222,6 +230,104 @@ export function reconcileActiveBlueprint(dv: DockviewApi | null): void {
 export function reconcileAfterLayoutApplied(dv: DockviewApi | null): void {
   resetLayoutReconcileState();
   reconcileLayout(activeGraph, dv);
+}
+
+// ============================== 当前层（D53/D54） ==============================
+
+/** 当前层 key（按仓库持久化；本进程内缓存，供布局保存/套用使用）。 */
+let activeLayer: string | null = null;
+
+/** 当前层 key（未装载时为 null）。 */
+export function currentLayerKey(): string | null {
+  return activeLayer;
+}
+
+/** 指定当前层（只更新标识，不触发装载/套用布局）。 */
+export function setCurrentLayerKey(layerKey: string | null): void {
+  activeLayer = layerKey;
+  blueprintEngine.setLayer(layerKey);
+}
+
+/** 生效蓝图的有效层清单（含单层兜底）。 */
+export function activeLayers() {
+  return activeGraph ? effectiveLayers(activeGraph) : [];
+}
+
+/**
+ * 装载某仓库的当前层（D54）：优先读取持久化记录；记录缺失或已不在生效蓝图里时，
+ * 回退到生效蓝图的第一个层。返回最终当前层 key（无蓝图时为 null）。
+ */
+export async function loadCurrentLayer(repoId: string): Promise<string | null> {
+  const layers = activeGraph ? effectiveLayers(activeGraph) : [];
+  let key: string | null = null;
+  try {
+    key = await api.blueprintCurrentLayerGet(repoId);
+  } catch {
+    key = null;
+  }
+  if (!key || !layers.some((l) => l.key === key)) {
+    key = layers[0]?.key ?? null;
+  }
+  setCurrentLayerKey(key);
+  trace(`[layer] 当前层 repo=${repoId} layer=${key ?? "-"} layers=${layers.length}`);
+  return key;
+}
+
+/**
+ * 套用某一层的布局（D53：每层一份布局）：读取默认布局在该层的快照并套用，
+ * 然后按蓝图语义对账一次（D54：切层时目标层按自身结构对账一次）。
+ *
+ * 该层没有专属布局行时返回 `false`（保持当前布局不动）；布局损坏时同样返回 `false`。
+ */
+export async function applyLayerLayout(
+  repoId: string,
+  layerKey: string,
+  dv: DockviewApi | null,
+): Promise<boolean> {
+  if (!dv) {
+    return false;
+  }
+  try {
+    const name = await api.layoutGetDefault({ repoId });
+    if (!name) {
+      return false;
+    }
+    const raw = await api.layoutGet({ repoId, name, layerKey });
+    if (!raw) {
+      return false;
+    }
+    dv.fromJSON(normalizeLayoutJson(JSON.parse(raw)));
+    reconcileAfterLayoutApplied(dv);
+    return true;
+  } catch (e) {
+    trace(`[layer] 套用层布局失败 repo=${repoId} layer=${layerKey}: ${String(e)}`);
+    return false;
+  }
+}
+
+/**
+ * 切换当前层（D54）：持久化记录 → 套用该层布局 → 对账蓝图语义。幂等（已在该层则无操作）。
+ * 供编辑器的层切换与引擎的 `navigate`（界面跳转）共用。
+ */
+export async function switchLayer(
+  repoId: string,
+  layerKey: string,
+  dv: DockviewApi | null,
+): Promise<boolean> {
+  const same = activeLayer === layerKey;
+  setCurrentLayerKey(layerKey);
+  try {
+    await api.blueprintCurrentLayerSet(repoId, layerKey);
+  } catch {
+    /* 持久化失败不影响本次切换 */
+  }
+  trace(`[layer] 切层 repo=${repoId} → ${layerKey}（${same ? "重入" : "切换"}）`);
+  const applied = await applyLayerLayout(repoId, layerKey, dv);
+  if (!applied) {
+    // 该层没有专属布局：只按蓝图语义对账一次，避免显隐/收起状态漂移。
+    reconcileActiveBlueprint(dv);
+  }
+  return applied;
 }
 
 /**

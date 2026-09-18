@@ -16,12 +16,13 @@ import type {
   LayoutSetDefaultArgs,
 } from "../types";
 
-/** 保存（同 (repoId, name) 覆盖）某仓库下的命名布局；可选绑定蓝图 ID 列表 */
+/** 保存（同 (repoId, name, layerKey) 覆盖）某仓库下、某一层的命名布局；可选绑定蓝图 ID 列表 */
 export function layoutSave(args: LayoutSaveArgs): Promise<LayoutItem> {
   return invoke<LayoutItem>("layout_save", {
     repoId: args.repoId,
     name: args.name,
     layoutJson: args.layoutJson,
+    layerKey: args.layerKey ?? null,
     blueprintIds: args.blueprintIds ?? null,
   });
 }
@@ -34,14 +35,18 @@ export function layoutBlueprints(args: LayoutBlueprintsArgs): Promise<string[]> 
   });
 }
 
-/** 列出某仓库下全部命名布局（最新在前） */
+/** 列出某仓库下全部命名布局层行（最新在前；同一布局名在每个层各一行） */
 export function layoutList(args: LayoutListArgs): Promise<LayoutItem[]> {
   return invoke<LayoutItem[]>("layout_list", { repoId: args.repoId });
 }
 
-/** 读取某仓库下单个命名布局 JSON；不存在返回 null */
+/** 读取某仓库下某一层的命名布局 JSON；不存在返回 null（该层无行时按层无关行兜底） */
 export function layoutGet(args: LayoutGetArgs): Promise<string | null> {
-  return invoke<string | null>("layout_get", { repoId: args.repoId, name: args.name });
+  return invoke<string | null>("layout_get", {
+    repoId: args.repoId,
+    name: args.name,
+    layerKey: args.layerKey ?? null,
+  });
 }
 
 /** 重命名布局预设 */

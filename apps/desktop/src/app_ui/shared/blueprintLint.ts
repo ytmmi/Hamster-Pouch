@@ -41,7 +41,7 @@ function hasSource(node: BlueprintNode, graph: BlueprintGraph): boolean {
  * 计算"未接通"节点：返回 key → 原因。
  *
  * 判定（与后端软告警口径一致，**不阻塞保存**）：
- * - 控件缺 `panel_id`、类缺 `control`、对象缺 `class`、状态缺 `target`；
+ * - 控件缺 `panel_id`、类缺 `control`、对象缺 `class`、状态缺 `target`、浮层缺 `control_id`（D56）；
  * - 引用指向**已不存在的节点**（删除关联节点后的常见状态）；
  * - 操作缺对象来源、条件/状态缺触发来源。
  *
@@ -76,6 +76,13 @@ export function analyzeUnlinked(graph: BlueprintGraph): BlueprintUnlinkedMap {
       case "action":
         if (!node.target || !byKey.has(node.target)) {
           mark(node.key, "missing-target");
+        }
+        break;
+      case "overlay":
+        // D56：浮层必须绑定浮动控件 schema（`control_id`）；未绑定即"未接通"。
+        // 指向的 schema 是否存在需控件标准落地后才能校验，这里只校验"有没有填"。
+        if (!node.control_id || node.control_id.trim().length === 0) {
+          mark(node.key, "missing-control-id");
         }
         break;
       default:

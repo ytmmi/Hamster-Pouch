@@ -1,12 +1,17 @@
-//! 蓝图领域模型（RFC 0007 / D28-D32 / D46-D48）。
+//! 蓝图领域模型（RFC 0007 / D28-D32 / D46-D60）。
 //!
 //! 蓝图是仓库内节点式「面板控件显隐 + 组布局控制」配置文档（一个 JSON 图 + schema 版本）。
-//! 节点分：界面（Interface，顶层容器与页面）/ 布局块（LayoutBlock）/ 标签组（Group）/
-//! 面板控件（Control，旧称「控件」）/ 面板控件内部的类（Class）/ 类内的对象（Object），
-//! 以及事件、条件、动作等逻辑节点；边语义含 contains / memberOf / fires / guards。
-//! 界面节点可有多个（多页面），页面之间用 `navigate` 动作（界面跳转）连接。
+//! 节点分：界面（Interface，层的根与页面）/ 布局块（LayoutBlock）/ 浮层（Overlay，D50）/
+//! 标签组（Group）/ 面板控件（Control，旧称「控件」）/ 面板控件内部的类（Class）/
+//! 类内的对象（Object），以及事件、条件、动作等逻辑节点；
+//! 边语义含 contains / memberOf / fires / guards。
 //!
-//! 本模块只承载纯数据模型与校验（`validate`），不依赖 Tauri/SQLite/文件系统；
+//! **分层（D51）**：一个层 = 一张画布 = 一个界面（页面）；`BlueprintGraph.layers` 列出层，
+//! 每个节点用 `layer` 归属某一层；跨层只允许 `navigate`（界面跳转，字段引用，不是边）。
+//! `layers` 缺失/为空时按**单层文档**兜底（层名取界面 `name`，无则「主界面」）。
+//!
+//! 本模块只承载纯数据模型与校验入口（`validate` / `warnings`），不依赖 Tauri/SQLite/文件系统；
+//! 校验算法在 `blueprint_validate.rs`，版本迁移在 `blueprint_migrate.rs`，
 //! 存储与命令桥接分别位于 hp-store 与 src-tauri。
 
 use std::collections::{HashMap, HashSet};
@@ -14,22 +19,32 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// 蓝图文档 schema 版本（当前 = 1）。
-pub const BLUEPRINT_SCHEMA_VERSION: i64 = 1;
+use crate::blueprint_validate as validate_impl;
+
+/// 蓝图文档 schema 版本（当前 = 2；v1 → v2 为「引入分层」迁移，D52/D58）。
+pub const BLUEPRINT_SCHEMA_VERSION: i64 = 2;
+
+/// 浮层高度参数下界（D57：默认 1，1 最低）。
+pub const OVERLAY_HEIGHT_MIN: i64 = 1;
+
+/// 浮层高度参数上界（D57：1–10，值大者在上）。
+pub const OVERLAY_HEIGHT_MAX: i64 = 10;
 
 /// 节点 key（蓝图内唯一，边引用寻址依据）。
 pub type NodeKey = String;
 
 // ============================== 枚举 ==============================
 
-/// 节点类型（RFC 0007 决策 1；D46/D47）。
+/// 节点类型（RFC 0007 决策 1；D46/D47/D50）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeType {
-    /// 界面：顶层容器 + 页面（一个界面 = 一个页面，可有多个，多页面基础）。
+    /// 界面：层的根节点 + 页面（一个界面 = 一个页面；每层至多一个）。
     Interface,
     /// 布局块：界面上的一个区域（如左/中/右三栏），包含标签组与面板控件。
     LayoutBlock,
+    /// 浮层：浮动控件的显隐载体（D50）；与布局块同级、是叶子节点。
+    Overlay,
     /// 面板控件：dockview 面板实例（UI 组件实例，旧称「控件」）。
     Control,
     /// 类：面板控件内部条目分类（按 media_type）。
@@ -51,6 +66,7 @@ impl NodeType {
         match self {
             NodeType::Interface => "interface",
             NodeType::LayoutBlock => "layout_block",
+            NodeType::Overlay => "overlay",
             NodeType::Control => "control",
             NodeType::Class => "class",
             NodeType::Object => "object",
@@ -65,6 +81,7 @@ impl NodeType {
         match s {
             "interface" => Some(NodeType::Interface),
             "layout_block" => Some(NodeType::LayoutBlock),
+            "overlay" => Some(NodeType::Overlay),
             "control" => Some(NodeType::Control),
             "class" => Some(NodeType::Class),
             "object" => Some(NodeType::Object),
@@ -336,13 +353,35 @@ pub struct BlueprintPosition {
     pub y: f64,
 }
 
+/// 蓝图层（D51）：一个层 = 一张画布 = 一个界面（页面）；`name` 即该层界面的显示名。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlueprintLayer {
+    /// 层 key（蓝图内唯一、非空）。
+    pub key: String,
+    /// 层名（非空、蓝图内唯一，D60）；即该层界面的显示名。
+    pub name: String,
+}
+
+impl BlueprintLayer {
+    pub fn new(key: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            name: name.into(),
+        }
+    }
+}
+
 /// 蓝图节点（扁平结构，按 `node_type` 各取所需字段；RFC 0007 决策 1）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlueprintNode {
     pub key: NodeKey,
     #[serde(rename = "type")]
     pub node_type: NodeType,
+    /// 所属层 key（D51）；`layers` 为空时缺省按单层兜底推导。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<String>,
     /// 显示名称（用户自定义）；缺省时由前端按类型本地化生成（如「控件 1」）。
+    /// 界面节点的显示名取自**层名**（D51），不使用本字段。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     // control
@@ -377,11 +416,21 @@ pub struct BlueprintNode {
     // condition
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expr: Option<String>,
-    // action（target = 控件或组 key）
+    // action（target = 面板控件/标签组/界面/浮层 key）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub op: Option<ActionOp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Value>,
+    // overlay（浮层，D50/D56/D57）
+    /// 绑定的浮动控件 schema id（D56）；缺失或指向不存在的 schema → 未接通（软告警）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_id: Option<String>,
+    /// 初始显隐（D50）；缺省由插件声明的初始状态决定。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible: Option<bool>,
+    /// 浮层高度参数（D57：1–10，默认 1，值大者在上）；不是像素高度。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<i64>,
 }
 
 /// 蓝图边（RFC 0007 决策 1）。
@@ -404,6 +453,9 @@ pub struct BlueprintGraph {
     /// 内置默认蓝图版本（仅内置默认图携带；用户图无此字段）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_version: Option<i64>,
+    /// 层清单（D51）；缺失/为空时按**单层文档**兜底（见 `effective_layers`）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<BlueprintLayer>,
     #[serde(default)]
     pub nodes: Vec<BlueprintNode>,
     #[serde(default)]
@@ -415,6 +467,12 @@ fn default_schema_version() -> i64 {
 }
 
 impl BlueprintGraph {
+    /// 单层兜底时使用的层 key（无界面节点可推导时）。
+    pub const FALLBACK_LAYER_KEY: &'static str = "l_main";
+
+    /// 单层兜底时的层名（无界面节点 `name` 可推导时）。
+    pub const FALLBACK_LAYER_NAME: &'static str = "主界面";
+
     /// 解析蓝图 JSON 文档。
     pub fn from_json(json: &str) -> Result<Self, String> {
         serde_json::from_str(json).map_err(|e| format!("蓝图 JSON 解析失败: {e}"))
@@ -426,9 +484,15 @@ impl BlueprintGraph {
     }
 
     /// 解析并校验；返回全部错误（空 = 有效）。
+    ///
+    /// 低版本文档（`schema_version < 当前版本`）先做**内存迁移**再校验（D58：
+    /// 旧文档走迁移而非拒绝；`> 当前版本` 才是硬错误）。
     pub fn validate_json(json: &str) -> Vec<String> {
         match Self::from_json(json) {
-            Ok(graph) => graph.validate(),
+            Ok(mut graph) => {
+                crate::blueprint_migrate::migrate_graph(&mut graph);
+                graph.validate()
+            }
             Err(e) => vec![e],
         }
     }
@@ -438,11 +502,60 @@ impl BlueprintGraph {
         self.nodes.iter().find(|n| n.key == key)
     }
 
+    /// 是否显式分层（`layers` 非空）。
+    pub fn has_layers(&self) -> bool {
+        !self.layers.is_empty()
+    }
+
+    /// 单层兜底时推导出的层 key：取首个界面节点所属层，无则 `l_main`。
+    pub fn fallback_layer_key(&self) -> String {
+        self.nodes
+            .iter()
+            .find(|n| n.node_type == NodeType::Interface)
+            .and_then(|n| n.layer.clone())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| Self::FALLBACK_LAYER_KEY.to_string())
+    }
+
+    /// 节点所属层 key（`layer` 缺省时按单层兜底推导）。
+    pub fn node_layer_key(&self, node: &BlueprintNode) -> String {
+        node.layer
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| self.fallback_layer_key())
+    }
+
+    /// 有效层清单：显式 `layers`，为空中时按单层兜底推导一层（层名取界面 `name` 或「主界面」）。
+    ///
+    /// 编辑器的"当前层"、布局的 `layer_key` 维度都以本方法的结果为准，
+    /// 因此旧文档（无 `layers`）在 UI 上表现为单层文档。
+    pub fn effective_layers(&self) -> Vec<BlueprintLayer> {
+        if self.has_layers() {
+            return self.layers.clone();
+        }
+        let name = self
+            .nodes
+            .iter()
+            .find(|n| n.node_type == NodeType::Interface)
+            .and_then(|n| n.name.clone())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| Self::FALLBACK_LAYER_NAME.to_string());
+        vec![BlueprintLayer::new(self.fallback_layer_key(), name)]
+    }
+
+    /// 某层的界面节点（层的根；每层至多一个，返回首个）。
+    pub fn interface_of_layer(&self, layer_key: &str) -> Option<&BlueprintNode> {
+        self.nodes.iter().find(|n| {
+            n.node_type == NodeType::Interface && self.node_layer_key(n) == layer_key
+        })
+    }
+
     /// 语义校验（RFC 0007 决策 6）：返回全部错误，空 = 有效。
     pub fn validate(&self) -> Vec<String> {
         let mut errors = Vec::new();
 
-        if self.schema_version != BLUEPRINT_SCHEMA_VERSION {
+        // 版本闸门：`>` 当前版本才是硬错误；更低版本先走迁移（D58），迁移后再校验。
+        if self.schema_version > BLUEPRINT_SCHEMA_VERSION {
             errors.push(format!(
                 "不支持的蓝图 schema 版本: {}（当前为 {}）",
                 self.schema_version, BLUEPRINT_SCHEMA_VERSION
@@ -466,13 +579,13 @@ impl BlueprintGraph {
 
         // 各节点类型字段校验（硬错误）
         for node in &self.nodes {
-            blueprint_validate::validate_node(node, &by_key, &mut errors);
+            validate_impl::validate_node(node, &by_key, &mut errors);
         }
 
         // 边校验
         let mut edge_seen = HashSet::new();
         for edge in &self.edges {
-            blueprint_validate::validate_edge(edge, &by_key, &mut errors);
+            validate_impl::validate_edge(edge, &by_key, &mut errors);
             if !edge_seen.insert((edge.from.clone(), edge.to.clone(), edge.edge_kind)) {
                 errors.push(format!(
                     "重复边: {} --{}--> {}",
@@ -480,6 +593,9 @@ impl BlueprintGraph {
                 ));
             }
         }
+
+        // 分层规则（D51/D58/D60）：层 key/名、每层至多一个界面、节点 layer 归属、跨层边。
+        validate_impl::validate_layers(self, &mut errors);
 
         // 互斥组 default_visible 至多一个成员
         for node in &self.nodes {
@@ -498,7 +614,7 @@ impl BlueprintGraph {
         }
 
         // fires/guards 求值子图必须无环（DAG）
-        if let Some(cycle) = blueprint_validate::find_cycle(&self.edges) {
+        if let Some(cycle) = validate_impl::find_cycle(&self.edges) {
             errors.push(format!(
                 "fires/guards 求值链存在环: {}",
                 cycle
@@ -520,10 +636,24 @@ impl BlueprintGraph {
     ///
     /// 设计意图（RFC 0007）：删除节点/断线后**不级联删除关联节点**，允许先保存中间
     /// 状态；不生效的部分由画布灰色表示，用户接回去即恢复。
+    /// 分层相关的软告警：**无根层**（层内界面节点被软删除）与**浮层未绑定**（D55/D56）。
     pub fn warnings(&self) -> Vec<String> {
         let by_key: HashMap<&str, &BlueprintNode> =
             self.nodes.iter().map(|n| (n.key.as_str(), n)).collect();
         let mut warnings = Vec::new();
+
+        // 无根层（D55）：显式分层的文档里某层没有界面节点 → 该层不可显示、跳转失效。
+        if self.has_layers() {
+            for layer in &self.layers {
+                if self.interface_of_layer(&layer.key).is_none() {
+                    warnings.push(format!(
+                        "层 {name}（{key}）暂未接通：该层没有界面节点（无根层），指向它的界面跳转不会执行",
+                        name = layer.name,
+                        key = layer.key
+                    ));
+                }
+            }
+        }
 
         for node in &self.nodes {
             match node.node_type {
@@ -565,6 +695,21 @@ impl BlueprintGraph {
                         ));
                     }
                 }
+                NodeType::Overlay => {
+                    // D56：control_id 缺失 → 未接通（指向不存在的 schema 需控件标准落地后校验）。
+                    if node
+                        .control_id
+                        .as_deref()
+                        .unwrap_or("")
+                        .trim()
+                        .is_empty()
+                    {
+                        warnings.push(format!(
+                            "浮层节点 {key} 暂未接通：缺少 control_id（未绑定浮动控件，D56）",
+                            key = node.key
+                        ));
+                    }
+                }
                 _ => {}
             }
 
@@ -579,7 +724,7 @@ impl BlueprintGraph {
                     None => true,
                 },
                 NodeType::Action => match node.target.as_deref() {
-                    // 界面跳转的目标是界面节点；指向已删除界面属未接通（软告警，D48）。
+                    // 界面跳转的目标是界面节点；指向已删除界面属未接通（软告警，D48/D55）。
                     Some(t) if node.op == Some(ActionOp::Navigate) => !matches!(
                         by_key.get(t).map(|n| n.node_type),
                         Some(NodeType::Interface)
@@ -600,273 +745,6 @@ impl BlueprintGraph {
     }
 }
 
-/// 校验算法（硬错误 + 软问题/未接通）；数据模型在父模块。
-mod blueprint_validate {
-    use super::*;
-
-    /// 校验单个节点字段与引用（硬错误）。
-    pub(super) fn validate_node(
-        node: &BlueprintNode,
-        by_key: &HashMap<&str, &BlueprintNode>,
-        errors: &mut Vec<String>,
-    ) {
-        let key = &node.key;
-        match node.node_type {
-            NodeType::Interface => {
-                // 界面（页面）：结构节点，仅要求 key 非空（name/position 可选）。
-                // 可有多个界面（多页面，D47），不限制唯一。
-            }
-            NodeType::LayoutBlock => {
-                // 布局块：结构节点，仅要求 key 非空（name/position 可选）。
-            }
-            NodeType::Control => {
-                // panel_id 缺失 → 未接通（软），不阻塞保存。
-            }
-            NodeType::Class => {
-                // control 缺失/指向已删除节点 → 未接通（软）；指向存在但类型不符 → 硬错误。
-                if let Some(ck) = node.control.as_deref() {
-                    if let Some(target) = by_key.get(ck) {
-                        if target.node_type != NodeType::Control {
-                            errors.push(format!(
-                                "类节点 {key} 的 control 必须指向面板控件节点（当前指向 {}）",
-                                target.node_type
-                            ));
-                        }
-                    }
-                }
-                match node.media_type.as_deref() {
-                    Some("image") | Some("video") | Some("audio") => {}
-                    _ => errors.push(format!(
-                        "类节点 {key} 的 media_type 必须是 image/video/audio（当前: {}）",
-                        node.media_type.as_deref().unwrap_or("")
-                    )),
-                }
-            }
-            NodeType::Object => {
-                if let Some(class_key) = node.class.as_deref() {
-                    if let Some(target) = by_key.get(class_key) {
-                        if target.node_type != NodeType::Class {
-                            errors.push(format!(
-                                "对象节点 {key} 的 class 必须指向类节点（当前指向 {}）",
-                                target.node_type
-                            ));
-                        }
-                    }
-                }
-                if node.scope.as_deref().unwrap_or("").trim().is_empty() {
-                    errors.push(format!("对象节点 {key} 缺少 scope"));
-                }
-            }
-            NodeType::Group => {
-                if node.mode.is_none() {
-                    errors.push(format!("组节点 {key} 缺少 mode"));
-                }
-                if let Some(visible) = &node.default_visible {
-                    for vk in visible {
-                        if let Some(target) = by_key.get(vk.as_str()) {
-                            if target.node_type != NodeType::Control {
-                                errors.push(format!(
-                                    "组节点 {key} 的 default_visible 成员 {vk} 必须是面板控件节点"
-                                ));
-                            }
-                        }
-                    }
-                }
-                if let Some(dir) = &node.hide_direction {
-                    if let Some(target_key) = dir.toward_target() {
-                        if let Some(target) = by_key.get(target_key) {
-                            if target.node_type != NodeType::Group {
-                                errors.push(format!(
-                                    "组节点 {key} 的 hide_direction 指向的 {target_key} 必须是组节点"
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-            NodeType::Event => {
-                if node.trigger.is_none() {
-                    errors.push(format!("操作节点 {key} 缺少 trigger"));
-                }
-                if let Some(t) = node.target.as_deref() {
-                    if let Some(target) = by_key.get(t) {
-                        if !matches!(
-                            target.node_type,
-                            NodeType::Control | NodeType::Class | NodeType::Object
-                        ) {
-                            errors.push(format!(
-                                "操作节点 {key} 的 target 必须指向面板控件/类/对象节点（当前指向 {}）",
-                                target.node_type
-                            ));
-                        }
-                    }
-                }
-            }
-            NodeType::Condition => {
-                if let Some(expr) = &node.expr {
-                    if let Some(msg) = validate_expr(expr) {
-                        errors.push(format!("条件节点 {key}: {msg}"));
-                    }
-                } else {
-                    errors.push(format!("条件节点 {key} 缺少 expr"));
-                }
-            }
-            NodeType::Action => {
-                let op = node.op;
-                if op.is_none() {
-                    errors.push(format!("动作节点 {key} 缺少 op"));
-                }
-                if let Some(target_key) = node.target.as_deref() {
-                    if let Some(target) = by_key.get(target_key) {
-                        let actual = target.node_type;
-                        let ok = match op {
-                            Some(ActionOp::Show) | Some(ActionOp::Hide) => {
-                                actual == NodeType::Control
-                            }
-                            Some(ActionOp::Collapse) | Some(ActionOp::Expand) => {
-                                actual == NodeType::Group
-                            }
-                            Some(ActionOp::Toggle) => {
-                                matches!(actual, NodeType::Control | NodeType::Group)
-                            }
-                            // 界面跳转：目标必须是界面节点（D48）。
-                            Some(ActionOp::Navigate) => actual == NodeType::Interface,
-                            None => true,
-                        };
-                        if !ok {
-                            errors.push(format!(
-                                "动作节点 {key} 的 target 类型不符：{} 不能指向 {}",
-                                op.map(|o| o.as_str()).unwrap_or("?"),
-                                actual
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// 校验边：端点存在性 + 端点类型与边类型匹配。
-    pub(super) fn validate_edge(
-        edge: &BlueprintEdge,
-        by_key: &HashMap<&str, &BlueprintNode>,
-        errors: &mut Vec<String>,
-    ) {
-        let from = by_key.get(edge.from.as_str()).map(|n| n.node_type);
-        let to = by_key.get(edge.to.as_str()).map(|n| n.node_type);
-        if from.is_none() {
-            errors.push(format!("边引用不存在的起点: {}", edge.from));
-        }
-        if to.is_none() {
-            errors.push(format!("边引用不存在的终点: {}", edge.to));
-        }
-        let ok = match (edge.edge_kind, from, to) {
-            (EdgeKind::Contains, Some(NodeType::Interface), Some(NodeType::LayoutBlock))
-            | (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Group))
-            | (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Control))
-            | (EdgeKind::Contains, Some(NodeType::Group), Some(NodeType::Control))
-            | (EdgeKind::Contains, Some(NodeType::Control), Some(NodeType::Class))
-            | (EdgeKind::Contains, Some(NodeType::Class), Some(NodeType::Object)) => true,
-            (EdgeKind::MemberOf, Some(NodeType::Control), Some(NodeType::Group)) => true,
-            (EdgeKind::On, Some(NodeType::Control | NodeType::Class | NodeType::Object), Some(NodeType::Event)) => {
-                true
-            }
-            (EdgeKind::Fires, Some(NodeType::Event), Some(NodeType::Condition | NodeType::Action)) => {
-                true
-            }
-            (EdgeKind::Guards, Some(NodeType::Condition), Some(NodeType::Action)) => true,
-            _ => false,
-        };
-        if !ok {
-            errors.push(format!(
-                "非法边: {} --{}--> {}（端点类型不匹配或引用缺失）",
-                edge.from, edge.edge_kind, edge.to
-            ));
-        }
-    }
-
-    /// 条件表达式校验（基础集，RFC 0007 决策 1）。
-    pub(super) fn validate_expr(expr: &str) -> Option<String> {
-        let tokens: Vec<&str> = expr.split_whitespace().collect();
-        if tokens.len() != 3 {
-            return Some(format!("条件表达式应为「字段 操作符 值」三段: {expr}"));
-        }
-        let lhs = tokens[0];
-        let op = tokens[1];
-        let rhs = tokens[2];
-        match (lhs, op) {
-            ("media_type", "==") => match rhs {
-                "image" | "video" | "audio" => None,
-                _ => Some(format!("media_type 值必须是 image/video/audio: {expr}")),
-            },
-            ("selection", "!=") if rhs == "empty" => None,
-            ("selection", _) => Some(format!("selection 仅支持 `selection != empty`: {expr}")),
-            ("rating", ">=") => match rhs.parse::<u32>() {
-                Ok(v) if v <= 5 => None,
-                _ => Some(format!("rating 值必须是 0..=5 的整数: {expr}")),
-            },
-            ("has_tag", "==") if !rhs.is_empty() => None,
-            ("has_tag", _) => Some(format!("has_tag 值不能为空: {expr}")),
-            _ => Some(format!("不支持的条件表达式: {expr}")),
-        }
-    }
-
-    /// 在 fires/guards 子图上找环（求值链必须为 DAG）。
-    pub(super) fn find_cycle(edges: &[BlueprintEdge]) -> Option<Vec<NodeKey>> {
-        let eval_edges: Vec<&BlueprintEdge> = edges
-            .iter()
-            .filter(|e| matches!(e.edge_kind, EdgeKind::Fires | EdgeKind::Guards))
-            .collect();
-        let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
-        for e in &eval_edges {
-            adj.entry(e.from.as_str()).or_default().push(e.to.as_str());
-        }
-        let mut state: HashMap<&str, u8> = HashMap::new();
-        let mut path: Vec<&str> = Vec::new();
-        for start in adj.keys() {
-            if state.get(start) == Some(&2) {
-                continue;
-            }
-            if let Some(cycle) = dfs_cycle(start, &adj, &mut state, &mut path) {
-                return Some(cycle);
-            }
-        }
-        None
-    }
-
-    fn dfs_cycle<'a>(
-        node: &'a str,
-        adj: &HashMap<&'a str, Vec<&'a str>>,
-        state: &mut HashMap<&'a str, u8>,
-        path: &mut Vec<&'a str>,
-    ) -> Option<Vec<NodeKey>> {
-        state.insert(node, 1);
-        path.push(node);
-        if let Some(nexts) = adj.get(node) {
-            for &next in nexts {
-                match state.get(next) {
-                    Some(&1) => {
-                        let start = path.iter().position(|k| *k == next)?;
-                        let cycle = path[start..]
-                            .iter()
-                            .map(|k| k.to_string())
-                            .collect::<Vec<_>>();
-                        return Some(cycle);
-                    }
-                    Some(&2) => {}
-                    _ => {
-                        if let Some(cycle) = dfs_cycle(next, adj, state, path) {
-                            return Some(cycle);
-                        }
-                    }
-                }
-            }
-        }
-        state.insert(node, 2);
-        path.pop();
-        None
-    }
-}
 
 // ============================== 存储行 ==============================
 

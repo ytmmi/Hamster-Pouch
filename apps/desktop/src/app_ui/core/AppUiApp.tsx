@@ -20,10 +20,12 @@ import { normalizeLayoutJson } from "../shared/panelLayout";
 import {
   activeBlueprintId,
   loadActiveBlueprint,
+  loadCurrentLayer,
   notifyBlueprintChangedLocally,
   reconcileActiveBlueprint,
   reconcileAfterLayoutApplied,
   subscribeBlueprintHotReload,
+  switchLayer,
 } from "../shared/blueprintRuntime";
 import {
   publishStructure,
@@ -56,6 +58,8 @@ export function AppUiApp(): JSX.Element {
   const [language, setLanguageState] = useState<Language>(DEFAULT_LANGUAGE);
   const apiRef = useRef<DockviewApi | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
+  /** 浮层期望可见态（D50）：控件标准落地前先由宿主记录，供浮层宿主直接消费。 */
+  const overlayStateRef = useRef<Map<string, boolean>>(new Map());
 
   const t = useMemo(() => makeTranslator(language), [language]);
 
@@ -228,6 +232,30 @@ export function AppUiApp(): JSX.Element {
           .then(() => status(t("player.playingInMpv"), "ok"))
           .catch((e) => status(t("player.playFailed", { err: String(e) }), "error"));
       },
+      // 界面跳转（D48/D54）：切到目标层 = 持久化当前层 + 套用该层布局 + 对账蓝图语义。
+      navigateLayer: (layerKey: string) => {
+        if (!repoId) {
+          return;
+        }
+        void switchLayer(repoId, layerKey, apiRef.current).then((applied) => {
+          status(
+            applied ? t("layer.switched") : t("layer.switchedNoLayout"),
+            "info",
+          );
+        });
+      },
+      // 浮层显隐（D50/D56）：浮动控件由控件标准落地后渲染（`docs/spec/control-standard.md`
+      // 第 4–5 步）。当前先记录**期望可见态**并把结果写进诊断日志，宿主接管后即可直接消费。
+      setOverlayVisible: (controlId: string, visible: boolean) => {
+        overlayStateRef.current.set(controlId, visible);
+        void import("../shared/blueprintRuntime")
+          .then((m) =>
+            m.traceBlueprint(
+              `[overlay] ${controlId} → ${visible ? "显示" : "隐藏"}（浮动控件渲染待控件标准落地）`,
+            ),
+          )
+          .catch(() => undefined);
+      },
     }),
     [focusPanel, repoId, status, t],
   );
@@ -250,6 +278,11 @@ export function AppUiApp(): JSX.Element {
     void (async () => {
       // 重新装载"当前生效蓝图"（可能是布局绑定的蓝图，而非仓库默认）。
       await loadActiveBlueprint(repoId, activeBlueprintId());
+      if (cancelled) {
+        return;
+      }
+      // 当前层（D54）：按仓库持久化；记录缺失/失效时回退生效蓝图的第一个层。
+      await loadCurrentLayer(repoId);
       if (cancelled) {
         return;
       }
@@ -458,17 +491,30 @@ export function AppUiApp(): JSX.Element {
           }
           const opened = await api.repoOpen({ repoId: defRepo });
           setRepoId(opened.id);
+          // 分层（D53/D54）：先装载生效蓝图 → 读出该仓库的当前层 → 套用**当前层**那一份布局。
+          await loadActiveBlueprint(opened.id, activeBlueprintId());
+          const layer = await loadCurrentLayer(opened.id);
           const defLayout = await api.layoutGetDefault({ repoId: opened.id });
           if (!defLayout) {
             return;
           }
-          const raw = await api.layoutGet({ repoId: opened.id, name: defLayout });
-          if (!raw) {
+          const raw = await api.layoutGet({
+            repoId: opened.id,
+            name: defLayout,
+            layerKey: layer ?? undefined,
+          });
+          const applied =
+            raw ??
+            // 该层没有专属行时按层无关行兼容（旧预设）。
+            (await api.layoutGet({ repoId: opened.id, name: defLayout }));
+          if (!applied) {
             return;
           }
-          const layout = JSON.parse(raw);
+          const layout = JSON.parse(applied);
           // 补齐最小尺寸约束并保持媒体预览 DOM（renderer=always）。
           dv.fromJSON(normalizeLayoutJson(layout));
+          // 套用布局后按蓝图语义对账一次（D29：防止显隐/收起状态漂移）。
+          reconcileAfterLayoutApplied(dv);
         } catch {
           /* 无默认仓库/布局或打开失败：保留默认布局 */
         }

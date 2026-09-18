@@ -1,21 +1,31 @@
 /**
- * 蓝图（RFC 0007 / D28-D32）前端共享配置：
- * 节点/边类型、常量、内置默认蓝图（复现现状硬编码联动，保证零回归）。
+ * 蓝图（RFC 0007 / D28-D60）前端共享配置：
+ * 节点/边类型、常量、分层与浮层辅助函数、内置默认蓝图（复现现状硬编码联动，保证零回归）。
  *
  * 蓝图文档整 JSON 存储（save = 整文档替换），语义校验由后端 `blueprint.validate` 承担；
- * 本文件只承载图结构类型、枚举常量与内置默认图。
+ * 本文件只承载图结构类型、枚举常量、分层/浮层工具与内置默认图。
  */
 
-export const BLUEPRINT_SCHEMA_VERSION = 1;
+export const BLUEPRINT_SCHEMA_VERSION = 2;
 
 /** 当前内置默认蓝图版本（引擎据此自动升级旧库存默认）。 */
-export const DEFAULT_BLUEPRINT_VERSION = 6;
+export const DEFAULT_BLUEPRINT_VERSION = 7;
+
+/** 浮层高度参数范围（D57：默认 1，范围 1–10，值大者在上；不是像素高度）。 */
+export const OVERLAY_HEIGHT_MIN = 1;
+export const OVERLAY_HEIGHT_MAX = 10;
+
+/** 单层兜底时使用的层 key / 层名（与 hp-core `BlueprintGraph::FALLBACK_LAYER_*` 一致）。 */
+export const FALLBACK_LAYER_KEY = "l_main";
+export const FALLBACK_LAYER_NAME = "主界面";
 
 // ============================== 类型 ==============================
 
 export type BlueprintNodeType =
   | "interface"
   | "layout_block"
+  /** 浮层（D50）：浮动控件的显隐载体，与布局块同级、是叶子节点。 */
+  | "overlay"
   | "control"
   | "class"
   | "object"
@@ -47,11 +57,22 @@ export interface BlueprintPosition {
   y: number;
 }
 
+/** 蓝图层（D51）：一个层 = 一张画布 = 一个界面（页面）；`name` 即该层界面的显示名。 */
+export interface BlueprintLayer {
+  /** 层 key（蓝图内唯一、非空）。 */
+  key: string;
+  /** 层名（非空、蓝图内唯一，D60）；即该层界面的显示名。 */
+  name: string;
+}
+
 /** 蓝图节点（扁平结构，按 type 各取所需字段，与后端 hp-core 模型一致）。 */
 export interface BlueprintNode {
   key: string;
   type: BlueprintNodeType;
-  /** 显示名称（用户自定义）；缺省时前端按类型本地化生成（如「控件 1」）。 */
+  /** 所属层 key（D51）；文档未分层时按单层兜底推导。 */
+  layer?: string;
+  /** 显示名称（用户自定义）；缺省时前端按类型本地化生成（如「控件 1」）。
+   *  界面节点的显示名取自**层名**（D51），不使用本字段。 */
   name?: string;
   // control
   panel_id?: string;
@@ -75,6 +96,13 @@ export interface BlueprintNode {
   // action
   op?: BlueprintActionOp;
   payload?: unknown;
+  // overlay（浮层，D50/D56/D57）
+  /** 绑定的浮动控件 schema id（D56）；缺失或指向不存在的 schema → 未接通。 */
+  control_id?: string;
+  /** 初始显隐（D50）；缺省由插件声明的初始状态决定。 */
+  visible?: boolean;
+  /** 浮层高度参数（D57：1–10，默认 1，值大者在上）。 */
+  height?: number;
   /**
    * 未接通（画布渲染用的**派生标记**，不落库）：
    * 删除/断线后节点自身缺少必要引用或触发来源，因而**不生效**，
@@ -89,7 +117,8 @@ export type BlueprintUnlinkedReason =
   | "missing-class"
   | "missing-target"
   | "missing-object-source"
-  | "missing-trigger";
+  | "missing-trigger"
+  | "missing-control-id";
 
 /** 派生分析结果：未接通节点 key → 原因。 */
 export type BlueprintUnlinkedMap = Record<string, BlueprintUnlinkedReason>;
@@ -107,6 +136,8 @@ export interface BlueprintGraph {
   schema_version: number;
   /** 内置默认蓝图版本（仅 DEFAULT_BLUEPRINT 携带；旧库存默认无此字段）。 */
   default_version?: number;
+  /** 层清单（D51）；缺失/为空 = 单层兜底（见 `effectiveLayers`）。 */
+  layers?: BlueprintLayer[];
   nodes: BlueprintNode[];
   edges: BlueprintEdge[];
 }
@@ -136,14 +167,121 @@ export const CONDITION_EXPR_HINTS = [
   "has_tag == 示例标签",
 ] as const;
 
+// ============================== 分层工具（D51/D58/D60） ==============================
+
+/** 文档是否显式分层（`layers` 非空）。 */
+export function hasLayers(doc: BlueprintGraph): boolean {
+  return (doc.layers?.length ?? 0) > 0;
+}
+
+/** 单层兜底时推导出的层 key：首个界面节点所属层，无则 `l_main`。 */
+export function fallbackLayerKey(doc: BlueprintGraph): string {
+  const ui = doc.nodes.find((n) => n.type === "interface");
+  const layer = ui?.layer?.trim();
+  return layer && layer.length > 0 ? layer : FALLBACK_LAYER_KEY;
+}
+
+/** 节点所属层 key（`layer` 缺省时按单层兜底推导）。 */
+export function nodeLayerKey(doc: BlueprintGraph, node: BlueprintNode): string {
+  const layer = node.layer?.trim();
+  return layer && layer.length > 0 ? layer : fallbackLayerKey(doc);
+}
+
+/**
+ * 有效层清单：显式 `layers`；为空时按单层兜底推导一层（层名取界面 `name` 或「主界面」）。
+ * 编辑器"当前层"、布局 `layer_key` 维度都以本函数结果为准。
+ */
+export function effectiveLayers(doc: BlueprintGraph): BlueprintLayer[] {
+  if (hasLayers(doc)) {
+    return doc.layers!;
+  }
+  const name =
+    doc.nodes.find((n) => n.type === "interface")?.name?.trim() || FALLBACK_LAYER_NAME;
+  return [{ key: fallbackLayerKey(doc), name }];
+}
+
+/** 某层的界面节点（层的根；每层至多一个）。 */
+export function interfaceOfLayer(
+  doc: BlueprintGraph,
+  layerKey: string,
+): BlueprintNode | undefined {
+  return doc.nodes.find(
+    (n) => n.type === "interface" && nodeLayerKey(doc, n) === layerKey,
+  );
+}
+
+/** 某层内的全部节点。 */
+export function nodesOfLayer(doc: BlueprintGraph, layerKey: string): BlueprintNode[] {
+  return doc.nodes.filter((n) => nodeLayerKey(doc, n) === layerKey);
+}
+
+/** 某层内的节点 key 集合。 */
+export function layerNodeKeys(doc: BlueprintGraph, layerKey: string): Set<string> {
+  return new Set(nodesOfLayer(doc, layerKey).map((n) => n.key));
+}
+
+/** 某层内的边（按端点归属：边不带 layer，由端点推导）。 */
+export function edgesOfLayer(doc: BlueprintGraph, layerKey: string) {
+  const keys = layerNodeKeys(doc, layerKey);
+  return doc.edges.filter((e) => keys.has(e.from) && keys.has(e.to));
+}
+
+/** 生成蓝图内唯一的层 key。 */
+export function uniqueLayerKey(doc: BlueprintGraph, base = "l"): string {
+  const used = new Set((doc.layers ?? []).map((l) => l.key));
+  if (!used.has(base)) {
+    return base;
+  }
+  let i = 2;
+  while (used.has(`${base}_${i}`)) {
+    i += 1;
+  }
+  return `${base}_${i}`;
+}
+
+/** 生成蓝图内唯一的层名（D60：层名蓝图内唯一）。 */
+export function uniqueLayerName(doc: BlueprintGraph, wanted: string): string {
+  const used = new Set((doc.layers ?? []).map((l) => l.name));
+  if (!used.has(wanted)) {
+    return wanted;
+  }
+  let i = 2;
+  while (used.has(`${wanted} ${i}`)) {
+    i += 1;
+  }
+  return `${wanted} ${i}`;
+}
+
+/**
+ * 保存前归一化分层：把**兜底单层**实体化进 `layers`，并给每个缺 `layer` 的节点补上归属。
+ *
+ * 后端校验规则是"`layers` 存在而节点缺 `layer` = 硬错误"，且"`layers` 缺失/为空才兜底"，
+ * 因此编辑器保存时必须显式写出层与归属；已是分层文档时保持原样。
+ */
+export function normalizeLayersForSave(doc: BlueprintGraph): BlueprintGraph {
+  if (hasLayers(doc)) {
+    return doc;
+  }
+  const [layer] = effectiveLayers(doc);
+  return {
+    ...doc,
+    layers: [layer],
+    nodes: doc.nodes.map((n) => ({ ...n, layer: n.layer ?? layer.key })),
+  };
+}
+
+
 // ============================== 内置默认蓝图 ==============================
 
 /**
- * 内置默认蓝图 v6：如实表达当前默认「媒体-测试」布局（RFC 0007 决策 5 / D32 / D47）。
+ * 内置默认蓝图 v7：如实表达当前默认「媒体-测试」布局（RFC 0007 决策 5 / D32 / D47 / D51）。
  *
- * 结构（界面 ⊃ 布局块 ⊃ 标签组 ⊃ 面板控件；面板控件 ⊃ 类 ⊃ 对象）—— 与仓库默认布局逐栏对应：
- * - 顶层 `ui`：**界面节点**（一个界面 = 一个页面；多页面由用户自行新增界面节点并用
- *   `navigate`（界面跳转）连接，D47/D48）；
+ * 结构（**单层**「主界面」：层 ⊃ 界面 ⊃ 布局块 ⊃ 标签组 ⊃ 面板控件；面板控件 ⊃ 类 ⊃ 对象）
+ * —— 与仓库默认布局逐栏对应：
+ * - 分层（D51）：`layers = [{ key: "l_main", name: "主界面" }]`，**每个节点都带 `layer`**；
+ *   一个层 = 一张画布 = 一个界面（页面）；多页面由用户新增层与界面节点，
+ *   并用 `navigate`（界面跳转，D48）连接；
+ * - 层内的根是**界面节点** `ui`（界面显示名取自层名，D51：不再另存 `name`）；
  * - 左栏（blk_left）：**三个独立面板**，故直接含 仓库、图像源、相册 三个面板控件
  *   （该栏没有 dockview 标签组）；
  * - 中栏（blk_center）：**只有一个标签组** `g_media`，其成员为 媒体预览 / 查看器 /
@@ -153,7 +291,8 @@ export const CONDITION_EXPR_HINTS = [
  *   标签·评分 / 元数据（布局里同样是同一个 leaf 的三个标签页）。
  *
  * 术语（D46）：节点类型 `control` 在文档与 UI 中显示为**面板控件**，
- * 与 `docs/spec/control-standard.md` 的「控件」（宿主标准 UI 单元）区分。
+ * 与 `docs/spec/control-standard.md` 的「控件」（宿主标准 UI 单元）区分；
+ * 浮层（`overlay`，D50）承载浮动控件的显隐，与布局块同级，默认蓝图不含浮层。
  *
  * 规则（对象 → 操作 → 状态，全部连线）：
  * - 双击 图像·双击对象 → 显示 查看器；
@@ -172,52 +311,53 @@ export const CONDITION_EXPR_HINTS = [
  *   不会因切换标签而把面板销毁。
  * - 节点 `position` 为画布世界坐标（界面一行、布局块一行、各栏一列），**互不重叠**，
  *   打开编辑器即可读清结构；拖拽后位置随文档落库（D30）。
- * - 旧版内置默认由引擎按 `default_version` 自动升级（v5 → v6 即引入界面节点的那次升级）；
+ * - 旧版内置默认由引擎按 `default_version` 自动升级（v6 → v7 即引入分层那次升级）；
  *   不保留旧模式兼容。
  */
 export const DEFAULT_BLUEPRINT: BlueprintGraph = {
   schema_version: BLUEPRINT_SCHEMA_VERSION,
   default_version: DEFAULT_BLUEPRINT_VERSION,
+  layers: [{ key: "l_main", name: "主界面" }],
   nodes: [
     // 界面（顶层容器 / 页面）：一行，居中于三栏之上
-    { key: "ui", type: "interface", name: "主界面", position: { x: 460, y: 40 } },
+    { key: "ui", type: "interface", layer: "l_main", position: { x: 460, y: 40 } },
 
     // 布局块（各栏一列，位于界面之下）
-    { key: "blk_left", type: "layout_block", name: "左栏", position: { x: 40, y: 170 } },
-    { key: "blk_center", type: "layout_block", name: "中栏", position: { x: 460, y: 170 } },
-    { key: "blk_right", type: "layout_block", name: "右栏", position: { x: 880, y: 170 } },
+    { key: "blk_left", type: "layout_block", layer: "l_main", name: "左栏", position: { x: 40, y: 170 } },
+    { key: "blk_center", type: "layout_block", layer: "l_main", name: "中栏", position: { x: 460, y: 170 } },
+    { key: "blk_right", type: "layout_block", layer: "l_main", name: "右栏", position: { x: 880, y: 170 } },
 
     // 左栏面板控件（仓库 / 图像源 / 相册）
-    { key: "c_repo", type: "control", panel_id: "repo", title_key: "panel.repo", position: { x: 40, y: 300 } },
-    { key: "c_sources", type: "control", panel_id: "sources", title_key: "panel.sources", position: { x: 40, y: 430 } },
-    { key: "c_albums", type: "control", panel_id: "albums", title_key: "panel.albums", position: { x: 40, y: 560 } },
+    { key: "c_repo", type: "control", layer: "l_main", panel_id: "repo", title_key: "panel.repo", position: { x: 40, y: 300 } },
+    { key: "c_sources", type: "control", layer: "l_main", panel_id: "sources", title_key: "panel.sources", position: { x: 40, y: 430 } },
+    { key: "c_albums", type: "control", layer: "l_main", panel_id: "albums", title_key: "panel.albums", position: { x: 40, y: 560 } },
 
     // 中栏：**只有标签组** g_media（媒体预览 / 查看器 / 媒体播放同属一个 dockview
     // 标签组，对应布局里的一个 leaf），媒体预览内部再分 图像/视频/音频 类 → 对象。
-    { key: "g_media", type: "group", mode: "exclusive", name: "媒体·查看器·播放", position: { x: 460, y: 300 } },
-    { key: "c_media", type: "control", panel_id: "media", title_key: "panel.media", position: { x: 760, y: 300 } },
-    { key: "c_viewer", type: "control", panel_id: "viewer", title_key: "panel.viewer", position: { x: 760, y: 430 } },
-    { key: "c_player", type: "control", panel_id: "player", title_key: "panel.player", position: { x: 760, y: 560 } },
-    { key: "k_image", type: "class", control: "c_media", media_type: "image", position: { x: 1060, y: 300 } },
-    { key: "k_video", type: "class", control: "c_media", media_type: "video", position: { x: 1060, y: 430 } },
-    { key: "k_audio", type: "class", control: "c_media", media_type: "audio", position: { x: 1060, y: 560 } },
-    { key: "o_img", type: "object", class: "k_image", scope: "double_clicked", position: { x: 1360, y: 300 } },
-    { key: "o_vid", type: "object", class: "k_video", scope: "double_clicked", position: { x: 1360, y: 430 } },
-    { key: "o_aud", type: "object", class: "k_audio", scope: "double_clicked", position: { x: 1360, y: 560 } },
+    { key: "g_media", type: "group", layer: "l_main", mode: "exclusive", name: "媒体·查看器·播放", position: { x: 460, y: 300 } },
+    { key: "c_media", type: "control", layer: "l_main", panel_id: "media", title_key: "panel.media", position: { x: 760, y: 300 } },
+    { key: "c_viewer", type: "control", layer: "l_main", panel_id: "viewer", title_key: "panel.viewer", position: { x: 760, y: 430 } },
+    { key: "c_player", type: "control", layer: "l_main", panel_id: "player", title_key: "panel.player", position: { x: 760, y: 560 } },
+    { key: "k_image", type: "class", layer: "l_main", control: "c_media", media_type: "image", position: { x: 1060, y: 300 } },
+    { key: "k_video", type: "class", layer: "l_main", control: "c_media", media_type: "video", position: { x: 1060, y: 430 } },
+    { key: "k_audio", type: "class", layer: "l_main", control: "c_media", media_type: "audio", position: { x: 1060, y: 560 } },
+    { key: "o_img", type: "object", layer: "l_main", class: "k_image", scope: "double_clicked", position: { x: 1360, y: 300 } },
+    { key: "o_vid", type: "object", layer: "l_main", class: "k_video", scope: "double_clicked", position: { x: 1360, y: 430 } },
+    { key: "o_aud", type: "object", layer: "l_main", class: "k_audio", scope: "double_clicked", position: { x: 1360, y: 560 } },
 
     // 右栏：**只有标签组** g_inspector（色彩参考 / 标签·评分 / 元数据同属一个 dockview 标签组）
-    { key: "g_inspector", type: "group", mode: "exclusive", name: "色彩·标签·元数据", position: { x: 460, y: 720 } },
-    { key: "c_color", type: "control", panel_id: "color", title_key: "panel.color", position: { x: 760, y: 720 } },
-    { key: "c_tags", type: "control", panel_id: "tags", title_key: "panel.tags", position: { x: 760, y: 850 } },
-    { key: "c_metadata", type: "control", panel_id: "metadata", title_key: "panel.metadata", position: { x: 760, y: 980 } },
+    { key: "g_inspector", type: "group", layer: "l_main", mode: "exclusive", name: "色彩·标签·元数据", position: { x: 460, y: 720 } },
+    { key: "c_color", type: "control", layer: "l_main", panel_id: "color", title_key: "panel.color", position: { x: 760, y: 720 } },
+    { key: "c_tags", type: "control", layer: "l_main", panel_id: "tags", title_key: "panel.tags", position: { x: 760, y: 850 } },
+    { key: "c_metadata", type: "control", layer: "l_main", panel_id: "metadata", title_key: "panel.metadata", position: { x: 760, y: 980 } },
 
     // 规则三元组：操作（由对象 on 边驱动）→ 状态
-    { key: "e_dbl_img", type: "event", trigger: "double_click", position: { x: 1660, y: 300 } },
-    { key: "e_dbl_vid", type: "event", trigger: "double_click", position: { x: 1660, y: 430 } },
-    { key: "e_dbl_aud", type: "event", trigger: "double_click", position: { x: 1660, y: 560 } },
-    { key: "a_show_viewer", type: "action", op: "show", target: "c_viewer", position: { x: 1960, y: 300 } },
-    { key: "a_show_player", type: "action", op: "show", target: "c_player", payload: { play: true }, position: { x: 1960, y: 430 } },
-    { key: "a_show_meta", type: "action", op: "show", target: "c_metadata", position: { x: 1960, y: 560 } },
+    { key: "e_dbl_img", type: "event", layer: "l_main", trigger: "double_click", position: { x: 1660, y: 300 } },
+    { key: "e_dbl_vid", type: "event", layer: "l_main", trigger: "double_click", position: { x: 1660, y: 430 } },
+    { key: "e_dbl_aud", type: "event", layer: "l_main", trigger: "double_click", position: { x: 1660, y: 560 } },
+    { key: "a_show_viewer", type: "action", layer: "l_main", op: "show", target: "c_viewer", position: { x: 1960, y: 300 } },
+    { key: "a_show_player", type: "action", layer: "l_main", op: "show", target: "c_player", payload: { play: true }, position: { x: 1960, y: 430 } },
+    { key: "a_show_meta", type: "action", layer: "l_main", op: "show", target: "c_metadata", position: { x: 1960, y: 560 } },
   ],
   edges: [
     // 界面 → 布局块（顶层容器收纳区域）
@@ -287,7 +427,8 @@ export function forUserSave(doc: BlueprintGraph): BlueprintGraph {
  *
  * 规则：
  * - 带 `default_version` 且小于当前版本 → 旧库存内置默认（引擎种子写入，仅内置默认携带）；
- *   **v5 → v6** 的差异是引入顶层**界面节点**（D47），因此 v5 库存默认会被升级补齐界面节点；
+ *   **v6 → v7** 的差异是引入**分层**（`layers` + 每个节点的 `layer`，D51），
+ *   因此 v6 库存默认会被升级补齐分层；**v5 → v6** 是引入界面节点（D47）；
  * - 无版本号时只在**结构特征明确指向旧默认**（存在 `blk_*` → 旧分组 key 的 contains 边）
  *   才判定为旧默认。仅"有分组但无布局块"不算——那是用户自建的合法图，
  *   不能被静默覆盖；用户一旦在编辑器保存，`default_version` 会被移除（`forUserSave`）。

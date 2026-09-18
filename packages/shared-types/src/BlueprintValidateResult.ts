@@ -2,5 +2,8 @@
 
 /**
  * blueprint.validate 返回（RFC 0007 决策 6；errors 为空 = 有效）。
+ *
+ * `errors` = 硬错误（拒绝保存）；`warnings` = **未接通软告警**（不阻塞保存，
+ * 供编辑器灰显与提示：缺引用、无根层 D55、浮层未绑定 D56、跳转失效等）。
  */
-export type BlueprintValidateResult = { errors: Array<string>, };
+export type BlueprintValidateResult = { errors: Array<string>, warnings: Array<string>, };

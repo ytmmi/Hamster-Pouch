@@ -66,6 +66,8 @@ impl RepoDb {
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| store_err("开启外键", e))?;
         migrate::apply(&mut conn, REPO_MIGRATIONS)?;
+        // 打开即把低版本蓝图文档一次性迁移到当前版本并回写（RFC 0007 / D52）。
+        crate::repo::blueprint_repo::migrate_blueprint_documents(&mut conn)?;
         Ok(Self { conn })
     }
 

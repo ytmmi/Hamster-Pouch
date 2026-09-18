@@ -22,24 +22,24 @@ fn temp_repo_path(tag: &str) -> PathBuf {
 fn layout_rename_and_delete() {
     let path = temp_global_path("layout-admin");
     let mut g = GlobalDb::open(&path).expect("打开全局库失败");
-    g.save_panel_layout("repo-1", "旧名", r#"{"v":1}"#)
+    g.save_panel_layout("repo-1", "旧名", "", r#"{"v":1}"#)
         .expect("保存失败");
 
     g.rename_panel_layout("repo-1", "旧名", "新名")
         .expect("重命名失败");
     assert!(g
-        .get_panel_layout("repo-1", "旧名")
+        .get_panel_layout("repo-1", "旧名", "")
         .expect("查询失败")
         .is_none());
     let renamed = g
-        .get_panel_layout("repo-1", "新名")
+        .get_panel_layout("repo-1", "新名", "")
         .expect("查询失败")
         .expect("新名应存在");
     assert_eq!(renamed.layout_json, r#"{"v":1}"#);
 
     g.delete_panel_layout("repo-1", "新名").expect("删除失败");
     assert!(g
-        .get_panel_layout("repo-1", "新名")
+        .get_panel_layout("repo-1", "新名", "")
         .expect("查询失败")
         .is_none());
     assert!(g.delete_panel_layout("repo-1", "新名").is_err(), "重复删除应报错");
@@ -59,7 +59,7 @@ fn repo_rename_and_delete_cascade() {
         let row = g
             .register_repo("原仓库", repo_path.to_str().unwrap())
             .expect("注册失败");
-        g.save_panel_layout(&row.id, "布局A", r#"{"v":1}"#)
+        g.save_panel_layout(&row.id, "布局A", "", r#"{"v":1}"#)
             .expect("保存布局失败");
         g.rename_repo(&row.id, "新仓库").expect("重命名失败");
         row.id

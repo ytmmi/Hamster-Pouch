@@ -186,6 +186,8 @@ fn main() {
             commands::blueprint::blueprint_delete,
             commands::blueprint::blueprint_set_default,
             commands::blueprint::blueprint_validate,
+            commands::blueprint::blueprint_current_layer_get,
+            commands::blueprint::blueprint_current_layer_set,
             commands::blueprint::blueprint_template_list,
             commands::blueprint::blueprint_template_install,
             commands::shared::debug_log

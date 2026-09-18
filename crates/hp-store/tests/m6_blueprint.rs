@@ -1,6 +1,7 @@
-//! M6 验收测试：蓝图（RFC 0007 / D28-D32）。
+//! M6 验收测试：蓝图（RFC 0007 / D28-D60）。
 //! 覆盖：仓库库蓝图存储往返、默认蓝图唯一与回退、模板复制、语义校验拒绝、
-//! 以及 hp-core 图文档 JSON 往返。对应 docs/roadmap/phase-1-top-level-plan.md 的 M6 验证线。
+//! 分层/浮层校验、v1→v2 文档迁移，以及 hp-core 图文档 JSON 往返。
+//! 对应 docs/roadmap/phase-1-top-level-plan.md 的 M6/M7 验证线。
 
 use std::path::PathBuf;
 
@@ -23,19 +24,21 @@ fn temp_repo_path(tag: &str) -> PathBuf {
         .join(format!("{tag}-repo.sqlite3"))
 }
 
-/// 最小合法蓝图图文档（控件 + 互斥组 + 事件→动作）。
+/// 最小合法蓝图图文档（单层 + 面板控件 + 互斥组 + 事件→动作），当前 schema 版本。
 fn valid_blueprint_json() -> String {
     r#"{
-      "schema_version": 1,
+      "schema_version": 2,
+      "layers": [{"key":"l_main","name":"主界面"}],
       "nodes": [
-        {"key":"c_preview","type":"control","panel_id":"media","title_key":"panel.media"},
-        {"key":"c_viewer","type":"control","panel_id":"viewer","title_key":"panel.viewer"},
-        {"key":"k_image","type":"class","control":"c_preview","media_type":"image"},
-        {"key":"o_img","type":"object","class":"k_image","scope":"double_clicked"},
-        {"key":"g_viewers","type":"group","mode":"exclusive","default_visible":[],
+        {"key":"ui","type":"interface","layer":"l_main","position":{"x":40,"y":40}},
+        {"key":"c_preview","type":"control","layer":"l_main","panel_id":"media","title_key":"panel.media"},
+        {"key":"c_viewer","type":"control","layer":"l_main","panel_id":"viewer","title_key":"panel.viewer"},
+        {"key":"k_image","type":"class","layer":"l_main","control":"c_preview","media_type":"image"},
+        {"key":"o_img","type":"object","layer":"l_main","class":"k_image","scope":"double_clicked"},
+        {"key":"g_viewers","type":"group","layer":"l_main","mode":"exclusive","default_visible":[],
          "hide_direction":"left","position":{"x":0,"y":0}},
-        {"key":"e_dbl","type":"event","trigger":"double_click","target":"o_img"},
-        {"key":"a_show","type":"action","op":"show","target":"c_viewer"}
+        {"key":"e_dbl","type":"event","layer":"l_main","trigger":"double_click","target":"o_img"},
+        {"key":"a_show","type":"action","layer":"l_main","op":"show","target":"c_viewer"}
       ],
       "edges": [
         {"from":"c_preview","to":"k_image","kind":"contains","order":1},
@@ -316,18 +319,27 @@ fn default_blueprint_fixture_validates() {
     assert!(errors.is_empty(), "默认蓝图校验失败: {errors:?}");
     assert_eq!(graph.nodes.len(), 27, "默认蓝图应有 27 个节点");
     assert_eq!(graph.edges.len(), 26, "默认蓝图应有 26 条边");
-    assert_eq!(graph.default_version, Some(6));
+    assert_eq!(graph.default_version, Some(7), "引入分层后内置默认升版（D51）");
 
-    // 顶层界面节点（页面，D47）：只连布局块，不直接连标签组/面板控件。
-    assert_eq!(
-        graph
-            .nodes
-            .iter()
-            .filter(|n| n.node_type == NodeType::Interface)
-            .count(),
-        1,
-        "默认蓝图应有且仅有一个界面节点（ui）"
+    // 分层（D51）：内置默认是**单层「主界面」**，每个节点都带 layer 归属。
+    assert_eq!(graph.schema_version, BLUEPRINT_SCHEMA_VERSION);
+    assert_eq!(graph.layers.len(), 1, "内置默认蓝图应是单层");
+    assert_eq!(graph.layers[0].key, "l_main");
+    assert_eq!(graph.layers[0].name, "主界面");
+    assert!(
+        graph.nodes.iter().all(|n| n.layer.as_deref() == Some("l_main")),
+        "默认蓝图每个节点都必须归属 l_main"
     );
+
+    // 顶层界面节点（页面，D47）：每层至多一个；界面显示名取自层名，不另存 name。
+    let interfaces: Vec<&hp_core::BlueprintNode> = graph
+        .nodes
+        .iter()
+        .filter(|n| n.node_type == NodeType::Interface)
+        .collect();
+    assert_eq!(interfaces.len(), 1, "内置默认蓝图应有且仅有一个界面节点（ui）");
+    assert_eq!(interfaces[0].key, "ui");
+    assert!(interfaces[0].name.is_none(), "界面显示名取自层名（D51）");
     for block in ["blk_left", "blk_center", "blk_right"] {
         assert!(
             graph.edges.iter().any(|e| e.from == "ui"
@@ -412,6 +424,50 @@ fn default_blueprint_fixture_validates() {
     // 「媒体-测试」布局未挂载 tag表/任务，默认蓝图不表达它们。
     assert!(!panel_ids.contains(&"tagtable"));
     assert!(!panel_ids.contains(&"tasks"));
+}
+
+#[test]
+fn legacy_v1_document_is_migrated_on_write() {
+    // v1 文档（无分层）落库时归一化到当前版本（D52/D58）：层由界面节点拆出、
+    // 节点补 layer、列版本与文档版本一致。
+    let path = temp_repo_path("blueprint-migrate");
+    let mut db = RepoDb::create(&path, "迁移仓库").expect("创建仓库失败");
+    let v1 = r#"{
+      "schema_version": 1,
+      "default_version": 6,
+      "nodes": [
+        {"key":"ui","type":"interface","name":"主界面","position":{"x":40,"y":40}},
+        {"key":"c_preview","type":"control","panel_id":"media"},
+        {"key":"e_dbl","type":"event","trigger":"double_click","target":"c_preview"},
+        {"key":"a_show","type":"action","op":"show","target":"c_preview"}
+      ],
+      "edges": [{"from":"e_dbl","to":"a_show","kind":"fires","order":1}]
+    }"#;
+    let row = db
+        .create_blueprint("repo-1", "旧图", v1)
+        .expect("创建蓝图失败");
+    assert_eq!(
+        row.schema_version, BLUEPRINT_SCHEMA_VERSION,
+        "列版本必须同步为当前版本（D58）"
+    );
+    let graph = BlueprintGraph::from_json(&row.blueprint_json).expect("解析失败");
+    assert_eq!(graph.schema_version, BLUEPRINT_SCHEMA_VERSION);
+    assert_eq!(graph.layers.len(), 1, "界面节点应拆出一个层");
+    assert_eq!(graph.layers[0].name, "主界面");
+    assert_eq!(graph.default_version, Some(6), "内置默认标记保留");
+    assert!(
+        graph.nodes.iter().all(|n| n.layer.as_deref() == Some("l_ui")),
+        "所有节点应补上层归属"
+    );
+    assert!(graph.validate().is_empty(), "{:?}", graph.validate());
+
+    // 已是当前版本 → 落库原样（不做无谓改写）
+    let current = valid_blueprint_json();
+    let row = db
+        .create_blueprint("repo-1", "新图", &current)
+        .expect("创建第二份失败");
+    assert_eq!(row.blueprint_json, current);
+    db.close().expect("关闭失败");
 }
 
 /// 默认蓝图的节点坐标必须互不重叠（打开编辑器即可读清结构；用户要求）。

@@ -3,23 +3,37 @@
  *
  * 保存布局时，把当前 dockview 组结构合并进仓库默认蓝图：
  * - 布局里出现、但蓝图中缺失的面板 → 自动补 `control` 节点（panel_id=面板 id）；
- * - 含多个面板的 dockview 组 → 自动补 `group` 节点（独立组）+ 各成员的 `memberOf` 边；
+ * - 含多个面板的 dockview 组 → 自动补 `group` 节点（独立组）+ 各成员的 `contains` 边
+ *   （D59：成员边统一用 `contains`，不再用已降级的 `memberOf`）；
+ * - 新节点归属**当前层**（D51：文档已分层时节点必须带 `layer`，否则后端拒绝保存）；
  * - 只做增量合并（不动用户已有的节点/边），合并后保存蓝图。
+ *
+ * 保存走 `blueprint.save` 命令，因此后端会广播 `blueprint.changed`（D59 要求）。
  */
 
 import type { BlueprintGraph, BlueprintNode, BlueprintEdge } from "@hamster-pouch/config";
-import { forUserSave, makeEmptyBlueprint, PANEL_TITLES } from "@hamster-pouch/config";
+import {
+  forUserSave,
+  hasLayers,
+  makeEmptyBlueprint,
+  normalizeLayersForSave,
+  PANEL_TITLES,
+} from "@hamster-pouch/config";
 import type { DockviewApi } from "dockview-react";
 
 import * as api from "./api";
+import { currentLayerKey } from "./blueprintRuntime";
 
 /** 由当前 dockview 结构推导需要补进蓝图的控件/组节点与边。 */
 export function diffLayoutIntoBlueprint(
   dv: DockviewApi,
   doc: BlueprintGraph,
+  layerKey?: string | null,
 ): BlueprintGraph {
   const groups = dv.groups;
   const existingKeys = new Set(doc.nodes.map((n) => n.key));
+  // 文档已显式分层时，新节点必须带 layer（否则后端按硬错误拒绝）。
+  const layer = hasLayers(doc) ? layerKey ?? doc.layers?.[0]?.key : undefined;
   const panelIdSet = new Set(
     doc.nodes
       .filter((n) => n.type === "control")
@@ -45,6 +59,7 @@ export function diffLayoutIntoBlueprint(
     const node: BlueprintNode = {
       key,
       type: "control",
+      ...(layer ? { layer } : {}),
       panel_id: panelId,
       ...(PANEL_TITLES[panelId as keyof typeof PANEL_TITLES]
         ? { title_key: PANEL_TITLES[panelId as keyof typeof PANEL_TITLES] }
@@ -67,7 +82,7 @@ export function diffLayoutIntoBlueprint(
       ensureControl(panelIds[0]);
       continue;
     }
-    // 多面板组：确保标签组节点 + 成员 memberOf 边。
+    // 多面板组：确保标签组节点 + 成员 contains 边。
     const base = `g_layout_${String(group.id).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
     let groupKey = base;
     let i = 1;
@@ -78,6 +93,7 @@ export function diffLayoutIntoBlueprint(
     const groupNode: BlueprintNode = {
       key: groupKey,
       type: "group",
+      ...(layer ? { layer } : {}),
       mode: "independent",
       default_visible: [],
       position: { x: 60 + nodes.length * 20, y: 60 + nodes.length * 20 },
@@ -89,7 +105,7 @@ export function diffLayoutIntoBlueprint(
       if (!controlKey) {
         continue;
       }
-      // 结构：标签组包含控件（contains 组→控件）
+      // 结构：标签组包含面板控件（contains 组→控件，D59）。
       const exists = edges.some(
         (e) => e.from === groupKey && e.to === controlKey && e.kind === "contains",
       );
@@ -124,11 +140,13 @@ export async function syncBlueprintFromLayout(
   dv: DockviewApi,
 ): Promise<string | null> {
   try {
+    // 同步进**当前层**（D51/D53）：新节点归属该层。
+    const layerKey = currentLayerKey();
     let docJson = await api.blueprintGetDefault({ repoId });
     let doc: BlueprintGraph = docJson
       ? (JSON.parse(docJson) as BlueprintGraph)
       : makeEmptyBlueprint();
-    doc = diffLayoutIntoBlueprint(dv, doc);
+    doc = diffLayoutIntoBlueprint(dv, doc, layerKey);
 
     let defaultItem = (await api.blueprintList({ repoId })).find(
       (i) => i.is_default,
@@ -147,14 +165,17 @@ export async function syncBlueprintFromLayout(
       if (!defaultItem) {
         return null;
       }
-      doc = diffLayoutIntoBlueprint(dv, doc);
+      doc = diffLayoutIntoBlueprint(dv, doc, layerKey);
     }
     await api.blueprintSave({
       repoId,
       blueprintId: defaultItem.id,
       name: defaultItem.name,
-      // 同步布局结构后的文档已含用户/布局信息：去掉内置默认标记，停止自动升级覆盖。
-      blueprintJson: JSON.stringify(forUserSave(doc)),
+      // 同步布局结构后的文档已含用户/布局信息：去掉内置默认标记，停止自动升级覆盖；
+      // 并归一化分层，保证"文档已分层则节点都带 layer"（D58）。
+      blueprintJson: JSON.stringify(
+        forUserSave(normalizeLayersForSave(doc)),
+      ),
     });
     return defaultItem.id;
   } catch {

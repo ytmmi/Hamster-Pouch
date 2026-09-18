@@ -16,7 +16,13 @@
  */
 
 import type { BlueprintEdge, BlueprintGraph, BlueprintNode } from "@hamster-pouch/config";
-import { makeEmptyBlueprint, PANEL_TITLES, type PanelId } from "@hamster-pouch/config";
+import {
+  FALLBACK_LAYER_KEY,
+  FALLBACK_LAYER_NAME,
+  makeEmptyBlueprint,
+  PANEL_TITLES,
+  type PanelId,
+} from "@hamster-pouch/config";
 import type { DockviewApi } from "dockview-react";
 
 import { uniqueKey } from "./blueprintNodeFactory";
@@ -167,9 +173,10 @@ export function clusterRegions(
 }
 
 /**
- * 生成结构骨架图文档：顶层一个**界面节点**（页面，收纳布局块）；**每个区域（栏）一个
- * 布局块**（界面 contains 布局块）；区域内多面板组 → 标签组节点（布局块只连标签组），
- * 单面板组 → 布局块直连面板控件。
+ * 生成结构骨架图文档：**一个层**（层名即界面显示名，D51）内顶层一个**界面节点**
+ * （层的根 / 页面，收纳布局块）；**每个区域（栏）一个布局块**（界面 contains 布局块）；
+ * 区域内多面板组 → 标签组节点（布局块只连标签组），单面板组 → 布局块直连面板控件。
+ * 多页面由使用者后续新增层自建（跨层用 `navigate` 连接，D48）。
  */
 export function structureBlueprint(snapshot: StructureSnapshot | null): BlueprintGraph {
   const doc = makeEmptyBlueprint();
@@ -191,11 +198,16 @@ export function structureBlueprint(snapshot: StructureSnapshot | null): Blueprin
     return { ...doc, nodes, edges };
   }
 
-  // 顶层界面节点（页面；只连布局块，RFC 0007 决策 1 / D47）。
+  // 骨架自带**一个层**（D51：一个层 = 一张画布 = 一个界面）。
+  const layerKey = FALLBACK_LAYER_KEY;
+  const layers = [{ key: layerKey, name: FALLBACK_LAYER_NAME }];
+
+  // 层内的根：界面节点（页面；只连布局块，RFC 0007 决策 1 / D47）。
   const structureX = ORIGIN + ((clusters.length - 1) * COL_W) / 2;
   const interfaceKey = add({
     key: uniqueKey(nodes, "ui"),
     type: "interface",
+    layer: layerKey,
     position: { x: structureX, y: ORIGIN },
   });
 
@@ -204,6 +216,7 @@ export function structureBlueprint(snapshot: StructureSnapshot | null): Blueprin
     const blockKey = add({
       key: uniqueKey(nodes, `blk_${col + 1}`),
       type: "layout_block",
+      layer: layerKey,
       name: `区域 ${col + 1}`,
       position: { x, y: ORIGIN + ROW_H },
     });
@@ -219,6 +232,7 @@ export function structureBlueprint(snapshot: StructureSnapshot | null): Blueprin
         const key = add({
           key: uniqueKey(nodes, `c_${panelId}`),
           type: "control",
+          layer: layerKey,
           panel_id: panelId,
           ...(PANEL_TITLES[panelId as PanelId]
             ? { title_key: PANEL_TITLES[panelId as PanelId] }
@@ -235,6 +249,7 @@ export function structureBlueprint(snapshot: StructureSnapshot | null): Blueprin
       const groupKey = add({
         key: uniqueKey(nodes, `g_${col + 1}_${row}`),
         type: "group",
+        layer: layerKey,
         mode: "exclusive",
         position: { x: x + COL_W, y: ORIGIN + row * ROW_H },
       });
@@ -251,5 +266,5 @@ export function structureBlueprint(snapshot: StructureSnapshot | null): Blueprin
     }
   });
 
-  return { ...doc, nodes, edges };
+  return { ...doc, layers, nodes, edges };
 }

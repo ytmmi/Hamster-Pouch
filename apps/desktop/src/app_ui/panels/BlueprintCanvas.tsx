@@ -8,14 +8,16 @@
  * 画布平移（拖空白）与缩放（滚轮）。
  */
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type {
   BlueprintEdge,
   BlueprintGraph,
+  BlueprintLayer,
   BlueprintNode,
   BlueprintNodeType,
 } from "@hamster-pouch/config";
+import { nodeLayerKey } from "@hamster-pouch/config";
 import type { Translate, TranslationKey } from "../i18n";
 import {
   sampleEdgeCurve,
@@ -29,6 +31,7 @@ import {
 export const NODE_TYPE_COLORS: Record<BlueprintNodeType, string> = {
   interface: "#7f8cff",
   layout_block: "#b085f5",
+  overlay: "#8fd0c0",
   control: "#4a90d9",
   class: "#6bbf59",
   object: "#d9b45b",
@@ -56,6 +59,8 @@ export interface PortDef {
 const PORT_DEFS: Record<BlueprintNodeType, PortDef[]> = {
   interface: [{ id: "contains", side: "out" }],
   layout_block: [{ id: "contains", side: "out" }],
+  // 浮层（D50）：与布局块同级、是叶子节点，只接收界面的 contains（无输出端口）。
+  overlay: [{ id: "contains", side: "in" }],
   control: [
     { id: "in", side: "in" },
     { id: "contains", side: "out" },
@@ -108,8 +113,13 @@ export function kindForEdge(
 ): BlueprintEdge["kind"] | null {
   switch (fromPort) {
     case "contains":
-      // 层级：界面 → 布局块 → 标签组/面板控件 → 类 → 对象（RFC 0007 决策 1）
-      if (fromType === "interface" && toType === "layout_block") return "contains";
+      // 层级：界面 → 布局块/浮层 → 标签组/面板控件 → 类 → 对象（RFC 0007 决策 1 / D50）
+      if (
+        fromType === "interface" &&
+        (toType === "layout_block" || toType === "overlay")
+      ) {
+        return "contains";
+      }
       if (fromType === "layout_block" && (toType === "group" || toType === "control")) {
         return "contains";
       }
@@ -194,13 +204,21 @@ export function nodeSummary(
   const nodes = graph.nodes;
   const nameOf = (key: string): string => {
     const n = nodes.find((x) => x.key === key);
-    return n ? nodeDisplayName(n, t, nodes) : key;
+    return n ? nodeDisplayName(n, t, nodes, graph.layers) : key;
   };
   switch (node.type) {
     case "interface":
       return t("blueprint.summary.interface");
     case "layout_block":
       return t("blueprint.summary.layoutBlock");
+    case "overlay": {
+      // 浮层（D50/D56/D57）：绑定键 + 叠放高度；未绑定即"未接通"。
+      const binding = node.control_id?.trim()
+        ? node.control_id.trim()
+        : t("blueprint.summary.overlayUnbound");
+      const height = node.height ?? 1;
+      return `${binding} · ${t("blueprint.overlayHeight")} ${height}`;
+    }
     case "control":
       return resolveControlTitle(node, t) || "—";
     case "class":
@@ -245,14 +263,22 @@ function nodePos(node: BlueprintNode): { x: number; y: number } {
 
 /**
  * 节点显示名称：用户自定义 `name` 优先；控件节点回退到本地化标签名
- * （`title_key` → 「媒体预览」等，随语言切换）；其余按类型本地化生成
- * （如 zh-CN 下「控件 1」「事件 2」）。
+ * （`title_key` → 「媒体预览」等，随语言切换）；界面节点取**层名**（D51）；其余按类型
+ * 本地化生成（如 zh-CN 下「控件 1」「事件 2」）。
  */
 export function nodeDisplayName(
   node: BlueprintNode,
   t: Translate,
   nodes: BlueprintNode[],
+  layers?: BlueprintLayer[],
 ): string {
+  if (node.type === "interface") {
+    // D51：界面显示名取自层名（界面节点不再另存 name）。
+    const layer = layers?.find((l) => l.key === node.layer);
+    if (layer?.name?.trim()) {
+      return layer.name.trim();
+    }
+  }
   if (node.name?.trim()) {
     return node.name.trim();
   }
@@ -330,6 +356,11 @@ export interface BlueprintCanvasProps {
   onSelect: (key: string | null) => void;
   /** 未接通节点 key（画布灰显"不通"；由面板用 `blueprintLint` 计算）。 */
   unlinked?: ReadonlySet<string>;
+  /**
+   * 当前渲染的层（D51：画布同一时刻只画**一个层**）。缺省渲染整个文档
+   * （兼容单层兜底文档；编辑器始终传入当前层）。
+   */
+  layerKey?: string | null;
   t: Translate;
 }
 
@@ -363,6 +394,7 @@ export function BlueprintCanvas({
   selectedKey,
   onSelect,
   unlinked,
+  layerKey,
   t,
 }: BlueprintCanvasProps): JSX.Element {
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -391,6 +423,26 @@ export function BlueprintCanvas({
     const rect = canvasRef.current!.getBoundingClientRect();
     return { x: clientX - rect.left, y: clientY - rect.top };
   }, []);
+
+  /**
+   * 层内可见节点/边（D51：画布同一时刻只渲染一个层）。
+   *
+   * 边不带 `layer`，其归属由**端点**推导；这里保留边在 `doc.edges` 中的**原始下标**，
+   * 因为删除边（刀痕）按整文档下标回调给面板。
+   */
+  const visibleNodes = useMemo(
+    () =>
+      layerKey ? doc.nodes.filter((n) => nodeLayerKey(doc, n) === layerKey) : doc.nodes,
+    [doc, layerKey],
+  );
+  const visibleEdges = useMemo(() => {
+    const indexed = doc.edges.map((edge, index) => ({ edge, index }));
+    if (!layerKey) {
+      return indexed;
+    }
+    const keys = new Set(visibleNodes.map((n) => n.key));
+    return indexed.filter(({ edge }) => keys.has(edge.from) && keys.has(edge.to));
+  }, [doc.edges, layerKey, visibleNodes]);
 
   const toWorld = useCallback(
     (local: { x: number; y: number }) => ({
@@ -479,7 +531,8 @@ export function BlueprintCanvas({
   const bladeHits = useCallback(
     (from: Point, to: Point) => {
       const edges: number[] = [];
-      doc.edges.forEach((edge, index) => {
+      // 只对**层内可见**的边/节点判定（不可见的元素不该被刀痕删掉）。
+      visibleEdges.forEach(({ edge, index }) => {
         const a = portMap.current.get(
           `${edge.from}::out::${portIdFor(
             doc.nodes.find((n) => n.key === edge.from)?.type ?? "control",
@@ -503,7 +556,7 @@ export function BlueprintCanvas({
       });
 
       const nodes: string[] = [];
-      for (const node of doc.nodes) {
+      for (const node of visibleNodes) {
         const pos = nodePos(node);
         // 刀痕在视口坐标、节点在世界坐标：把节点矩形换算到视口坐标后再判交。
         const screenRect = {
@@ -518,7 +571,7 @@ export function BlueprintCanvas({
       }
       return { edges, nodes };
     },
-    [doc.edges, doc.nodes, view],
+    [visibleEdges, visibleNodes, doc.nodes, view],
   );
 
   /** 画布级指针按下：右键=刀痕删除，左键=端口连线 / 节点拖动 / 画布平移。 */
@@ -776,7 +829,7 @@ export function BlueprintCanvas({
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
         }}
       >
-        {doc.nodes.map((node) => {
+        {visibleNodes.map((node) => {
           const pos = nodePos(node);
           const ins = nodePorts(node).filter((p) => p.side === "in");
           const outs = nodePorts(node).filter((p) => p.side === "out");
@@ -798,7 +851,7 @@ export function BlueprintCanvas({
                 }}
               >
                 <span className="bp-node-key" title={node.key}>
-                  {nodeDisplayName(node, t, doc.nodes)}
+                  {nodeDisplayName(node, t, doc.nodes, doc.layers)}
                 </span>
                 <span className="bp-node-type">
                   {isUnlinked && <span className="bp-node-flag">{t("blueprint.unlinkedTag")}</span>}
@@ -841,7 +894,7 @@ export function BlueprintCanvas({
 
       {/* 边层（未变换，使用测量后的局部坐标） */}
       <svg className="bp-edges">
-        {doc.edges.map((edge, i) => {
+        {visibleEdges.map(({ edge, index: i }) => {
           const a = portMap.current.get(
             `${edge.from}::out::${portIdFor(
               doc.nodes.find((n) => n.key === edge.from)?.type ?? "control",

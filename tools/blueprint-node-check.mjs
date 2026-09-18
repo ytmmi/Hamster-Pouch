@@ -117,12 +117,12 @@ const hasEdge = (doc, from, to, kind) =>
 }
 
 // ---- 5. 空图新增各类型仍合法（不依赖既有节点）----
-// 首个新增的是**界面节点**（顶层容器 / 页面，D47）：`appendNode` 对 interface 走默认分支
+// 首个新增的是**界面节点**（层的根 / 页面，D47）：`appendNode` 对 interface 走默认分支
 // （只追加自身、不连线），因此后续布局块不会因缺界面上级而产生非法边。
 {
   let doc = config.makeEmptyBlueprint();
   const keys = [];
-  for (const type of ["interface", "layout_block", "control", "class", "object", "group", "event", "condition", "action"]) {
+  for (const type of ["interface", "layout_block", "overlay", "control", "class", "object", "group", "event", "condition", "action"]) {
     const r = factory.appendNode(doc, type, { x: 40 + doc.nodes.length * 260, y: 40 }, null);
     doc = r.doc;
     keys.push(r.node.key);
@@ -138,6 +138,62 @@ const hasEdge = (doc, from, to, kind) =>
     doc.nodes.some((n) => n.type === "interface" && n.key === "ui_1"),
     doc.nodes.map((n) => `${n.type}:${n.key}`).join(", "),
   );
+  // D51：新增节点一律带层归属（空图按单层兜底推导 l_main）。
+  check(
+    "工厂新增节点都带 layer 归属（D51）",
+    doc.nodes.every((n) => n.layer === "l_main"),
+    doc.nodes.map((n) => `${n.key}:${n.layer ?? "(none)"}`).join(", "),
+  );
+  // D50：浮层节点默认 height=1，未绑定 control_id（画布灰显"未接通"）。
+  const ov = doc.nodes.find((n) => n.type === "overlay");
+  check(
+    "浮层节点默认 height=1 且未绑定 control_id",
+    ov?.height === 1 && ov?.control_id === undefined,
+    `height=${ov?.height} control_id=${ov?.control_id ?? "(none)"}`,
+  );
+}
+
+// ---- 5b. 分层（D51/D55/D60）：新增层自带界面根节点、层名唯一、禁止删最后一层 ----
+{
+  const layersMod = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintLayers.ts")).href
+  );
+  const deleteMod = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintDelete.ts")).href
+  );
+  let doc = defaults();
+  const added = layersMod.addLayer(doc);
+  doc = added.doc;
+  check(
+    "新增层：自动带出该层界面根节点（每层至多一个界面，D51）",
+    doc.layers.length === 2 &&
+      doc.nodes.filter(
+        (n) => n.type === "interface" && n.layer === added.layer.key,
+      ).length === 1,
+    `layers=${doc.layers.map((l) => l.key).join("|")} 新层界面=${layersMod.layerInterfaceKey(doc, added.layer.key) ?? "(none)"}`,
+  );
+
+  doc = layersMod.renameLayer(doc, added.layer.key, "主界面"); // 与已有层名重复 → 自动去重（D60）
+  check(
+    "层名蓝图内唯一：重名自动追加序号（D60）",
+    new Set(doc.layers.map((l) => l.name)).size === doc.layers.length,
+    doc.layers.map((l) => l.name).join(" | "),
+  );
+
+  const removed = deleteMod.removeLayer(doc, added.layer.key);
+  check(
+    "删除层：层与层内节点一并删除（D55，非软删除）",
+    removed.rejected === null &&
+      removed.doc.layers.length === 1 &&
+      !removed.doc.nodes.some((n) => n.layer === added.layer.key),
+    `layers=${removed.doc.layers.length} nodes=${removed.doc.nodes.length}`,
+  );
+  const rejected = deleteMod.removeLayer(removed.doc, removed.doc.layers[0].key);
+  check(
+    "删除层：禁止删除最后一层（D55）",
+    rejected.rejected === "last-layer" && rejected.doc === removed.doc,
+    `rejected=${rejected.rejected}`,
+  );
 }
 
 // ---- 6. 空图只加一个"状态"（最苛刻：无任何上级可复用）----
@@ -147,13 +203,24 @@ const hasEdge = (doc, from, to, kind) =>
 }
 
 // ---- 7. 默认蓝图上批量新增（回归：仍能保存）----
-// 默认蓝图已含界面节点 `ui`，新增布局块按"不跨链路挂钩"规则不会自动连线
-// （需要时由使用者在画布上拖线），因此文档结构仍合法。
+// 默认蓝图已含界面节点 `ui` 与显式层 l_main，新增布局块按"不跨链路挂钩"规则不会自动
+// 连线（需要时由使用者在画布上拖线），因此文档结构仍合法。
+// **不含 `interface`**：一个层至多一个界面节点，新增界面走"新增层"（编辑器即如此）。
 {
   let doc = defaults();
-  for (const type of ["interface", "class", "object", "action", "condition", "event", "group", "control", "layout_block"]) {
+  for (const type of ["class", "object", "action", "condition", "event", "group", "control", "layout_block", "overlay"]) {
     doc = factory.appendNode(doc, type, { x: 40 + doc.nodes.length * 260, y: 40 }, null).doc;
   }
+  check(
+    "默认蓝图批量新增：新节点归属当前层 l_main（D51）",
+    doc.nodes
+      .filter((n) => !config.DEFAULT_BLUEPRINT.nodes.some((d) => d.key === n.key))
+      .every((n) => n.layer === "l_main"),
+    doc.nodes
+      .filter((n) => !config.DEFAULT_BLUEPRINT.nodes.some((d) => d.key === n.key))
+      .map((n) => `${n.key}:${n.layer ?? "(none)"}`)
+      .join(", "),
+  );
   writeFixture("default_plus_new", doc);
 }
 
@@ -228,6 +295,15 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
   check(
     "结构骨架：无几何信息时退化为每组一块（不崩溃）",
     fallback.nodes.filter((n) => n.type === "layout_block").length === 2,
+  );
+  // D51：骨架自带**一个层**（层名即界面显示名），且每个节点都带 layer 归属。
+  check(
+    "结构骨架：自带单层「主界面」且节点全部带 layer（D51）",
+    doc.layers?.length === 1 &&
+      doc.layers[0].key === "l_main" &&
+      doc.layers[0].name === "主界面" &&
+      doc.nodes.every((n) => n.layer === "l_main"),
+    `layers=${JSON.stringify(doc.layers)} 缺层节点=${doc.nodes.filter((n) => !n.layer).length}`,
   );
   check(
     "结构骨架：空快照 / null → 空图",

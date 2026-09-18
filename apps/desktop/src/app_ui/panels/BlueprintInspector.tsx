@@ -1,9 +1,10 @@
 /**
- * 蓝图节点属性检查器（RFC 0007 决策 7 / D31）。
+ * 蓝图节点属性检查器（RFC 0007 决策 7 / D31 / D50）。
  *
  * 选中画布节点后，在侧栏编辑该节点的全部字段：控件 `panel_id`/`title_key`、
  * 类 `control`/`media_type`、对象 `class`/`scope`、组 `mode`/`default_visible`/
- * `hide_direction`/`position`、操作 `trigger`、条件 `expr`、状态 `op`/`target`/`payload`；
+ * `hide_direction`/`position`、浮层 `control_id`/`visible`/`height`、操作 `trigger`、
+ * 条件 `expr`、状态 `op`/`target`/`payload`；
  * 并支持重命名节点 key（联动更新引用与边，由面板负责唯一性校验）与删除节点。
  *
  * 展示层：参数与选项一律用本地化文案，不向用户暴露底层 key。
@@ -17,6 +18,8 @@ import {
   type BlueprintNodeType,
   CONDITION_EXPR_HINTS,
   HIDE_DIRECTIONS,
+  OVERLAY_HEIGHT_MAX,
+  OVERLAY_HEIGHT_MIN,
   PANEL_IDS,
   PANEL_TITLES,
 } from "@hamster-pouch/config";
@@ -63,9 +66,9 @@ function DerivedField({
 
 /**
  * 状态节点的目标候选：按动作类型给合法目标
- * （show/hide→面板控件，collapse/expand→标签组，toggle→面板控件/标签组，navigate→界面），
- * 名称用**本地化显示名**（面板控件→面板标题、标签组→自定义名/「标签组 N」、界面→界面名/「界面 N」），
- * 不暴露裸 key。
+ * （show/hide→面板控件/浮层，collapse/expand→标签组，toggle→面板控件/标签组/浮层，
+ * navigate→界面），名称用**本地化显示名**（面板控件→面板标题、标签组→自定义名/
+ * 「标签组 N」、界面→层名、浮层→自定义名/「浮层 N」），不暴露裸 key。
  */
 function actionTargets(
   doc: BlueprintGraph,
@@ -78,11 +81,11 @@ function actionTargets(
       : op === "collapse" || op === "expand"
         ? ["group"]
         : op === "toggle"
-          ? ["control", "group"]
-          : ["control"];
+          ? ["control", "group", "overlay"]
+          : ["control", "overlay"];
   return doc.nodes
     .filter((n) => wanted.includes(n.type))
-    .map((n) => ({ v: n.key, l: nodeDisplayName(n, t, doc.nodes) }));
+    .map((n) => ({ v: n.key, l: nodeDisplayName(n, t, doc.nodes, doc.layers) }));
 }
 
 /** 节点属性检查器：只暴露**本节点必须设定**的字段；key 型引用一律只读展示。 */
@@ -138,7 +141,7 @@ export function NodeInspector({
   /** 节点 key → 本地化显示名（供下拉选项，不暴露 key）。 */
   const labelOf = (key: string): string => {
     const n = doc.nodes.find((x) => x.key === key);
-    return n ? nodeDisplayName(n, t, doc.nodes) : key;
+    return n ? nodeDisplayName(n, t, doc.nodes, doc.layers) : key;
   };
   /** 引用 key → 本地化显示名（供只读展示，不暴露裸 key 给用户操作）。 */
   const derivedLabel = (key: string | undefined): string =>
@@ -169,7 +172,11 @@ export function NodeInspector({
           {node.key} <em>{t("blueprint.autoTag")}</em>
         </span>
       </div>
-      {field(t("blueprint.name"), node.name ?? "", (v) => onPatch({ name: v }))}
+      {node.type !== "interface" &&
+        field(t("blueprint.name"), node.name ?? "", (v) => onPatch({ name: v }))}
+      {node.type === "interface" && (
+        <span className="dim bp-hints">{t("blueprint.layer.renameHint")}</span>
+      )}
       {node.type === "control" &&
         select(
           t("blueprint.panelId"),
@@ -216,6 +223,38 @@ export function NodeInspector({
           label_={derivedLabel(node.class)}
           t={t}
         />
+      )}
+      {/* 浮层（D50/D56/D57）：绑定浮动控件 schema id + 初始显隐 + 叠放高度 */}
+      {node.type === "overlay" &&
+        field(t("blueprint.controlId"), node.control_id ?? "", (v) =>
+          onPatch({ control_id: v.trim() ? v : undefined }),
+        )}
+      {node.type === "overlay" &&
+        row(
+          t("blueprint.visible"),
+          <input
+            type="checkbox"
+            checked={node.visible ?? false}
+            onChange={(e) => onPatch({ visible: e.target.checked })}
+          />,
+        )}
+      {node.type === "overlay" &&
+        row(
+          t("blueprint.overlayHeight"),
+          <input
+            type="number"
+            min={OVERLAY_HEIGHT_MIN}
+            max={OVERLAY_HEIGHT_MAX}
+            value={node.height ?? 1}
+            onChange={(e) =>
+              onPatch({ height: Number(e.target.value) || OVERLAY_HEIGHT_MIN })
+            }
+          />,
+        )}
+      {node.type === "overlay" && (
+        <span className="dim bp-hints">
+          {OVERLAY_HEIGHT_MIN}–{OVERLAY_HEIGHT_MAX}
+        </span>
       )}
       {node.type === "group" &&
         select(

@@ -4,6 +4,8 @@
 pub mod ai;
 pub mod album;
 pub mod blueprint;
+pub mod blueprint_migrate;
+mod blueprint_validate;
 pub mod color;
 pub mod error;
 pub mod file;
@@ -23,9 +25,12 @@ pub use album::{
     SyncMode,
 };
 pub use blueprint::{
-    ActionOp, BlueprintEdge, BlueprintGraph, BlueprintNode, BlueprintPosition, BlueprintRow,
-    BlueprintTemplateRow, EdgeKind, GroupMode, HideDirection, NodeType, Trigger,
-    BLUEPRINT_SCHEMA_VERSION,
+    ActionOp, BlueprintEdge, BlueprintGraph, BlueprintLayer, BlueprintNode, BlueprintPosition,
+    BlueprintRow, BlueprintTemplateRow, EdgeKind, GroupMode, HideDirection, NodeType, Trigger,
+    BLUEPRINT_SCHEMA_VERSION, OVERLAY_HEIGHT_MAX, OVERLAY_HEIGHT_MIN,
+};
+pub use blueprint_migrate::{
+    migrate_document, migrate_graph, normalize_document, MigratedDocument,
 };
 pub use color::ColorRef;
 pub use error::{HpError, HpResult};

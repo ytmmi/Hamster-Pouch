@@ -1,72 +1,191 @@
 /**
  * 蓝图引擎行为自检（开发期验证，不参与打包）。
  *
- * 直接驱动真实 `BlueprintEngine`，对**仓库库里的当前生效蓝图**跑一遍典型交互
- * （双击图像/视频/音频、单击图像），打印引擎推导出的 dockview 操作序列。
- * 用于回答"删掉规则后为什么还有联动"这类问题：分清是引擎仍推导出动作，
- * 还是引擎已无动作、联动来自别处（面板自身逻辑/未热更新）。
+ * 两部分：
+ * 1. **合成用例（始终运行，断言 + 退出码）**：用内存图驱动真实 `BlueprintEngine`，
+ *    覆盖 D48 界面跳转（`navigate`）、D50 浮层显隐（`overlay`）、D51 只求值当前层、
+ *    以及组收起（collapse/expand）；这些是引擎的可判定行为，不依赖宿主环境。
+ * 2. **诊断（可选）**：给定仓库库路径时，对该库的当前生效蓝图跑一遍典型交互并打印
+ *    引擎推导出的操作序列——用于回答"删掉规则后为什么还有联动"这类问题。
  *
- * 用法：node --no-warnings --import ./tools/blueprint-check-register.mjs \
- *         tools/blueprint-engine-check.mjs [仓库库路径] [蓝图id]
+ * 用法：pnpm check:blueprint-engine [仓库库路径] [蓝图id]
  */
 
-import { DatabaseSync } from "node:sqlite";
+import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const ROOT = "E:/Hamster Pouch";
-const defaultDb =
-  "C:/Users/wxlxt/AppData/Roaming/dev.hamsterpouch.desktop/repos/00c37ce8-8464-4808-8c51-c9af38e86516.sqlite3";
-const dbPath = process.argv[2] ?? defaultDb;
-const wantedId = process.argv[3] ?? null;
 
 const { BlueprintEngine } = await import(
   pathToFileURL(`${ROOT}/apps/desktop/src/app_ui/core/blueprintEngine.ts`).href
 );
 
-const db = new DatabaseSync(dbPath, { readOnly: true });
-const row = wantedId
-  ? db.prepare("SELECT * FROM blueprints WHERE id = ?").get(wantedId)
-  : db.prepare("SELECT * FROM blueprints WHERE is_default = 1 LIMIT 1").get();
-db.close();
-if (!row) {
-  console.error("找不到蓝图");
-  process.exit(1);
+const results = [];
+const check = (label, ok, detail = "") => {
+  results.push({ label, ok });
+  console.log(`${ok ? "PASS" : "FAIL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+};
+
+/** 双层的合成图：l_main 里双击图像 → 显示查看器；单击 → 跳转到 l_edit；l_edit 里显示浮层。 */
+function syntheticGraph() {
+  return {
+    schema_version: 2,
+    layers: [
+      { key: "l_main", name: "主界面" },
+      { key: "l_edit", name: "编辑界面" },
+    ],
+    nodes: [
+      { key: "ui_main", type: "interface", layer: "l_main", position: { x: 40, y: 40 } },
+      { key: "ui_edit", type: "interface", layer: "l_edit", position: { x: 40, y: 40 } },
+      { key: "blk_main", type: "layout_block", layer: "l_main", name: "主区", position: { x: 40, y: 170 } },
+      { key: "blk_edit", type: "layout_block", layer: "l_edit", name: "编辑区", position: { x: 40, y: 170 } },
+      { key: "g_main", type: "group", layer: "l_main", mode: "exclusive", position: { x: 340, y: 170 } },
+      { key: "g_edit", type: "group", layer: "l_edit", mode: "exclusive", position: { x: 340, y: 170 } },
+      { key: "c_media", type: "control", layer: "l_main", panel_id: "media", position: { x: 340, y: 300 } },
+      { key: "c_viewer", type: "control", layer: "l_main", panel_id: "viewer", position: { x: 640, y: 300 } },
+      { key: "c_player", type: "control", layer: "l_main", panel_id: "player", position: { x: 640, y: 430 } },
+      { key: "c_edit", type: "control", layer: "l_edit", panel_id: "metadata", position: { x: 340, y: 300 } },
+      { key: "k_edit", type: "class", layer: "l_edit", control: "c_edit", media_type: "image", position: { x: 640, y: 300 } },
+      { key: "o_edit", type: "object", layer: "l_edit", class: "k_edit", scope: "double_clicked", position: { x: 940, y: 300 } },
+      { key: "k_image", type: "class", layer: "l_main", control: "c_media", media_type: "image", position: { x: 940, y: 300 } },
+      { key: "o_img", type: "object", layer: "l_main", class: "k_image", scope: "double_clicked", position: { x: 1240, y: 300 } },
+      { key: "o_img_click", type: "object", layer: "l_main", class: "k_image", scope: "clicked", position: { x: 1240, y: 430 } },
+      { key: "e_dbl", type: "event", layer: "l_main", trigger: "double_click", position: { x: 1540, y: 300 } },
+      { key: "e_click", type: "event", layer: "l_main", trigger: "click", position: { x: 1540, y: 430 } },
+      { key: "e_edit_dbl", type: "event", layer: "l_edit", trigger: "double_click", position: { x: 1540, y: 300 } },
+      { key: "ov_float", type: "overlay", layer: "l_edit", control_id: "demo.floating", name: "浮层 1", visible: false, height: 3, position: { x: 940, y: 560 } },
+      { key: "a_show_viewer", type: "action", layer: "l_main", op: "show", target: "c_viewer", position: { x: 1840, y: 300 } },
+      { key: "a_navigate", type: "action", layer: "l_main", op: "navigate", target: "ui_edit", position: { x: 1840, y: 430 } },
+      { key: "a_collapse", type: "action", layer: "l_main", op: "collapse", target: "g_main", position: { x: 1840, y: 560 } },
+      { key: "a_overlay", type: "action", layer: "l_edit", op: "show", target: "ov_float", position: { x: 1840, y: 300 } },
+    ],
+    edges: [
+      { from: "ui_main", to: "blk_main", kind: "contains", order: 1 },
+      { from: "ui_edit", to: "blk_edit", kind: "contains", order: 2 },
+      { from: "blk_main", to: "g_main", kind: "contains", order: 3 },
+      { from: "blk_edit", to: "g_edit", kind: "contains", order: 4 },
+      { from: "g_main", to: "c_media", kind: "contains", order: 5 },
+      { from: "g_main", to: "c_viewer", kind: "contains", order: 6 },
+      { from: "g_main", to: "c_player", kind: "contains", order: 7 },
+      { from: "g_edit", to: "c_edit", kind: "contains", order: 8 },
+      { from: "c_edit", to: "k_edit", kind: "contains", order: 19 },
+      { from: "k_edit", to: "o_edit", kind: "contains", order: 20 },
+      { from: "o_edit", to: "e_edit_dbl", kind: "on", order: 21 },
+      { from: "c_media", to: "k_image", kind: "contains", order: 9 },
+      { from: "k_image", to: "o_img", kind: "contains", order: 10 },
+      { from: "k_image", to: "o_img_click", kind: "contains", order: 11 },
+      { from: "ui_edit", to: "ov_float", kind: "contains", order: 12 },
+      { from: "o_img", to: "e_dbl", kind: "on", order: 13 },
+      { from: "o_img_click", to: "e_click", kind: "on", order: 14 },
+      { from: "e_dbl", to: "a_show_viewer", kind: "fires", order: 15 },
+      { from: "e_click", to: "a_navigate", kind: "fires", order: 16 },
+      { from: "e_dbl", to: "a_collapse", kind: "fires", order: 17 },
+      { from: "e_edit_dbl", to: "a_overlay", kind: "fires", order: 18 },
+    ],
+  };
 }
-const graph = JSON.parse(row.blueprint_json);
-console.log(`蓝图: ${row.name} (id=${row.id})`);
-console.log(
-  `节点 ${graph.nodes.length} / 边 ${graph.edges.length} / default_version=${graph.default_version ?? "-"}`,
-);
-console.log(
-  "事件节点:",
-  graph.nodes
-    .filter((n) => n.type === "event")
-    .map((n) => `${n.key}(${n.trigger ?? "-"})`)
-    .join(", ") || "（无）",
-);
 
-const engine = new BlueprintEngine();
-engine.setGraph(graph);
-const ops = [];
-engine.setExecutor({
-  showPanel: (id, floating) => ops.push(`show ${id}${floating ? " (floating)" : ""}`),
-  hidePanel: (id) => ops.push(`hide ${id}`),
-  togglePanel: (id, floating) => ops.push(`toggle ${id}${floating ? " (floating)" : ""}`),
-  collapsePanels: (ids) => ops.push(`collapse [${ids.join(", ")}]`),
-  expandPanels: (ids) => ops.push(`expand [${ids.join(", ")}]`),
-  playFile: (fileId) => ops.push(`play ${fileId}`),
-});
-
-for (const [trigger, mediaType] of [
-  ["double_click", "image"],
-  ["double_click", "video"],
-  ["double_click", "audio"],
-  ["click", "image"],
-  ["selection_change", "image"],
-]) {
-  ops.length = 0;
+/** 驱动引擎并收集执行器收到的操作。 */
+function run(graph, layer, trigger, mediaType) {
+  const engine = new BlueprintEngine();
+  engine.setGraph(graph);
+  engine.setLayer(layer);
+  const ops = [];
+  engine.setExecutor({
+    showPanel: (id, floating) => ops.push(`show ${id}${floating ? " (floating)" : ""}`),
+    hidePanel: (id) => ops.push(`hide ${id}`),
+    togglePanel: (id, floating) => ops.push(`toggle ${id}${floating ? " (floating)" : ""}`),
+    collapsePanels: (ids) => ops.push(`collapse [${ids.join(", ")}]`),
+    expandPanels: (ids) => ops.push(`expand [${ids.join(", ")}]`),
+    playFile: (fileId) => ops.push(`play ${fileId}`),
+    navigateLayer: (layerKey) => ops.push(`navigate ${layerKey}`),
+    setOverlayVisible: (controlId, visible) =>
+      ops.push(`overlay ${controlId} ${visible ? "show" : "hide"}`),
+  });
   engine.dispatch({ trigger, target: { mediaType, fileId: "file-1" } });
-  console.log(
-    `${trigger} / ${mediaType} → ${ops.length ? ops.join(" ; ") : "（无动作）"}`,
+  return ops;
+}
+
+// ---- 合成用例：D48 界面跳转 / D50 浮层 / D51 分层求值 ----
+{
+  const graph = syntheticGraph();
+
+  const main = run(graph, "l_main", "double_click", "image");
+  check(
+    "D48/D29：当前层 l_main 双击图像 → 显示查看器 + 收起组（同为 fires 的动作都执行）",
+    main.includes("show viewer") && main.includes("collapse [media, viewer, player]"),
+    main.join(" ; ") || "（无动作）",
+  );
+
+  const nav = run(graph, "l_main", "click", "image");
+  check(
+    "D48：单击图像 → 界面跳转 navigate l_edit",
+    nav.includes("navigate l_edit"),
+    nav.join(" ; ") || "（无动作）",
+  );
+
+  const other = run(graph, "l_main", "double_click", "video");
+  check(
+    "D51/D33：非当前层（l_edit）的规则不参与求值",
+    !other.some((op) => op.startsWith("overlay")),
+    other.join(" ; ") || "（无动作）",
+  );
+
+  const edit = run(graph, "l_edit", "double_click", "image");
+  check(
+    "D50：当前层 l_edit 的动作 → 浮层按 control_id 显示（未绑定则不执行）",
+    edit.includes("overlay demo.floating show"),
+    edit.join(" ; ") || "（无动作）",
+  );
+
+  // 未绑定 control_id 的浮层：动作执行但引擎不产出宿主操作（未接通，D56）。
+  const unbound = syntheticGraph();
+  unbound.nodes.find((n) => n.key === "ov_float").control_id = undefined;
+  const editUnbound = run(unbound, "l_edit", "double_click", "image");
+  check(
+    "D56：浮层未绑定 control_id → 不产出宿主操作（未接通软告警）",
+    !editUnbound.some((op) => op.startsWith("overlay")),
+    editUnbound.join(" ; ") || "（无动作）",
   );
 }
+
+// ---- 诊断（可选）：对给定仓库库跑一遍典型交互 ----
+const dbPath = process.argv[2];
+if (dbPath && existsSync(dbPath)) {
+  const { DatabaseSync } = await import("node:sqlite");
+  const wantedId = process.argv[3] ?? null;
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  const row = wantedId
+    ? db.prepare("SELECT * FROM blueprints WHERE id = ?").get(wantedId)
+    : db.prepare("SELECT * FROM blueprints WHERE is_default = 1 LIMIT 1").get();
+  db.close();
+  if (!row) {
+    console.error("找不到蓝图");
+  } else {
+    const graph = JSON.parse(row.blueprint_json);
+    console.log(`\n[诊断] 蓝图: ${row.name} (id=${row.id})`);
+    console.log(
+      `节点 ${graph.nodes.length} / 边 ${graph.edges.length} / schema=${graph.schema_version} / default_version=${graph.default_version ?? "-"}`,
+    );
+    console.log(
+      `层: ${(graph.layers ?? []).map((l) => `${l.key}(${l.name})`).join(", ") || "（单层兜底）"}`,
+    );
+    const layer = graph.layers?.[0]?.key ?? null;
+    for (const [trigger, mediaType] of [
+      ["double_click", "image"],
+      ["double_click", "video"],
+      ["double_click", "audio"],
+      ["click", "image"],
+      ["selection_change", "image"],
+    ]) {
+      const ops = run(graph, layer, trigger, mediaType);
+      console.log(`${trigger} / ${mediaType} → ${ops.length ? ops.join(" ; ") : "（无动作）"}`);
+    }
+  }
+} else if (dbPath) {
+  console.error(`仓库库不存在，跳过诊断：${dbPath}`);
+}
+
+const failed = results.filter((r) => !r.ok);
+console.log(`\n${results.length - failed.length}/${results.length} 通过`);
+process.exit(failed.length === 0 ? 0 : 1);

@@ -18,8 +18,11 @@ import {
   type BlueprintGraph,
   type BlueprintNode,
   type BlueprintNodeType,
+  effectiveLayers,
   forUserSave,
+  interfaceOfLayer,
   makeEmptyBlueprint,
+  normalizeLayersForSave,
 } from "@hamster-pouch/config";
 import type {
   BlueprintItem,
@@ -27,12 +30,24 @@ import type {
 } from "@hamster-pouch/shared-types";
 
 import * as api from "../shared/api";
-import { notifyBlueprintChangedLocally, traceBlueprint } from "../shared/blueprintRuntime";
+import {
+  currentLayerKey,
+  notifyBlueprintChangedLocally,
+  setCurrentLayerKey,
+  switchLayer,
+  traceBlueprint,
+} from "../shared/blueprintRuntime";
 import { analyzeUnlinked } from "../shared/blueprintLint";
 import { useApp } from "../core/AppContext";
 import { BlueprintCanvas } from "./BlueprintCanvas";
-import { softRemove } from "./blueprintDelete";
+import { BlueprintLayerBar } from "./BlueprintLayerBar";
+import { removeLayer, softRemove } from "./blueprintDelete";
 import { NodeInspector } from "./BlueprintInspector";
+import {
+  addLayer,
+  moveLayer,
+  renameLayer,
+} from "./blueprintLayers";
 import { appendNode, parentHintFor } from "./blueprintNodeFactory";
 import {
   readStructure,
@@ -62,10 +77,28 @@ export function BlueprintPanel(): JSX.Element {
   const [busy, setBusy] = useState(false);
   /** 画布渲染视口中心（世界坐标）：新增节点落点用。 */
   const [viewCenter, setViewCenter] = useState<{ x: number; y: number } | null>(null);
-  /** 新建蓝图时是否带上当前布局的结构骨架（布局块→标签组→控件）。 */
+  /** 新建蓝图时是否带上当前布局的结构骨架（界面→布局块→标签组→面板控件）。 */
   const [withStructure, setWithStructure] = useState(true);
+  /**
+   * 编辑器当前层（D51：画布同一时刻只渲染一个层）。
+   * 与运行时"当前层"（D54，按仓库持久化）同步：切层时一并套用该层布局。
+   */
+  const [layerKey, setLayerKey] = useState<string | null>(null);
 
   const repoId = app.repoId;
+
+  /** 有效层清单（含单层兜底）。 */
+  const layers = useMemo(() => effectiveLayers(doc), [doc]);
+  /** 无根层（层内界面节点被软删除 → 未接通软告警，D55）。 */
+  const rootlessLayers = useMemo(() => {
+    const set = new Set<string>();
+    for (const layer of layers) {
+      if (!interfaceOfLayer(doc, layer.key)) {
+        set.add(layer.key);
+      }
+    }
+    return set;
+  }, [doc, layers]);
 
   const load = useCallback(async () => {
     if (!repoId) {
@@ -121,6 +154,15 @@ export function BlueprintPanel(): JSX.Element {
         setName(items.find((i) => i.id === id)?.name ?? "");
         setSelectedKey(null);
         setErrors([]);
+        // 当前层（D54）：优先沿用运行时记录；失效则取该蓝图的第一个层。
+        const available = effectiveLayers(normalized);
+        const wanted = currentLayerKey();
+        const nextLayer =
+          wanted && available.some((l) => l.key === wanted)
+            ? wanted
+            : available[0]?.key ?? null;
+        setLayerKey(nextLayer);
+        setCurrentLayerKey(nextLayer);
       } catch (e) {
         app.status(app.t("blueprint.loadFailed", { err: String(e) }), "error");
       }
@@ -140,6 +182,12 @@ export function BlueprintPanel(): JSX.Element {
    */
   const addNode = useCallback(
     (type: BlueprintNodeType) => {
+      // 「界面」= 一个页面 = 一个层（D51）：不在当前层里再塞第二个界面节点
+      // （那是硬错误"每层至多一个界面"），而是**新增一个层**（并自动带出界面根节点）。
+      if (type === "interface") {
+        addNewLayer();
+        return;
+      }
       // 视口中心（世界坐标）由画布上报；未上报前退回已有节点附近。
       const center = viewCenter ?? canvasCenter(doc.nodes);
       const position = freeSlotPosition(doc.nodes, center);
@@ -148,6 +196,8 @@ export function BlueprintPanel(): JSX.Element {
         type,
         position,
         parentHintFor(type, selectedKey, doc),
+        // D51：新增节点归属**当前层**。
+        layerKey,
       );
       mutate(next);
       setSelectedKey(node.key);
@@ -156,7 +206,72 @@ export function BlueprintPanel(): JSX.Element {
         "ok",
       );
     },
-    [doc, mutate, selectedKey, viewCenter, app],
+    // addNewLayer 定义在下方（函数声明顺序无关，闭包内引用即可）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doc, mutate, selectedKey, viewCenter, app, layerKey],
+  );
+
+  // ============================== 层操作（D51/D54/D55/D60） ==============================
+
+  /** 切换当前层：编辑器随之换画布；运行时同步套用该层布局（D53/D54）。 */
+  const switchToLayer = useCallback(
+    (key: string) => {
+      setLayerKey(key);
+      setSelectedKey(null);
+      setCurrentLayerKey(key);
+      if (!repoId) {
+        return;
+      }
+      void switchLayer(repoId, key, app.getDockview()).then(() => {
+        app.status(app.t("layer.switched"), "info");
+      });
+    },
+    [repoId, app],
+  );
+
+  /** 新增层：自动建出该层的界面节点（否则是无根层）。 */
+  const addNewLayer = useCallback(() => {
+    const { doc: next, layer } = addLayer(doc, undefined, viewCenter ?? undefined);
+    mutate(next);
+    setLayerKey(layer.key);
+    setCurrentLayerKey(layer.key);
+    app.status(app.t("blueprint.layer.add"), "ok");
+  }, [doc, mutate, viewCenter, app]);
+
+  const renameCurrentLayer = useCallback(
+    (key: string, name: string) => {
+      mutate(renameLayer(doc, key, name));
+    },
+    [doc, mutate],
+  );
+
+  /** 删除层（D55：直接删除，不是软删除；禁止删最后一层）。 */
+  const removeCurrentLayer = useCallback(
+    (key: string) => {
+      const result = removeLayer(doc, key);
+      if (result.rejected === "last-layer") {
+        app.status(app.t("blueprint.layer.removeLast"), "error");
+        return;
+      }
+      if (result.rejected) {
+        return;
+      }
+      const remaining = effectiveLayers(result.doc);
+      mutate(result.doc);
+      const next = remaining[0]?.key ?? null;
+      setLayerKey(next);
+      setCurrentLayerKey(next);
+      setSelectedKey(null);
+      app.status(app.t("blueprint.layer.removed", { name: key }), "ok");
+    },
+    [doc, mutate, app],
+  );
+
+  const moveCurrentLayer = useCallback(
+    (key: string, delta: number) => {
+      mutate(moveLayer(doc, key, delta));
+    },
+    [doc, mutate],
   );
 
   const updateNode = useCallback(
@@ -249,9 +364,12 @@ export function BlueprintPanel(): JSX.Element {
     }
     setBusy(true);
     try {
+      // 保存前归一化分层（D51/D58）：把兜底单层实体化进 `layers` 并给节点补 `layer`，
+      // 否则后端会以"文档已分层但节点缺 layer"拒绝保存。
+      const prepared = normalizeLayersForSave(doc);
       const result = await api.blueprintValidate({
         repoId,
-        blueprintJson: JSON.stringify(doc),
+        blueprintJson: JSON.stringify(prepared),
       });
       if (result.errors.length > 0) {
         setErrors(result.errors);
@@ -261,18 +379,26 @@ export function BlueprintPanel(): JSX.Element {
         );
         return;
       }
+      // 服务端软告警（未接通）：不阻塞保存，但要让使用者知道哪些节点不生效。
+      if (result.warnings?.length) {
+        app.status(
+          app.t("blueprint.serverWarnings", { count: result.warnings.length }),
+          "info",
+        );
+      }
       await api.blueprintSave({
         repoId,
         blueprintId: selectedId,
         name: name.trim() || undefined,
         // 用户保存 = 不再是内置默认：去掉 default_version，停止自动升级覆盖。
-        blueprintJson: JSON.stringify(forUserSave(doc)),
+        blueprintJson: JSON.stringify(forUserSave(prepared)),
       });
+      mutate(prepared);
       setErrors([]);
       app.status(app.t("blueprint.saved"), "ok");
       // 热更新：广播"已保存"（本窗口 + 跨窗口令牌），任何窗口都会重载并把语义
       // 对账到当前布局——无需手动重开面板或重启应用。
-      notifyBlueprintChangedLocally({ id: selectedId, graph: doc });
+      notifyBlueprintChangedLocally({ id: selectedId, graph: prepared });
       app.refresh();
       void load();
     } catch (e) {
@@ -280,7 +406,7 @@ export function BlueprintPanel(): JSX.Element {
     } finally {
       setBusy(false);
     }
-  }, [repoId, selectedId, doc, name, app, load]);
+  }, [repoId, selectedId, doc, name, app, load, mutate]);
 
   /**
    * 新建蓝图：默认带上**当前布局的结构骨架**（布局块 → 标签组 → 控件），
@@ -451,7 +577,8 @@ export function BlueprintPanel(): JSX.Element {
           repoId,
           blueprintId: selectedId,
           name: name.trim() || undefined,
-          blueprintJson: JSON.stringify(forUserSave(next)),
+          // 位置静默保存同样归一化分层，避免"文档已分层但节点缺 layer"被后端拒绝。
+          blueprintJson: JSON.stringify(forUserSave(normalizeLayersForSave(next))),
         })
         .catch(() => undefined);
     },
@@ -654,12 +781,26 @@ export function BlueprintPanel(): JSX.Element {
                 </div>
               ) : (
                 <>
+                  {/* 层工具条（D51）：画布同一时刻只显示一个层 */}
+                  <BlueprintLayerBar
+                    layers={layers}
+                    current={layerKey}
+                    rootless={rootlessLayers}
+                    onSwitch={switchToLayer}
+                    onAdd={addNewLayer}
+                    onRename={renameCurrentLayer}
+                    onRemove={removeCurrentLayer}
+                    onMove={moveCurrentLayer}
+                    t={app.t}
+                  />
+
                   {/* 节点添加面板 */}
                   <div className="bp-palette">
                     {(
                       [
                         "interface",
                         "layout_block",
+                        "overlay",
                         "control",
                         "class",
                         "object",
@@ -692,6 +833,7 @@ export function BlueprintPanel(): JSX.Element {
                       selectedKey={selectedKey}
                       onSelect={setSelectedKey}
                       unlinked={unlinkedKeys}
+                      layerKey={layerKey}
                       t={app.t}
                     />
                     <NodeInspector

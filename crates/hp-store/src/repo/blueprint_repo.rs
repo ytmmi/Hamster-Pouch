@@ -1,14 +1,18 @@
-//! 仓库库蓝图仓储（RFC 0007 / D30）。
+//! 仓库库蓝图仓储（RFC 0007 / D30 / D58）。
 //!
 //! `blueprints` 表（迁移 0006）：定义按仓库持久化（每仓库一个仓库库文件），
 //! 整文档 JSON 存储，save = 整文档替换（对齐 D1 `panel_layouts` 先例）；
 //! `is_default` 每仓库唯一，无默认时由消费层回退内置默认蓝图。
 //!
+//! **版本权威（D58）**：文档内 `schema_version` 为权威，数据库 `schema_version` 列同步写入；
+//! 低版本文档（v1）在写库前**归一化到当前版本**，并在打开仓库库时**一次性遍历回写**
+//! （`migrate_blueprint_documents`），因此列与文档不会分叉。
+//!
 //! 语义校验（`BlueprintGraph::validate`）在 hp-core，由命令层在保存前执行；
-//! 本仓储只做存储与默认标记维护。
+//! 本仓储只做存储、版本归一化与默认标记维护。
 
-use hp_core::{BlueprintGraph, BlueprintRow, HpError, HpResult};
-use rusqlite::{params, OptionalExtension, Row};
+use hp_core::{BlueprintRow, HpError, HpResult};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err, uuid};
@@ -17,11 +21,45 @@ use crate::util::{now_iso, require_nonempty, store_err, uuid};
 const BLUEPRINT_COLUMNS: &str =
     "id, repo_id, name, is_default, schema_version, blueprint_json, created_at, updated_at";
 
-/// 从文档 JSON 读取 schema 版本（解析失败记 0，权威版本在 JSON 内）。
-fn doc_schema_version(json: &str) -> i64 {
-    BlueprintGraph::from_json(json)
-        .map(|g| g.schema_version)
-        .unwrap_or(0)
+/// 归一化到当前 schema 版本（低版本文档走迁移，D52/D58）。
+fn normalize_blueprint_json(json: &str) -> HpResult<(String, i64)> {
+    hp_core::normalize_document(json).map_err(HpError::InvalidArgument)
+}
+
+/// 打开仓库库时的一次性文档迁移：把低版本蓝图文档迁移到当前版本并回写。
+///
+/// 返回迁移的文档数。无法解析的文档**保持原样**（读取端会回退内置默认蓝图），
+/// 避免因单篇损坏文档导致整个仓库库打不开。
+pub(crate) fn migrate_blueprint_documents(conn: &mut Connection) -> HpResult<usize> {
+    let rows: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT id, blueprint_json FROM blueprints")
+            .map_err(|e| store_err("查询待迁移蓝图", e))?;
+        let mapped = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| store_err("读取待迁移蓝图", e))?;
+        mapped
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析待迁移蓝图", e))?
+    };
+    let mut migrated = 0usize;
+    for (id, json) in rows {
+        match hp_core::migrate_document(&json) {
+            Ok(Some(doc)) => {
+                conn.execute(
+                    "UPDATE blueprints SET blueprint_json = ?2, schema_version = ?3 WHERE id = ?1",
+                    params![id, doc.json, doc.schema_version],
+                )
+                .map_err(|e| store_err("回写迁移后的蓝图", e))?;
+                migrated += 1;
+            }
+            Ok(None) => {}
+            Err(_) => {}
+        }
+    }
+    Ok(migrated)
 }
 
 impl RepoDb {
@@ -35,14 +73,15 @@ impl RepoDb {
         require_nonempty(repo_id, "仓库 ID")?;
         require_nonempty(name, "蓝图名")?;
         require_nonempty(blueprint_json, "蓝图内容")?;
+        let (blueprint_json, schema_version) = normalize_blueprint_json(blueprint_json)?;
         let now = now_iso();
         let row = BlueprintRow {
             id: uuid(),
             repo_id: repo_id.to_string(),
             name: name.to_string(),
             is_default: false,
-            schema_version: doc_schema_version(blueprint_json),
-            blueprint_json: blueprint_json.to_string(),
+            schema_version,
+            blueprint_json,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -108,6 +147,7 @@ impl RepoDb {
         require_nonempty(id, "蓝图 ID")?;
         require_nonempty(name, "蓝图名")?;
         require_nonempty(blueprint_json, "蓝图内容")?;
+        let (blueprint_json, schema_version) = normalize_blueprint_json(blueprint_json)?;
         let existing = self.get_blueprint(id)?;
         let mut row = existing.ok_or_else(|| HpError::NotFound(format!("蓝图不存在: {id}")))?;
         // 仓库 ID 归属校验：蓝图必须属于当前仓库（防御性，仓库库通常单仓库）。
@@ -115,8 +155,8 @@ impl RepoDb {
             return Err(HpError::NotFound(format!("蓝图不存在: {id}")));
         }
         row.name = name.to_string();
-        row.blueprint_json = blueprint_json.to_string();
-        row.schema_version = doc_schema_version(blueprint_json);
+        row.blueprint_json = blueprint_json;
+        row.schema_version = schema_version;
         row.updated_at = now_iso();
         let n = self
             .conn()
@@ -213,4 +253,55 @@ fn row_to_blueprint(row: &Row) -> rusqlite::Result<BlueprintRow> {
         created_at: row.get(6)?,
         updated_at: row.get(7)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 打开仓库库时的一次性文档迁移：库存 v1 行被迁移并回写（含 `schema_version` 列）。
+    ///
+    /// 用直连 SQL 伪造"旧版本写下的行"（正常写库路径已归一化，造不出 v1 行）。
+    #[test]
+    fn open_sweep_migrates_legacy_rows() {
+        let dir = tempfile::tempdir().expect("创建临时目录失败");
+        let path = dir.path().join("sweep-repo.sqlite3");
+        let db = RepoDb::create(&path, "迁移仓库").expect("创建仓库失败");
+        let v1 = r#"{"schema_version":1,"nodes":[
+          {"key":"ui","type":"interface","name":"主界面"},
+          {"key":"c","type":"control","panel_id":"viewer"}
+        ],"edges":[]}"#;
+        db.conn()
+            .execute(
+                "INSERT INTO blueprints
+                     (id, repo_id, name, is_default, schema_version, blueprint_json, created_at, updated_at)
+                 VALUES ('bp-legacy', 'repo-1', '旧图', 1, 1, ?1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                params![v1],
+            )
+            .expect("插入旧版行失败");
+        db.close().expect("关闭失败");
+
+        // 重新打开 → 迁移已回写
+        let db = RepoDb::open(&path).expect("重开仓库失败");
+        let row = db
+            .get_blueprint("bp-legacy")
+            .expect("查询失败")
+            .expect("蓝图应存在");
+        assert_eq!(row.schema_version, hp_core::BLUEPRINT_SCHEMA_VERSION);
+        let graph = hp_core::BlueprintGraph::from_json(&row.blueprint_json).expect("解析失败");
+        assert_eq!(graph.schema_version, hp_core::BLUEPRINT_SCHEMA_VERSION);
+        assert_eq!(graph.layers.len(), 1);
+        assert_eq!(graph.layers[0].name, "主界面");
+        assert!(graph.validate().is_empty(), "{:?}", graph.validate());
+
+        // 幂等：再次打开不产生变化
+        let before = row.blueprint_json.clone();
+        db.close().expect("关闭失败");
+        let db = RepoDb::open(&path).expect("重开仓库失败");
+        let again = db
+            .get_blueprint("bp-legacy")
+            .expect("查询失败")
+            .expect("蓝图应存在");
+        assert_eq!(again.blueprint_json, before, "已是当前版本不应被改写");
+    }
 }

@@ -1,11 +1,14 @@
-//! 全局配置库蓝图模板仓储（RFC 0007 / D30）。
+//! 全局配置库蓝图模板仓储（RFC 0007 / D30 / D58）。
 //!
 //! `blueprint_templates` 表（全局迁移 0002）：应用级共享的蓝图模板；
 //! `blueprint.template.install` 把模板 JSON 一次性复制进仓库库 `blueprints` 表，
 //! 复制后与模板脱离（模板后续修改不影响已复制蓝图）。
+//!
+//! 模板同样整文档存储，因此**低版本文档在写库前归一化到当前版本**，并在打开全局库时
+//! 一次性遍历回写（D52/D58：文档内 `schema_version` 为权威，列同步写入）。
 
 use hp_core::{BlueprintGraph, BlueprintTemplateRow, HpError, HpResult};
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use super::global_db::GlobalDb;
 use crate::util::{now_iso, require_nonempty, store_err, uuid};
@@ -20,12 +23,53 @@ fn doc_schema_version(json: &str) -> i64 {
         .unwrap_or(0)
 }
 
+/// 归一化到当前 schema 版本（低版本文档走迁移，D52/D58）。
+fn normalize_blueprint_json(json: &str) -> HpResult<(String, i64)> {
+    hp_core::normalize_document(json).map_err(HpError::InvalidArgument)
+}
+
+/// 打开全局库时的一次性文档迁移：把低版本模板文档迁移到当前版本并回写。
+///
+/// 返回迁移的文档数；无法解析的模板保持原样（不阻塞全局库打开）。
+pub(crate) fn migrate_blueprint_template_documents(conn: &mut Connection) -> HpResult<usize> {
+    let rows: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT id, blueprint_json FROM blueprint_templates")
+            .map_err(|e| store_err("查询待迁移蓝图模板", e))?;
+        let mapped = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| store_err("读取待迁移蓝图模板", e))?;
+        mapped
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析待迁移蓝图模板", e))?
+    };
+    let mut migrated = 0usize;
+    for (id, json) in rows {
+        match hp_core::migrate_document(&json) {
+            Ok(Some(doc)) => {
+                conn.execute(
+                    "UPDATE blueprint_templates SET blueprint_json = ?2, schema_version = ?3 WHERE id = ?1",
+                    params![id, doc.json, doc.schema_version],
+                )
+                .map_err(|e| store_err("回写迁移后的蓝图模板", e))?;
+                migrated += 1;
+            }
+            Ok(None) => {}
+            Err(_) => {}
+        }
+    }
+    Ok(migrated)
+}
+
 impl GlobalDb {
-    /// 插入或更新蓝图模板（按 `id` UPSERT）。
+    /// 插入或更新蓝图模板（按 `id` UPSERT）；低版本文档在写库前归一化。
     pub fn upsert_blueprint_template(&mut self, row: &BlueprintTemplateRow) -> HpResult<()> {
         require_nonempty(&row.id, "模板 ID")?;
         require_nonempty(&row.name, "模板名")?;
         require_nonempty(&row.blueprint_json, "模板内容")?;
+        let (blueprint_json, schema_version) = normalize_blueprint_json(&row.blueprint_json)?;
         self.conn()
             .execute(
                 "INSERT INTO blueprint_templates
@@ -41,8 +85,8 @@ impl GlobalDb {
                     row.id,
                     row.name,
                     row.description,
-                    row.schema_version,
-                    row.blueprint_json,
+                    schema_version,
+                    blueprint_json,
                     row.created_at,
                     row.updated_at,
                 ],

@@ -12,6 +12,7 @@ import * as api from "../shared/api";
 import { useApp } from "../core/AppContext";
 import { syncBlueprintFromLayout } from "../shared/blueprintSync";
 import {
+  currentLayerKey,
   loadActiveBlueprint,
   reconcileAfterLayoutApplied,
   setActiveBlueprintId,
@@ -71,11 +72,20 @@ export function MenuBar({
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  // 读取当前仓库的已保存布局名（首行为最近保存）
+  // 读取当前仓库的已保存布局名（首行为最近保存）。
+  // D53：列表返回的是**层行**（同一布局名在每个层各一行），这里按名字去重展示预设。
   const loadLayoutNames = useCallback(async () => {
     try {
       const items = await api.layoutList({ repoId });
-      setLayouts(items.map((item) => item.name));
+      const seen = new Set<string>();
+      const names: string[] = [];
+      for (const item of items) {
+        if (!seen.has(item.name)) {
+          seen.add(item.name);
+          names.push(item.name);
+        }
+      }
+      setLayouts(names);
     } catch {
       setLayouts([]);
     }
@@ -160,6 +170,8 @@ export function MenuBar({
         repoId,
         name,
         layoutJson: json,
+        // D53：写**当前层**那一份布局；当前层按仓库持久化（D54）。
+        layerKey: currentLayerKey() ?? undefined,
         blueprintIds: boundId ? [boundId] : undefined,
       });
       await loadLayoutNames();
@@ -175,7 +187,11 @@ export function MenuBar({
     const dv = apiRef.current;
     if (!dv) return;
     try {
-      const raw = await api.layoutGet({ repoId, name });
+      // D53：套用**当前层**那一份布局；该层没有专属行时按层无关行兜底（旧预设）。
+      const layerKey = currentLayerKey() ?? undefined;
+      const raw =
+        (await api.layoutGet({ repoId, name, layerKey })) ??
+        (await api.layoutGet({ repoId, name }));
       if (!raw) {
         app.status(t("layout.notFound", { name }), "error");
         return;
@@ -252,6 +268,8 @@ export function MenuBar({
         repoId,
         name,
         layoutJson: json,
+        // D53：覆盖的是**当前层**那一份布局。
+        layerKey: currentLayerKey() ?? undefined,
         blueprintIds: boundId ? [boundId] : undefined,
       });
       await loadLayoutNames();

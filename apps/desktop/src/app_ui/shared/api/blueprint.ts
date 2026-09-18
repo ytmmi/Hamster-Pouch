@@ -85,6 +85,19 @@ export function blueprintValidate(
   });
 }
 
+/** 读取某仓库的当前层 key（D54：按仓库持久化）；未设置返回 null。 */
+export function blueprintCurrentLayerGet(repoId: string): Promise<string | null> {
+  return invoke<string | null>("blueprint_current_layer_get", { repoId });
+}
+
+/** 记住某仓库的当前层（D54：多窗口读同一记录，后写覆盖）。 */
+export function blueprintCurrentLayerSet(
+  repoId: string,
+  layerKey: string,
+): Promise<void> {
+  return invoke<void>("blueprint_current_layer_set", { repoId, layerKey });
+}
+
 /** 列出应用级共享的蓝图模板。 */
 export function blueprintTemplateList(): Promise<BlueprintTemplateItem[]> {
   return invoke<BlueprintTemplateItem[]>("blueprint_template_list");

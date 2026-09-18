@@ -1,5 +1,5 @@
 /**
- * 蓝图新节点工厂（RFC 0007 D31）：**本节点只定"类型 + 自身必备字段"，其余从上级推导**。
+ * 蓝图新节点工厂（RFC 0007 D31 / D51）：**本节点只定"类型 + 自身必备字段"，其余从上级推导**。
  *
  * 设计规则：
  * - **引用自动**：类节点的 `control`、对象节点的 `class`、操作的对象来源、状态的 `target`
@@ -10,11 +10,14 @@
  *   或者直接拖线。
  * - **key 自动且可读**：由「上级 key + 自身类型标识」生成（如 `c_media` 下的图像类 →
  *   `c_media_image`，其下双击对象 → `c_media_image_dbl`），冲突才追加序号。
+ * - **层归属（D51）**：编辑器同一时刻只画**一个层**，因此新增节点一律归属**当前层**
+ *   （由调用方传入 `layerKey`；缺省取文档第一个有效层）。
  *
  * 纯函数，便于脱离宿主验证（见 tools/blueprint-node-check.mjs）。
  */
 
 import type { BlueprintGraph, BlueprintNode, BlueprintNodeType } from "@hamster-pouch/config";
+import { effectiveLayers } from "@hamster-pouch/config";
 import type { PanelId } from "@hamster-pouch/config";
 import { PANEL_IDS } from "@hamster-pouch/config";
 
@@ -22,6 +25,7 @@ import { PANEL_IDS } from "@hamster-pouch/config";
 export const TYPE_PREFIX: Record<string, string> = {
   interface: "ui",
   layout_block: "blk",
+  overlay: "ov",
   control: "c",
   class: "k",
   object: "o",
@@ -77,7 +81,11 @@ export function parentKeyOf(
           ? ["control", "class", "object"]
           : node.type === "condition" || node.type === "action"
             ? ["event", "condition"]
-            : [];
+            : node.type === "overlay" || node.type === "layout_block"
+              ? ["interface"]
+              : node.type === "group"
+                ? ["layout_block"]
+                : [];
   const edge = graph.edges.find((e) => {
     if (e.to !== node.key) {
       return false;
@@ -113,11 +121,22 @@ function tempPosition(doc: BlueprintGraph): { x: number; y: number } {
   return { x: 40 + doc.nodes.length * 260, y: 40 };
 }
 
+/** 新增节点归属的层（D51）：显式给定优先，否则取文档第一个有效层。 */
+function resolveLayer(doc: BlueprintGraph, layerKey?: string | null): string {
+  const explicit = layerKey?.trim();
+  return explicit && explicit.length > 0 ? explicit : effectiveLayers(doc)[0].key;
+}
+
 /** 建一个控件节点（指向第一个规范面板）。 */
-function createControl(doc: BlueprintGraph, key?: string): { doc: BlueprintGraph; key: string } {
+function createControl(
+  doc: BlueprintGraph,
+  layer: string,
+  key?: string,
+): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
     key: key ?? uniqueKey(doc.nodes, `${TYPE_PREFIX.control}_1`),
     type: "control",
+    layer,
     panel_id: PANEL_IDS[0] as PanelId,
     position: tempPosition(doc),
   };
@@ -128,11 +147,13 @@ function createControl(doc: BlueprintGraph, key?: string): { doc: BlueprintGraph
 function createClass(
   doc: BlueprintGraph,
   controlKey: string,
+  layer: string,
   parentKeyForName?: string,
 ): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
     key: nextNodeKey(doc.nodes, "class", parentKeyForName ?? controlKey),
     type: "class",
+    layer,
     control: controlKey,
     media_type: "image",
     position: tempPosition(doc),
@@ -144,11 +165,13 @@ function createClass(
 function createObject(
   doc: BlueprintGraph,
   classKey: string,
+  layer: string,
   parentKeyForName?: string,
 ): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
     key: nextNodeKey(doc.nodes, "object", parentKeyForName ?? classKey),
     type: "object",
+    layer,
     class: classKey,
     scope: "double_clicked",
     position: tempPosition(doc),
@@ -160,11 +183,13 @@ function createObject(
 function createEvent(
   doc: BlueprintGraph,
   objectKey: string,
+  layer: string,
   parentKeyForName?: string,
 ): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
     key: nextNodeKey(doc.nodes, "event", parentKeyForName ?? objectKey),
     type: "event",
+    layer,
     trigger: "double_click",
     position: tempPosition(doc),
   };
@@ -180,11 +205,13 @@ function createAction(
   doc: BlueprintGraph,
   eventKey: string,
   targetKey: string | undefined,
+  layer: string,
   parentKeyForName?: string,
 ): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
     key: nextNodeKey(doc.nodes, "action", parentKeyForName ?? eventKey),
     type: "action",
+    layer,
     op: "show",
     ...(targetKey ? { target: targetKey } : {}),
     position: tempPosition(doc),
@@ -220,24 +247,28 @@ function fallbackParent(
 /**
  * 构造并接入一个新节点：只连到"上级"，不做跨链路自动挂钩。
  * 返回值是追加后的文档（可能为补链路而新建了上级节点）与新节点 key。
+ *
+ * `layerKey` = 新增节点归属的层（D51；缺省取文档第一个有效层）。
  */
 export function appendNode(
   doc: BlueprintGraph,
   type: BlueprintNodeType,
   position: { x: number; y: number },
   parent?: ParentHint | null,
+  layerKey?: string | null,
 ): { doc: BlueprintGraph; node: BlueprintNode } {
+  const layer = resolveLayer(doc, layerKey);
   const hinted =
     parent?.key && doc.nodes.some((n) => n.key === parent.key)
       ? parent.key
       : undefined;
   // 显式指定上级时不兜底：没有可用上级就新建一条最小链，避免挂到别的节点上。
-    let work = doc;
+  let work = doc;
   let key: string;
 
   switch (type) {
     case "control": {
-      const created = createControl(work);
+      const created = createControl(work, layer);
       work = created.doc;
       key = created.key;
       break;
@@ -246,13 +277,13 @@ export function appendNode(
       const controlKey = hinted ?? fallbackParent(work, "class");
       const parentForName = hinted;
       if (!controlKey) {
-        const control = createControl(work);
+        const control = createControl(work, layer);
         work = control.doc;
-        const created = createClass(work, control.key, parentForName ?? control.key);
+        const created = createClass(work, control.key, layer, parentForName ?? control.key);
         work = created.doc;
         key = created.key;
       } else {
-        const created = createClass(work, controlKey, parentForName ?? controlKey);
+        const created = createClass(work, controlKey, layer, parentForName ?? controlKey);
         work = created.doc;
         key = created.key;
       }
@@ -262,15 +293,15 @@ export function appendNode(
       const classKey = hinted ?? fallbackParent(work, "object");
       if (!classKey) {
         // 独立新增：补 控件 → 类 → 对象 一条最小链
-        const control = createControl(work);
+        const control = createControl(work, layer);
         work = control.doc;
-        const cls = createClass(work, control.key, control.key);
+        const cls = createClass(work, control.key, layer, control.key);
         work = cls.doc;
-        const created = createObject(work, cls.key, cls.key);
+        const created = createObject(work, cls.key, layer, cls.key);
         work = created.doc;
         key = created.key;
       } else {
-        const created = createObject(work, classKey, hinted ?? classKey);
+        const created = createObject(work, classKey, layer, hinted ?? classKey);
         work = created.doc;
         key = created.key;
       }
@@ -281,23 +312,23 @@ export function appendNode(
       const objectKey = hinted ?? fallbackParent(work, "event");
       let objectForName = objectKey;
       if (!objectKey) {
-        const control = createControl(work);
+        const control = createControl(work, layer);
         work = control.doc;
-        const cls = createClass(work, control.key, control.key);
+        const cls = createClass(work, control.key, layer, control.key);
         work = cls.doc;
-        const obj = createObject(work, cls.key, cls.key);
+        const obj = createObject(work, cls.key, layer, cls.key);
         work = obj.doc;
         objectForName = obj.key;
       }
-      const event = createEvent(work, objectForName!, hinted ?? objectForName);
+      const event = createEvent(work, objectForName!, layer, hinted ?? objectForName);
       work = event.doc;
       key = event.key;
       if (!work.nodes.some((n) => n.type === "control")) {
-        const control = createControl(work);
+        const control = createControl(work, layer);
         work = control.doc;
       }
       const targetKey = firstOf(work.nodes, "control");
-      const action = createAction(work, event.key, targetKey, event.key);
+      const action = createAction(work, event.key, targetKey, layer, event.key);
       work = action.doc;
       break;
     }
@@ -305,19 +336,20 @@ export function appendNode(
       const eventKey = hinted ?? fallbackParent(work, "condition");
       let sourceEvent = eventKey;
       if (!sourceEvent) {
-        const control = createControl(work);
+        const control = createControl(work, layer);
         work = control.doc;
-        const cls = createClass(work, control.key, control.key);
+        const cls = createClass(work, control.key, layer, control.key);
         work = cls.doc;
-        const obj = createObject(work, cls.key, cls.key);
+        const obj = createObject(work, cls.key, layer, cls.key);
         work = obj.doc;
-        const evt = createEvent(work, obj.key, obj.key);
+        const evt = createEvent(work, obj.key, layer, obj.key);
         work = evt.doc;
         sourceEvent = evt.key;
       }
       const node: BlueprintNode = {
         key: nextNodeKey(work.nodes, "condition", hinted ?? sourceEvent),
         type: "condition",
+        layer,
         expr: "media_type == image",
         position: tempPosition(work),
       };
@@ -341,33 +373,37 @@ export function appendNode(
       const eventKey = hinted ?? fallbackParent(work, "action");
       let sourceEvent = eventKey;
       if (!sourceEvent) {
-        const control = createControl(work);
+        const control = createControl(work, layer);
         work = control.doc;
-        const cls = createClass(work, control.key, control.key);
+        const cls = createClass(work, control.key, layer, control.key);
         work = cls.doc;
-        const obj = createObject(work, cls.key, cls.key);
+        const obj = createObject(work, cls.key, layer, cls.key);
         work = obj.doc;
-        const evt = createEvent(work, obj.key, obj.key);
+        const evt = createEvent(work, obj.key, layer, obj.key);
         work = evt.doc;
         sourceEvent = evt.key;
       }
       if (!work.nodes.some((n) => n.type === "control")) {
-        const control = createControl(work);
+        const control = createControl(work, layer);
         work = control.doc;
       }
       const targetKey = firstOf(work.nodes, "control");
-      const action = createAction(work, sourceEvent, targetKey, hinted ?? sourceEvent);
+      const action = createAction(work, sourceEvent, targetKey, layer, hinted ?? sourceEvent);
       work = action.doc;
       key = action.key;
       break;
     }
     default: {
-      // 组 / 布局块 / 未知类型：只追加自身，不做任何连线。
+      // 组 / 布局块 / 浮层 / 未知类型：只追加自身，不做任何连线。
+      // 浮层（D50）与布局块同级、是叶子节点；`control_id` 由使用者在属性面板绑定，
+      // 缺失时按"未接通"灰显（软告警，不阻塞保存）。
       const node: BlueprintNode = {
         key: nextNodeKey(work.nodes, type, hinted),
         type,
+        layer,
         position: tempPosition(work),
         ...(type === "group" ? { mode: "exclusive" as const } : {}),
+        ...(type === "overlay" ? { height: 1 } : {}),
       };
       work = { ...work, nodes: [...work.nodes, node] };
       key = node.key;
@@ -419,11 +455,13 @@ export function parentHintFor(
           ? ["object"]
           : type === "condition" || type === "action"
             ? ["event", "condition"]
-            : type === "group" || type === "layout_block"
-              ? type === "group"
-                ? ["layout_block"]
-                : ["interface"]
-              : [];
+            : type === "overlay"
+              ? ["interface"]
+              : type === "group" || type === "layout_block"
+                ? type === "group"
+                  ? ["layout_block"]
+                  : ["interface"]
+                : [];
   if (wanted.length === 0) {
     return null;
   }

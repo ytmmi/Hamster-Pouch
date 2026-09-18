@@ -1,16 +1,19 @@
 /**
- * 蓝图运行时引擎（RFC 0007 决策 3 / D29）。
+ * 蓝图运行时引擎（RFC 0007 决策 3 / D29 / D48 / D50 / D51）。
  *
  * 职责：加载当前生效蓝图（仓库默认或内置默认），订阅 UI 事件（单击/双击/选中），
- * 按图求值（fires/guards DAG）→ 输出 dockview 操作序列（面板显隐 + 组收起/展开），
- * 由外部注入的 Executor 执行。
+ * 按图求值（fires/guards DAG）→ 输出 dockview 操作序列（面板显隐 + 组收起/展开 +
+ * 界面跳转 + 浮层显隐），由外部注入的 Executor 执行。
  *
  * 求值语义：
+ * - **只求值"当前层"**（D51）：非当前层的事件不参与匹配（那些页面没在显示）；
  * - 事件节点按 trigger + target（类/对象）匹配 dispatch 上报的目标；
  * - 沿 fires/guards 边按 order 升序执行；条件为真才继续；
  * - 互斥组不自动隐藏成员：同 dockview 组的成员共享显示区域，标签激活天然保证
  *   同一时间仅一个激活；跨 dockview 组的成员不做自动隐藏/收缩（避免破坏用户布局），
  *   如需隐藏/收起请用显式 hide/collapse 动作；
+ * - `navigate`（D48）= 切换到目标界面（层），幂等（已在该层无操作）；
+ * - `show`/`hide`/`toggle` 指向**浮层**（D50）时驱动浮动控件宿主（不销毁、不卸载）；
  * - 幂等：重复触发不产生额外副作用（show 已存在面板 = 激活）。
  *
  * 组收起/拉伸（collapse/expand）与隐藏方向（hide_direction）的 dockview 映射属于
@@ -26,6 +29,7 @@ import type {
   BlueprintTargetRef,
   BlueprintTrigger,
 } from "@hamster-pouch/config";
+import { nodeLayerKey } from "@hamster-pouch/config";
 
 /** 引擎对外执行器（由应用装配层注入，与 dockview/媒体命令解耦）。 */
 export interface BlueprintExecutor {
@@ -41,6 +45,10 @@ export interface BlueprintExecutor {
   expandPanels: (panelIds: string[]) => void;
   /** 播放文件（action payload { play: true } 联动）。 */
   playFile: (fileId: string) => void;
+  /** 界面跳转（D48）：切换到目标层（页面）；执行方负责持久化当前层并套用其布局。 */
+  navigateLayer: (layerKey: string) => void;
+  /** 浮层显隐（D50）：`controlId` = 绑定的浮动控件 schema id；不销毁、不卸载控件。 */
+  setOverlayVisible: (controlId: string, visible: boolean) => void;
 }
 
 /** dispatch 入参（单击/双击/选中变化 + 目标条目）。 */
@@ -61,6 +69,8 @@ const SCOPE_FOR_TRIGGER: Record<BlueprintTrigger, string> = {
 export class BlueprintEngine {
   private graph: BlueprintGraph | null = null;
   private executor: BlueprintExecutor | null = null;
+  /** 当前层（D51/D54）：只求值该层的事件；null = 不限层（单层兜底文档）。 */
+  private layer: string | null = null;
   /** 诊断日志回调（应用装配层注入；null = 不记录）。 */
   private logger: ((message: string) => void) | null = null;
 
@@ -78,11 +88,24 @@ export class BlueprintEngine {
     this.executor = executor;
   }
 
+  /** 设置当前层（D51/D54）：只求值该层的事件。 */
+  setLayer(layerKey: string | null): void {
+    this.layer = layerKey;
+    this.log(`[engine] setLayer ${layerKey ?? "(all)"}`);
+  }
+
+  /** 当前层 key。 */
+  currentLayer(): string | null {
+    return this.layer;
+  }
+
   /** 设置当前生效蓝图（仓库默认或内置默认；null = 无蓝图）。 */
   setGraph(graph: BlueprintGraph | null): void {
     this.graph = graph;
     this.log(
-      `[engine] setGraph nodes=${graph?.nodes.length ?? "null"} edges=${graph?.edges.length ?? "-"} events=${
+      `[engine] setGraph nodes=${graph?.nodes.length ?? "null"} edges=${graph?.edges.length ?? "-"} layers=${
+        graph?.layers?.length ?? 0
+      } events=${
         graph
           ? graph.nodes
               .filter((n) => n.type === "event")
@@ -98,7 +121,7 @@ export class BlueprintEngine {
     return this.graph !== null;
   }
 
-  /** 事件分发入口：按 trigger + target 匹配事件节点并求值。 */
+  /** 事件分发入口：按 trigger + target 匹配**当前层**的事件节点并求值。 */
   dispatch(input: BlueprintDispatchInput): void {
     const graph = this.graph;
     const executor = this.executor;
@@ -112,17 +135,26 @@ export class BlueprintEngine {
     const events = graph.nodes.filter(
       (n) =>
         n.type === "event" &&
+        this.inCurrentLayer(graph, n) &&
         n.trigger === input.trigger &&
         this.eventMatches(n, input.target, scope, graph),
     );
     this.log(
-      `[engine] dispatch ${input.trigger}/${input.target.mediaType ?? "-"} → 命中事件=[${
+      `[engine] dispatch ${input.trigger}/${input.target.mediaType ?? "-"} layer=${this.layer ?? "(all)"} → 命中事件=[${
         events.map((e) => e.key).join(", ") || "无"
       }]`,
     );
     for (const ev of events) {
       this.evalChain(ev.key, new Set<string>(), graph, input);
     }
+  }
+
+  /** 节点是否属于当前层（D51：非当前层的事件不参与求值）。 */
+  private inCurrentLayer(graph: BlueprintGraph, node: BlueprintNode): boolean {
+    if (!this.layer) {
+      return true;
+    }
+    return nodeLayerKey(graph, node) === this.layer;
   }
 
   /** 事件 target（控件/类/对象）与上报目标是否匹配。 */
@@ -242,7 +274,7 @@ export class BlueprintEngine {
     }
   }
 
-  /** 执行动作：show/hide/toggle（控件）+ collapse/expand（组）+ play 联动。 */
+  /** 执行动作：show/hide/toggle（面板控件/浮层）+ collapse/expand（组）+ navigate（界面）+ play 联动。 */
   private executeAction(action: BlueprintNode, input: BlueprintDispatchInput): void {
     const executor = this.executor;
     if (!executor) {
@@ -266,6 +298,11 @@ export class BlueprintEngine {
 
     switch (op) {
       case "show": {
+        if (target?.type === "overlay") {
+          // 浮层（D50）：显示 = 进入叠加显示；未绑定 control_id 时不执行（未接通）。
+          this.setOverlay(target, true);
+          break;
+        }
         if (target?.type !== "control" || !target.panel_id) {
           return;
         }
@@ -279,13 +316,18 @@ export class BlueprintEngine {
         break;
       }
       case "hide": {
-        if (target?.type === "control" && target.panel_id) {
+        if (target?.type === "overlay") {
+          this.setOverlay(target, false);
+        } else if (target?.type === "control" && target.panel_id) {
           executor.hidePanel(target.panel_id);
         }
         break;
       }
       case "toggle": {
-        if (target?.type === "control" && target.panel_id) {
+        if (target?.type === "overlay") {
+          // 切换需要宿主/插件声明的当前可见态；引擎侧按"取反"交给宿主处理。
+          this.toggleOverlay(target);
+        } else if (target?.type === "control" && target.panel_id) {
           executor.togglePanel(target.panel_id, true);
         } else if (target?.type === "group") {
           const members = this.groupMemberPanelIds(target.key, graph);
@@ -313,6 +355,23 @@ export class BlueprintEngine {
         }
         break;
       }
+      case "navigate": {
+        // 界面跳转（D48）：目标是界面节点；界面与层 1:1（D51），因此跳转 = 切到该层。
+        // 未接通（界面被软删除/层无根）时不执行——由校验/画布灰显提示。
+        if (target?.type === "interface") {
+          const layerKey = target.layer;
+          if (!layerKey) {
+            this.log(`[engine] navigate 跳过：界面 ${target.key} 缺 layer（未接通）`);
+            break;
+          }
+          if (this.layer === layerKey) {
+            this.log(`[engine] navigate 幂等：已在层 ${layerKey}`);
+            break;
+          }
+          executor.navigateLayer(layerKey);
+        }
+        break;
+      }
     }
 
     // payload.play 联动（显示播放器时同时发起播放，RFC 0007 默认蓝图）。
@@ -320,6 +379,26 @@ export class BlueprintEngine {
     if (payload?.play && input.target.fileId) {
       executor.playFile(input.target.fileId);
     }
+  }
+
+  /** 浮层显示（D50/D56）：未绑定 control_id 时不执行（未接通软告警）。 */
+  private setOverlay(node: BlueprintNode, visible: boolean): void {
+    const controlId = node.control_id?.trim();
+    if (!controlId) {
+      this.log(`[engine] 浮层 ${node.key} 未绑定浮动控件（缺 control_id）→ 不执行`);
+      return;
+    }
+    this.executor?.setOverlayVisible(controlId, visible);
+  }
+
+  /** 浮层切换：宿主记录可见态时按取反执行；宿主不知道时按"显示"处理（幂等）。 */
+  private toggleOverlay(node: BlueprintNode): void {
+    const controlId = node.control_id?.trim();
+    if (!controlId) {
+      this.log(`[engine] 浮层 ${node.key} 未绑定浮动控件（缺 control_id）→ 不执行`);
+      return;
+    }
+    this.executor?.setOverlayVisible(controlId, !(node.visible ?? false));
   }
 
   /** 标签组内成员控件对应的面板 ID 列表（contains 组→控件；兼容旧 memberOf）。 */

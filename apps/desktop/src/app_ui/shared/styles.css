@@ -1334,6 +1334,46 @@ button.danger {
   min-height: 260px;
 }
 
+/* 层工具条（D51）：切换/新增/重命名/删除/排序 + 无根层标记 */
+.bp-layerbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 4px 6px;
+  background: var(--surface-2, #f4f5f7);
+  border: 1px solid var(--border, #d8dbe0);
+  border-radius: 6px;
+}
+
+.bp-layerbar-label {
+  font-size: 12px;
+  color: var(--text-dim, #666);
+}
+
+.bp-layerbar-select {
+  min-width: 140px;
+  font-size: 12px;
+}
+
+.bp-layerbar-btn {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.bp-layerbar-btn:disabled {
+  opacity: 0.5;
+}
+
+.bp-layerbar-warn {
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.bp-layerbar-hint {
+  font-size: 11px;
+}
+
 /* 画布：深色 + 点阵网格 */
 .bp-canvas {
   position: relative;

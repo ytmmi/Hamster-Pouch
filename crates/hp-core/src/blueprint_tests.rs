@@ -9,6 +9,7 @@ mod tests {
         for v in [
             NodeType::Interface,
             NodeType::LayoutBlock,
+            NodeType::Overlay,
             NodeType::Control,
             NodeType::Class,
             NodeType::Object,
@@ -163,18 +164,21 @@ mod tests {
 
     #[test]
     fn validate_accepts_navigate_to_interface_and_rejects_other_types() {
-        // 界面跳转：目标为界面节点 → 合法（D48）
+        // 界面跳转：目标为**另一层的**界面节点 → 合法（D48/D51：跨层只允许 navigate 引用）
         let graph = BlueprintGraph::from_json(
-            r#"{"schema_version":1,"nodes":[
-              {"key":"ui_main","type":"interface","name":"主界面"},
-              {"key":"ui_edit","type":"interface","name":"编辑界面"},
-              {"key":"c","type":"control","panel_id":"viewer"},
-              {"key":"e","type":"event","trigger":"click"},
-              {"key":"a","type":"action","op":"navigate","target":"ui_edit"}
-            ],"edges":[
-              {"from":"c","to":"e","kind":"on","order":1},
-              {"from":"e","to":"a","kind":"fires","order":1}
-            ]}"#,
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_main","name":"主界面"},{"key":"l_edit","name":"编辑界面"}],
+                "nodes":[
+                  {"key":"ui_main","type":"interface","layer":"l_main"},
+                  {"key":"ui_edit","type":"interface","layer":"l_edit"},
+                  {"key":"c","type":"control","panel_id":"viewer","layer":"l_main"},
+                  {"key":"e","type":"event","trigger":"click","layer":"l_main"},
+                  {"key":"a","type":"action","op":"navigate","target":"ui_edit","layer":"l_main"}
+                ],
+                "edges":[
+                  {"from":"c","to":"e","kind":"on","order":1},
+                  {"from":"e","to":"a","kind":"fires","order":1}
+                ]}"#,
         )
         .unwrap();
         assert!(graph.validate().is_empty(), "{:?}", graph.validate());
@@ -210,16 +214,336 @@ mod tests {
     }
 
     #[test]
-    fn multiple_interfaces_are_allowed() {
-        // 界面 = 页面，可有多个（多页面基础，D47）
-        let graph = BlueprintGraph::from_json(
-            r#"{"schema_version":1,"nodes":[
-              {"key":"ui_a","type":"interface","name":"浏览界面"},
-              {"key":"ui_b","type":"interface","name":"编辑界面"}
+    fn multiple_interfaces_require_layers() {
+        // 界面 = 页面，可有**多个**（多页面基础，D47）——但自 D51 起，"每层至多一个界面"，
+        // 因此多页面必须**显式分层**：同层出现两个界面是硬错误。
+        let same_layer = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"nodes":[
+              {"key":"ui_a","type":"interface"},
+              {"key":"ui_b","type":"interface"}
             ],"edges":[]}"#,
         )
         .unwrap();
+        assert!(
+            same_layer
+                .validate()
+                .iter()
+                .any(|e| e.contains("每层至多一个")),
+            "{:?}",
+            same_layer.validate()
+        );
+
+        // 显式分层：两个界面各占一层 → 合法（多页面）
+        let layered = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"浏览层"},{"key":"l_b","name":"编辑层"}],
+                "nodes":[
+                  {"key":"ui_a","type":"interface","layer":"l_a"},
+                  {"key":"ui_b","type":"interface","layer":"l_b"}
+                ],"edges":[]}"#,
+        )
+        .unwrap();
+        assert!(layered.validate().is_empty(), "{:?}", layered.validate());
+    }
+
+    #[test]
+    fn layers_validate_keys_names_and_node_ownership() {
+        // 缺 layer（文档已分层）→ 硬错误
+        let missing = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"layers":[{"key":"l_a","name":"主界面"}],
+                "nodes":[{"key":"ui","type":"interface"}],"edges":[]}"#,
+        )
+        .unwrap();
+        assert!(
+            missing.validate().iter().any(|e| e.contains("缺少 layer")),
+            "{:?}",
+            missing.validate()
+        );
+
+        // layer 指向不存在的层 → 硬错误
+        let unknown = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"layers":[{"key":"l_a","name":"主界面"}],
+                "nodes":[{"key":"ui","type":"interface","layer":"l_gone"}],"edges":[]}"#,
+        )
+        .unwrap();
+        assert!(
+            unknown
+                .validate()
+                .iter()
+                .any(|e| e.contains("指向不存在的层")),
+            "{:?}",
+            unknown.validate()
+        );
+
+        // 层 key 重复 / 层名重复（D60）/ 空层名 → 硬错误
+        let dup = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"同名"},{"key":"l_a","name":"同名"}],
+                "nodes":[{"key":"ui","type":"interface","layer":"l_a"}],"edges":[]}"#,
+        )
+        .unwrap();
+        let errors = dup.validate();
+        assert!(errors.iter().any(|e| e.contains("层 key 重复")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.contains("层名重复")), "{errors:?}");
+
+        // 跨层边 → 硬错误（跨层只允许 navigate 引用，而 navigate 是字段不是边）
+        let crossing = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"A"},{"key":"l_b","name":"B"}],
+                "nodes":[
+                  {"key":"ui_a","type":"interface","layer":"l_a"},
+                  {"key":"ui_b","type":"interface","layer":"l_b"},
+                  {"key":"blk_b","type":"layout_block","layer":"l_b"}
+                ],
+                "edges":[{"from":"ui_a","to":"blk_b","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(
+            crossing
+                .validate()
+                .iter()
+                .any(|e| e.contains("跨层边")),
+            "{:?}",
+            crossing.validate()
+        );
+    }
+
+    #[test]
+    fn warnings_report_layer_without_interface_and_unbound_overlay() {
+        // 无根层（D55）：层内界面被软删除 → 软告警，不阻塞保存
+        let rootless = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"A"},{"key":"l_b","name":"B"}],
+                "nodes":[
+                  {"key":"ui_a","type":"interface","layer":"l_a"},
+                  {"key":"blk_b","type":"layout_block","layer":"l_b"}
+                ],"edges":[]}"#,
+        )
+        .unwrap();
+        assert!(rootless.validate().is_empty(), "{:?}", rootless.validate());
+        assert!(
+            rootless
+                .warnings()
+                .iter()
+                .any(|w| w.contains("无根层")),
+            "{:?}",
+            rootless.warnings()
+        );
+
+        // 浮层未绑定（D56）：缺 control_id → 软告警
+        let overlay = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"ov","type":"overlay","layer":"l_a"}
+                ],
+                "edges":[{"from":"ui","to":"ov","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(overlay.validate().is_empty(), "{:?}", overlay.validate());
+        assert!(
+            overlay.warnings().iter().any(|w| w.contains("control_id")),
+            "{:?}",
+            overlay.warnings()
+        );
+    }
+
+    #[test]
+    fn validate_accepts_overlay_and_rejects_illegal_overlay_actions() {
+        // 浮层：interface --contains--> overlay 合法；是叶子节点（不 contains 任何节点）
+        let graph = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"主界面"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"ov","type":"overlay","layer":"l_a",
+                   "control_id":"demo.floating","name":"浮层 1","visible":true,"height":5},
+                  {"key":"c","type":"control","panel_id":"viewer","layer":"l_a"},
+                  {"key":"e","type":"event","trigger":"click","layer":"l_a"},
+                  {"key":"g","type":"group","mode":"exclusive","layer":"l_a"},
+                  {"key":"a_show","type":"action","op":"show","target":"ov","layer":"l_a"},
+                  {"key":"a_hide","type":"action","op":"hide","target":"ov","layer":"l_a"},
+                  {"key":"a_toggle","type":"action","op":"toggle","target":"ov","layer":"l_a"}
+                ],
+                "edges":[
+                  {"from":"ui","to":"ov","kind":"contains","order":1},
+                  {"from":"c","to":"e","kind":"on","order":2},
+                  {"from":"e","to":"a_show","kind":"fires","order":3},
+                  {"from":"e","to":"a_hide","kind":"fires","order":4},
+                  {"from":"e","to":"a_toggle","kind":"fires","order":5}
+                ]}"#,
+        )
+        .unwrap();
         assert!(graph.validate().is_empty(), "{:?}", graph.validate());
+        assert!(graph.warnings().is_empty(), "{:?}", graph.warnings());
+        assert_eq!(graph.nodes[1].height, Some(5));
+
+        // collapse / expand 指向浮层 → 硬错误（D50）
+        let collapse = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"ov","type":"overlay","layer":"l_a","control_id":"x"},
+                  {"key":"a","type":"action","op":"collapse","target":"ov","layer":"l_a"}
+                ],
+                "edges":[{"from":"ui","to":"ov","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(
+            collapse
+                .validate()
+                .iter()
+                .any(|e| e.contains("target 类型不符")),
+            "{:?}",
+            collapse.validate()
+        );
+
+        // navigate 指向浮层 → 硬错误（D50）
+        let navigate = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"ov","type":"overlay","layer":"l_a","control_id":"x"},
+                  {"key":"a","type":"action","op":"navigate","target":"ov","layer":"l_a"}
+                ],
+                "edges":[{"from":"ui","to":"ov","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(
+            navigate
+                .validate()
+                .iter()
+                .any(|e| e.contains("target 类型不符")),
+            "{:?}",
+            navigate.validate()
+        );
+
+        // height 越界 → 硬错误（D57：1–10）
+        let bad_height = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"ov","type":"overlay","layer":"l_a","control_id":"x","height":11}
+                ],
+                "edges":[{"from":"ui","to":"ov","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(
+            bad_height
+                .validate()
+                .iter()
+                .any(|e| e.contains("height 必须在 1-10")),
+            "{:?}",
+            bad_height.validate()
+        );
+    }
+
+    #[test]
+    fn schema_version_gate_is_greater_than_only() {
+        // 低于当前版本 → 不拒绝（走迁移，D58）
+        let old = BlueprintGraph::from_json(
+            r#"{"schema_version":1,"nodes":[{"key":"c","type":"control","panel_id":"viewer"}],
+                "edges":[]}"#,
+        )
+        .unwrap();
+        assert!(old.validate().is_empty(), "{:?}", old.validate());
+
+        // 高于当前版本 → 硬错误
+        let newer = BlueprintGraph::from_json(&format!(
+            r#"{{"schema_version":{},"nodes":[],"edges":[]}}"#,
+            BLUEPRINT_SCHEMA_VERSION + 1
+        ))
+        .unwrap();
+        assert!(
+            newer
+                .validate()
+                .iter()
+                .any(|e| e.contains("不支持的蓝图 schema 版本")),
+            "{:?}",
+            newer.validate()
+        );
+    }
+
+    #[test]
+    fn migrate_v1_splits_interfaces_into_layers() {
+        use crate::blueprint_migrate::{migrate_document, normalize_document};
+
+        // v1 单界面文档：界面 name → 层名；其余节点归属该层；版本升为当前
+        let v1 = r#"{"schema_version":1,"default_version":6,"nodes":[
+          {"key":"ui","type":"interface","name":"主界面","position":{"x":40,"y":40}},
+          {"key":"blk","type":"layout_block","name":"左栏"},
+          {"key":"c","type":"control","panel_id":"viewer"}
+        ],"edges":[{"from":"ui","to":"blk","kind":"contains","order":1}]}"#;
+        let migrated = migrate_document(v1).unwrap().expect("v1 应触发迁移");
+        assert_eq!(migrated.schema_version, BLUEPRINT_SCHEMA_VERSION);
+        let graph = BlueprintGraph::from_json(&migrated.json).unwrap();
+        assert_eq!(graph.layers.len(), 1);
+        assert_eq!(graph.layers[0].name, "主界面");
+        assert_eq!(graph.layers[0].key, "l_ui");
+        assert_eq!(graph.nodes[0].name, None, "界面显示名改由层名承载");
+        assert_eq!(graph.nodes[0].layer.as_deref(), Some("l_ui"));
+        assert_eq!(graph.nodes[1].layer.as_deref(), Some("l_ui"));
+        assert_eq!(graph.nodes[2].layer.as_deref(), Some("l_ui"));
+        assert_eq!(graph.default_version, Some(6), "内置默认标记保留");
+        assert!(graph.validate().is_empty(), "{:?}", graph.validate());
+
+        // v1 多界面文档：每个界面拆一层
+        let v1_multi = r#"{"schema_version":1,"nodes":[
+          {"key":"ui_a","type":"interface","name":"浏览"},
+          {"key":"ui_b","type":"interface","name":"编辑"}
+        ],"edges":[]}"#;
+        let migrated = migrate_document(v1_multi).unwrap().expect("v1 应触发迁移");
+        let graph = BlueprintGraph::from_json(&migrated.json).unwrap();
+        assert_eq!(graph.layers.len(), 2);
+        assert_eq!(graph.layers[0].name, "浏览");
+        assert_eq!(graph.layers[1].name, "编辑");
+        assert!(graph.validate().is_empty(), "{:?}", graph.validate());
+
+        // 已是当前版本 → 不迁移（返回 None，不做无谓改写）
+        let current = format!(r#"{{"schema_version":{BLUEPRINT_SCHEMA_VERSION},"nodes":[],"edges":[]}}"#);
+        assert!(migrate_document(&current).unwrap().is_none());
+
+        // normalize_document：低版本返回迁移结果，当前版本原样返回
+        let (json, version) = normalize_document(v1).unwrap();
+        assert_eq!(version, BLUEPRINT_SCHEMA_VERSION);
+        assert!(json.contains("\"layers\""));
+        let (same, version) = normalize_document(&current).unwrap();
+        assert_eq!(same, current);
+        assert_eq!(version, BLUEPRINT_SCHEMA_VERSION);
+
+        // validate_json 也走迁移后再校验（低版本文档不会被版本闸门拒绝）
+        assert!(BlueprintGraph::validate_json(v1).is_empty());
+    }
+
+    #[test]
+    fn effective_layers_falls_back_to_single_layer() {
+        // 无 layers 的旧文档 → 单层兜底（层名取界面 name）
+        let legacy = BlueprintGraph::from_json(
+            r#"{"schema_version":1,"nodes":[
+              {"key":"ui","type":"interface","name":"我的界面"}
+            ],"edges":[]}"#,
+        )
+        .unwrap();
+        assert!(!legacy.has_layers());
+        let layers = legacy.effective_layers();
+        assert_eq!(layers.len(), 1);
+        assert_eq!(layers[0].name, "我的界面");
+        assert_eq!(layers[0].key, BlueprintGraph::FALLBACK_LAYER_KEY);
+
+        // 完全空文档 → 兜底层名「主界面」
+        let empty = BlueprintGraph::from_json(r#"{"schema_version":2,"nodes":[],"edges":[]}"#).unwrap();
+        assert_eq!(empty.effective_layers()[0].name, "主界面");
+
+        // 显式分层 → 原样返回
+        let layered = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"layers":[{"key":"l_a","name":"A"},{"key":"l_b","name":"B"}],
+                "nodes":[{"key":"ui","type":"interface","layer":"l_a"}],"edges":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(layered.effective_layers().len(), 2);
+        assert!(layered.interface_of_layer("l_a").is_some());
+        assert!(layered.interface_of_layer("l_b").is_none());
     }
 
     #[test]
