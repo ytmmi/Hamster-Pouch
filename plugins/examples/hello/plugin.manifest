@@ -3,9 +3,14 @@
   "name": "Hello 示例插件",
   "version": "0.1.0",
   "min_host_version": 1,
+  "api_version": 1,
   "runtime": { "kind": "external-process" },
   "entry": "bin/hello.exe",
   "capabilities": ["ui.panel", "repo.read"],
-  "contributions": ["panel"],
+  "contributions": [
+    { "kind": "panel", "id": "hello.panel", "title_key": "plugin.hello.panel", "read_only": true }
+  ],
+  "data_queries": [{ "name": "greetings", "returns": "rows" }],
+  "events": [{ "id": "greet" }],
   "trust": { "requested": "local-dev" }
 }

@@ -11,9 +11,12 @@ mod blueprint_types;
 mod blueprint_validate;
 mod blueprint_warnings;
 pub mod color;
+pub mod control;
+mod control_types;
 pub mod error;
 pub mod file;
 pub mod plugin;
+pub mod plugin_contribution;
 pub mod rating;
 pub mod repo;
 pub mod source;
@@ -39,11 +42,24 @@ pub use blueprint_migrate::{
     migrate_document, migrate_graph, normalize_document, MigratedDocument,
 };
 pub use color::ColorRef;
+pub use control::{
+    is_valid_id, ControlBind, ControlNode, ControlPredicate, ControlSchema, ControlValidateCtx,
+    ControlValidateResult,
+};
+pub use control_types::{
+    control_spec, AlignToken, ControlCategory, ControlEvent, ControlKind, ControlKindSpec,
+    ControlProp, GapToken, PropType, CONTROL_API_VERSION, CONTROL_EVENTS, CONTROL_KINDS,
+    CONTROL_NODE_SOFT_LIMIT, CONTROL_REGISTRY, TABLE_COLUMN_MAX,
+};
 pub use error::{HpError, HpResult};
 pub use file::{FileId, FileIndexRow, ThumbStatus, VerifyStatus};
 pub use plugin::{
     Capability, HostApiVersion, PluginId, PluginManifest, PluginRegistryRow, PluginRepoState,
     RuntimeKind, SourceKind, TrustLevel, HOST_API_VERSION,
+};
+pub use plugin_contribution::{
+    is_valid_contribution_id, Contribution, ContributionKind, DataQueryReturns,
+    PluginDataQueryDecl, PluginEventDecl,
 };
 pub use rating::{validate_rating, Rating, RATING_MAX, RATING_MIN};
 pub use repo::RepoId;

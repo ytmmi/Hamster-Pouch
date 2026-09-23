@@ -8,7 +8,8 @@
 use std::path::{Path, PathBuf};
 
 use hp_core::{
-    Capability, HpError, HpResult, PluginId, PluginManifest, RuntimeKind, SourceKind, TrustLevel,
+    Capability, Contribution, ContributionKind, DataQueryReturns, HpError, HpResult, PluginDataQueryDecl,
+    PluginEventDecl, PluginId, PluginManifest, RuntimeKind, SourceKind, TrustLevel,
 };
 use serde_json::Value;
 
@@ -22,7 +23,7 @@ pub struct PluginPackage {
     pub root: PathBuf,
 }
 
-/// 解析 `plugin.manifest` JSON 文本为 [`PluginManifest`]。
+/// 解析 `plugin.manifest` JSON 文本为 [`PluginManifest`]（`docs/spec/plugin-standard.md` 第 3 节）。
 pub fn parse_manifest(json: &str) -> HpResult<PluginManifest> {
     let v: Value = serde_json::from_str(json)
         .map_err(|e| HpError::InvalidArgument(format!("解析 plugin.manifest 失败: {e}")))?;
@@ -35,28 +36,44 @@ pub fn parse_manifest(json: &str) -> HpResult<PluginManifest> {
         .get("min_host_version")
         .and_then(Value::as_u64)
         .unwrap_or(1) as u32;
+    let api_version = v.get("api_version").and_then(Value::as_u64).unwrap_or(1) as u32;
 
     let source_kind = parse_source_kind(&v)?;
     let runtime_kind = parse_runtime_kind(&v)?;
     let trust_requested = parse_trust(&v)?;
     let capabilities = parse_capabilities(&v)?;
-    let contributions = parse_string_array(&v, "contributions")?;
+    let contributions = parse_contributions(&v)?;
+    let data_queries = merge_data_queries(&v, &contributions)?;
+    let events = parse_events(&v)?;
+    let native_dependencies = parse_string_array(&v, "native_dependencies")?;
 
-    Ok(PluginManifest {
+    let manifest = PluginManifest {
         id: PluginId::from_raw(id),
         name,
         version,
         min_host_version,
+        api_version,
         source_kind,
         runtime_kind,
         entry,
         capabilities,
         contributions,
+        data_queries,
+        events,
+        native_dependencies,
         trust_requested,
-    })
+    };
+    // 解析即做一次**结构校验**（字段/取值域/引用），但**不**做"业务完备性"校验
+    // （如贡献点是否带 `title_key`）：那是安装/加载路径的职责（`read_package` / `host`），
+    // 这样标准化之前发布的旧包仍可被解析（否则历史包会因为新增的完备性要求直接读不出来）。
+    manifest.validate_structure()?;
+    Ok(manifest)
 }
 
 /// 读取单个插件包目录（含 `plugin.manifest`）并解析。
+///
+/// 这里是**安装/加载路径**：除结构校验外还要求贡献点完备（业务级 `validate`），
+/// 旧包若缺少标准化后新增的必填项会在此被拒绝。
 pub fn read_package(dir: &Path) -> HpResult<PluginPackage> {
     let manifest_path = dir.join(MANIFEST_FILE);
     if !manifest_path.is_file() {
@@ -68,6 +85,7 @@ pub fn read_package(dir: &Path) -> HpResult<PluginPackage> {
     let json = std::fs::read_to_string(&manifest_path)
         .map_err(|e| HpError::Io(format!("读取插件清单失败: {e}")))?;
     let manifest = parse_manifest(&json)?;
+    manifest.validate()?;
     Ok(PluginPackage {
         manifest,
         root: dir.to_path_buf(),
@@ -149,6 +167,133 @@ fn parse_string_array(v: &Value, key: &str) -> HpResult<Vec<String>> {
     }
 }
 
+/// 解析贡献点：**标准形态**是对象数组（`{ kind, id, ... }`）；
+/// RFC 0004 草案里的字符串数组（如 `["panel"]`）作为**旧包兼容**解析为只有 kind 的贡献点
+/// （缺 id 时用插件 id 占位，随后由 `validate` 的 id 规则拦下不合理取值）。
+fn parse_contributions(v: &Value) -> HpResult<Vec<Contribution>> {
+    match v.get("contributions") {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(arr)) => arr.iter().map(parse_contribution).collect(),
+        Some(_) => Err(HpError::InvalidArgument(
+            "contributions 必须为数组（对象或字符串元素）".into(),
+        )),
+    }
+}
+
+fn parse_contribution(item: &Value) -> HpResult<Contribution> {
+    if let Some(name) = item.as_str() {
+        // 旧形态：仅贡献点类型。
+        let kind = ContributionKind::from_str(name)
+            .ok_or_else(|| HpError::InvalidArgument(format!("未知贡献点类型: {name}")))?;
+        return Ok(Contribution::new(kind, name.to_string()));
+    }
+    let obj = item
+        .as_object()
+        .ok_or_else(|| HpError::InvalidArgument("contributions 元素必须是对象或字符串".into()))?;
+    let kind_raw = obj
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| HpError::InvalidArgument("贡献点缺少 kind".into()))?;
+    let kind = ContributionKind::from_str(kind_raw)
+        .ok_or_else(|| HpError::InvalidArgument(format!("未知贡献点类型: {kind_raw}")))?;
+    let id = obj
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| HpError::InvalidArgument(format!("贡献点 {kind_raw} 缺少 id")))?
+        .to_string();
+    let mut contribution = Contribution::new(kind, id);
+    contribution.title_key = obj
+        .get("title_key")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    contribution.read_only = obj.get("read_only").and_then(Value::as_bool);
+    contribution.media_type = obj
+        .get("media_type")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    contribution.returns = obj
+        .get("returns")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    contribution.model_kind = obj
+        .get("model_kind")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Ok(contribution)
+}
+
+/// 合并数据查询声明：顶层 `data_queries` 与 `dataQuery` 贡献点等价（去重，顶层优先）。
+fn merge_data_queries(v: &Value, contributions: &[Contribution]) -> HpResult<Vec<PluginDataQueryDecl>> {
+    let mut out: Vec<PluginDataQueryDecl> = Vec::new();
+    if let Some(raw) = v.get("data_queries") {
+        let arr = raw
+            .as_array()
+            .ok_or_else(|| HpError::InvalidArgument("data_queries 必须为数组".into()))?;
+        for item in arr {
+            let obj = item
+                .as_object()
+                .ok_or_else(|| HpError::InvalidArgument("data_queries 元素必须是对象".into()))?;
+            let name = obj
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| HpError::InvalidArgument("data_queries 元素缺少 name".into()))?;
+            let returns = obj
+                .get("returns")
+                .and_then(Value::as_str)
+                .ok_or_else(|| HpError::InvalidArgument("data_queries 元素缺少 returns".into()))?;
+            if DataQueryReturns::from_str(returns).is_none() {
+                return Err(HpError::InvalidArgument(format!(
+                    "data_queries.returns 必须是 rows/object/scalar（当前 {returns}）"
+                )));
+            }
+            out.push(PluginDataQueryDecl {
+                name: name.to_string(),
+                returns: returns.to_string(),
+            });
+        }
+    }
+    for c in contributions {
+        if c.kind != ContributionKind::DataQuery {
+            continue;
+        }
+        if out.iter().any(|q| q.name == c.id) {
+            continue;
+        }
+        out.push(PluginDataQueryDecl {
+            name: c.id.clone(),
+            returns: c.returns.clone().unwrap_or_else(|| "rows".to_string()),
+        });
+    }
+    Ok(out)
+}
+
+/// 解析事件声明（控件事件回传目标，控件标准第 6 节）。
+fn parse_events(v: &Value) -> HpResult<Vec<PluginEventDecl>> {
+    match v.get("events") {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .map(|item| {
+                let obj = item.as_object().ok_or_else(|| {
+                    HpError::InvalidArgument("events 元素必须是对象".into())
+                })?;
+                let id = obj
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| HpError::InvalidArgument("events 元素缺少 id".into()))?;
+                Ok(PluginEventDecl {
+                    id: id.to_string(),
+                    title_key: obj
+                        .get("title_key")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                })
+            })
+            .collect(),
+        Some(_) => Err(HpError::InvalidArgument("events 必须为数组".into())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,11 +303,17 @@ mod tests {
         "name": "Hello",
         "version": "0.1.0",
         "min_host_version": 1,
+        "api_version": 1,
         "source": { "kind": "local-path" },
         "runtime": { "kind": "external-process" },
         "entry": "bin/hello.exe",
         "capabilities": ["ui.panel", "repo.read"],
-        "contributions": ["panel"],
+        "contributions": [
+            { "kind": "panel", "id": "hello.panel", "title_key": "panel.hello", "read_only": true }
+        ],
+        "data_queries": [{ "name": "greetings", "returns": "rows" }],
+        "events": [{ "id": "greet" }],
+        "native_dependencies": ["bin/hello.dll"],
         "trust": { "requested": "local-dev" }
     }"#;
 
@@ -174,8 +325,58 @@ mod tests {
         assert_eq!(m.source_kind, SourceKind::LocalPath);
         assert_eq!(m.trust_requested, TrustLevel::LocalDev);
         assert_eq!(m.capabilities, vec![Capability::UiPanel, Capability::RepoRead]);
-        assert_eq!(m.contributions, vec!["panel".to_string()]);
+        assert_eq!(m.api_version, 1);
+        assert_eq!(m.contributions.len(), 1);
+        assert_eq!(m.contributions[0].kind, ContributionKind::Panel);
+        assert_eq!(m.contributions[0].id, "hello.panel");
+        assert_eq!(m.declared_query_names(), vec!["greetings"]);
+        assert_eq!(m.declared_event_ids(), vec!["greet"]);
+        assert_eq!(m.native_dependencies, vec!["bin/hello.dll".to_string()]);
         assert!(m.validate().is_ok());
+    }
+
+    #[test]
+    fn parse_manifest_accepts_legacy_string_contributions() {
+        // RFC 0004 草案的旧形态：字符串数组（标准化前发布的包仍可装载）。
+        let legacy = [
+            "{",
+            "  \"id\": \"dev.hamsterpouch.hello\",",
+            "  \"name\": \"Hello\",",
+            "  \"version\": \"0.1.0\",",
+            "  \"runtime\": { \"kind\": \"external-process\" },",
+            "  \"entry\": \"bin/hello.exe\",",
+            "  \"capabilities\": [\"ui.panel\", \"repo.read\"],",
+            "  \"contributions\": [\"panel\"],",
+            "  \"trust\": { \"requested\": \"local-dev\" }",
+            "}",
+        ]
+        .join("\n");
+        let m = parse_manifest(&legacy).expect("旧形态应可解析");
+        assert_eq!(m.contributions.len(), 1);
+        assert_eq!(m.contributions[0].kind, ContributionKind::Panel);
+        assert!(m.data_queries.is_empty());
+    }
+
+    #[test]
+    fn parse_manifest_rejects_contribution_without_declared_capability() {
+        // 读写面板需要 repo.write，未声明即拒绝。
+        let json = SAMPLE.replace("\"read_only\": true", "\"read_only\": false");
+        assert!(parse_manifest(&json).is_err());
+    }
+
+    #[test]
+    fn parse_manifest_rejects_bad_data_query_returns() {
+        let json = SAMPLE.replace("\"returns\": \"rows\"", "\"returns\": \"matrix\"");
+        assert!(parse_manifest(&json).is_err());
+    }
+
+    #[test]
+    fn parse_manifest_rejects_duplicate_event_ids() {
+        let json = SAMPLE.replace(
+            r#""events": [{ "id": "greet" }],"#,
+            r#""events": [{ "id": "greet" }, { "id": "greet" }],"#,
+        );
+        assert!(parse_manifest(&json).is_err());
     }
 
     #[test]
