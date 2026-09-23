@@ -3,6 +3,10 @@
 //! 职责边界（docs/spec/module-boundaries.md）：只做参数校验、状态装配、
 //! 调用 crate；业务规则在 crate 层。
 
+// 桌面应用是 GUI 程序：发布构建不弹控制台窗口，也不随启动它的控制台/父进程退出而结束
+// （缺这个属性时进程挂在控制台上，父 shell 一结束就被一起收走，表现为"启动后又消失"）。
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
