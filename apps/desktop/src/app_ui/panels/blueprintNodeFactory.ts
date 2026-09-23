@@ -17,7 +17,11 @@
  */
 
 import type { BlueprintGraph, BlueprintNode, BlueprintNodeType } from "@hamster-pouch/config";
-import { effectiveLayers } from "@hamster-pouch/config";
+import {
+  BLUEPRINT_NODE_TYPES,
+  effectiveLayers,
+  structuralParentsOf,
+} from "@hamster-pouch/config";
 import type { PanelId } from "@hamster-pouch/config";
 import { PANEL_IDS } from "@hamster-pouch/config";
 
@@ -273,16 +277,16 @@ function fallbackParent(
 /**
  * 各类型的"容器上级"（显式选中这类上级时，新增节点落进它里面并自动连 `contains`）。
  *
- * 与校验的层级规则一致：界面 ⊃ 布局块/浮层；布局块 ⊃ 标签组/面板控件；
- * **浮层 ⊃ 面板控件/标签组**（D50 修订）；标签组 ⊃ 面板控件。
+ * **由节点定义表派生**（`packages/config` 的 `structuralParentsOf`，节点标准第 2 节）：
+ * 结构父只有定义表一处声明，画布、解析层与工厂都读它，避免"工厂能挂但校验拒绝"的漂移。
  * 只认**使用者显式选中的上级**，没有上级就不连线（不跨链路挂钩）。
  */
-const PARENT_CONTAINERS: Partial<Record<BlueprintNodeType, BlueprintNodeType[]>> = {
-  layout_block: ["interface"],
-  overlay: ["interface"],
-  control: ["layout_block", "overlay", "group"],
-  group: ["layout_block", "overlay"],
-};
+const PARENT_CONTAINERS: Partial<Record<BlueprintNodeType, BlueprintNodeType[]>> =
+  Object.fromEntries(
+    BLUEPRINT_NODE_TYPES.map((type) => [type, [...structuralParentsOf(type)]]).filter(
+      ([, parents]) => (parents as BlueprintNodeType[]).length > 0,
+    ),
+  ) as Partial<Record<BlueprintNodeType, BlueprintNodeType[]>>;
 
 /** 建立 `from --contains--> to` 边（已存在则不加）。 */
 function addContainsEdge(

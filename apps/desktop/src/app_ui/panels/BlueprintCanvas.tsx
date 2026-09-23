@@ -175,6 +175,28 @@ export function BlueprintCanvas({
     return indexed.filter(({ edge }) => keys.has(edge.from) && keys.has(edge.to));
   }, [doc.edges, layerKey, visibleNodes]);
 
+  /** 节点按 key 索引：边渲染时按端点类型推导端口 id（避免每帧线性查找文档）。 */
+  const byKey = useMemo(() => new Map(doc.nodes.map((n) => [n.key, n])), [doc.nodes]);
+
+  /**
+   * 一条边某侧的端口坐标（`portMap` 里查不到 = `undefined`）。
+   *
+   * **必须与画布渲染的端口标记一致**（`${key}::${side}::${PORT_DEFS 里的 id}`）：
+   * 连线绘制、刀痕命中判定都走这一个函数，避免两处各推一次导致"数据里有边、画布上没线"。
+   */
+  const portPointFor = useCallback(
+    (edge: BlueprintEdge, side: "in" | "out"): { x: number; y: number } | undefined => {
+      const key = side === "in" ? edge.to : edge.from;
+      const type = byKey.get(key)?.type;
+      if (!type) {
+        return undefined;
+      }
+      const portId = portIdFor(type, side, edge.kind);
+      return portId ? portMap.current.get(`${key}::${side}::${portId}`) : undefined;
+    },
+    [byKey],
+  );
+
   const toWorld = useCallback(
     (local: { x: number; y: number }) => ({
       x: (local.x - view.x) / view.zoom,
@@ -264,20 +286,8 @@ export function BlueprintCanvas({
       const edges: number[] = [];
       // 只对**层内可见**的边/节点判定（不可见的元素不该被刀痕删掉）。
       visibleEdges.forEach(({ edge, index }) => {
-        const a = portMap.current.get(
-          `${edge.from}::out::${portIdFor(
-            doc.nodes.find((n) => n.key === edge.from)?.type ?? "control",
-            "out",
-            edge.kind,
-          )}`,
-        );
-        const b = portMap.current.get(
-          `${edge.to}::in::${portIdFor(
-            doc.nodes.find((n) => n.key === edge.to)?.type ?? "control",
-            "in",
-            edge.kind,
-          )}`,
-        );
+        const a = portPointFor(edge, "out");
+        const b = portPointFor(edge, "in");
         if (!a || !b) {
           return;
         }
@@ -444,7 +454,14 @@ export function BlueprintCanvas({
         if (side === "in" && toKey !== tempEdge.fromKey) {
           const fromNode = doc.nodes.find((n) => n.key === tempEdge.fromKey);
           const toNode = doc.nodes.find((n) => n.key === toKey);
-          if (fromNode && toNode && inPort === portIdFor(toNode.type, "in", "contains")) {
+          // 落点必须是**该节点声明的输入口**：这里只校验"这个输入口属于它"，
+          // 不再限定 `contains`——规则边（on/fires/guards）的落点是操作/条件的输入口，
+          // 早前用 `portIdFor(toType,"in","contains")` 比对，导致拖到「操作」的输入口
+          // 永远判不等（真实缺陷："操作节点接不到触发节点"）。
+          const isInputPort =
+            !!toNode &&
+            PORT_DEFS[toNode.type].some((p) => p.side === "in" && p.id === inPort);
+          if (fromNode && toNode && isInputPort) {
             const kind = kindForEdge(
               fromNode.type,
               tempEdge.fromPort,
@@ -623,23 +640,14 @@ export function BlueprintCanvas({
         })}
       </div>
 
-      {/* 边层（未变换，使用测量后的局部坐标） */}
+      {/* 边层（**画布坐标系**，不随世界变换）：端口位置由 `measurePorts` 按
+          `getBoundingClientRect()` 量出，已经是"画布局部坐标"，所以这一层必须是
+          `.bp-canvas` 的直接子级——放进 `.bp-canvas-world` 会被二次变换，且那个容器
+          自身尺寸为 0（节点都是绝对定位），`inset:0` 的 SVG 拿到 0×0 盒子把连线裁没。 */}
       <svg className="bp-edges">
         {visibleEdges.map(({ edge, index: i }) => {
-          const a = portMap.current.get(
-            `${edge.from}::out::${portIdFor(
-              doc.nodes.find((n) => n.key === edge.from)?.type ?? "control",
-              "out",
-              edge.kind,
-            )}`,
-          );
-          const b = portMap.current.get(
-            `${edge.to}::in::${portIdFor(
-              doc.nodes.find((n) => n.key === edge.to)?.type ?? "control",
-              "in",
-              edge.kind,
-            )}`,
-          );
+          const a = portPointFor(edge, "out");
+          const b = portPointFor(edge, "in");
           if (!a || !b) {
             return null;
           }

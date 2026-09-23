@@ -30,6 +30,7 @@ export const zhCN = {
   "menubar.language.zhTW": "繁體中文",
   "menubar.language.en": "English",
   "menubar.settingsHint": "设置项将在后续里程碑提供",
+  "menubar.syncBlueprint": "保存布局时同步蓝图",
   "menubar.extensionsHint": "插件与 AI 扩展将在 M5 提供",
 
   // 标签页右键菜单
@@ -425,6 +426,11 @@ export const zhCN = {
   "blueprint.layer.moveDown": "下移",
   "blueprint.layer.newPrompt": "新层名",
   "blueprint.layer.switchHint": "画布同一时刻只显示一个层；每个层 = 一个界面（页面）",
+  "blueprint.layer.home": "主界面",
+  "blueprint.layer.setHome": "设为主界面",
+  "blueprint.layer.setHomeHint": "把该层设为主界面：进入该仓库时默认显示的界面（同一蓝图只能有一个）",
+  "blueprint.layer.isHome": "已是主界面",
+  "blueprint.layer.homeSet": "已把「{name}」设为主界面",
   "blueprint.overlayHeight": "叠放高度",
   "blueprint.visible": "初始可见",
   "blueprint.anchor": "定位",
@@ -477,6 +483,17 @@ export const zhCN = {
   "layer.switched": "已切换到该层的界面（布局与该层的蓝图规则已生效）",
   "layer.switchedNoLayout": "已切换到该层的界面（该层暂无专属布局，保留当前布局）",
   "blueprint.serverWarnings": "已保存；服务端提示 {count} 条未接通软告警（不阻塞保存）",
+  "control.empty": "暂无内容",
+  "control.loading": "加载中…",
+  "control.retry": "重试",
+  "control.error": "控件渲染失败",
+  "control.errorDetail": "控件渲染失败：{reason}",
+  "control.value": "值",
+  "control.selectPlaceholder": "请选择",
+  "control.noOptions": "暂无可选项",
+  "control.selectionEmpty": "未选中文件",
+  "control.boundEmpty": "绑定数据为空",
+  "blueprint.stateConflict": "当前蓝图有 {count} 处状态冲突（同界面同对象同触发却落到互斥状态），请在蓝图编辑器中修正",
 } as const;
 
 export type DictZhCN = typeof zhCN;

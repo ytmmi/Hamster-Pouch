@@ -10,10 +10,63 @@
  * - `blueprintDefault.ts` —— 内置默认图与空图（Rust 夹具的权威来源）。
  */
 
-export const BLUEPRINT_SCHEMA_VERSION = 2;
+// ============================== 取值域 ==============================
+//
+// 取值域（枚举清单与固定常量）**下沉到 `blueprintValues.ts`**，这里只**再导出**，
+// 保持既有 `@hamster-pouch/config` 引用不变；同时供 `blueprintNodes.ts`（节点定义表）
+// 独立引用，避免两个模块互相 import 形成循环初始化。
 
-/** 当前内置默认蓝图版本（引擎据此自动升级旧库存默认）。 */
-export const DEFAULT_BLUEPRINT_VERSION = 7;
+export {
+  BLUEPRINT_ACTION_OPS,
+  BLUEPRINT_EDGE_KINDS,
+  BLUEPRINT_GROUP_MODES,
+  BLUEPRINT_MEDIA_TYPES,
+  BLUEPRINT_NODE_TYPES,
+  BLUEPRINT_SCHEMA_VERSION,
+  BLUEPRINT_TRIGGERS,
+  DEFAULT_BLUEPRINT_VERSION,
+  FALLBACK_LAYER_KEY,
+  FALLBACK_LAYER_NAME,
+  HIDE_DIRECTIONS,
+  OVERLAY_HEIGHT_MAX,
+  OVERLAY_HEIGHT_MIN,
+  enumAllows,
+  inList,
+  isHideDirection,
+} from "./blueprintValues";
+export type {
+  BlueprintActionOp,
+  BlueprintEdgeKind,
+  BlueprintGroupMode,
+  BlueprintHideDirection,
+  BlueprintMediaType,
+  BlueprintNodeType,
+  BlueprintTrigger,
+} from "./blueprintValues";
+
+import {
+  BLUEPRINT_ACTION_OPS,
+  BLUEPRINT_EDGE_KINDS,
+  BLUEPRINT_GROUP_MODES,
+  BLUEPRINT_MEDIA_TYPES,
+  BLUEPRINT_NODE_TYPES,
+  BLUEPRINT_SCHEMA_VERSION,
+  BLUEPRINT_TRIGGERS,
+  DEFAULT_BLUEPRINT_VERSION,
+  FALLBACK_LAYER_KEY,
+  FALLBACK_LAYER_NAME,
+  HIDE_DIRECTIONS,
+  enumAllows,
+  inList,
+  isHideDirection,
+  type BlueprintActionOp,
+  type BlueprintEdgeKind,
+  type BlueprintGroupMode,
+  type BlueprintHideDirection,
+  type BlueprintMediaType,
+  type BlueprintNodeType,
+  type BlueprintTrigger,
+} from "./blueprintValues";
 
 // 浮层的取值域与几何纯函数在 `blueprintOverlay.ts`：这里只消费其取值域做解析层校验。
 import {
@@ -22,67 +75,11 @@ import {
   type OverlayAnchor,
   type TokenLevel,
 } from "./blueprintOverlay";
-
-/** 浮层高度参数范围（D57：默认 1，范围 1–10，值大者在上；不是像素高度）。 */
-export const OVERLAY_HEIGHT_MIN = 1;
-export const OVERLAY_HEIGHT_MAX = 10;
-
-
-/** 单层兜底时使用的层 key / 层名（与 hp-core `BlueprintGraph::FALLBACK_LAYER_*` 一致）。 */
-export const FALLBACK_LAYER_KEY = "l_main";
-export const FALLBACK_LAYER_NAME = "主界面";
+// 节点定义表在 `blueprintNodes.ts`（节点标准第 2 节）：解析层按它判定"字段是否属于该类型"。
+// 该模块只从 `blueprintValues.ts` 读取值域，与本文件无模块级循环。
+import { blueprintNodeSpec } from "./blueprintNodes";
 
 // ============================== 类型 ==============================
-
-/**
- * 节点类型取值域（RFC 0007 决策 1 / D46/D47/D50）——编辑器下拉、画布端口表与
- * **解析层校验**（`parseBlueprintDocument`）共用同一份清单，避免三处各写一遍。
- */
-export const BLUEPRINT_NODE_TYPES = [
-  "interface",
-  "layout_block",
-  /**
-   * 浮层（D50 修订）：与布局块同级的**容器**（界面 ⊃ 浮层 ⊃ 面板控件/标签组），
-   * 承载外观档位与相对定位；2026-09 取消「浮动控件」绑定。
-   */
-  "overlay",
-  "control",
-  "class",
-  "object",
-  "group",
-  "event",
-  "condition",
-  "action",
-] as const;
-
-export type BlueprintNodeType = (typeof BLUEPRINT_NODE_TYPES)[number];
-
-/** 触发取值域（事件节点 `trigger`）。 */
-export const BLUEPRINT_TRIGGERS = ["click", "double_click", "selection_change"] as const;
-export type BlueprintTrigger = (typeof BLUEPRINT_TRIGGERS)[number];
-
-/** 动作取值域（动作节点 `op`；含界面跳转 `navigate`，D48）。 */
-export const BLUEPRINT_ACTION_OPS = [
-  "show",
-  "hide",
-  "toggle",
-  "collapse",
-  "expand",
-  "navigate",
-] as const;
-export type BlueprintActionOp = (typeof BLUEPRINT_ACTION_OPS)[number];
-
-/** 组模式取值域（组节点 `mode`）。 */
-export const BLUEPRINT_GROUP_MODES = ["exclusive", "independent"] as const;
-export type BlueprintGroupMode = (typeof BLUEPRINT_GROUP_MODES)[number];
-
-/** 边类型取值域（RFC 0007 决策 1）。 */
-export const BLUEPRINT_EDGE_KINDS = ["contains", "memberOf", "on", "fires", "guards"] as const;
-export type BlueprintEdgeKind = (typeof BLUEPRINT_EDGE_KINDS)[number];
-
-/** 媒体类型取值域（类节点 `media_type`；与后端校验同一最小集）。 */
-export const BLUEPRINT_MEDIA_TYPES = ["image", "video", "audio"] as const;
-export type BlueprintMediaType = (typeof BLUEPRINT_MEDIA_TYPES)[number];
 
 /** 组/控件目标锚点（画布编辑器定位 + 浮动/停靠）。 */
 export interface BlueprintPosition {
@@ -96,6 +93,11 @@ export interface BlueprintLayer {
   key: string;
   /** 层名（非空、蓝图内唯一，D60）；即该层界面的显示名。 */
   name: string;
+  /**
+   * 是否**主界面**（D67）：应用进入该仓库时默认显示的界面。
+   * 同一蓝图至多一个层可标记（后端校验拒绝多个）；无标记时回退第一个层。
+   */
+  is_home?: boolean;
 }
 
 /** 蓝图节点（扁平结构，按 type 各取所需字段，与后端 hp-core 模型一致）。 */
@@ -206,19 +208,8 @@ export interface BlueprintTargetRef {
 
 // ============================== 常量 ==============================
 
-/** 隐藏方向可选值（用于编辑器下拉）。 */
-export const HIDE_DIRECTIONS = ["left", "right", "up", "down"] as const;
-
-/** 隐藏方向的轴向取值（编辑器下拉提供的四个值）。 */
+/** 隐藏方向的轴向取值（编辑器下拉提供的四个值；`toward:<group>` 见 `BlueprintHideDirection`）。 */
 export type HideDirectionAxis = (typeof HIDE_DIRECTIONS)[number];
-
-/**
- * 组隐藏方向（D29）：轴向值，或 `toward:<groupKey>` 精确指定由哪个邻居吸收空间。
- *
- * 下拉只提供四个轴向值；`toward:<组 key>` 同样合法，由属性面板按同层标签组补充候选，
- * 解析层与后端都接受该两种形态。
- */
-export type BlueprintHideDirection = HideDirectionAxis | `toward:${string}`;
 
 /** 条件表达式支持的前缀（用于编辑器提示）。 */
 export const CONDITION_EXPR_HINTS = [
@@ -253,6 +244,8 @@ export function nodeLayerKey(doc: BlueprintGraph, node: BlueprintNode): string {
 /**
  * 有效层清单：显式 `layers`；为空时按单层兜底推导一层（层名取界面 `name` 或「主界面」）。
  * 编辑器"当前层"、布局 `layer_key` 维度都以本函数结果为准。
+ *
+ * 兜底层即**主界面**（D67）。
  */
 export function effectiveLayers(doc: BlueprintGraph): BlueprintLayer[] {
   if (hasLayers(doc)) {
@@ -260,7 +253,21 @@ export function effectiveLayers(doc: BlueprintGraph): BlueprintLayer[] {
   }
   const name =
     doc.nodes.find((n) => n.type === "interface")?.name?.trim() || FALLBACK_LAYER_NAME;
-  return [{ key: fallbackLayerKey(doc), name }];
+  return [{ key: fallbackLayerKey(doc), name, is_home: true }];
+}
+
+/**
+ * **主界面层 key**（D67）：带 `is_home` 标记的层；无标记时回退**第一个有效层**。
+ *
+ * 应用进入该仓库时默认显示这一层（`blueprint.currentLayer` 记录的"上次所在层"若仍存在
+ * 则优先，用于重启回到上次页面）。
+ */
+export function homeLayerKey(doc: BlueprintGraph | null): string | null {
+  if (!doc) {
+    return null;
+  }
+  const layers = effectiveLayers(doc);
+  return (layers.find((l) => l.is_home === true) ?? layers[0])?.key ?? null;
 }
 
 /** 某层的界面节点（层的根；每层至多一个）。 */
@@ -319,44 +326,40 @@ export function uniqueLayerName(doc: BlueprintGraph, wanted: string): string {
  * 保存前归一化分层：把**兜底单层**实体化进 `layers`，并给每个缺 `layer` 的节点补上归属。
  *
  * 后端校验规则是"`layers` 存在而节点缺 `layer` = 硬错误"，且"`layers` 缺失/为空才兜底"，
- * 因此编辑器保存时必须显式写出层与归属；已是分层文档时保持原样。
+ * 因此编辑器保存时必须显式写出层与归属。
+ *
+ * 另外**保证恰好一个主界面**（D67）：一个标记都没有时，把第一个层标为主界面（旧文档
+ * 显式化，避免"默认进哪一页"永远依赖隐式回退）。已有标记则原样保留。
  */
 export function normalizeLayersForSave(doc: BlueprintGraph): BlueprintGraph {
-  if (hasLayers(doc)) {
+  if (!hasLayers(doc)) {
+    const [layer] = effectiveLayers(doc);
+    return {
+      ...doc,
+      layers: [{ ...layer, is_home: true }],
+      nodes: doc.nodes.map((n) => ({ ...n, layer: n.layer ?? layer.key })),
+    };
+  }
+  const layers = doc.layers!;
+  if (layers.some((l) => l.is_home === true)) {
     return doc;
   }
-  const [layer] = effectiveLayers(doc);
   return {
     ...doc,
-    layers: [layer],
-    nodes: doc.nodes.map((n) => ({ ...n, layer: n.layer ?? layer.key })),
+    layers: layers.map((l, i) => (i === 0 ? { ...l, is_home: true } : { ...l, is_home: false })),
   };
 }
 
 
 // ============================== 解析层校验（RFC 0007 决策 6） ==============================
 
-/** 取值是否在给定清单内（解析层校验用）。 */
-function inList<T extends string>(list: readonly T[], value: unknown): value is T {
-  return typeof value === "string" && (list as readonly string[]).includes(value);
-}
-
 /**
- * `hide_direction` 是否合法：`left` / `right` / `up` / `down`，或 `toward:<groupKey>`（D29）。
+ * 解析层校验单个节点（取值域非法返回 `null`）。
  *
- * `HIDE_DIRECTIONS` 只是编辑器下拉提供的四个轴向值；`toward:<组 key>` 属合法取值，
- * 编辑器会原样保留（不认识的取值不允许进文档）。
+ * 专属字段的合法性来自**节点定义表**（`blueprintNodes.ts`，节点标准第 2 节）：
+ * 字段用在**不支持它的节点类型**上即解析层拒绝（与 Rust 的 "引用存在但类型不符"
+ * 同为硬错误口径，但这里更早拦截，避免把错误图渲染到画布上）。
  */
-function isHideDirection(value: unknown): boolean {
-  return (
-    inList(HIDE_DIRECTIONS, value) ||
-    (typeof value === "string" &&
-      value.startsWith("toward:") &&
-      value.length > "toward:".length)
-  );
-}
-
-/** 解析层校验单个节点（取值域非法返回 `null`）。 */
 function parseNode(value: unknown): BlueprintNode | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -371,31 +374,68 @@ function parseNode(value: unknown): BlueprintNode | null {
   if (node.layer !== undefined && typeof node.layer !== "string") {
     return null;
   }
-  if (node.trigger !== undefined && !inList(BLUEPRINT_TRIGGERS, node.trigger)) {
+  if (node.name !== undefined && (typeof node.name !== "string" || !node.name.trim())) {
     return null;
   }
-  if (node.op !== undefined && !inList(BLUEPRINT_ACTION_OPS, node.op)) {
-    return null;
-  }
-  if (node.mode !== undefined && !inList(BLUEPRINT_GROUP_MODES, node.mode)) {
-    return null;
-  }
-  if (node.media_type !== undefined && !inList(BLUEPRINT_MEDIA_TYPES, node.media_type)) {
-    return null;
+  // 节点定义表驱动：字段归属 + 取值域 + 类型。
+  for (const [field, fieldValue] of Object.entries(node)) {
+    if (field === "key" || field === "type" || field === "layer" || PAYLOAD_FIELD === field) {
+      continue;
+    }
+    const spec = blueprintNodeSpec(node.type).fields.find((f) => f.name === field);
+    if (!spec) {
+      // `unlinked` 是画布派生标记（不落库），允许出现在内存对象上；其余未知字段即拒绝。
+      if (field !== "unlinked") return null;
+      continue;
+    }
+    if (!matchesFieldType(fieldValue, spec.type, field)) {
+      return null;
+    }
   }
   if (node.hide_direction !== undefined && !isHideDirection(node.hide_direction)) {
     return null;
   }
-  if (node.anchor !== undefined && !inList(OVERLAY_ANCHORS, node.anchor)) {
-    return null;
-  }
-  if (node.shadow !== undefined && !inList(TOKEN_LEVELS, node.shadow)) {
-    return null;
-  }
-  if (node.radius !== undefined && !inList(TOKEN_LEVELS, node.radius)) {
-    return null;
-  }
   return node as unknown as BlueprintNode;
+}
+
+/** 节点上允许存在但暂不参与解析层类型校验的字段（`payload` 由动作执行侧解释）。 */
+const PAYLOAD_FIELD = "payload";
+
+/** 字段取值是否与定义表的类型匹配（`ref`/`refArray` 只要求字符串/字符串数组）。 */
+function matchesFieldType(value: unknown, type: string, field: string): boolean {
+  switch (type) {
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "boolean":
+      return typeof value === "boolean";
+    case "position":
+      return (
+        typeof value === "object" &&
+        value !== null &&
+        typeof (value as { x?: unknown }).x === "number" &&
+        typeof (value as { y?: unknown }).y === "number"
+      );
+    case "size":
+      return (
+        typeof value === "object" &&
+        value !== null &&
+        ((value as { width?: unknown }).width === undefined ||
+          typeof (value as { width?: unknown }).width === "number") &&
+        ((value as { height?: unknown }).height === undefined ||
+          typeof (value as { height?: unknown }).height === "number")
+      );
+    case "ref":
+      return typeof value === "string";
+    case "refArray":
+      return Array.isArray(value) && value.every((v) => typeof v === "string");
+    case "enum":
+      // 取值域按字段名分派（清单来自 blueprintValues.ts / blueprintOverlay.ts）。
+      return typeof value === "string" && enumAllows(field, value);
+    default:
+      return false;
+  }
 }
 
 /** 解析层校验单条边（取值域非法返回 `null`）。 */

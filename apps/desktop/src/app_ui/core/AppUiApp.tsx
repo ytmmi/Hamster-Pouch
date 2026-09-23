@@ -8,6 +8,7 @@ import {
   themeDark,
   themeLight,
   type DockviewApi,
+  type DockviewGroupPanel,
   type DockviewReadyEvent,
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
@@ -20,6 +21,7 @@ import { normalizeLayoutJson } from "../shared/panelLayout";
 import { collapseGroup, expandGroup } from "../shared/blueprintLayout";
 import {
   activeBlueprintId,
+  activeStateConflicts,
   loadActiveBlueprint,
   loadCurrentLayer,
   notifyBlueprintChangedLocally,
@@ -36,7 +38,7 @@ import {
 
 import * as api from "../shared/api";
 import { AppContext, type AppContextValue } from "./AppContext";
-import { blueprintEngine, type BlueprintDispatchInput } from "./blueprintEngine";
+import { blueprintEngine, type BlueprintCollapseAbsorb, type BlueprintDispatchInput } from "./blueprintEngine";
 import {
   DEFAULT_LANGUAGE,
   isLanguage,
@@ -46,6 +48,24 @@ import {
 import { MenuBar } from "../menu/MenuBar";
 import { DOCK_COMPONENTS, PANEL_DEFS, panelTitle } from "./panelRegistry";
 import type { FileItem, StatusType } from "../shared/types";
+
+/** 在 dockview 里找"包含最多指定面板"的组（用于 `toward:<组>` 吸收目标解析）。 */
+function findGroupForPanels(
+  dv: DockviewApi,
+  panelIds: string[],
+): DockviewGroupPanel | null {
+  let best: DockviewGroupPanel | null = null;
+  let bestScore = 0;
+  for (const g of dv.groups) {
+    const ids = new Set(g.panels.map((p) => p.id));
+    const score = panelIds.filter((id) => ids.has(id)).length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = g;
+    }
+  }
+  return best;
+}
 
 export function AppUiApp(): JSX.Element {
   const [repoId, setRepoId] = useState<string | null>(null);
@@ -260,20 +280,30 @@ export function AppUiApp(): JSX.Element {
           focusPanel(panelId, floating);
         }
       },
-      collapsePanels: (panelIds: string[]) => {
+      collapsePanels: (panelIds: string[], absorb?: BlueprintCollapseAbsorb) => {
         const dv = apiRef.current;
         if (!dv) {
           return;
         }
+        // toward 目标组：按成员面板 id 命中最多的 dockview 组（引擎已把 toward:<组> 解析为面板 id）。
+        const towardGroup = absorb?.towardPanelIds
+          ? findGroupForPanels(dv, absorb.towardPanelIds)
+          : null;
+        // 按 dockview 组去重：同一组成员只收起一次，避免重复吸收把邻居放大多次。
+        const seen = new Set<string>();
         for (const id of panelIds) {
           const panel = dv.getPanel(id);
-          if (!panel) {
+          if (!panel || seen.has(panel.api.group.id)) {
             continue;
           }
+          seen.add(panel.api.group.id);
           // 组的隐藏 = 最小化至最小尺寸（正文 6px、标签条保留，D25）；
-          // 与布局对账共用同一份"收起前尺寸"记忆，保证 expand 能恢复（RFC 0007 决策 3）。
-          // 隐藏方向/相邻组拉伸的 dockview 映射属实现期开放点。
-          collapseGroup(panel.api.group);
+          // 与布局对账共用同一份"收起前尺寸"记忆，保证 expand 能恢复（RFC 0007 决策 3）；
+          // hide_direction 指定把释放空间让给哪个邻居（D29）。
+          collapseGroup(panel.api.group, dv, {
+            direction: absorb?.direction,
+            towardGroup,
+          });
         }
       },
       expandPanels: (panelIds: string[]) => {
@@ -281,11 +311,14 @@ export function AppUiApp(): JSX.Element {
         if (!dv) {
           return;
         }
+        // 按组去重：展开重复触发会用兜底尺寸覆盖已恢复的原尺寸。
+        const seen = new Set<string>();
         for (const id of panelIds) {
           const panel = dv.getPanel(id);
-          if (!panel) {
+          if (!panel || seen.has(panel.api.group.id)) {
             continue;
           }
+          seen.add(panel.api.group.id);
           expandGroup(panel.api.group);
         }
       },
@@ -368,6 +401,12 @@ export function AppUiApp(): JSX.Element {
         return;
       }
       reconcileActiveBlueprint(apiRef.current);
+      // 状态冲突（同界面同对象同触发多状态，节点标准第 6 节）：库存里可能有历史遗留文档
+      // （规则上线前保存的），装载后提示一次，避免"某次交互同时触发互斥状态"却毫无提示。
+      const conflicts = activeStateConflicts();
+      if (conflicts.length > 0) {
+        status(t("blueprint.stateConflict", { count: conflicts.length }), "error");
+      }
     })();
     return () => {
       cancelled = true;

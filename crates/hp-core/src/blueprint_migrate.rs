@@ -108,9 +108,11 @@ fn migrate_single_layer_doc(graph: &mut BlueprintGraph) {
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| format!("界面 {}", idx + 1));
         let name = unique_layer_name(&layers, &name);
-        layers.push(BlueprintLayer {
-            key: key.clone(),
-            name,
+        // 第一个界面即主界面（D67）：旧文档只有一个界面时，它就是默认进入的页面。
+        layers.push(if layers.is_empty() {
+            BlueprintLayer::home(key.clone(), name)
+        } else {
+            BlueprintLayer::new(key.clone(), name)
         });
         node_layer.push((node.key.clone(), key));
     }

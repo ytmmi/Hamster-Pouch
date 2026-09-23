@@ -11,7 +11,7 @@
  * 用法：pnpm check:blueprint-nodes
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -313,6 +313,55 @@ const hasEdge = (doc, from, to, kind) =>
       ports.kindForEdge("interface", "contains", "group") === null,
     `control=${ports.kindForEdge("interface", "contains", "control")} group=${ports.kindForEdge("interface", "contains", "group")}`,
   );
+
+  /*
+   * 端口推导一致性（真实缺陷回归）：画布渲染连线时按
+   * `portMap.get(`${key}::${side}::${portIdFor(type, side, kind)}`)` 找端口坐标，
+   * 而 DOM 标记用 `PORT_DEFS` 里的 id。因此 `portIdFor` 返回的 id **必须**是该类型声明过的端口；
+   * 返回一个未声明的 id 会让查表落空、连线被静默丢弃（历史上输入侧被边类型名覆盖，
+   * 导致"操作 → 状态"永远画不出线、也拖不上）。
+   */
+  const portDrift = [];
+  for (const type of config.BLUEPRINT_NODE_TYPES) {
+    for (const side of ["in", "out"]) {
+      for (const kind of config.BLUEPRINT_EDGE_KINDS) {
+        const id = ports.portIdFor(type, side, kind);
+        if (id === "") continue; // 空串 = 该节点没有这个端口，调用方据此丢弃/拒绝
+        if (!ports.nodeHasPort(type, side, id)) {
+          portDrift.push(`${type}.${side}.${kind} → "${id}" 未在 PORT_DEFS 声明`);
+        }
+      }
+    }
+  }
+  check(
+    "端口推导一致性：portIdFor 只返回 PORT_DEFS 声明过的端口（否则连线被静默丢弃）",
+    portDrift.length === 0,
+    portDrift.slice(0, 4).join("；") || "全部匹配",
+  );
+
+  // 正向：每种允许的**规则边**两端都能推出口端口 id（否则画布上也连不出来）。
+  const ruleEdgeProblems = [];
+  for (const kind of ["memberOf", "on", "fires", "guards"]) {
+    for (const fromType of config.BLUEPRINT_NODE_TYPES) {
+      for (const toType of config.BLUEPRINT_NODE_TYPES) {
+        const derived = ports.kindForEdge(fromType, kind === "on" ? "on" : kind, toType);
+        if (derived !== kind) continue;
+        const outId = ports.portIdFor(fromType, "out", kind);
+        const inId = ports.portIdFor(toType, "in", kind);
+        if (!outId || !ports.nodeHasPort(fromType, "out", outId)) {
+          ruleEdgeProblems.push(`${kind}: ${fromType} 缺输出口（${outId || "空"}）`);
+        }
+        if (!inId || !ports.nodeHasPort(toType, "in", inId)) {
+          ruleEdgeProblems.push(`${kind}: ${toType} 缺输入口（${inId || "空"}）`);
+        }
+      }
+    }
+  }
+  check(
+    "端口推导一致性：每种规则边两端都能在画布上连出来（on/fires/guards/memberOf）",
+    ruleEdgeProblems.length === 0,
+    [...new Set(ruleEdgeProblems)].slice(0, 4).join("；") || "全部可连",
+  );
 }
 
 // ---- 5e. 浮层相对定位：九宫格锚点 + 双模式偏移（0–1 比例 / >1 像素）----
@@ -567,24 +616,138 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
   );
 }
 
-// ---- 用 hp-core 真实校验器复核全部夹具 ----
-try {
-  const out = execFileSync(
-    "cargo",
-    [
-      "test",
-      "-p",
-      "hp-store",
-      "--test",
-      "m6_blueprint",
-      "factory_built_docs_validate",
-      "--",
-      "--nocapture",
-    ],
-    { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+// ---- 状态冲突规则的 TS/Rust 一致性（D66）----
+//
+// 前端 `findStateConflicts` 与后端 `blueprint_validate::find_state_conflicts` 必须同口径：
+// 这里用同一份夹具分别判定，断言两者都报（冲突图）或都不报（干净图）。
+{
+  const withActions = (extraNodes, edges) =>
+    JSON.parse(
+      `{"schema_version":2,
+        "layers":[{"key":"l_a","name":"主界面"}],
+        "nodes":[
+          {"key":"ui","type":"interface","layer":"l_a"},
+          {"key":"blk","type":"layout_block","layer":"l_a","name":"栏"},
+          {"key":"c_media","type":"control","panel_id":"media","layer":"l_a"},
+          {"key":"c_viewer","type":"control","panel_id":"viewer","layer":"l_a"},
+          {"key":"c_player","type":"control","panel_id":"player","layer":"l_a"},
+          {"key":"g_v","type":"group","mode":"exclusive","layer":"l_a"},
+          {"key":"k","type":"class","control":"c_media","media_type":"image","layer":"l_a"},
+          {"key":"o","type":"object","class":"k","scope":"double_clicked","layer":"l_a"},
+          {"key":"e1","type":"event","trigger":"double_click","layer":"l_a"},
+          {"key":"e2","type":"event","trigger":"double_click","layer":"l_a"}
+          ${extraNodes}
+        ],
+        "edges":[
+          {"from":"ui","to":"blk","kind":"contains","order":1},
+          {"from":"blk","to":"c_media","kind":"contains","order":2},
+          {"from":"blk","to":"c_viewer","kind":"contains","order":3},
+          {"from":"blk","to":"c_player","kind":"contains","order":4},
+          {"from":"blk","to":"g_v","kind":"contains","order":5},
+          {"from":"g_v","to":"c_viewer","kind":"contains","order":6},
+          {"from":"g_v","to":"c_player","kind":"contains","order":7},
+          {"from":"c_media","to":"k","kind":"contains","order":8},
+          {"from":"k","to":"o","kind":"contains","order":9},
+          {"from":"o","to":"e1","kind":"on","order":10},
+          {"from":"o","to":"e2","kind":"on","order":11}
+          ${edges}
+        ]}`,
+    );
+
+  const conflictDoc = withActions(
+    `,
+          {"key":"a_show","type":"action","op":"show","target":"c_viewer","layer":"l_a"},
+          {"key":"a_hide","type":"action","op":"hide","target":"c_viewer","layer":"l_a"}`,
+    `,
+          {"from":"e1","to":"a_show","kind":"fires","order":12},
+          {"from":"e2","to":"a_hide","kind":"fires","order":13}`,
   );
-  process.stdout.write(out);
-  check("工厂产出的文档全部通过 hp-core 真实校验", true);
+  const cleanDoc = withActions(
+    `,
+          {"key":"a_show","type":"action","op":"show","target":"c_viewer","layer":"l_a"}`,
+    `,
+          {"from":"e1","to":"a_show","kind":"fires","order":12}`,
+  );
+
+  /** 用 Rust 校验器判定（stdin 喂 JSON，从输出里数硬错误条数）。
+   *  注意：check-blueprint 在"有硬错误"时以退出码 1 结束，所以必须捕获异常后再解析输出。 */
+  const rustErrorCount = (doc) => {
+    let out = "";
+    try {
+      out = execFileSync("cargo", ["run", "-q", "-p", "hp-core", "--example", "check-blueprint"], {
+        cwd: ROOT,
+        input: JSON.stringify(doc),
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (e) {
+      out = `${e?.stdout ?? ""}${e?.stderr ?? ""}`;
+    }
+    const plain = String(out).replace(/\u001b\[[0-9;]*m/g, "");
+    return Number(/硬错误 \(([0-9]+)\)/.exec(plain)?.[1] ?? "-1");
+  };
+
+  const tsConflict = config.findStateConflicts(conflictDoc).length > 0;
+  check("TS：同对象同触发的 show/hide 被判为状态冲突", tsConflict);
+  const tsClean = config.findStateConflicts(cleanDoc).length === 0;
+  check("TS：单一动作不报状态冲突", tsClean);
+
+  try {
+    const rustConflict = rustErrorCount(conflictDoc) > 0;
+    const rustClean = rustErrorCount(cleanDoc) === 0;
+    check(
+      "TS 与 Rust 的冲突判定一致（同夹具同结论）",
+      tsConflict === rustConflict && tsClean === rustClean,
+      `TS=${tsConflict}/${tsClean} Rust=${rustConflict}/${rustClean}`,
+    );
+  } catch (e) {
+    check("TS 与 Rust 的冲突判定一致（同夹具同结论）", false, `cargo 执行失败：${e?.message ?? e}`);
+  }
+}
+
+// ---- 用 hp-core 真实校验器复核全部夹具 ----
+//
+// 注意：受限沙箱下 `execFileSync` 的管道式 stdio 会被拒绝（EPERM），但
+// `stdio: "inherit"` 可以正常创建子进程。因此这里先用捕获模式（能拿到输出），
+// 仅当遇到 EPERM 时**原地重试一次继承模式**，用退出码判定，避免把沙箱限制误报成校验失败。
+const CARGO_ARGS = [
+  "test",
+  "-p",
+  "hp-store",
+  "--test",
+  "m6_blueprint",
+  "factory_built_docs_validate",
+  "--",
+  "--nocapture",
+];
+function runCargoInherited() {
+  const result = spawnSync("cargo", CARGO_ARGS, { cwd: ROOT, stdio: "inherit" });
+  return { status: result.status, signal: result.signal, error: result.error };
+}
+try {
+  let out = "";
+  let inherited = null;
+  try {
+    out = execFileSync("cargo", CARGO_ARGS, {
+      cwd: ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (e) {
+    if ((e?.code ?? null) === "EPERM" || (e?.status ?? null) === null) {
+      inherited = runCargoInherited();
+    } else {
+      throw e;
+    }
+  }
+  if (out) process.stdout.write(out);
+  check(
+    "工厂产出的文档全部通过 hp-core 真实校验",
+    inherited ? inherited.status === 0 : true,
+    inherited && inherited.status !== 0
+      ? `cargo 退出码 ${inherited.status}`
+      : "",
+  );
 } catch (e) {
   // 关键：把真实原因打出来（退出码 / 信号 / 解析错误），否则只看到"见上方 cargo 输出"而无从排查。
   const status = e?.status ?? null;

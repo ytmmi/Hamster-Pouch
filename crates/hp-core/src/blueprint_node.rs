@@ -51,20 +51,42 @@ pub struct BlueprintPosition {
 }
 
 /// 蓝图层（D51）：一个层 = 一张画布 = 一个界面（页面）；`name` 即该层界面的显示名。
+///
+/// `is_home`（D67）= **主界面标记**：应用进入该仓库时默认显示的界面。同一蓝图**至多一个**
+/// 层可标记（多于一个为硬错误）；无标记时由消费层回退到**第一个层**（旧文档兼容）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlueprintLayer {
     /// 层 key（蓝图内唯一、非空）。
     pub key: String,
     /// 层名（非空、蓝图内唯一，D60）；即该层界面的显示名。
     pub name: String,
+    /// 是否为主界面（默认进入该仓库时显示的界面，D67）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_home: Option<bool>,
 }
 
 impl BlueprintLayer {
+    /// 普通层（非主界面）。
     pub fn new(key: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             key: key.into(),
             name: name.into(),
+            is_home: None,
         }
+    }
+
+    /// 主界面层（D67）。
+    pub fn home(key: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            name: name.into(),
+            is_home: Some(true),
+        }
+    }
+
+    /// 是否被标记为主界面。
+    pub fn is_home(&self) -> bool {
+        self.is_home == Some(true)
     }
 }
 

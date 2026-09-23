@@ -48,6 +48,7 @@ import {
   ensureInterface,
   moveLayer,
   renameLayer,
+  setHomeLayer,
 } from "./blueprintLayers";
 import { appendNode, parentHintFor } from "./blueprintNodeFactory";
 import { arrangeTree } from "./blueprintArrange";
@@ -287,6 +288,22 @@ export function BlueprintPanel(): JSX.Element {
       mutate(moveLayer(doc, key, delta));
     },
     [doc, mutate],
+  );
+
+  /**
+   * 设为主界面（D67）：该层成为进入仓库时默认显示的界面。
+   *
+   * 同时把"当前层"也切过去并记忆（`blueprint.currentLayer`），避免"设了主界面却还停在
+   * 另一页"的割裂感；下次进入该仓库若没有更近的当前层记录，就会落在主界面。
+   */
+  const setCurrentLayerAsHome = useCallback(
+    (key: string) => {
+      mutate(setHomeLayer(doc, key));
+      setCurrentLayerKey(key);
+      const name = effectiveLayers(doc).find((l) => l.key === key)?.name ?? key;
+      app.status(app.t("blueprint.layer.homeSet", { name }), "ok");
+    },
+    [doc, mutate, app],
   );
 
   const updateNode = useCallback(
@@ -765,6 +782,7 @@ export function BlueprintPanel(): JSX.Element {
                     onRename={renameCurrentLayer}
                     onRemove={removeCurrentLayer}
                     onMove={moveCurrentLayer}
+                    onSetHome={setCurrentLayerAsHome}
                     t={app.t}
                   />
 

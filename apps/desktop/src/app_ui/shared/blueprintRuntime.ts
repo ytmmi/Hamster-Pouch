@@ -15,8 +15,11 @@
 import {
   DEFAULT_BLUEPRINT,
   effectiveLayers,
+  findStateConflicts,
+  homeLayerKey,
   isObsoleteDefaultBlueprint,
   type BlueprintGraph,
+  type BlueprintStateConflict,
 } from "@hamster-pouch/config";
 import type { DockviewApi } from "dockview-react";
 
@@ -109,6 +112,19 @@ export function setBlueprintFallbackNotifier(
   fallbackNotifier = next;
 }
 
+/**
+ * 生效蓝图里的**状态冲突**（同界面同对象同触发多状态冲突，节点标准第 6 节）。
+ *
+ * 后端 `blueprint.validate` 在保存前会**硬错误**拒绝这类文档；这里在**装载**时也算一遍，
+ * 供画布标红与用户提示（库存里可能存在历史遗留的冲突文档——那时还没有这条规则）。
+ */
+let activeConflicts: BlueprintStateConflict[] = [];
+
+/** 当前生效蓝图的状态冲突（无冲突为空数组）。 */
+export function activeStateConflicts(): BlueprintStateConflict[] {
+  return activeConflicts;
+}
+
 // 模块装载即打点：区分"前端没跑到蓝图链路"与"跑到了但分支不对"。
 trace(`[blueprint] runtime module imported at ${new Date().toISOString()} hw=${navigator.hardwareConcurrency}`);
 
@@ -138,6 +154,15 @@ function activate(graph: BlueprintGraph | null, digest?: string): BlueprintGraph
     activeLayer = layers[0]?.key ?? null;
   }
   blueprintEngine.setLayer(activeLayer);
+  // 状态冲突（同界面同对象同触发多状态）随生效蓝图重算：供画布标红与用户提示。
+  activeConflicts = findStateConflicts(activeGraph);
+  if (activeConflicts.length > 0) {
+    trace(
+      `[blueprint] 状态冲突 ${activeConflicts.length} 处：${activeConflicts
+        .map((c) => c.message)
+        .join(" | ")}`,
+    );
+  }
   return activeGraph;
 }
 
@@ -277,10 +302,11 @@ export function setCurrentLayerKey(layerKey: string | null): void {
 
 /**
  * 装载某仓库的当前层（D54）：优先读取持久化记录；记录缺失或已不在生效蓝图里时，
- * 回退到生效蓝图的第一个层。返回最终当前层 key（无蓝图时为 null）。
+ * 回退到**主界面**（D67 `is_home`，无标记则第一个层）。返回最终当前层 key（无蓝图时为 null）。
  */
 export async function loadCurrentLayer(repoId: string): Promise<string | null> {
   const layers = activeGraph ? effectiveLayers(activeGraph) : [];
+  const home = homeLayerKey(activeGraph);
   let key: string | null = null;
   try {
     key = await api.blueprintCurrentLayerGet(repoId);
@@ -288,10 +314,10 @@ export async function loadCurrentLayer(repoId: string): Promise<string | null> {
     key = null;
   }
   if (!key || !layers.some((l) => l.key === key)) {
-    key = layers[0]?.key ?? null;
+    key = home ?? layers[0]?.key ?? null;
   }
   setCurrentLayerKey(key);
-  trace(`[layer] 当前层 repo=${repoId} layer=${key ?? "-"} layers=${layers.length}`);
+  trace(`[layer] 当前层 repo=${repoId} layer=${key ?? "-"} home=${home ?? "-"} layers=${layers.length}`);
   return key;
 }
 

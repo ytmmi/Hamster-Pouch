@@ -13,7 +13,7 @@ use crate::blueprint::{
     OVERLAY_MAX_SIZE,
 };
 use crate::blueprint_node::{BlueprintEdge, BlueprintNode};
-use crate::blueprint_types::{ActionOp, EdgeKind, GroupMode, NodeType};
+use crate::blueprint_types::{ActionOp, EdgeKind, GroupMode, NodeType, Trigger};
 
 /// 图级校验入口：返回全部硬错误（空 = 有效，可保存）。
 ///
@@ -93,9 +93,198 @@ pub(crate) fn validate_graph(graph: &BlueprintGraph) -> Vec<String> {
         ));
     }
 
+    // **同界面 + 同对象 + 同触发 + 多状态冲突**（用户新增规则）：一次交互不可能同时
+    // 落到两个互斥结果上——要么目标被同时显示与隐藏，要么互斥组里有两个成员被同时显示。
+    errors.extend(find_state_conflicts(graph));
+
     // 「未接通」类软问题（缺引用、缺触发来源、无根层、浮层未连界面）不在此处报错，
     // 见 `blueprint_warnings::collect`：删除关联节点后允许先存下中间状态。
     errors
+}
+
+/// 一次交互可能落到的一个"状态"（动作目标 + 操作）。
+#[derive(Debug, Clone)]
+struct ActionState {
+    /// 动作节点 key（报错定位用）。
+    action: String,
+    op: ActionOp,
+    /// 动作目标 key（面板控件 / 标签组 / 浮层 / 界面）。
+    target: String,
+    /// 该动作所在的面板控件（用于判定"同一面板"）。
+    panel_id: Option<String>,
+}
+
+/// 沿求值链找同一「对象 + 触发」下互相冲突的状态（硬错误，拒绝保存）。
+///
+/// 规则（同**层** = 同界面；跨层只能靠 `navigate`，不在此判定）：
+/// 1. **互斥状态**：同一目标被同时赋予互斥操作 —— `show`/`hide` 或 `show`/`toggle`；
+///    标签组同时 `collapse`/`expand`；界面同时 `navigate` 到两个不同界面。
+///    重复同一操作（`show` 两次）不算冲突，`toggle` 与 `hide` 的组合也允许。
+/// 2. **互斥组多成员同时显示**：同一次交互把同一互斥组（`mode = exclusive`）的两个不同
+///    成员面板都置为 `show`（或 `toggle`），违反"同一时间至多一个成员显示"。
+fn find_state_conflicts(graph: &BlueprintGraph) -> Vec<String> {
+    let mut errors = Vec::new();
+
+    // 触发来源节点：面板控件 / 类 / 对象（与引擎 `eventMatches` 的候选口径一致）。
+    for source in &graph.nodes {
+        if !matches!(
+            source.node_type,
+            NodeType::Control | NodeType::Class | NodeType::Object
+        ) {
+            continue;
+        }
+        let layer = graph.node_layer_key(source);
+        let _ = &layer; // 同层由上层规则保证；保留取值以便日后按层细化报错。
+
+        // 按触发分组：这些事件都由本对象触发（`on` 入边）。
+        let triggers: Vec<&Trigger> = graph
+            .nodes
+            .iter()
+            .filter(|n| {
+                n.node_type == NodeType::Event
+                    && n.trigger.is_some()
+                    && graph.edges.iter().any(|e| {
+                        e.edge_kind == EdgeKind::On && e.from == source.key && e.to == n.key
+                    })
+            })
+            .filter_map(|n| n.trigger.as_ref())
+            .collect();
+        let mut unique_triggers: Vec<&Trigger> = Vec::new();
+        for t in triggers {
+            if !unique_triggers.iter().any(|u| *u == t) {
+                unique_triggers.push(t);
+            }
+        }
+
+        for trigger in unique_triggers {
+            // 该触发下可达的全部事件节点。
+            let events: Vec<&str> = graph
+                .nodes
+                .iter()
+                .filter(|n| {
+                    n.node_type == NodeType::Event
+                        && n.trigger.as_ref() == Some(trigger)
+                        && graph
+                            .edges
+                            .iter()
+                            .any(|e| e.edge_kind == EdgeKind::On && e.from == source.key && e.to == n.key)
+                })
+                .map(|n| n.key.as_str())
+                .collect();
+
+            // 收集可达动作（事件 fires 条件/动作，条件 guards 动作；带环保护）。
+            let mut reached: Vec<&str> = Vec::new();
+            let mut queue: Vec<&str> = events.clone();
+            let mut seen: HashSet<&str> = events.iter().copied().collect();
+            while let Some(key) = queue.pop() {
+                for edge in graph.edges.iter().filter(|e| {
+                    e.from == key
+                        && matches!(e.edge_kind, EdgeKind::Fires | EdgeKind::Guards)
+                }) {
+                    if !seen.insert(edge.to.as_str()) {
+                        continue;
+                    }
+                    match graph.node(&edge.to) {
+                        Some(n) if n.node_type == NodeType::Action => reached.push(n.key.as_str()),
+                        Some(n) if n.node_type == NodeType::Condition => {
+                            queue.push(n.key.as_str())
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            let states: Vec<ActionState> = reached
+                .iter()
+                .filter_map(|key| graph.node(key))
+                .filter_map(|n| {
+                    let target = n.target.as_deref()?;
+                    let target_node = graph.node(target)?;
+                    Some(ActionState {
+                        action: n.key.clone(),
+                        op: n.op?,
+                        target: target.to_string(),
+                        panel_id: target_node.panel_id.clone(),
+                    })
+                })
+                .collect();
+
+            // 1. 同一目标的互斥状态。
+            for (i, a) in states.iter().enumerate() {
+                for b in states.iter().skip(i + 1) {
+                    if a.target != b.target || !mutually_exclusive(a.op, b.op) {
+                        continue;
+                    }
+                    errors.push(format!(
+                        "同界面同对象同触发「{}」状态冲突：对象 {} 的两个状态同时作用于 {}（{}:{} / {}:{}）",
+                        trigger.as_str(),
+                        source.key,
+                        a.target,
+                        a.action,
+                        a.op.as_str(),
+                        b.action,
+                        b.op.as_str()
+                    ));
+                }
+            }
+
+            // 2. 同一互斥组里的两个成员被同时显示。
+            for (i, a) in states.iter().enumerate() {
+                if !is_visible_op(a.op) {
+                    continue;
+                }
+                for b in states.iter().skip(i + 1) {
+                    if a.panel_id.is_none()
+                        || a.panel_id == b.panel_id
+                        || !is_visible_op(b.op)
+                    {
+                        continue;
+                    }
+                    let Some(group) = graph.nodes.iter().find(|g| {
+                        g.node_type == NodeType::Group
+                            && g.mode == Some(GroupMode::Exclusive)
+                            && graph.edges.iter().any(|e| {
+                                e.edge_kind == EdgeKind::Contains && e.from == g.key && e.to == a.target
+                            })
+                            && graph.edges.iter().any(|e| {
+                                e.edge_kind == EdgeKind::Contains && e.from == g.key && e.to == b.target
+                            })
+                    }) else {
+                        continue;
+                    };
+                    errors.push(format!(
+                        "同界面同对象同触发「{}」状态冲突：互斥组 {} 的成员 {} 与 {} 被同时置为显示",
+                        trigger.as_str(),
+                        group.key,
+                        a.target,
+                        b.target
+                    ));
+                }
+            }
+
+            let _ = layer; // 同层由上层规则保证；保留取值以便日后按层细化报错。
+        }
+    }
+
+    errors
+}
+/// 两个操作是否互斥（不可能同时成立）。
+fn mutually_exclusive(a: ActionOp, b: ActionOp) -> bool {
+    use ActionOp::{Collapse, Expand, Hide, Navigate, Show, Toggle};
+    match (a, b) {
+        // 显示 vs 隐藏 / 切换：同一目标不可能既显示又隐藏。
+        (Show, Hide) | (Hide, Show) | (Show, Toggle) | (Toggle, Show) => true,
+        // 收起 vs 展开。
+        (Collapse, Expand) | (Expand, Collapse) => true,
+        // 界面跳转：同一次交互不能跳到两个不同界面（target 不同已在调用处排除同目标）。
+        (Navigate, Navigate) => true,
+        _ => false,
+    }
+}
+
+/// 该操作是否表示"让目标可见"。
+fn is_visible_op(op: ActionOp) -> bool {
+    matches!(op, ActionOp::Show | ActionOp::Toggle)
 }
 
 /// 校验单个节点字段与引用（硬错误）。
@@ -376,6 +565,20 @@ pub(crate) fn validate_layers(graph: &BlueprintGraph, errors: &mut Vec<String>) 
                 layer.key
             ));
         }
+    }
+
+    // 主界面标记（D67）：至多一个层可标记 `is_home`。
+    let home_layers: Vec<&str> = graph
+        .layers
+        .iter()
+        .filter(|l| l.is_home())
+        .map(|l| l.key.as_str())
+        .collect();
+    if home_layers.len() > 1 {
+        errors.push(format!(
+            "主界面标记重复（D67）：{} 个层同时标记为主界面（同层至多一个），请只保留一个",
+            home_layers.len()
+        ));
     }
 
     // 节点 layer 必须存在；`layers` 存在而缺 layer = 硬错误（不静默压成单层）。

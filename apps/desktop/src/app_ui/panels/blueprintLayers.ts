@@ -42,7 +42,12 @@ export function addLayer(
   const index = (base.layers?.length ?? 0) + 1;
   const key = uniqueLayerKey(base, `l_${index}`);
   const layerName = uniqueLayerName(base, name?.trim() || `界面 ${index}`);
-  const layer: BlueprintLayer = { key, name: layerName };
+  // 新层默认**不是**主界面（D67）：除非文档原本连一个主界面都没有（这时它顶上）。
+  const layer: BlueprintLayer = {
+    key,
+    name: layerName,
+    is_home: (base.layers ?? []).some((l) => l.is_home === true) ? false : true,
+  };
 
   const interfaceKey = uniqueKey(base.nodes, "ui");
   const interfaceNode: BlueprintNode = {
@@ -59,6 +64,26 @@ export function addLayer(
     },
     layer,
     interfaceKey,
+  };
+}
+
+/**
+ * 把某层设为**主界面**（D67）：该层 `is_home = true`，其余层显式置 `false`。
+ *
+ * 应用进入该仓库时默认显示主界面（`blueprint.currentLayer` 的"上次所在层"仍优先，
+ * 用于重启回到上次页面）。层不存在时原样返回。
+ */
+export function setHomeLayer(doc: BlueprintGraph, layerKey: string): BlueprintGraph {
+  const base = withExplicitLayers(doc);
+  if (!(base.layers ?? []).some((l) => l.key === layerKey)) {
+    return base;
+  }
+  return {
+    ...base,
+    layers: (base.layers ?? []).map((l) => ({
+      ...l,
+      is_home: l.key === layerKey,
+    })),
   };
 }
 

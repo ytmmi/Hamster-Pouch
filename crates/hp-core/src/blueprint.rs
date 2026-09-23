@@ -135,7 +135,7 @@ impl BlueprintGraph {
     /// 有效层清单：显式 `layers`，为空中时按单层兜底推导一层（层名取界面 `name` 或「主界面」）。
     ///
     /// 编辑器的"当前层"、布局的 `layer_key` 维度都以本方法的结果为准，
-    /// 因此旧文档（无 `layers`）在 UI 上表现为单层文档。
+    /// 因此旧文档（无 `layers`）在 UI 上表现为单层文档。兜底层即**主界面**（D67）。
     pub fn effective_layers(&self) -> Vec<BlueprintLayer> {
         if self.has_layers() {
             return self.layers.clone();
@@ -147,7 +147,20 @@ impl BlueprintGraph {
             .and_then(|n| n.name.clone())
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| Self::FALLBACK_LAYER_NAME.to_string());
-        vec![BlueprintLayer::new(self.fallback_layer_key(), name)]
+        vec![BlueprintLayer::home(self.fallback_layer_key(), name)]
+    }
+
+    /// **主界面层 key**（D67）：带 `is_home` 标记的层；无标记时回退**第一个有效层**。
+    ///
+    /// 应用进入该仓库时默认显示这一层；`blueprint.currentLayer` 记录的"上次所在层"若仍存在
+    /// 则优先，用于重启回到上次页面。
+    pub fn home_layer_key(&self) -> Option<String> {
+        let layers = self.effective_layers();
+        layers
+            .iter()
+            .find(|l| l.is_home())
+            .or_else(|| layers.first())
+            .map(|l| l.key.clone())
     }
 
     /// 某层的界面节点（层的根；每层至多一个，返回首个）。
