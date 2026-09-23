@@ -103,7 +103,7 @@ impl FsOpsService {
 
     fn target_source(&self, db: &RepoDb, source_id: &str) -> HpResult<hp_core::Source> {
         db.get_source(source_id)?
-            .ok_or_else(|| HpError::NotFound(format!("目标图像源不存在: {source_id}")))
+            .ok_or_else(|| HpError::NotFound(format!("目标媒体源不存在: {source_id}")))
     }
 
     fn file(&self, db: &RepoDb, file_id: &str) -> HpResult<hp_core::FileIndexRow> {
@@ -113,7 +113,7 @@ impl FsOpsService {
 
     fn source_of(&self, db: &RepoDb, file: &hp_core::FileIndexRow) -> HpResult<hp_core::Source> {
         db.get_source(file.source_id.as_str())?.ok_or_else(|| {
-            HpError::NotFound(format!("图像源不存在: {}", file.source_id.as_str()))
+            HpError::NotFound(format!("媒体源不存在: {}", file.source_id.as_str()))
         })
     }
 }

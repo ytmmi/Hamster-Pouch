@@ -42,7 +42,7 @@ export const zhCN = {
 
   // 面板标题
   "panel.repo": "仓库",
-  "panel.sources": "图像源",
+  "panel.sources": "媒体源",
   "panel.albums": "相册",
   "panel.media": "媒体预览",
   "panel.viewer": "查看器",
@@ -100,11 +100,11 @@ export const zhCN = {
   "repo.rename": "重命名",
   "repo.delete": "删除仓库",
   "repo.setDefault": "设为默认仓库",
-  "repo.deleteConfirm": "确定删除该仓库？仅删除索引与注册，不删除真实图像源文件。",
-  "source.add": "添加图像源",
-  "source.pathPlaceholder": "本地文件夹路径",
-  "source.aliasPlaceholder": "别名（可选）",
-  "source.list": "已添加的图像源",
+  "repo.deleteConfirm": "确定删除该仓库？仅删除索引与注册，不删除真实媒体源文件。",
+  "source.add": "添加媒体源",
+  "source.pickFolderTitle": "选择媒体源文件夹",
+  "source.list": "已添加的媒体源",
+  "source.noSource": "暂无媒体源",
   "source.copyAsAlbum": "复制为相册",
   "album.add": "添加相册",
   "album.list": "已添加的相册",
@@ -183,16 +183,53 @@ export const zhCN = {
   "repo.defaultSet": "已设为默认仓库",
   "repo.defaultFailed": "设置默认仓库失败：{err}",
 
-  // 图像源
-  "source.treeFailed": "图像源目录树加载失败：{err}",
+  // 媒体源
+  "source.treeFailed": "媒体源目录树加载失败：{err}",
   "source.scanCompleted": "扫描完成：索引 {indexed} / 变更 {changed} / 缺失 {missing}",
   "source.scanError": "扫描错误：{err}",
   "source.mountFailed": "挂载失败：{err}",
   "source.unmountFailed": "卸载失败：{err}",
   "source.scanStarted": "扫描已启动",
   "source.scanStartFailed": "启动扫描失败：{err}",
+  "source.added": "已添加媒体源：{name}",
+  "source.alreadyAdded": "该文件夹已添加为媒体源：{name}",
+  "source.pickFailed": "选取文件夹失败：{err}",
+  "source.renamed": "媒体源已重命名：{name}",
+  "source.renameFailed": "重命名失败：{err}",
+  "source.renameEmpty": "别名不能为空",
   "source.copiedAsAlbum": "已复制为相册：{name}",
   "source.copyAsAlbumFailed": "复制为相册失败：{err}",
+
+  // 扫描进度浮窗
+  "scan.title": "正在扫描媒体源",
+  "scan.walking": "正在遍历文件夹…（已发现 {count} 个文件）",
+  "scan.indexing": "正在索引 {processed}/{total}",
+  "scan.cancelled": "扫描已取消",
+  "scan.busy": "已有扫描正在进行中",
+
+  // 长任务浮窗（扫描 / 卸载共用）
+  "task.source": "媒体源：{name}",
+  "task.current": "当前：{name}",
+  "task.busy": "已有任务正在进行中（扫描或卸载）",
+  "task.stale": "很久没有进度了，任务可能已经结束。",
+  "task.close": "关闭浮窗",
+  "task.recovered": "任务已结束（未收到完成事件），已刷新",
+
+  // 完全卸载媒体源
+  "unmount.title": "正在完全卸载媒体源",
+  "unmount.preparing": "准备卸载…",
+  "unmount.counting": "正在统计要删除的数据…",
+  "unmount.syncRules": "正在解除跟随相册的关联 {processed}/{total}",
+  "unmount.children": "正在摘挂子源 {processed}/{total}",
+  "unmount.derived": "正在删除标签·评分·相册成员 {processed}/{total}",
+  "unmount.files": "正在删除文件索引 {processed}/{total}",
+  "unmount.source": "正在删除媒体源记录…",
+  "unmount.done": "已完全卸载：删除 {files} 个文件索引、{tags} 个标签关联、{ratings} 个评分、{members} 个相册成员",
+  "unmount.cancelled": "卸载已取消（未删除任何数据）",
+  "unmount.confirmTitle": "完全卸载媒体源「{name}」？",
+  "unmount.confirmBody": "将从本仓库删除该源的全部数据：{files} 个文件索引、{tags} 个标签关联、{ratings} 个评分、{colors} 个色彩参考，以及 {albums} 个相册中的 {members} 个成员关系。",
+  "unmount.confirmWarn": "此操作不可恢复；卸载后重新添加同一文件夹也不会恢复 tag 与评分。磁盘上的真实文件不会被删除。",
+  "unmount.confirmDetails": "成员将被删除的相册（{count}）",
 
   // 相册
   "album.listFailed": "相册列表失败：{err}",

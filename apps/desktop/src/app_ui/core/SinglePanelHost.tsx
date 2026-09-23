@@ -4,10 +4,14 @@
  * 用于「窗口 → 独立」把面板脱离为系统窗口。仓库与语言上下文从 URL 读取。
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { emit } from "@tauri-apps/api/event";
 
 import { AppContext, type AppContextValue } from "./AppContext";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { TaskOverlay } from "./TaskOverlay";
+import { bindTaskActions, startTaskEvents } from "./taskStore";
+import { useConfirm } from "./useConfirm";
 import { blueprintEngine } from "./blueprintEngine";
 import { DEFAULT_LANGUAGE, isLanguage, makeTranslator, type Language } from "../i18n";
 import { panelRender, panelTitle } from "./panelRegistry";
@@ -36,6 +40,13 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
     (text: string, type: StatusType = "info") => setStatusMsg({ text, type }),
     [],
   );
+  // 独立窗口同样需要任务状态与确认弹窗：从脱离出来的媒体源面板发起扫描/卸载时，
+  // 浮窗与警告框就在本窗口显示（进度走模块级 store，不入 context）
+  useEffect(() => {
+    bindTaskActions({ status, refresh, t });
+  }, [status, refresh, t]);
+  useEffect(() => startTaskEvents(), []);
+  const { confirm, askConfirm, resolveConfirm } = useConfirm();
 
   const ctxValue: AppContextValue = useMemo(
     () => ({
@@ -54,6 +65,9 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
       refreshKey,
       refresh,
       status,
+      askConfirm,
+      confirm,
+      resolveConfirm,
       focusPanel: () => undefined,
       dispatch: (input) => blueprintEngine.dispatch(input),
       // 独立单面板窗口没有工作区 dockview：结构骨架不可用（返回 null，面板会退化为空图）。
@@ -72,6 +86,9 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
       refreshKey,
       refresh,
       status,
+      askConfirm,
+      confirm,
+      resolveConfirm,
       language,
       t,
     ],
@@ -108,6 +125,8 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
             {t("status.repo")}: {repoId ?? "—"}
           </span>
         </div>
+        <TaskOverlay />
+        <ConfirmDialog />
       </div>
     </AppContext.Provider>
   );

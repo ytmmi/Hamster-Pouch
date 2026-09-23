@@ -64,7 +64,7 @@ pub(crate) fn file_metadata(
     })
 }
 
-/// file.query：按仓库分页查询文件索引（支持媒体类型 / 图像源 / 目录前缀过滤）。
+/// file.query：按仓库分页查询文件索引（支持媒体类型 / 媒体源 / 目录前缀过滤）。
 #[tauri::command]
 pub(crate) fn file_query(
     repo_id: String,
@@ -294,7 +294,7 @@ pub(crate) fn file_reanalyze(
     let source = db
         .get_source(file.source_id.as_str())
         .map_err(hp_err_to_string)?
-        .ok_or_else(|| "图像源不存在".to_string())?;
+        .ok_or_else(|| "媒体源不存在".to_string())?;
 
     let options = ScanOptions {
         full: true,
@@ -335,7 +335,7 @@ pub(crate) fn file_reverify(
     let source = db
         .get_source(file.source_id.as_str())
         .map_err(hp_err_to_string)?
-        .ok_or_else(|| "图像源不存在".to_string())?;
+        .ok_or_else(|| "媒体源不存在".to_string())?;
 
     let options = ScanOptions {
         full: true,

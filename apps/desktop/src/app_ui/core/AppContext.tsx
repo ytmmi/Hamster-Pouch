@@ -5,7 +5,7 @@
 import { createContext, useContext } from "react";
 import type { DockviewApi } from "dockview-react";
 
-import type { Language, Translate } from "../i18n";
+import type { Language, Translate, TranslateParams, TranslationKey } from "../i18n";
 import type { FileItem, StatusType } from "../shared/types";
 import type { BlueprintDispatchInput } from "./blueprintEngine";
 
@@ -26,6 +26,12 @@ export interface AppContextValue {
   refreshKey: number;
   refresh: () => void;
   status: (message: string, type?: StatusType) => void;
+  /** 重要/危险操作确认弹窗（与进度浮窗同款卡片样式），返回用户是否确认。 */
+  askConfirm: (req: ConfirmRequest) => Promise<boolean>;
+  /** 当前待确认请求（宿主渲染 `<ConfirmDialog />` 用）。 */
+  confirm: ConfirmRequest | null;
+  /** 结束当前确认请求。 */
+  resolveConfirm: (ok: boolean) => void;
   /** 聚焦/打开面板：已存在则激活（切换 tab），不存在则按 floating 创建。 */
   focusPanel: (id: string, floating?: boolean) => void;
   /** 当前 dockview 实例（只读用途，如从布局推导蓝图结构骨架）。 */
@@ -35,6 +41,50 @@ export interface AppContextValue {
   language: Language;
   setLanguage: (lang: Language) => void;
   t: Translate;
+}
+
+/**
+ * 长任务进度（模块级 store，见 `taskStore.ts`）。
+ *
+ * 文字一律存 **i18n 键 + 参数** 而不是成品字符串：切换语言时浮窗要跟着变。
+ */
+export interface TaskProgress {
+  /** 浮窗标题。 */
+  titleKey: TranslationKey;
+  /** 关联的媒体源 ID（用于把进度事件与已设好的标题/副标题对齐）。 */
+  sourceId: string | null;
+  /** 副标题：媒体源名等。 */
+  subtitle: string | null;
+  /** 状态行文案。 */
+  messageKey: TranslationKey;
+  messageParams: TranslateParams;
+  processed: number;
+  /** 已处理数；`total === 0` 表示总数未知 → 不定进度条。 */
+  total: number;
+  /** 当前处理对象（文件 / 相册），可空。 */
+  current: string | null;
+  /** 是否显示取消按钮（可取消的长任务才给）。 */
+  cancellable: boolean;
+  /** 最近一次进度事件的时间戳（卡住检测与后端对账用）。 */
+  updatedAt: number;
+}
+
+/** 确认弹窗请求（文案已翻译，由调用方用 `t(...)` 生成）。 */
+export interface ConfirmRequest {
+  title: string;
+  message: string;
+  /** 高危提示（不可恢复之类），以危险色单独一行显示。 */
+  warning?: string;
+  /** 明细行（如受影响的相册列表）。 */
+  details?: string[];
+  /** 明细区标题，仅在 `details` 非空时有意义。 */
+  detailsTitle?: string;
+  /** 确认按钮文案；缺省用「确定」。 */
+  confirmLabel?: string;
+  /** 取消按钮文案；缺省用「取消」。 */
+  cancelLabel?: string;
+  /** 危险操作：确认按钮使用危险色。 */
+  danger?: boolean;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);

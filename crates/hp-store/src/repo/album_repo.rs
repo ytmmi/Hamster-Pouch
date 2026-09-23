@@ -16,6 +16,15 @@ use crate::util::{now_iso, require_nonempty, store_err};
 const ALBUM_COLUMNS: &str =
     "id, repo_id, parent_album_id, name, kind, media_type, created_at, updated_at";
 
+/// 某媒体源在**单个相册**中的成员关系统计（卸载影响评估与清理用）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlbumSourceMembers {
+    pub album_id: String,
+    pub album_name: String,
+    /// 该相册中属于该媒体源的成员关系条数。
+    pub members: i64,
+}
+
 impl RepoDb {
     /// 创建相册；返回写入的 `Album`。
     pub fn create_album(
@@ -269,6 +278,72 @@ impl RepoDb {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| store_err("解析文件所属相册", e))?;
         Ok(rows)
+    }
+
+    /// 某媒体源的文件总数。
+    pub fn count_files_by_source(&self, source_id: &str) -> HpResult<i64> {
+        self.conn()
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE source_id = ?1",
+                params![source_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| store_err("统计媒体源文件数", e))
+    }
+
+    /// 列出"某媒体源的文件参与了哪些相册、各多少条成员关系"（卸载影响评估与清理都基于它）。
+    ///
+    /// 按相册名排序，便于界面稳定展示。
+    pub fn list_album_source_members(
+        &self,
+        source_id: &str,
+    ) -> HpResult<Vec<AlbumSourceMembers>> {
+        let mut stmt = self
+            .conn()
+            .prepare(
+                "SELECT m.album_id, a.name, COUNT(*) AS members
+                 FROM album_member m
+                 JOIN files f ON f.id = m.file_id
+                 JOIN albums a ON a.id = m.album_id
+                 WHERE f.source_id = ?1
+                 GROUP BY m.album_id, a.name
+                 ORDER BY a.name",
+            )
+            .map_err(|e| store_err("查询相册关联成员", e))?;
+        let rows = stmt
+            .query_map(params![source_id], |row| {
+                Ok(AlbumSourceMembers {
+                    album_id: row.get(0)?,
+                    album_name: row.get(1)?,
+                    members: row.get(2)?,
+                })
+            })
+            .map_err(|e| store_err("读取相册关联成员", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析相册关联成员", e))?;
+        Ok(rows)
+    }
+
+    /// 删除**单个相册**中属于某媒体源的全部成员关系；返回删除行数。
+    ///
+    /// 这是不可恢复操作（卸载源时按相册逐个调用，便于上报进度）。
+    pub fn remove_album_members_for_album_source(
+        &mut self,
+        album_id: &str,
+        source_id: &str,
+    ) -> HpResult<u64> {
+        require_nonempty(album_id, "相册 ID")?;
+        require_nonempty(source_id, "媒体源 ID")?;
+        let n = self
+            .conn()
+            .execute(
+                "DELETE FROM album_member
+                 WHERE album_id = ?1
+                   AND file_id IN (SELECT id FROM files WHERE source_id = ?2)",
+                params![album_id, source_id],
+            )
+            .map_err(|e| store_err("清除相册成员", e))?;
+        Ok(n as u64)
     }
 
     /// 查询跟随源同步规则；不存在返回 `None`。

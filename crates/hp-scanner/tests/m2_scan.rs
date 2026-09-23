@@ -15,15 +15,15 @@ fn make_png(path: &Path, seed: u8) {
     img.save(path).expect("保存 PNG 失败");
 }
 
-/// 创建临时仓库 + 挂载临时图像源。
+/// 创建临时仓库 + 挂载临时媒体源。
 fn setup(tmp: &tempfile::TempDir) -> (RepoDb, Source) {
     let source_dir = tmp.path().join("photos");
-    std::fs::create_dir_all(&source_dir).expect("创建图像源目录失败");
+    std::fs::create_dir_all(&source_dir).expect("创建媒体源目录失败");
     let repo_path = tmp.path().join("repo.sqlite3");
     let mut db = RepoDb::create(&repo_path, "测试仓库").expect("创建仓库失败");
     let source = db
         .mount_source("test-repo", source_dir.to_str().unwrap(), None, None)
-        .expect("挂载图像源失败");
+        .expect("挂载媒体源失败");
     (db, source)
 }
 

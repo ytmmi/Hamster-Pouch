@@ -86,7 +86,7 @@ pub(crate) fn ensure_global(state: &AppState, app: &tauri::AppHandle) -> HpResul
 pub(crate) fn resolve_file_path(db: &RepoDb, file: &FileIndexRow) -> HpResult<PathBuf> {
     let source = db
         .get_source(file.source_id.as_str())?
-        .ok_or_else(|| HpError::NotFound(format!("图像源不存在: {}", file.source_id.as_str())))?;
+        .ok_or_else(|| HpError::NotFound(format!("媒体源不存在: {}", file.source_id.as_str())))?;
     Ok(PathBuf::from(source.local_path).join(&file.relative_path))
 }
 

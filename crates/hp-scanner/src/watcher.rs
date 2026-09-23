@@ -6,7 +6,7 @@ use std::sync::mpsc::Receiver;
 use hp_core::{HpError, HpResult};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 
-/// 单个图像源的实时文件监听器。
+/// 单个媒体源的实时文件监听器。
 ///
 /// 用 `notify` 监听目录树变化；上层通过 `try_recv` 轮询事件并触发局部重扫。
 /// 事件丢失/溢出由定期全量校验兜底（D9）。

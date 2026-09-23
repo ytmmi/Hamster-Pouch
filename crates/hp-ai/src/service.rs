@@ -88,7 +88,7 @@ impl AiTaggingService {
 
         let source = db
             .get_source(file.source_id.as_str())?
-            .ok_or_else(|| HpError::NotFound(format!("图像源不存在: {}", file.source_id.as_str())))?;
+            .ok_or_else(|| HpError::NotFound(format!("媒体源不存在: {}", file.source_id.as_str())))?;
         let image_path = Path::new(&source.local_path).join(&file.relative_path);
 
         let input = AiTaggingInput {

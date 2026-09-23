@@ -111,7 +111,7 @@ impl RepoDb {
         Ok(rows)
     }
 
-    /// 列出某图像源下全部文件索引行。
+    /// 列出某媒体源下全部文件索引行。
     pub fn list_files_by_source(&self, source_id: &str) -> HpResult<Vec<FileIndexRow>> {
         let mut stmt = self
             .conn()
@@ -127,7 +127,7 @@ impl RepoDb {
         Ok(rows)
     }
 
-    /// 列出某图像源下全部文件的相对路径（仅取 `relative_path` 列，目录树构建用）。
+    /// 列出某媒体源下全部文件的相对路径（仅取 `relative_path` 列，目录树构建用）。
     pub fn list_relative_paths_by_source(&self, source_id: &str) -> HpResult<Vec<String>> {
         let mut stmt = self
             .conn()
@@ -155,7 +155,7 @@ impl RepoDb {
         Ok(rows)
     }
 
-    /// 按仓库分页查询文件索引（可选媒体类型 / 图像源 / 目录前缀过滤，网格面板基础筛选用）。
+    /// 按仓库分页查询文件索引（可选媒体类型 / 媒体源 / 目录前缀过滤，网格面板基础筛选用）。
     ///
     /// `dir_prefix` 非空时仅返回 `relative_path` 以 `<dir_prefix>/` 开头的文件（含更深子目录）。
     pub fn query_files(
@@ -177,6 +177,7 @@ impl RepoDb {
                 "SELECT {FILE_COLUMNS_F}
                  FROM files f JOIN sources s ON s.id = f.source_id
                  WHERE s.repo_id = ?1
+                   AND s.mounted = 1
                    AND (?2 IS NULL OR f.media_type = ?2)
                    AND (?3 IS NULL OR f.source_id = ?3)
                    AND (?4 IS NULL OR f.relative_path LIKE ?4 ESCAPE '\\')

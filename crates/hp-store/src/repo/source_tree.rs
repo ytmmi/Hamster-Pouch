@@ -1,6 +1,6 @@
-//! 图像源目录树构建（纯函数，不依赖 serde；序列化由桌面壳完成）。
+//! 媒体源目录树构建（纯函数，不依赖 serde；序列化由桌面壳完成）。
 //!
-//! 输入为 `files.relative_path` 列表（相对图像源根、以 `/` 分隔，
+//! 输入为 `files.relative_path` 列表（相对媒体源根、以 `/` 分隔，
 //! 末段为文件名，前缀段为目录链）。输出目录树：
 //! - 每个目录节点的 `file_count` = 该目录直接文件数 + 全部后代文件数；
 //! - 子目录按名称升序（`BTreeMap`）；
@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 pub struct TreeNode {
     /// 目录名（仅目录名，不含路径）。
     pub name: String,
-    /// 相对图像源根的目录路径（`/` 分隔）。
+    /// 相对媒体源根的目录路径（`/` 分隔）。
     pub relative_path: String,
     /// 本目录直接文件数 + 全部后代文件数（递归）。
     pub file_count: i64,
@@ -21,7 +21,7 @@ pub struct TreeNode {
     pub children: Vec<TreeNode>,
 }
 
-/// 图像源根目录树（顶层不含文件名的聚合结果）。
+/// 媒体源根目录树（顶层不含文件名的聚合结果）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceTree {
     /// 全部文件数（根节点递归计数）。

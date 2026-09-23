@@ -65,7 +65,7 @@ fn assert_valid(json: &str) -> BlueprintGraph {
 fn blueprint_crud_roundtrip_and_default() {
     let path = temp_repo_path("blueprint");
     let mut db = RepoDb::create(&path, "蓝图仓库").expect("创建仓库失败");
-    assert_eq!(db.schema_version().expect("读版本失败"), 6);
+    assert_eq!(db.schema_version().expect("读版本失败"), 7);
 
     assert_eq!(db.count_blueprints("repo-1").expect("统计失败"), 0);
 
@@ -496,7 +496,7 @@ fn default_blueprint_fixture_validates() {
     assert!(ev.target.is_none());
 
     // 如实表达当前默认「媒体-测试」布局：中栏 = 媒体预览 + 查看器/播放器；
-    // 右栏 = 色彩参考/标签·评分/元数据；左栏 = 仓库/图像源/相册。
+    // 右栏 = 色彩参考/标签·评分/元数据；左栏 = 仓库/媒体源/相册。
     let panel_ids: Vec<&str> = graph
         .nodes
         .iter()

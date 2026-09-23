@@ -404,7 +404,7 @@ impl GlobalDb {
 
     /// 删除仓库注册行及其关联数据（面板布局、插件仓库状态）。
     ///
-    /// 不删除仓库库文件本身（由边界层处理），也不删除真实图像源文件。
+    /// 不删除仓库库文件本身（由边界层处理），也不删除真实媒体源文件。
     pub fn delete_repo(&mut self, id: &str) -> HpResult<()> {
         require_nonempty(id, "仓库 ID")?;
         let tx = self

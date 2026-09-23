@@ -16,6 +16,7 @@ const REPO_MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/repo/0004_split_tag_tables.sql"),
     include_str!("../../migrations/repo/0005_tag_relations.sql"),
     include_str!("../../migrations/repo/0006_blueprint.sql"),
+    include_str!("../../migrations/repo/0007_album_member_file_index.sql"),
 ];
 
 /// 仓库库句柄。
@@ -63,6 +64,10 @@ impl RepoDb {
         let mut conn = Connection::open(path).map_err(|e| store_err("打开仓库库", e))?;
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(|e| store_err("设置 WAL", e))?;
+        // 扫描线程持有**独立连接**（不占用主连接的锁以免整个 UI 被长扫描堵住），
+        // 因此同一仓库库可能存在两个连接；给写冲突留出等待窗口，避免直接 SQLITE_BUSY。
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| store_err("设置 busy_timeout", e))?;
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| store_err("开启外键", e))?;
         migrate::apply(&mut conn, REPO_MIGRATIONS)?;

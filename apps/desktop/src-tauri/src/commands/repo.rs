@@ -69,6 +69,9 @@ pub(crate) fn repo_create(
     if let Ok(mut cur) = state.current_repo_id.lock() {
         *cur = Some(row.id.clone());
     }
+    if let Ok(mut path) = state.current_repo_path.lock() {
+        *path = Some(PathBuf::from(&row.repo_db_path));
+    }
 
     Ok(RepoSummary {
         id: row.id,
@@ -116,6 +119,9 @@ pub(crate) fn repo_open(
     if let Ok(mut cur) = state.current_repo_id.lock() {
         *cur = Some(repo_id.clone());
     }
+    if let Ok(mut path) = state.current_repo_path.lock() {
+        *path = Some(PathBuf::from(&row.repo_db_path));
+    }
 
     Ok(RepoSummary {
         id: repo_id,
@@ -136,6 +142,9 @@ pub(crate) fn repo_close(state: State<AppState>) -> Result<(), String> {
     }
     if let Ok(mut cur) = state.current_repo_id.lock() {
         *cur = None;
+    }
+    if let Ok(mut path) = state.current_repo_path.lock() {
+        *path = None;
     }
     Ok(())
 }
@@ -267,7 +276,7 @@ pub(crate) fn repo_rename(
     Ok(())
 }
 
-/// repo.delete：删除仓库（注册行 + 仓库库文件；不删除真实图像源文件）。
+/// repo.delete：删除仓库（注册行 + 仓库库文件；不删除真实媒体源文件）。
 #[tauri::command]
 pub(crate) fn repo_delete(
     repo_id: String,
@@ -292,6 +301,9 @@ pub(crate) fn repo_delete(
         }
         if let Ok(mut cur) = state.current_repo_id.lock() {
             *cur = None;
+        }
+        if let Ok(mut path) = state.current_repo_path.lock() {
+            *path = None;
         }
     }
 

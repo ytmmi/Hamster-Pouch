@@ -1,4 +1,4 @@
-//! M4 验收测试：仓库隔离（同一图像源挂载到两个仓库时 tag/评分互不可见）。
+//! M4 验收测试：仓库隔离（同一媒体源挂载到两个仓库时 tag/评分互不可见）。
 //! 对应 docs/roadmap/phase-1-top-level-plan.md 的 M4 验证线。
 
 use hp_core::{FileId, FileIndexRow, MediaType, SourceId, ThumbStatus, VerifyStatus};
@@ -41,7 +41,7 @@ fn tag_and_rating_are_isolated_between_repos() {
     let mut db1 = RepoDb::create(temp_path("m4_repo1"), "仓库1").expect("创建仓库1失败");
     let mut db2 = RepoDb::create(temp_path("m4_repo2"), "仓库2").expect("创建仓库2失败");
 
-    // 同一本地图像源分别挂载到两个仓库（真实文件共享，解释数据隔离）。
+    // 同一本地媒体源分别挂载到两个仓库（真实文件共享，解释数据隔离）。
     let s1 = db1
         .mount_source("repo-1", "C:/shared", None, None)
         .expect("挂载源1失败");

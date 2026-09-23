@@ -1,24 +1,34 @@
 /**
- * 图像源组件 — 添加图像源（子菜单）+ 已添加图像源目录树（右键操作）。
+ * 媒体源组件 — 添加媒体源（选取文件夹）+ 已添加媒体源目录树（右键操作）。
+ *
+ * 添加流程：点「添加媒体源」→ 原生对话框选取文件夹 → 以**文件夹名为默认源名称**挂载；
+ * 别名不在添加时填写，只能在添加后于条目上重命名。
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import * as api from "../shared/api";
 import { useApp } from "../core/AppContext";
+import { getTask, setTask, useTask } from "../core/taskStore";
 import { ContextMenu } from "../menu/ContextMenu";
-import type {
-  ScanCompletedPayload,
-  ScanErrorPayload,
-  ScanProgressPayload,
-  SourceTreeNode,
-} from "../shared/types";
+import type { SourceTreeNode } from "../shared/types";
 
 /** 取路径最后一段文件夹名。 */
 function baseName(path: string): string {
   const parts = path.replace(/[\\/]+$/, "").split(/[\\/]/);
   return parts[parts.length - 1] || path;
+}
+
+/** 路径比较：同一文件夹只应挂载一次（Windows 路径忽略大小写，统一分隔符与末尾斜杠）。 */
+function samePath(a: string, b: string): boolean {
+  const isWindowsPath = (p: string) => p.includes("\\") || /^[A-Za-z]:/.test(p);
+  const normalize = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/");
+  const na = normalize(a);
+  const nb = normalize(b);
+  if (isWindowsPath(a) || isWindowsPath(b)) {
+    return na.toLowerCase() === nb.toLowerCase();
+  }
+  return na === nb;
 }
 
 /** 文件夹图标（内联 SVG，currentColor）。 */
@@ -110,14 +120,14 @@ function removeBySourceId(
 export function SourcePanel(): JSX.Element {
   const app = useApp();
   const { t } = app;
-  const [openAdd, setOpenAdd] = useState(false);
-  const [localPath, setLocalPath] = useState("");
-  const [alias, setAlias] = useState("");
+  // 任务进度走独立 store：进度变化只重渲染本面板与浮窗，不再波及所有面板
+  const task = useTask();
   const [nodes, setNodes] = useState<SourceTreeNode[]>([]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [progress, setProgress] = useState<{ p: number; t: number } | null>(null);
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
-  const unlistenRef = useRef<UnlistenFn[]>([]);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const renameRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     if (!app.repoId) {
@@ -157,57 +167,42 @@ export function SourcePanel(): JSX.Element {
     return () => document.removeEventListener("click", close);
   }, [menu]);
 
-  // 扫描事件订阅
-  useEffect(() => {
-    void (async () => {
-      try {
-        unlistenRef.current.push(
-          await listen<ScanProgressPayload>("scan.progress", (e) =>
-            setProgress({ p: e.payload.processed, t: e.payload.total }),
-          ),
-          await listen<ScanCompletedPayload>("scan.completed", (e) => {
-            app.status(
-              app.t("source.scanCompleted", {
-                indexed: e.payload.indexed,
-                changed: e.payload.changed,
-                missing: e.payload.missing,
-              }),
-              "ok",
-            );
-            setProgress(null);
-            app.refresh();
-          }),
-          await listen<ScanErrorPayload>("scan.error", (e) => {
-            app.status(app.t("source.scanError", { err: e.payload.error }), "error");
-            setProgress(null);
-          }),
-        );
-      } catch {
-        /* 非 Tauri 运行时忽略 */
-      }
-    })();
-    return () => {
-      for (const fn of unlistenRef.current) {
-        try {
-          fn();
-        } catch {
-          /* ignore */
-        }
-      }
-    };
-  }, [app]);
+  // 扫描事件订阅已上移到应用层（core/AppUiApp → core/ScanOverlay）：
+  // 进度浮窗与"完成即刷新"不再依赖本面板是否挂载。
 
-  const mount = async () => {
-    if (!app.repoId || !localPath.trim()) {
-      app.status(t("source.pathPlaceholder"), "error");
+  /**
+   * 添加媒体源：选取文件夹 → 以文件夹名为默认名称挂载。
+   * 不在添加时填别名（别名只能添加后在条目上重命名）。
+   */
+  const addSource = async () => {
+    if (!app.repoId) {
+      app.status(t("common.pleaseOpenRepo"), "error");
       return;
     }
+    let picked: string | null;
     try {
-      const s = await api.sourceMount({
-        repoId: app.repoId,
-        localPath: localPath.trim(),
-        alias: alias.trim() || undefined,
-      });
+      picked = await api.pickFolder(t("source.pickFolderTitle"));
+    } catch (e) {
+      app.status(t("source.pickFailed", { err: String(e) }), "error");
+      return;
+    }
+    if (!picked) {
+      return; // 用户取消
+    }
+    // 同一文件夹只挂载一次：已添加则直接选中，避免重复条目
+    const existing = nodes.find(
+      (n) => n.local_path !== null && samePath(n.local_path, picked),
+    );
+    if (existing?.source_id) {
+      app.setSourceId(existing.source_id);
+      app.setDirPath(null);
+      app.setAlbumId(null);
+      app.status(t("source.alreadyAdded", { name: existing.name }), "info");
+      return;
+    }
+    const name = baseName(picked);
+    try {
+      const s = await api.sourceMount({ repoId: app.repoId, localPath: picked });
       // 立即入列，避免等待刷新
       setNodes((prev) =>
         prev.some((n) => n.source_id === s.id)
@@ -216,7 +211,7 @@ export function SourcePanel(): JSX.Element {
               ...prev,
               {
                 key: `src:${s.id}`,
-                name: s.alias ?? baseName(s.local_path),
+                name: s.alias ?? name,
                 local_path: s.local_path,
                 relative_path: null,
                 source_id: s.id,
@@ -225,37 +220,147 @@ export function SourcePanel(): JSX.Element {
               },
             ],
       );
-      app.status(`${t("source.add")}: ${s.alias ?? baseName(s.local_path)}`, "ok");
-      setLocalPath("");
-      setAlias("");
-      setOpenAdd(false);
+      app.status(t("source.added", { name: s.alias ?? name }), "ok");
       app.refresh();
     } catch (e) {
       app.status(t("source.mountFailed", { err: String(e) }), "error");
     }
   };
 
-  const unmount = async (sourceId: string) => {
-    if (!app.repoId) return;
+  /** 开始重命名已添加媒体源的别名（添加时不可填）。 */
+  const beginRename = (node: SourceTreeNode) => {
+    setMenu(null);
+    setRenameId(node.source_id);
+    setRenameValue(node.name);
+  };
+
+  /** 提交别名重命名。 */
+  const commitRename = async () => {
+    if (!app.repoId || !renameId) return;
+    const alias = renameValue.trim();
+    if (!alias) {
+      app.status(t("source.renameEmpty"), "error");
+      return;
+    }
     try {
-      await api.sourceUnmount({ repoId: app.repoId, sourceId });
-      setNodes((prev) => removeBySourceId(prev, sourceId));
-      app.status(`${t("common.unmount")} \u2713`, "ok");
+      await api.sourceRename({ repoId: app.repoId, sourceId: renameId, alias });
+      setNodes((prev) =>
+        prev.map((n) => (n.source_id === renameId ? { ...n, name: alias } : n)),
+      );
+      app.status(t("source.renamed", { name: alias }), "ok");
+      setRenameId(null);
+      setRenameValue("");
       app.refresh();
     } catch (e) {
+      app.status(t("source.renameFailed", { err: String(e) }), "error");
+    }
+  };
+
+  // 重命名输入框自动聚焦
+  useEffect(() => {
+    if (renameId) {
+      renameRef.current?.focus();
+      renameRef.current?.select();
+    }
+  }, [renameId]);
+
+  /**
+   * 卸载媒体源：先取影响预估 → 弹出警告（与进度浮窗同款）告知**不可恢复**的后果 →
+   * 确认后在后台执行（带进度浮窗）。源在标记离线后立即从列表消失。
+   */
+  const unmount = async (sourceId: string) => {
+    if (!app.repoId) return;
+    const node = nodes.find((n) => n.source_id === sourceId);
+    const name = node?.name ?? sourceId;
+
+    let preview: Awaited<ReturnType<typeof api.sourceUnmountPreview>>;
+    try {
+      preview = await api.sourceUnmountPreview({ repoId: app.repoId, sourceId });
+    } catch (e) {
+      app.status(t("source.unmountFailed", { err: String(e) }), "error");
+      return;
+    }
+
+    const confirmed = await app.askConfirm({
+      title: t("unmount.confirmTitle", { name }),
+      message: t("unmount.confirmBody", {
+        files: preview.file_count,
+        tags: preview.tag_count,
+        ratings: preview.rating_count,
+        colors: preview.color_count,
+        members: preview.member_count,
+        albums: preview.albums.length,
+      }),
+      warning: t("unmount.confirmWarn"),
+      details: preview.albums.map((a) => `${a.name}（${a.members}）`),
+      detailsTitle:
+        preview.albums.length > 0
+          ? t("unmount.confirmDetails", { count: preview.albums.length })
+          : undefined,
+      confirmLabel: t("common.unmount"),
+      cancelLabel: t("common.cancel"),
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    // 卸载的正是当前选中源时清掉选中，避免媒体预览停在一个已离线的源上
+    if (app.sourceId === sourceId) {
+      app.setSourceId(null);
+      app.setDirPath(null);
+    }
+    // 立即挂上进度浮窗（后端第一帧进度到达前也要有反馈）
+    setTask({
+      titleKey: "unmount.title",
+      sourceId,
+      subtitle: name,
+      messageKey: "unmount.preparing",
+      messageParams: {},
+      processed: 0,
+      total: 0,
+      current: null,
+      // 卸载可取消：后端的清理循环在相册之间采样取消标志，不会把界面锁死
+      cancellable: true,
+      updatedAt: Date.now(),
+    });
+
+    try {
+      await api.sourceUnmount({ repoId: app.repoId, sourceId });
+      // 完成/失败由事件驱动（taskStore 会收尾并刷新）
+    } catch (e) {
+      setTask(null);
       app.status(t("source.unmountFailed", { err: String(e) }), "error");
     }
   };
 
+  /**
+   * 发起扫描。进度与完成事件由应用层集中订阅并渲染居中浮窗
+   * （见 `core/TaskOverlay.tsx`），面板只负责发起与提示。
+   */
   const scan = async (sourceId: string, full: boolean) => {
     if (!app.repoId) return;
+    if (getTask()) {
+      app.status(t("task.busy"), "info");
+      return;
+    }
+    const name = nodes.find((n) => n.source_id === sourceId)?.name ?? null;
     try {
-      setProgress({ p: 0, t: 0 });
       await api.sourceScan({ repoId: app.repoId, sourceId, full });
+      // 立刻置为"遍历中、总数未知"：后端第一帧进度可能还要等一会儿才到
+      setTask({
+        titleKey: "scan.title",
+        sourceId,
+        subtitle: name,
+        messageKey: "scan.walking",
+        messageParams: { count: 0 },
+        processed: 0,
+        total: 0,
+        current: null,
+        cancellable: true,
+        updatedAt: Date.now(),
+      });
       app.status(t("source.scanStarted"), "info");
     } catch (e) {
       app.status(t("source.scanStartFailed", { err: String(e) }), "error");
-      setProgress(null);
     }
   };
 
@@ -288,9 +393,6 @@ export function SourcePanel(): JSX.Element {
     }
   };
 
-  const pct =
-    progress && progress.t > 0 ? Math.round((progress.p / progress.t) * 100) : 0;
-
   /** 递归渲染目录树节点。 */
   const renderNode = (
     node: SourceTreeNode,
@@ -301,6 +403,8 @@ export function SourcePanel(): JSX.Element {
     const expanded = !collapsed.has(node.key);
     const hasChildren = node.children.length > 0;
     const indent = depth * 14;
+    // 重命名只针对源根节点（改名即改媒体源别名）。
+    const renaming = isSource && renameId === node.source_id;
     const selected = isSource
       ? app.sourceId === node.source_id && app.dirPath === null
       : app.sourceId === ownerSourceId && app.dirPath === node.relative_path;
@@ -312,17 +416,19 @@ export function SourcePanel(): JSX.Element {
             className={`tree-node list-row${selected ? " selected" : ""}`}
             style={{ paddingLeft: indent }}
             onClick={
-              isSource
-                ? () => {
-                    app.setSourceId(node.source_id!);
-                    app.setDirPath(null);
-                    app.setAlbumId(null);
-                  }
-                : () => {
-                    app.setSourceId(ownerSourceId);
-                    app.setDirPath(node.relative_path);
-                    app.setAlbumId(null);
-                  }
+              renaming
+                ? undefined
+                : isSource
+                  ? () => {
+                      app.setSourceId(node.source_id!);
+                      app.setDirPath(null);
+                      app.setAlbumId(null);
+                    }
+                  : () => {
+                      app.setSourceId(ownerSourceId);
+                      app.setDirPath(node.relative_path);
+                      app.setAlbumId(null);
+                    }
             }
             onContextMenu={(e) => {
               e.preventDefault();
@@ -367,7 +473,36 @@ export function SourcePanel(): JSX.Element {
             <span className="tree-folder">
               <FolderIcon />
             </span>
-            <span className="source-name">{node.name}</span>
+            {renaming ? (
+              // 重命名只改「已添加媒体源」的别名，源路径不变
+              <span className="rename-row" onClick={(e) => e.stopPropagation()}>
+                <input
+                  ref={renameRef}
+                  className="menu-input"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      void commitRename();
+                    } else if (e.key === "Escape") {
+                      setRenameId(null);
+                    }
+                  }}
+                />
+                <button className="menu-item small" onClick={() => void commitRename()}>
+                  {"\u2713"}
+                </button>
+                <button
+                  className="menu-item small"
+                  onClick={() => setRenameId(null)}
+                  title={t("common.cancel")}
+                >
+                  {"\u2715"}
+                </button>
+              </span>
+            ) : (
+              <span className="source-name">{node.name}</span>
+            )}
             <span className="tree-count">{node.file_count}</span>
           </div>
 
@@ -394,65 +529,21 @@ export function SourcePanel(): JSX.Element {
       )}
       {app.repoId && (
         <>
-          {/* 添加图像源（点击 → 子菜单） */}
-          <button className="menu-item has-sub" onClick={() => setOpenAdd((v) => !v)}>
-            {t("source.add")}{" "}
-            <span className="sub-arrow">{openAdd ? "\u25BE" : "\u25B8"}</span>
+          {/* 添加媒体源：选取文件夹，源名称默认取文件夹名 */}
+          <button className="menu-item" onClick={() => void addSource()}>
+            {t("source.add")}
           </button>
-          {openAdd && (
-            <div className="menu-sub">
-              <div className="menu-item-row">
-                <input
-                  className="menu-input"
-                  value={localPath}
-                  autoFocus
-                  placeholder={t("source.pathPlaceholder")}
-                  onChange={(e) => setLocalPath(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      void mount();
-                    }
-                  }}
-                />
-              </div>
-              <div className="menu-item-row">
-                <input
-                  className="menu-input"
-                  value={alias}
-                  placeholder={t("source.aliasPlaceholder")}
-                  onChange={(e) => setAlias(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      void mount();
-                    }
-                  }}
-                />
-                <button className="menu-item small" onClick={() => void mount()}>
-                  {"\u2713"}
-                </button>
-              </div>
-            </div>
-          )}
 
-          {progress && (
-            <div className="progress-wrap">
-              <div className="progress-bar">
-                <div className="progress-fill" style={{ width: `${pct}%` }} />
-              </div>
-              <button className="danger" onClick={() => void api.taskCancel()}>
-                {t("common.cancel")}
-              </button>
-            </div>
-          )}
+          {/* 扫描进度改由应用层居中浮窗显示（core/ScanOverlay.tsx），面板不再内嵌进度条 */}
 
-          {/* 已添加的图像源目录树（右键操作） */}
+          {/* 已添加的媒体源目录树（右键操作） */}
           <div className="section-title">
             {t("source.list")}（{nodes.length}）
           </div>
           <div className="list source-list">
             {nodes.map((n) => renderNode(n, 0, n.source_id!))}
             {nodes.length === 0 && (
-              <span className="placeholder">{t("common.noFile")}</span>
+              <span className="placeholder">{t("source.noSource")}</span>
             )}
           </div>
 
@@ -461,6 +552,7 @@ export function SourcePanel(): JSX.Element {
             <ContextMenu x={menu.x} y={menu.y}>
               <button
                 className="menu-item"
+                disabled={task !== null}
                 onClick={() => {
                   void scan(menu.sourceId, false);
                   setMenu(null);
@@ -470,6 +562,7 @@ export function SourcePanel(): JSX.Element {
               </button>
               <button
                 className="menu-item"
+                disabled={task !== null}
                 onClick={() => {
                   void scan(menu.sourceId, true);
                   setMenu(null);
@@ -489,6 +582,21 @@ export function SourcePanel(): JSX.Element {
               </button>
               {menu.relativePath === null && (
                 <>
+                  <div className="menu-sep" />
+                  {/* 别名只能在添加之后修改 */}
+                  <button
+                    className="menu-item"
+                    onClick={() => {
+                      const node = nodes.find((n) => n.source_id === menu.sourceId);
+                      if (node) {
+                        beginRename(node);
+                      } else {
+                        setMenu(null);
+                      }
+                    }}
+                  >
+                    {t("common.rename")}
+                  </button>
                   <div className="menu-sep" />
                   <button
                     className="menu-item danger"

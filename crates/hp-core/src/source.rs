@@ -1,4 +1,4 @@
-//! 图像源领域模型（RFC 0003 / database-schema.md 第 4.2 节）。
+//! 媒体源领域模型（RFC 0003 / database-schema.md 第 4.2 节）。
 
 use std::fmt;
 
@@ -6,12 +6,12 @@ use uuid::Uuid;
 
 use crate::repo::RepoId;
 
-/// 图像源稳定 ID（UUID v4 文本）。
+/// 媒体源稳定 ID（UUID v4 文本）。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SourceId(String);
 
 impl SourceId {
-    /// 生成新的图像源 ID。
+    /// 生成新的媒体源 ID。
     pub fn generate() -> Self {
         Self(Uuid::new_v4().to_string())
     }
@@ -69,7 +69,7 @@ impl fmt::Display for MediaType {
     }
 }
 
-/// 图像源：仓库挂载的真实本地文件夹，可嵌套（RFC 0003）。
+/// 媒体源：仓库挂载的真实本地文件夹，可嵌套（RFC 0003）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Source {
     pub id: SourceId,

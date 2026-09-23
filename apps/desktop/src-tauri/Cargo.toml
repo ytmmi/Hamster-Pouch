@@ -12,6 +12,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset"] }
+# 原生系统对话框：「添加媒体源」改为**选取文件夹**，不再手工输入路径。
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }

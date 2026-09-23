@@ -54,7 +54,7 @@ export function repoRename(args: RepoRenameArgs): Promise<void> {
   return invoke<void>("repo_rename", { repoId: args.repoId, name: args.name });
 }
 
-/** 删除仓库（注册行 + 仓库库文件；不删除真实图像源文件） */
+/** 删除仓库（注册行 + 仓库库文件；不删除真实媒体源文件） */
 export function repoDelete(args: RepoDeleteArgs): Promise<void> {
   return invoke<void>("repo_delete", { repoId: args.repoId });
 }

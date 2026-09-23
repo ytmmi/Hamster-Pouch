@@ -1,9 +1,9 @@
-//! 图像源扫描器：遍历、媒体类型判定、哈希、索引、变更检测、移动识别（D11/D12/D16）。
+//! 媒体源扫描器：遍历、媒体类型判定、哈希、索引、变更检测、移动识别（D11/D12/D16）。
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use hp_core::{
     FileId, FileIndexRow, HpError, HpResult, MediaType, Source, ThumbStatus, VerifyStatus,
@@ -15,6 +15,9 @@ use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
 
 use crate::media_type::detect_media_type;
+
+/// 遍历阶段的进度上报间隔（节流，避免海量小文件把事件通道打满）。
+const WALK_REPORT_INTERVAL: Duration = Duration::from_millis(200);
 
 /// 扫描阶段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,8 +32,11 @@ pub enum ScanPhase {
 #[derive(Debug, Clone)]
 pub struct ScanProgress {
     pub processed: u64,
+    /// 已发现的文件总数；**遍历阶段为 0**（未知，UI 按不定进度显示）。
     pub total: u64,
     pub phase: ScanPhase,
+    /// 正在处理的条目标识（相对路径或目录），供 UI 显示"当前文件"。
+    pub current: Option<String>,
 }
 
 /// 扫描结果统计。
@@ -44,6 +50,8 @@ pub struct ScanOutcome {
     pub missing: u64,
     /// 未知类型跳过数。
     pub skipped: u64,
+    /// 是否被用户取消（取消不再视为错误，返回已完成的部分统计）。
+    pub cancelled: bool,
 }
 
 /// 扫描选项。
@@ -73,7 +81,7 @@ impl Default for ScanOptions {
     }
 }
 
-/// 图像源扫描器：可取消、可暂停/恢复、可报告进度。
+/// 媒体源扫描器：可取消、可暂停/恢复、可报告进度。
 #[derive(Clone)]
 pub struct Scanner {
     cancel: Arc<AtomicBool>,
@@ -126,18 +134,18 @@ impl Scanner {
         self.cancel.load(Ordering::SeqCst)
     }
 
-    /// 暂停等待：若已请求取消则返回取消错误。
-    fn wait_if_paused(&self) -> HpResult<()> {
+    /// 暂停等待：返回 `true` 表示可继续，`false` 表示已请求取消。
+    fn wait_if_paused(&self) -> HpResult<bool> {
         while self.is_paused() {
             if self.is_cancelled() {
-                return Err(HpError::Io("扫描已取消".into()));
+                return Ok(false);
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        Ok(())
+        Ok(!self.is_cancelled())
     }
 
-    /// 扫描单个图像源并更新仓库文件索引。
+    /// 扫描单个媒体源并更新仓库文件索引。
     ///
     /// `on_progress` 在每个文件处理前回调；`options.full` 为真时全量重算哈希
     /// （定期全量校验兜底，D9）。
@@ -152,51 +160,79 @@ impl Scanner {
         let root = Path::new(&source.local_path);
         if !root.exists() {
             return Err(HpError::NotFound(format!(
-                "图像源路径不存在: {}",
+                "媒体源路径不存在: {}",
                 source.local_path
             )));
         }
 
         // 1. 遍历收集文件路径
+        //
+        // 遍历阶段同样上报进度（total 未知记 0）：大型视频源遍历本身就可能耗时，
+        // 旧实现遍历期间完全不发事件，UI 表现为"点了扫描没反应"。
+        let mut outcome = ScanOutcome::default();
         let mut entries: Vec<PathBuf> = Vec::new();
+        let mut last_walk_report = Instant::now();
         for entry in WalkDir::new(root).follow_links(false).into_iter() {
-            if self.is_cancelled() {
-                return Err(HpError::Io("扫描已取消".into()));
+            if !self.wait_if_paused()? {
+                outcome.cancelled = true;
+                return Ok(outcome);
             }
-            self.wait_if_paused()?;
             match entry {
-                Ok(e) if e.file_type().is_file() => entries.push(e.into_path()),
+                Ok(e) if e.file_type().is_file() => {
+                    entries.push(e.into_path());
+                    if last_walk_report.elapsed() >= WALK_REPORT_INTERVAL {
+                        last_walk_report = Instant::now();
+                        let current = entries
+                            .last()
+                            .and_then(|p| p.parent())
+                            .and_then(|p| p.strip_prefix(root).ok())
+                            .map(|p| p.to_string_lossy().replace('\\', "/"))
+                            .filter(|s| !s.is_empty());
+                        on_progress(&ScanProgress {
+                            processed: entries.len() as u64,
+                            total: 0,
+                            phase: ScanPhase::Walking,
+                            current,
+                        });
+                    }
+                }
                 Ok(_) => {}
                 Err(_) => continue, // 无法访问的条目跳过
             }
         }
         let total = entries.len() as u64;
+        // 阶段切换帧：遍历结束、索引尚未开始，按 0/total 上报，
+        // 保证进度条单调递增（若这里报 total/total，会先冲满再退回 0）。
         on_progress(&ScanProgress {
             processed: 0,
             total,
             phase: ScanPhase::Indexing,
+            current: None,
         });
 
-        let mut outcome = ScanOutcome::default();
         let source_id = source.id.as_str();
 
         // 2. 逐文件处理
         for (i, path) in entries.iter().enumerate() {
-            if self.is_cancelled() {
-                return Err(HpError::Io("扫描已取消".into()));
+            if !self.wait_if_paused()? {
+                outcome.cancelled = true;
+                return Ok(outcome);
             }
-            self.wait_if_paused()?;
-            on_progress(&ScanProgress {
-                processed: i as u64,
-                total,
-                phase: ScanPhase::Indexing,
-            });
 
             let relative = match path.strip_prefix(root) {
                 Ok(r) => r,
                 Err(_) => continue,
             };
             let relative_path = relative.to_string_lossy().replace('\\', "/");
+
+            // 先上报"正在处理哪个文件"：大视频的哈希/抽帧单文件就要数秒，
+            // 只在处理完后上报会让进度条长时间停在同一格，看起来像卡死。
+            on_progress(&ScanProgress {
+                processed: i as u64,
+                total,
+                phase: ScanPhase::Indexing,
+                current: Some(relative_path.clone()),
+            });
 
             let media_type = match detect_media_type(path) {
                 Some(mt) => mt,
@@ -230,6 +266,14 @@ impl Scanner {
                 }
             }
         }
+
+        // 收尾上报：进度必须能到达 100%（旧实现最后一格永远停在 total-1）。
+        on_progress(&ScanProgress {
+            processed: total,
+            total,
+            phase: ScanPhase::Indexing,
+            current: None,
+        });
 
         // 3. 缺失检测：索引存在但磁盘已消失 → 标记 missing（RFC 0001）
         for row in db.list_files_by_source(source_id)? {

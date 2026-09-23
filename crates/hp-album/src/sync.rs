@@ -28,6 +28,28 @@ pub fn run_sync(db: &mut RepoDb, repo_id: &str, album_id: &str) -> HpResult<Sync
         });
     }
 
+    // 根源已卸载：不参与当前媒体库，同步必须是**空操作**。
+    // 否则 mirror 会把它当作"匹配集合为空"而清空相册（连同手工加入的成员）。
+    let root_mounted = db
+        .get_source(rule.source_id.as_str())?
+        .map(|s| s.mounted)
+        .unwrap_or(false);
+    if !root_mounted {
+        let state = AlbumSyncState {
+            album_id: album.id.clone(),
+            source_id: rule.source_id.clone(),
+            last_synced_at: Some(now_iso()),
+            last_scan_cursor: None,
+            status: Some("source_offline".to_string()),
+        };
+        db.upsert_sync_state(&state)?;
+        return Ok(SyncOutcome {
+            added: 0,
+            removed: 0,
+            pinned_kept: 0,
+        });
+    }
+
     let source_ids = collect_source_ids(
         db,
         repo_id,
@@ -102,6 +124,8 @@ pub fn run_sync(db: &mut RepoDb, repo_id: &str, album_id: &str) -> HpResult<Sync
 }
 
 /// 收集参与同步的源 ID（可选递归嵌套子源）。
+///
+/// 只收集**在线**源：离线源不属于当前媒体库，不能贡献成员。
 fn collect_source_ids(
     db: &RepoDb,
     repo_id: &str,
@@ -112,7 +136,7 @@ fn collect_source_ids(
     if !include_subsources {
         return Ok(out);
     }
-    let sources = db.list_sources(repo_id)?;
+    let sources = db.list_mounted_sources(repo_id)?;
     let mut frontier = vec![root.to_string()];
     while let Some(parent) = frontier.pop() {
         for source in &sources {

@@ -43,6 +43,8 @@ export async function load(url, context, nextLoad) {
       export const emit = async () => undefined;
       export const getCurrentWindow = () => ({ show: async () => {} });
       export const WebviewWindow = class {};
+      // 原生对话框（@tauri-apps/plugin-dialog）：「添加媒体源」选取文件夹入口；自检里等同"用户取消"。
+      export const open = async () => null;
       `,
     };
   }

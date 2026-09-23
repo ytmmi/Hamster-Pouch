@@ -1,5 +1,7 @@
 //! 相册媒体属性解析与可见成员过滤（D10）。
 
+use std::collections::HashSet;
+
 use hp_core::{Album, AlbumMediaType, FileIndexRow, HpError, HpResult};
 use hp_store::RepoDb;
 
@@ -26,15 +28,27 @@ pub(crate) fn resolve_media_type(db: &RepoDb, album: &Album) -> HpResult<AlbumMe
 }
 
 /// 相册可见成员：成员关系中媒体类型匹配有效属性的文件（D10）。
+///
+/// 同时过滤**离线媒体源**：卸载的源不属于当前媒体库，其文件不得出现在相册里。
+/// 这是显示侧的兜底——卸载本身会删除该源的成员关系（`crate::purge`），
+/// 但历史数据或未来新增的离线路径仍可能留下成员行。
 pub(crate) fn visible_members(db: &RepoDb, album_id: &str) -> HpResult<Vec<FileIndexRow>> {
     let album = db
         .get_album(album_id)?
         .ok_or_else(|| HpError::NotFound(format!("相册不存在: {album_id}")))?;
     let media_type = resolve_media_type(db, &album)?;
+    let mounted: HashSet<String> = db
+        .list_mounted_sources(album.repo_id.as_str())?
+        .into_iter()
+        .map(|s| s.id.as_str().to_string())
+        .collect();
     let members = db.list_album_members(album_id)?;
     let mut out = Vec::new();
     for member in members {
         if let Some(file) = db.get_file(member.file_id.as_str())? {
+            if !mounted.contains(file.source_id.as_str()) {
+                continue; // 离线源的文件不展示
+            }
             if media_type.contains(file.media_type) {
                 out.push(file);
             }

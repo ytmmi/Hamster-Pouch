@@ -38,6 +38,10 @@ import {
 
 import * as api from "../shared/api";
 import { AppContext, type AppContextValue } from "./AppContext";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { TaskOverlay } from "./TaskOverlay";
+import { bindTaskActions, startTaskEvents } from "./taskStore";
+import { useConfirm } from "./useConfirm";
 import { blueprintEngine, type BlueprintCollapseAbsorb, type BlueprintDispatchInput } from "./blueprintEngine";
 import {
   DEFAULT_LANGUAGE,
@@ -475,6 +479,15 @@ export function AppUiApp(): JSX.Element {
     };
   }, [status, t]);
 
+  // 长任务（扫描/卸载）事件：模块级 store，进度不进 context（否则每次进度都会重渲染所有面板）
+  useEffect(() => {
+    bindTaskActions({ status, refresh, t });
+  }, [status, refresh, t]);
+  useEffect(() => startTaskEvents(), []);
+
+  // 危险操作确认弹窗
+  const { confirm, askConfirm, resolveConfirm } = useConfirm();
+
   const ctxValue: AppContextValue = useMemo(
     () => ({
       repoId,
@@ -492,6 +505,9 @@ export function AppUiApp(): JSX.Element {
       refreshKey,
       refresh,
       status,
+      askConfirm,
+      confirm,
+      resolveConfirm,
       focusPanel,
       dispatch,
       getDockview,
@@ -509,6 +525,9 @@ export function AppUiApp(): JSX.Element {
       refreshKey,
       refresh,
       status,
+      askConfirm,
+      confirm,
+      resolveConfirm,
       focusPanel,
       dispatch,
       getDockview,
@@ -728,6 +747,9 @@ export function AppUiApp(): JSX.Element {
             {PANEL_DEFS.length}
           </span>
         </div>
+        {/* 长任务进度浮窗 + 危险操作确认弹窗：界面居中，盖在布局/面板之上 */}
+        <TaskOverlay />
+        <ConfirmDialog />
       </div>
     </AppContext.Provider>
   );

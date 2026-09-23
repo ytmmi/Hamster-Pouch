@@ -1,4 +1,4 @@
-//! M2 验收测试：图像源挂载/卸载/别名 + 文件索引仓储 + media_info_json 迁移。
+//! M2 验收测试：媒体源挂载/卸载/别名 + 文件索引仓储 + media_info_json 迁移。
 //! 对应 docs/roadmap/phase-1-top-level-plan.md 的 M2 范围。
 
 use hp_core::{FileId, FileIndexRow, MediaType, ThumbStatus, VerifyStatus};
@@ -101,8 +101,8 @@ fn file_upsert_get_and_media_info_migration() {
         Some(r#"{"format":{"duration":"1.5"}}"#)
     );
 
-    // 迁移 0006 已生效：schema_version 应为 6（0001..0006）
-    assert_eq!(db.schema_version().expect("读版本失败"), 6);
+    // 迁移 0007 已生效：schema_version 应为 7（0001..0007）
+    assert_eq!(db.schema_version().expect("读版本失败"), 7);
 
     db.close().expect("关闭失败");
 }

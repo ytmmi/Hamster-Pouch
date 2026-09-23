@@ -283,7 +283,7 @@ export function AlbumPanel(): JSX.Element {
     }
   };
 
-  /** 递归渲染相册树节点（呈现方式与图像源目录树一致）。 */
+  /** 递归渲染相册树节点（呈现方式与媒体源目录树一致）。 */
   const renderAlbumNode = (node: AlbumNode, depth: number): JSX.Element => {
     const expanded = !collapsed.has(node.id);
     const hasChildren = node.children.length > 0;

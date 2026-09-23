@@ -1,5 +1,5 @@
 /**
- * 图像源面板 — 挂载、列表、重命名、卸载、扫描（含事件订阅）。
+ * 媒体源面板 — 挂载、列表、重命名、卸载、扫描（含事件订阅）。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -27,8 +27,6 @@ export function SourcePanel({
   onStatus,
   refreshKey,
 }: SourcePanelProps): JSX.Element {
-  const [localPath, setLocalPath] = useState("");
-  const [alias, setAlias] = useState("");
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [renameId, setRenameId] = useState("");
   const [renameAlias, setRenameAlias] = useState("");
@@ -49,7 +47,7 @@ export function SourcePanel({
       const list = await api.sourceList({ repoId });
       setSources(list);
     } catch (e) {
-      onStatus(`图像源列表失败: ${String(e)}`, "error");
+      onStatus(`媒体源列表失败: ${String(e)}`, "error");
     }
   }, [repoId, onStatus]);
 
@@ -105,36 +103,36 @@ export function SourcePanel({
     };
   }, [onStatus, onRefresh]);
 
+  // 添加媒体源：选取文件夹 → 以文件夹名为默认源名挂载（添加时不能填别名）
   const handleMount = useCallback(async () => {
     if (!repoId) return;
-    if (!localPath.trim()) {
-      onStatus("图像源路径不能为空", "error");
+    let picked: string | null;
+    try {
+      picked = await api.pickSourceFolder();
+    } catch (e) {
+      onStatus(`选取文件夹失败: ${String(e)}`, "error");
       return;
     }
+    if (!picked) return;
+    const folderName = picked.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || picked;
     try {
-      const source = await api.sourceMount({
-        repoId,
-        localPath: localPath.trim(),
-        alias: alias.trim() || undefined,
-      });
-      onStatus(`图像源已挂载: ${source.id.slice(0, 8)}`, "ok");
-      setLocalPath("");
-      setAlias("");
+      const source = await api.sourceMount({ repoId, localPath: picked });
+      onStatus(`媒体源已挂载: ${source.alias ?? folderName}`, "ok");
       onRefresh();
     } catch (e) {
-      onStatus(`挂载图像源失败: ${String(e)}`, "error");
+      onStatus(`挂载媒体源失败: ${String(e)}`, "error");
     }
-  }, [repoId, localPath, alias, onRefresh, onStatus]);
+  }, [repoId, onRefresh, onStatus]);
 
   const handleUnmount = useCallback(
     async (sourceId: string) => {
       if (!repoId) return;
       try {
         await api.sourceUnmount({ repoId, sourceId });
-        onStatus("图像源已卸载", "ok");
+        onStatus("媒体源已卸载", "ok");
         onRefresh();
       } catch (e) {
-        onStatus(`卸载图像源失败: ${String(e)}`, "error");
+        onStatus(`卸载媒体源失败: ${String(e)}`, "error");
       }
     },
     [repoId, onRefresh, onStatus],
@@ -192,37 +190,26 @@ export function SourcePanel({
 
   return (
     <div className="panel">
-      <h2>图像源管理</h2>
+      <h2>媒体源管理</h2>
 
       {!repoId && <span className="placeholder">请先打开仓库</span>}
 
       {repoId && (
         <>
           <div className="panel-section">
-            <label>挂载图像源</label>
+            <label>添加媒体源</label>
             <div className="panel-row">
-              <input
-                type="text"
-                placeholder="本地路径"
-                value={localPath}
-                onChange={(e) => setLocalPath(e.target.value)}
-              />
-              <input
-                type="text"
-                placeholder="别名（可选）"
-                value={alias}
-                onChange={(e) => setAlias(e.target.value)}
-              />
-              <button onClick={handleMount}>挂载</button>
+              <button onClick={handleMount}>选取文件夹…</button>
+              <span className="placeholder">默认以所选文件夹名为源名</span>
             </div>
           </div>
 
           <div className="panel-section">
-            <label>重命名</label>
+            <label>重命名（仅已添加的媒体源）</label>
             <div className="panel-row">
               <input
                 type="text"
-                placeholder="图像源 ID"
+                placeholder="媒体源 ID"
                 value={renameId}
                 onChange={(e) => setRenameId(e.target.value)}
               />
@@ -252,10 +239,10 @@ export function SourcePanel({
           )}
 
           <div className="panel-section">
-            <label>图像源列表 ({sources.length})</label>
+            <label>媒体源列表 ({sources.length})</label>
             <div className="item-list">
               {sources.length === 0 && (
-                <span className="placeholder">无图像源</span>
+                <span className="placeholder">无媒体源</span>
               )}
               {sources.map((s) => (
                 <div key={s.id} className="item-list-item">

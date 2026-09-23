@@ -8,6 +8,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use hp_ai::AiTaggingService;
@@ -29,6 +30,13 @@ pub(crate) struct AppState {
     pub(crate) open_repo: Arc<Mutex<Option<RepoDb>>>,
     /// 当前打开的仓库 ID（用于删除仓库时判断是否需先关闭）。
     pub(crate) current_repo_id: Arc<Mutex<Option<String>>>,
+    /// 当前打开的仓库库文件路径：扫描线程据此开**独立连接**，
+    /// 不再长时间占用 `open_repo` 锁（否则大视频扫描会堵住整个 UI 的命令）。
+    pub(crate) current_repo_path: Arc<Mutex<Option<PathBuf>>>,
+    /// 是否有扫描正在进行（同一时刻只允许一个扫描任务）。
+    pub(crate) scanning: Arc<AtomicBool>,
+    /// 长任务的取消请求（扫描 / 卸载共用；`task.cancel` 置位）。
+    pub(crate) task_cancel: Arc<AtomicBool>,
     pub(crate) scanner: Arc<Scanner>,
     pub(crate) ffmpeg_bin: Arc<Option<PathBuf>>,
     pub(crate) ffprobe_bin: Arc<Option<PathBuf>>,
@@ -59,6 +67,9 @@ fn make_state(app: &tauri::AppHandle) -> AppState {
         global_db: Arc::new(Mutex::new(None)),
         open_repo: Arc::new(Mutex::new(None)),
         current_repo_id: Arc::new(Mutex::new(None)),
+        current_repo_path: Arc::new(Mutex::new(None)),
+        scanning: Arc::new(AtomicBool::new(false)),
+        task_cancel: Arc::new(AtomicBool::new(false)),
         scanner: Arc::new(Scanner::new()),
         ffmpeg_bin: Arc::new(external_bin("ffmpeg")),
         ffprobe_bin: Arc::new(external_bin("ffprobe")),
@@ -72,6 +83,8 @@ fn make_state(app: &tauri::AppHandle) -> AppState {
 
 fn main() {
     tauri::Builder::default()
+        // 原生系统对话框：媒体源「选取文件夹」入口（权限见 capabilities/default.json 的 dialog:allow-open）。
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let state = make_state(app.handle());
             app.manage(state);
@@ -105,11 +118,13 @@ fn main() {
             commands::repo::setting_set,
             commands::source::source_mount,
             commands::source::source_unmount,
+            commands::source::source_unmount_preview,
             commands::source::source_rename,
             commands::source::source_list,
             commands::source::source_tree,
             commands::source::source_scan,
             commands::source::task_cancel,
+            commands::source::task_status,
             commands::source::task_pause,
             commands::source::task_resume,
             commands::album::album_create,

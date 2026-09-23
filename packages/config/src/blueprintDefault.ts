@@ -27,7 +27,7 @@ import {
  *   一个层 = 一张画布 = 一个界面（页面）；多页面由用户新增层与界面节点，
  *   并用 `navigate`（界面跳转，D48）连接；
  * - 层内的根是**界面节点** `ui`（界面显示名取自层名，D51：不再另存 `name`）；
- * - 左栏（blk_left）：**三个独立面板**，故直接含 仓库、图像源、相册 三个面板控件
+ * - 左栏（blk_left）：**三个独立面板**，故直接含 仓库、媒体源、相册 三个面板控件
  *   （该栏没有 dockview 标签组）；
  * - 中栏（blk_center）：**只有一个标签组** `g_media`，其成员为 媒体预览 / 查看器 /
  *   媒体播放（布局里就是同一个 leaf 的三个标签页）；媒体预览内部再分
@@ -73,7 +73,7 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { key: "blk_center", type: "layout_block", layer: "l_main", name: "中栏", position: { x: 460, y: 170 } },
     { key: "blk_right", type: "layout_block", layer: "l_main", name: "右栏", position: { x: 880, y: 170 } },
 
-    // 左栏面板控件（仓库 / 图像源 / 相册）
+    // 左栏面板控件（仓库 / 媒体源 / 相册）
     { key: "c_repo", type: "control", layer: "l_main", panel_id: "repo", title_key: "panel.repo", position: { x: 40, y: 300 } },
     { key: "c_sources", type: "control", layer: "l_main", panel_id: "sources", title_key: "panel.sources", position: { x: 40, y: 430 } },
     { key: "c_albums", type: "control", layer: "l_main", panel_id: "albums", title_key: "panel.albums", position: { x: 40, y: 560 } },

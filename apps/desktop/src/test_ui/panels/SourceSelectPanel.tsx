@@ -1,5 +1,5 @@
 /**
- * 源选择面板 — 选择已挂载图像源，浏览该源下文件，点击文件上推选中。
+ * 源选择面板 — 选择已挂载媒体源，浏览该源下文件，点击文件上推选中。
  *
  * 源列表通过 `source_list` 获取，选中源后通过 `file_query` 按源过滤列出文件。
  */
@@ -34,7 +34,7 @@ export function SourceSelectPanel({
     setFiles([]);
   }, [repoId]);
 
-  // 加载图像源列表
+  // 加载媒体源列表
   useEffect(() => {
     if (!repoId) {
       setSources([]);
@@ -49,7 +49,7 @@ export function SourceSelectPanel({
         }
       } catch (e) {
         if (!cancelled) {
-          onStatus(`图像源列表失败: ${String(e)}`, "error");
+          onStatus(`媒体源列表失败: ${String(e)}`, "error");
         }
       }
     })();
@@ -95,10 +95,10 @@ export function SourceSelectPanel({
       {repoId && (
         <>
           <div className="panel-section">
-            <label>图像源列表 ({sources.length})</label>
+            <label>媒体源列表 ({sources.length})</label>
             <div className="item-list source-list">
               {sources.length === 0 && (
-                <span className="placeholder">无图像源</span>
+                <span className="placeholder">无媒体源</span>
               )}
               {sources.map((s) => (
                 <div

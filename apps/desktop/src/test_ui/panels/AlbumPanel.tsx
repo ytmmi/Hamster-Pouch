@@ -266,7 +266,7 @@ export function AlbumPanel({
               <div className="panel-row">
                 <input
                   type="text"
-                  placeholder="图像源 ID"
+                  placeholder="媒体源 ID"
                   value={createSourceId}
                   onChange={(e) => setCreateSourceId(e.target.value)}
                 />

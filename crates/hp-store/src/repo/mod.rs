@@ -6,6 +6,7 @@ mod blueprint_repo;
 mod color_repo;
 mod file_repo;
 mod ops_repo;
+mod purge_repo;
 mod rating_repo;
 mod repo_db;
 mod source_repo;
@@ -14,7 +15,9 @@ mod tag_relation_repo;
 mod tag_repo;
 mod tag_tree;
 
+pub use album_repo::AlbumSourceMembers;
 pub use ops_repo::OpsHistoryRow;
+pub use purge_repo::{PurgePhase, PurgeResult, SourceDataCounts};
 pub use repo_db::RepoDb;
 pub use source_tree::{build_source_tree, SourceTree, TreeNode};
 pub use tag_tree::{build_tag_tree, TagTree, TagTreeNode};

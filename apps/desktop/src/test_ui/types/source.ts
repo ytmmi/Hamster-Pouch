@@ -1,5 +1,5 @@
 /**
- * test_ui M2：图像源类型。
+ * test_ui M2：媒体源类型。
  */
 
 /** source_mount / source_list 返回元素 */
