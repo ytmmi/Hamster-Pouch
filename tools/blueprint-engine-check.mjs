@@ -20,6 +20,10 @@ const { BlueprintEngine } = await import(
   pathToFileURL(`${ROOT}/apps/desktop/src/app_ui/core/blueprintEngine.ts`).href
 );
 
+const { pickNeighborByDirection, adjacencyAxis } = await import(
+  pathToFileURL(`${ROOT}/apps/desktop/src/app_ui/shared/blueprintLayout.ts`).href
+);
+
 const results = [];
 const check = (label, ok, detail = "") => {
   results.push({ label, ok });
@@ -88,7 +92,7 @@ function syntheticGraph() {
 }
 
 /** 驱动引擎并收集执行器收到的操作。 */
-function run(graph, layer, trigger, mediaType) {
+function run(graph, layer, trigger, mediaType, context) {
   const engine = new BlueprintEngine();
   engine.setGraph(graph);
   engine.setLayer(layer);
@@ -97,7 +101,12 @@ function run(graph, layer, trigger, mediaType) {
     showPanel: (id, floating) => ops.push(`show ${id}${floating ? " (floating)" : ""}`),
     hidePanel: (id) => ops.push(`hide ${id}`),
     togglePanel: (id, floating) => ops.push(`toggle ${id}${floating ? " (floating)" : ""}`),
-    collapsePanels: (ids) => ops.push(`collapse [${ids.join(", ")}]`),
+    collapsePanels: (ids, absorb) =>
+      ops.push(
+        `collapse [${ids.join(", ")}]${
+          absorb ? " absorb=" + JSON.stringify(absorb) : ""
+        }`,
+      ),
     expandPanels: (ids) => ops.push(`expand [${ids.join(", ")}]`),
     playFile: (fileId) => ops.push(`play ${fileId}`),
     navigateLayer: (layerKey) => ops.push(`navigate ${layerKey}`),
@@ -106,7 +115,11 @@ function run(graph, layer, trigger, mediaType) {
     showOverlayPanel: (panelId, box) =>
       ops.push(`float ${panelId} ${box.width}×${box.height} @${box.anchor}(${box.offsetX}, ${box.offsetY})`),
   });
-  engine.dispatch({ trigger, target: { mediaType, fileId: "file-1" } });
+  engine.dispatch({
+    trigger,
+    target: { mediaType, fileId: "file-1" },
+    ...(context ? { context } : {}),
+  });
   return ops;
 }
 
@@ -294,6 +307,145 @@ function run(graph, layer, trigger, mediaType) {
       ops.join(" ; ") || "（无动作）",
     );
   }
+}
+
+// ---- D29 hide_direction 透传 + selection_change/rating/has_tag 运行时 context ----
+{
+  // 轴向：组带 hide_direction=left → collapse 动作把 { direction: "left" } 传给执行器
+  const g = syntheticGraph();
+  g.nodes.find((n) => n.key === "g_main").hide_direction = "left";
+  const ops = run(g, "l_main", "double_click", "image");
+  check(
+    "D29：collapse 动作透传 hide_direction=left（执行器据此把空间让给左侧邻居）",
+    ops.some(
+      (op) =>
+        op.startsWith("collapse [media, viewer, player]") &&
+        op.includes('"direction":"left"'),
+    ),
+    ops.join(" ; ") || "（无动作）",
+  );
+
+  // toward:<组> → 引擎解析为目标组成员面板 id 列表
+  const g2 = syntheticGraph();
+  g2.nodes.push({
+    key: "g_other",
+    type: "group",
+    layer: "l_main",
+    mode: "independent",
+    position: { x: 340, y: 620 },
+  });
+  g2.nodes.push({
+    key: "c_other",
+    type: "control",
+    layer: "l_main",
+    panel_id: "tags",
+    position: { x: 640, y: 620 },
+  });
+  g2.edges.push({ from: "blk_main", to: "g_other", kind: "contains", order: 30 });
+  g2.edges.push({ from: "g_other", to: "c_other", kind: "contains", order: 31 });
+  g2.nodes.find((n) => n.key === "g_main").hide_direction = "toward:g_other";
+  const opsToward = run(g2, "l_main", "double_click", "image");
+  check(
+    "D29：collapse 动作把 toward:<组> 解析为成员面板 id（towardPanelIds=[tags]）",
+    opsToward.some(
+      (op) =>
+        op.startsWith("collapse [media, viewer, player]") &&
+        op.includes('"towardPanelIds":["tags"]'),
+    ),
+    opsToward.join(" ; ") || "（无动作）",
+  );
+
+  // selection_change 事件源 + rating 运行时 context（对象 scope=selected 才命中 selected 作用域）
+  const g3 = syntheticGraph();
+  g3.nodes.push({
+    key: "o_sel",
+    type: "object",
+    layer: "l_main",
+    class: "k_image",
+    scope: "selected",
+    position: { x: 1240, y: 620 },
+  });
+  g3.nodes.push({ key: "e_sel", type: "event", layer: "l_main", trigger: "selection_change", position: { x: 1540, y: 620 } });
+  g3.nodes.push({ key: "cnd_rating", type: "condition", layer: "l_main", expr: "rating >= 3", position: { x: 1840, y: 620 } });
+  g3.nodes.push({ key: "a_sel_viewer", type: "action", layer: "l_main", op: "show", target: "c_viewer", position: { x: 2140, y: 620 } });
+  g3.edges.push({ from: "o_sel", to: "e_sel", kind: "on", order: 40 });
+  g3.edges.push({ from: "e_sel", to: "cnd_rating", kind: "fires", order: 41 });
+  g3.edges.push({ from: "cnd_rating", to: "a_sel_viewer", kind: "guards", order: 42 });
+  const hits = run(g3, "l_main", "selection_change", "image", { rating: 4, tags: [] });
+  check(
+    "selection_change + rating>=3：context.rating=4 命中 → 显示查看器",
+    hits.includes("show viewer"),
+    hits.join(" ; ") || "（无动作）",
+  );
+  const miss = run(g3, "l_main", "selection_change", "image", { rating: 2, tags: [] });
+  check(
+    "selection_change + rating>=3：context.rating=2 不命中 → 无动作",
+    !miss.includes("show viewer"),
+    miss.join(" ; ") || "（无动作）",
+  );
+
+  // has_tag 运行时 context
+  const g4 = syntheticGraph();
+  g4.nodes.push({
+    key: "o_sel2",
+    type: "object",
+    layer: "l_main",
+    class: "k_image",
+    scope: "selected",
+    position: { x: 1240, y: 750 },
+  });
+  g4.nodes.push({ key: "e_sel2", type: "event", layer: "l_main", trigger: "selection_change", position: { x: 1540, y: 750 } });
+  g4.nodes.push({ key: "cnd_tag", type: "condition", layer: "l_main", expr: "has_tag == 猫", position: { x: 1840, y: 750 } });
+  g4.nodes.push({ key: "a_sel2_viewer", type: "action", layer: "l_main", op: "show", target: "c_viewer", position: { x: 2140, y: 750 } });
+  g4.edges.push({ from: "o_sel2", to: "e_sel2", kind: "on", order: 50 });
+  g4.edges.push({ from: "e_sel2", to: "cnd_tag", kind: "fires", order: 51 });
+  g4.edges.push({ from: "cnd_tag", to: "a_sel2_viewer", kind: "guards", order: 52 });
+  const tagHit = run(g4, "l_main", "selection_change", "image", { rating: 0, tags: ["猫", "动物"] });
+  check(
+    "selection_change + has_tag==猫：context.tags 命中 → 显示查看器",
+    tagHit.includes("show viewer"),
+    tagHit.join(" ; ") || "（无动作）",
+  );
+  const tagMiss = run(g4, "l_main", "selection_change", "image", { rating: 0, tags: ["风景"] });
+  check(
+    "selection_change + has_tag==猫：context.tags 不命中 → 无动作",
+    !tagMiss.includes("show viewer"),
+    tagMiss.join(" ; ") || "（无动作）",
+  );
+}
+
+// ---- 纯几何：hide_direction 邻居选择（与运行时共用同一实现） ----
+{
+  const A = { id: "A", box: { left: 0, top: 0, width: 200, height: 400 } };
+  const B = { id: "B", box: { left: 200, top: 0, width: 300, height: 400 } };
+  const C = { id: "C", box: { left: 500, top: 0, width: 200, height: 400 } };
+  check(
+    "几何：水平行 A|B|C 中 B 的左邻=A",
+    pickNeighborByDirection(B.box, [A, C], "left") === "A",
+  );
+  check(
+    "几何：水平行 A|B|C 中 B 的右邻=C",
+    pickNeighborByDirection(B.box, [A, C], "right") === "C",
+  );
+  const Av = { id: "A", box: { left: 0, top: 0, width: 400, height: 200 } };
+  const Bv = { id: "B", box: { left: 0, top: 200, width: 400, height: 300 } };
+  const Cv = { id: "C", box: { left: 0, top: 500, width: 400, height: 200 } };
+  check(
+    "几何：垂直列 A|B|C 中 B 的上邻=A",
+    pickNeighborByDirection(Bv.box, [Av, Cv], "up") === "A",
+  );
+  check(
+    "几何：垂直列 A|B|C 中 B 的下邻=C",
+    pickNeighborByDirection(Bv.box, [Av, Cv], "down") === "C",
+  );
+  check(
+    "几何：同水平带判定为水平相邻轴",
+    adjacencyAxis(B.box, A.box) === "horizontal",
+  );
+  check(
+    "几何：同垂直带判定为垂直相邻轴",
+    adjacencyAxis(Bv.box, Av.box) === "vertical",
+  );
 }
 
 // ---- 诊断（可选）：对给定仓库库跑一遍典型交互 ----

@@ -308,12 +308,52 @@ export function MediaPreviewPanel(): JSX.Element {
   const setSelectedIds = app.setSelectedIds;
   // Shift 范围选择的锚点（上一次点击项，随面板实例保存）。
   const anchorRef = useRef<string | null>(null);
+  // selection_change 异步取 context 的过期令牌：只让最后一次选中上报生效。
+  const selectionTokenRef = useRef(0);
 
   // 切换仓库或筛选（列表内容变化）时清空多选，避免残留失效选择。
   useEffect(() => {
     setSelectedIds(new Set());
     anchorRef.current = null;
   }, [app.repoId, typeFilter, setSelectedIds]);
+
+  /**
+   * 选中变化上报蓝图引擎（RFC 0007 实现期开放点）：`selection_change` 事件源，
+   * 并携带 `rating >=` / `has_tag ==` 条件求值所需的运行时 context（评分 + 人工/自动 tag 名）。
+   * context 是异步取的，故用令牌丢弃过期响应，避免快速切换选中时旧结果误触发规则。
+   */
+  const dispatchSelectionChange = useCallback(
+    (file: FileItem) => {
+      if (!app.repoId) {
+        return;
+      }
+      const token = ++selectionTokenRef.current;
+      const currentRepo = app.repoId;
+      void (async () => {
+        let rating: number | undefined;
+        let tags: string[] | undefined;
+        try {
+          const [r, tagResult] = await Promise.all([
+            api.ratingGet({ repoId: currentRepo, fileId: file.id }),
+            api.tagForFile({ repoId: currentRepo, fileId: file.id }),
+          ]);
+          rating = r ?? undefined;
+          tags = [...tagResult.manual, ...tagResult.auto].map((t) => t.name);
+        } catch {
+          // context 取不到时按缺失处理（rating/has_tag 条件求值为 false，不阻塞选中上报）。
+        }
+        if (token !== selectionTokenRef.current) {
+          return;
+        }
+        app.dispatch({
+          trigger: "selection_change",
+          target: { mediaType: file.media_type, fileId: file.id },
+          context: { rating, tags },
+        });
+      })();
+    },
+    [app],
+  );
 
   /**
    * 点击选择：
@@ -337,6 +377,7 @@ export function MediaPreviewPanel(): JSX.Element {
           }
           app.setSelectedIds(next);
           app.setSelectedFile(file);
+          dispatchSelectionChange(file);
           return;
         }
       }
@@ -349,18 +390,20 @@ export function MediaPreviewPanel(): JSX.Element {
         anchorRef.current = file.id;
         app.setSelectedIds(next);
         app.setSelectedFile(file);
+        dispatchSelectionChange(file);
         return;
       }
       anchorRef.current = file.id;
       app.setSelectedIds(new Set([file.id]));
       app.setSelectedFile(file);
+      dispatchSelectionChange(file);
       // 单击事件上报蓝图引擎（默认蓝图无单击规则，行为不变；用户蓝图可响应）。
       app.dispatch({
         trigger: "click",
         target: { mediaType: file.media_type, fileId: file.id },
       });
     },
-    [app, items],
+    [app, items, dispatchSelectionChange],
   );
 
   const selectedCount = useMemo(

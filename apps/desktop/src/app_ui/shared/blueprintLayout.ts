@@ -18,8 +18,18 @@
  *   `collapse`/`expand`/`hide` 动作共用（同一份实现，避免"恢复不了原尺寸"）。
  */
 
-import type { BlueprintGraph, BlueprintNode } from "@hamster-pouch/config";
-import { PANEL_MIN_SIZE, edgesOfLayer, nodeLayerKey, nodesOfLayer } from "@hamster-pouch/config";
+import type {
+  BlueprintGraph,
+  BlueprintHideDirection,
+  BlueprintNode,
+} from "@hamster-pouch/config";
+import {
+  HIDE_DIRECTIONS,
+  PANEL_MIN_SIZE,
+  edgesOfLayer,
+  nodeLayerKey,
+  nodesOfLayer,
+} from "@hamster-pouch/config";
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 
 /** 收起前的组尺寸（按 dockview 组 id 记忆，`expand` 时恢复）。 */
@@ -43,6 +53,108 @@ const COLLAPSED_SIZE = {
 
 /** 展开时的兜底尺寸（无记录时使用）。 */
 const EXPAND_FALLBACK = { width: 480, height: 320 };
+
+/** 组几何框（与 dockview `Box` 结构兼容：left/top/width/height）。 */
+export interface GroupBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** 收起时"空间让给谁"的指令（D29 `hide_direction`）。 */
+export interface AbsorbTarget {
+  /** 轴向方向（left/right/up/down）；缺省时需提供 `towardGroup`。 */
+  direction?: "left" | "right" | "up" | "down";
+  /** `toward:<groupKey>` 已解析出的目标 dockview 组（可能为空 = 匹配失败）。 */
+  towardGroup?: DockviewGroupPanel | null;
+}
+
+/**
+ * 沿方向找相邻组（纯几何，供运行时与开发期自检共用，不依赖 dockview）。
+ *
+ * 判据：与目标在正交轴上有重叠（同水平带找左右、同垂直带找上下），
+ * 且在该方向上是"最近的那个"（允许 1px 误差吸收舍入）。
+ */
+export function pickNeighborByDirection(
+  box: GroupBox,
+  candidates: { id: string; box: GroupBox }[],
+  direction: "left" | "right" | "up" | "down",
+): string | null {
+  let bestId: string | null = null;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const c of candidates) {
+    const b = c.box;
+    if (direction === "left" || direction === "right") {
+      const overlapY =
+        Math.min(box.top + box.height, b.top + b.height) -
+        Math.max(box.top, b.top);
+      if (overlapY <= 0) {
+        continue;
+      }
+      const dist =
+        direction === "left"
+          ? box.left - (b.left + b.width)
+          : b.left - (box.left + box.width);
+      if (dist >= -1 && dist < bestDist) {
+        bestDist = dist;
+        bestId = c.id;
+      }
+    } else {
+      const overlapX =
+        Math.min(box.left + box.width, b.left + b.width) -
+        Math.max(box.left, b.left);
+      if (overlapX <= 0) {
+        continue;
+      }
+      const dist =
+        direction === "up"
+          ? box.top - (b.top + b.height)
+          : b.top - (box.top + box.height);
+      if (dist >= -1 && dist < bestDist) {
+        bestDist = dist;
+        bestId = c.id;
+      }
+    }
+  }
+  return bestId;
+}
+
+/** 判定两个框的相邻轴（`toward` 用）：纵向重叠更多 → 水平相邻（左右），否则垂直相邻（上下）。 */
+export function adjacencyAxis(
+  a: GroupBox,
+  b: GroupBox,
+): "horizontal" | "vertical" | null {
+  const overlapX =
+    Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left);
+  const overlapY =
+    Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top);
+  if (overlapX <= 0 && overlapY <= 0) {
+    return null;
+  }
+  return overlapY >= overlapX ? "horizontal" : "vertical";
+}
+
+/** 把蓝图组节点的 `hide_direction` 解析成吸收指令（toward 经 `resolveToward` 映射到 dockview 组）。 */
+function resolveAbsorb(
+  node: BlueprintNode,
+  resolveToward: (groupKey: string) => DockviewGroupPanel | null,
+): AbsorbTarget | null {
+  const hd = node.hide_direction as BlueprintHideDirection | undefined;
+  if (!hd) {
+    return null;
+  }
+  if (hd.startsWith("toward:")) {
+    const key = hd.slice("toward:".length);
+    const towardGroup = resolveToward(key);
+    return towardGroup ? { towardGroup } : null;
+  }
+  if ((HIDE_DIRECTIONS as readonly string[]).includes(hd)) {
+    return { direction: hd as AbsorbTarget["direction"] };
+  }
+  return null;
+}
+
 
 /**
  * 取**某一层**的图视图（`layerKey` 为空 = 不限层，单层兜底文档与旧调用照旧）。
@@ -169,20 +281,123 @@ function declaredGroupStates(graph: BlueprintGraph): {
 /**
  * 收起一个 dockview 组：记忆原尺寸并压到 `PANEL_MIN_SIZE`（正文 6px、标签条保留）。
  *
+ * `absorb`（D29）指定"释放的空间让给谁"：
+ * - 轴向（left/right/up/down）：沿该方向找最近相邻组，本组压到最小、邻居沿同轴放大；
+ * - `towardGroup`：直接放大指定的目标组（轴由其与本组的相对位置判定）。
+ * 无法解析邻居 / 无几何信息时，回退为"缩小本组 → 由网格吸收"（现状行为）。
+ *
  * 供本模块的对账与引擎的 `collapse` / `hide` 动作**共用**（同一份尺寸记忆，
  * 否则 `expand` 恢复不到收起前的尺寸分布，RFC 0007 决策 3）。
  * 重复收起不会覆盖已记忆的原尺寸（第二次的 boundingBox 已经是收起后的）。
  */
-export function collapseGroup(group: DockviewGroupPanel): void {
+export function collapseGroup(
+  group: DockviewGroupPanel,
+  dv?: DockviewApi | null,
+  absorb?: AbsorbTarget | null,
+): void {
   const box = group.api.boundingBox;
   if (!expandedSizes.has(group.id) && box && box.width > 0 && box.height > 0) {
     expandedSizes.set(group.id, { width: box.width, height: box.height });
   }
-  try {
-    group.api.setSize({ ...COLLAPSED_SIZE });
-  } catch {
-    // dockview 网格约束下忽略：**不关闭面板**（RFC 0007：隐藏 = 收起，不是关闭）。
+
+  const target = resolveNeighbor(group, dv, absorb);
+  if (!box || !target) {
+    try {
+      group.api.setSize({ ...COLLAPSED_SIZE });
+    } catch {
+      // dockview 网格约束下忽略：**不关闭面板**（RFC 0007：隐藏 = 收起，不是关闭）。
+    }
+    return;
   }
+
+  const { neighbor, axis } = target;
+  const nbBox = neighbor.api.boundingBox;
+  if (!nbBox) {
+    try {
+      group.api.setSize({ ...COLLAPSED_SIZE });
+    } catch {
+      /* 忽略 */
+    }
+    return;
+  }
+  const axisKey = axis === "horizontal" ? "width" : "height";
+  const released = box[axisKey] - COLLAPSED_SIZE[axisKey];
+  if (released <= 0) {
+    try {
+      group.api.setSize({ ...COLLAPSED_SIZE });
+    } catch {
+      /* 忽略 */
+    }
+    return;
+  }
+  // 先沿轴收起本组，再把释放的空间沿同轴给到指定邻居（D29「指定侧吸收」）。
+  try {
+    group.api.setSize({
+      width: box.width,
+      height: box.height,
+      [axisKey]: COLLAPSED_SIZE[axisKey],
+    });
+    neighbor.api.setSize({
+      width: nbBox.width,
+      height: nbBox.height,
+      [axisKey]: nbBox[axisKey] + released,
+    });
+  } catch {
+    // 网格约束下失败退化为只收起本组（不关闭面板）。
+    try {
+      group.api.setSize({ ...COLLAPSED_SIZE });
+    } catch {
+      /* 忽略 */
+    }
+  }
+}
+
+/** 解析收起时的"吸收邻居"：toward 组优先，其次按轴向几何查找。 */
+function resolveNeighbor(
+  group: DockviewGroupPanel,
+  dv: DockviewApi | null | undefined,
+  absorb: AbsorbTarget | null | undefined,
+): { neighbor: DockviewGroupPanel; axis: "horizontal" | "vertical" } | null {
+  if (!absorb || !dv) {
+    return null;
+  }
+  const box = group.api.boundingBox;
+  if (!box) {
+    return null;
+  }
+  if (absorb.towardGroup) {
+    const nbBox = absorb.towardGroup.api.boundingBox;
+    if (!nbBox) {
+      return null;
+    }
+    const axis = adjacencyAxis(box, nbBox);
+    if (!axis) {
+      return null;
+    }
+    return { neighbor: absorb.towardGroup, axis };
+  }
+  if (absorb.direction) {
+    const candidates = dv.groups
+      .filter((g) => g.api.location.type !== "floating" && g.id !== group.id)
+      .map((g) => ({ id: g.id, box: g.api.boundingBox }))
+      .filter(
+        (c): c is { id: string; box: GroupBox } => !!c.box,
+      );
+    const id = pickNeighborByDirection(box, candidates, absorb.direction);
+    if (!id) {
+      return null;
+    }
+    const neighbor = dv.groups.find((g) => g.id === id);
+    if (!neighbor) {
+      return null;
+    }
+    const axis =
+      absorb.direction === "left" || absorb.direction === "right"
+        ? "horizontal"
+        : "vertical";
+    return { neighbor, axis };
+  }
+  return null;
 }
 
 /** 展开一个 dockview 组：恢复收起前的尺寸（无记录用兜底尺寸），并清掉记忆。 */
@@ -244,7 +459,11 @@ export function reconcileLayout(
     if (expanded.has(node.key)) {
       expandGroup(group);
     } else if (collapsed.has(node.key)) {
-      collapseGroup(group);
+      // D29：按 hide_direction 把释放空间让给指定侧邻居（toward 经 matched 映射到 dockview 组）。
+      const absorb = resolveAbsorb(node, (towardKey) =>
+        matched.find((m) => m.node.key === towardKey)?.group ?? null,
+      );
+      collapseGroup(group, dv, absorb);
       collapsedCount += 1;
     }
   }

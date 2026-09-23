@@ -15,9 +15,11 @@ import type { BlueprintGraph, BlueprintNode, BlueprintEdge } from "@hamster-pouc
 import {
   forUserSave,
   hasLayers,
+  isSyncBlueprintEnabled,
   makeEmptyBlueprint,
   normalizeLayersForSave,
   PANEL_TITLES,
+  SETTING_KEYS,
 } from "@hamster-pouch/config";
 import type { DockviewApi } from "dockview-react";
 
@@ -139,6 +141,13 @@ export async function syncBlueprintFromLayout(
   repoId: string,
   dv: DockviewApi,
 ): Promise<string | null> {
+  // D59 开关（默认开）：关闭时不把布局结构同步进蓝图，只保存布局本身（不碰蓝图）。
+  const enabled = await api
+    .settingGet({ key: SETTING_KEYS.syncBlueprint })
+    .catch(() => null);
+  if (!isSyncBlueprintEnabled(enabled)) {
+    return null;
+  }
   try {
     // 同步进**当前层**（D51/D53）：新节点归属该层。
     const layerKey = currentLayerKey();

@@ -21,7 +21,11 @@ import { LANGUAGES, type Language } from "../i18n";
 import { PANEL_DEFS, panelTitle } from "../core/panelRegistry";
 import { ContextMenu } from "./ContextMenu";
 import { normalizeLayoutJson } from "../shared/panelLayout";
-import { PANEL_MIN_SIZE } from "@hamster-pouch/config";
+import {
+  isSyncBlueprintEnabled,
+  PANEL_MIN_SIZE,
+  SETTING_KEYS,
+} from "@hamster-pouch/config";
 
 /** 媒体预览面板必须保持 DOM（renderer=always），否则同组 tab 切换会丢失滚动位置。 */
 const MEDIA_PANEL_ID = "media";
@@ -59,6 +63,7 @@ export function MenuBar({
   );
   const [renamingLayout, setRenamingLayout] = useState<string | null>(null);
   const [renameLayoutValue, setRenameLayoutValue] = useState("");
+  const [syncBlueprint, setSyncBlueprint] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -71,6 +76,22 @@ export function MenuBar({
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
+
+  // 读取 D59 布局→蓝图同步开关（默认开）。
+  useEffect(() => {
+    void api
+      .settingGet({ key: SETTING_KEYS.syncBlueprint })
+      .then((v) => setSyncBlueprint(isSyncBlueprintEnabled(v)))
+      .catch(() => undefined);
+  }, []);
+
+  const toggleSyncBlueprint = useCallback(() => {
+    const next = !syncBlueprint;
+    setSyncBlueprint(next);
+    void api
+      .settingSet({ key: SETTING_KEYS.syncBlueprint, value: next ? "true" : "false" })
+      .catch(() => undefined);
+  }, [syncBlueprint]);
 
   // 读取当前仓库的已保存布局名（首行为最近保存）。
   // D53：列表返回的是**层行**（同一布局名在每个层各一行），这里按名字去重展示预设。
@@ -355,6 +376,12 @@ export function MenuBar({
                 ))}
               </div>
             )}
+
+            {/* D59：布局→蓝图自动同步开关（默认开） */}
+            <button className="menu-item" onClick={toggleSyncBlueprint}>
+              {syncBlueprint ? "✓ " : "　"}
+              {t("menubar.syncBlueprint")}
+            </button>
           </div>
         )}
       </div>

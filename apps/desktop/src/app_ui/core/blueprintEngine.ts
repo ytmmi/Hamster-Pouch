@@ -28,6 +28,7 @@ import type {
   BlueprintNode,
   BlueprintTargetRef,
   BlueprintTrigger,
+  HideDirectionAxis,
 } from "@hamster-pouch/config";
 import {
   DEFAULT_OVERLAY_ANCHOR,
@@ -44,8 +45,11 @@ export interface BlueprintExecutor {
   hidePanel: (panelId: string) => void;
   /** 切换控件显隐（取反：不存在则显示、已存在则关闭）。 */
   togglePanel: (panelId: string, floating: boolean) => void;
-  /** 收起组：把组内成员面板最小化至最小尺寸（标签条保留，D25）。 */
-  collapsePanels: (panelIds: string[]) => void;
+  /** 收起组：把组内成员面板最小化至最小尺寸（标签条保留，D25）；`absorb` 指定释放空间让给谁（D29）。 */
+  collapsePanels: (
+    panelIds: string[],
+    absorb?: BlueprintCollapseAbsorb,
+  ) => void;
   /** 展开组：恢复成员面板尺寸。 */
   expandPanels: (panelIds: string[]) => void;
   /** 播放文件（action payload { play: true } 联动）。 */
@@ -83,6 +87,15 @@ export interface BlueprintDispatchInput {
   target: BlueprintTargetRef;
   /** 条件求值上下文（rating / has_tag 用；缺省按 false 处理）。 */
   context?: { rating?: number; tags?: string[] };
+}
+
+/**
+ * `collapse` 动作的隐藏方向（D29）：轴向，或 `toward:<组>` 已由引擎解析为
+ * 目标组成员面板 id 列表（引擎持有图，执行器持有 dockview，各解析各自能解析的一半）。
+ */
+export interface BlueprintCollapseAbsorb {
+  direction?: HideDirectionAxis;
+  towardPanelIds?: string[];
 }
 
 const SCOPE_FOR_TRIGGER: Record<BlueprintTrigger, string> = {
@@ -377,7 +390,7 @@ export class BlueprintEngine {
           const members = this.groupMemberPanelIds(target.key, graph);
           if (members.length > 0) {
             if (nextCollapsed) {
-              executor.collapsePanels(members);
+              executor.collapsePanels(members, this.resolveCollapseAbsorb(target, graph));
             } else {
               executor.expandPanels(members);
             }
@@ -390,7 +403,7 @@ export class BlueprintEngine {
           this.groupCollapsed.set(target.key, true);
           const members = this.groupMemberPanelIds(target.key, graph);
           if (members.length > 0) {
-            executor.collapsePanels(members);
+            executor.collapsePanels(members, this.resolveCollapseAbsorb(target, graph));
           }
         }
         break;
@@ -574,6 +587,26 @@ export class BlueprintEngine {
       }
     }
     return ids;
+  }
+
+  /**
+   * 把组节点的 `hide_direction` 解析为执行器可消费的吸收指令（D29）：
+   * 轴向原样透传；`toward:<groupKey>` 解析为目标组的成员面板 id（执行器据此找 dockview 组）。
+   */
+  private resolveCollapseAbsorb(
+    groupNode: BlueprintNode,
+    graph: BlueprintGraph,
+  ): BlueprintCollapseAbsorb | undefined {
+    const hd = groupNode.hide_direction;
+    if (!hd) {
+      return undefined;
+    }
+    if (hd.startsWith("toward:")) {
+      const towardKey = hd.slice("toward:".length);
+      const towardPanelIds = this.groupMemberPanelIds(towardKey, graph);
+      return towardPanelIds.length > 0 ? { towardPanelIds } : undefined;
+    }
+    return { direction: hd as HideDirectionAxis };
   }
 
   /**

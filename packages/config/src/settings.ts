@@ -12,6 +12,8 @@ export type Language = "zh-CN" | "zh-TW" | "en";
 export const SETTING_KEYS = {
   theme: "ui.theme",
   language: "ui.language",
+  /** 保存布局时是否把 dockview 结构自动同步进默认蓝图（D59，默认开）。 */
+  syncBlueprint: "layout.syncBlueprint",
 } as const;
 
 /** 默认主题：白天浅色。 */
@@ -26,4 +28,9 @@ export function isTheme(value: string | null | undefined): value is Theme {
 
 export function isLanguage(value: string | null | undefined): value is Language {
   return value === "zh-CN" || value === "zh-TW" || value === "en";
+}
+
+/** D59：布局→蓝图自动同步开关是否开启（未设置 = 开）。 */
+export function isSyncBlueprintEnabled(value: string | null | undefined): boolean {
+  return value === null || value === undefined || value === "true";
 }
