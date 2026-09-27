@@ -30,6 +30,7 @@ import type {
 } from "@hamster-pouch/shared-types";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import {
   currentLayerKey,
   notifyBlueprintChangedLocally,
@@ -119,7 +120,7 @@ export function BlueprintPanel(): JSX.Element {
       setItems(list);
       setTemplates(tpls);
     } catch (e) {
-      app.status(app.t("blueprint.loadFailed", { err: String(e) }), "error");
+      app.status(app.t("blueprint.loadFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   }, [repoId, app]);
 
@@ -171,7 +172,7 @@ export function BlueprintPanel(): JSX.Element {
         setLayerKey(nextLayer);
         setCurrentLayerKey(nextLayer);
       } catch (e) {
-        app.status(app.t("blueprint.loadFailed", { err: String(e) }), "error");
+        app.status(app.t("blueprint.loadFailed", { err: errorTextOf(app.t, e) }), "error");
       }
     },
     [repoId, items, app],
@@ -435,7 +436,7 @@ export function BlueprintPanel(): JSX.Element {
       app.refresh();
       void load();
     } catch (e) {
-      app.status(app.t("blueprint.saveFailed", { err: String(e) }), "error");
+      app.status(app.t("blueprint.saveFailed", { err: errorTextOf(app.t, e) }), "error");
     } finally {
       setBusy(false);
     }
@@ -486,7 +487,7 @@ export function BlueprintPanel(): JSX.Element {
       setName(n);
       setNewName("");
     } catch (e) {
-      app.status(app.t("blueprint.createFailed", { err: String(e) }), "error");
+      app.status(app.t("blueprint.createFailed", { err: errorTextOf(app.t, e) }), "error");
     } finally {
       setBusy(false);
     }
@@ -508,7 +509,7 @@ export function BlueprintPanel(): JSX.Element {
         await select(item.id);
       } catch (e) {
         app.status(
-          app.t("blueprint.templateInstallFailed", { err: String(e) }),
+          app.t("blueprint.templateInstallFailed", { err: errorTextOf(app.t, e) }),
           "error",
         );
       } finally {
@@ -537,7 +538,7 @@ export function BlueprintPanel(): JSX.Element {
       await load();
       app.refresh();
     } catch (e) {
-      app.status(app.t("blueprint.deleteFailed", { err: String(e) }), "error");
+      app.status(app.t("blueprint.deleteFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   }, [repoId, selectedId, app, load]);
 
@@ -557,7 +558,7 @@ export function BlueprintPanel(): JSX.Element {
         notifyBlueprintChangedLocally();
         await load();
       } catch (e) {
-        app.status(app.t("blueprint.defaultFailed", { err: String(e) }), "error");
+        app.status(app.t("blueprint.defaultFailed", { err: errorTextOf(app.t, e) }), "error");
       }
     },
     [repoId, app, load],
@@ -590,7 +591,7 @@ export function BlueprintPanel(): JSX.Element {
       notifyBlueprintChangedLocally({ id: selectedId, graph: next });
       await load();
     } catch (e) {
-      app.status(app.t("blueprint.restoreFailed", { err: String(e) }), "error");
+      app.status(app.t("blueprint.restoreFailed", { err: errorTextOf(app.t, e) }), "error");
     } finally {
       setBusy(false);
     }
