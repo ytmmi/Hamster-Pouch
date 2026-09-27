@@ -2,9 +2,10 @@
  * 「全部设置」的**分组与检索**纯逻辑（RFC 0010 决策 7 /
  * `docs/spec/settings-standard.md` 第 2、4、6 节）。
  *
- * 单独成文件的原因：界面（`SettingsApp.tsx`）只负责渲染，分组口径与搜索口径是
- * **可被门禁断言**的纯函数——`pnpm check:settings` 直接导入它验证"二级列表覆盖全部
- * 面板、分组与 `category` 一致、搜索只命中注册表内的项"。
+ * 单独成文件的原因：界面（`SettingsApp.tsx`）只负责渲染，分组口径、主从详情口径与
+ * 搜索口径都是**可被门禁断言**的纯函数——`pnpm check:settings` 直接导入它验证
+ * "二级列表覆盖声明了设置项的面板、分组与 `category` 一致、右侧只显示所选节点的详情、
+ * 搜索只命中注册表内的项"。
  *
  * 本文件不 import React：纯数据 + 纯函数。
  */
@@ -44,8 +45,6 @@ export interface SettingsSection {
   anchor: string;
   /** 节标题 i18n 键。 */
   titleKey: string;
-  /** 该分节为空时的空态文案键（`undefined` = 正常渲染）。 */
-  emptyKey?: string;
   decls: readonly SettingDecl[];
 }
 
@@ -70,24 +69,35 @@ export function pluginAnchor(pluginId: string): string {
 }
 
 /**
- * 「面板」大类的二级列表：**全部已注册面板**，按 `category` 分组。
+ * 声明了 `settings` 的面板——**只有这些面板进「全部设置」**。
  *
- * 无 `settings` 的面板**仍然列出**（置灰空态）：`docs/spec/panel-standard.md` 第 8.5 节
- * 要求二级列表覆盖全部面板，设置标准第 4.1 节允许"置灰空态"这一口径——两处共用同一
- * 选择，本版本内一致。
+ * 口径（`docs/spec/settings-standard.md` 第 4.1 节）：面板没有声明 `settings` 时
+ * **不出现在二级列表**（避免点进去是空页）。二级列表与右侧分节共用这一个函数，
+ * 保证「同一版本内两处口径一致」。
+ */
+export function panelsWithSettings() {
+  return allPanels().filter((panel) => (panel.settings ?? []).length > 0);
+}
+
+/**
+ * 「面板」大类的二级列表：**声明了设置项的面板**，按 `category` 分组。
+ *
+ * 该分类下一个面板都没有设置项时，**连分组标题一起不渲染**（不留空标题）。
  */
 export function panelSubGroups(): SettingsSubGroup[] {
   const byCategory = new Map<PanelCategory, SettingsSubItem[]>();
   for (const category of PANEL_CATEGORIES) byCategory.set(category, []);
-  for (const panel of allPanels()) {
+  for (const panel of panelsWithSettings()) {
     const count = (panel.settings ?? []).length;
     const items = byCategory.get(panel.category) ?? byCategory.get("other")!;
     items.push({ anchor: panelAnchor(panel.id), titleKey: panel.titleKey, count });
   }
-  return PANEL_CATEGORIES.map((category) => ({
-    groupKey: panelCategoryTitleKey(category),
-    items: byCategory.get(category) ?? [],
-  }));
+  return PANEL_CATEGORIES.filter((category) => (byCategory.get(category) ?? []).length > 0).map(
+    (category) => ({
+      groupKey: panelCategoryTitleKey(category),
+      items: byCategory.get(category) ?? [],
+    }),
+  );
 }
 
 /**
@@ -124,6 +134,31 @@ export function subGroupsOf(category: SettingCategory): SettingsSubGroup[] {
   return [];
 }
 
+/** 某大类二级项的扁平清单；**空数组 = 该大类自身即叶子**（界面 / 蓝图 / 语言）。 */
+export function flatSubItems(category: SettingCategory): SettingsSubItem[] {
+  return subGroupsOf(category).flatMap((group) => group.items);
+}
+
+/**
+ * 右侧详情的**主从解析**（需求：右侧永远是左侧当前选择的详情，不是整栏的混合）。
+ *
+ * - 大类**有**二级项（面板 / 插件）：`anchor` 命中某项 → **只返回该项的分节**；
+ *   `anchor` 为空或已失效 → 回退到第一个二级项（选中大类即选中其首项）。
+ * - 大类**没有**二级项（界面 / 蓝图 / 语言）：返回该大类的分节。
+ *
+ * 返回值可能为空数组（该大类无任何设置项）——界面据此显示一行空态。
+ */
+export function detailSectionsOf(
+  category: SettingCategory,
+  anchor: string | null,
+): SettingsSection[] {
+  const all = sectionsOf(category);
+  const items = flatSubItems(category);
+  if (items.length === 0) return all;
+  const active = anchor && items.some((item) => item.anchor === anchor) ? anchor : items[0].anchor;
+  return all.filter((section) => section.anchor === active);
+}
+
 /**
  * 某大类右侧的分节。
  *
@@ -133,10 +168,10 @@ export function subGroupsOf(category: SettingCategory): SettingsSubGroup[] {
  */
 export function sectionsOf(category: SettingCategory): SettingsSection[] {
   if (category === "panel") {
-    return allPanels().map((panel) => ({
+    // 只有声明了设置项的面板才有分节（与二级列表同源，第 4.1 节）。
+    return panelsWithSettings().map((panel) => ({
       anchor: panelAnchor(panel.id),
       titleKey: panel.titleKey,
-      emptyKey: (panel.settings ?? []).length === 0 ? "settings.panel.empty" : undefined,
       decls: panelSettingDecls().filter(
         (d) => d.owner.kind === "panel" && d.owner.id === panel.id,
       ),
@@ -156,15 +191,6 @@ export function sectionsOf(category: SettingCategory): SettingsSection[] {
       sections.push({
         anchor: pluginAnchor(pluginId),
         titleKey: `plugin.${pluginId}`,
-        emptyKey: "settings.plugin.empty",
-        decls: [],
-      });
-    }
-    if (sections.length === 0) {
-      sections.push({
-        anchor: "plugin.empty",
-        titleKey: settingCategoryTitleKey("plugin"),
-        emptyKey: "settings.plugin.empty",
         decls: [],
       });
     }

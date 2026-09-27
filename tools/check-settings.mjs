@@ -4,7 +4,10 @@
  * 断言：
  * 1. **设置注册表 ↔ 本文档的五大大类**一致；每个大类都有归属项或**空态**（不隐藏）；
  * 2. `kind` 白名单与控件注册表的**输入类子集**一致，**不得出现 `button` 或非输入类**；
- * 3. **「面板」二级列表的分组与面板注册表 `category` 一致**，且覆盖全部面板；
+ * 3. **「面板」二级列表的分组与面板注册表 `category` 一致**，且**只列出声明了
+ *    `settings` 的面板**（无设置项的面板不显示，第 4.1 节）；
+ * 4. **右侧 = 左侧当前选择的详情**（主从结构，不是整栏混合）：面板/插件的每个二级项
+ *    只解析出自己那一节，未显式选择时回退到该大类第一项；
  * 4. **「插件」二级列表**覆盖已登记插件，未分类落 `other`；
  * 5. **落库键前缀规则**：宿主 `ui.*` / `layout.*`；面板 `panel.<panel_id>.`；
  *    插件强制 `plugin.<plugin_id>.`（插件自带其它前缀即拒绝）；
@@ -149,14 +152,27 @@ check(
 
 // ============================== 4. 「面板」二级列表与面板注册表一致 ==============================
 
+/** 声明了设置项的面板 id——**只有这些面板进「全部设置」**（第 4.1 节）。 */
+const withSettingsIds = registry
+  .panelsWithSettings()
+  .map((p) => p.id)
+  .sort();
 const groups = registry.panelSubGroups();
 const listedIds = groups
   .flatMap((g) => g.items.map((i) => i.anchor.slice("panel.".length)))
   .sort();
 check(
-  "「面板」二级列表覆盖全部已注册面板（无 settings 的面板也列出并置灰空态）",
-  eqList(listedIds, [...config.PANEL_IDS].sort()),
-  `listed=${listedIds.length} panels=${config.PANEL_IDS.length}`,
+  "「面板」二级列表只列出声明了设置项的面板（无 settings 的面板不显示）",
+  eqList(listedIds, withSettingsIds),
+  `listed=${listedIds.length} withSettings=${withSettingsIds.length} 全部面板=${config.PANEL_IDS.length}`,
+);
+const listedWithoutSettings = listedIds.filter(
+  (id) => ((config.panelSpec(id)?.settings ?? []).length === 0),
+);
+check(
+  "反向：没有设置项的面板一个都不在列表里（避免点进去是空页）",
+  listedWithoutSettings.length === 0,
+  listedWithoutSettings.join(", ") || "0 个无设置项的面板被列出",
 );
 const groupMismatch = [];
 for (const group of groups) {
@@ -173,12 +189,52 @@ check(
   groupMismatch.length === 0,
   groupMismatch.join(" | ") || `${groups.length} 个分类分组逐项一致`,
 );
+check(
+  "空分组不渲染标题（该 category 下没有带设置项的面板时不留空标题）",
+  groups.every((g) => g.items.length > 0),
+  `groups=${groups.length}`,
+);
 const panelSections = registry.sectionsOf("panel");
 check(
-  "右侧按面板分节（每个面板一个分节，节标题 = 面板标题）",
-  panelSections.length === config.PANEL_IDS.length &&
-    panelSections.every((s) => typeof s.titleKey === "string"),
+  "右侧面板分节与二级列表同源（每节 = 一个有设置项的面板，节内有设置项）",
+  eqList(
+    panelSections.map((s) => s.anchor).sort(),
+    withSettingsIds.map((id) => `panel.${id}`),
+  ) &&
+    panelSections.every((s) => typeof s.titleKey === "string" && s.decls.length > 0),
   `sections=${panelSections.length}`,
+);
+
+// ============================== 4b. 右侧 = 左侧选择的详情（主从结构） ==============================
+
+const mixed = [];
+const fallbackWrong = [];
+for (const category of config.SETTING_CATEGORIES) {
+  const items = registry.flatSubItems(category);
+  if (items.length === 0) {
+    // 界面 / 蓝图 / 语言：大类自身即叶子，详情 = 该大类的分节。
+    continue;
+  }
+  for (const item of items) {
+    const detail = registry.detailSectionsOf(category, item.anchor);
+    if (detail.length !== 1 || detail[0].anchor !== item.anchor) {
+      mixed.push(`${category}/${item.anchor}: ${detail.map((s) => s.anchor).join("+") || "空"}`);
+    }
+  }
+  const fallback = registry.detailSectionsOf(category, null);
+  if (fallback.length !== 1 || fallback[0].anchor !== items[0].anchor) {
+    fallbackWrong.push(`${category}: ${fallback.map((s) => s.anchor).join("+") || "空"}`);
+  }
+}
+check(
+  "右侧是主从详情：**只**显示左侧所选节点的分节，不是整栏混合",
+  mixed.length === 0,
+  mixed.join(" | ") || "全部二级项逐项只返回自己那一节",
+);
+check(
+  "未显式选择（或选择已失效）时，右侧回退到该大类第一个二级项",
+  fallbackWrong.length === 0,
+  fallbackWrong.join(" | ") || "回退口径一致",
 );
 
 // ============================== 5. 「插件」二级列表与落库键前缀 ==============================

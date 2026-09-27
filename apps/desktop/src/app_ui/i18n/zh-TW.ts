@@ -31,7 +31,6 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "menubar.language.zhTW": "繁體中文",
   "menubar.language.en": "English",
   "menubar.settingsHint": "設定項將於後續里程碑提供",
-  "menubar.syncBlueprint": "儲存版面時同步藍圖",
   "menubar.extensionsHint": "外掛與 AI 擴充將於 M5 提供",
 
   "tabmenu.close": "關閉",
@@ -523,10 +522,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "settings.close": "關閉",
   "settings.searchPlaceholder": "搜尋設定項…",
   "settings.searchEmpty": "沒有符合的設定項",
-  "settings.emptyCategory": "該大類下暫無可顯示的內容",
-  "settings.panel.empty": "該面板暫無可設定的設定項",
-  "settings.plugin.empty": "暫未安裝外掛；外掛設定會在此按外掛列出",
-  "settings.value.unset": "（未設定）",
+  "settings.empty": "無設定項",
   "settings.reset": "恢復預設",
   "settings.resetAll": "全部恢復預設",
   "settings.resetDone": "已恢復預設值",
@@ -554,5 +550,4 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "settings.panelCategory.info": "資訊與中繼資料",
   "settings.panelCategory.system": "系統與外掛",
   "settings.panelCategory.other": "其它",
-  "settings.subtitle": "應用級系統介面：不進藍圖、不參與佈局持久化，設定值只寫應用設定",
 };

@@ -30,7 +30,6 @@ export const zhCN = {
   "menubar.language.zhTW": "繁體中文",
   "menubar.language.en": "English",
   "menubar.settingsHint": "设置项将在后续里程碑提供",
-  "menubar.syncBlueprint": "保存布局时同步蓝图",
   "menubar.extensionsHint": "插件与 AI 扩展将在 M5 提供",
 
   // 标签页右键菜单
@@ -540,10 +539,7 @@ export const zhCN = {
   "settings.close": "关闭",
   "settings.searchPlaceholder": "搜索设置项…",
   "settings.searchEmpty": "没有匹配的设置项",
-  "settings.emptyCategory": "该大类下暂无可显示的内容",
-  "settings.panel.empty": "该面板暂无可配置的设置项",
-  "settings.plugin.empty": "暂未安装插件；插件设置会在此按插件列出",
-  "settings.value.unset": "（未设置）",
+  "settings.empty": "无设置项",
   "settings.reset": "恢复默认",
   "settings.resetAll": "全部恢复默认",
   "settings.resetDone": "已恢复默认值",
@@ -571,7 +567,6 @@ export const zhCN = {
   "settings.panelCategory.info": "信息与元数据",
   "settings.panelCategory.system": "系统与插件",
   "settings.panelCategory.other": "其它",
-  "settings.subtitle": "应用级系统界面：不进蓝图、不参与布局持久化，设置值只写应用设置",
 } as const;
 
 export type DictZhCN = typeof zhCN;

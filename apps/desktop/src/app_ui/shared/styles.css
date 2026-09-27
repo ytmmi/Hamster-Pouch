@@ -1894,8 +1894,8 @@ button.danger {
   word-break: break-all;
 }
 
-/* ===== ¡¸È«²¿ÉèÖÃ¡¹ÏµÍ³½çÃæ£¨RFC 0010 ¾ö²ß 7 / settings-standard£© =====
-   Ó¦ÓÃ¼¶ÏµÍ³½çÃæ£º¸ÇÔÚ²¼¾Ö/Ãæ°åÖ®ÉÏ£¬²»²ÎÓë²¼¾Ö³Ö¾Ã»¯¡¢²»Ğ´ËÀÏñËØ£¨ÓÃÉè¼Æ token ±äÁ¿£©¡£ */
+/* ===== ã€Œå…¨éƒ¨è®¾ç½®ã€ç³»ç»Ÿç•Œé¢ï¼ˆRFC 0010 å†³ç­– 7 / settings-standardï¼‰ =====
+   åº”ç”¨çº§ç³»ç»Ÿç•Œé¢ï¼šç›–åœ¨å¸ƒå±€/é¢æ¿ä¹‹ä¸Šï¼Œä¸å‚ä¸å¸ƒå±€æŒä¹…åŒ–ã€ä¸å†™æ­»åƒç´ ï¼ˆç”¨è®¾è®¡ token å˜é‡ï¼‰ã€‚ */
 
 .settings-overlay {
   position: fixed;
@@ -1984,9 +1984,9 @@ button.danger {
   margin-top: 6px;
 }
 
-.settings-nav-hint {
-  padding: 6px 10px;
-  font-size: 12px;
+.settings-nav-sub.active {
+  font-weight: 600;
+  color: var(--fg);
 }
 
 .settings-detail {

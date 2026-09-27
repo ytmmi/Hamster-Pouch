@@ -8,7 +8,8 @@
  * 3. 每个 `blueprint_node` 都命中**已注册**的蓝图节点类型；可承载面板的节点类型必须
  *    允许 `panel_id` 字段（面板标准第 5.2 节）；
  * 4. Rust `PanelCategory` / 设置项输入类白名单 ↔ TS 注册表逐项对齐；
- * 5. 「全部设置」的大类/二级列表覆盖全部面板，且分组与 `category` 一致；
+ * 5. 「全部设置」的大类/二级列表**只列出声明了 `settings` 的面板**，且分组与
+ *    `category` 一致（无设置项的面板不显示，见 `docs/spec/settings-standard.md` 第 4.1 节）；
  * 6. **命名空间与插件缺失容错**：插件面板项必须是 `plugin.<plugin_id>.<local_id>`；
  *    未注册的 `panel_id` 既不报硬错误也不被丢弃（允许保存、原样保留）。
  *
@@ -271,10 +272,14 @@ const settingsRegistry = await import(
 const groups = settingsRegistry.panelSubGroups();
 const listed = groups.flatMap((g) => g.items.map((i) => i.anchor));
 const listedIds = listed.map((a) => a.slice("panel.".length)).sort();
+const withSettingsIds = settingsRegistry
+  .panelsWithSettings()
+  .map((p) => p.id)
+  .sort();
 check(
-  "「全部设置 → 面板」二级列表覆盖全部已注册面板",
-  eqList(listedIds, [...config.PANEL_IDS].sort()),
-  `listed=${listedIds.length} panels=${config.PANEL_IDS.length}`,
+  "「全部设置 → 面板」二级列表只列出声明了 settings 的面板",
+  eqList(listedIds, withSettingsIds),
+  `listed=${listedIds.length} withSettings=${withSettingsIds.length} 全部面板=${config.PANEL_IDS.length}`,
 );
 const groupMismatch = [];
 for (const group of groups) {
@@ -288,7 +293,7 @@ for (const group of groups) {
 check(
   "「全部设置 → 面板」二级分组与面板 category 一致",
   groupMismatch.length === 0,
-  groupMismatch.join(" | ") || "5 个分类分组逐项一致",
+  groupMismatch.join(" | ") || `${groups.length} 个分类分组逐项一致`,
 );
 
 // ============================== 汇总 ==============================

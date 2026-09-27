@@ -4,13 +4,16 @@
  * - **系统界面**：宿主提供、用户不可自定义；**不是蓝图层**（不进 `blueprints` 表、
  *   不受蓝图引擎管辖、不参与 `panel_layouts`）；
  * - **应用级**：跨仓库共享；值只写全局库 `app_settings`（键值对，**不新增库表**）；
- * - 结构：**顶部搜索框 + 左右分栏**；左侧大类（面板/插件含二级列表），右侧按分节渲染
- *   （分节用横线分割）；点左侧二级项**滚动定位**到对应分节（不重建页面）。
+ * - 结构：**顶部搜索框 + 左右分栏**。左侧 = 大类（面板/插件含二级列表），
+ *   右侧 = **左侧当前选择**的详情——主从结构，不是左侧整栏的混合：面板/插件只渲染
+ *   所选那一项的分节，界面/蓝图/语言渲染该大类的分节。选择项没有任何设置项时，
+ *   右侧只留一行空态，**不写说明文字**（无设置项的面板不进入列表，见
+ *   `settingsRegistry.panelsWithSettings`）。
  *
  * 打开入口是顶部设置区的「更多设置」（`MenuBar`）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   SETTING_CATEGORIES,
@@ -26,9 +29,10 @@ import type { Translate, TranslationKey } from "../i18n";
 import {
   allSettingCategories,
   decodeSettingValue,
+  detailSectionsOf,
   encodeSettingValue,
+  flatSubItems,
   searchSettings,
-  sectionsOf,
   settingCategoryTitleKey,
   storageKeyOf,
   subGroupsOf,
@@ -50,9 +54,10 @@ export function SettingsApp({
   const app = useApp();
   const { t } = app;
   const [category, setCategory] = useState<SettingCategory>("interface");
+  /** 左侧二级项的当前选择；`null` = 未显式选择（回退到该大类第一项）。 */
+  const [sub, setSub] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [query, setQuery] = useState("");
-  const sectionRefs = useRef(new Map<string, HTMLElement>());
 
   // 读取全部应用设置（一次读完，界面据注册表按 `kind` 还原）。
   const reload = useCallback(async () => {
@@ -128,14 +133,29 @@ export function SettingsApp({
   );
 
   const subGroups = useMemo(() => subGroupsOf(category), [category]);
-  const sections = useMemo(() => sectionsOf(category), [category]);
+  const subItems = useMemo(() => flatSubItems(category), [category]);
+  /** 左侧当前高亮的二级项：显式选择优先，否则取第一项；大类自身是叶子时为 `null`。 */
+  const activeSub =
+    sub && subItems.some((item) => item.anchor === sub) ? sub : (subItems[0]?.anchor ?? null);
+  /**
+   * 右侧**只**显示左侧当前选择的详情（主从结构，不是整栏混合）：
+   * 面板/插件取所选那一项的分节；界面/蓝图/语言取该大类的分节。
+   */
+  const sections = useMemo(
+    () => detailSectionsOf(category, activeSub),
+    [category, activeSub],
+  );
   const hits = useMemo(
     () => searchSettings(query, (key) => t(key as TranslationKey)),
     [query, t],
   );
+  /** 当前选择没有任何设置项（含"整类为空"）→ 右侧只留一行空态。 */
+  const detailEmpty = sections.every((section) => section.decls.length === 0);
 
-  const scrollTo = (anchor: string) => {
-    sectionRefs.current.get(anchor)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  /** 切换大类：清掉二级选择，使右侧落到该大类首项。 */
+  const selectCategory = (next: SettingCategory) => {
+    setCategory(next);
+    setSub(null);
   };
 
   return (
@@ -160,7 +180,7 @@ export function SettingsApp({
               <div key={item}>
                 <button
                   className={`settings-nav-item ${item === category ? "active" : ""}`}
-                  onClick={() => setCategory(item)}
+                  onClick={() => selectCategory(item)}
                 >
                   {t(settingCategoryTitleKey(item) as TranslationKey)}
                 </button>
@@ -172,23 +192,19 @@ export function SettingsApp({
                           {t(group.groupKey as TranslationKey)}
                         </span>
                       )}
-                      {group.items.map((sub) => (
+                      {group.items.map((entry) => (
                         <button
-                          key={sub.anchor}
-                          className="settings-nav-sub"
-                          onClick={() => scrollTo(sub.anchor)}
+                          key={entry.anchor}
+                          className={`settings-nav-sub ${
+                            entry.anchor === activeSub ? "active" : ""
+                          }`}
+                          onClick={() => setSub(entry.anchor)}
                         >
-                          {t(sub.titleKey as TranslationKey)}
-                          {sub.count === 0 && (
-                            <em className="dim"> · {t("settings.value.unset")}</em>
-                          )}
+                          {t(entry.titleKey as TranslationKey)}
                         </button>
                       ))}
                     </div>
                   ))}
-                {item === category && subGroups.length === 0 && (
-                  <div className="settings-nav-hint dim">{t("settings.subtitle")}</div>
-                )}
               </div>
             ))}
           </nav>
@@ -203,11 +219,9 @@ export function SettingsApp({
                     className="menu-item grow"
                     onClick={() => {
                       setCategory(hit.category);
+                      // 主从结构：直接选中命中项所属的二级节点，右侧即显示它的详情。
+                      setSub(anchorForHit(hit.ownerTitleKey, hit.storageKey));
                       setQuery("");
-                      // 大类切换后分节才渲染，下一帧再滚动定位。
-                      requestAnimationFrame(() =>
-                        scrollTo(anchorForHit(hit.ownerTitleKey, hit.storageKey)),
-                      );
                     }}
                   >
                     {t(settingCategoryTitleKey(hit.category) as TranslationKey)} ·{" "}
@@ -217,24 +231,15 @@ export function SettingsApp({
                 ))}
               </div>
             )}
-            {!query.trim() && sections.length === 0 && (
-              <span className="placeholder">{t("settings.emptyCategory")}</span>
+            {!query.trim() && detailEmpty && (
+              <span className="placeholder">{t("settings.empty")}</span>
             )}
             {!query.trim() &&
+              !detailEmpty &&
               sections.map((section) => (
-                <section
-                  key={section.anchor}
-                  className="settings-section"
-                  ref={(el) => {
-                    if (el) sectionRefs.current.set(section.anchor, el);
-                    else sectionRefs.current.delete(section.anchor);
-                  }}
-                >
+                <section key={section.anchor} className="settings-section">
                   <div className="section-title">{t(section.titleKey as TranslationKey)}</div>
                   <hr className="settings-divider" />
-                  {section.emptyKey && (
-                    <span className="placeholder">{t(section.emptyKey as TranslationKey)}</span>
-                  )}
                   {section.decls.map((decl) => (
                     <SettingRow
                       key={storageKeyOf(decl)}

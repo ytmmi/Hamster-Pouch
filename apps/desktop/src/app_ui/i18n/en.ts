@@ -31,7 +31,6 @@ export const en: Record<keyof DictZhCN, string> = {
   "menubar.language.zhTW": "繁體中文",
   "menubar.language.en": "English",
   "menubar.settingsHint": "More settings coming in later milestones",
-  "menubar.syncBlueprint": "Sync blueprint on layout save",
   "menubar.extensionsHint": "Plugins and AI extensions arrive in M5",
 
   "tabmenu.close": "Close",
@@ -523,10 +522,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "settings.close": "Close",
   "settings.searchPlaceholder": "Search settings…",
   "settings.searchEmpty": "No matching settings",
-  "settings.emptyCategory": "Nothing to show in this category yet",
-  "settings.panel.empty": "This panel has no configurable settings yet",
-  "settings.plugin.empty": "No plugins installed yet; plugin settings are listed per plugin here",
-  "settings.value.unset": "(unset)",
+  "settings.empty": "No settings",
   "settings.reset": "Reset to default",
   "settings.resetAll": "Reset all to defaults",
   "settings.resetDone": "Defaults restored",
@@ -554,5 +550,4 @@ export const en: Record<keyof DictZhCN, string> = {
   "settings.panelCategory.info": "Info and metadata",
   "settings.panelCategory.system": "System and plugins",
   "settings.panelCategory.other": "Other",
-  "settings.subtitle": "An application-level system screen: not part of blueprints, not persisted with panel layouts; values go to app settings only",
 };
