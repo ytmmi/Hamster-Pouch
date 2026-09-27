@@ -25,6 +25,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import {
   getPlayerPlayRequest,
@@ -99,7 +100,7 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
       setPlayToken((token) => token + 1);
       ctx.status(ctx.t("player.playing"), "ok");
     } catch (e) {
-      ctx.status(ctx.t("player.playFailed", { err: String(e) }), "error");
+      ctx.status(ctx.t("player.playFailed", { err: errorTextOf(ctx.t, e) }), "error");
     } finally {
       busyRef.current = false;
     }

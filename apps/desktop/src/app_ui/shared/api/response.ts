@@ -103,7 +103,22 @@ export function errorCodeOf(error: unknown): HpErrorCode {
   return error instanceof HpApiFailure ? error.code : FALLBACK_CODE;
 }
 
-/** 由任意异常取当前语言的用户可见文案。 */
+/** 由任意异常取当前语言的用户可见文案（**只看码**）。 */
 export function errorMessageOf(t: Translate, error: unknown): string {
   return apiErrorMessage(t, errorCodeOf(error));
+}
+
+/**
+ * 由任意异常取**界面要显示的文案**（迁移期的统一出口）。
+ *
+ * - **已迁移域**（`HpApiFailure`）→ 按 `code` 走 i18n（D76/D27），
+ *   **不**显示后端 `message`；
+ * - **尚未迁移的域**仍以裸字符串拒绝（`hp_err_to_string`）→ 原样显示，
+ *   避免在迁移途中把错误信息彻底藏掉；该域迁移后此处**自动**收敛到码文案。
+ *
+ * 因此调用方只需 `errorTextOf(t, e)`，不必知道该命令属于哪个批次。
+ */
+export function errorTextOf(t: Translate, error: unknown): string {
+  if (error instanceof HpApiFailure) return apiErrorMessage(t, error.code);
+  return error instanceof Error ? error.message : String(error);
 }

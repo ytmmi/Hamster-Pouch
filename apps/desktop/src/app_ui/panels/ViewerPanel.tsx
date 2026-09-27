@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 
 export function ViewerPanel(): JSX.Element {
@@ -26,7 +27,7 @@ export function ViewerPanel(): JSX.Element {
       } catch (e) {
         if (!cancelled) {
           setFailed(true);
-          app.status(app.t("viewer.previewFailed", { err: String(e) }), "error");
+          app.status(app.t("viewer.previewFailed", { err: errorTextOf(app.t, e) }), "error");
         }
       }
     })();

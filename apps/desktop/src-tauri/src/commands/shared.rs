@@ -88,6 +88,22 @@ pub(crate) fn api_from_hp<T>(result: HpResult<T>) -> ApiResponse<T> {
     }
 }
 
+/// **异步命令**的返回包装。
+///
+/// Tauri 的 `#[tauri::command]` 对**含引用的 `async` 命令**（例如带 `State<'_, T>`）
+/// 强制要求返回 `Result`（tauri-macros 的 `AsyncCommandMustReturnResult`）。
+///
+/// 但 D76 的包装必须落在**成功值**里：失败也是"已解析的响应"，而不是 IPC 层拒绝——
+/// 这样前端只需一套 `unwrapApi`，错误码（`validation`/`not_found`/…）不会在
+/// IPC 边界被压成字符串。因此本类型**恒为 `Ok(..)`**，失败信息放在
+/// `ApiResponse.error` 里（`Err` 分支仅为满足宏约束而存在，不被构造）。
+pub(crate) type ApiAsync<T> = Result<ApiResponse<T>, ApiResponse<T>>;
+
+/// 把统一响应装进异步命令的返回类型（见 [`ApiAsync`]）。
+pub(crate) fn api_async<T>(response: ApiResponse<T>) -> ApiAsync<T> {
+    Ok(response)
+}
+
 /// 开发期诊断日志：追加一行到应用数据目录 `debug.log`。
 ///
 /// 用途：在**打包运行**（无 devtools）时定位前端链路问题；文件位置固定、可直接查看，

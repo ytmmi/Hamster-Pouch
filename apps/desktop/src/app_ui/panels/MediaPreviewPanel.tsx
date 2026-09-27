@@ -10,6 +10,7 @@ import type { DragEvent, MouseEvent } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { ContextMenu } from "../menu/ContextMenu";
 import type { Translate } from "../i18n";
@@ -254,7 +255,7 @@ export function MediaPreviewPanel(): JSX.Element {
       setFiles(list);
       setSources(srcs);
     } catch (e) {
-      app.status(app.t("media.loadFailed", { err: String(e) }), "error");
+      app.status(app.t("media.loadFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   }, [app, typeFilter]);
 
@@ -490,7 +491,7 @@ export function MediaPreviewPanel(): JSX.Element {
       app.setSelectedIds(new Set());
       app.refresh();
     } catch (e) {
-      app.status(app.t("media.deleteFailed", { err: String(e) }), "error");
+      app.status(app.t("media.deleteFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   }, [app]);
 
@@ -511,7 +512,7 @@ export function MediaPreviewPanel(): JSX.Element {
       app.status(app.t("media.renamed"), "ok");
       app.refresh();
     } catch (e) {
-      app.status(String(e), "error");
+      app.status(errorTextOf(app.t, e), "error");
     }
     setRenaming(false);
     setMenu(null);
@@ -529,7 +530,7 @@ export function MediaPreviewPanel(): JSX.Element {
       await navigator.clipboard.writeText(path);
       app.status(app.t("media.pathCopied"), "ok");
     } catch (e) {
-      app.status(app.t("media.pathCopyFailed", { err: String(e) }), "error");
+      app.status(app.t("media.pathCopyFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   }, [menu, app]);
 
@@ -545,7 +546,7 @@ export function MediaPreviewPanel(): JSX.Element {
       app.status(app.t("media.reanalyzed"), "ok");
       app.refresh();
     } catch (e) {
-      app.status(app.t("media.reanalyzeFailed", { err: String(e) }), "error");
+      app.status(app.t("media.reanalyzeFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   }, [menu, app]);
 

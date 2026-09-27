@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import type { FileMetadataResult } from "../shared/types";
 
@@ -30,7 +31,7 @@ export function MetadataPanel(): JSX.Element {
     try {
       setMeta(await api.fileMetadata({ repoId: app.repoId, fileId: file.id }));
     } catch (e) {
-      app.status(app.t("metadata.readFailed", { err: String(e) }), "error");
+      app.status(app.t("metadata.readFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   }, [app]);
 
