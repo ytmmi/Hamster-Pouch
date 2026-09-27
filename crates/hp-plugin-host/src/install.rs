@@ -5,24 +5,31 @@
 
 use std::path::{Path, PathBuf};
 
-use hp_core::{HpError, HpResult};
+use hp_core::{HpError, HpResult, PluginRegistryRow};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::manifest::{read_package, PluginPackage};
+use crate::manifest::{read_package, PluginPackage, MANIFEST_FILE};
+use crate::trust::{effective_trust, HostSourceKind};
 
-/// 安装来源。
+/// 安装来源：**宿主按实际安装方式判定的**（RFC 0009「来源与信任判定」）。
+///
+/// 这个枚举是"来源"的唯一权威入口——manifest 里自称的 `source.kind` 一律忽略
+/// （缺陷 0008）。信任等级与注册表 `source_kind` 列都由这里的取值推导。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallSource {
-    /// 本地路径（git 插件的本地路径形式）。
+    /// 随应用分发的内置插件包（`plugins/system/*`）→ `system`。
+    Bundled(PathBuf),
+    /// 本地路径（git 插件的本地路径形式）→ `local-path`。
     LocalPath(PathBuf),
-    /// git 仓库：本地已克隆目录 + 锁定 URL 与 ref。
+    /// git 仓库：本地已克隆目录 + 锁定 URL 与 ref → `git`。
     Git { dir: PathBuf, url: String, rev: String },
 }
 
 impl InstallSource {
     fn dir(&self) -> &Path {
         match self {
+            InstallSource::Bundled(p) => p,
             InstallSource::LocalPath(p) => p,
             InstallSource::Git { dir, .. } => dir,
         }
@@ -76,6 +83,35 @@ impl PluginInstaller {
         Ok(InstalledPackage {
             package,
             dir: dest,
+        })
+    }
+
+    /// 安装插件包并构造**注册表行**：来源与信任等级由宿主按 [`InstallSource`] 判定。
+    ///
+    /// 这是安装入口的宿主侧实现（Tauri 桥接层只做库/锁编排）：
+    /// `trust_level` 与注册表 `source_kind` 列**同源于宿主判定**，manifest 里的
+    /// `source` 自始至终不参与推导——过去本地目录自称 `system` 即可解锁 `native.code`
+    /// （RFC 0009「来源与信任判定」/ 缺陷 0008）。
+    pub fn install_registry_row(
+        &self,
+        source: &InstallSource,
+        installed_at: impl Into<String>,
+    ) -> HpResult<PluginRegistryRow> {
+        let installed = self.install(source)?;
+        let manifest = &installed.package.manifest;
+        let manifest_json = std::fs::read_to_string(installed.dir.join(MANIFEST_FILE))
+            .map_err(|e| HpError::Io(format!("读取插件清单失败: {e}")))?;
+        let host_source = HostSourceKind::from_install_source(source);
+        Ok(PluginRegistryRow {
+            id: manifest.id.clone(),
+            name: manifest.name.clone(),
+            version: manifest.version.clone(),
+            trust_level: effective_trust(host_source, manifest.trust_requested),
+            source_kind: host_source.as_source_kind(),
+            source_ref: Some(installed.dir.to_string_lossy().to_string()),
+            runtime_kind: manifest.runtime_kind,
+            installed_at: installed_at.into(),
+            manifest_json,
         })
     }
 

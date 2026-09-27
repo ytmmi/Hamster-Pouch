@@ -1,9 +1,7 @@
 //! M5：插件命令桥接（plugin.*，RFC 0004 / commands-events.md §3.11）。
 
 use hp_core::{Capability, PluginRegistryRow};
-use hp_plugin_host::{
-    discover_packages, effective_trust, InstallSource, PluginHost, PluginInstaller,
-};
+use hp_plugin_host::{discover_packages, InstallSource, PluginHost, PluginInstaller};
 use serde::Serialize;
 use tauri::{Emitter, State};
 use time::format_description::well_known::Rfc3339;
@@ -178,6 +176,10 @@ pub(crate) fn plugin_discover(dir: String) -> Result<Vec<DiscoveredPlugin>, Stri
 }
 
 /// plugin.installLocal：安装本地路径插件包并注册。
+///
+/// **来源与信任由宿主判定**：注册表行的 `source_kind` / `trust_level` 同源于
+/// `InstallSource::LocalPath`（本地路径恒为 `local-dev`），manifest 里自称的
+/// `source.kind` 一律忽略（RFC 0009「来源与信任判定」/ 缺陷 0008）。
 #[tauri::command]
 pub(crate) fn plugin_install_local(
     path: String,
@@ -185,27 +187,14 @@ pub(crate) fn plugin_install_local(
     app: tauri::AppHandle,
 ) -> Result<PluginItem, String> {
     let installer = PluginInstaller::new(state.plugin_root.as_ref().clone());
-    let installed = installer
-        .install(&InstallSource::LocalPath(std::path::PathBuf::from(&path)))
+    let row = installer
+        .install_registry_row(
+            &InstallSource::LocalPath(std::path::PathBuf::from(&path)),
+            now_iso(),
+        )
         .map_err(hp_err_to_string)?;
-    let manifest = &installed.package.manifest;
 
     ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let trust = effective_trust(manifest.source_kind, manifest.trust_requested);
-    let manifest_json = std::fs::read_to_string(installed.dir.join("plugin.manifest"))
-        .map_err(|e| format!("读取插件清单失败: {e}"))?;
-    let row = PluginRegistryRow {
-        id: manifest.id.clone(),
-        name: manifest.name.clone(),
-        version: manifest.version.clone(),
-        trust_level: trust,
-        source_kind: manifest.source_kind,
-        source_ref: Some(installed.dir.to_string_lossy().to_string()),
-        runtime_kind: manifest.runtime_kind,
-        installed_at: now_iso(),
-        manifest_json,
-    };
-
     let mut guard = state
         .global_db
         .lock()

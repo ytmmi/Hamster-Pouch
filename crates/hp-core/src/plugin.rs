@@ -285,7 +285,12 @@ pub struct PluginManifest {
     pub min_host_version: u32,
     /// 插件实现的宿主 API 版本（与 `min_host_version` 一起构成兼容区间）。
     pub api_version: u32,
-    pub source_kind: SourceKind,
+    /// **注意：这里没有"来源"字段**（RFC 0009「来源与信任判定」/ 缺陷 0008）。
+    ///
+    /// 来源由宿主按实际安装方式判定（`hp_plugin_host::HostSourceKind`），manifest 里
+    /// 若写了 `source` 一律**忽略**：过去把 manifest 自称的 `source.kind` 送进信任推导，
+    /// 使本地目录自称 `system` 即可解锁 `native.code`。字段被删除后，"manifest 来源 →
+    /// 信任"在类型层面不再存在，误用会直接编译失败。
     pub runtime_kind: RuntimeKind,
     /// 进程入口或动态库入口。
     pub entry: String,
@@ -688,7 +693,6 @@ mod tests {
             version: "0.1.0".into(),
             min_host_version: 1,
             api_version: 1,
-            source_kind: SourceKind::LocalPath,
             runtime_kind: RuntimeKind::ExternalProcess,
             entry: "bin/example.exe".into(),
             capabilities: vec![Capability::UiPanel, Capability::RepoRead],

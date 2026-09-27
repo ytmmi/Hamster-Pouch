@@ -12,4 +12,4 @@ pub use host::{
 };
 pub use install::{InstallSource, InstalledPackage, PluginInstaller};
 pub use manifest::{discover_packages, parse_manifest, read_package, PluginPackage, MANIFEST_FILE};
-pub use trust::{can_elevate, effective_trust};
+pub use trust::{can_elevate, effective_trust, HostSourceKind};

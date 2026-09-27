@@ -2,8 +2,10 @@
 //!
 //! 插件包目录包含 `plugin.manifest`（JSON）；宿主负责解析并强制校验。
 //!
-//! 注意：`source` **不是**信任依据。来源由宿主按实际安装方式判定（RFC 0004 决策 17 /
-//! RFC 0009），manifest 中若出现 `source` 仅用于本地路径场景的兼容解析，不得据此提升信任等级。
+//! 注意：`source` **不是**信任依据，因此**根本不被解析**——`PluginManifest` 没有来源
+//! 字段（RFC 0009「来源与信任判定」）。来源由宿主按实际安装方式判定
+//! （[`crate::InstallSource`] → [`crate::HostSourceKind`]）；manifest 里写了
+//! `source.kind = "system"` 也只是被忽略的普通未知键（缺陷 0008）。
 
 use std::path::{Path, PathBuf};
 
@@ -11,7 +13,7 @@ use hp_core::{
     BlueprintNodeDecl, Capability, Contribution, ContributionKind, DataQueryReturns, HpError,
     HpResult, NodeFieldDecl, NodePortDecl, NodeSeverityDecl, PanelDefaultSize, PanelMount,
     PanelSettingDecl, PluginDataQueryDecl, PluginEventDecl, PluginId, PluginManifest, RuntimeKind,
-    SourceKind, TrustLevel,
+    TrustLevel,
 };
 use serde_json::{Map, Value};
 
@@ -42,7 +44,7 @@ pub fn parse_manifest(json: &str) -> HpResult<PluginManifest> {
         .unwrap_or(1) as u32;
     let api_version = v.get("api_version").and_then(Value::as_u64).unwrap_or(1) as u32;
 
-    let source_kind = parse_source_kind(&v)?;
+    // 注意：这里**故意不解析** `source`。来源由宿主按安装方式判定（缺陷 0008）。
     let runtime_kind = parse_runtime_kind(&v)?;
     let trust_requested = parse_trust(&v)?;
     let capabilities = parse_capabilities(&v)?;
@@ -57,7 +59,6 @@ pub fn parse_manifest(json: &str) -> HpResult<PluginManifest> {
         version,
         min_host_version,
         api_version,
-        source_kind,
         runtime_kind,
         entry,
         capabilities,
@@ -124,13 +125,6 @@ fn required_str(v: &Value, key: &str) -> HpResult<String> {
 
 fn nested_str(v: &Value, obj: &str, key: &str) -> Option<String> {
     v.get(obj)?.get(key)?.as_str().map(|s| s.to_string())
-}
-
-fn parse_source_kind(v: &Value) -> HpResult<SourceKind> {
-    // 兼容解析：`source` 不作为信任依据（RFC 0009「来源与信任判定」）。
-    let raw = nested_str(v, "source", "kind").unwrap_or_else(|| "local-path".into());
-    SourceKind::from_str(&raw)
-        .ok_or_else(|| HpError::InvalidArgument(format!("未知插件来源: {raw}")))
 }
 
 fn parse_runtime_kind(v: &Value) -> HpResult<RuntimeKind> {
@@ -622,7 +616,6 @@ mod tests {
         let m = parse_manifest(SAMPLE).expect("解析失败");
         assert_eq!(m.id.as_str(), "dev.hamsterpouch.hello");
         assert_eq!(m.runtime_kind, RuntimeKind::ExternalProcess);
-        assert_eq!(m.source_kind, SourceKind::LocalPath);
         assert_eq!(m.trust_requested, TrustLevel::LocalDev);
         assert_eq!(m.capabilities, vec![Capability::UiPanel, Capability::RepoRead]);
         assert_eq!(m.api_version, 1);
@@ -642,6 +635,27 @@ mod tests {
         assert_eq!(m.declared_event_ids(), vec!["greet"]);
         assert_eq!(m.native_dependencies, vec!["bin/hello.dll".to_string()]);
         assert!(m.validate().is_ok());
+    }
+
+    #[test]
+    fn manifest_source_declaration_is_ignored() {
+        // 缺陷 0008：manifest 自称 `source.kind = system` 不得产生任何解析结果——
+        // `PluginManifest` 连来源字段都没有，正式信任推导只认宿主判定的来源。
+        let json = SAMPLE.replace(
+            "\"source\": { \"kind\": \"local-path\" }",
+            "\"source\": { \"kind\": \"system\" }",
+        );
+        let m = parse_manifest(&json).expect("自称来源不应影响解析");
+        assert_eq!(m.id.as_str(), "dev.hamsterpouch.hello");
+        // 自称 system 不影响任何字段：请求的信任等级仍原样来自 `trust.requested`。
+        assert_eq!(m.trust_requested, TrustLevel::LocalDev);
+
+        // 连非法的自称来源也照常忽略（该键不再是契约的一部分）。
+        let bogus = SAMPLE.replace(
+            "\"source\": { \"kind\": \"local-path\" }",
+            "\"source\": { \"kind\": \"bogus\" }",
+        );
+        assert!(parse_manifest(&bogus).is_ok());
     }
 
     #[test]
