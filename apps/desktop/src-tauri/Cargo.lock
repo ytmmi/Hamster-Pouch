@@ -1631,6 +1631,7 @@ dependencies = [
  "image",
  "kamadak-exif",
  "serde_json",
+ "windows 0.61.3",
 ]
 
 [[package]]

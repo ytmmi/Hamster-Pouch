@@ -9,6 +9,7 @@ import type {
   MediaPauseArgs,
   MediaPlayArgs,
   MediaPlayResult,
+  MediaPlaybackSnapshot,
   MediaSeekArgs,
   MediaStatus,
   MediaStopArgs,
@@ -22,27 +23,24 @@ export function mediaPlay(args: MediaPlayArgs): Promise<MediaPlayResult> {
   });
 }
 
-/** 暂停 / 继续（paused 缺省=切换为暂停） */
+/**
+ * 暂停 / 继续（paused 缺省=切换为暂停）。
+ *
+ * 后端按"当前常驻媒体子进程"操作、**不使用** `sessionId`（它只是 `file_id` 的回显），
+ * 因此这里不再传——面板也就能在没有本地会话记录时直接控制播放（蓝图双击的情形）。
+ */
 export function mediaPause(args: MediaPauseArgs): Promise<void> {
-  return invoke<void>("media_pause", {
-    sessionId: args.sessionId,
-    paused: args.paused,
-  });
+  return invoke<void>("media_pause", { paused: args.paused });
 }
 
-/** 绝对定位到指定毫秒位置 */
+/** 绝对定位到指定毫秒位置（同样不依赖 `sessionId`）。 */
 export function mediaSeek(args: MediaSeekArgs): Promise<void> {
-  return invoke<void>("media_seek", {
-    sessionId: args.sessionId,
-    positionMs: args.positionMs,
-  });
+  return invoke<void>("media_seek", { positionMs: args.positionMs });
 }
 
-/** 停止播放（保留常驻进程） */
-export function mediaStop(args: MediaStopArgs): Promise<void> {
-  return invoke<void>("media_stop", {
-    sessionId: args.sessionId,
-  });
+/** 停止播放（保留常驻进程）。 */
+export function mediaStop(): Promise<void> {
+  return invoke<void>("media_stop");
 }
 
 /** 查询媒体子进程状态（alive / pipe） */
@@ -63,4 +61,28 @@ export function mediaEmbedRect(args: MediaEmbedRectArgs): Promise<boolean> {
 /** 销毁面板级渲染子窗口（面板关闭时调用） */
 export function mediaEmbedRelease(): Promise<void> {
   return invoke<void>("media_embed_release");
+}
+
+/**
+ * 显示/隐藏面板级渲染子窗口（面板切到后台标签时必须隐藏）。
+ *
+ * 原生子窗口不受 DOM/CSS 约束，不会随面板卸载自动消失；返回 `false` 表示窗口
+ * 尚未创建（隐藏是空操作，不算错误）。
+ */
+export function mediaEmbedVisible(visible: boolean): Promise<boolean> {
+  return invoke<boolean>("media_embed_visible", { visible });
+}
+
+/**
+ * 设置渲染子窗口是否把鼠标事件穿透给下层 WebView（默认穿透）。
+ *
+ * 穿透开启时「单击视频暂停/继续」与进度条拖动才能收到事件。
+ */
+export function mediaEmbedClickThrough(enabled: boolean): Promise<boolean> {
+  return invoke<boolean>("media_embed_click_through", { enabled });
+}
+
+/** 读取播放进度快照（进度条与暂停状态实时同步）。 */
+export function mediaPlaybackState(): Promise<MediaPlaybackSnapshot> {
+  return invoke<MediaPlaybackSnapshot>("media_playback_state");
 }

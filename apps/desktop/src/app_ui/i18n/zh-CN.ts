@@ -48,7 +48,7 @@ export const zhCN = {
   "panel.metadata": "元数据",
   "panel.tags": "标签/评分",
   "panel.color": "色彩参考",
-  "panel.player": "媒体播放",
+  "panel.player": "媒体播放器",
   "panel.tasks": "任务",
 
   // 状态栏
@@ -269,26 +269,16 @@ export const zhCN = {
   "media.addToAlbum": "加入相册",
   "media.removeFromAlbumAction": "移出相册",
 
-  // 媒体播放
-  "player.statusFailed": "媒体状态查询失败：{err}",
+  // 媒体播放器
   "player.selectFileFirst": "请先选中文件",
   "player.playingInMpv": "已在 mpv 中播放",
   "player.playFailed": "播放失败：{err}",
-  "player.resumed": "已继续",
   "player.paused": "已暂停",
   "player.pauseToggleFailed": "暂停切换失败：{err}",
-  "player.invalidSeek": "定位值无效",
-  "player.seeked": "已定位到 {ms} ms",
   "player.seekFailed": "定位失败：{err}",
-  "player.stopped": "已停止",
-  "player.stopFailed": "停止失败：{err}",
-  "player.seekPlaceholder": "毫秒",
-  "player.refreshStatus": "刷新状态",
-  "player.session": "会话",
-  "player.processAlive": "进程存活",
-  "player.ipcPipe": "IPC 管道",
-  "player.panelEmbed": "面板嵌入",
-  "player.embedded": "已嵌入",
+  "player.clickToPause": "单击暂停",
+  "player.clickToResume": "单击继续",
+  "player.progress": "播放进度",
   "player.detachedWindow": "独立窗口",
 
   // 色彩参考

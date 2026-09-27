@@ -30,7 +30,7 @@ import {
  * - 左栏（blk_left）：**三个独立面板**，故直接含 仓库、媒体源、相册 三个面板
  *   （该栏没有 dockview 标签组）；
  * - 中栏（blk_center）：**只有一个标签组** `g_media`，其成员为 媒体预览 / 查看器 /
- *   媒体播放（布局里就是同一个 leaf 的三个标签页）；媒体预览内部再分
+ *   媒体播放器（布局里就是同一个 leaf 的三个标签页）；媒体预览内部再分
  *   图像/视频/音频 类目 → 各一个「双击」对象；
  * - 右栏（blk_right）：**只有一个标签组** `g_inspector`，成员为 色彩参考 /
  *   标签·评分 / 元数据（布局里同样是同一个 leaf 的三个标签页）。
@@ -79,7 +79,7 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { key: "c_sources", type: "control", layer: "l_main", panel_id: "sources", title_key: "panel.sources", position: { x: 40, y: 430 } },
     { key: "c_albums", type: "control", layer: "l_main", panel_id: "albums", title_key: "panel.albums", position: { x: 40, y: 560 } },
 
-    // 中栏：**只有标签组** g_media（媒体预览 / 查看器 / 媒体播放同属一个 dockview
+    // 中栏：**只有标签组** g_media（媒体预览 / 查看器 / 媒体播放器同属一个 dockview
     // 标签组，对应布局里的一个 leaf），媒体预览内部再分 图像/视频/音频 类目 → 对象。
     { key: "g_media", type: "group", layer: "l_main", mode: "exclusive", name: "媒体·查看器·播放", position: { x: 460, y: 300 } },
     { key: "c_media", type: "control", layer: "l_main", panel_id: "media", title_key: "panel.media", position: { x: 760, y: 300 } },

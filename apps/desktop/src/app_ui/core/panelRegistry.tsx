@@ -33,10 +33,22 @@ import { TagTablePanel } from "../panels/TagTablePanel";
 import { TaskPanel } from "../panels/TaskPanel";
 import { ViewerPanel } from "../panels/ViewerPanel";
 
+/**
+ * 面板渲染所需的 dockview 运行时信息。
+ *
+ * 需要「自己是不是当前激活标签」的面板（如媒体播放器：原生渲染子窗口必须随面板
+ * 显隐）不能只靠 React 挂载/卸载判断——dockview 会把非激活标签的组件继续留在 DOM
+ * 里，`useEffect` 的清理函数因此不会执行。
+ */
+export interface PanelRenderCtx {
+  /** dockview 面板 API（订阅 `onDidActiveChange` 等）。 */
+  api: IDockviewPanelProps["api"];
+}
+
 export interface PanelDef {
   id: string;
   titleKey: TranslationKey;
-  render: () => JSX.Element;
+  render: (ctx: PanelRenderCtx) => JSX.Element;
 }
 
 /** 宿主内置 13 个面板（顺序与 `PANEL_IDS` 一致）。 */
@@ -50,7 +62,8 @@ export const PANEL_DEFS: PanelDef[] = [
   { id: "tags", titleKey: "panel.tags", render: () => <TagRatingPanel /> },
   { id: "tagtable", titleKey: "panel.tagtable", render: () => <TagTablePanel /> },
   { id: "color", titleKey: "panel.color", render: () => <ColorPanel /> },
-  { id: "player", titleKey: "panel.player", render: () => <MediaPlayerPanel /> },
+  // 媒体播放器持有**原生**渲染子窗口（libmpv，D14），必须知道激活状态才能显隐。
+  { id: "player", titleKey: "panel.player", render: (ctx) => <MediaPlayerPanel api={ctx.api} /> },
   { id: "tasks", titleKey: "panel.tasks", render: () => <TaskPanel /> },
   { id: "plugins", titleKey: "panel.plugins", render: () => <PluginPanel /> },
   { id: "blueprint", titleKey: "panel.blueprint", render: () => <BlueprintPanel /> },
@@ -96,9 +109,10 @@ export function panelTitle(id: string, t: Translate): string {
   return key ? t(key) : id;
 }
 
-export function panelRender(id: string): JSX.Element | null {
+/** 面板渲染（无 dockview 上下文；供独立窗口 `SinglePanelHost` 等宿主使用）。 */
+export function panelRender(id: string, ctx: PanelRenderCtx): JSX.Element | null {
   const def = allPanelDefs().find((p) => p.id === id);
-  return def ? def.render() : null;
+  return def ? def.render(ctx) : null;
 }
 
 /** dockview 组件表（内置 13 个；与 `PANEL_DEFS` 一一对应）。 */
@@ -115,7 +129,11 @@ export function useDockComponents(): Record<string, FC<IDockviewPanelProps>> {
 function buildComponents(defs: PanelDef[]): Record<string, FC<IDockviewPanelProps>> {
   return Object.fromEntries(
     defs.map((def) => {
-      const Component: FC<IDockviewPanelProps> = () => <>{def.render()}</>;
+      // dockview 把面板 API 交给组件；这里透传给 `render`，让需要感知
+      // 「自己是不是当前激活标签」的面板（媒体播放器）能正确显隐原生子窗口。
+      const Component: FC<IDockviewPanelProps> = (props) => (
+        <>{def.render({ api: props.api })}</>
+      );
       Component.displayName = `DockPanel_${def.id}`;
       return [def.id, Component];
     }),

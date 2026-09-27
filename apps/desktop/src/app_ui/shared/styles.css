@@ -1364,11 +1364,70 @@ button.danger {
 
 /* ===== M4-8：面板级媒体嵌入渲染目标占位�?===== */
 
+/* 播放画面区：原生渲染子窗口盖在 .player-surface 之上；
+   .player-click-layer 是接收点击的透明覆盖层（子窗口已设为穿透）。 */
+.player-stage {
+  position: relative;
+  flex: 1;
+  min-height: 180px;
+  display: flex;
+}
+
 .player-surface {
   flex: 1;
   min-height: 180px;
   background: #000;
   border-radius: 4px;
+}
+
+.player-click-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--fg);
+}
+
+.player-click-layer:disabled {
+  cursor: default;
+}
+
+/* 未播放 / 已暂停时给一行居中提示（画面本身在原生窗口里，DOM 看不到） */
+.player-overlay-hint {
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 13px;
+}
+
+/* 进度条：画面下方，时间在两端 */
+.player-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.player-progress-bar {
+  flex: 1;
+  min-width: 80px;
+}
+
+.player-time {
+  font-size: 12px;
+  color: var(--fg-dim);
+  min-width: 44px;
+  text-align: center;
+}
+
+.player-detached {
+  font-size: 12px;
 }
 
 /* ===== M6：蓝图过渡编辑器（RFC 0007�?===== */

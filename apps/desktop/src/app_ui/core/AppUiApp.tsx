@@ -177,8 +177,40 @@ export function AppUiApp(): JSX.Element {
     [],
   );
 
-  // 语言切换时更新所有面板标签页标题（组件名随语言变化），并按蓝图重新对账布局
-  // （默认可见/组收起状态与语言无关，但重渲染后需保持不漂移）。
+  /**
+   * 等面板级渲染子窗口就绪后再播放（`docs/issues/0001`）。
+   *
+   * 蓝图双击会先 `show 播放器` 再立刻 `play`，但嵌入子窗口要等播放器面板挂载后的
+   * `useEffect` 才创建；后端拿不到渲染目标时返回 `EMBED_NOT_READY`（不再静默开独立
+   * 窗口）。这里轮询重试，让"第一次双击"也走面板内嵌。
+   */
+  const playWhenEmbedReady = useCallback(
+    async (repoIdValue: string, fileId: string, attempts = 25): Promise<void> => {
+      let lastError: unknown;
+      for (let i = 0; i < attempts; i += 1) {
+        try {
+          await api.mediaPlay({ repoId: repoIdValue, fileId });
+          return;
+        } catch (e) {
+          lastError = e;
+          if (!String(e).includes("EMBED_NOT_READY")) {
+            throw e;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 80));
+        }
+      }
+      throw lastError;
+    },
+    [],
+  );
+
+  // 面板标题**始终**由「面板注册表 + 当前语言」派生，不采信布局里持久化的 `title`。
+  //
+  // 为什么需要这一步：dockview 的 `fromJSON` 会把持久化布局里存的 `title` 原样恢复，
+  // 而标题是派生显示值、不是布局数据。少了它，面板改名（或切换语言）后旧布局会一直
+  // 显示旧名——包括**未激活的标签页**（其组件尚未挂载，没法自行纠正）。
+  // 因此这里既订阅 `onDidAddPanel`（覆盖 `fromJSON` 重建出来的每一个面板），
+  // 也对已存在的面板立即补一遍。
   useEffect(() => {
     const dv = apiRef.current;
     if (!dv) {
@@ -187,7 +219,13 @@ export function AppUiApp(): JSX.Element {
     for (const panel of dv.panels) {
       panel.setTitle(panelTitle(panel.id, t));
     }
+    const disposable = dv.onDidAddPanel((panel) => {
+      panel.setTitle(panelTitle(panel.id, t));
+    });
+    // 语言切换后按蓝图重新对账布局（默认可见/组收起状态与语言无关，
+    // 但重渲染后需保持不漂移）。
     reconcileActiveBlueprint(dv);
+    return () => disposable.dispose();
   }, [t, language]);
 
   // 双击预览：已存在的目标面板 → 激活（切换 tab）；不存在 → 创建（可按需浮动）
@@ -383,8 +421,10 @@ export function AppUiApp(): JSX.Element {
         if (!repoId) {
           return;
         }
-        void api
-          .mediaPlay({ repoId, fileId })
+        // 蓝图双击与「显示播放器」在同一帧发生，而面板级嵌入子窗口是在播放器面板
+        // **挂载之后**才由 `media_embed_rect` 创建的。后端此时会回 EMBED_NOT_READY
+        // （不再静默降级为独立窗口，见 `docs/issues/0001`），这里等面板就绪后重试。
+        void playWhenEmbedReady(repoId, fileId)
           .then(() => status(t("player.playingInMpv"), "ok"))
           .catch((e) => status(t("player.playFailed", { err: String(e) }), "error"));
       },

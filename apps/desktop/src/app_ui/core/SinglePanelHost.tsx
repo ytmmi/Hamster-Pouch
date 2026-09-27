@@ -14,7 +14,7 @@ import { bindTaskActions, startTaskEvents } from "./taskStore";
 import { useConfirm } from "./useConfirm";
 import { blueprintEngine } from "./blueprintEngine";
 import { DEFAULT_LANGUAGE, isLanguage, makeTranslator, type Language } from "../i18n";
-import { panelRender, panelTitle } from "./panelRegistry";
+import { panelRender, panelTitle, type PanelRenderCtx } from "./panelRegistry";
 import type { FileItem, StatusType } from "../shared/types";
 
 export interface SinglePanelHostProps {
@@ -94,7 +94,16 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
     ],
   );
 
-  const content = panelRender(panelId);
+  // 独立单面板窗口**没有** dockview 面板 API：用最小替身让面板正常渲染，
+  // 且视为"始终激活"（该窗口只显示这一个面板，没有标签可切换）。
+  const content = panelRender(panelId, {
+    api: {
+      isActive: true,
+      isVisible: true,
+      onDidActiveChange: () => ({ dispose: () => undefined }),
+      onDidVisibilityChange: () => ({ dispose: () => undefined }),
+    } as unknown as PanelRenderCtx["api"],
+  });
 
   return (
     <AppContext.Provider value={ctxValue}>
