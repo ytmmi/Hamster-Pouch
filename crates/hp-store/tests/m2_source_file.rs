@@ -140,14 +140,32 @@ fn query_files_dir_prefix_filter() {
     }
 
     // 无前缀：返回全部 4 个
-    let all = db
-        .query_files("repo-1", None, Some(s.id.as_str()), None, 100, 0)
+    let (all, next) = db
+        .query_files(
+            "repo-1",
+            &hp_store::FileQueryFilter {
+                source_id: Some(s.id.as_str()),
+                ..Default::default()
+            },
+            None,
+            100,
+        )
         .expect("查询失败");
     assert_eq!(all.len(), 4);
+    assert!(next.is_none(), "未超页大小不应给出下一页游标");
 
     // 前缀 Raw：仅 Raw/b.jpg 与 Raw/Sub/c.jpg（不含 RawX/d.jpg、a.jpg）
-    let filtered = db
-        .query_files("repo-1", None, Some(s.id.as_str()), Some("Raw"), 100, 0)
+    let (filtered, _) = db
+        .query_files(
+            "repo-1",
+            &hp_store::FileQueryFilter {
+                source_id: Some(s.id.as_str()),
+                dir_prefix: Some("Raw"),
+                ..Default::default()
+            },
+            None,
+            100,
+        )
         .expect("查询失败");
     let mut rels: Vec<&str> = filtered
         .iter()
@@ -155,6 +173,89 @@ fn query_files_dir_prefix_filter() {
         .collect();
     rels.sort_unstable();
     assert_eq!(rels, vec!["Raw/Sub/c.jpg", "Raw/b.jpg"]);
+
+    db.close().expect("关闭失败");
+}
+
+/// D78：键集游标分页——逐页取完不重不漏，且**翻页途中插入新行也不会漏项**。
+#[test]
+fn cursor_pagination_is_stable_under_inserts() {
+    let path = temp_path("cursor");
+    let mut db = RepoDb::create(&path, "仓库").expect("创建仓库失败");
+    let s = db
+        .mount_source("repo-1", "C:/photos", None, None)
+        .expect("挂载失败");
+
+    let row = |rel: &str| FileIndexRow {
+        id: FileId::generate(),
+        source_id: s.id.clone(),
+        relative_path: rel.to_string(),
+        media_type: MediaType::Image,
+        content_hash: Some(format!("h-{rel}")),
+        content_hash_algo: Some("BLAKE3".to_string()),
+        content_hash_algo_version: Some(1),
+        perceptual_hash: None,
+        perceptual_hash_algo: None,
+        perceptual_hash_algo_version: None,
+        size: 1,
+        mtime: "1".to_string(),
+        scan_time: "t".to_string(),
+        verify_status: VerifyStatus::Ok,
+        thumb_status: ThumbStatus::NotGenerated,
+        missing_status: 0,
+        media_info_json: None,
+    };
+    // 文件名故意让"按路径排序"与"插入顺序"不同。
+    for rel in ["b.jpg", "a.jpg", "d.jpg", "c.jpg"] {
+        db.upsert_file(&row(rel)).expect("写入失败");
+    }
+
+    let filter = hp_store::FileQueryFilter {
+        source_id: Some(s.id.as_str()),
+        ..Default::default()
+    };
+
+    // 第一页：2 条 + 游标。
+    let (page1, cursor1) = db.query_files("repo-1", &filter, None, 2).expect("第一页失败");
+    assert_eq!(page1.len(), 2);
+    let cursor1 = cursor1.expect("还有下一页时必须给出游标");
+    assert_eq!(cursor1.relative_path, "b.jpg", "排序键应为 relative_path 升序");
+
+    // 翻页途中插入一行（**排在游标之前**）：键集游标不受影响；offset 分页会在这里漏项/重复。
+    db.upsert_file(&row("aa.jpg")).expect("插入失败");
+
+    let (page2, cursor2) = db
+        .query_files("repo-1", &filter, Some(&cursor1), 2)
+        .expect("第二页失败");
+    let rels2: Vec<&str> = page2.iter().map(|r| r.relative_path.as_str()).collect();
+    assert_eq!(rels2, vec!["c.jpg", "d.jpg"]);
+    assert!(
+        cursor2.is_none(),
+        "第二页刚好取完，末页不得再给游标（给出即会让调用方多跑一次空页）"
+    );
+
+    // 两页拼起来 = **不重不漏**：插入的 `aa.jpg` 排在游标之前，因此按设计不在本次翻页结果里，
+    // 也**不会**把后面的行顶成重复（同一场景下 offset 分页会让 `b.jpg` 或 `c.jpg` 重复出现）。
+    let mut seen: Vec<String> = page1
+        .iter()
+        .chain(page2.iter())
+        .map(|r| r.relative_path.clone())
+        .collect();
+    seen.sort();
+    assert_eq!(seen, vec!["a.jpg", "b.jpg", "c.jpg", "d.jpg"]);
+    assert_eq!(seen.len(), 4, "不得重复返回任何行");
+
+    // 从头再翻一次（此时 `aa.jpg` 已在库里）：能取到全部 5 条，说明新行按排序键正常进入首页序列。
+    let (all_first_page, _) = db.query_files("repo-1", &filter, None, 1).expect("首页失败");
+    assert_eq!(all_first_page[0].relative_path, "a.jpg");
+
+    // 游标是不透明字符串：编码/解码往返一致；非法游标报错（不静默从头开始）。
+    let round = hp_store::FileQueryCursor::decode(&cursor1.encode()).expect("游标往返失败");
+    assert_eq!(round, cursor1);
+    assert!(
+        hp_store::FileQueryCursor::decode("garbage").is_err(),
+        "非法游标必须报错"
+    );
 
     db.close().expect("关闭失败");
 }

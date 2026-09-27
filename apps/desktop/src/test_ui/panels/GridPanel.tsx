@@ -40,14 +40,13 @@ export function GridPanel({
     let cancelled = false;
     void (async () => {
       try {
-        const rows = await api.fileQuery({
+        const page = await api.fileQuery({
           repoId,
-          mediaType: mediaType || undefined,
+          filter: { mediaType: mediaType || undefined },
           limit: 500,
-          offset: 0,
         });
         if (!cancelled) {
-          setFiles(rows);
+          setFiles(page.items);
         }
       } catch (e) {
         if (!cancelled) {

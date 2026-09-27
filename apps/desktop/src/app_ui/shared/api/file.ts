@@ -14,6 +14,7 @@ import type {
   FileMetadataResult,
   FilePathArgs,
   FileQueryArgs,
+  FileQueryPage,
   FileReanalyzeArgs,
   FileRenameArgs,
   FileTrashArgs,
@@ -37,15 +38,19 @@ export function filePath(args: FilePathArgs): Promise<string> {
   }).then(unwrapApi);
 }
 
-/** 按仓库分页查询文件索引 */
-export function fileQuery(args: FileQueryArgs): Promise<FileItem[]> {
-  return invoke<ApiResponse<FileItem[]>>("file_query", {
+/**
+ * 按仓库**游标分页**查询文件索引（D78）。
+ *
+ * 请求 `{ repoId, filter?, cursor?, limit? }`（`limit` 只是页大小）；
+ * 响应 `{ items, nextCursor }`——把 `nextCursor` 原样回传即可续页，`null` 表示末页。
+ * 排序键 `(relative_path, source_id, id)`。
+ */
+export function fileQuery(args: FileQueryArgs): Promise<FileQueryPage> {
+  return invoke<ApiResponse<FileQueryPage>>("file_query", {
     repoId: args.repoId,
-    mediaType: args.mediaType,
-    sourceId: args.sourceId,
-    dirPrefix: args.dirPrefix,
-    limit: args.limit,
-    offset: args.offset,
+    filter: args.filter ?? null,
+    cursor: args.cursor ?? null,
+    limit: args.limit ?? null,
   }).then(unwrapApi);
 }
 

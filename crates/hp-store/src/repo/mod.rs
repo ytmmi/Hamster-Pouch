@@ -16,6 +16,7 @@ mod tag_repo;
 mod tag_tree;
 
 pub use album_repo::AlbumSourceMembers;
+pub use file_repo::{FileQueryCursor, FileQueryFilter, FILE_QUERY_MAX_LIMIT};
 pub use ops_repo::OpsHistoryRow;
 pub use purge_repo::{PurgePhase, PurgeResult, SourceDataCounts};
 pub use repo_db::RepoDb;

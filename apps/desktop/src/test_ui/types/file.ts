@@ -36,10 +36,23 @@ export interface FilePathArgs {
   fileId: string;
 }
 
-export interface FileQueryArgs {
-  repoId: string;
+/** `file.query` 的过滤条件（契约里的 `filter` 对象）。 */
+export interface FileQueryFilter {
   mediaType?: string;
   sourceId?: string;
+  dirPrefix?: string;
+}
+
+/** `file.query` 的命令参数（游标分页，D78）。 */
+export interface FileQueryArgs {
+  repoId: string;
+  filter?: FileQueryFilter;
+  cursor?: string | null;
   limit?: number;
-  offset?: number;
+}
+
+/** `file.query` 的响应体（排序键 `(relative_path, source_id, id)`）。 */
+export interface FileQueryPage {
+  items: FileItem[];
+  nextCursor: string | null;
 }

@@ -67,13 +67,13 @@ export function SourceSelectPanel({
     let cancelled = false;
     void (async () => {
       try {
-        const rows = await api.fileQuery({
+        const page = await api.fileQuery({
           repoId,
-          sourceId: selectedSourceId,
+          filter: { sourceId: selectedSourceId },
           limit: 200,
         });
         if (!cancelled) {
-          setFiles(rows);
+          setFiles(page.items);
         }
       } catch (e) {
         if (!cancelled) {

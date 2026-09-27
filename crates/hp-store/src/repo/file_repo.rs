@@ -1,10 +1,86 @@
 //! 文件索引仓储（RFC 0001 / database-schema.md 第 4.3 节）。
 
-use hp_core::{FileId, FileIndexRow, HpResult, MediaType, SourceId, ThumbStatus, VerifyStatus};
+use hp_core::{FileId, FileIndexRow, HpError, HpResult, MediaType, SourceId, ThumbStatus, VerifyStatus};
 use rusqlite::{params, OptionalExtension, Row};
 
 use crate::repo::repo_db::RepoDb;
 use crate::util::{require_nonempty, store_err};
+
+/// 单页最大条数（防调用方一次拉全库；契约里 `limit` 只是页大小）。
+pub const FILE_QUERY_MAX_LIMIT: i64 = 1000;
+
+/// `file.query` 的过滤条件。
+#[derive(Debug, Clone, Default)]
+pub struct FileQueryFilter<'a> {
+    pub media_type: Option<MediaType>,
+    pub source_id: Option<&'a str>,
+    /// 只返回 `relative_path` 以 `<dir_prefix>/` 开头的文件（含更深子目录）。
+    pub dir_prefix: Option<&'a str>,
+}
+
+/// 键集游标：指向排序键 `(relative_path, source_id, id)` 上**最后一个已返回行**。
+///
+/// 对外是**不透明字符串**（[`FileQueryCursor::encode`] / [`FileQueryCursor::decode`]）：
+/// 契约只承诺"把它原样回传即可续页"，不承诺编码格式。
+///
+/// 编码是 `"{路径字节长度}\u{1f}{路径}\u{1f}{source_id}\u{1f}{id}"`：
+/// **先读长度再按字节切**，因此相对路径里即使出现分隔符也不歧义
+/// （用 `split` 拼串在某些文件名上会切错）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileQueryCursor {
+    pub relative_path: String,
+    pub source_id: String,
+    pub id: String,
+}
+
+/// 游标字段分隔符（U+001F，单元分隔符）。
+const CURSOR_SEP: char = '\u{1f}';
+
+impl FileQueryCursor {
+    fn is_empty(&self) -> bool {
+        self.relative_path.is_empty() && self.source_id.is_empty() && self.id.is_empty()
+    }
+
+    /// 编码为可回传的游标字符串。
+    pub fn encode(&self) -> String {
+        format!(
+            "{}{CURSOR_SEP}{}{CURSOR_SEP}{}{CURSOR_SEP}{}",
+            self.relative_path.len(),
+            self.relative_path,
+            self.source_id,
+            self.id
+        )
+    }
+
+    /// 解析调用方回传的游标（非法即 `validation`，**不静默从头开始**）。
+    pub fn decode(raw: &str) -> HpResult<Self> {
+        let invalid = || {
+            HpError::InvalidArgument(
+                "游标格式非法（应由上次响应的 nextCursor 原样回传）".into(),
+            )
+        };
+        let Some(sep1) = raw.find(CURSOR_SEP) else {
+            return Err(invalid());
+        };
+        let len: usize = raw[..sep1].parse().map_err(|_| invalid())?;
+        let rest = &raw[sep1 + CURSOR_SEP.len_utf8()..];
+        if rest.len() < len || !rest.is_char_boundary(len) {
+            return Err(invalid());
+        }
+        let (path, rest) = rest.split_at(len);
+        let Some(rest) = rest.strip_prefix(CURSOR_SEP) else {
+            return Err(invalid());
+        };
+        let Some((source_id, id)) = rest.split_once(CURSOR_SEP) else {
+            return Err(invalid());
+        };
+        Ok(Self {
+            relative_path: path.to_string(),
+            source_id: source_id.to_string(),
+            id: id.to_string(),
+        })
+    }
+}
 
 /// `files` 表列清单（与迁移 0001 + 0002 顺序一致）。
 const FILE_COLUMNS: &str = "id, source_id, relative_path, media_type, \
@@ -155,52 +231,90 @@ impl RepoDb {
         Ok(rows)
     }
 
-    /// 按仓库分页查询文件索引（可选媒体类型 / 媒体源 / 目录前缀过滤，网格面板基础筛选用）。
+    /// 按仓库分页查询文件索引（**游标分页**，D78；可选媒体类型 / 媒体源 / 目录前缀过滤）。
     ///
     /// `dir_prefix` 非空时仅返回 `relative_path` 以 `<dir_prefix>/` 开头的文件（含更深子目录）。
+    ///
+    /// **排序键（游标的依据，契约要求写明）**：`(relative_path, source_id, id)` **升序**。
+    /// - `relative_path` 单独**不是**全序：同一仓库下两个源可以有同名相对路径，
+    ///   所以必须带上 `source_id`；`id` 是主键，保证同一 `(源, 路径)`（唯一索引）下也不含糊。
+    /// - 游标是**键集游标**（keyset），不是 `OFFSET`：库内容在翻页途中变动（扫描新增/删除）
+    ///   时不会漏项或重复——这正是 D78 换掉 `offset` 的原因。
+    ///
+    /// 返回 `(本页行, 下一页游标)`；`next_cursor = None` 表示已到末页。
+    /// 实现取 `limit + 1` 行来判断"还有没有下一页"，因此**不会**多返回一行。
     pub fn query_files(
         &self,
         repo_id: &str,
-        media_type: Option<MediaType>,
-        source_id: Option<&str>,
-        dir_prefix: Option<&str>,
+        filter: &FileQueryFilter<'_>,
+        cursor: Option<&FileQueryCursor>,
         limit: i64,
-        offset: i64,
-    ) -> HpResult<Vec<FileIndexRow>> {
+    ) -> HpResult<(Vec<FileIndexRow>, Option<FileQueryCursor>)> {
         require_nonempty(repo_id, "仓库 ID")?;
-        let dir_pattern = dir_prefix
+        let limit = limit.clamp(1, FILE_QUERY_MAX_LIMIT);
+        let dir_pattern = filter
+            .dir_prefix
             .filter(|p| !p.trim().is_empty())
             .map(|p| format!("{}/%", escape_like(p.trim_matches('/'))));
+        // 键集谓词：`(relative_path, source_id, id) > (游标三元组)`，展开写以避开行值比较的方言差异。
+        let after = cursor.map(|_| {
+            "(f.relative_path > ?6
+              OR (f.relative_path = ?6
+                  AND (f.source_id > ?7
+                       OR (f.source_id = ?7 AND f.id > ?8))))"
+        });
+        let sql = format!(
+            "SELECT {FILE_COLUMNS_F}
+             FROM files f JOIN sources s ON s.id = f.source_id
+             WHERE s.repo_id = ?1
+               AND s.mounted = 1
+               AND (?2 IS NULL OR f.media_type = ?2)
+               AND (?3 IS NULL OR f.source_id = ?3)
+               AND (?4 IS NULL OR f.relative_path LIKE ?4 ESCAPE '\\')
+               AND (?5 = 0 OR {after})
+             ORDER BY f.relative_path, f.source_id, f.id
+             LIMIT ?9",
+            after = after.unwrap_or("1 = 1")
+        );
         let mut stmt = self
             .conn()
-            .prepare(&format!(
-                "SELECT {FILE_COLUMNS_F}
-                 FROM files f JOIN sources s ON s.id = f.source_id
-                 WHERE s.repo_id = ?1
-                   AND s.mounted = 1
-                   AND (?2 IS NULL OR f.media_type = ?2)
-                   AND (?3 IS NULL OR f.source_id = ?3)
-                   AND (?4 IS NULL OR f.relative_path LIKE ?4 ESCAPE '\\')
-                 ORDER BY f.relative_path
-                 LIMIT ?5 OFFSET ?6"
-            ))
+            .prepare(&sql)
             .map_err(|e| store_err("查询文件列表", e))?;
+        let cursor = cursor.cloned().unwrap_or_default();
         let rows = stmt
             .query_map(
                 params![
                     repo_id,
-                    media_type.map(|m| m.as_str()),
-                    source_id,
+                    filter.media_type.map(|m| m.as_str()),
+                    filter.source_id,
                     dir_pattern,
-                    limit,
-                    offset
+                    if cursor.is_empty() { 0 } else { 1 },
+                    cursor.relative_path,
+                    cursor.source_id,
+                    cursor.id,
+                    limit + 1
                 ],
                 row_to_file,
             )
             .map_err(|e| store_err("读取文件列表", e))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| store_err("解析文件列表", e))?;
-        Ok(rows)
+
+        let mut rows = rows;
+        let has_more = rows.len() as i64 > limit;
+        if has_more {
+            rows.truncate(limit as usize);
+        }
+        let next_cursor = if has_more {
+            rows.last().map(|row| FileQueryCursor {
+                relative_path: row.relative_path.clone(),
+                source_id: row.source_id.as_str().to_string(),
+                id: row.id.as_str().to_string(),
+            })
+        } else {
+            None
+        };
+        Ok((rows, next_cursor))
     }
 
     /// 更新文件路径（移动/重命名且内容哈希一致时，保留 id 与解释数据，RFC 0001）。

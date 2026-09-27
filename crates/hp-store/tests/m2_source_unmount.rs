@@ -57,8 +57,9 @@ fn unmount_hides_source_from_lists_and_queries_but_keeps_index() {
         1
     );
     assert_eq!(
-        db.query_files("repo-1", None, None, None, 100, 0)
+        db.query_files("repo-1", &Default::default(), None, 100)
             .expect("查询文件失败")
+            .0
             .len(),
         1
     );
@@ -95,8 +96,9 @@ fn unmount_hides_source_from_lists_and_queries_but_keeps_index() {
 
     // 3) 离线源的文件不得参与文件查询（否则界面上"卸载了还在"）
     assert!(
-        db.query_files("repo-1", None, None, None, 100, 0)
+        db.query_files("repo-1", &Default::default(), None, 100)
             .expect("查询文件失败")
+            .0
             .is_empty(),
         "离线源的文件不应出现在查询结果里"
     );
@@ -127,8 +129,9 @@ fn unmount_hides_source_from_lists_and_queries_but_keeps_index() {
         "恢复不应新增源行"
     );
     assert_eq!(
-        db.query_files("repo-1", None, None, None, 100, 0)
+        db.query_files("repo-1", &Default::default(), None, 100)
             .expect("查询文件失败")
+            .0
             .len(),
         1,
         "恢复后原文件索引应重新可见（解释数据不丢）"

@@ -101,35 +101,65 @@ pub(crate) fn file_metadata(
     api_from_hp(outcome)
 }
 
-/// file.query：按仓库分页查询文件索引（支持媒体类型 / 媒体源 / 目录前缀过滤）。
-#[tauri::command]
-pub(crate) fn file_query(
-    repo_id: String,
+/// `file.query` 的过滤条件（契约里的 `filter` 对象）。
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FileQueryFilterArgs {
     media_type: Option<String>,
     source_id: Option<String>,
     dir_prefix: Option<String>,
+}
+
+/// `file.query` 的返回体：本页 + 下一页游标（`null` = 已到末页）。
+#[derive(Serialize)]
+pub(crate) struct FileQueryPage {
+    items: Vec<AlbumFileItem>,
+    next_cursor: Option<String>,
+}
+
+/// file.query：按仓库**游标分页**查询文件索引（D78）。
+///
+/// - 请求 `{ repoId, filter?, cursor?, limit? }`：`limit` 只是**页大小**；
+/// - 响应 `{ items, nextCursor }`：把 `nextCursor` 原样回传即可续页，`null` 表示末页；
+/// - **排序键**：`(relative_path, source_id, id)` 升序（见 `hp_store::FileQueryFilter` 的文档）；
+/// - 游标是**键集游标**：翻页途中库内容变动不会漏项/重复（原 `offset` 分页会）。
+#[tauri::command]
+pub(crate) fn file_query(
+    repo_id: String,
+    filter: Option<FileQueryFilterArgs>,
+    cursor: Option<String>,
     limit: Option<i64>,
-    offset: Option<i64>,
     state: State<AppState>,
-) -> ApiResponse<Vec<AlbumFileItem>> {
-    let outcome = (|| -> HpResult<Vec<AlbumFileItem>> {
-        let mt = match media_type.as_deref() {
+) -> ApiResponse<FileQueryPage> {
+    let outcome = (|| -> HpResult<FileQueryPage> {
+        let filter = filter.unwrap_or_default();
+        let media_type = match filter.media_type.as_deref() {
             None | Some("") | Some("multimedia") => None,
-            Some(s) => {
-                Some(MediaType::from_str(s).ok_or_else(|| HpError::InvalidArgument(format!("未知媒体类型: {s}")))?)
-            }
+            Some(s) => Some(
+                MediaType::from_str(s)
+                    .ok_or_else(|| HpError::InvalidArgument(format!("未知媒体类型: {s}")))?,
+            ),
+        };
+        let parsed_cursor = match cursor.as_deref().map(str::trim) {
+            None | Some("") => None,
+            Some(raw) => Some(hp_store::FileQueryCursor::decode(raw)?),
         };
         let guard = lock_repo(&state)?;
         let db = open_repo(&guard)?;
-        let rows = db.query_files(
+        let (rows, next) = db.query_files(
             &repo_id,
-            mt,
-            source_id.as_deref(),
-            dir_prefix.as_deref(),
+            &hp_store::FileQueryFilter {
+                media_type,
+                source_id: filter.source_id.as_deref(),
+                dir_prefix: filter.dir_prefix.as_deref(),
+            },
+            parsed_cursor.as_ref(),
             limit.unwrap_or(500),
-            offset.unwrap_or(0),
         )?;
-        Ok(rows.into_iter().map(file_to_item).collect())
+        Ok(FileQueryPage {
+            items: rows.into_iter().map(file_to_item).collect(),
+            next_cursor: next.map(|c| c.encode()),
+        })
     })();
     api_from_hp(outcome)
 }

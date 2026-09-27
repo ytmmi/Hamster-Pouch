@@ -36,13 +36,42 @@ export interface FilePathArgs {
   fileId: string;
 }
 
-export interface FileQueryArgs {
-  repoId: string;
+/**
+ * `file.query` 的过滤条件（契约里的 `filter` 对象）。
+ *
+ * 三者都是**可选**：不传即不按该维度过滤。
+ */
+export interface FileQueryFilter {
+  /** `image` / `video` / `audio` / `multimedia`（缺省不过滤）。 */
   mediaType?: string;
   sourceId?: string;
+  /** 只返回相对路径以 `<dirPrefix>/` 开头的文件（含更深子目录）。 */
   dirPrefix?: string;
+}
+
+/**
+ * `file.query` 的命令参数（**游标分页**，D78）。
+ *
+ * `limit` 只是**页大小**；`cursor` 是上次响应里的 `nextCursor`（不透明字符串，
+ * 原样回传即可续页，调用方不得解析其内容）。
+ */
+export interface FileQueryArgs {
+  repoId: string;
+  filter?: FileQueryFilter;
+  cursor?: string | null;
   limit?: number;
-  offset?: number;
+}
+
+/**
+ * `file.query` 的响应体。
+ *
+ * **排序键**：`(relative_path, source_id, id)` 升序——分页顺序由它决定，
+ * 且翻页途中库内容变动不会漏项/重复（键集游标，不是 `OFFSET`）。
+ */
+export interface FileQueryPage {
+  items: FileItem[];
+  /** `null` = 已到末页。 */
+  nextCursor: string | null;
 }
 
 /** thumb_get 命令参数 */

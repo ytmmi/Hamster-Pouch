@@ -240,19 +240,23 @@ export function MediaPreviewPanel(): JSX.Element {
       return;
     }
     try {
-      const [list, srcs] = await Promise.all([
+      const [page, srcs] = await Promise.all([
         app.albumId
           ? api.albumMembers({ repoId: app.repoId, albumId: app.albumId })
-          : api.fileQuery({
-              repoId: app.repoId,
-              sourceId: app.sourceId ?? undefined,
-              dirPrefix: app.dirPath ?? undefined,
-              mediaType: typeFilter === "all" ? undefined : typeFilter,
-              limit: 300,
-            }),
+          : api
+              .fileQuery({
+                repoId: app.repoId,
+                filter: {
+                  sourceId: app.sourceId ?? undefined,
+                  dirPrefix: app.dirPath ?? undefined,
+                  mediaType: typeFilter === "all" ? undefined : typeFilter,
+                },
+                limit: 300,
+              })
+              .then((p) => p.items),
         api.sourceList({ repoId: app.repoId }),
       ]);
-      setFiles(list);
+      setFiles(page);
       setSources(srcs);
     } catch (e) {
       app.status(app.t("media.loadFailed", { err: errorTextOf(app.t, e) }), "error");
