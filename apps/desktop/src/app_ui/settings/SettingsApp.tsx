@@ -24,6 +24,7 @@ import {
 } from "@hamster-pouch/config";
 
 import * as api from "../shared/api";
+import { apiErrorMessage, errorCodeOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import type { Translate, TranslationKey } from "../i18n";
 import {
@@ -65,7 +66,8 @@ export function SettingsApp({
       const result = await api.settingList();
       setValues(Object.fromEntries(result.items.map((row) => [row.key, String(row.value)])));
     } catch (e) {
-      app.status(t("settings.loadFailed", { err: String(e) }), "error");
+      // D76：`HpError.message` 只作诊断，界面按错误码走 i18n（D27）。
+      app.status(t("settings.loadFailed", { err: apiErrorMessage(t, errorCodeOf(e)) }), "error");
     }
   }, [app, t]);
 
@@ -108,7 +110,7 @@ export function SettingsApp({
           onLanguageChange(value);
         }
       } catch (e) {
-        app.status(t("settings.saveFailed", { err: String(e) }), "error");
+        app.status(t("settings.saveFailed", { err: apiErrorMessage(t, errorCodeOf(e)) }), "error");
       }
     },
     [app, onLanguageChange, onThemeChange, t],
@@ -126,7 +128,7 @@ export function SettingsApp({
         });
         app.status(t("settings.resetDone"), "ok");
       } catch (e) {
-        app.status(t("settings.saveFailed", { err: String(e) }), "error");
+        app.status(t("settings.saveFailed", { err: apiErrorMessage(t, errorCodeOf(e)) }), "error");
       }
     },
     [app, t],

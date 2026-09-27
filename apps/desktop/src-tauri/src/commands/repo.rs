@@ -2,12 +2,18 @@
 
 use std::path::PathBuf;
 
-use hp_core::RepoId;
+use hp_core::{
+    registry_decl_for_storage_key, scoped_storage_key, validate_setting_value, Capability,
+    HpError, HpResult, RepoId, SettingScope,
+};
+use hp_plugin_host::PluginHost;
 use hp_store::RepoDb;
 use serde::Serialize;
 use tauri::{Emitter, State};
 
-use crate::commands::shared::{default_repo_dir, ensure_global, hp_err_to_string};
+use crate::commands::shared::{
+    api_from_hp, default_repo_dir, ensure_global, hp_err_to_string, ApiResponse,
+};
 use crate::AppState;
 
 /// `app_settings` 的一行（`setting.list` 的 `items` 元素）。
@@ -71,12 +77,137 @@ fn decode_setting_value(raw: &str) -> serde_json::Value {
 }
 
 /// `scope = "repo"` 的设置项按仓库隔离，键为 `{key}.{repoId}`
-/// （`docs/spec/commands-events.md` 3.13）。
-fn scoped_setting_key(key: &str, repo_id: Option<&str>) -> String {
-    match repo_id.map(str::trim).filter(|r| !r.is_empty()) {
-        Some(repo) => format!("{key}.{repo}"),
-        None => key.to_string(),
+/// （`docs/spec/commands-events.md` 3.13 规则 4）。
+///
+/// 规则本身在 `hp_core::scoped_storage_key`（纯函数 + 单测）：
+/// **只有** `scope = "repo"` 的项才拼 `repoId`，其余项忽略传入的 `repoId`。
+
+/// 一个设置键解析出的**校验事实**：宿主/面板项来自注册表镜像，插件项来自 manifest。
+enum SettingTarget {
+    /// 宿主项 / 面板项（`hp_core::setting_registry` 的镜像）。
+    Mirror(&'static hp_core::SettingDeclFact),
+    /// 插件项（随插件包存在，运行时反查）。
+    Plugin {
+        plugin_id: String,
+        decl: hp_core::PanelSettingDecl,
+        storage_key: String,
+    },
+}
+
+impl SettingTarget {
+    /// 基础落库键（不含 `repoId` 后缀）。
+    fn base_key(&self) -> String {
+        match self {
+            SettingTarget::Mirror(fact) => fact.storage_key(),
+            SettingTarget::Plugin { storage_key, .. } => storage_key.clone(),
+        }
     }
+
+    fn scope(&self) -> SettingScope {
+        match self {
+            SettingTarget::Mirror(fact) => fact.scope,
+            SettingTarget::Plugin { decl, .. } => match decl.scope.as_deref() {
+                Some("repo") => SettingScope::Repo,
+                _ => SettingScope::App,
+            },
+        }
+    }
+
+    /// 按注册表 `kind` 校验值（规则 2）。
+    fn validate(&self, value: &serde_json::Value) -> HpResult<()> {
+        match self {
+            SettingTarget::Mirror(fact) => {
+                let options: Vec<String> = fact.options.iter().map(|o| (*o).to_string()).collect();
+                validate_setting_value(fact.kind, value, &options).map_err(HpError::InvalidArgument)
+            }
+            SettingTarget::Plugin { decl, .. } => {
+                // 插件 `select` 的 `options` 尚未在 manifest 侧解析（见设置标准第 5 节缺口），
+                // 因此这里对 select 只能校验"是字符串"——**不假装**校验了枚举归属。
+                validate_setting_value(&decl.kind, value, &[])
+                    .map_err(HpError::InvalidArgument)
+                    .map_err(|e| match (decl.kind.as_str(), e) {
+                        ("select", HpError::InvalidArgument(_)) => HpError::InvalidArgument(
+                            "插件 select 设置项的值必须是字符串（manifest 尚未声明 options）".into(),
+                        ),
+                        (_, e) => e,
+                    })
+            }
+        }
+    }
+}
+
+/// 解析设置键 → 校验事实；**未知键即硬错误**（规则 1）。
+fn resolve_setting_target(state: &AppState, key: &str) -> HpResult<SettingTarget> {
+    if let Some(fact) = registry_decl_for_storage_key(key) {
+        return Ok(SettingTarget::Mirror(fact));
+    }
+    // 宿主内部键（不经注册表、也不允许经 `setting.*` 读写）：明确报错，避免被当成"任意键值存储"。
+    let guard = state
+        .global_db
+        .lock()
+        .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+    let db = guard
+        .as_ref()
+        .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+    if let Some((plugin_id, decl)) = PluginHost.find_setting_decl(db, key)? {
+        return Ok(SettingTarget::Plugin {
+            plugin_id,
+            storage_key: key.to_string(),
+            decl,
+        });
+    }
+    Err(HpError::InvalidArgument(format!(
+        "未知设置键: {key}（设置项必须先在设置注册表里声明）"
+    )))
+}
+
+/// 规则 3：插件项若声明了 `requires_capability`，必须在该仓库已获授权，否则 `permission`。
+///
+/// 失败关闭：拿不到 `repoId` 就无法判定授权，因此**同样返回 `permission`**，
+/// 而不是放行或降级成校验错误。
+fn ensure_setting_capability(
+    state: &AppState,
+    target: &SettingTarget,
+    repo_id: Option<&str>,
+) -> HpResult<()> {
+    let SettingTarget::Plugin { plugin_id, decl, .. } = target else {
+        return Ok(());
+    };
+    let Some(raw) = decl.requires_capability.as_deref() else {
+        return Ok(());
+    };
+    let capability = Capability::from_str(raw)
+        .ok_or_else(|| HpError::InvalidArgument(format!("插件声明了未知能力: {raw}")))?;
+    let repo = repo_id
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .ok_or_else(|| {
+            HpError::Permission(format!(
+                "设置项需要能力 {raw}：必须带 repoId 才能校验插件在该仓库的授权"
+            ))
+        })?;
+    let guard = state
+        .global_db
+        .lock()
+        .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+    let db = guard
+        .as_ref()
+        .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+    PluginHost.check_capability(db, plugin_id, repo, capability)
+}
+
+/// 解析出**实际落库键**（规则 4）+ 校验值（规则 2）+ 校验授权（规则 3）。
+fn prepare_setting_write(
+    state: &AppState,
+    key: &str,
+    value: &serde_json::Value,
+    repo_id: Option<&str>,
+) -> HpResult<String> {
+    let target = resolve_setting_target(state, key)?;
+    target.validate(value)?;
+    ensure_setting_capability(state, &target, repo_id)?;
+    scoped_storage_key(&target.base_key(), target.scope(), repo_id)
+        .map_err(HpError::InvalidArgument)
 }
 
 /// 广播设置变更（`setting.changed`）：前端据此刷新受影响的面板/界面。
@@ -262,33 +393,42 @@ pub(crate) fn repo_list(
 
 /// setting.get：读取单个设置值（`{ value | null }`，标量）。
 ///
-/// `repoId` 只对 `scope = "repo"` 的设置项有意义（键为 `{key}.{repoId}`，3.13 规则）；
-/// 其余项**不得**带（带了即忽略——本实现在空串/缺省时按应用级键处理）。
+/// 契约 3.13 四条规则见 `resolve_setting_target` / `scoped_storage_key`：
+/// 未知键拒绝、`scope = "repo"` 项才拼 `{key}.{repoId}`（缺 `repoId` 即硬错误）。
+/// 形状遵循 **D76**（`{ ok, data?, error? }`；`data = { value }`）。
 #[tauri::command]
 pub(crate) fn setting_get(
     key: String,
     repo_id: Option<String>,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<SettingValueResult, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().expect("ensure_global 已初始化");
-    let stored = g
-        .get_setting(&scoped_setting_key(&key, repo_id.as_deref()))
-        .map_err(hp_err_to_string)?;
-    Ok(SettingValueResult {
-        value: stored.as_deref().map(decode_setting_value),
-    })
+) -> ApiResponse<SettingValueResult> {
+    let outcome = (|| -> HpResult<SettingValueResult> {
+        ensure_global(&state, &app)?;
+        let target = resolve_setting_target(&state, &key)?;
+        ensure_setting_capability(&state, &target, repo_id.as_deref())?;
+        let storage_key = scoped_storage_key(&target.base_key(), target.scope(), repo_id.as_deref())
+            .map_err(HpError::InvalidArgument)?;
+        let guard = state
+            .global_db
+            .lock()
+            .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+        let g = guard
+            .as_ref()
+            .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+        let stored = g.get_setting(&storage_key)?;
+        Ok(SettingValueResult {
+            value: stored.as_deref().map(decode_setting_value),
+        })
+    })();
+    api_from_hp(outcome)
 }
 
 /// setting.set：写入单个设置值（**标量**；并广播 `setting.changed`）。
 ///
-/// 未知键与类型校验由**设置注册表**决定（注册表在前端，`setting.registry` 契约先行），
-/// 因此界面只写注册表里声明过的键；本命令拒绝非标量值（同 D32 口径）。
+/// 契约 3.13 的四条规则都在这里执行（未知键拒绝 / 按 `kind` 校验 /
+/// 插件项不满能力返回 `permission` / 仅 `scope = "repo"` 项拼 `repoId`）。
+/// 形状遵循 **D76**（`{ ok, data?, error? }`；`data = { ok: true }`）。
 #[tauri::command]
 pub(crate) fn setting_set(
     key: String,
@@ -296,70 +436,92 @@ pub(crate) fn setting_set(
     repo_id: Option<String>,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<SettingOkResult, String> {
-    let encoded = encode_setting_value(&value)?;
-    let storage_key = scoped_setting_key(&key, repo_id.as_deref());
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    {
-        let guard = state
-            .global_db
-            .lock()
-            .map_err(|_| "全局库锁中毒".to_string())?;
-        let g = guard.as_ref().expect("ensure_global 已初始化");
-        g.set_setting(&storage_key, &encoded)
-            .map_err(hp_err_to_string)?;
-    }
-    emit_setting_changed(&app, &key);
-    Ok(SettingOkResult { ok: true })
+) -> ApiResponse<SettingOkResult> {
+    let outcome = (|| -> HpResult<SettingOkResult> {
+        ensure_global(&state, &app)?;
+        let storage_key = prepare_setting_write(&state, &key, &value, repo_id.as_deref())?;
+        let encoded = encode_setting_value(&value).map_err(HpError::InvalidArgument)?;
+        {
+            let guard = state
+                .global_db
+                .lock()
+                .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+            let g = guard
+                .as_ref()
+                .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+            g.set_setting(&storage_key, &encoded)?;
+        }
+        emit_setting_changed(&app, &key);
+        Ok(SettingOkResult { ok: true })
+    })();
+    api_from_hp(outcome)
 }
 
 /// setting.list：列出全部设置值（`{ items: [{ key, value }] }`；**不新增库表**）。
+///
+/// 这是 `app_settings` 的**原始转储**（含宿主内部键如 `repo.default`），不做注册表过滤：
+/// 界面按注册表挑选自己要用的行，过滤反而会让"未设置 vs 设成缺省"无法区分。
+/// 形状遵循 **D76**。
 #[tauri::command]
 pub(crate) fn setting_list(
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<SettingListResult, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().expect("ensure_global 已初始化");
-    let rows = g.list_settings().map_err(hp_err_to_string)?;
-    Ok(SettingListResult {
-        items: rows
-            .into_iter()
-            .map(|(key, value)| SettingRowDto {
-                key,
-                value: decode_setting_value(&value),
-            })
-            .collect(),
-    })
+) -> ApiResponse<SettingListResult> {
+    let outcome = (|| -> HpResult<SettingListResult> {
+        ensure_global(&state, &app)?;
+        let guard = state
+            .global_db
+            .lock()
+            .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+        let g = guard
+            .as_ref()
+            .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+        let rows = g.list_settings()?;
+        Ok(SettingListResult {
+            items: rows
+                .into_iter()
+                .map(|(key, value)| SettingRowDto {
+                    key,
+                    value: decode_setting_value(&value),
+                })
+                .collect(),
+        })
+    })();
+    api_from_hp(outcome)
 }
 
 /// setting.reset：把某项设置恢复为声明缺省值（删除该键；并广播 `setting.changed`）。
 ///
 /// **注册表不落库**：缺省值来自设置注册表的声明，因此这里只删键、不写值——
 /// "未设置"与"设成缺省值"是两个可区分的状态（设置标准第 5 节）。
+/// 未知键与 `scope` 口径与 `setting.set` 完全一致。形状遵循 **D76**。
 #[tauri::command]
 pub(crate) fn setting_reset(
     key: String,
     repo_id: Option<String>,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<SettingOkResult, String> {
-    let storage_key = scoped_setting_key(&key, repo_id.as_deref());
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    {
-        let guard = state
-            .global_db
-            .lock()
-            .map_err(|_| "全局库锁中毒".to_string())?;
-        let g = guard.as_ref().expect("ensure_global 已初始化");
-        g.delete_setting(&storage_key).map_err(hp_err_to_string)?;
-    }
-    emit_setting_changed(&app, &key);
-    Ok(SettingOkResult { ok: true })
+) -> ApiResponse<SettingOkResult> {
+    let outcome = (|| -> HpResult<SettingOkResult> {
+        ensure_global(&state, &app)?;
+        let target = resolve_setting_target(&state, &key)?;
+        ensure_setting_capability(&state, &target, repo_id.as_deref())?;
+        let storage_key = scoped_storage_key(&target.base_key(), target.scope(), repo_id.as_deref())
+            .map_err(HpError::InvalidArgument)?;
+        {
+            let guard = state
+                .global_db
+                .lock()
+                .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+            let g = guard
+                .as_ref()
+                .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+            g.delete_setting(&storage_key)?;
+        }
+        emit_setting_changed(&app, &key);
+        Ok(SettingOkResult { ok: true })
+    })();
+    api_from_hp(outcome)
 }
 
 /// repo.backup：把仓库库文件复制到目标路径；返回备份 ID。

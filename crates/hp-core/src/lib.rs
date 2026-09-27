@@ -22,6 +22,7 @@ pub mod plugin;
 pub mod plugin_contribution;
 pub mod rating;
 pub mod repo;
+pub mod setting_registry;
 pub mod setting_types;
 pub mod source;
 pub mod tag;
@@ -83,6 +84,10 @@ pub use plugin_contribution::{
 };
 pub use rating::{validate_rating, Rating, RATING_MAX, RATING_MIN};
 pub use repo::RepoId;
+pub use setting_registry::{
+    registry_decl_for_storage_key, scoped_storage_key, validate_setting_value, SettingDeclFact,
+    PANEL_SETTING_DECLS, SETTING_INPUT_KINDS, SYSTEM_SETTING_DECLS,
+};
 pub use setting_types::{
     validate_setting_decl, SettingCategory, SettingDecl, SettingDeclCtx, SettingInputKind,
     SettingOwnerKind, SettingScope,

@@ -43,6 +43,10 @@ const eqList = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 
 const doc = readFileSync(join(ROOT, "docs/spec/settings-standard.md"), "utf8");
 const rustSettings = readFileSync(join(ROOT, "crates/hp-core/src/setting_types.rs"), "utf8");
+const rustRegistry = readFileSync(
+  join(ROOT, "crates/hp-core/src/setting_registry.rs"),
+  "utf8",
+);
 
 const t = (key) => zhCN[key] ?? zhTW[key] ?? en[key] ?? key;
 
@@ -384,6 +388,125 @@ check(
   config
     .validateSettingDecl({ ...goodDecl, id: "ui.theme" }, { takenKeys: ["ui.theme"] })
     .some((e) => e.includes("落库键冲突")),
+);
+
+// ============== Rust 校验镜像 ↔ TS 权威声明（D76 / 契约 3.13 四条规则）==============
+//
+// 注册表的**权威声明在 TS**（D80 已裁决它不做成命令）；但 `setting.set` 的
+// 「未知键拒绝 / 按 kind 校验 / 插件项 permission / 仅 repo 项带 repoId」必须由宿主执行，
+// 所以 Rust 侧镜像了**校验所需的事实**。这一组断言就是防漂移的那道锁。
+
+/** 解析 `setting_registry.rs` 里的 `SettingDeclFact { … }` 字面量。 */
+function parseRustSettingMirror(src) {
+  const out = [];
+  const re = /SettingDeclFact\s*\{([\s\S]*?)\n\s*\}/g;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    const body = m[1];
+    // `\b` 前缀不可省：否则 `kind:` 会命中 `owner_kind:`（下划线不是词边界）。
+    const str = (k) => (body.match(new RegExp(`\\b${k}:\\s*"([^"]*)"`)) || [])[1];
+    const ownerId = body.match(/owner_id:\s*Some\("([^"]*)"\)/);
+    const scope = (body.match(/scope:\s*SettingScope::(\w+)/) || [])[1];
+    const optionsRaw = (body.match(/options:\s*&\[([^\]]*)\]/) || [])[1] ?? "";
+    const entry = {
+      id: str("id"),
+      ownerKind: str("owner_kind"),
+      ownerId: ownerId ? ownerId[1] : null,
+      kind: str("kind"),
+      scope: scope === "Repo" ? "repo" : "app",
+      options: [...optionsRaw.matchAll(/"([^"]*)"/g)].map((x) => x[1]),
+    };
+    // 结构体定义 / impl 里的其它 `SettingDeclFact {` 没有这些字段，跳过。
+    if (entry.id && entry.ownerKind && entry.kind) out.push(entry);
+  }
+  return out;
+}
+
+const storageKeyOfDecl = (d) =>
+  d.ownerKind === "panel" || d.ownerKind === "plugin"
+    ? `${d.ownerKind}.${d.ownerId}.${d.id}`
+    : d.id;
+const factKey = (d) =>
+  JSON.stringify([storageKeyOfDecl(d), d.kind, d.scope, [...d.options].sort()]);
+
+const rustMirror = parseRustSettingMirror(rustRegistry);
+const tsSystem = config.SYSTEM_SETTING_DECLS.map((d) => ({
+  id: d.id,
+  ownerKind: "system",
+  ownerId: null,
+  kind: d.kind,
+  scope: d.scope ?? "app",
+  options: (d.options ?? []).map((o) => o.value),
+}));
+const tsPanel = config.panelSettingDecls().map((d) => ({
+  id: d.id,
+  ownerKind: "panel",
+  ownerId: d.owner.id,
+  kind: d.kind,
+  scope: d.scope ?? "app",
+  options: (d.options ?? []).map((o) => o.value),
+}));
+
+const rustSystem = rustMirror.filter((d) => d.ownerKind === "system");
+const rustPanel = rustMirror.filter((d) => d.ownerKind === "panel");
+
+/** 两侧的对称差（便于一眼看出漂在哪一项）。 */
+function mirrorDiff(rust, ts) {
+  const r = new Set(rust.map(factKey));
+  const s = new Set(ts.map(factKey));
+  return [
+    ...[...r].filter((k) => !s.has(k)).map((k) => `rust-only ${k}`),
+    ...[...s].filter((k) => !r.has(k)).map((k) => `ts-only   ${k}`),
+  ].join(" | ");
+}
+
+check(
+  "Rust 宿主设置镜像 ↔ TS `SYSTEM_SETTING_DECLS` 逐项一致（落库键 / kind / scope / options）",
+  eqList(rustSystem.map(factKey).sort(), tsSystem.map(factKey).sort()),
+  mirrorDiff(rustSystem, tsSystem),
+);
+check(
+  "Rust 面板设置镜像 ↔ TS `panelSettingDecls()` 逐项一致",
+  eqList(rustPanel.map(factKey).sort(), tsPanel.map(factKey).sort()),
+  mirrorDiff(rustPanel, tsPanel),
+);
+check(
+  "镜像里没有 TS 侧不存在的多余声明（反向也一致）",
+  rustMirror.length === tsSystem.length + tsPanel.length,
+  `rust=${rustMirror.length} ts=${tsSystem.length + tsPanel.length}`,
+);
+
+const repoBridge = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/repo.rs"),
+  "utf8",
+);
+check(
+  "契约 3.13 规则①：setting.set 拒绝未知键（走 resolve_setting_target）",
+  /未知设置键/.test(repoBridge) && /fn resolve_setting_target/.test(repoBridge),
+);
+check(
+  "契约 3.13 规则②：按注册表 kind 校验值（复用 hp_core::validate_setting_value）",
+  /validate_setting_value/.test(repoBridge) && /pub fn validate_setting_value/.test(rustRegistry),
+);
+check(
+  "契约 3.13 规则③：插件项不满能力返回 permission（HpError::Permission）",
+  /fn ensure_setting_capability/.test(repoBridge) &&
+    /HpError::Permission/.test(repoBridge) &&
+    /check_capability/.test(repoBridge),
+);
+check(
+  "契约 3.13 规则④：仅 scope = repo 的项才拼 {key}.{repoId}",
+  /scoped_storage_key/.test(repoBridge) &&
+    !/fn scoped_setting_key/.test(repoBridge) &&
+    /pub fn scoped_storage_key/.test(rustRegistry),
+);
+check(
+  "setting.* 已按 D76 包装（{ ok, data?, error? }），前端对应解包",
+  /ApiResponse<SettingValueResult>/.test(repoBridge) &&
+    /ApiResponse<SettingOkResult>/.test(repoBridge) &&
+    /unwrapApi/.test(
+      readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/api/repo.ts"), "utf8"),
+    ),
 );
 
 // ============================== 汇总 ==============================

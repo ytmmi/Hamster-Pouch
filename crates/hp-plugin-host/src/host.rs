@@ -5,7 +5,8 @@
 
 use hp_core::{
     BlueprintNodeDecl, Capability, ContributionKind, HostApiVersion, HpError, HpResult, PanelDecl,
-    PanelSettingDecl, PluginId, PluginRegistryRow, PluginRepoState, RepoId, RuntimeKind,
+    PanelSettingDecl, PluginId, PluginManifest, PluginRegistryRow, PluginRepoState, RepoId,
+    RuntimeKind,
 };
 use hp_store::GlobalDb;
 
@@ -224,6 +225,30 @@ impl PluginHost {
         Ok(None)
     }
 
+    /// 反查**插件设置项**的归属：哪个已安装插件声明了这个落库键
+    /// （`plugin.<plugin_id>.<local_key>`，D75「插件设置键由宿主强制加前缀」）。
+    ///
+    /// 与 [`PluginHost::find_panel_owner`] 同一手法：按 manifest 反查，
+    /// 不靠 `plugin_id` 含点的字符串切分猜前缀。
+    pub fn find_setting_decl(
+        &self,
+        db: &GlobalDb,
+        storage_key: &str,
+    ) -> HpResult<Option<(String, PanelSettingDecl)>> {
+        for row in db.list_plugins()? {
+            let Ok(manifest) = parse_manifest(&row.manifest_json) else {
+                continue;
+            };
+            let plugin_id = manifest.id.as_str();
+            for decl in manifest_setting_decls(&manifest) {
+                if format!("plugin.{plugin_id}.{}", decl.key) == storage_key {
+                    return Ok(Some((plugin_id.to_string(), decl)));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// **注册表视图**：某仓库当前**已启用**插件注册的面板 / 蓝图节点类型 / 设置分节
     /// （RFC 0010 决策 3/4/5/7）。
     ///
@@ -295,6 +320,27 @@ impl PluginHost {
         });
         Ok(out)
     }
+}
+
+/// manifest 声明的**全部**设置项（`panel.settings` 与 `settingsSection.settings` 两处）。
+///
+/// 两处同形（`docs/spec/settings-standard.md` 第 5 节），宿主的落库键统一是
+/// `plugin.<plugin_id>.<key>`，因此反查与校验都不需要区分来源。
+fn manifest_setting_decls(manifest: &PluginManifest) -> Vec<PanelSettingDecl> {
+    let mut out: Vec<PanelSettingDecl> = Vec::new();
+    for contribution in &manifest.contributions {
+        if matches!(
+            contribution.kind,
+            ContributionKind::Panel | ContributionKind::SettingsSection
+        ) {
+            for decl in &contribution.settings {
+                if !out.iter().any(|d| d.key == decl.key) {
+                    out.push(decl.clone());
+                }
+            }
+        }
+    }
+    out
 }
 
 /// 一条**注册表视图**记录（宿主按当前安装 + 启用状态构造，不落库）。
