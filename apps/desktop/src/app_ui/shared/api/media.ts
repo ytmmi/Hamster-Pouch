@@ -13,6 +13,7 @@ import type {
   MediaSeekArgs,
   MediaStatus,
   MediaStopArgs,
+  MediaTogglePauseResult,
 } from "../types";
 
 /** 启动/复用常驻 mpv 子进程并加载文件，返回会话 ID */
@@ -36,6 +37,17 @@ export function mediaPause(args: MediaPauseArgs): Promise<void> {
 /** 绝对定位到指定毫秒位置（同样不依赖 `sessionId`）。 */
 export function mediaSeek(args: MediaSeekArgs): Promise<void> {
   return invoke<void>("media_seek", { positionMs: args.positionMs });
+}
+
+/**
+ * 原子切换暂停 / 继续（单击画面 = 暂停/继续 的处理入口）。
+ *
+ * 后端在一次锁内完成「读 pause → 取反写入」，返回 `{ has_session, paused }`：
+ * 并发点击（双击）各自只翻转一次，不会因读到相同的旧快照而发出两次相同的暂停
+ * （旧路径表现为"暂停后再单击无法继续"）。
+ */
+export function mediaTogglePause(): Promise<MediaTogglePauseResult> {
+  return invoke<MediaTogglePauseResult>("media_toggle_pause");
 }
 
 /** 停止播放（保留常驻进程）。 */

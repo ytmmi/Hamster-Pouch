@@ -261,15 +261,14 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "media.removeFromAlbumAction": "移出相簿",
 
   "player.selectFileFirst": "請先選取檔案",
-  "player.playingInMpv": "已在 mpv 中播放",
+  "player.playing": "正在播放",
   "player.playFailed": "播放失敗：{err}",
-  "player.paused": "已暫停",
   "player.pauseToggleFailed": "暫停切換失敗：{err}",
   "player.seekFailed": "定位失敗：{err}",
   "player.clickToPause": "單擊暫停",
   "player.clickToResume": "單擊繼續",
   "player.progress": "播放進度",
-  "player.detachedWindow": "獨立視窗",
+  "player.settings.autoPauseOnTabSwitch": "切換標籤時自動暫停",
 
   "color.paletteExtracted": "調色盤已擷取（{count} 色）",
   "color.extractStarted": "調色盤擷取已啟動",

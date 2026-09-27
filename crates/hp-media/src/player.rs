@@ -69,6 +69,9 @@ pub struct MediaProcess {
     inbox: VecDeque<serde_json::Value>,
     /// `get_property` 的请求序号（响应靠它配对）。
     request_seq: i64,
+    /// 上次读到的 `eof-reached` 值：用于检测「刚播放完成」的上升沿
+    /// （false→true），命中即在 `playback_state` 里回到首帧暂停。
+    prev_eof: bool,
 }
 
 impl MediaProcess {
@@ -93,6 +96,7 @@ impl MediaProcess {
             pending: Vec::new(),
             inbox: VecDeque::new(),
             request_seq: 0,
+            prev_eof: false,
         })
     }
 
@@ -113,6 +117,7 @@ impl MediaProcess {
         self.inbox.clear();
         // 新进程的请求序号重新计数，避免与旧进程的响应错配。
         self.request_seq = 0;
+        self.prev_eof = false;
         self.subscribe_properties();
         Ok(())
     }
@@ -241,20 +246,56 @@ impl MediaProcess {
     /// 依赖默认值；加载后进度归零、暂停态重置，前端据此重新同步进度条。
     ///
     /// 加载前重新订阅属性：换文件后 `time-pos` / `duration` 会重新推送，
-    /// 保证进度条不会停留在上一个文件的时长上。
+    /// 保证进度条不会停留在上一个文件的时长上。同时清零 `prev_eof`：
+    /// 新文件从头播，直到它自己走到结尾才算一次「播放完成」。
+    ///
+    /// **加载后强制复位暂停**（真机发现）：mpv 的 `pause` 属性**跨文件保留**——
+    /// 上一个文件因 EOF「回到首帧暂停」（或切标签自动暂停）而 `pause=true` 后，
+    /// 再 `loadfile` 新文件会**停在暂停**（媒体预览双击新视频看起来"没播"）。
+    /// 因此 `loadfile` 之后显式 `set pause false`，保证「加载即播放」。
     pub fn load_file(&mut self, path: &Path) -> HpResult<()> {
         self.subscribe_properties();
+        self.prev_eof = false;
         let payload = serde_json::json!({
             "command": ["loadfile", path.to_string_lossy(), "replace"]
         })
         .to_string();
-        self.send_command(&payload)
+        self.send_command(&payload)?;
+        self.set_pause(false)
     }
 
     /// 暂停 / 继续。
     pub fn set_pause(&mut self, paused: bool) -> HpResult<()> {
         let payload = serde_json::json!({ "command": ["set_property", "pause", paused] }).to_string();
         self.send_command(&payload)
+    }
+
+    /// **原子**切换暂停/继续（单击画面的处理入口）。
+    ///
+    /// 返回 `(新暂停态, 是否有活跃会话)`：
+    ///
+    /// - 无活跃会话（`idle-active`，已停止/已停止播放）→ `(false, false)`，前端据此
+    ///   转去「播放当前选中文件」，而不是对空进程反复发命令；
+    /// - 有会话 → 读当前 `pause`、取反写入，返回 `(新值, true)`。
+    ///
+    /// 之所以在后端一次锁内完成「读→翻转」：前端并发点击（如双击）时若各自先读快照
+    /// 再发命令，两次读到的旧值相同会发出两次相同的暂停（表现为"再单击无法继续"）。
+    /// 后端翻转保证**每次点击精确翻转一次**——快速两次点击 = 暂停后继续，符合直觉。
+    pub fn toggle_pause(&mut self) -> HpResult<(bool, bool)> {
+        let idle = self
+            .get_property("idle-active")?
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if idle {
+            return Ok((false, false));
+        }
+        let paused = self
+            .get_property("pause")?
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let next = !paused;
+        self.set_pause(next)?;
+        Ok((next, true))
     }
 
     /// 绝对定位（毫秒）。
@@ -277,16 +318,36 @@ impl MediaProcess {
     ///
     /// 每个属性单独取：mpv 会先回一条 ack、再回结果行；中间的 `property-change`
     /// 事件行直接跳过。取不到的属性按 `None` 处理，不整体失败。
+    ///
+    /// **播放完成的处理（用户裁决）**：`eof-reached` 由 false→true 的**上升沿**
+    /// 就是「这个文件刚播完」。此时若什么都不做，mpv 会停在最后一帧（配合
+    /// `--keep-open=yes` 文件仍保持加载）。按裁决应**回到首帧并暂停**：
+    /// 先 `set pause true` 再 `seek 0 absolute`（顺序不能反——EOF 处直接 seek
+    /// 会离开 EOF 并从头继续播放）。用 `prev_eof` 记住上次的值，避免每个轮询
+    /// 周期都在 EOF 处重复定位；`load_file` 会清零它。
     pub fn playback_state(&mut self) -> HpResult<PlaybackState> {
         let position = self.get_property_f64("time-pos")?;
         let duration = self.get_property_f64("duration")?;
         let paused = self.get_property("pause")?.and_then(|v| v.as_bool());
         let idle = self.get_property("idle-active")?.and_then(|v| v.as_bool());
+        let eof = self
+            .get_property("eof-reached")?
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if eof && !self.prev_eof {
+            // 播放完成：先暂停、再定位回首帧（顺序见上方说明）。
+            self.set_pause(true)?;
+            self.seek(0)?;
+        }
+        self.prev_eof = eof;
         Ok(PlaybackState {
             position_ms: position.map(|s| (s * 1000.0).round() as i64),
             duration_ms: duration.map(|s| (s * 1000.0).round() as i64),
             paused,
             // 文件已播完/已停止：mpv 回到 idle（`idle=yes` 下仍驻留进程）。
+            // 注：`--keep-open=yes` 下播完**不会**进 idle（文件保持加载），
+            // 因此 `ended` 在「回到首帧暂停」的完整流程里保持 false，前端据此
+            // 继续把会话视为活跃（单击画面即可从 0:00 继续）。
             ended: idle.unwrap_or(false),
         })
     }
@@ -367,6 +428,9 @@ fn spawn_parts(
     let mut cmd = Command::new(mpv_path);
     cmd.arg("--idle=yes")
         .arg("--no-terminal")
+        // 播完不卸载文件：停在最后一帧（配合 `playback_state` 的 EOF 检测
+        // 「回到首帧暂停」才有位置可定位；否则 EOF 后文件已卸载、seek 无效）。
+        .arg("--keep-open=yes")
         .arg(format!("--input-ipc-server={pipe_path}"))
         .stdin(Stdio::null())
         .stdout(Stdio::null())

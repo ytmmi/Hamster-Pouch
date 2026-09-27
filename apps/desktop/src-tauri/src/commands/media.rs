@@ -192,6 +192,45 @@ pub async fn media_stop(
     run_media(media, |process| process.stop()).await
 }
 
+/// media.togglePause：**原子**切换暂停/继续（单击画面 = 暂停/继续 的处理入口）。
+///
+/// 返回 `{ has_session, paused }`：
+///
+/// - `has_session = false`（无媒体子进程，或已停止/已播完回到 idle）→ 前端转去
+///   「播放当前选中文件」，不在空进程上反复发命令；
+/// - `has_session = true` → 已在一次锁内完成「读 pause → 取反写入」，返回新暂停态。
+///
+/// 为什么必须原子：前端并发点击（双击）若各自先读快照再发 `media.pause`，两次读到
+/// 的旧值相同会发出**两次相同**的暂停命令（表现为"暂停后再单击无法继续"）。后端翻转
+/// 保证每次点击精确翻转一次——快速两次点击 = 暂停后继续，符合单击切换的直觉。
+#[tauri::command]
+pub async fn media_toggle_pause(state: State<'_, AppState>) -> Result<TogglePauseResult, String> {
+    let media = std::sync::Arc::clone(&state.media);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut guard = media.lock().map_err(|_| "媒体锁中毒".to_string())?;
+        let Some(process) = guard.as_mut() else {
+            return Ok(TogglePauseResult {
+                has_session: false,
+                paused: false,
+            });
+        };
+        let (paused, active) = process.toggle_pause().map_err(hp_err_to_string)?;
+        Ok(TogglePauseResult {
+            has_session: active,
+            paused,
+        })
+    })
+    .await
+    .map_err(|e| format!("媒体任务失败: {e}"))?
+}
+
+/// media.togglePause 的响应：会话是否存在 + 切换后的暂停态。
+#[derive(Serialize)]
+pub struct TogglePauseResult {
+    has_session: bool,
+    paused: bool,
+}
+
 /// 在阻塞线程池上持锁调用媒体子进程（避免主线程等 `media_play` 的启动锁）。
 async fn run_media<T, F>(media: MediaHandle, task: F) -> Result<T, String>
 where
@@ -304,7 +343,7 @@ fn embed_rect_impl(
         .map_err(|_| "嵌入窗口锁中毒".to_string())?;
     match guard.as_mut() {
         Some(win) => win.set_rect(x, y, width, height)?,
-        None => *guard = Some(EmbedWindow::create(parent, x, y, width, height)?),
+        None => *guard = Some(EmbedWindow::create(parent, x, y, width, height, app)?),
     }
     Ok(true)
 }

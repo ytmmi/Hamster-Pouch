@@ -261,15 +261,14 @@ export const en: Record<keyof DictZhCN, string> = {
   "media.removeFromAlbumAction": "Remove from album",
 
   "player.selectFileFirst": "Select a file first",
-  "player.playingInMpv": "Playing in mpv",
+  "player.playing": "Playing",
   "player.playFailed": "Playback failed: {err}",
-  "player.paused": "Paused",
   "player.pauseToggleFailed": "Failed to toggle pause: {err}",
   "player.seekFailed": "Seek failed: {err}",
   "player.clickToPause": "Click to pause",
   "player.clickToResume": "Click to resume",
   "player.progress": "Playback progress",
-  "player.detachedWindow": "Separate window",
+  "player.settings.autoPauseOnTabSwitch": "Pause video when switching tabs",
 
   "color.paletteExtracted": "Palette extracted ({count} colors)",
   "color.extractStarted": "Palette extraction started",

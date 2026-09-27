@@ -2093,3 +2093,13 @@ button.danger {
   gap: 2px;
   margin-bottom: 14px;
 }
+/* DOM video surface (viewer-style embedding; 2026-09) */
+.player-video {
+  flex: 1;
+  min-height: 180px;
+  width: 100%;
+  object-fit: contain;
+  background: #000;
+  border-radius: 4px;
+  display: block;
+}

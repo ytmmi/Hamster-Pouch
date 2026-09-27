@@ -271,15 +271,14 @@ export const zhCN = {
 
   // 媒体播放器
   "player.selectFileFirst": "请先选中文件",
-  "player.playingInMpv": "已在 mpv 中播放",
+  "player.playing": "正在播放",
   "player.playFailed": "播放失败：{err}",
-  "player.paused": "已暂停",
   "player.pauseToggleFailed": "暂停切换失败：{err}",
   "player.seekFailed": "定位失败：{err}",
   "player.clickToPause": "单击暂停",
   "player.clickToResume": "单击继续",
   "player.progress": "播放进度",
-  "player.detachedWindow": "独立窗口",
+  "player.settings.autoPauseOnTabSwitch": "切换标签时自动暂停",
 
   // 色彩参考
   "color.paletteExtracted": "调色板已提取（{count} 色）",

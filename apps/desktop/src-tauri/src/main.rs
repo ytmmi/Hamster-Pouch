@@ -187,6 +187,7 @@ fn main() {
             commands::ai::ai_tagging_run,
             commands::media::media_play,
             commands::media::media_pause,
+            commands::media::media_toggle_pause,
             commands::media::media_seek,
             commands::media::media_stop,
             commands::media::media_process_status,

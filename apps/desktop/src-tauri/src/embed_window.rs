@@ -17,6 +17,7 @@
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use tauri::{AppHandle, Emitter};
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{COLOR_WINDOW, HBRUSH};
@@ -25,8 +26,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetWindowLongPtrW, RegisterClassW,
     SetWindowLongPtrW, SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA,
     HTTRANSPARENT, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_HIDE,
-    SW_SHOW, WM_NCDESTROY, WM_NCHITTEST, WINDOW_EX_STYLE, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS,
-    WS_VISIBLE,
+    SW_SHOW, WM_LBUTTONUP, WM_NCDESTROY, WM_NCHITTEST, WINDOW_EX_STYLE, WNDCLASSW, WS_CHILD,
+    WS_CLIPSIBLINGS, WS_VISIBLE,
 };
 
 /// 嵌入的原生子窗口（mpv 渲染目标）。
@@ -34,9 +35,14 @@ pub struct EmbedWindow {
     hwnd: HWND,
 }
 
-/// 窗口过程状态（`GWLP_USERDATA`）：窗口过程是自由函数，需要拿到 `click_through`。
+/// 窗口过程状态（`GWLP_USERDATA`）：窗口过程是自由函数，需要拿到 `click_through`
+/// 与广播事件用的 `AppHandle`。
 struct WndState {
+    /// 穿透模式（旧路径）：开启时 `WM_NCHITTEST` 返回 `HTTRANSPARENT`，把鼠标事件
+    /// 让给下层 WebView（面板里的 DOM 覆盖层收点击）。默认**关闭**：由本窗口自己
+    /// 接收点击并广播 `media.surface.click`（真机验证更可靠，见模块注释）。
     click_through: AtomicBool,
+    app: AppHandle,
 }
 
 // 安全说明：HWND 为原始句柄，其生命周期由本结构独占管理；几何更新/销毁
@@ -45,20 +51,25 @@ unsafe impl Send for EmbedWindow {}
 
 /// 窗口过程。
 ///
-/// 除 `WM_NCHITTEST` 外一律交给系统默认处理。`WM_NCHITTEST` 在 `click_through`
-/// 开启时返回 `HTTRANSPARENT`：命中测试穿透到**下方窗口**（WebView2），这样即使
-/// 原生窗口正在显示，鼠标事件仍能到达 WebView——面板上的"单击视频暂停/继续"
-/// 与进度条拖动都依赖这一点。
+/// - `click_through` 关闭（默认）：本窗口消费鼠标事件——`WM_LBUTTONUP` 时广播
+///   `media.surface.click`（前端据此调用 `media.togglePause` 原子切换）；
+/// - `click_through` 开启（旧路径）：`WM_NCHITTEST` 返回 `HTTRANSPARENT`，命中测试
+///   穿透到**同线程**下方的窗口（WebView2），面板里的 DOM 覆盖层收点击。
 unsafe extern "system" fn wnd_proc(
     hwnd: HWND,
     msg: u32,
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    if msg == WM_NCHITTEST {
-        let state = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const WndState;
-        if !state.is_null() && (*state).click_through.load(Ordering::Relaxed) {
+    let state = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const WndState;
+    if !state.is_null() {
+        if msg == WM_NCHITTEST && (*state).click_through.load(Ordering::Relaxed) {
             return LRESULT(HTTRANSPARENT as isize);
+        }
+        if msg == WM_LBUTTONUP && !(*state).click_through.load(Ordering::Relaxed) {
+            // 单击视频 = 暂停/继续：把点击翻译成事件，由前端调原子切换命令。
+            let _ = (*state).app.emit("media.surface.click", ());
+            return LRESULT(0);
         }
     }
     if msg == WM_NCDESTROY {
@@ -76,7 +87,14 @@ impl EmbedWindow {
     /// 在 `parent` 之上创建子窗口并覆盖 `(x, y, width, height)`。
     ///
     /// 坐标与尺寸均为**物理像素**、相对父窗口客户区左上角。
-    pub fn create(parent: isize, x: i32, y: i32, width: i32, height: i32) -> Result<Self, String> {
+    pub fn create(
+        parent: isize,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        app: &AppHandle,
+    ) -> Result<Self, String> {
         let parent = HWND(parent as *mut c_void);
         if parent.is_invalid() {
             return Err("父窗口句柄无效".into());
@@ -116,11 +134,13 @@ impl EmbedWindow {
             )
             .map_err(|e| format!("创建媒体渲染子窗口失败: {e}"))?;
 
-            // 把 click_through 状态挂到窗口上，供窗口过程读取。
+            // 把 click_through 状态与 AppHandle 挂到窗口上，供窗口过程读取。
             // Box::into_raw 后所有权交给窗口：随窗口销毁在 WM_NCDESTROY 处释放
             // （见 wnd_proc），避免泄漏。
             let state = Box::into_raw(Box::new(WndState {
-                click_through: AtomicBool::new(true),
+                // 默认**不穿透**：由原生窗口自收点击并广播 media.surface.click。
+                click_through: AtomicBool::new(false),
+                app: app.clone(),
             }));
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
 

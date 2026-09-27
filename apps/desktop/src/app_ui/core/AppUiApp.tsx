@@ -41,6 +41,7 @@ import { AppContext, type AppContextValue } from "./AppContext";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { TaskOverlay } from "./TaskOverlay";
 import { bindTaskActions, startTaskEvents } from "./taskStore";
+import { requestPlayerPlay } from "./playerPlayStore";
 import { useConfirm } from "./useConfirm";
 import { blueprintEngine, type BlueprintCollapseAbsorb, type BlueprintDispatchInput } from "./blueprintEngine";
 import {
@@ -174,33 +175,6 @@ export function AppUiApp(): JSX.Element {
 
   const status = useCallback(
     (text: string, type: StatusType = "info") => setStatusMsg({ text, type }),
-    [],
-  );
-
-  /**
-   * 等面板级渲染子窗口就绪后再播放（`docs/issues/0001`）。
-   *
-   * 蓝图双击会先 `show 播放器` 再立刻 `play`，但嵌入子窗口要等播放器面板挂载后的
-   * `useEffect` 才创建；后端拿不到渲染目标时返回 `EMBED_NOT_READY`（不再静默开独立
-   * 窗口）。这里轮询重试，让"第一次双击"也走面板内嵌。
-   */
-  const playWhenEmbedReady = useCallback(
-    async (repoIdValue: string, fileId: string, attempts = 25): Promise<void> => {
-      let lastError: unknown;
-      for (let i = 0; i < attempts; i += 1) {
-        try {
-          await api.mediaPlay({ repoId: repoIdValue, fileId });
-          return;
-        } catch (e) {
-          lastError = e;
-          if (!String(e).includes("EMBED_NOT_READY")) {
-            throw e;
-          }
-          await new Promise((resolve) => window.setTimeout(resolve, 80));
-        }
-      }
-      throw lastError;
-    },
     [],
   );
 
@@ -418,15 +392,11 @@ export function AppUiApp(): JSX.Element {
         }
       },
       playFile: (fileId: string) => {
-        if (!repoId) {
-          return;
-        }
-        // 蓝图双击与「显示播放器」在同一帧发生，而面板级嵌入子窗口是在播放器面板
-        // **挂载之后**才由 `media_embed_rect` 创建的。后端此时会回 EMBED_NOT_READY
-        // （不再静默降级为独立窗口，见 `docs/issues/0001`），这里等面板就绪后重试。
-        void playWhenEmbedReady(repoId, fileId)
-          .then(() => status(t("player.playingInMpv"), "ok"))
-          .catch((e) => status(t("player.playFailed", { err: String(e) }), "error"));
+        // 双击视频 = 显示播放器并播放：播放器面板是 DOM `<video>`（与查看器同构，
+        // 见 RFC 0005 2026-09 决策更新），libmpv 原生窗口方案已退役。这里只投递
+        // "播放哪个文件"的请求，由面板自行解析路径并播放；不再有 EMBED_NOT_READY
+        // 时序竞争（旧实现 `docs/issues/0001`）。
+        requestPlayerPlay(fileId);
       },
       // 界面跳转（D48/D54）：切到目标层 = 持久化当前层 + 套用该层布局 + 对账蓝图语义。
       navigateLayer: (layerKey: string) => {

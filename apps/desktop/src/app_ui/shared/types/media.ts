@@ -29,6 +29,17 @@ export interface MediaPauseArgs {
   paused?: boolean;
 }
 
+/**
+ * `media_toggle_pause` 返回：单击画面 = 暂停/继续 的原子切换结果。
+ *
+ * `has_session = false` 表示当前没有活跃会话（无子进程，或已停止/已播完回到 idle）——
+ * 前端据此转去「播放当前选中文件」；`has_session = true` 时 `paused` 是**切换后**的值。
+ */
+export interface MediaTogglePauseResult {
+  has_session: boolean;
+  paused: boolean;
+}
+
 /** `media_seek` 参数（同样不含 `sessionId`，理由见 `MediaPauseArgs`）。 */
 export interface MediaSeekArgs {
   positionMs: number;

@@ -175,7 +175,7 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
   { id: "tags", titleKey: "panel.tags", category: "info", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "tagtable", titleKey: "panel.tagtable", category: "info", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "color", titleKey: "panel.color", category: "media", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
-  { id: "player", titleKey: "panel.player", category: "media", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
+  { id: "player", titleKey: "panel.player", category: "media", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN, settings: [{ key: "autoPauseOnTabSwitch", kind: "switch", title_key: "player.settings.autoPauseOnTabSwitch", default: true }] },
   { id: "tasks", titleKey: "panel.tasks", category: "system", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "plugins", titleKey: "panel.plugins", category: "system", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "blueprint", titleKey: "panel.blueprint", category: "system", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
