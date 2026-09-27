@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import type { ColorExtractedPayload } from "../shared/types";
 
@@ -86,7 +87,7 @@ export function ColorPanel(): JSX.Element {
       });
       app.status(app.t("color.extractStarted"), "info");
     } catch (e) {
-      app.status(app.t("color.extractFailed", { err: String(e) }), "error");
+      app.status(app.t("color.extractFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -103,7 +104,7 @@ export function ColorPanel(): JSX.Element {
       setLocked(true);
       app.status(app.t("color.lockedToast"), "ok");
     } catch (e) {
-      app.status(app.t("color.lockFailed", { err: String(e) }), "error");
+      app.status(app.t("color.lockFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
