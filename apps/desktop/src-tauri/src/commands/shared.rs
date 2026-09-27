@@ -213,6 +213,40 @@ pub(crate) fn resolve_file_path(db: &RepoDb, file: &FileIndexRow) -> HpResult<Pa
     Ok(PathBuf::from(source.local_path).join(&file.relative_path))
 }
 
+// ===== 打开的仓库库：批次迁移共用的取用/加锁助手（D76）=====
+
+/// 未打开仓库 → `HpError::NotFound`（"目标上下文不存在"）。
+///
+/// `HpError::code()` 的闭集里没有"前置条件"这一类，最贴近的是 `not_found`：
+/// 请求要作用的仓库上下文不存在。**不要**把它写成 `Store`/`Io`——那会把
+/// "用户还没打开仓库"误报成读写故障。
+pub(crate) fn open_repo<'g, 'a>(
+    guard: &'g std::sync::MutexGuard<'a, Option<RepoDb>>,
+) -> HpResult<&'g RepoDb> {
+    guard
+        .as_ref()
+        .ok_or_else(|| HpError::NotFound("未打开仓库".into()))
+}
+
+/// 同 [`open_repo`]，可变借用（写操作）。
+pub(crate) fn open_repo_mut<'g, 'a>(
+    guard: &'g mut std::sync::MutexGuard<'a, Option<RepoDb>>,
+) -> HpResult<&'g mut RepoDb> {
+    guard
+        .as_mut()
+        .ok_or_else(|| HpError::NotFound("未打开仓库".into()))
+}
+
+/// 锁住 `open_repo`（毒锁 → `Store`）。
+pub(crate) fn lock_repo(
+    state: &AppState,
+) -> HpResult<std::sync::MutexGuard<'_, Option<RepoDb>>> {
+    state
+        .open_repo
+        .lock()
+        .map_err(|_| HpError::Store("仓库锁中毒".into()))
+}
+
 /// 相册成员 / 文件查询返回项。
 #[derive(Serialize)]
 pub(crate) struct AlbumFileItem {

@@ -1,11 +1,18 @@
 //! M3：虚拟相册命令桥接。
+//!
+//! **D76 迁移状态：已包装**（批次 `album`，2026-09）。全部命令返回
+//! `{ ok, data?, error? }`，错误为结构化 `HpError`；前端 `api/album.ts` 经
+//! `unwrapApi` 解包，界面按 `code` 走 i18n（D27）。
 
 use hp_album::AlbumService;
 use hp_core::{AlbumKind, AlbumMediaType, HpError, HpResult, SyncMode};
 use serde::Serialize;
 use tauri::{Emitter, State};
 
-use crate::commands::shared::{file_to_item, hp_err_to_string, AlbumFileItem};
+use crate::commands::shared::{
+    api_async, api_from_hp, file_to_item, lock_repo, open_repo, open_repo_mut, AlbumFileItem,
+    ApiAsync, ApiResponse,
+};
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -61,12 +68,12 @@ struct AlbumSyncConflictEvent {
 }
 
 /// 解析相册媒体属性字符串；缺省或空串表示继承父相册。
-fn parse_album_media_type(value: Option<&str>) -> Result<Option<AlbumMediaType>, String> {
+fn parse_album_media_type(value: Option<&str>) -> HpResult<Option<AlbumMediaType>> {
     match value {
         None | Some("") => Ok(None),
         Some(s) => AlbumMediaType::from_str(s)
             .map(Some)
-            .ok_or_else(|| format!("未知媒体属性: {s}")),
+            .ok_or_else(|| HpError::InvalidArgument(format!("未知媒体属性: {s}"))),
     }
 }
 
@@ -99,54 +106,54 @@ pub(crate) fn album_create(
     filter_json: Option<String>,
     file_ids: Option<Vec<String>>,
     state: State<AppState>,
-) -> Result<AlbumCreateResult, String> {
-    if name.trim().is_empty() {
-        return Err("相册名不能为空".into());
-    }
-    let kind = AlbumKind::from_str(&kind).ok_or_else(|| format!("未知相册类型: {kind}"))?;
-    let media_type = parse_album_media_type(media_type.as_deref())?;
-
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-
-    let album = match kind {
-        AlbumKind::Fixed => {
-            let files = file_ids.unwrap_or_default();
-            AlbumService::create_fixed(
-                db,
-                &repo_id,
-                &name,
-                media_type,
-                parent_album_id.as_deref(),
-                &files,
-            )
-            .map_err(hp_err_to_string)?
+) -> ApiResponse<AlbumCreateResult> {
+    let outcome = (|| -> HpResult<AlbumCreateResult> {
+        if name.trim().is_empty() {
+            return Err(HpError::InvalidArgument("相册名不能为空".into()));
         }
-        AlbumKind::FollowSource => {
-            let source_id = source_id.ok_or("跟随源型相册必须提供 sourceId".to_string())?;
-            let mode = SyncMode::from_str(sync_mode.as_deref().unwrap_or("add_only"))
-                .ok_or_else(|| "未知同步模式".to_string())?;
-            AlbumService::create_follow_source(
-                db,
-                &repo_id,
-                &name,
-                media_type,
-                parent_album_id.as_deref(),
-                &source_id,
-                mode,
-                include_subsources.unwrap_or(false),
-                filter_json,
-            )
-            .map_err(hp_err_to_string)?
-        }
-    };
+        let kind = AlbumKind::from_str(&kind)
+            .ok_or_else(|| HpError::InvalidArgument(format!("未知相册类型: {kind}")))?;
+        let media_type = parse_album_media_type(media_type.as_deref())?;
 
-    Ok(AlbumCreateResult {
-        album_id: album.id.as_str().to_string(),
-    })
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+
+        let album = match kind {
+            AlbumKind::Fixed => {
+                let files = file_ids.unwrap_or_default();
+                AlbumService::create_fixed(
+                    db,
+                    &repo_id,
+                    &name,
+                    media_type,
+                    parent_album_id.as_deref(),
+                    &files,
+                )?
+            }
+            AlbumKind::FollowSource => {
+                let source_id = source_id
+                    .ok_or_else(|| HpError::InvalidArgument("跟随源型相册必须提供 sourceId".into()))?;
+                let mode = SyncMode::from_str(sync_mode.as_deref().unwrap_or("add_only"))
+                    .ok_or_else(|| HpError::InvalidArgument("未知同步模式".into()))?;
+                AlbumService::create_follow_source(
+                    db,
+                    &repo_id,
+                    &name,
+                    media_type,
+                    parent_album_id.as_deref(),
+                    &source_id,
+                    mode,
+                    include_subsources.unwrap_or(false),
+                    filter_json,
+                )?
+            }
+        };
+
+        Ok(AlbumCreateResult {
+            album_id: album.id.as_str().to_string(),
+        })
+    })();
+    api_from_hp(outcome)
 }
 
 /// album.setMediaType：修改相册媒体属性（移除不匹配成员并写操作历史）。
@@ -156,19 +163,18 @@ pub(crate) fn album_set_media_type(
     album_id: String,
     media_type: Option<String>,
     state: State<AppState>,
-) -> Result<AlbumSetMediaTypeResult, String> {
-    let media_type = parse_album_media_type(media_type.as_deref())?;
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    let outcome = AlbumService::set_media_type(db, &repo_id, &album_id, media_type)
-        .map_err(hp_err_to_string)?;
-    Ok(AlbumSetMediaTypeResult {
-        removed_count: outcome.removed_count,
-        op_record_id: outcome.op_record_id,
-    })
+) -> ApiResponse<AlbumSetMediaTypeResult> {
+    let outcome = (|| -> HpResult<AlbumSetMediaTypeResult> {
+        let media_type = parse_album_media_type(media_type.as_deref())?;
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let outcome = AlbumService::set_media_type(db, &repo_id, &album_id, media_type)?;
+        Ok(AlbumSetMediaTypeResult {
+            removed_count: outcome.removed_count,
+            op_record_id: outcome.op_record_id,
+        })
+    })();
+    api_from_hp(outcome)
 }
 
 /// album.addMember：手动加入成员（不匹配相册属性的文件被拒绝）。
@@ -178,17 +184,17 @@ pub(crate) fn album_add_member(
     album_id: String,
     file_ids: Vec<String>,
     state: State<AppState>,
-) -> Result<AlbumMemberResult, String> {
+) -> ApiResponse<AlbumMemberResult> {
     let _ = repo_id;
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    let outcome = AlbumService::add_members(db, &album_id, &file_ids).map_err(hp_err_to_string)?;
-    Ok(AlbumMemberResult {
-        added: outcome.added,
-    })
+    let outcome = (|| -> HpResult<AlbumMemberResult> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let outcome = AlbumService::add_members(db, &album_id, &file_ids)?;
+        Ok(AlbumMemberResult {
+            added: outcome.added,
+        })
+    })();
+    api_from_hp(outcome)
 }
 
 /// album.removeMember：移除成员。
@@ -198,35 +204,32 @@ pub(crate) fn album_remove_member(
     album_id: String,
     file_ids: Vec<String>,
     state: State<AppState>,
-) -> Result<AlbumRemoveResult, String> {
+) -> ApiResponse<AlbumRemoveResult> {
     let _ = repo_id;
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    let removed =
-        AlbumService::remove_members(db, &album_id, &file_ids).map_err(hp_err_to_string)?;
-    Ok(AlbumRemoveResult { removed })
+    let outcome = (|| -> HpResult<AlbumRemoveResult> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let removed = AlbumService::remove_members(db, &album_id, &file_ids)?;
+        Ok(AlbumRemoveResult { removed })
+    })();
+    api_from_hp(outcome)
 }
 
 /// album.list：列出仓库下全部相册。
 #[tauri::command]
-pub(crate) fn album_list(repo_id: String, state: State<AppState>) -> Result<Vec<AlbumItem>, String> {
-    let guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
-    let albums = db.list_albums(&repo_id).map_err(hp_err_to_string)?;
-    let mut items = Vec::with_capacity(albums.len());
-    for a in albums {
-        let count = db
-            .count_album_members(a.id.as_str())
-            .map_err(hp_err_to_string)?;
-        items.push(album_to_item(a, count));
-    }
-    Ok(items)
+pub(crate) fn album_list(repo_id: String, state: State<AppState>) -> ApiResponse<Vec<AlbumItem>> {
+    let outcome = (|| -> HpResult<Vec<AlbumItem>> {
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
+        let albums = db.list_albums(&repo_id)?;
+        let mut items = Vec::with_capacity(albums.len());
+        for a in albums {
+            let count = db.count_album_members(a.id.as_str())?;
+            items.push(album_to_item(a, count));
+        }
+        Ok(items)
+    })();
+    api_from_hp(outcome)
 }
 
 /// album.members：列出相册可见成员（按有效媒体属性过滤）。
@@ -235,61 +238,70 @@ pub(crate) fn album_members(
     repo_id: String,
     album_id: String,
     state: State<AppState>,
-) -> Result<Vec<AlbumFileItem>, String> {
+) -> ApiResponse<Vec<AlbumFileItem>> {
     let _ = repo_id;
-    let guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
-    let files = AlbumService::visible_members(db, &album_id).map_err(hp_err_to_string)?;
-    Ok(files.into_iter().map(file_to_item).collect())
+    let outcome = (|| -> HpResult<Vec<AlbumFileItem>> {
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
+        let files = AlbumService::visible_members(db, &album_id)?;
+        Ok(files.into_iter().map(file_to_item).collect())
+    })();
+    api_from_hp(outcome)
 }
 
 /// album.sync：执行跟随源同步，后台运行并发出进度/冲突事件。
+///
+/// 异步命令（含 `State<'_, _>` 引用）按 Tauri 的要求返回 `Result`，
+/// 由 [`ApiAsync`] 承载——包装仍落在**成功值**里。
+///
+/// 返回的是 `taskId`：真正的同步在后台线程执行，失败经 `album.sync.conflict`
+/// 事件上报（`docs/issues/0004` 记录了该事件的语义漂移：当前只代表"整体失败"）。
 #[tauri::command]
 pub(crate) async fn album_sync(
     repo_id: String,
     album_id: String,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
-) -> Result<String, String> {
-    if album_id.trim().is_empty() {
-        return Err("相册 ID 不能为空".into());
-    }
-    let task_id = uuid::Uuid::new_v4().to_string();
-    let st = state.inner().clone();
-    let app_handle = app.clone();
-    let emit_task_id = task_id.clone();
-    let emit_album_id = album_id.clone();
-
-    tauri::async_runtime::spawn_blocking(move || match run_album_sync(&st, &repo_id, &album_id) {
-        Ok(outcome) => {
-            let _ = app_handle.emit(
-                "album.sync.progress",
-                AlbumSyncProgressEvent {
-                    task_id: emit_task_id.clone(),
-                    album_id: emit_album_id.clone(),
-                    added: outcome.added,
-                    removed: outcome.removed,
-                    pinned: outcome.pinned_kept,
-                },
-            );
+) -> ApiAsync<String> {
+    let outcome = (|| -> HpResult<String> {
+        if album_id.trim().is_empty() {
+            return Err(HpError::InvalidArgument("相册 ID 不能为空".into()));
         }
-        Err(e) => {
-            let _ = app_handle.emit(
-                "album.sync.conflict",
-                AlbumSyncConflictEvent {
-                    task_id: emit_task_id.clone(),
-                    album_id: emit_album_id.clone(),
-                    file_id: String::new(),
-                    reason: e.to_string(),
-                },
-            );
-        }
-    });
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let st = state.inner().clone();
+        let app_handle = app.clone();
+        let emit_task_id = task_id.clone();
+        let emit_album_id = album_id.clone();
 
-    Ok(task_id)
+        tauri::async_runtime::spawn_blocking(move || match run_album_sync(&st, &repo_id, &album_id) {
+            Ok(outcome) => {
+                let _ = app_handle.emit(
+                    "album.sync.progress",
+                    AlbumSyncProgressEvent {
+                        task_id: emit_task_id.clone(),
+                        album_id: emit_album_id.clone(),
+                        added: outcome.added,
+                        removed: outcome.removed,
+                        pinned: outcome.pinned_kept,
+                    },
+                );
+            }
+            Err(e) => {
+                let _ = app_handle.emit(
+                    "album.sync.conflict",
+                    AlbumSyncConflictEvent {
+                        task_id: emit_task_id.clone(),
+                        album_id: emit_album_id.clone(),
+                        file_id: String::new(),
+                        reason: e.to_string(),
+                    },
+                );
+            }
+        });
+
+        Ok(task_id)
+    })();
+    api_async(api_from_hp(outcome))
 }
 
 /// 在后台线程执行相册同步。
@@ -298,13 +310,8 @@ fn run_album_sync(
     repo_id: &str,
     album_id: &str,
 ) -> HpResult<hp_album::SyncOutcome> {
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| HpError::Store("仓库锁中毒".into()))?;
-    let db = guard
-        .as_mut()
-        .ok_or_else(|| HpError::NotFound("未打开仓库".into()))?;
+    let mut guard = lock_repo(state)?;
+    let db = open_repo_mut(&mut guard)?;
     AlbumService::sync(db, repo_id, album_id)
 }
 
@@ -315,19 +322,18 @@ pub(crate) fn album_rename(
     album_id: String,
     name: String,
     state: State<AppState>,
-) -> Result<(), String> {
+) -> ApiResponse<()> {
     let _ = repo_id;
-    let name = name.trim();
-    if name.is_empty() {
-        return Err("相册名不能为空".to_string());
-    }
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    db.update_album_name(&album_id, name)
-        .map_err(hp_err_to_string)
+    let outcome = (|| -> HpResult<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(HpError::InvalidArgument("相册名不能为空".into()));
+        }
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        db.update_album_name(&album_id, name)
+    })();
+    api_from_hp(outcome)
 }
 
 /// album.delete：删除相册（成员关系与同步规则一并清理）。
@@ -336,12 +342,12 @@ pub(crate) fn album_delete(
     repo_id: String,
     album_id: String,
     state: State<AppState>,
-) -> Result<(), String> {
+) -> ApiResponse<()> {
     let _ = repo_id;
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    db.delete_album(&album_id).map_err(hp_err_to_string)
+    let outcome = (|| -> HpResult<()> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        db.delete_album(&album_id)
+    })();
+    api_from_hp(outcome)
 }

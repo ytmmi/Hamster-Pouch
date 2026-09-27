@@ -1,5 +1,9 @@
 /**
  * M3：虚拟相册命令封装。
+ *
+ * **D76 迁移状态：已包装**（批次 `album`，2026-09）。全部命令返回
+ * `{ ok, data?, error? }`，这里经 [`unwrapApi`] 解包：调用方拿到的仍是原来的领域值，
+ * 失败时抛带 `code` 的 `HpApiFailure`，界面按 `code` 走 i18n（D27）。
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -21,10 +25,11 @@ import type {
   AlbumSyncArgs,
   FileItem,
 } from "../types";
+import { unwrapApi, type ApiResponse } from "./response";
 
 /** 创建相册 */
 export function albumCreate(args: AlbumCreateArgs): Promise<AlbumCreateResult> {
-  return invoke<AlbumCreateResult>("album_create", {
+  return invoke<ApiResponse<AlbumCreateResult>>("album_create", {
     repoId: args.repoId,
     name: args.name,
     kind: args.kind,
@@ -35,74 +40,76 @@ export function albumCreate(args: AlbumCreateArgs): Promise<AlbumCreateResult> {
     includeSubsources: args.includeSubsources,
     filterJson: args.filterJson,
     fileIds: args.fileIds,
-  });
+  }).then(unwrapApi);
 }
 
 /** 设置相册媒体属性 */
 export function albumSetMediaType(
   args: AlbumSetMediaTypeArgs,
 ): Promise<AlbumSetMediaTypeResult> {
-  return invoke<AlbumSetMediaTypeResult>("album_set_media_type", {
+  return invoke<ApiResponse<AlbumSetMediaTypeResult>>("album_set_media_type", {
     repoId: args.repoId,
     albumId: args.albumId,
     mediaType: args.mediaType,
-  });
+  }).then(unwrapApi);
 }
 
 /** 添加相册成员 */
 export function albumAddMember(args: AlbumAddMemberArgs): Promise<AlbumMemberResult> {
-  return invoke<AlbumMemberResult>("album_add_member", {
+  return invoke<ApiResponse<AlbumMemberResult>>("album_add_member", {
     repoId: args.repoId,
     albumId: args.albumId,
     fileIds: args.fileIds,
-  });
+  }).then(unwrapApi);
 }
 
 /** 移除相册成员 */
 export function albumRemoveMember(
   args: AlbumRemoveMemberArgs,
 ): Promise<AlbumRemoveResult> {
-  return invoke<AlbumRemoveResult>("album_remove_member", {
+  return invoke<ApiResponse<AlbumRemoveResult>>("album_remove_member", {
     repoId: args.repoId,
     albumId: args.albumId,
     fileIds: args.fileIds,
-  });
+  }).then(unwrapApi);
 }
 
 /** 列出仓库下全部相册 */
 export function albumList(args: AlbumListArgs): Promise<AlbumItem[]> {
-  return invoke<AlbumItem[]>("album_list", { repoId: args.repoId });
+  return invoke<ApiResponse<AlbumItem[]>>("album_list", {
+    repoId: args.repoId,
+  }).then(unwrapApi);
 }
 
 /** 列出相册可见成员 */
 export function albumMembers(args: AlbumMembersArgs): Promise<FileItem[]> {
-  return invoke<FileItem[]>("album_members", {
+  return invoke<ApiResponse<FileItem[]>>("album_members", {
     repoId: args.repoId,
     albumId: args.albumId,
-  });
+  }).then(unwrapApi);
 }
 
 /** 执行相册同步（后台执行，返回 taskId） */
 export function albumSync(args: AlbumSyncArgs): Promise<string> {
-  return invoke<string>("album_sync", {
+  return invoke<ApiResponse<string>>("album_sync", {
     repoId: args.repoId,
     albumId: args.albumId,
-  });
+  }).then(unwrapApi);
 }
 
 /** 重命名相册 */
 export function albumRename(args: AlbumRenameArgs): Promise<void> {
-  return invoke<void>("album_rename", {
+  return invoke<ApiResponse<void>>("album_rename", {
     repoId: args.repoId,
     albumId: args.albumId,
     name: args.name,
-  });
+  }).then(unwrapApi);
 }
 
 /** 删除相册 */
 export function albumDelete(args: AlbumDeleteArgs): Promise<void> {
-  return invoke<void>("album_delete", {
+  return invoke<ApiResponse<void>>("album_delete", {
     repoId: args.repoId,
     albumId: args.albumId,
-  });
+  }).then(unwrapApi);
 }

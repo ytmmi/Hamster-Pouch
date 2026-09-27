@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { ContextMenu } from "../menu/ContextMenu";
 import type { AlbumItem } from "../shared/types";
@@ -131,7 +132,7 @@ export function AlbumPanel(): JSX.Element {
     try {
       setAlbums(await api.albumList({ repoId: app.repoId }));
     } catch (e) {
-      app.status(t("album.listFailed", { err: String(e) }), "error");
+      app.status(t("album.listFailed", { err: errorTextOf(t, e) }), "error");
     }
   }, [app]);
 
@@ -168,7 +169,7 @@ export function AlbumPanel(): JSX.Element {
       app.setSourceId(null);
       app.refresh();
     } catch (e) {
-      app.status(t("album.createFailed", { err: String(e) }), "error");
+      app.status(t("album.createFailed", { err: errorTextOf(t, e) }), "error");
     }
   };
 
@@ -183,7 +184,7 @@ export function AlbumPanel(): JSX.Element {
       app.status(`${t("album.rename")}: ${newName.trim()}`, "ok");
       app.refresh();
     } catch (e) {
-      app.status(t("album.renameFailed", { err: String(e) }), "error");
+      app.status(t("album.renameFailed", { err: errorTextOf(t, e) }), "error");
     }
   };
 
@@ -205,7 +206,7 @@ export function AlbumPanel(): JSX.Element {
       app.setAlbumId(r.album_id);
       app.refresh();
     } catch (e) {
-      app.status(t("album.createChildFailed", { err: String(e) }), "error");
+      app.status(t("album.createChildFailed", { err: errorTextOf(t, e) }), "error");
     }
   };
 
@@ -222,7 +223,7 @@ export function AlbumPanel(): JSX.Element {
       }
       app.refresh();
     } catch (e) {
-      app.status(t("album.deleteFailed", { err: String(e) }), "error");
+      app.status(t("album.deleteFailed", { err: errorTextOf(t, e) }), "error");
     }
   };
 
@@ -234,7 +235,7 @@ export function AlbumPanel(): JSX.Element {
       app.status(`${t("album.mediaType.set")}: ${mediaLabel(mt)}`, "ok");
       app.refresh();
     } catch (e) {
-      app.status(t("album.setMediaTypeFailed", { err: String(e) }), "error");
+      app.status(t("album.setMediaTypeFailed", { err: errorTextOf(t, e) }), "error");
     }
   };
 
@@ -260,7 +261,7 @@ export function AlbumPanel(): JSX.Element {
       app.status(`${t("album.dropHint")}: +${r.added}`, "ok");
       app.refresh();
     } catch (err) {
-      app.status(t("album.addMemberFailed", { err: String(err) }), "error");
+      app.status(t("album.addMemberFailed", { err: errorTextOf(t, err) }), "error");
     }
   };
 

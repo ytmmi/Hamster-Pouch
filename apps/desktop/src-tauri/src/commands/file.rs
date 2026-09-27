@@ -8,36 +8,14 @@
 use hp_core::{HpError, HpResult, MediaType};
 use hp_media::extract_exif;
 use hp_scanner::ScanOptions;
-use hp_store::RepoDb;
 use serde::Serialize;
 use tauri::State;
 
 use crate::commands::shared::{
-    api_async, api_from_hp, file_to_item, resolve_file_path, AlbumFileItem, ApiAsync, ApiResponse,
+    api_async, api_from_hp, file_to_item, lock_repo, open_repo, open_repo_mut, resolve_file_path,
+    AlbumFileItem, ApiAsync, ApiResponse,
 };
 use crate::AppState;
-
-/// 仓库未打开（前置条件不满足）→ `not_found`：目标上下文不存在。
-fn repo_guard<'g, 'a>(guard: &'g std::sync::MutexGuard<'a, Option<RepoDb>>) -> HpResult<&'g RepoDb> {
-    guard
-        .as_ref()
-        .ok_or_else(|| HpError::NotFound("未打开仓库".into()))
-}
-
-fn repo_guard_mut<'g, 'a>(
-    guard: &'g mut std::sync::MutexGuard<'a, Option<RepoDb>>,
-) -> HpResult<&'g mut RepoDb> {
-    guard
-        .as_mut()
-        .ok_or_else(|| HpError::NotFound("未打开仓库".into()))
-}
-
-fn lock_open_repo(state: &AppState) -> HpResult<std::sync::MutexGuard<'_, Option<RepoDb>>> {
-    state
-        .open_repo
-        .lock()
-        .map_err(|_| HpError::Store("仓库锁中毒".into()))
-}
 
 /// 后台线程按需生成缩略图（缓存未命中时才调用；不阻塞 IPC 线程）。
 fn generate_thumbnail(
@@ -92,8 +70,8 @@ pub(crate) fn file_metadata(
 ) -> ApiResponse<FileMetadataResult> {
     let _ = repo_id;
     let outcome = (|| -> HpResult<FileMetadataResult> {
-        let guard = lock_open_repo(&state)?;
-        let db = repo_guard(&guard)?;
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
         let file = db
             .get_file(&file_id)?
             .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
@@ -141,8 +119,8 @@ pub(crate) fn file_query(
                 Some(MediaType::from_str(s).ok_or_else(|| HpError::InvalidArgument(format!("未知媒体类型: {s}")))?)
             }
         };
-        let guard = lock_open_repo(&state)?;
-        let db = repo_guard(&guard)?;
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
         let rows = db.query_files(
             &repo_id,
             mt,
@@ -165,8 +143,8 @@ pub(crate) fn file_path(
 ) -> ApiResponse<String> {
     let _ = repo_id;
     let outcome = (|| -> HpResult<String> {
-        let guard = lock_open_repo(&state)?;
-        let db = repo_guard(&guard)?;
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
         let file = db
             .get_file(&file_id)?
             .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
@@ -191,8 +169,8 @@ pub(crate) async fn thumb_get(
     let outcome = async {
         // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard。
         let (src_path, content_hash, media_type, cache, ffmpeg) = {
-            let guard = lock_open_repo(&state)?;
-            let db = repo_guard(&guard)?;
+            let guard = lock_repo(&state)?;
+            let db = open_repo(&guard)?;
             let file = db
                 .get_file(&file_id)?
                 .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
@@ -251,8 +229,8 @@ pub(crate) fn file_rename(
             return Err(HpError::InvalidArgument("文件名非法".into()));
         }
 
-        let mut guard = lock_open_repo(&state)?;
-        let db = repo_guard_mut(&mut guard)?;
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
         let file = db
             .get_file(&file_id)?
             .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
@@ -290,8 +268,8 @@ pub(crate) fn file_trash(
 ) -> ApiResponse<u32> {
     let _ = repo_id;
     let outcome = (|| -> HpResult<u32> {
-        let mut guard = lock_open_repo(&state)?;
-        let db = repo_guard_mut(&mut guard)?;
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
 
         let mut removed: Vec<String> = Vec::new();
         for id in &file_ids {
@@ -320,8 +298,8 @@ pub(crate) fn file_reanalyze(
 ) -> ApiResponse<AlbumFileItem> {
     let _ = repo_id;
     let outcome = (|| -> HpResult<AlbumFileItem> {
-        let mut guard = lock_open_repo(&state)?;
-        let db = repo_guard_mut(&mut guard)?;
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
         let file = db
             .get_file(&file_id)?
             .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
@@ -357,8 +335,8 @@ pub(crate) fn file_reverify(
 ) -> ApiResponse<String> {
     let _ = repo_id;
     let outcome = (|| -> HpResult<String> {
-        let mut guard = lock_open_repo(&state)?;
-        let db = repo_guard_mut(&mut guard)?;
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
         let file = db
             .get_file(&file_id)?
             .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
