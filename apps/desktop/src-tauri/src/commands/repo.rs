@@ -12,7 +12,8 @@ use serde::Serialize;
 use tauri::{Emitter, State};
 
 use crate::commands::shared::{
-    api_from_hp, default_repo_dir, ensure_global, hp_err_to_string, ApiResponse,
+    api_from_hp, default_repo_dir, ensure_global, global, global_mut, lock_global, lock_repo,
+    ApiResponse,
 };
 use crate::AppState;
 
@@ -251,51 +252,51 @@ pub(crate) fn repo_create(
     db_path: Option<String>,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<RepoSummary, String> {
-    if name.trim().is_empty() {
-        return Err("仓库名不能为空".into());
-    }
-    let repo_path = match db_path {
-        Some(p) => PathBuf::from(p),
-        None => {
-            let dir = default_repo_dir(&app)?;
-            dir.join(format!("{}.sqlite3", RepoId::generate()))
+) -> ApiResponse<RepoSummary> {
+    let outcome = (|| -> HpResult<RepoSummary> {
+        if name.trim().is_empty() {
+            return Err(HpError::InvalidArgument("仓库名不能为空".into()));
         }
-    };
+        let repo_path = match db_path {
+            Some(p) => PathBuf::from(p),
+            None => {
+                let dir = default_repo_dir(&app).map_err(HpError::Io)?;
+                dir.join(format!("{}.sqlite3", RepoId::generate()))
+            }
+        };
 
-    let repo = RepoDb::create(&repo_path, &name).map_err(hp_err_to_string)?;
-    repo.close().map_err(hp_err_to_string)?;
+        let repo = RepoDb::create(&repo_path, &name)?;
+        repo.close()?;
 
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let mut guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_mut().expect("ensure_global 已初始化");
-    let row = g
-        .register_repo(&name, repo_path.to_str().expect("路径非 UTF-8"))
-        .map_err(hp_err_to_string)?;
+        ensure_global(&state, &app)?;
+        let row = {
+            let mut guard = lock_global(&state)?;
+            let g = global_mut(&mut guard)?;
+            let path_str = repo_path
+                .to_str()
+                .ok_or_else(|| HpError::InvalidArgument("仓库库路径不是合法 UTF-8".into()))?;
+            g.register_repo(&name, path_str)?
+        };
 
-    let opened = RepoDb::open(repo_path).map_err(hp_err_to_string)?;
-    let version = opened.schema_version().map_err(hp_err_to_string)?;
+        let opened = RepoDb::open(&repo_path)?;
+        let version = opened.schema_version()?;
 
-    let mut open_guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    *open_guard = Some(opened);
-    if let Ok(mut cur) = state.current_repo_id.lock() {
-        *cur = Some(row.id.clone());
-    }
-    if let Ok(mut path) = state.current_repo_path.lock() {
-        *path = Some(PathBuf::from(&row.repo_db_path));
-    }
+        let mut open_guard = lock_repo(&state)?;
+        *open_guard = Some(opened);
+        if let Ok(mut cur) = state.current_repo_id.lock() {
+            *cur = Some(row.id.clone());
+        }
+        if let Ok(mut path) = state.current_repo_path.lock() {
+            *path = Some(PathBuf::from(&row.repo_db_path));
+        }
 
-    Ok(RepoSummary {
-        id: row.id,
-        name: row.name,
-        schema_version: version,
-    })
+        Ok(RepoSummary {
+            id: row.id,
+            name: row.name,
+            schema_version: version,
+        })
+    })();
+    api_from_hp(outcome)
 }
 
 /// repo.open：打开已注册仓库。
@@ -304,67 +305,60 @@ pub(crate) fn repo_open(
     repo_id: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<RepoSummary, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let row = {
-        let guard = state
-            .global_db
-            .lock()
-            .map_err(|_| "全局库锁中毒".to_string())?;
-        let g = guard.as_ref().expect("ensure_global 已初始化");
-        g.get_repo(&repo_id)
-            .map_err(hp_err_to_string)?
-            .ok_or_else(|| format!("仓库不存在: {repo_id}"))?
-    };
+) -> ApiResponse<RepoSummary> {
+    let outcome = (|| -> HpResult<RepoSummary> {
+        ensure_global(&state, &app)?;
+        let row = {
+            let guard = lock_global(&state)?;
+            let g = global(&guard)?;
+            g.get_repo(&repo_id)?
+                .ok_or_else(|| HpError::NotFound(format!("仓库不存在: {repo_id}")))?
+        };
 
-    let repo = RepoDb::open(&row.repo_db_path).map_err(hp_err_to_string)?;
-    let version = repo.schema_version().map_err(hp_err_to_string)?;
+        let repo = RepoDb::open(&row.repo_db_path)?;
+        let version = repo.schema_version()?;
 
-    {
-        let mut guard = state
-            .global_db
-            .lock()
-            .map_err(|_| "全局库锁中毒".to_string())?;
-        let g = guard.as_mut().expect("ensure_global 已初始化");
-        g.touch_repo(&repo_id).map_err(hp_err_to_string)?;
-    }
+        {
+            let mut guard = lock_global(&state)?;
+            let g = global_mut(&mut guard)?;
+            g.touch_repo(&repo_id)?;
+        }
 
-    let mut open_guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    *open_guard = Some(repo);
-    if let Ok(mut cur) = state.current_repo_id.lock() {
-        *cur = Some(repo_id.clone());
-    }
-    if let Ok(mut path) = state.current_repo_path.lock() {
-        *path = Some(PathBuf::from(&row.repo_db_path));
-    }
+        let mut open_guard = lock_repo(&state)?;
+        *open_guard = Some(repo);
+        if let Ok(mut cur) = state.current_repo_id.lock() {
+            *cur = Some(repo_id.clone());
+        }
+        if let Ok(mut path) = state.current_repo_path.lock() {
+            *path = Some(PathBuf::from(&row.repo_db_path));
+        }
 
-    Ok(RepoSummary {
-        id: repo_id,
-        name: row.name,
-        schema_version: version,
-    })
+        Ok(RepoSummary {
+            id: repo_id,
+            name: row.name,
+            schema_version: version,
+        })
+    })();
+    api_from_hp(outcome)
 }
 
 /// repo.close：关闭当前打开的仓库。
 #[tauri::command]
-pub(crate) fn repo_close(state: State<AppState>) -> Result<(), String> {
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    if let Some(repo) = guard.take() {
-        repo.close().map_err(hp_err_to_string)?;
-    }
-    if let Ok(mut cur) = state.current_repo_id.lock() {
-        *cur = None;
-    }
-    if let Ok(mut path) = state.current_repo_path.lock() {
-        *path = None;
-    }
-    Ok(())
+pub(crate) fn repo_close(state: State<AppState>) -> ApiResponse<()> {
+    let outcome = (|| -> HpResult<()> {
+        let mut guard = lock_repo(&state)?;
+        if let Some(repo) = guard.take() {
+            repo.close()?;
+        }
+        if let Ok(mut cur) = state.current_repo_id.lock() {
+            *cur = None;
+        }
+        if let Ok(mut path) = state.current_repo_path.lock() {
+            *path = None;
+        }
+        Ok(())
+    })();
+    api_from_hp(outcome)
 }
 
 /// repo.list：列出全部已注册仓库。
@@ -372,24 +366,24 @@ pub(crate) fn repo_close(state: State<AppState>) -> Result<(), String> {
 pub(crate) fn repo_list(
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<Vec<RepoListItem>, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().expect("ensure_global 已初始化");
-    let rows = g.list_repos().map_err(hp_err_to_string)?;
-    Ok(rows
-        .into_iter()
-        .map(|r| RepoListItem {
-            id: r.id,
-            name: r.name,
-            repo_db_path: r.repo_db_path,
-            created_at: r.created_at,
-            last_opened_at: r.last_opened_at,
-        })
-        .collect())
+) -> ApiResponse<Vec<RepoListItem>> {
+    let outcome = (|| -> HpResult<Vec<RepoListItem>> {
+        ensure_global(&state, &app)?;
+        let guard = lock_global(&state)?;
+        let g = global(&guard)?;
+        let rows = g.list_repos()?;
+        Ok(rows
+            .into_iter()
+            .map(|r| RepoListItem {
+                id: r.id,
+                name: r.name,
+                repo_db_path: r.repo_db_path,
+                created_at: r.created_at,
+                last_opened_at: r.last_opened_at,
+            })
+            .collect())
+    })();
+    api_from_hp(outcome)
 }
 
 /// setting.get：读取单个设置值（`{ value | null }`，标量）。
@@ -532,28 +526,29 @@ pub(crate) fn repo_backup(
     dest_path: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<String, String> {
-    if dest_path.trim().is_empty() {
-        return Err("备份目标路径不能为空".into());
-    }
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let row = {
-        let guard = state
-            .global_db
-            .lock()
-            .map_err(|_| "全局库锁中毒".to_string())?;
-        let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
-        g.get_repo(&repo_id)
-            .map_err(hp_err_to_string)?
-            .ok_or_else(|| format!("仓库不存在: {repo_id}"))?
-    };
+) -> ApiResponse<String> {
+    let outcome = (|| -> HpResult<String> {
+        if dest_path.trim().is_empty() {
+            return Err(HpError::InvalidArgument("备份目标路径不能为空".into()));
+        }
+        ensure_global(&state, &app)?;
+        let row = {
+            let guard = lock_global(&state)?;
+            let g = global(&guard)?;
+            g.get_repo(&repo_id)?
+                .ok_or_else(|| HpError::NotFound(format!("仓库不存在: {repo_id}")))?
+        };
 
-    let dest = PathBuf::from(&dest_path);
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("创建备份目录失败: {e}"))?;
-    }
-    std::fs::copy(&row.repo_db_path, &dest).map_err(|e| format!("备份仓库库失败: {e}"))?;
-    Ok(uuid::Uuid::new_v4().to_string())
+        let dest = PathBuf::from(&dest_path);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| HpError::Io(format!("创建备份目录失败: {e}")))?;
+        }
+        std::fs::copy(&row.repo_db_path, &dest)
+            .map_err(|e| HpError::Io(format!("备份仓库库失败: {e}")))?;
+        Ok(uuid::Uuid::new_v4().to_string())
+    })();
+    api_from_hp(outcome)
 }
 
 /// repo.rename：重命名仓库（全局注册表 + 若打开则同步仓库库 meta）。
@@ -563,35 +558,32 @@ pub(crate) fn repo_rename(
     name: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<(), String> {
-    let trimmed = name.trim();
-    if trimmed.is_empty() {
-        return Err("仓库名不能为空".into());
-    }
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    {
-        let mut guard = state
-            .global_db
-            .lock()
-            .map_err(|_| "全局库锁中毒".to_string())?;
-        let g = guard.as_mut().ok_or("全局库未初始化".to_string())?;
-        g.rename_repo(&repo_id, trimmed).map_err(hp_err_to_string)?;
-    }
-    let is_current = state
-        .current_repo_id
-        .lock()
-        .map(|c| c.as_deref() == Some(repo_id.as_str()))
-        .unwrap_or(false);
-    if is_current {
-        let mut open = state
-            .open_repo
-            .lock()
-            .map_err(|_| "仓库锁中毒".to_string())?;
-        if let Some(db) = open.as_mut() {
-            db.set_repo_name(trimmed).map_err(hp_err_to_string)?;
+) -> ApiResponse<()> {
+    let outcome = (|| -> HpResult<()> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(HpError::InvalidArgument("仓库名不能为空".into()));
         }
-    }
-    Ok(())
+        ensure_global(&state, &app)?;
+        {
+            let mut guard = lock_global(&state)?;
+            let g = global_mut(&mut guard)?;
+            g.rename_repo(&repo_id, trimmed)?;
+        }
+        let is_current = state
+            .current_repo_id
+            .lock()
+            .map(|c| c.as_deref() == Some(repo_id.as_str()))
+            .unwrap_or(false);
+        if is_current {
+            let mut open = lock_repo(&state)?;
+            if let Some(db) = open.as_mut() {
+                db.set_repo_name(trimmed)?;
+            }
+        }
+        Ok(())
+    })();
+    api_from_hp(outcome)
 }
 
 /// repo.delete：删除仓库（注册行 + 仓库库文件；不删除真实媒体源文件）。
@@ -600,66 +592,54 @@ pub(crate) fn repo_delete(
     repo_id: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<(), String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
+) -> ApiResponse<()> {
+    let outcome = (|| -> HpResult<()> {
+        ensure_global(&state, &app)?;
 
-    // 若删除的是当前打开仓库，先关闭以释放文件句柄。
-    let is_current = state
-        .current_repo_id
-        .lock()
-        .map(|c| c.as_deref() == Some(repo_id.as_str()))
-        .unwrap_or(false);
-    if is_current {
-        let mut guard = state
-            .open_repo
+        // 若删除的是当前打开仓库，先关闭以释放文件句柄。
+        let is_current = state
+            .current_repo_id
             .lock()
-            .map_err(|_| "仓库锁中毒".to_string())?;
-        if let Some(repo) = guard.take() {
-            repo.close().map_err(hp_err_to_string)?;
+            .map(|c| c.as_deref() == Some(repo_id.as_str()))
+            .unwrap_or(false);
+        if is_current {
+            let mut guard = lock_repo(&state)?;
+            if let Some(repo) = guard.take() {
+                repo.close()?;
+            }
+            if let Ok(mut cur) = state.current_repo_id.lock() {
+                *cur = None;
+            }
+            if let Ok(mut path) = state.current_repo_path.lock() {
+                *path = None;
+            }
         }
-        if let Ok(mut cur) = state.current_repo_id.lock() {
-            *cur = None;
-        }
-        if let Ok(mut path) = state.current_repo_path.lock() {
-            *path = None;
-        }
-    }
 
-    let repo_path = {
-        let guard = state
-            .global_db
-            .lock()
-            .map_err(|_| "全局库锁中毒".to_string())?;
-        let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
-        let row = g
-            .get_repo(&repo_id)
-            .map_err(hp_err_to_string)?
-            .ok_or_else(|| format!("仓库不存在: {repo_id}"))?;
-        row.repo_db_path
-    };
+        let repo_path = {
+            let guard = lock_global(&state)?;
+            let g = global(&guard)?;
+            g.get_repo(&repo_id)?
+                .ok_or_else(|| HpError::NotFound(format!("仓库不存在: {repo_id}")))?
+                .repo_db_path
+        };
 
-    {
-        let mut guard = state
-            .global_db
-            .lock()
-            .map_err(|_| "全局库锁中毒".to_string())?;
-        let g = guard.as_mut().ok_or("全局库未初始化".to_string())?;
-        g.delete_repo(&repo_id).map_err(hp_err_to_string)?;
-        // 清理默认仓库标记。
-        if g.get_setting("repo.default")
-            .map_err(hp_err_to_string)?
-            .as_deref()
-            == Some(repo_id.as_str())
         {
-            g.set_setting("repo.default", "").map_err(hp_err_to_string)?;
+            let mut guard = lock_global(&state)?;
+            let g = global_mut(&mut guard)?;
+            g.delete_repo(&repo_id)?;
+            // 清理默认仓库标记。
+            if g.get_setting("repo.default")?.as_deref() == Some(repo_id.as_str()) {
+                g.set_setting("repo.default", "")?;
+            }
         }
-    }
 
-    // 删除仓库库文件（含 WAL / SHM 附属文件）。
-    for suffix in ["", "-wal", "-shm"] {
-        let _ = std::fs::remove_file(format!("{repo_path}{suffix}"));
-    }
-    Ok(())
+        // 删除仓库库文件（含 WAL / SHM 附属文件）。
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{repo_path}{suffix}"));
+        }
+        Ok(())
+    })();
+    api_from_hp(outcome)
 }
 
 /// repo.setDefault：把某仓库设为默认仓库（启动时自动打开）。
@@ -668,15 +648,14 @@ pub(crate) fn repo_set_default(
     repo_id: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<(), String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
-    g.set_setting("repo.default", &repo_id)
-        .map_err(hp_err_to_string)
+) -> ApiResponse<()> {
+    let outcome = (|| -> HpResult<()> {
+        ensure_global(&state, &app)?;
+        let guard = lock_global(&state)?;
+        let g = global(&guard)?;
+        g.set_setting("repo.default", &repo_id)
+    })();
+    api_from_hp(outcome)
 }
 
 /// repo.getDefault：读取默认仓库 ID；未设置返回 `None`。
@@ -684,13 +663,13 @@ pub(crate) fn repo_set_default(
 pub(crate) fn repo_get_default(
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<Option<String>, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
-    let value = g.get_setting("repo.default").map_err(hp_err_to_string)?;
-    Ok(value.filter(|v| !v.is_empty()))
+) -> ApiResponse<Option<String>> {
+    let outcome = (|| -> HpResult<Option<String>> {
+        ensure_global(&state, &app)?;
+        let guard = lock_global(&state)?;
+        let g = global(&guard)?;
+        let value = g.get_setting("repo.default")?;
+        Ok(value.filter(|v| !v.is_empty()))
+    })();
+    api_from_hp(outcome)
 }

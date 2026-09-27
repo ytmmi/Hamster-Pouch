@@ -5,12 +5,18 @@
 //! 分层（D53/D54）：布局行按 `(repo_id, name, layer_key)` 各存一份——同一布局名在每个层
 //! 一份；`layout.save` 写**当前层**那一份、`layout.get` 读**当前层**那一份；
 //! **当前层按仓库持久化**（应用设置键 `blueprint.currentLayer.<repoId>`，D54）。
+//!
+//! **D76 迁移状态：已包装**（批次 `repo/layout`，2026-09）。八条命令返回
+//! `{ ok, data?, error? }`；前端 `api/layout.ts` 经 `unwrapApi` 解包。
 
+use hp_core::{HpError, HpResult};
 use hp_store::PanelLayoutRow;
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{ensure_global, hp_err_to_string};
+use crate::commands::shared::{
+    api_from_hp, ensure_global, global, global_mut, lock_global, ApiResponse,
+};
 use crate::AppState;
 
 /// 布局列表项（返回前端）。
@@ -47,24 +53,21 @@ pub fn layout_save(
     blueprint_ids: Option<Vec<String>>,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<LayoutItem, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let layer_key = layer_key.unwrap_or_default();
-    let mut guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_mut().ok_or("全局库未初始化".to_string())?;
-    let row = g
-        .save_panel_layout(&repo_id, &name, &layer_key, &layout_json)
-        .map_err(hp_err_to_string)?;
-    if let Some(ids) = blueprint_ids {
-        if !ids.is_empty() {
-            g.set_layout_blueprints(&repo_id, &name, &ids)
-                .map_err(hp_err_to_string)?;
+) -> ApiResponse<LayoutItem> {
+    let outcome = (|| -> HpResult<LayoutItem> {
+        ensure_global(&state, &app)?;
+        let layer_key = layer_key.unwrap_or_default();
+        let mut guard = lock_global(&state)?;
+        let g = global_mut(&mut guard)?;
+        let row = g.save_panel_layout(&repo_id, &name, &layer_key, &layout_json)?;
+        if let Some(ids) = blueprint_ids {
+            if !ids.is_empty() {
+                g.set_layout_blueprints(&repo_id, &name, &ids)?;
+            }
         }
-    }
-    Ok(to_item(row))
+        Ok(to_item(row))
+    })();
+    api_from_hp(outcome)
 }
 
 /// layout.list：列出某仓库下全部命名布局行（最新在前）。
@@ -75,15 +78,15 @@ pub fn layout_list(
     repo_id: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<Vec<LayoutItem>, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
-    let rows = g.list_panel_layouts(&repo_id).map_err(hp_err_to_string)?;
-    Ok(rows.into_iter().map(to_item).collect())
+) -> ApiResponse<Vec<LayoutItem>> {
+    let outcome = (|| -> HpResult<Vec<LayoutItem>> {
+        ensure_global(&state, &app)?;
+        let guard = lock_global(&state)?;
+        let g = global(&guard)?;
+        let rows = g.list_panel_layouts(&repo_id)?;
+        Ok(rows.into_iter().map(to_item).collect())
+    })();
+    api_from_hp(outcome)
 }
 
 /// layout.get：读取某仓库下、某一层命名布局的 JSON；不存在返回 `None`。
@@ -96,18 +99,16 @@ pub fn layout_get(
     layer_key: Option<String>,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<Option<String>, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let layer_key = layer_key.unwrap_or_default();
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
-    let row = g
-        .get_panel_layout(&repo_id, &name, &layer_key)
-        .map_err(hp_err_to_string)?;
-    Ok(row.map(|r| r.layout_json))
+) -> ApiResponse<Option<String>> {
+    let outcome = (|| -> HpResult<Option<String>> {
+        ensure_global(&state, &app)?;
+        let layer_key = layer_key.unwrap_or_default();
+        let guard = lock_global(&state)?;
+        let g = global(&guard)?;
+        let row = g.get_panel_layout(&repo_id, &name, &layer_key)?;
+        Ok(row.map(|r| r.layout_json))
+    })();
+    api_from_hp(outcome)
 }
 
 /// layout.rename：重命名某仓库下的命名布局（作用于该布局名的全部层行）。
@@ -118,28 +119,22 @@ pub fn layout_rename(
     new_name: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<(), String> {
-    if new_name.trim().is_empty() {
-        return Err("布局名不能为空".into());
-    }
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let mut guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_mut().ok_or("全局库未初始化".to_string())?;
-    g.rename_panel_layout(&repo_id, &name, new_name.trim())
-        .map_err(hp_err_to_string)?;
-    // 默认布局名同步更新。
-    if g.get_setting(&layout_default_key(&repo_id))
-        .map_err(hp_err_to_string)?
-        .as_deref()
-        == Some(name.as_str())
-    {
-        g.set_setting(&layout_default_key(&repo_id), new_name.trim())
-            .map_err(hp_err_to_string)?;
-    }
-    Ok(())
+) -> ApiResponse<()> {
+    let outcome = (|| -> HpResult<()> {
+        if new_name.trim().is_empty() {
+            return Err(HpError::InvalidArgument("布局名不能为空".into()));
+        }
+        ensure_global(&state, &app)?;
+        let mut guard = lock_global(&state)?;
+        let g = global_mut(&mut guard)?;
+        g.rename_panel_layout(&repo_id, &name, new_name.trim())?;
+        // 默认布局名同步更新。
+        if g.get_setting(&layout_default_key(&repo_id))?.as_deref() == Some(name.as_str()) {
+            g.set_setting(&layout_default_key(&repo_id), new_name.trim())?;
+        }
+        Ok(())
+    })();
+    api_from_hp(outcome)
 }
 
 /// layout.delete：删除某仓库下的命名布局（作用于该布局名的全部层行）。
@@ -149,24 +144,18 @@ pub fn layout_delete(
     name: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<(), String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let mut guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_mut().ok_or("全局库未初始化".to_string())?;
-    g.delete_panel_layout(&repo_id, &name)
-        .map_err(hp_err_to_string)?;
-    if g.get_setting(&layout_default_key(&repo_id))
-        .map_err(hp_err_to_string)?
-        .as_deref()
-        == Some(name.as_str())
-    {
-        g.set_setting(&layout_default_key(&repo_id), "")
-            .map_err(hp_err_to_string)?;
-    }
-    Ok(())
+) -> ApiResponse<()> {
+    let outcome = (|| -> HpResult<()> {
+        ensure_global(&state, &app)?;
+        let mut guard = lock_global(&state)?;
+        let g = global_mut(&mut guard)?;
+        g.delete_panel_layout(&repo_id, &name)?;
+        if g.get_setting(&layout_default_key(&repo_id))?.as_deref() == Some(name.as_str()) {
+            g.set_setting(&layout_default_key(&repo_id), "")?;
+        }
+        Ok(())
+    })();
+    api_from_hp(outcome)
 }
 
 /// layout.setDefault：把某命名布局设为该仓库的默认布局。
@@ -176,15 +165,14 @@ pub fn layout_set_default(
     name: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<(), String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
-    g.set_setting(&layout_default_key(&repo_id), &name)
-        .map_err(hp_err_to_string)
+) -> ApiResponse<()> {
+    let outcome = (|| -> HpResult<()> {
+        ensure_global(&state, &app)?;
+        let guard = lock_global(&state)?;
+        let g = global(&guard)?;
+        g.set_setting(&layout_default_key(&repo_id), &name)
+    })();
+    api_from_hp(outcome)
 }
 
 /// layout.getDefault：读取某仓库的默认布局名；未设置返回 `None`。
@@ -193,17 +181,15 @@ pub fn layout_get_default(
     repo_id: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<Option<String>, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
-    let value = g
-        .get_setting(&layout_default_key(&repo_id))
-        .map_err(hp_err_to_string)?;
-    Ok(value.filter(|v| !v.is_empty()))
+) -> ApiResponse<Option<String>> {
+    let outcome = (|| -> HpResult<Option<String>> {
+        ensure_global(&state, &app)?;
+        let guard = lock_global(&state)?;
+        let g = global(&guard)?;
+        let value = g.get_setting(&layout_default_key(&repo_id))?;
+        Ok(value.filter(|v| !v.is_empty()))
+    })();
+    api_from_hp(outcome)
 }
 
 /// layout.blueprints：读取某布局绑定的蓝图 ID 列表（1 个布局可绑定多个蓝图）。
@@ -215,19 +201,19 @@ pub fn layout_blueprints(
     name: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<Vec<String>, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
-    let rows = g.list_panel_layouts(&repo_id).map_err(hp_err_to_string)?;
-    let row = rows
-        .into_iter()
-        .find(|r| r.workspace == name)
-        .ok_or_else(|| format!("布局不存在: {name}"))?;
-    Ok(row.blueprint_ids)
+) -> ApiResponse<Vec<String>> {
+    let outcome = (|| -> HpResult<Vec<String>> {
+        ensure_global(&state, &app)?;
+        let guard = lock_global(&state)?;
+        let g = global(&guard)?;
+        let rows = g.list_panel_layouts(&repo_id)?;
+        let row = rows
+            .into_iter()
+            .find(|r| r.workspace == name)
+            .ok_or_else(|| HpError::NotFound(format!("布局不存在: {name}")))?;
+        Ok(row.blueprint_ids)
+    })();
+    api_from_hp(outcome)
 }
 
 /// 某仓库默认布局的设置键。

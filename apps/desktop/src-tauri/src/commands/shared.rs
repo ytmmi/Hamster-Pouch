@@ -9,18 +9,16 @@ use tauri::Manager;
 
 use crate::AppState;
 
-/// 统一把领域错误转为前端可见字符串。
+/// **D76 迁移已完成（2026-09）**：桥接层不再需要"把领域错误压成 String"的转换函数。
 ///
-/// **仅用于尚未迁移的旧命令**（D76 的分批迁移范围内）。新命令一律走
-/// [`api_from_hp`] 的结构化错误：`message` 只是诊断，前端按 `code` 走 i18n（D27）。
-pub(crate) fn hp_err_to_string(e: HpError) -> String {
-    e.to_string()
-}
+/// 历史上这里是 `hp_err_to_string(e)`，D76 让每条命令都返回 `{ ok, data?, error? }`
+/// 并携带 `HpError::code()` 的闭集错误码，因此该函数在 2026-09 最后一批
+/// （`repo` / `layout` / `debug.log`）迁移完成后**已无调用方**并删除。
+/// 新增命令一律走 [`api_from_hp`] / [`api_async`]；错误文案由前端按 `code` 走 i18n（D27）。
 
 /// **D76 统一响应包装**：`{ ok, data?, error? }`（`docs/spec/commands-events.md` 第 2 节）。
 ///
-/// 新命令**必须**用这个形状；旧命令按 D76 的批次顺序（file → album → source → tag →
-/// media → plugin → blueprint → ai → fsops → repo/layout）分批迁移。
+/// 全部命令**必须**用这个形状（2026-09 起已全量迁移，无一例外）。
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ApiResponse<T> {
     pub ok: bool,
@@ -111,20 +109,27 @@ pub(crate) fn api_async<T>(response: ApiResponse<T>) -> ApiAsync<T> {
 ///
 /// 用途：在**打包运行**（无 devtools）时定位前端链路问题；文件位置固定、可直接查看，
 /// 不属于业务数据。仅诊断场景由前端调用。
+///
+/// **D76**：本命令是**新增/新增式**诊断通道，按新口径返回 `{ ok, data?, error? }`
+/// （`data` 为 `null`）。它不属于业务命令，不进 `commands-events.md` §3 的业务表。
 #[tauri::command]
-pub(crate) fn debug_log(message: String, app: tauri::AppHandle) -> Result<(), String> {
-    use std::io::Write;
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建应用数据目录失败: {e}"))?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir.join("debug.log"))
-        .map_err(|e| format!("打开诊断日志失败: {e}"))?;
-    writeln!(file, "{message}").map_err(|e| format!("写入诊断日志失败: {e}"))
+pub(crate) fn debug_log(message: String, app: tauri::AppHandle) -> ApiResponse<()> {
+    let outcome = (|| -> HpResult<()> {
+        use std::io::Write;
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| HpError::Io(format!("获取应用数据目录失败: {e}")))?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| HpError::Io(format!("创建应用数据目录失败: {e}")))?;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("debug.log"))
+            .map_err(|e| HpError::Io(format!("打开诊断日志失败: {e}")))?;
+        writeln!(file, "{message}").map_err(|e| HpError::Io(format!("写入诊断日志失败: {e}")))
+    })();
+    api_from_hp(outcome)
 }
 
 /// 全局配置库文件路径（应用数据目录下）。

@@ -7,6 +7,7 @@ import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import { DEFAULT_LANGUAGE, isLanguage, makeTranslator } from "../i18n";
 import type { RepoListItem } from "../shared/types";
 
@@ -23,7 +24,7 @@ export function RepoSwitchDialog({ lang }: { lang: string | null }): JSX.Element
     try {
       setRepos(await api.repoList());
     } catch (e) {
-      setError(String(e));
+      setError(errorTextOf(t, e));
     }
   }, []);
 
@@ -37,7 +38,7 @@ export function RepoSwitchDialog({ lang }: { lang: string | null }): JSX.Element
       await emit("repo.changed", { repoId: id });
       close();
     } catch (e) {
-      setError(String(e));
+      setError(errorTextOf(t, e));
     }
   };
 

@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { ContextMenu } from "../menu/ContextMenu";
 import type { RepoListItem } from "../shared/types";
@@ -27,7 +28,7 @@ export function RepoPanel(): JSX.Element {
     try {
       setRepos(await api.repoList());
     } catch (e) {
-      app.status(t("repo.listFailed", { err: String(e) }), "error");
+      app.status(t("repo.listFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   }, [app]);
 
@@ -49,7 +50,7 @@ export function RepoPanel(): JSX.Element {
       setOpenCreate(false);
       app.refresh();
     } catch (e) {
-      app.status(t("repo.createFailed", { err: String(e) }), "error");
+      app.status(t("repo.createFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -61,7 +62,7 @@ export function RepoPanel(): JSX.Element {
       setOpenSwitch(false);
       app.refresh();
     } catch (e) {
-      app.status(t("repo.switchFailed", { err: String(e) }), "error");
+      app.status(t("repo.switchFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -76,7 +77,7 @@ export function RepoPanel(): JSX.Element {
       await load();
       app.status(t("repo.renamed", { name: trimmed }), "ok");
     } catch (e) {
-      app.status(t("repo.renameFailed", { err: String(e) }), "error");
+      app.status(t("repo.renameFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -94,7 +95,7 @@ export function RepoPanel(): JSX.Element {
       app.status(t("repo.deleted"), "ok");
       app.refresh();
     } catch (e) {
-      app.status(t("repo.deleteFailed", { err: String(e) }), "error");
+      app.status(t("repo.deleteFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -104,7 +105,7 @@ export function RepoPanel(): JSX.Element {
       await api.repoSetDefault({ repoId: id });
       app.status(t("repo.defaultSet"), "ok");
     } catch (e) {
-      app.status(t("repo.defaultFailed", { err: String(e) }), "error");
+      app.status(t("repo.defaultFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 

@@ -9,6 +9,7 @@ import type { DockviewApi } from "dockview-react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { syncBlueprintFromLayout } from "../shared/blueprintSync";
 import {
@@ -150,12 +151,12 @@ export function MenuBar({
         height: 620,
       });
       void win.once("tauri://error", (e) => {
-        app.status(t("layout.detachFailed", { err: String(e) }), "error");
+        app.status(t("layout.detachFailed", { err: errorTextOf(app.t, e) }), "error");
       });
       dv?.getPanel(id)?.api.close();
       app.status(`${panelTitle(id, t)} → ${t("menubar.detach")}`, "ok");
     } catch (e) {
-      app.status(t("layout.detachFailed", { err: String(e) }), "error");
+      app.status(t("layout.detachFailed", { err: errorTextOf(app.t, e) }), "error");
     }
     closeMenus();
   };
@@ -184,7 +185,7 @@ export function MenuBar({
       app.refresh();
       closeMenus();
     } catch (e) {
-      app.status(t("layout.saveFailed", { err: String(e) }), "error");
+      app.status(t("layout.saveFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -224,7 +225,7 @@ export function MenuBar({
       app.status(t("layout.loaded", { name }), "ok");
       closeMenus();
     } catch (e) {
-      app.status(t("layout.loadFailed", { err: String(e) }), "error");
+      app.status(t("layout.loadFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -240,7 +241,7 @@ export function MenuBar({
       await loadLayoutNames();
       app.status(t("layout.renamed", { name: trimmed }), "ok");
     } catch (e) {
-      app.status(t("layout.renameFailed", { err: String(e) }), "error");
+      app.status(t("layout.renameFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -254,7 +255,7 @@ export function MenuBar({
       await loadLayoutNames();
       app.status(t("layout.deleted", { name }), "ok");
     } catch (e) {
-      app.status(t("layout.deleteFailed", { err: String(e) }), "error");
+      app.status(t("layout.deleteFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -281,7 +282,7 @@ export function MenuBar({
       app.status(t("layout.updated", { name }), "ok");
       app.refresh();
     } catch (e) {
-      app.status(t("layout.updateFailed", { err: String(e) }), "error");
+      app.status(t("layout.updateFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -291,7 +292,7 @@ export function MenuBar({
       await api.layoutSetDefault({ repoId, name });
       app.status(t("layout.defaultSet", { name }), "ok");
     } catch (e) {
-      app.status(t("layout.defaultFailed", { err: String(e) }), "error");
+      app.status(t("layout.defaultFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 

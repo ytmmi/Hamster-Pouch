@@ -37,6 +37,7 @@ import {
 } from "../panels/blueprintStructure";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import { AppContext, type AppContextValue } from "./AppContext";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { TaskOverlay } from "./TaskOverlay";
@@ -509,7 +510,7 @@ export function AppUiApp(): JSX.Element {
         apiRef.current?.getPanel(id)?.api.close();
         status(`${title} → ${t("menubar.detach")}`, "ok");
       } catch (e) {
-        status(t("layout.detachFailed", { err: String(e) }), "error");
+        status(t("layout.detachFailed", { err: errorTextOf(t, e) }), "error");
       }
     },
     [status, t, language],

@@ -1,10 +1,9 @@
 /**
  * M1：仓库与设置命令封装。
  *
- * **D76 迁移状态**：`setting.*` 四条已按新口径返回 `{ ok, data?, error? }` 并在此解包
- * （它们要先落地契约 3.13 的四条规则——规则 3「插件项不满能力返回 `permission`」
- * 只有在**结构化错误**下才对前端可判定）。`repo.*` 仍属 D76 批次里的
- * `repo/layout` 批，**尚未迁移**（下表命令仍裸返回）。
+ * **D76 迁移状态：已包装**（批次 `setting` 与 `repo/layout`，2026-09）。本文件全部命令
+ * 返回 `{ ok, data?, error? }`，这里经 [`unwrapApi`] 解包：调用方拿到的仍是原来的领域值，
+ * 失败时抛带 `code` 的 `HpApiFailure`，界面按 `code` 走 i18n（D27）。
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -28,25 +27,27 @@ import { unwrapApi, type ApiResponse } from "./response";
 
 /** 创建仓库（自动打开） */
 export function repoCreate(args: RepoCreateArgs): Promise<RepoSummary> {
-  return invoke<RepoSummary>("repo_create", {
+  return invoke<ApiResponse<RepoSummary>>("repo_create", {
     name: args.name,
     dbPath: args.dbPath,
-  });
+  }).then(unwrapApi);
 }
 
 /** 打开已注册仓库 */
 export function repoOpen(args: RepoOpenArgs): Promise<RepoSummary> {
-  return invoke<RepoSummary>("repo_open", { repoId: args.repoId });
+  return invoke<ApiResponse<RepoSummary>>("repo_open", {
+    repoId: args.repoId,
+  }).then(unwrapApi);
 }
 
 /** 关闭当前仓库 */
 export function repoClose(): Promise<void> {
-  return invoke<void>("repo_close");
+  return invoke<ApiResponse<void>>("repo_close").then(unwrapApi);
 }
 
 /** 列出全部已注册仓库 */
 export function repoList(): Promise<RepoListItem[]> {
-  return invoke<RepoListItem[]>("repo_list");
+  return invoke<ApiResponse<RepoListItem[]>>("repo_list").then(unwrapApi);
 }
 
 /**
@@ -91,20 +92,37 @@ export function settingReset(args: SettingResetArgs): Promise<SettingOkResult> {
 
 /** 重命名仓库 */
 export function repoRename(args: RepoRenameArgs): Promise<void> {
-  return invoke<void>("repo_rename", { repoId: args.repoId, name: args.name });
+  return invoke<ApiResponse<void>>("repo_rename", {
+    repoId: args.repoId,
+    name: args.name,
+  }).then(unwrapApi);
 }
 
 /** 删除仓库（注册行 + 仓库库文件；不删除真实媒体源文件） */
 export function repoDelete(args: RepoDeleteArgs): Promise<void> {
-  return invoke<void>("repo_delete", { repoId: args.repoId });
+  return invoke<ApiResponse<void>>("repo_delete", {
+    repoId: args.repoId,
+  }).then(unwrapApi);
 }
 
 /** 设为默认仓库（启动时自动打开） */
 export function repoSetDefault(args: RepoSetDefaultArgs): Promise<void> {
-  return invoke<void>("repo_set_default", { repoId: args.repoId });
+  return invoke<ApiResponse<void>>("repo_set_default", {
+    repoId: args.repoId,
+  }).then(unwrapApi);
 }
 
 /** 读取默认仓库 ID；未设置返回 null */
 export function repoGetDefault(): Promise<string | null> {
-  return invoke<string | null>("repo_get_default");
+  return invoke<ApiResponse<string | null>>("repo_get_default").then(unwrapApi);
+}
+
+/**
+ * 备份仓库库文件到目标路径，返回备份 ID。
+ *
+ * **D76**：`repo.backup` 此前**没有前端封装**（对账把它记为「仅代码」），本批一并补上——
+ * 契约记录了能力却拿不到，与 D79 处理 tag 关系缺口是同一类问题。
+ */
+export function repoBackup(repoId: string, destPath: string): Promise<string> {
+  return invoke<ApiResponse<string>>("repo_backup", { repoId, destPath }).then(unwrapApi);
 }
