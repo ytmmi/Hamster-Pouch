@@ -1,10 +1,16 @@
 //! M4/M5：tag 命令桥接（仓库内 tag 的增删查；人工/自动两组，D21）。
+//!
+//! **D76 迁移状态：已包装**（批次 `tag`，2026-09）。全部命令返回
+//! `{ ok, data?, error? }`，错误为结构化 `HpError`；前端 `api/tag.ts` 经
+//! `unwrapApi` 解包，界面按 `code` 走 i18n（D27）。
 
-use hp_core::{Tag, TagRelationKind};
+use hp_core::{HpError, HpResult, Tag, TagRelationKind};
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::hp_err_to_string;
+use crate::commands::shared::{
+    api_from_hp, lock_repo, open_repo, open_repo_mut, ApiResponse,
+};
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -69,23 +75,19 @@ pub(crate) fn tag_add(
     file_ids: Vec<String>,
     tag_name: String,
     state: State<AppState>,
-) -> Result<(), String> {
-    if tag_name.trim().is_empty() {
-        return Err("tag 名不能为空".into());
-    }
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    let tag = db
-        .create_tag(&repo_id, &tag_name, None)
-        .map_err(hp_err_to_string)?;
-    for file_id in &file_ids {
-        db.add_file_tag(file_id, tag.id.as_str())
-            .map_err(hp_err_to_string)?;
-    }
-    Ok(())
+) -> ApiResponse<()> {
+    api_from_hp((|| -> HpResult<()> {
+        if tag_name.trim().is_empty() {
+            return Err(HpError::InvalidArgument("tag 名不能为空".into()));
+        }
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let tag = db.create_tag(&repo_id, &tag_name, None)?;
+        for file_id in &file_ids {
+            db.add_file_tag(file_id, tag.id.as_str())?;
+        }
+        Ok(())
+    })())
 }
 
 /// tag.remove：从文件批量移除人工 tag（不影响自动 tag）。
@@ -95,34 +97,28 @@ pub(crate) fn tag_remove(
     file_ids: Vec<String>,
     tag_name: String,
     state: State<AppState>,
-) -> Result<(), String> {
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    if let Some(tag) = db
-        .find_tag_by_name(&repo_id, &tag_name)
-        .map_err(hp_err_to_string)?
-    {
-        for file_id in &file_ids {
-            db.remove_file_tag(file_id, tag.id.as_str())
-                .map_err(hp_err_to_string)?;
+) -> ApiResponse<()> {
+    api_from_hp((|| -> HpResult<()> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        if let Some(tag) = db.find_tag_by_name(&repo_id, &tag_name)? {
+            for file_id in &file_ids {
+                db.remove_file_tag(file_id, tag.id.as_str())?;
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })())
 }
 
 /// tag.list：列出仓库内全部 tag 实体。
 #[tauri::command]
-pub(crate) fn tag_list(repo_id: String, state: State<AppState>) -> Result<Vec<TagItem>, String> {
-    let guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
-    let tags = db.list_tags(&repo_id).map_err(hp_err_to_string)?;
-    Ok(tags.into_iter().map(tag_to_item).collect())
+pub(crate) fn tag_list(repo_id: String, state: State<AppState>) -> ApiResponse<Vec<TagItem>> {
+    api_from_hp((|| -> HpResult<Vec<TagItem>> {
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
+        let tags = db.list_tags(&repo_id)?;
+        Ok(tags.into_iter().map(tag_to_item).collect())
+    })())
 }
 
 /// tag.forFile：列出文件的人工 tag 与自动 tag 两组（D21）。
@@ -131,37 +127,33 @@ pub(crate) fn tag_for_file(
     repo_id: String,
     file_id: String,
     state: State<AppState>,
-) -> Result<FileTagsResult, String> {
+) -> ApiResponse<FileTagsResult> {
     let _ = repo_id;
-    let guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+    api_from_hp((|| -> HpResult<FileTagsResult> {
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
 
-    let manual = db
-        .list_tags_for_file(&file_id)
-        .map_err(hp_err_to_string)?
-        .into_iter()
-        .map(|t| tag_to_file_item(t, None))
-        .collect();
+        let manual = db
+            .list_tags_for_file(&file_id)?
+            .into_iter()
+            .map(|t| tag_to_file_item(t, None))
+            .collect();
 
-    let auto = db
-        .list_auto_tags_for_file(&file_id)
-        .map_err(hp_err_to_string)?
-        .into_iter()
-        .map(|t| tag_to_file_item(t, None))
-        .collect();
+        let mut auto: Vec<FileTagItem> = db
+            .list_auto_tags_for_file(&file_id)?
+            .into_iter()
+            .map(|t| tag_to_file_item(t, None))
+            .collect();
 
-    // 自动组补上置信度（按 tag_id 匹配）。
-    let mut auto: Vec<FileTagItem> = auto;
-    for detail in db.list_file_auto_tags(&file_id).map_err(hp_err_to_string)? {
-        if let Some(item) = auto.iter_mut().find(|i| i.id == detail.tag_id.as_str()) {
-            item.confidence = detail.confidence;
+        // 自动组补上置信度（按 tag_id 匹配）。
+        for detail in db.list_file_auto_tags(&file_id)? {
+            if let Some(item) = auto.iter_mut().find(|i| i.id == detail.tag_id.as_str()) {
+                item.confidence = detail.confidence;
+            }
         }
-    }
 
-    Ok(FileTagsResult { manual, auto })
+        Ok(FileTagsResult { manual, auto })
+    })())
 }
 
 fn relation_to_item(r: hp_core::TagRelation) -> TagRelationItem {
@@ -183,18 +175,16 @@ pub(crate) fn tag_relation_add(
     to_tag_id: String,
     relation_kind: String,
     state: State<AppState>,
-) -> Result<TagRelationItem, String> {
-    let kind = TagRelationKind::from_str(&relation_kind)
-        .ok_or_else(|| format!("未知 tag 关系类型: {relation_kind}"))?;
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    let relation = db
-        .add_tag_relation(&repo_id, &from_tag_id, &to_tag_id, kind)
-        .map_err(hp_err_to_string)?;
-    Ok(relation_to_item(relation))
+) -> ApiResponse<TagRelationItem> {
+    api_from_hp((|| -> HpResult<TagRelationItem> {
+        let kind = TagRelationKind::from_str(&relation_kind).ok_or_else(|| {
+            HpError::InvalidArgument(format!("未知 tag 关系类型: {relation_kind}"))
+        })?;
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let relation = db.add_tag_relation(&repo_id, &from_tag_id, &to_tag_id, kind)?;
+        Ok(relation_to_item(relation))
+    })())
 }
 
 /// tag.relation.remove：按 ID 删除 tag 关系。
@@ -202,14 +192,12 @@ pub(crate) fn tag_relation_add(
 pub(crate) fn tag_relation_remove(
     relation_id: String,
     state: State<AppState>,
-) -> Result<(), String> {
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    db.remove_tag_relation(&relation_id)
-        .map_err(hp_err_to_string)
+) -> ApiResponse<()> {
+    api_from_hp((|| -> HpResult<()> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        db.remove_tag_relation(&relation_id)
+    })())
 }
 
 /// tag.relation.list：列出仓库全部 tag 关系（关系图谱数据源）。
@@ -217,14 +205,13 @@ pub(crate) fn tag_relation_remove(
 pub(crate) fn tag_relation_list(
     repo_id: String,
     state: State<AppState>,
-) -> Result<Vec<TagRelationItem>, String> {
-    let guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
-    let rows = db.list_tag_relations(&repo_id).map_err(hp_err_to_string)?;
-    Ok(rows.into_iter().map(relation_to_item).collect())
+) -> ApiResponse<Vec<TagRelationItem>> {
+    api_from_hp((|| -> HpResult<Vec<TagRelationItem>> {
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
+        let rows = db.list_tag_relations(&repo_id)?;
+        Ok(rows.into_iter().map(relation_to_item).collect())
+    })())
 }
 
 /// tag.relation.parents：列出某 tag 的直接上级（层级）。
@@ -232,14 +219,13 @@ pub(crate) fn tag_relation_list(
 pub(crate) fn tag_relation_parents(
     tag_id: String,
     state: State<AppState>,
-) -> Result<Vec<TagItem>, String> {
-    let guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
-    let tags = db.list_parent_tags(&tag_id).map_err(hp_err_to_string)?;
-    Ok(tags.into_iter().map(tag_to_item).collect())
+) -> ApiResponse<Vec<TagItem>> {
+    api_from_hp((|| -> HpResult<Vec<TagItem>> {
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
+        let tags = db.list_parent_tags(&tag_id)?;
+        Ok(tags.into_iter().map(tag_to_item).collect())
+    })())
 }
 
 /// tag.relation.children：列出某 tag 的直接下级（层级）。
@@ -247,14 +233,13 @@ pub(crate) fn tag_relation_parents(
 pub(crate) fn tag_relation_children(
     tag_id: String,
     state: State<AppState>,
-) -> Result<Vec<TagItem>, String> {
-    let guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
-    let tags = db.list_child_tags(&tag_id).map_err(hp_err_to_string)?;
-    Ok(tags.into_iter().map(tag_to_item).collect())
+) -> ApiResponse<Vec<TagItem>> {
+    api_from_hp((|| -> HpResult<Vec<TagItem>> {
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
+        let tags = db.list_child_tags(&tag_id)?;
+        Ok(tags.into_iter().map(tag_to_item).collect())
+    })())
 }
 
 /// tag 树节点（前端树视图；`is_cross` 为交叉 tag，D22）。
@@ -284,22 +269,21 @@ fn tree_node_to_item(n: hp_store::TagTreeNode) -> TagTreeNodeItem {
 pub(crate) fn tag_tree(
     repo_id: String,
     state: State<AppState>,
-) -> Result<Vec<TagTreeNodeItem>, String> {
-    let guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
+) -> ApiResponse<Vec<TagTreeNodeItem>> {
+    api_from_hp((|| -> HpResult<Vec<TagTreeNodeItem>> {
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
 
-    let tags = db.list_tags(&repo_id).map_err(hp_err_to_string)?;
-    let relations = db.list_tag_relations(&repo_id).map_err(hp_err_to_string)?;
-    let mut counts = std::collections::HashMap::new();
-    for t in &tags {
-        let c = db.count_tag_files(t.id.as_str()).map_err(hp_err_to_string)?;
-        counts.insert(t.id.as_str().to_string(), c);
-    }
-    let tree = hp_store::build_tag_tree(&tags, &relations, &counts);
-    Ok(tree.roots.into_iter().map(tree_node_to_item).collect())
+        let tags = db.list_tags(&repo_id)?;
+        let relations = db.list_tag_relations(&repo_id)?;
+        let mut counts = std::collections::HashMap::new();
+        for t in &tags {
+            let c = db.count_tag_files(t.id.as_str())?;
+            counts.insert(t.id.as_str().to_string(), c);
+        }
+        let tree = hp_store::build_tag_tree(&tags, &relations, &counts);
+        Ok(tree.roots.into_iter().map(tree_node_to_item).collect())
+    })())
 }
 
 /// tag.rename：重命名 tag 实体。
@@ -308,13 +292,12 @@ pub(crate) fn tag_rename(
     tag_id: String,
     name: String,
     state: State<AppState>,
-) -> Result<(), String> {
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    db.rename_tag(&tag_id, &name).map_err(hp_err_to_string)
+) -> ApiResponse<()> {
+    api_from_hp((|| -> HpResult<()> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        db.rename_tag(&tag_id, &name)
+    })())
 }
 
 /// tag.createRoot：新建根 tag（同名已存在则复用，不重复创建）。
@@ -323,22 +306,16 @@ pub(crate) fn tag_create_root(
     repo_id: String,
     name: String,
     state: State<AppState>,
-) -> Result<TagItem, String> {
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    let tag = match db
-        .find_tag_by_name(&repo_id, &name)
-        .map_err(hp_err_to_string)?
-    {
-        Some(existing) => existing,
-        None => db
-            .create_tag(&repo_id, &name, None)
-            .map_err(hp_err_to_string)?,
-    };
-    Ok(tag_to_item(tag))
+) -> ApiResponse<TagItem> {
+    api_from_hp((|| -> HpResult<TagItem> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let tag = match db.find_tag_by_name(&repo_id, &name)? {
+            Some(existing) => existing,
+            None => db.create_tag(&repo_id, &name, None)?,
+        };
+        Ok(tag_to_item(tag))
+    })())
 }
 
 /// tag.createChild：在父 tag 下新建子 tag。
@@ -350,24 +327,22 @@ pub(crate) fn tag_create_child(
     parent_tag_id: String,
     name: String,
     state: State<AppState>,
-) -> Result<TagItem, String> {
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    let tag = match db
-        .find_tag_by_name(&repo_id, &name)
-        .map_err(hp_err_to_string)?
-    {
-        Some(existing) => existing,
-        None => db
-            .create_tag(&repo_id, &name, None)
-            .map_err(hp_err_to_string)?,
-    };
-    db.add_tag_relation(&repo_id, &parent_tag_id, tag.id.as_str(), TagRelationKind::Hierarchy)
-        .map_err(hp_err_to_string)?;
-    Ok(tag_to_item(tag))
+) -> ApiResponse<TagItem> {
+    api_from_hp((|| -> HpResult<TagItem> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let tag = match db.find_tag_by_name(&repo_id, &name)? {
+            Some(existing) => existing,
+            None => db.create_tag(&repo_id, &name, None)?,
+        };
+        db.add_tag_relation(
+            &repo_id,
+            &parent_tag_id,
+            tag.id.as_str(),
+            TagRelationKind::Hierarchy,
+        )?;
+        Ok(tag_to_item(tag))
+    })())
 }
 
 /// tag.createSibling：新建与参照 tag 同级的 tag（共享其全部层级上级；无上级则为根）。
@@ -379,32 +354,25 @@ pub(crate) fn tag_create_sibling(
     ref_tag_id: String,
     name: String,
     state: State<AppState>,
-) -> Result<TagItem, String> {
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    let parents = db.list_parent_tags(&ref_tag_id).map_err(hp_err_to_string)?;
-    let tag = match db
-        .find_tag_by_name(&repo_id, &name)
-        .map_err(hp_err_to_string)?
-    {
-        Some(existing) => existing,
-        None => db
-            .create_tag(&repo_id, &name, None)
-            .map_err(hp_err_to_string)?,
-    };
-    for parent in parents {
-        db.add_tag_relation(
-            &repo_id,
-            parent.id.as_str(),
-            tag.id.as_str(),
-            TagRelationKind::Hierarchy,
-        )
-        .map_err(hp_err_to_string)?;
-    }
-    Ok(tag_to_item(tag))
+) -> ApiResponse<TagItem> {
+    api_from_hp((|| -> HpResult<TagItem> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let parents = db.list_parent_tags(&ref_tag_id)?;
+        let tag = match db.find_tag_by_name(&repo_id, &name)? {
+            Some(existing) => existing,
+            None => db.create_tag(&repo_id, &name, None)?,
+        };
+        for parent in parents {
+            db.add_tag_relation(
+                &repo_id,
+                parent.id.as_str(),
+                tag.id.as_str(),
+                TagRelationKind::Hierarchy,
+            )?;
+        }
+        Ok(tag_to_item(tag))
+    })())
 }
 
 /// tag.move：移动 tag（拖拽 = 移动）；`newParentId` 为空表示移到根。
@@ -413,23 +381,20 @@ pub(crate) fn tag_move(
     tag_id: String,
     new_parent_id: Option<String>,
     state: State<AppState>,
-) -> Result<(), String> {
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    db.move_tag(&tag_id, new_parent_id.as_deref())
-        .map_err(hp_err_to_string)
+) -> ApiResponse<()> {
+    api_from_hp((|| -> HpResult<()> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        db.move_tag(&tag_id, new_parent_id.as_deref())
+    })())
 }
 
 /// tag.detach：解除某 tag 的全部层级上级（拖到根区域 → 成为根）。
 #[tauri::command]
-pub(crate) fn tag_detach(tag_id: String, state: State<AppState>) -> Result<(), String> {
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    db.detach_tag(&tag_id).map_err(hp_err_to_string)
+pub(crate) fn tag_detach(tag_id: String, state: State<AppState>) -> ApiResponse<()> {
+    api_from_hp((|| -> HpResult<()> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        db.detach_tag(&tag_id)
+    })())
 }

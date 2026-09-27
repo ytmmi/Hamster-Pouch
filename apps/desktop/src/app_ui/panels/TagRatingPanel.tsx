@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import { TagInput } from "../shared/TagInput";
 import { useApp } from "../core/AppContext";
 import type { FileTagItem } from "../shared/types";
@@ -39,7 +40,7 @@ export function TagRatingPanel(): JSX.Element {
         })) ?? 0,
       );
     } catch (e) {
-      app.status(app.t("tag.loadFailed", { err: String(e) }), "error");
+      app.status(app.t("tag.loadFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   }, [app]);
 
@@ -58,7 +59,7 @@ export function TagRatingPanel(): JSX.Element {
       app.status(app.t("tag.added"), "ok");
       app.refresh();
     } catch (e) {
-      app.status(app.t("tag.addFailed", { err: String(e) }), "error");
+      app.status(app.t("tag.addFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -73,7 +74,7 @@ export function TagRatingPanel(): JSX.Element {
       app.status(app.t("tag.removed"), "ok");
       app.refresh();
     } catch (e) {
-      app.status(app.t("tag.removeFailed", { err: String(e) }), "error");
+      app.status(app.t("tag.removeFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -88,7 +89,7 @@ export function TagRatingPanel(): JSX.Element {
       setRating(value);
       app.status(app.t("tag.ratingSet", { value }), "ok");
     } catch (e) {
-      app.status(app.t("tag.ratingFailed", { err: String(e) }), "error");
+      app.status(app.t("tag.ratingFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * tag表 — 仓库 tag 层级树（D22）。
  *
  * - 层级树：展开/折叠、缩进、tag 图标、右侧文件计数；
@@ -17,6 +17,7 @@ import {
 } from "react";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { ContextMenu } from "../menu/ContextMenu";
 import type { TagTreeNode } from "../shared/types";
@@ -85,7 +86,7 @@ export function TagTablePanel(): JSX.Element {
     try {
       setRoots(await api.tagTree(app.repoId));
     } catch (e) {
-      app.status(app.t("tagtable.loadFailed", { err: String(e) }), "error");
+      app.status(app.t("tagtable.loadFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   }, [app]);
 
@@ -147,7 +148,7 @@ export function TagTablePanel(): JSX.Element {
       setDraftValue("");
       app.refresh();
     } catch (e) {
-      app.status(app.t("tagtable.createFailed", { err: String(e) }), "error");
+      app.status(app.t("tagtable.createFailed", { err: errorTextOf(app.t, e) }), "error");
       setDraft(null);
       setDraftValue("");
     }
@@ -165,7 +166,7 @@ export function TagTablePanel(): JSX.Element {
       setRenaming(null);
       app.refresh();
     } catch (e) {
-      app.status(app.t("tagtable.renameFailed", { err: String(e) }), "error");
+      app.status(app.t("tagtable.renameFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -178,7 +179,7 @@ export function TagTablePanel(): JSX.Element {
       setDropTargetId(null);
       app.refresh();
     } catch (e) {
-      app.status(app.t("tagtable.moveFailed", { err: String(e) }), "error");
+      app.status(app.t("tagtable.moveFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -191,7 +192,7 @@ export function TagTablePanel(): JSX.Element {
       setDropTargetId(null);
       app.refresh();
     } catch (e) {
-      app.status(app.t("tagtable.moveFailed", { err: String(e) }), "error");
+      app.status(app.t("tagtable.moveFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 

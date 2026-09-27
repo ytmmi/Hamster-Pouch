@@ -1,8 +1,12 @@
 //! M4：评分命令桥接（仓库内 0-5 星评分）。
+//!
+//! **D76 迁移状态：已包装**（批次 `tag`，2026-09；`rating.*` 与 `tag.*` 同属契约
+//! 第 3.5 节，一并迁移）。返回 `{ ok, data?, error? }`；前端 `api/rating.ts` 经
+//! `unwrapApi` 解包。评分越界由领域层判为 `validation`。
 
 use tauri::State;
 
-use crate::commands::shared::hp_err_to_string;
+use crate::commands::shared::{api_from_hp, lock_repo, open_repo, open_repo_mut, ApiResponse};
 use crate::AppState;
 
 /// rating.set：设置文件评分（0-5）。
@@ -12,16 +16,14 @@ pub(crate) fn rating_set(
     file_id: String,
     rating: i64,
     state: State<AppState>,
-) -> Result<(), String> {
+) -> ApiResponse<()> {
     let _ = repo_id;
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    db.upsert_rating(&file_id, rating)
-        .map_err(hp_err_to_string)?;
-    Ok(())
+    api_from_hp((|| -> hp_core::HpResult<()> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        db.upsert_rating(&file_id, rating)?;
+        Ok(())
+    })())
 }
 
 /// rating.get：读取文件评分。
@@ -30,15 +32,11 @@ pub(crate) fn rating_get(
     repo_id: String,
     file_id: String,
     state: State<AppState>,
-) -> Result<Option<i64>, String> {
+) -> ApiResponse<Option<i64>> {
     let _ = repo_id;
-    let guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
-    Ok(db
-        .get_rating(&file_id)
-        .map_err(hp_err_to_string)?
-        .map(|r| r.rating))
+    api_from_hp((|| -> hp_core::HpResult<Option<i64>> {
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
+        Ok(db.get_rating(&file_id)?.map(|r| r.rating))
+    })())
 }
