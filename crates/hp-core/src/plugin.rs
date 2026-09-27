@@ -5,11 +5,16 @@
 
 use std::fmt;
 
+use crate::blueprint_registry::validate_node_decl;
 use crate::error::{HpError, HpResult};
+use crate::panel_types::{
+    validate_panel_decl, PanelCategory, PanelDeclCtx, PanelSettingKind, PanelSettingScope,
+};
 use crate::plugin_contribution::{
     Contribution, ContributionKind, DataQueryReturns, PluginDataQueryDecl, PluginEventDecl,
 };
 use crate::repo::RepoId;
+use crate::setting_types::{validate_setting_decl, SettingCategory, SettingDecl};
 
 /// 插件全局唯一 ID（manifest 自声明，非 UUID 生成）。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -171,6 +176,18 @@ pub enum Capability {
 }
 
 impl Capability {
+    /// 能力白名单全集（顺序与 `docs/spec/plugin-standard.md` 第 5 节的表一致）。
+    pub const ALL: [Capability; 8] = [
+        Capability::UiPanel,
+        Capability::RepoRead,
+        Capability::RepoWrite,
+        Capability::FsRead,
+        Capability::FsWrite,
+        Capability::Network,
+        Capability::AiInfer,
+        Capability::NativeCode,
+    ];
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Capability::UiPanel => "ui.panel",
@@ -256,7 +273,10 @@ impl fmt::Display for HostApiVersion {
 ///
 /// `contributions` 在 RFC 0004 的草案里是字符串数组；**标准化后为类型化的贡献点**
 /// （对象数组），旧的 `["panel"]` 形式仍被解析层兼容为「只有一个 id 的贡献点」。
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// 只实现 `PartialEq`（不含 `Eq`）：设置项的 `default` 是任意 JSON 标量
+/// （`serde_json::Value` 本身不是 `Eq`）。
+#[derive(Debug, Clone, PartialEq)]
 pub struct PluginManifest {
     pub id: PluginId,
     pub name: String,
@@ -350,8 +370,123 @@ impl PluginManifest {
                     c.kind, c.id
                 )));
             }
+            // 面板：命名空间 + 完整声明参数（`docs/spec/panel-standard.md` 第 4、7.1 节）。
+            if c.kind == ContributionKind::Panel {
+                let decl = c.panel_decl(Some(self.id.as_str()));
+                let errors = validate_panel_decl(&decl, &self.panel_decl_ctx());
+                if let Some(first) = errors.first() {
+                    return Err(HpError::InvalidArgument(format!(
+                        "面板贡献点 {}/{} 声明不合规（共 {} 项）: {first}",
+                        c.kind,
+                        c.id,
+                        errors.len()
+                    )));
+                }
+            }
+            // 蓝图节点类型：命名空间（id 与 type 双份）+ 纯声明校验（决策 5/6）。
+            if c.kind == ContributionKind::BlueprintNode {
+                if !crate::namespace::is_id_in_plugin_namespace(&c.id, self.id.as_str()) {
+                    return Err(HpError::InvalidArgument(format!(
+                        "蓝图节点贡献点 id 必须是 plugin.{}.<local_id> 形式: {}",
+                        self.id, c.id
+                    )));
+                }
+                let Some(decl) = c.node.as_ref() else {
+                    return Err(HpError::InvalidArgument(format!(
+                        "蓝图节点贡献点 {} 缺少 type/role/fields 等声明参数",
+                        c.id
+                    )));
+                };
+                let errors = validate_node_decl(decl, Some(self.id.as_str()), &self.node_decl_ctx());
+                if let Some(first) = errors.first() {
+                    return Err(HpError::InvalidArgument(format!(
+                        "蓝图节点贡献点 {} 声明不合规（共 {} 项）: {first}",
+                        c.id,
+                        errors.len()
+                    )));
+                }
+            }
+            // 设置分节：只能归入既有大类，且设置项形状与设置标准一致（决策 7）。
+            if c.kind == ContributionKind::SettingsSection {
+                if c.title_key.as_deref().unwrap_or("").trim().is_empty() {
+                    return Err(HpError::InvalidArgument(format!(
+                        "设置分节 {} 缺少 title_key（D27）",
+                        c.id
+                    )));
+                }
+                let category = c.category.as_deref().unwrap_or("");
+                if SettingCategory::from_str(category).is_none() {
+                    return Err(HpError::InvalidArgument(format!(
+                        "设置分节 {} 的 category 不在五大大类内: {category}（插件不能新增或改名大类）",
+                        c.id
+                    )));
+                }
+                let mut seen_keys: Vec<String> = Vec::new();
+                for (index, setting) in c.settings.iter().enumerate() {
+                    let decl = SettingDecl {
+                        id: setting.key.clone(),
+                        category: c.category.clone(),
+                        owner_kind: Some("plugin".to_string()),
+                        owner_id: Some(self.id.as_str().to_string()),
+                        title_key: Some(setting.title_key.clone()),
+                        kind: Some(setting.kind.clone()),
+                        default: setting.default.clone(),
+                        scope: setting.scope.clone(),
+                        requires_capability: setting.requires_capability.clone(),
+                        keywords: Vec::new(),
+                        section_key: None,
+                    };
+                    let mut ctx = self.setting_decl_ctx();
+                    ctx.taken_keys = seen_keys.clone();
+                    let errors = validate_setting_decl(&decl, &ctx);
+                    if let Some(first) = errors.first() {
+                        return Err(HpError::InvalidArgument(format!(
+                            "设置分节 {} 的第 {} 项设置不合规: {first}",
+                            c.id,
+                            index + 1
+                        )));
+                    }
+                    seen_keys.push(decl.storage_key());
+                }
+            }
         }
         Ok(())
+    }
+
+    /// 面板声明校验上下文：宿主内置节点类型 + **本 manifest 声明**的插件节点类型。
+    ///
+    /// 插件注册的节点类型可以在同一份 manifest 里被面板的 `blueprint_node` 引用，
+    /// 因此"已注册"必须把本包自己的注册项算进去（RFC 0010 决策 5）。
+    pub fn panel_decl_ctx(&self) -> PanelDeclCtx {
+        let mut ctx = PanelDeclCtx::builtin();
+        for c in &self.contributions {
+            if c.kind == ContributionKind::BlueprintNode {
+                if let Some(ty) = c.blueprint_node_type() {
+                    ctx.registered_node_types.push(ty.to_string());
+                }
+            }
+        }
+        ctx
+    }
+
+    /// 蓝图节点声明校验上下文：宿主内置节点类型 + 本 manifest 自己声明的节点类型。
+    pub fn node_decl_ctx(&self) -> crate::blueprint_registry::NodeDeclCtx {
+        let mut ctx = crate::blueprint_registry::NodeDeclCtx::builtin();
+        for c in &self.contributions {
+            if c.kind == ContributionKind::BlueprintNode {
+                if let Some(ty) = c.blueprint_node_type() {
+                    ctx.registered_node_types.push(ty.to_string());
+                }
+            }
+        }
+        ctx
+    }
+
+    /// 设置项校验上下文：能力白名单 + 本插件 id（同名 id 冲突由调用方逐项累积判定）。
+    pub fn setting_decl_ctx(&self) -> crate::setting_types::SettingDeclCtx {
+        let mut ctx = crate::setting_types::SettingDeclCtx::permissive();
+        ctx.registered_plugins.push(self.id.as_str().to_string());
+        ctx
     }
 
     /// 贡献点校验（id 规则、重复、类型专属取值域、能力要求）。
@@ -387,6 +522,67 @@ impl PluginManifest {
                     "贡献点 dataQuery / {} 的 returns 必须是 rows/object/scalar",
                     c.id
                 )));
+            }
+            // 面板 / 设置分节：**已给出**的取值域立即硬错误（歧义即拒绝，不静默降级）。
+            // "必需项缺失"留给完备性校验：旧包必须在解析层读得出来。
+            if c.kind == ContributionKind::Panel {
+                if let Some(category) = c.category.as_deref() {
+                    if PanelCategory::from_str(category).is_none() {
+                        return Err(HpError::InvalidArgument(format!(
+                            "面板贡献点 {} 的 category 非法: {category}（允许 source/media/info/system/other）",
+                            c.id
+                        )));
+                    }
+                }
+                for cap in &c.capabilities {
+                    if Capability::from_str(cap).is_none() {
+                        return Err(HpError::InvalidArgument(format!(
+                            "面板贡献点 {} 声明了未知能力: {cap}",
+                            c.id
+                        )));
+                    }
+                }
+            }
+            if matches!(
+                c.kind,
+                ContributionKind::Panel | ContributionKind::SettingsSection
+            ) {
+                for setting in &c.settings {
+                    if PanelSettingKind::from_str(&setting.kind).is_none() {
+                        return Err(HpError::InvalidArgument(format!(
+                            "贡献点 {} / {} 的设置项 {} 的 kind 不是输入类控件: {}",
+                            c.kind, c.id, setting.key, setting.kind
+                        )));
+                    }
+                    if let Some(cap) = setting.requires_capability.as_deref() {
+                        if Capability::from_str(cap).is_none() {
+                            return Err(HpError::InvalidArgument(format!(
+                                "贡献点 {} / {} 的设置项 {} 声明了未知能力: {cap}",
+                                c.kind, c.id, setting.key
+                            )));
+                        }
+                    }
+                    if PanelSettingScope::from_str(setting.scope.as_deref().unwrap_or("app")).is_none()
+                    {
+                        return Err(HpError::InvalidArgument(format!(
+                            "贡献点 {} / {} 的设置项 {} 的 scope 非法: {:?}",
+                            c.kind,
+                            c.id,
+                            setting.key,
+                            setting.scope
+                        )));
+                    }
+                }
+            }
+            if c.kind == ContributionKind::SettingsSection {
+                if let Some(category) = c.category.as_deref() {
+                    if SettingCategory::from_str(category).is_none() {
+                        return Err(HpError::InvalidArgument(format!(
+                            "设置分节 {} 的 category 不在五大大类内: {category}",
+                            c.id
+                        )));
+                    }
+                }
             }
             if let Some(required) = c.required_capability() {
                 if let Some(cap) = Capability::from_str(required) {
@@ -497,9 +693,15 @@ mod tests {
             entry: "bin/example.exe".into(),
             capabilities: vec![Capability::UiPanel, Capability::RepoRead],
             contributions: vec![{
-                let mut panel = Contribution::new(ContributionKind::Panel, "example.panel");
+                let mut panel = Contribution::new(
+                    ContributionKind::Panel,
+                    "plugin.dev.hamsterpouch.example.example.panel",
+                );
                 panel.title_key = Some("panel.example".into());
                 panel.read_only = Some(true);
+                panel.category = Some("system".into());
+                panel.has_class = Some(false);
+                panel.blueprint_node = Some("control".into());
                 panel
             }],
             data_queries: vec![PluginDataQueryDecl {
@@ -635,5 +837,178 @@ mod tests {
         let id = PluginId::from_raw("a.b.c");
         assert_eq!(id.to_string(), "a.b.c");
         assert_eq!(id.as_str(), "a.b.c");
+    }
+
+    /// RFC 0010 决策 4：面板贡献点的必需声明参数（`category`/`has_class`/`blueprint_node`）
+    /// 与 `plugin.<plugin_id>.<local_id>` 命名空间。
+    #[test]
+    fn panel_contribution_requires_full_declaration_and_namespace() {
+        let mut m = manifest();
+        m.contributions[0].category = None;
+        assert!(m.validate().is_err(), "缺 category 应拒绝");
+
+        let mut m = manifest();
+        m.contributions[0].has_class = None;
+        assert!(m.validate().is_err(), "缺 has_class 应拒绝");
+
+        let mut m = manifest();
+        m.contributions[0].blueprint_node = None;
+        assert!(m.validate().is_err(), "缺 blueprint_node 应拒绝");
+
+        let mut m = manifest();
+        m.contributions[0].blueprint_node = Some("ghost".into());
+        assert!(m.validate().is_err(), "blueprint_node 未命中已注册类型应拒绝");
+
+        let mut m = manifest();
+        m.contributions[0].id = "example.panel".into();
+        assert!(m.validate().is_err(), "面板 id 未用插件命名空间应拒绝");
+    }
+
+    /// 取值域非法在**解析路径**（`validate_structure`）就报硬错误，不静默降级。
+    #[test]
+    fn panel_contribution_rejects_invalid_value_domains_at_parse_time() {
+        let mut m = manifest();
+        m.contributions[0].category = Some("bogus".into());
+        assert!(m.validate_structure().is_err());
+
+        let mut m = manifest();
+        m.contributions[0].capabilities = vec!["bogus.cap".into()];
+        assert!(m.validate_structure().is_err());
+
+        let mut m = manifest();
+        m.contributions[0].settings = vec![crate::panel_types::PanelSettingDecl {
+            key: "size".into(),
+            kind: "button".into(),
+            title_key: "panel.example.size".into(),
+            default: None,
+            scope: None,
+            requires_capability: None,
+        }];
+        assert!(m.validate_structure().is_err(), "button 不是合法的设置项控件");
+    }
+
+    /// RFC 0010 决策 6：插件注册的蓝图节点类型必须是纯声明 + 命名空间正确。
+    #[test]
+    fn blueprint_node_contribution_is_pure_declaration() {
+        let node_type = "plugin.dev.hamsterpouch.example.waveform";
+        let mut decl = crate::blueprint_registry::BlueprintNodeDecl {
+            node_type: node_type.into(),
+            label_key: "example.waveform".into(),
+            role: "logic".into(),
+            name_from_layer: false,
+            provides_name: true,
+            fields: vec![crate::blueprint_registry::NodeFieldDecl {
+                name: "target".into(),
+                field_type: "ref".into(),
+                required: false,
+                soft_when_missing: true,
+                values: vec!["control".into()],
+            }],
+            parents: vec![],
+            children: vec![],
+            events: vec![],
+            ports: vec![],
+            severity: None,
+            evaluation_role: Some("condition".into()),
+        };
+
+        let mut m = manifest();
+        let mut contribution =
+            Contribution::new(ContributionKind::BlueprintNode, format!("{node_type}.node"));
+        contribution.title_key = Some("example.waveform".into());
+        contribution.node = Some(decl.clone());
+        m.contributions.push(contribution);
+        assert!(m.validate().is_ok(), "{:?}", m.validate());
+
+        // 插件注册项**暂不能参与结构边**（文档开放点）。
+        let mut m2 = manifest();
+        decl.parents = vec!["layout_block".into()];
+        let mut c2 = Contribution::new(
+            ContributionKind::BlueprintNode,
+            format!("{node_type}.node"),
+        );
+        c2.title_key = Some("example.waveform".into());
+        c2.node = Some(decl.clone());
+        m2.contributions.push(c2);
+        assert!(m2.validate().is_err());
+
+        // 不得注册到别的插件的命名空间里。
+        let mut m3 = manifest();
+        decl.parents = vec![];
+        decl.node_type = "plugin.other.plugin.waveform".into();
+        let mut c3 = Contribution::new(
+            ContributionKind::BlueprintNode,
+            "plugin.other.plugin.waveform.node",
+        );
+        c3.title_key = Some("example.waveform".into());
+        c3.node = Some(decl);
+        m3.contributions.push(c3);
+        assert!(m3.validate().is_err());
+    }
+
+    /// RFC 0010 决策 7：设置分节只能归入既有大类，落库键强制 `plugin.<plugin_id>.` 前缀。
+    #[test]
+    fn settings_section_uses_existing_category_and_forced_prefix() {
+        let setting = |key: &str| crate::panel_types::PanelSettingDecl {
+            key: key.into(),
+            kind: "numberInput".into(),
+            title_key: format!("example.{key}"),
+            default: Some(serde_json::json!(4)),
+            scope: None,
+            requires_capability: None,
+        };
+
+        let mut m = manifest();
+        let mut section =
+            Contribution::new(ContributionKind::SettingsSection, "example.settings");
+        section.title_key = Some("example.settings.title".into());
+        section.category = Some("plugin".into());
+        section.settings = vec![setting("grid_size")];
+        m.contributions.push(section);
+        assert!(m.validate().is_ok(), "{:?}", m.validate());
+        assert_eq!(
+            m.contributions[1].settings[0].key,
+            "grid_size",
+            "插件自带的前缀无效：落库键由宿主强制加 plugin.<plugin_id>. 前缀"
+        );
+
+        // 插件不能新增/改名大类。
+        let mut m2 = manifest();
+        let mut bad = Contribution::new(ContributionKind::SettingsSection, "example.settings");
+        bad.title_key = Some("example.settings.title".into());
+        bad.category = Some("controls".into());
+        bad.settings = vec![setting("grid_size")];
+        m2.contributions.push(bad);
+        assert!(m2.validate().is_err());
+
+        // 同一分节内的重复设置键 = 硬错误（不覆盖、不合并）。
+        let mut m3 = manifest();
+        let mut dup = Contribution::new(ContributionKind::SettingsSection, "example.settings");
+        dup.title_key = Some("example.settings.title".into());
+        dup.category = Some("plugin".into());
+        dup.settings = vec![setting("grid_size"), setting("grid_size")];
+        m3.contributions.push(dup);
+        assert!(m3.validate().is_err());
+    }
+
+    /// 注册权边界：插件**不能**注册控件 `kind`（26 种是宿主内置白名单，D62）。
+    #[test]
+    fn plugin_cannot_register_control_kinds() {
+        assert_eq!(ContributionKind::from_str("control"), None);
+        assert_eq!(ContributionKind::from_str("controlKind"), None);
+        // 合法的贡献点类型里没有"控件"。
+        for kind in [
+            ContributionKind::Panel,
+            ContributionKind::Command,
+            ContributionKind::Viewer,
+            ContributionKind::AiProvider,
+            ContributionKind::MetadataField,
+            ContributionKind::DataQuery,
+            ContributionKind::BlueprintNode,
+            ContributionKind::SettingsSection,
+        ] {
+            assert_ne!(kind.as_str(), "control");
+            assert_eq!(ContributionKind::from_str(kind.as_str()), Some(kind));
+        }
     }
 }

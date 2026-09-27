@@ -30,16 +30,17 @@ import {
   overlayOffsetLabel,
   overlaySizeLabel,
   nodeLayerKey,
-  PANEL_IDS,
-  PANEL_TITLES,
+  type PanelSpec,
   TOKEN_LEVELS,
 } from "@hamster-pouch/config";
 
 import type { Translate, TranslationKey } from "../i18n";
+import { useAllPanels } from "../core/panelStore";
 import {
   hideDirLabel,
   mediaTypeLabel,
   nodeDisplayName,
+  nodeTypeLabel,
   opLabel,
   resolveControlTitle,
   scopeLabel,
@@ -105,8 +106,27 @@ function actionTargets(
     .map((n) => ({ v: n.key, l: nodeDisplayName(n, t, doc.nodes, doc.layers) }));
 }
 
-/** 节点属性检查器：只暴露**本节点必须设定**的字段；key 型引用一律只读展示。 */
-export function NodeInspector({
+/**
+ * `panel_id` 候选：**面板注册表**的 id（内置裸 id + 插件的
+ * `plugin.<plugin_id>.<local_id>`）。
+ *
+ * 已写在节点上但当前**无注册项**的 id（插件未安装/未启用/API 不兼容）仍然列出并标注
+ * 「未接通」——插件缺失不得绑架用户数据：引用原样保留、允许保存、插件恢复后自动恢复
+ * （RFC 0010 决策 6）。
+ */
+function panelIdOptions(
+  panels: readonly PanelSpec[],
+  current: string | undefined,
+  t: Translate,
+): { v: string; l: string }[] {
+  const items = panels.map((p) => ({ v: p.id, l: t(p.titleKey as TranslationKey) }));
+  if (current && !items.some((i) => i.v === current)) {
+    items.push({ v: current, l: `${current}（${t("blueprint.unlinkedTag")}）` });
+  }
+  return items;
+}
+
+/** 节点属性检查器：只暴露**本节点必须设定**的字段；key 型引用一律只读展示。 */export function NodeInspector({
   node,
   doc,
   onPatch,
@@ -119,6 +139,8 @@ export function NodeInspector({
   onRemove: () => void;
   t: Translate;
 }): JSX.Element {
+  // 面板注册表（React 订阅版）：必须在任何提前返回之前调用（hooks 规则）。
+  const panels = useAllPanels();
   if (!node) {
     return (
       <div className="bp-inspector">
@@ -198,7 +220,7 @@ export function NodeInspector({
   return (
     <div className="bp-inspector">
       <div className="bp-inspector-title">
-        {t(`blueprint.type.${node.type}`)} · {t("blueprint.inspector")}
+        {nodeTypeLabel(node.type, t)} · {t("blueprint.inspector")}
       </div>
       {/* 节点 key：自动生成（由上级推导）；输入框已废弃，改为只读展示，见下 */}
       <div className="bp-field">
@@ -216,11 +238,13 @@ export function NodeInspector({
         select(
           t("blueprint.panelId"),
           node.panel_id ?? "",
-          PANEL_IDS.map((id) => ({
-            v: id,
-            l: t(PANEL_TITLES[id] as TranslationKey),
-          })),
-          (v) => onPatch({ panel_id: v }),
+          panelIdOptions(panels, node.panel_id, t),
+          (v) => {
+            // 选中已有注册项时同步 `title_key`（面板注册表是显示名的权威）；
+            // 未注册的既有引用**原样保留**，不因插件缺失而清掉字段。
+            const spec = panels.find((p) => p.id === v);
+            onPatch(spec ? { panel_id: v, title_key: spec.titleKey } : { panel_id: v });
+          },
         )}
       {node.type === "control" && (
         <span className="dim bp-hints">

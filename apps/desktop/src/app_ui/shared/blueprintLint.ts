@@ -14,9 +14,35 @@ import type {
   BlueprintUnlinkedMap,
   BlueprintUnlinkedReason,
 } from "@hamster-pouch/config";
+import { nodeSpecOrNull, panelSpec } from "@hamster-pouch/config";
 
 /** 求值链节点（操作/条件/状态）必须有触发来源，否则不会被执行。 */
 const CHAIN_TYPES: BlueprintNode["type"][] = ["event", "condition", "action"];
+
+/**
+ * 该面板是否**有类目**（RFC 0010 决策 4 / 面板标准第 5.1 节）。
+ *
+ * 返回值语义：`true` / `false` = 有明确声明；`undefined` = 面板当前无注册项
+ * （插件未安装/未启用/API 不兼容）或未填 `panel_id` —— 无从判定，不在此处标记
+ * （面板缺失本身已按"未接通"处理）。
+ */
+function panelHasClass(graph: BlueprintGraph, controlKey: string): boolean | undefined {
+  const control = graph.nodes.find((n) => n.key === controlKey);
+  if (!control || control.type !== "control") return undefined;
+  const panelId = control.panel_id?.trim();
+  if (!panelId) return undefined;
+  return panelSpec(panelId)?.hasClass;
+}
+
+/**
+ * 该节点类型当前是否**有注册项**（RFC 0010 决策 6）。
+ *
+ * 插件注册的节点类型在插件缺失时没有注册项 → 画布灰显「未接通」、**允许保存**、
+ * 插件恢复后自动恢复。
+ */
+function nodeTypeRegistered(node: BlueprintNode): boolean {
+  return nodeSpecOrNull(node.type) !== undefined;
+}
 
 /** 节点是否还有触发来源（与后端校验口径一致）。 */
 function hasSource(node: BlueprintNode, graph: BlueprintGraph): boolean {
@@ -43,7 +69,9 @@ function hasSource(node: BlueprintNode, graph: BlueprintGraph): boolean {
  * 判定（与后端软告警口径一致，**不阻塞保存**）：
  * - 控件缺 `panel_id`、类缺 `control`、对象缺 `class`、状态缺 `target`；
  * - 引用指向**已不存在的节点**（删除关联节点后的常见状态）；
- * - 操作缺对象来源、条件/状态缺触发来源。
+ * - 操作缺对象来源、条件/状态缺触发来源；
+ * - 节点类型**当前无注册项**（插件缺失，RFC 0010 决策 6）；
+ * - 类目挂在**无类目**的面板下（`has_class = false`，RFC 0010 决策 4）。
  *
  * 引用指向"存在但类型不对"的节点仍属硬错误（由后端拒绝），不算"未接通"。
  */
@@ -57,17 +85,28 @@ export function analyzeUnlinked(graph: BlueprintGraph): BlueprintUnlinkedMap {
   };
 
   for (const node of graph.nodes) {
+    // RFC 0010 决策 6：节点类型**当前无注册项**（插件未安装 / 未启用 / 宿主 API 不兼容）
+    // → 未接通（灰显、允许保存、恢复后自动恢复）。命名不合规则的类型是**硬错误**，
+    // 由解析层/后端拒绝，不在"未接通"之列。
+    if (!nodeTypeRegistered(node)) {
+      mark(node.key, "missing-registration");
+    }
     switch (node.type) {
       case "control":
         if (!node.panel_id) {
           mark(node.key, "missing-control");
         }
         break;
-      case "class":
+      case "class": {
         if (!node.control || !byKey.has(node.control)) {
           mark(node.key, "missing-control");
+        } else if (panelHasClass(graph, node.control) === false) {
+          // 类目挂在**无类目**的面板下：宿主内置面板是硬错误（保存时被拒），
+          // 插件注册面板是未接通——两种情况在画布上都先灰显提示。
+          mark(node.key, "panel-has-no-class");
         }
         break;
+      }
       case "object":
         if (!node.class || !byKey.has(node.class)) {
           mark(node.key, "missing-class");

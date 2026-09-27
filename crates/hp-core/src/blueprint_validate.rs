@@ -13,57 +13,106 @@ use crate::blueprint::{
     OVERLAY_MAX_SIZE,
 };
 use crate::blueprint_node::{BlueprintEdge, BlueprintNode};
+use crate::blueprint_registry::{NodeRegistry, SeverityLevel};
 use crate::blueprint_types::{ActionOp, EdgeKind, GroupMode, NodeType, Trigger};
+
+/// 一条校验结论：消息 + **分级**（硬错误 / 未接通软告警）。
+///
+/// 分级来自节点类型注册表的 `severity`：内置 10 种的缺省口径是
+/// **字段问题 = 硬错误、引用缺失 = 软告警**，因此本结构不改变既有行为。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeIssue {
+    pub message: String,
+    pub severity: SeverityLevel,
+}
+
+impl NodeIssue {
+    fn hard(message: String) -> Self {
+        Self {
+            message,
+            severity: SeverityLevel::Hard,
+        }
+    }
+
+    /// 是否硬错误（拒绝保存）。
+    pub fn is_hard(&self) -> bool {
+        self.severity == SeverityLevel::Hard
+    }
+}
 
 /// 图级校验入口：返回全部硬错误（空 = 有效，可保存）。
 ///
 /// 判定顺序（与 RFC 0007 决策 6 的条目顺序一致）：版本闸门 → 节点 key 唯一 →
 /// 各节点字段/引用 → 边端点与类型 → 分层规则 → 互斥组默认可见 → 求值链无环。
 pub(crate) fn validate_graph(graph: &BlueprintGraph) -> Vec<String> {
-    let mut errors = Vec::new();
+    validate_graph_with(graph, &NodeRegistry::builtin_only())
+        .into_iter()
+        .filter(NodeIssue::is_hard)
+        .map(|i| i.message)
+        .collect()
+}
+
+/// 图级校验入口（带节点类型注册表）：返回**全部分级结论**。
+///
+/// 宿主把插件注册表注入后，已启用插件的节点类型不再被标为「未接通」；
+/// 未注入（`builtin_only`）时，命名合法但无注册项的类型按**软告警**处理
+/// （不阻塞保存，RFC 0010 决策 6）。
+pub(crate) fn validate_graph_with(graph: &BlueprintGraph, registry: &NodeRegistry) -> Vec<NodeIssue> {
+    let mut issues: Vec<NodeIssue> = Vec::new();
 
     // 版本闸门：`>` 当前版本才是硬错误；更低版本先走迁移（D58），迁移后再校验。
     if graph.schema_version > BLUEPRINT_SCHEMA_VERSION {
-        errors.push(format!(
+        issues.push(NodeIssue::hard(format!(
             "不支持的蓝图 schema 版本: {}（当前为 {}）",
             graph.schema_version, BLUEPRINT_SCHEMA_VERSION
-        ));
+        )));
     }
 
-    // 节点 key 唯一
+    // 节点 key 唯一 + `type` 命名规则（**未知 type 分流**，RFC 0010 决策 6）：
+    // 不合命名规则 = 硬错误；命名合法但当前无注册项 = 软告警（见 warnings）。
     let mut seen = HashSet::new();
     for node in &graph.nodes {
         if node.key.trim().is_empty() {
-            errors.push("存在空 key 的节点".into());
+            issues.push(NodeIssue::hard("存在空 key 的节点".into()));
             continue;
         }
         if !seen.insert(node.key.clone()) {
-            errors.push(format!("节点 key 重复: {}", node.key));
+            issues.push(NodeIssue::hard(format!("节点 key 重复: {}", node.key)));
+        }
+        let raw = node.node_type.as_str();
+        if NodeType::from_str(raw).is_none() {
+            issues.push(NodeIssue::hard(format!(
+                "节点 {} 的 type 不合命名规则: {raw}（宿主内置用裸 id，插件注册用 plugin.<plugin_id>.<local_id>）",
+                node.key
+            )));
         }
     }
 
     let by_key: HashMap<&str, &BlueprintNode> =
         graph.nodes.iter().map(|n| (n.key.as_str(), n)).collect();
 
-    // 各节点类型字段校验（硬错误）
+    // 各节点类型字段校验（硬错误，按注册表的 `severity` 分级）。
     for node in &graph.nodes {
-        validate_node(node, &by_key, &mut errors);
+        validate_node_with(node, &by_key, registry, &mut issues);
     }
 
     // 边校验（悬空、端点类型不符、重复）
     let mut edge_seen = HashSet::new();
     for edge in &graph.edges {
-        validate_edge(edge, &by_key, &mut errors);
+        validate_edge_with(edge, &by_key, registry, &mut issues);
         if !edge_seen.insert((edge.from.clone(), edge.to.clone(), edge.edge_kind)) {
-            errors.push(format!(
+            issues.push(NodeIssue::hard(format!(
                 "重复边: {} --{}--> {}",
                 edge.from, edge.edge_kind, edge.to
-            ));
+            )));
         }
     }
 
     // 分层规则（D51/D58/D60）：层 key/名、每层至多一个界面、节点 layer 归属、跨层边。
-    validate_layers(graph, &mut errors);
+    // 分层规则全部是硬错误（与既有口径一致），因此直接映射成 `NodeIssue::hard`。
+    let mut layer_errors: Vec<String> = Vec::new();
+    validate_layers(graph, &mut layer_errors);
+    issues.extend(layer_errors.into_iter().map(NodeIssue::hard));
 
     // 互斥组 default_visible 至多一个成员。
     for node in &graph.nodes {
@@ -72,34 +121,40 @@ pub(crate) fn validate_graph(graph: &BlueprintGraph) -> Vec<String> {
         }
         if let Some(visible) = &node.default_visible {
             if visible.len() > 1 {
-                errors.push(format!(
+                issues.push(NodeIssue::hard(format!(
                     "互斥组 {} 的 default_visible 至多一个成员（当前 {} 个）",
                     node.key,
                     visible.len()
-                ));
+                )));
             }
         }
     }
 
+    // 类目挂在**无类目**的面板下（RFC 0010 决策 4 / 面板标准第 5.1、7.1 节）：
+    // `has_class = false` 的面板下出现 `control → class` 的 `contains` 边。
+    // 分级按**声明者是否可变**：宿主内置面板 = 硬错误；插件注册面板 = 未接通软告警
+    // （插件升级可能把 `has_class` 由 true 改成 false，不能把用户既有文档变成"保存失败"）。
+    issues.extend(find_panel_class_violations(graph, registry, &by_key));
+
     // fires/guards 求值子图必须无环（DAG）。
     if let Some(cycle) = find_cycle(&graph.edges) {
-        errors.push(format!(
+        issues.push(NodeIssue::hard(format!(
             "fires/guards 求值链存在环: {}",
             cycle
                 .iter()
                 .map(|s| s.as_str())
                 .collect::<Vec<_>>()
                 .join(" -> ")
-        ));
+        )));
     }
 
     // **同界面 + 同对象 + 同触发 + 多状态冲突**（用户新增规则）：一次交互不可能同时
     // 落到两个互斥结果上——要么目标被同时显示与隐藏，要么互斥组里有两个成员被同时显示。
-    errors.extend(find_state_conflicts(graph));
+    issues.extend(find_state_conflicts(graph, registry));
 
     // 「未接通」类软问题（缺引用、缺触发来源、无根层、浮层未连界面）不在此处报错，
     // 见 `blueprint_warnings::collect`：删除关联节点后允许先存下中间状态。
-    errors
+    issues
 }
 
 /// 一次交互可能落到的一个"状态"（动作目标 + 操作）。
@@ -122,15 +177,13 @@ struct ActionState {
 ///    重复同一操作（`show` 两次）不算冲突，`toggle` 与 `hide` 的组合也允许。
 /// 2. **互斥组多成员同时显示**：同一次交互把同一互斥组（`mode = exclusive`）的两个不同
 ///    成员面板都置为 `show`（或 `toggle`），违反"同一时间至多一个成员显示"。
-fn find_state_conflicts(graph: &BlueprintGraph) -> Vec<String> {
+fn find_state_conflicts(graph: &BlueprintGraph, registry: &NodeRegistry) -> Vec<NodeIssue> {
     let mut errors = Vec::new();
 
-    // 触发来源节点：面板控件 / 类 / 对象（与引擎 `eventMatches` 的候选口径一致）。
+    // 触发来源节点：面板 / 类目 / 对象（= `on` 边的合法来源，与 `blueprint_registry` 的
+    // 规则边表同源；插件注册项与无注册项的节点不参与，见注册表开放点）。
     for source in &graph.nodes {
-        if !matches!(
-            source.node_type,
-            NodeType::Control | NodeType::Class | NodeType::Object
-        ) {
+        if !registry.rule_edge_allows(EdgeKind::On, &source.node_type, &NodeType::Event) {
             continue;
         }
         let layer = graph.node_layer_key(source);
@@ -215,7 +268,7 @@ fn find_state_conflicts(graph: &BlueprintGraph) -> Vec<String> {
                     if a.target != b.target || !mutually_exclusive(a.op, b.op) {
                         continue;
                     }
-                    errors.push(format!(
+                    errors.push(NodeIssue::hard(format!(
                         "同界面同对象同触发「{}」状态冲突：对象 {} 的两个状态同时作用于 {}（{}:{} / {}:{}）",
                         trigger.as_str(),
                         source.key,
@@ -224,7 +277,7 @@ fn find_state_conflicts(graph: &BlueprintGraph) -> Vec<String> {
                         a.op.as_str(),
                         b.action,
                         b.op.as_str()
-                    ));
+                    )));
                 }
             }
 
@@ -252,13 +305,13 @@ fn find_state_conflicts(graph: &BlueprintGraph) -> Vec<String> {
                     }) else {
                         continue;
                     };
-                    errors.push(format!(
+                    errors.push(NodeIssue::hard(format!(
                         "同界面同对象同触发「{}」状态冲突：互斥组 {} 的成员 {} 与 {} 被同时置为显示",
                         trigger.as_str(),
                         group.key,
                         a.target,
                         b.target
-                    ));
+                    )));
                 }
             }
 
@@ -268,6 +321,73 @@ fn find_state_conflicts(graph: &BlueprintGraph) -> Vec<String> {
 
     errors
 }
+/// 面板声明（`has_class` / `overlay_content`）与文档结构冲突的判定。
+///
+/// 逐条对应面板标准第 7.1 节第 6/7 条：
+/// 1. `has_class = false` 的面板下出现 `control --contains--> class`：**宿主内置**面板为
+///    硬错误（宿主声明是不变量），**插件注册**面板为未接通软告警（声明随版本可变）；
+/// 2. `mount.overlay_content = false` 的面板被浮层 `contains`：**硬错误**（与"浮层不得
+///    contains 布局块"同级）。
+///
+/// 面板未注册（插件缺失）或 `panel_id` 缺失时无从判定，按「未接通」交给软告警层。
+fn find_panel_class_violations(
+    graph: &BlueprintGraph,
+    registry: &NodeRegistry,
+    by_key: &HashMap<&str, &BlueprintNode>,
+) -> Vec<NodeIssue> {
+    let mut issues = Vec::new();
+    for edge in &graph.edges {
+        if edge.edge_kind != EdgeKind::Contains {
+            continue;
+        }
+        let (Some(parent), Some(child)) = (
+            by_key.get(edge.from.as_str()),
+            by_key.get(edge.to.as_str()),
+        ) else {
+            continue;
+        };
+
+        // 1. 类目挂在无类目面板下。
+        if parent.node_type == NodeType::Control && child.node_type == NodeType::Class {
+            if let Some(panel_id) = parent.panel_id.as_deref().filter(|s| !s.trim().is_empty()) {
+                if let Some(fact) = registry.panel_fact(panel_id) {
+                    if !fact.has_class {
+                        if fact.plugin {
+                            issues.push(NodeIssue {
+                                message: format!(
+                                    "类目节点 {} 暂未接通：面板 {} 声明 has_class = false（插件注册面板，声明可能随插件版本变化）",
+                                    child.key, panel_id
+                                ),
+                                severity: SeverityLevel::Soft,
+                            });
+                        } else {
+                            issues.push(NodeIssue::hard(format!(
+                                "类目节点 {} 挂在无类目的面板 {} 下：宿主内置面板的 has_class = false 是不变量，不允许出现 面板→类目 的结构边",
+                                child.key, panel_id
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. 浮层内容不合法：面板声明 `mount.overlay_content = false` 却被浮层 contains。
+        if parent.node_type == NodeType::Overlay && child.node_type == NodeType::Control {
+            if let Some(panel_id) = child.panel_id.as_deref().filter(|s| !s.trim().is_empty()) {
+                if let Some(fact) = registry.panel_fact(panel_id) {
+                    if !fact.overlay_content {
+                        issues.push(NodeIssue::hard(format!(
+                            "面板 {} 声明 mount.overlay_content = false，不能作为浮层 {} 的内容",
+                            panel_id, parent.key
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    issues
+}
+
 /// 两个操作是否互斥（不可能同时成立）。
 fn mutually_exclusive(a: ActionOp, b: ActionOp) -> bool {
     use ActionOp::{Collapse, Expand, Hide, Navigate, Show, Toggle};
@@ -287,8 +407,33 @@ fn is_visible_op(op: ActionOp) -> bool {
     matches!(op, ActionOp::Show | ActionOp::Toggle)
 }
 
-/// 校验单个节点字段与引用（硬错误）。
-pub(crate) fn validate_node(
+/// 校验单个节点字段与引用（按注册表的 `severity` 分级）。
+///
+/// **非宿主内置类型不做字段校验**：插件注册项（字段规格由插件声明）与「命名合法但当前
+/// 无注册项」的节点都不参与，前者由插件侧负责、后者按未接通软告警处理
+/// （RFC 0010 决策 5/6）。
+pub(crate) fn validate_node_with(
+    node: &BlueprintNode,
+    by_key: &HashMap<&str, &BlueprintNode>,
+    registry: &NodeRegistry,
+    issues: &mut Vec<NodeIssue>,
+) {
+    let key = &node.key;
+    let _ = key;
+    let Some(spec) = registry.builtin_spec(&node.node_type) else {
+        return;
+    };
+    let _ = spec;
+    let severity = registry.severity(&node.node_type).field_issue;
+    let mut local: Vec<String> = Vec::new();
+    validate_node_fields(node, by_key, &mut local);
+    for message in local {
+        issues.push(NodeIssue { message, severity });
+    }
+}
+
+/// 内置类型的字段校验本体（只产生消息，分级由调用方按注册表的 `severity` 决定）。
+fn validate_node_fields(
     node: &BlueprintNode,
     by_key: &HashMap<&str, &BlueprintNode>,
     errors: &mut Vec<String>,
@@ -431,7 +576,7 @@ pub(crate) fn validate_node(
             }
             if let Some(target_key) = node.target.as_deref() {
                 if let Some(target) = by_key.get(target_key) {
-                    let actual = target.node_type;
+                    let actual = target.node_type.clone();
                     let ok = match op {
                         // 显隐：面板控件，或浮层（D50：show/hide/toggle 可指向浮层）。
                         Some(ActionOp::Show) | Some(ActionOp::Hide) => {
@@ -461,50 +606,46 @@ pub(crate) fn validate_node(
                 }
             }
         }
+        // 非宿主内置类型不做字段校验（插件注册项 / 当前无注册项）。
+        NodeType::Other(_) => {}
     }
 }
 
-/// 校验边：端点存在性 + 端点类型与边类型匹配。
-pub(crate) fn validate_edge(
+/// 校验边：端点存在性 + 端点类型与边类型匹配（查注册表，不再硬编码类型组合）。
+pub(crate) fn validate_edge_with(
     edge: &BlueprintEdge,
     by_key: &HashMap<&str, &BlueprintNode>,
-    errors: &mut Vec<String>,
+    registry: &NodeRegistry,
+    issues: &mut Vec<NodeIssue>,
 ) {
-    let from = by_key.get(edge.from.as_str()).map(|n| n.node_type);
-    let to = by_key.get(edge.to.as_str()).map(|n| n.node_type);
+    let from = by_key.get(edge.from.as_str()).map(|n| &n.node_type);
+    let to = by_key.get(edge.to.as_str()).map(|n| &n.node_type);
     if from.is_none() {
-        errors.push(format!("边引用不存在的起点: {}", edge.from));
+        issues.push(NodeIssue::hard(format!("边引用不存在的起点: {}", edge.from)));
     }
     if to.is_none() {
-        errors.push(format!("边引用不存在的终点: {}", edge.to));
+        issues.push(NodeIssue::hard(format!("边引用不存在的终点: {}", edge.to)));
     }
-    let ok = match (edge.edge_kind, from, to) {
-        // 界面 → 布局块 / 浮层（浮层与布局块同级，D49/D50）。
-        (EdgeKind::Contains, Some(NodeType::Interface), Some(NodeType::LayoutBlock))
-        | (EdgeKind::Contains, Some(NodeType::Interface), Some(NodeType::Overlay))
-        // 浮层是**容器**（D50 修订）：可包含面板控件与标签组；标签组再包含面板控件。
-        | (EdgeKind::Contains, Some(NodeType::Overlay), Some(NodeType::Control))
-        | (EdgeKind::Contains, Some(NodeType::Overlay), Some(NodeType::Group))
-        | (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Group))
-        | (EdgeKind::Contains, Some(NodeType::LayoutBlock), Some(NodeType::Control))
-        | (EdgeKind::Contains, Some(NodeType::Group), Some(NodeType::Control))
-        | (EdgeKind::Contains, Some(NodeType::Control), Some(NodeType::Class))
-        | (EdgeKind::Contains, Some(NodeType::Class), Some(NodeType::Object)) => true,
-        (EdgeKind::MemberOf, Some(NodeType::Control), Some(NodeType::Group)) => true,
-        (EdgeKind::On, Some(NodeType::Control | NodeType::Class | NodeType::Object), Some(NodeType::Event)) => {
-            true
+    let ok = match (from, to) {
+        // 两端都是宿主内置类型 → 按注册表判定（结构边查 `can_contain`，规则边查边表）。
+        (Some(from), Some(to)) if from.is_builtin() && to.is_builtin() => {
+            if edge.edge_kind == EdgeKind::Contains {
+                registry.can_contain(from, to)
+            } else {
+                registry.rule_edge_allows(edge.edge_kind, from, to)
+            }
         }
-        (EdgeKind::Fires, Some(NodeType::Event), Some(NodeType::Condition | NodeType::Action)) => {
-            true
-        }
-        (EdgeKind::Guards, Some(NodeType::Condition), Some(NodeType::Action)) => true,
+        // 端点存在但**不是宿主内置类型**（插件注册项 / 命名合法但当前无注册项）：
+        // 不做类型判定——既不是"非法边"硬错误，也不参与求值（未接通，RFC 0010 决策 6）。
+        (Some(_), Some(_)) => return,
+        // 端点缺失：与既有口径一致，同时报"非法边"。
         _ => false,
     };
     if !ok {
-        errors.push(format!(
+        issues.push(NodeIssue::hard(format!(
             "非法边: {} --{}--> {}（端点类型不匹配或引用缺失）",
             edge.from, edge.edge_kind, edge.to
-        ));
+        )));
     }
 }
 

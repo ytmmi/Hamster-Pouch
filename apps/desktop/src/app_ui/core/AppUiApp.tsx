@@ -50,7 +50,9 @@ import {
   type Language,
 } from "../i18n";
 import { MenuBar } from "../menu/MenuBar";
-import { DOCK_COMPONENTS, PANEL_DEFS, panelTitle } from "./panelRegistry";
+import { useAllPanelDefs, useDockComponents, panelTitle } from "./panelRegistry";
+import { refreshPluginRegistrations, unregisterAll } from "./pluginRegistryHost";
+import { SettingsApp } from "../settings/SettingsApp";
 import type { FileItem, StatusType } from "../shared/types";
 
 /** 在 dockview 里找"包含最多指定面板"的组（用于 `toward:<组>` 吸收目标解析）。 */
@@ -89,16 +91,23 @@ export function AppUiApp(): JSX.Element {
 
   const t = useMemo(() => makeTranslator(language), [language]);
 
+  // 面板注册表（内置 13 个 + 插件注册项）：插件注册/卸载时自动更新菜单与 dockview 组件表。
+  const panelDefs = useAllPanelDefs();
+  const dockComponents = useDockComponents();
+
+  // 「全部设置」系统界面（RFC 0010 决策 7）：应用级、独立于仓库蓝图与 panel_layouts。
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   // 加载主题与语言设置（默认：白天模式 + 简体中文）
   useEffect(() => {
     void (async () => {
       try {
-        const savedTheme = await api.settingGet({ key: SETTING_KEYS.theme });
+        const savedTheme = (await api.settingGet({ key: SETTING_KEYS.theme })).value;
         if (savedTheme === "dark" || savedTheme === "light") {
           setTheme(savedTheme);
         }
-        const savedLang = await api.settingGet({ key: SETTING_KEYS.language });
-        if (isLanguage(savedLang)) {
+        const savedLang = (await api.settingGet({ key: SETTING_KEYS.language })).value;
+        if (typeof savedLang === "string" && isLanguage(savedLang)) {
           setLanguageState(savedLang);
         }
       } catch {
@@ -118,6 +127,50 @@ export function AppUiApp(): JSX.Element {
   }, []);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+
+  // 插件注册表（RFC 0010 决策 3/4/5/7）：按当前仓库重建三张注册表的插件部分。
+  // 未安装/未启用/API 不兼容的插件注册项**缺席** → 蓝图按「未接通」处理（允许保存）。
+  const reloadPlugins = useCallback(
+    async (targetRepoId: string) => {
+      const result = await refreshPluginRegistrations(targetRepoId);
+      if (result.panelCount + result.nodeTypeCount + result.settingsSectionCount > 0) {
+        setRefreshKey((k) => k + 1);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (!repoId) {
+        unregisterAll();
+        return;
+      }
+      await reloadPlugins(repoId);
+      if (cancelled) return;
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [repoId, reloadPlugins]);
+
+  // `plugin.changed`：启用/禁用/安装插件后立即重建注册表，蓝图里的引用随之恢复或灰显。
+  useEffect(() => {
+    let dispose: (() => void) | undefined;
+    void (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        dispose = await listen<{ repoId?: string }>("plugin.changed", (event) => {
+          const target = event.payload?.repoId ?? repoId;
+          if (target) void reloadPlugins(target);
+        });
+      } catch {
+        /* 非 Tauri 运行时忽略 */
+      }
+    })();
+    return () => dispose?.();
+  }, [repoId, reloadPlugins]);
 
   const status = useCallback(
     (text: string, type: StatusType = "info") => setStatusMsg({ text, type }),
@@ -712,10 +765,11 @@ export function AppUiApp(): JSX.Element {
           onThemeChange={changeTheme}
           language={language}
           onLanguageChange={changeLanguage}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
         <div className="app-workspace" ref={workspaceRef}>
           <DockviewReact
-            components={DOCK_COMPONENTS}
+            components={dockComponents}
             onReady={onReady}
             disableFloatingGroups={false}
             dndStrategy="pointer"
@@ -744,12 +798,20 @@ export function AppUiApp(): JSX.Element {
           <span className="dim">
             {t("status.repo")}: {repoId ?? "—"} | {t("status.source")}: {sourceId ?? "—"} |{" "}
             {t("status.file")}: {selectedFile?.relative_path ?? "—"} | {t("status.panels")}:{" "}
-            {PANEL_DEFS.length}
+            {panelDefs.length}
           </span>
         </div>
         {/* 长任务进度浮窗 + 危险操作确认弹窗：界面居中，盖在布局/面板之上 */}
         <TaskOverlay />
         <ConfirmDialog />
+        {/* 「全部设置」系统界面（RFC 0010 决策 7）：不进蓝图、不参与 panel_layouts */}
+        {settingsOpen && (
+          <SettingsApp
+            onClose={() => setSettingsOpen(false)}
+            onThemeChange={changeTheme}
+            onLanguageChange={changeLanguage}
+          />
+        )}
       </div>
     </AppContext.Provider>
   );

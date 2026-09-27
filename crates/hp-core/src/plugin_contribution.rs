@@ -4,11 +4,19 @@
 //! 数据查询。**贡献点不构成权限**——实际可用性仍由「插件在该仓库是否启用 + 该能力是否
 //! 授权」决定（RFC 0004 决策 6/14）。
 //!
+//! **注册权边界（RFC 0010 决策 2）**：插件**可以**注册**面板**（`panel`）与
+//! **蓝图节点类型**（`blueprintNode`），**不可以**注册**控件**——26 种 `kind` 是宿主
+//! 内置白名单（D62）。两者都要求 id 落在 `plugin.<plugin_id>.<local_id>` 命名空间里；
+//! **不存在**覆盖宿主内置项的路径，也不需要运行时"加前缀消歧"。
+//!
 //! 本文件只承载取值域与结构（纯数据），校验在 `plugin.rs` 的 `PluginManifest::validate`。
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+
+use crate::blueprint_registry::BlueprintNodeDecl;
+use crate::panel_types::{PanelDecl, PanelDefaultSize, PanelMount, PanelSettingDecl};
 
 /// 贡献点类型（`contributions[].kind`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +33,10 @@ pub enum ContributionKind {
     MetadataField,
     /// 面板控件 `bind` 可用的只读查询名。
     DataQuery,
+    /// 蓝图节点类型（纯声明；RFC 0010 决策 5/6）。
+    BlueprintNode,
+    /// 「全部设置」的设置项分节（RFC 0010 决策 7）。
+    SettingsSection,
 }
 
 impl ContributionKind {
@@ -36,6 +48,8 @@ impl ContributionKind {
             ContributionKind::AiProvider => "aiProvider",
             ContributionKind::MetadataField => "metadataField",
             ContributionKind::DataQuery => "dataQuery",
+            ContributionKind::BlueprintNode => "blueprintNode",
+            ContributionKind::SettingsSection => "settingsSection",
         }
     }
 
@@ -47,8 +61,21 @@ impl ContributionKind {
             "aiProvider" => Some(ContributionKind::AiProvider),
             "metadataField" => Some(ContributionKind::MetadataField),
             "dataQuery" => Some(ContributionKind::DataQuery),
+            "blueprintNode" => Some(ContributionKind::BlueprintNode),
+            "settingsSection" => Some(ContributionKind::SettingsSection),
             _ => None,
         }
+    }
+
+    /// 该贡献点 id 是否**必须**落在插件的 `plugin.<plugin_id>.<local_id>` 命名空间里。
+    ///
+    /// 面板与蓝图节点类型是**可注册对象**，形式本身保证不与宿主内置项冲突
+    /// （RFC 0010「命名空间」）；其余贡献点沿用既有的「同一插件内唯一」口径。
+    pub fn requires_plugin_namespace(&self) -> bool {
+        matches!(
+            self,
+            ContributionKind::Panel | ContributionKind::BlueprintNode
+        )
     }
 
     /// 该贡献点**必需**的能力（`None` = 只需插件在该仓库启用）。
@@ -70,7 +97,7 @@ impl fmt::Display for ContributionKind {
 }
 
 /// 一个贡献点。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Contribution {
     pub kind: ContributionKind,
     /// 该类型命名空间内唯一 id（`^[a-z][a-z0-9._-]{0,63}$`）。
@@ -85,6 +112,28 @@ pub struct Contribution {
     pub returns: Option<String>,
     /// `aiProvider` 的模型类别（自由文本，供 UI 分组；不参与权限判定）。
     pub model_kind: Option<String>,
+    // ===== 面板 / 设置分节声明（RFC 0010 决策 4、7）=====
+    /// 面板分类（`source` / `media` / `info` / `system` / `other`）；
+    /// 在 `settingsSection` 上表示**设置大类**（`interface` / `blueprint` / `panel` /
+    /// `plugin` / `language`）——同一 JSON 字段名，取值域按 `kind` 分别校验。
+    pub category: Option<String>,
+    /// **有无类目**：该面板能否挂「类目」节点（面板标准第 5.1 节）。
+    pub has_class: Option<bool>,
+    /// 该面板在蓝图里由哪种节点承载（须命中已注册的节点类型）。
+    pub blueprint_node: Option<String>,
+    /// 设置项声明（面板标准第 5.3 节、设置标准第 5 节；形状完全一致）。
+    pub settings: Vec<PanelSettingDecl>,
+    /// 该面板需要的能力（建面板与写操作按仓库校验）。
+    pub capabilities: Vec<String>,
+    /// 宿主约束：可挂载位置（面板标准第 5.4 节）。
+    pub mount: Option<PanelMount>,
+    /// 宿主图标集内的名字（白名单外即拒绝）。
+    pub icon: Option<String>,
+    /// 首次创建面板时的建议尺寸。
+    pub default_size: Option<PanelDefaultSize>,
+    // ===== 蓝图节点类型声明（RFC 0010 决策 5/6）=====
+    /// 插件注册的节点类型声明（纯声明；`type` 必须 `plugin.<plugin_id>.<local_id>`）。
+    pub node: Option<BlueprintNodeDecl>,
 }
 
 impl Contribution {
@@ -98,6 +147,15 @@ impl Contribution {
             media_type: None,
             returns: None,
             model_kind: None,
+            category: None,
+            has_class: None,
+            blueprint_node: None,
+            settings: Vec::new(),
+            capabilities: Vec::new(),
+            mount: None,
+            icon: None,
+            default_size: None,
+            node: None,
         }
     }
 
@@ -109,9 +167,46 @@ impl Contribution {
         self.kind.required_capability()
     }
 
+    /// 设置项声明的 `requires_capability` 清单（未授权项由宿主置灰并说明）。
+    pub fn setting_capabilities(&self) -> Vec<&str> {
+        self.settings
+            .iter()
+            .filter_map(|s| s.requires_capability.as_deref())
+            .collect()
+    }
+
     /// 贡献点 id 规则：`^[a-z][a-z0-9._-]{0,63}$`。
     pub fn has_valid_id(&self) -> bool {
         is_valid_contribution_id(&self.id)
+    }
+
+    /// 该贡献点注册的**节点类型 id**（`blueprintNode` 专用；其它贡献点返回 `None`）。
+    pub fn blueprint_node_type(&self) -> Option<&str> {
+        if self.kind != ContributionKind::BlueprintNode {
+            return None;
+        }
+        self.node.as_ref().map(|n| n.node_type.as_str())
+    }
+
+    /// 把 `panel` 贡献点转成面板声明（校验入口是 `panel_types::validate_panel_decl`）。
+    ///
+    /// `plugin_id` 由宿主注入（manifest `id`），插件**不能**自称来源
+    /// （RFC 0004 决策 17 / RFC 0009）。
+    pub fn panel_decl(&self, plugin_id: Option<&str>) -> PanelDecl {
+        PanelDecl {
+            id: self.id.clone(),
+            title_key: self.title_key.clone(),
+            category: self.category.clone(),
+            has_class: self.has_class,
+            blueprint_node: self.blueprint_node.clone(),
+            settings: self.settings.clone(),
+            capabilities: self.capabilities.clone(),
+            mount: self.mount,
+            read_only: self.read_only,
+            icon: self.icon.clone(),
+            default_size: self.default_size,
+            plugin_id: plugin_id.map(str::to_string),
+        }
     }
 }
 

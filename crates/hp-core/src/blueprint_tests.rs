@@ -11,6 +11,8 @@
 #[cfg(test)]
 mod tests {
     use super::*;
+    // RFC 0010：面板事实（`has_class` / `mount`）与节点类型注册表是校验分级的一部分。
+    use crate::blueprint_registry::{NodeRegistry, PanelFact};
 
 include!("blueprint_tests_structure.rs");
 include!("blueprint_tests_rules.rs");

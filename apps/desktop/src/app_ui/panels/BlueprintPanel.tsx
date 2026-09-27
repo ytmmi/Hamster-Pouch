@@ -42,6 +42,7 @@ import { useApp } from "../core/AppContext";
 import { BlueprintCanvas } from "./BlueprintCanvas";
 import { BlueprintLayerBar } from "./BlueprintLayerBar";
 import { removeLayer, softRemove } from "./blueprintDelete";
+import { nodeTypeLabel } from "./blueprintLabels";
 import { NodeInspector } from "./BlueprintInspector";
 import {
   addLayer,
@@ -807,7 +808,7 @@ export function BlueprintPanel(): JSX.Element {
                         className="bp-palette-btn"
                         onClick={() => addNode(type)}
                       >
-                        {app.t(`blueprint.type.${type}`)}
+                        {nodeTypeLabel(type, app.t)}
                       </button>
                     ))}
                   </div>

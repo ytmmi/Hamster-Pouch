@@ -8,7 +8,15 @@
   "entry": "bin/hello.exe",
   "capabilities": ["ui.panel", "repo.read"],
   "contributions": [
-    { "kind": "panel", "id": "hello.panel", "title_key": "plugin.hello.panel", "read_only": true }
+    {
+      "kind": "panel",
+      "id": "plugin.dev.hamsterpouch.example.hello.hello.panel",
+      "title_key": "plugin.hello.panel",
+      "category": "system",
+      "has_class": false,
+      "blueprint_node": "control",
+      "read_only": true
+    }
   ],
   "data_queries": [{ "name": "greetings", "returns": "rows" }],
   "events": [{ "id": "greet" }],

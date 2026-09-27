@@ -10,10 +10,10 @@
  */
 
 import {
-  BLUEPRINT_NODE_TYPES,
-  blueprintNodeSpec,
+  BLUEPRINT_BUILTIN_NODE_TYPES,
   containmentAllows,
-  structuralParentsOf,
+  nodeSpecOrNull,
+  resolveNodePorts,
   type BlueprintEdge,
   type BlueprintNodeType,
 } from "@hamster-pouch/config";
@@ -26,41 +26,45 @@ export interface PortDef {
   side: "in" | "out";
 }
 
-/** 输入端口 id：结构节点用 `contains`，面板控件/状态用 `in`，规则节点用各自的边名。 */
+/** 输入端口 id：结构节点用 `contains`，面板/状态用 `in`，规则节点用各自的边名。 */
 function inputPortId(type: BlueprintNodeType): string {
-  if (structuralParentsOf(type).length > 0) {
-    // 结构子节点：接收 `contains`；面板控件另可接收 `memberOf`（旧图兼容），
-    // 因此面板控件用 `in` 这个"结构输入口"统一承接。
-    return type === "control" ? "in" : "contains";
-  }
-  if (type === "event") return "on";
-  if (type === "condition") return "fires";
-  if (type === "action") return "in";
-  return "";
+  const spec = nodeSpecOrNull(type);
+  if (!spec) return "";
+  return resolveNodePorts(spec).find((p) => p.side === "in")?.id ?? "";
 }
 
 /** 输出端口 id 清单（含规则边端口）。 */
 function outputPortIds(type: BlueprintNodeType): string[] {
-  const out: string[] = [];
-  const spec = blueprintNodeSpec(type);
-  if (spec.children.length > 0) out.push("contains");
-  if (type === "control") out.push("memberOf", "on");
-  if (type === "class" || type === "object") out.push("on");
-  if (type === "event") out.push("fires");
-  if (type === "condition") out.push("guards");
-  return out;
+  const spec = nodeSpecOrNull(type);
+  if (!spec) return [];
+  return resolveNodePorts(spec)
+    .filter((p) => p.side === "out")
+    .map((p) => p.id);
+}
+
+/** 由定义表推导的端口（内置 10 种在初始化期算好）。 */
+function derivedPorts(type: BlueprintNodeType): PortDef[] {
+  const ports: PortDef[] = [];
+  const input = inputPortId(type);
+  if (input) ports.push({ id: input, side: "in" });
+  for (const id of outputPortIds(type)) ports.push({ id, side: "out" });
+  return ports;
 }
 
 /** 每类节点的端口定义（输入在左、输出在右）；标签文案走 i18n（`portLabel`）。 */
-export const PORT_DEFS: Record<BlueprintNodeType, PortDef[]> = Object.fromEntries(
-  BLUEPRINT_NODE_TYPES.map((type) => {
-    const ports: PortDef[] = [];
-    const input = inputPortId(type);
-    if (input) ports.push({ id: input, side: "in" });
-    for (const id of outputPortIds(type)) ports.push({ id, side: "out" });
-    return [type, ports];
-  }),
-) as Record<BlueprintNodeType, PortDef[]>;
+export const PORT_DEFS: Record<string, PortDef[]> = Object.fromEntries(
+  BLUEPRINT_BUILTIN_NODE_TYPES.map((type) => [type, derivedPorts(type)]),
+) as Record<string, PortDef[]>;
+
+/**
+ * 取某类型的端口表（**内置 10 种 + 插件注册项**）。
+ *
+ * 未注册的类型（插件缺失）没有注册项，也就没有端口——画布把它按「未接通」灰显，
+ * 连线既不渲染也不参与判定（RFC 0010 决策 6：节点与边**原样保留**）。
+ */
+export function portsOf(type: BlueprintNodeType): PortDef[] {
+  return PORT_DEFS[type] ?? (nodeSpecOrNull(type) ? derivedPorts(type) : []);
+}
 
 /** 端口标签（多语言）：contains/memberOf/fires/guards/on；状态输入口为「触发/守卫」。 */
 export function portLabel(type: BlueprintNodeType, portId: string, t: Translate): string {
@@ -76,7 +80,7 @@ export function nodeHasPort(
   side: "in" | "out",
   portId: string,
 ): boolean {
-  return PORT_DEFS[type].some((p) => p.side === side && p.id === portId);
+  return portsOf(type).some((p) => p.side === side && p.id === portId);
 }
 
 /** 规则边（非结构边）的输出侧来源：`边类型 → 允许的输出节点类型`。 */
@@ -115,10 +119,10 @@ export function kindForEdge(
 /**
  * 端口在边上的 ID：输入/输出 + 类型决定。
  *
- * **必须与 `PORT_DEFS` 三者一致**：画布渲染连线时用
+ * **必须与 `portsOf` 一致**：画布渲染连线时用
  * `portMap.get(`${key}::${side}::${portIdFor(type, side, kind)}`)` 找端口坐标，
- * 而 DOM 上的标记是 `${key}::${side}::${p.id}`（`p.id` 来自 `PORT_DEFS`）。
- * 因此本函数**只能返回该节点在 `PORT_DEFS` 里声明过的端口 id**；返回一个未声明的 id
+ * 而 DOM 上的标记是 `${key}::${side}::${p.id}`（`p.id` 来自端口表）。
+ * 因此本函数**只能返回该节点声明（或推导）过的端口 id**；返回一个未声明的 id
  * 会让查表落空、连线被静默丢弃——真实缺陷：输入侧曾被边类型名覆盖
  * （`action.in.fires` 返回 `"fires"`，而操作节点的输入口其实是 `"in"`），
  * 导致"操作 → 状态"的连线在画布上永远画不出来。
@@ -128,9 +132,9 @@ export function portIdFor(
   side: "in" | "out",
   kind: BlueprintEdge["kind"],
 ): string {
-  const ports = PORT_DEFS[type];
+  const ports = portsOf(type);
   if (side === "in") {
-    // 输入侧：节点自身唯一的输入口（结构子节点 `contains`、面板控件/状态 `in`、
+    // 输入侧：节点自身唯一的输入口（结构子节点 `contains`、面板/状态 `in`、
     // 操作 `on`、条件 `fires`）；`memberOf` 落在标签组的结构输入口。
     const id = inputPortId(type);
     return ports.some((p) => p.side === "in" && p.id === id) ? id : "";
@@ -142,8 +146,11 @@ export function portIdFor(
 /**
  * 允许的"父容器 → 子节点"关系（与 hp-core 校验层级一致）。
  * 画布落在子节点的输入口时，边类型由此表与 `kindForEdge` 共同决定。
+ *
+ * **只含宿主内置类型**：插件注册的节点类型暂不能参与结构边（节点标准开放点）。
  */
 export const CONTAINMENT: { parent: BlueprintNodeType; children: BlueprintNodeType[] }[] =
-  BLUEPRINT_NODE_TYPES.filter((type) => blueprintNodeSpec(type).children.length > 0).map(
-    (type) => ({ parent: type, children: [...blueprintNodeSpec(type).children] }),
-  );
+  BLUEPRINT_BUILTIN_NODE_TYPES.map((type) => ({
+    parent: type,
+    children: [...(nodeSpecOrNull(type)?.children ?? [])],
+  })).filter((entry) => entry.children.length > 0);

@@ -18,6 +18,7 @@
 
 export {
   BLUEPRINT_ACTION_OPS,
+  BLUEPRINT_BUILTIN_NODE_TYPES,
   BLUEPRINT_EDGE_KINDS,
   BLUEPRINT_GROUP_MODES,
   BLUEPRINT_MEDIA_TYPES,
@@ -33,15 +34,22 @@ export {
   enumAllows,
   inList,
   isHideDirection,
+  isNodeTypeRegistered,
+  isPluginNodeType,
+  isValidNodeTypeName,
+  registerBlueprintNodeTypes,
+  unregisterBlueprintNodeTypes,
 } from "./blueprintValues";
 export type {
   BlueprintActionOp,
+  BlueprintBuiltinNodeType,
   BlueprintEdgeKind,
   BlueprintGroupMode,
   BlueprintHideDirection,
   BlueprintMediaType,
   BlueprintNodeType,
   BlueprintTrigger,
+  RegisteredNodeType,
 } from "./blueprintValues";
 
 import {
@@ -59,6 +67,7 @@ import {
   enumAllows,
   inList,
   isHideDirection,
+  isValidNodeTypeName,
   type BlueprintActionOp,
   type BlueprintEdgeKind,
   type BlueprintGroupMode,
@@ -77,11 +86,11 @@ import {
 } from "./blueprintOverlay";
 // 节点定义表在 `blueprintNodes.ts`（节点标准第 2 节）：解析层按它判定"字段是否属于该类型"。
 // 该模块只从 `blueprintValues.ts` 读取值域，与本文件无模块级循环。
-import { blueprintNodeSpec } from "./blueprintNodes";
+import { nodeSpecOrNull } from "./blueprintNodes";
 
 // ============================== 类型 ==============================
 
-/** 组/控件目标锚点（画布编辑器定位 + 浮动/停靠）。 */
+/** 组/面板目标锚点（画布编辑器定位 + 浮动/停靠）。 */
 export interface BlueprintPosition {
   x: number;
   y: number;
@@ -106,7 +115,7 @@ export interface BlueprintNode {
   type: BlueprintNodeType;
   /** 所属层 key（D51）；文档未分层时按单层兜底推导。 */
   layer?: string;
-  /** 显示名称（用户自定义）；缺省时前端按类型本地化生成（如「控件 1」）。
+  /** 显示名称（用户自定义）；缺省时前端按类型本地化生成（如「面板 1」）。
    *  界面节点的显示名取自**层名**（D51），不使用本字段。 */
   name?: string;
   // control
@@ -172,7 +181,11 @@ export type BlueprintUnlinkedReason =
   | "missing-object-source"
   | "missing-trigger"
   /** 浮层没有连到界面（`界面 --contains--> 浮层`），不属于任何页面。 */
-  | "missing-interface";
+  | "missing-interface"
+  /** 节点类型**当前无注册项**（插件未安装 / 未启用 / 宿主 API 不兼容，RFC 0010 决策 6）。 */
+  | "missing-registration"
+  /** 类目挂在**无类目**的面板下（`has_class = false`，RFC 0010 决策 4 / 面板标准第 5.1 节）。 */
+  | "panel-has-no-class";
 
 /** 派生分析结果：未接通节点 key → 原因。 */
 export type BlueprintUnlinkedMap = Record<string, BlueprintUnlinkedReason>;
@@ -368,7 +381,8 @@ function parseNode(value: unknown): BlueprintNode | null {
   if (typeof node.key !== "string" || !node.key.trim()) {
     return null;
   }
-  if (!inList(BLUEPRINT_NODE_TYPES, node.type)) {
+  if (typeof node.type !== "string" || !isValidNodeTypeName(node.type)) {
+    // 命名不合规则的 `type` 是硬错误 → 解析层拒绝（与 Rust 校验同口径）。
     return null;
   }
   if (node.layer !== undefined && typeof node.layer !== "string") {
@@ -378,17 +392,22 @@ function parseNode(value: unknown): BlueprintNode | null {
     return null;
   }
   // 节点定义表驱动：字段归属 + 取值域 + 类型。
+  //
+  // **未注册的类型**（插件缺失）没有字段规格可查：不校验字段、**原样保留**，
+  // 按「未接通」处理（RFC 0010 决策 6）。
+  const spec = nodeSpecOrNull(node.type);
   for (const [field, fieldValue] of Object.entries(node)) {
     if (field === "key" || field === "type" || field === "layer" || PAYLOAD_FIELD === field) {
       continue;
     }
-    const spec = blueprintNodeSpec(node.type).fields.find((f) => f.name === field);
-    if (!spec) {
-      // `unlinked` 是画布派生标记（不落库），允许出现在内存对象上；其余未知字段即拒绝。
-      if (field !== "unlinked") return null;
-      continue;
+    // `unlinked` 是画布派生标记（不落库），允许出现在内存对象上；其余未知字段即拒绝。
+    if (field === "unlinked") continue;
+    if (!spec) continue;
+    const fieldSpec = spec.fields.find((f) => f.name === field);
+    if (!fieldSpec) {
+      return null;
     }
-    if (!matchesFieldType(fieldValue, spec.type, field)) {
+    if (!matchesFieldType(fieldValue, fieldSpec.type, field)) {
       return null;
     }
   }
@@ -488,11 +507,16 @@ function parseLayers(value: unknown): BlueprintLayer[] | null | undefined {
  *
  * 承担责任的范围（与后端"解析层"口径一致）：
  * - 文本不是 JSON 对象、`nodes`/`edges`/`layers` 结构不对；
- * - 节点类型、`trigger`、`op`、`mode`、`media_type`、`hide_direction`、浮层锚点与
- *   外观档位取值未知；
+ * - 节点类型**不合命名规则**、`trigger`、`op`、`mode`、`media_type`、`hide_direction`、
+ *   浮层锚点与外观档位取值未知；
  * - 边类型未知、端点不是字符串；
  * - `schema_version` **高于**当前版本（更低版本由迁移处理，D58；缺失按当前版本兜底，
  *   与 hp-core `#[serde(default)]` 一致）。
+ *
+ * **节点类型的分流**（RFC 0010 决策 6）：命名**不合法** → 解析层拒绝（硬错误口径）；
+ * 命名合法但**当前无注册项**（插件未安装/未启用/宿主 API 不兼容）→ **接受并原样保留**，
+ * 由画布按「未接通」灰显、**允许保存**，插件恢复后自动恢复。否则用户装过插件再卸载，
+ * 自己的蓝图会直接读不出来（等于数据被插件绑架）。
  *
  * **不**承担业务级硬错误（悬空边、环、引用存在但类型不符、每层多个界面…）：
  * 那些由后端 `blueprint.validate` 在**保存前**判定；装载路径只做解析层拦截，

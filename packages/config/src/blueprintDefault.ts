@@ -21,23 +21,24 @@ import {
 /**
  * 内置默认蓝图 v7：如实表达当前默认「媒体-测试」布局（RFC 0007 决策 5 / D32 / D47 / D51）。
  *
- * 结构（**单层**「主界面」：层 ⊃ 界面 ⊃ 布局块 ⊃ 标签组 ⊃ 面板控件；面板控件 ⊃ 类 ⊃ 对象）
+ * 结构（**单层**「主界面」：层 ⊃ 界面 ⊃ 布局块 ⊃ 标签组 ⊃ 面板；面板 ⊃ 类目 ⊃ 对象）
  * —— 与仓库默认布局逐栏对应：
  * - 分层（D51）：`layers = [{ key: "l_main", name: "主界面" }]`，**每个节点都带 `layer`**；
  *   一个层 = 一张画布 = 一个界面（页面）；多页面由用户新增层与界面节点，
  *   并用 `navigate`（界面跳转，D48）连接；
  * - 层内的根是**界面节点** `ui`（界面显示名取自层名，D51：不再另存 `name`）；
- * - 左栏（blk_left）：**三个独立面板**，故直接含 仓库、媒体源、相册 三个面板控件
+ * - 左栏（blk_left）：**三个独立面板**，故直接含 仓库、媒体源、相册 三个面板
  *   （该栏没有 dockview 标签组）；
  * - 中栏（blk_center）：**只有一个标签组** `g_media`，其成员为 媒体预览 / 查看器 /
  *   媒体播放（布局里就是同一个 leaf 的三个标签页）；媒体预览内部再分
- *   图像/视频/音频 类 → 各一个「双击」对象；
+ *   图像/视频/音频 类目 → 各一个「双击」对象；
  * - 右栏（blk_right）：**只有一个标签组** `g_inspector`，成员为 色彩参考 /
  *   标签·评分 / 元数据（布局里同样是同一个 leaf 的三个标签页）。
  *
- * 术语（D46）：节点类型 `control` 在文档与 UI 中显示为**面板控件**，
- * 与 `docs/spec/control-standard.md` 的「控件」（宿主标准 UI 单元）区分；
- * 浮层（`overlay`，D50）是**容器**，直接包含面板控件/标签组（2026-09 取消「浮动控件」绑定），
+ * 术语（D71 / RFC 0010 决策 1）：节点类型 `control` 在文档与 UI 中显示为**面板**，
+ * 与 `docs/spec/control-standard.md` 的「控件」（宿主标准 UI 单元，26 种）区分；
+ * 节点类型 `class` 显示为**类目**（D46 的「面板控件」叫法已由 D71 撤销）；
+ * 浮层（`overlay`，D50）是**容器**，直接包含面板/标签组（2026-09 取消「浮动控件」绑定），
  * 默认蓝图不含浮层。
  *
  * 规则（对象 → 操作 → 状态，全部连线）：
@@ -47,9 +48,9 @@ import {
  *
  * 说明：
  * - **标签组优先**：某栏在布局里是一个 dockview 标签组时，布局块只连标签组，
- *   成员面板控件由标签组 `contains`；只有该栏由多个独立面板组成（如左栏）时，
- *   布局块才直接连面板控件。
- * - **界面节点只连布局块**（`ui → blk_left/blk_center/blk_right`），不直接连标签组/面板控件。
+ *   成员面板由标签组 `contains`；只有该栏由多个独立面板组成（如左栏）时，
+ *   布局块才直接连面板。
+ * - **界面节点只连布局块**（`ui → blk_left/blk_center/blk_right`），不直接连标签组/面板。
  * - 「媒体-测试」默认布局中 `tagtable`（tag表）与 `tasks`（任务）未挂载，故默认蓝图
  *   不含它们；用户需要时在编辑器中加 `control` 节点并放进标签组即可。
  * - `default_visible` 留空（不指定默认可见成员）：对账时保留布局自身的激活标签；
@@ -73,13 +74,13 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { key: "blk_center", type: "layout_block", layer: "l_main", name: "中栏", position: { x: 460, y: 170 } },
     { key: "blk_right", type: "layout_block", layer: "l_main", name: "右栏", position: { x: 880, y: 170 } },
 
-    // 左栏面板控件（仓库 / 媒体源 / 相册）
+    // 左栏面板（仓库 / 媒体源 / 相册）
     { key: "c_repo", type: "control", layer: "l_main", panel_id: "repo", title_key: "panel.repo", position: { x: 40, y: 300 } },
     { key: "c_sources", type: "control", layer: "l_main", panel_id: "sources", title_key: "panel.sources", position: { x: 40, y: 430 } },
     { key: "c_albums", type: "control", layer: "l_main", panel_id: "albums", title_key: "panel.albums", position: { x: 40, y: 560 } },
 
     // 中栏：**只有标签组** g_media（媒体预览 / 查看器 / 媒体播放同属一个 dockview
-    // 标签组，对应布局里的一个 leaf），媒体预览内部再分 图像/视频/音频 类 → 对象。
+    // 标签组，对应布局里的一个 leaf），媒体预览内部再分 图像/视频/音频 类目 → 对象。
     { key: "g_media", type: "group", layer: "l_main", mode: "exclusive", name: "媒体·查看器·播放", position: { x: 460, y: 300 } },
     { key: "c_media", type: "control", layer: "l_main", panel_id: "media", title_key: "panel.media", position: { x: 760, y: 300 } },
     { key: "c_viewer", type: "control", layer: "l_main", panel_id: "viewer", title_key: "panel.viewer", position: { x: 760, y: 430 } },
@@ -112,15 +113,15 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { from: "ui", to: "blk_right", kind: "contains", order: 3 },
 
     // 布局块 → 内容（**标签组优先**：某栏在布局里就是一个 dockview 标签组时，
-    // 布局块只连该组，成员面板控件由标签组 contains；只有该栏由多个独立面板组成时，
-    // 布局块才直接连面板控件，如左栏）
+    // 布局块只连该组，成员面板由标签组 contains；只有该栏由多个独立面板组成时，
+    // 布局块才直接连面板，如左栏）
     { from: "blk_left", to: "c_repo", kind: "contains", order: 4 },
     { from: "blk_left", to: "c_sources", kind: "contains", order: 5 },
     { from: "blk_left", to: "c_albums", kind: "contains", order: 6 },
     { from: "blk_center", to: "g_media", kind: "contains", order: 7 },
     { from: "blk_right", to: "g_inspector", kind: "contains", order: 8 },
 
-    // 标签组 → 面板控件（标签组包含面板控件；中栏的媒体预览/查看器/播放同属一个标签组）
+    // 标签组 → 面板（标签组包含面板；中栏的媒体预览/查看器/播放同属一个标签组）
     { from: "g_media", to: "c_media", kind: "contains", order: 9 },
     { from: "g_media", to: "c_viewer", kind: "contains", order: 10 },
     { from: "g_media", to: "c_player", kind: "contains", order: 11 },
@@ -128,12 +129,12 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { from: "g_inspector", to: "c_tags", kind: "contains", order: 13 },
     { from: "g_inspector", to: "c_metadata", kind: "contains", order: 14 },
 
-    // 面板控件 → 类（媒体预览内的类）
+    // 面板 → 类目（媒体预览内的类目）
     { from: "c_media", to: "k_image", kind: "contains", order: 15 },
     { from: "c_media", to: "k_video", kind: "contains", order: 16 },
     { from: "c_media", to: "k_audio", kind: "contains", order: 17 },
 
-    // 类 → 对象（类内的对象）
+    // 类目 → 对象（类目内的对象）
     { from: "k_image", to: "o_img", kind: "contains", order: 18 },
     { from: "k_video", to: "o_vid", kind: "contains", order: 19 },
     { from: "k_audio", to: "o_aud", kind: "contains", order: 20 },

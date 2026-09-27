@@ -26,7 +26,7 @@ import {
   type PortDef,
 } from "./blueprintPorts";
 // 节点显示名/摘要等**本地化文案**由纯模块 `blueprintLabels` 承载（画布与属性面板共用）。
-import { nodeDisplayName, nodeSummary } from "./blueprintLabels";
+import { nodeDisplayName, nodeSummary, nodeTypeLabel } from "./blueprintLabels";
 import {
   sampleEdgeCurve,
   segmentHitsPolyline,
@@ -603,7 +603,7 @@ export function BlueprintCanvas({
                 </span>
                 <span className="bp-node-type">
                   {isUnlinked && <span className="bp-node-flag">{t("blueprint.unlinkedTag")}</span>}
-                  {t(`blueprint.type.${node.type}`)}
+                  {nodeTypeLabel(node.type, t)}
                 </span>
               </div>
               <div className="bp-node-body">{nodeSummary(node, t, doc)}</div>

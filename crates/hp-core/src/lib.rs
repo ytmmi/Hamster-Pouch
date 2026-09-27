@@ -6,6 +6,7 @@ pub mod album;
 pub mod blueprint;
 pub mod blueprint_migrate;
 mod blueprint_node;
+pub mod blueprint_registry;
 mod blueprint_row;
 mod blueprint_types;
 mod blueprint_validate;
@@ -15,10 +16,13 @@ pub mod control;
 mod control_types;
 pub mod error;
 pub mod file;
+pub mod namespace;
+pub mod panel_types;
 pub mod plugin;
 pub mod plugin_contribution;
 pub mod rating;
 pub mod repo;
+pub mod setting_types;
 pub mod source;
 pub mod tag;
 pub mod tag_dict;
@@ -34,12 +38,19 @@ pub use album::{
 pub use blueprint::{
     ActionOp, AnchorAxis, BlueprintEdge, BlueprintGraph, BlueprintLayer, BlueprintNode,
     BlueprintPosition, BlueprintRow, BlueprintTemplateRow, EdgeKind, GroupMode, HideDirection,
-    NodeType, OverlayAnchor, OverlaySize, TokenLevel, Trigger, BLUEPRINT_SCHEMA_VERSION,
+    NodeIssue, NodeType, OverlayAnchor, OverlaySize, TokenLevel, Trigger, BLUEPRINT_SCHEMA_VERSION,
     OVERLAY_HEIGHT_MAX, OVERLAY_HEIGHT_MIN, OVERLAY_MAX_SIZE, OVERLAY_MIN_HEIGHT,
     OVERLAY_MIN_WIDTH,
 };
 pub use blueprint_migrate::{
     migrate_document, migrate_graph, normalize_document, MigratedDocument,
+};
+pub use blueprint_registry::{
+    derive_ports, validate_node_decl, BlueprintNodeDecl, BuiltinNodeSpec, EvaluationRole,
+    NodeDeclCtx, NodeFieldDecl, NodePortDecl, NodeRegistry, NodeRole, NodeSeverity,
+    NodeSeverityDecl, NodeSpecView, PanelFact, PortSide, RegisteredPluginNode, SeverityLevel,
+    BUILTIN_NODE_SPECS, BUILTIN_PANEL_FACTS, NODE_EVENT_NAMES, NODE_FIELD_TYPES,
+    RULE_EDGE_SOURCES, RULE_EDGE_TARGETS,
 };
 pub use color::ColorRef;
 pub use control::{
@@ -57,12 +68,25 @@ pub use plugin::{
     Capability, HostApiVersion, PluginId, PluginManifest, PluginRegistryRow, PluginRepoState,
     RuntimeKind, SourceKind, TrustLevel, HOST_API_VERSION,
 };
+pub use namespace::{
+    is_bare_id, is_id_in_plugin_namespace, is_plugin_namespaced_id, is_valid_namespaced_id,
+    is_valid_plugin_id,
+};
+pub use panel_types::{
+    is_bare_panel_id, is_valid_panel_id, validate_panel_decl, PanelCategory, PanelDecl,
+    PanelDeclCtx, PanelDefaultSize, PanelMount, PanelSettingDecl, PanelSettingKind,
+    PanelSettingScope, PANEL_ICON_WHITELIST, PANEL_MAX_SIZE,
+};
 pub use plugin_contribution::{
     is_valid_contribution_id, Contribution, ContributionKind, DataQueryReturns,
     PluginDataQueryDecl, PluginEventDecl,
 };
 pub use rating::{validate_rating, Rating, RATING_MAX, RATING_MIN};
 pub use repo::RepoId;
+pub use setting_types::{
+    validate_setting_decl, SettingCategory, SettingDecl, SettingDeclCtx, SettingInputKind,
+    SettingOwnerKind, SettingScope,
+};
 pub use source::{MediaType, Source, SourceId};
 pub use tag::{FileAutoTag, FileTag, Tag, TagId, TagRelation, TagRelationKind, TagSource};
 pub use tag_dict::{

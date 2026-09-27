@@ -18,7 +18,7 @@ import {
   setActiveBlueprintId,
 } from "../shared/blueprintRuntime";
 import { LANGUAGES, type Language } from "../i18n";
-import { PANEL_DEFS, panelTitle } from "../core/panelRegistry";
+import { useAllPanelDefs, panelTitle } from "../core/panelRegistry";
 import { ContextMenu } from "./ContextMenu";
 import { normalizeLayoutJson } from "../shared/panelLayout";
 import {
@@ -40,6 +40,8 @@ export interface MenuBarProps {
   onThemeChange: (next: "light" | "dark") => void;
   language: Language;
   onLanguageChange: (next: Language) => void;
+  /** 打开「全部设置」系统界面（RFC 0010 决策 7）。 */
+  onOpenSettings: () => void;
 }
 
 export function MenuBar({
@@ -48,9 +50,12 @@ export function MenuBar({
   onThemeChange,
   language,
   onLanguageChange,
+  onOpenSettings,
 }: MenuBarProps): JSX.Element {
   const app = useApp();
   const { t } = app;
+  // 面板注册表（内置 13 个 + 插件注册项）：重置布局与组件菜单都用这一份清单。
+  const panelDefs = useAllPanelDefs();
   // 布局按仓库隔离（D1）：未打开仓库时用空串表示全局默认。
   const repoId = app.repoId ?? "";
   const [open, setOpen] = useState<string | null>(null);
@@ -81,7 +86,7 @@ export function MenuBar({
   useEffect(() => {
     void api
       .settingGet({ key: SETTING_KEYS.syncBlueprint })
-      .then((v) => setSyncBlueprint(isSyncBlueprintEnabled(v)))
+      .then((r) => setSyncBlueprint(isSyncBlueprintEnabled(r.value === null ? null : String(r.value))))
       .catch(() => undefined);
   }, []);
 
@@ -89,7 +94,7 @@ export function MenuBar({
     const next = !syncBlueprint;
     setSyncBlueprint(next);
     void api
-      .settingSet({ key: SETTING_KEYS.syncBlueprint, value: next ? "true" : "false" })
+      .settingSet({ key: SETTING_KEYS.syncBlueprint, value: next })
       .catch(() => undefined);
   }, [syncBlueprint]);
 
@@ -138,7 +143,7 @@ export function MenuBar({
     const dv = apiRef.current;
     if (!dv) return;
     dv.clear();
-    const order = PANEL_DEFS.map((p) => p.id);
+    const order = panelDefs.map((p) => p.id);
     order.forEach((id, index) => {
       if (index === 0) {
         dv.addPanel({ id, component: id, title: panelTitle(id, t), ...panelExtra(id) });
@@ -382,6 +387,11 @@ export function MenuBar({
               {syncBlueprint ? "✓ " : "　"}
               {t("menubar.syncBlueprint")}
             </button>
+
+            {/* RFC 0010 决策 7：跳转到「全部设置」系统界面（应用级，独立于仓库蓝图） */}
+            <button className="menu-item" onClick={onOpenSettings}>
+              {t("settings.more")} <span className="sub-arrow">▸</span>
+            </button>
           </div>
         )}
       </div>
@@ -490,7 +500,7 @@ export function MenuBar({
             </button>
             {submenu === "components" && (
               <div className="menu-sub">
-                {PANEL_DEFS.map((p) => {
+                {panelDefs.map((p) => {
                   const exists = Boolean(apiRef.current?.getPanel(p.id));
                   return (
                     <div key={p.id} className="menu-item-row">

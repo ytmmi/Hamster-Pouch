@@ -43,7 +43,7 @@ interface ActionState {
 
 /** 冲突描述（供编辑器提示与画布标红）。 */
 export interface BlueprintStateConflict {
-  /** 触发来源对象/类/面板控件的 key。 */
+  /** 触发来源对象/类目/面板的 key。 */
   source: string;
   trigger: string;
   /** 冲突原因（已本地化前的中文描述，与后端报错同口径）。 */

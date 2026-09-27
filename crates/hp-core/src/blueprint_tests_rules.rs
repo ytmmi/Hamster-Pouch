@@ -515,3 +515,178 @@
             "{errors:?}"
         );
     }
+
+    /// RFC 0010 决策 4 / 面板标准第 5.1、7.1 节：**类目挂在无类目面板下**的分级。
+    ///
+    /// - 宿主内置面板（`has_class` 是不变量）→ **硬错误**（拒绝保存）；
+    /// - 插件注册面板（声明随插件版本可变）→ **未接通软告警**（灰显、允许保存）；
+    /// - `panel_id` 缺失或面板当前无注册项 → 不判定（按未接通，允许保存）。
+    #[test]
+    fn panel_has_class_violation_is_graded_by_declarer() {
+        fn doc(panel_id: &str) -> String {
+            format!(
+                r#"{{"schema_version":2,
+                    "layers":[{{"key":"l_a","name":"主界面"}}],
+                    "nodes":[
+                      {{"key":"ui","type":"interface","layer":"l_a"}},
+                      {{"key":"blk","type":"layout_block","layer":"l_a","name":"栏"}},
+                      {{"key":"c","type":"control","panel_id":"{panel_id}","layer":"l_a"}},
+                      {{"key":"k","type":"class","control":"c","media_type":"image","layer":"l_a"}}
+                    ],
+                    "edges":[
+                      {{"from":"ui","to":"blk","kind":"contains","order":1}},
+                      {{"from":"blk","to":"c","kind":"contains","order":2}},
+                      {{"from":"c","to":"k","kind":"contains","order":3}}
+                    ]}}"#
+            )
+        }
+
+        // 内置面板 media 有类目 → 合法。
+        let media = BlueprintGraph::from_json(&doc("media")).unwrap();
+        assert!(media.validate().is_empty(), "{:?}", media.validate());
+
+        // 内置面板 viewer 无类目 → 硬错误（宿主声明是不变量）。
+        let viewer = BlueprintGraph::from_json(&doc("viewer")).unwrap();
+        let errors = viewer.validate();
+        assert!(
+            errors.iter().any(|e| e.contains("has_class")),
+            "内置面板 has_class=false 却挂类目应为硬错误：{errors:?}"
+        );
+
+        // 插件注册面板声明 has_class=false → 未接通软告警（允许保存）。
+        let plugin_panel = "plugin.dev.hamsterpouch.palette.palette";
+        let plugin_graph = BlueprintGraph::from_json(&doc(plugin_panel)).unwrap();
+        let registry = NodeRegistry::builtin_only().with_plugin_panels(vec![PanelFact {
+            id: plugin_panel.to_string(),
+            has_class: false,
+            overlay_content: true,
+            multiple_per_interface: true,
+            plugin: true,
+        }]);
+        assert!(
+            plugin_graph.validate_with(&registry).is_empty(),
+            "插件面板的同类违约不得阻塞保存：{:?}",
+            plugin_graph.validate_with(&registry)
+        );
+        assert!(
+            plugin_graph
+                .warnings_with(&registry)
+                .iter()
+                .any(|w| w.contains("has_class")),
+            "插件面板的同类违约应报未接通软告警：{:?}",
+            plugin_graph.warnings_with(&registry)
+        );
+
+        // 面板当前无注册项（插件缺失）→ 不判定硬错误，也不丢数据。
+        let ghost = BlueprintGraph::from_json(&doc("plugin.dev.gone.panel")).unwrap();
+        assert!(ghost.validate().is_empty(), "{:?}", ghost.validate());
+    }
+
+    /// 面板标准第 7.1 节第 6 条：`mount.overlay_content = false` 的面板被浮层 contains
+    /// = **硬错误**（与"浮层不得 contains 布局块"同级）。
+    #[test]
+    fn panel_without_overlay_content_cannot_be_overlay_child() {
+        let json = r#"{"schema_version":2,
+            "layers":[{"key":"l_a","name":"主界面"}],
+            "nodes":[
+              {"key":"ui","type":"interface","layer":"l_a"},
+              {"key":"ov","type":"overlay","layer":"l_a","name":"浮层"},
+              {"key":"c","type":"control","panel_id":"plugin.dev.hamsterpouch.palette.palette","layer":"l_a"}
+            ],
+            "edges":[
+              {"from":"ui","to":"ov","kind":"contains","order":1},
+              {"from":"ov","to":"c","kind":"contains","order":2}
+            ]}"#;
+        let graph = BlueprintGraph::from_json(json).unwrap();
+        let registry = NodeRegistry::builtin_only().with_plugin_panels(vec![PanelFact {
+            id: "plugin.dev.hamsterpouch.palette.palette".to_string(),
+            has_class: true,
+            overlay_content: false,
+            multiple_per_interface: true,
+            plugin: true,
+        }]);
+        let errors = graph.validate_with(&registry);
+        assert!(
+            errors.iter().any(|e| e.contains("overlay_content")),
+            "{errors:?}"
+        );
+        // 未注入面板事实时（面板无注册项）不判定：按未接通处理，允许保存。
+        assert!(graph.validate().is_empty(), "{:?}", graph.validate());
+    }
+
+    /// 面板标准第 7.2 节第 2 条：`mount.multiple_per_interface = false` 但同一界面出现
+    /// 多个实例 = **软告警**（不阻塞保存）。
+    #[test]
+    fn multiple_per_interface_violation_is_soft() {
+        let json = r#"{"schema_version":2,
+            "layers":[{"key":"l_a","name":"主界面"}],
+            "nodes":[
+              {"key":"ui","type":"interface","layer":"l_a"},
+              {"key":"blk","type":"layout_block","layer":"l_a","name":"栏"},
+              {"key":"c1","type":"control","panel_id":"plugin.dev.hamsterpouch.palette.palette","layer":"l_a"},
+              {"key":"c2","type":"control","panel_id":"plugin.dev.hamsterpouch.palette.palette","layer":"l_a"}
+            ],
+            "edges":[
+              {"from":"ui","to":"blk","kind":"contains","order":1},
+              {"from":"blk","to":"c1","kind":"contains","order":2},
+              {"from":"blk","to":"c2","kind":"contains","order":3}
+            ]}"#;
+        let graph = BlueprintGraph::from_json(json).unwrap();
+        let registry = NodeRegistry::builtin_only().with_plugin_panels(vec![PanelFact {
+            id: "plugin.dev.hamsterpouch.palette.palette".to_string(),
+            has_class: true,
+            overlay_content: true,
+            multiple_per_interface: false,
+            plugin: true,
+        }]);
+        assert!(graph.validate_with(&registry).is_empty());
+        assert!(
+            graph
+                .warnings_with(&registry)
+                .iter()
+                .any(|w| w.contains("multiple_per_interface")),
+            "{:?}",
+            graph.warnings_with(&registry)
+        );
+    }
+
+    /// RFC 0010 决策 6：节点 `type` 的分流——命名不合法 = 硬错误；
+    /// 命名合法但当前无注册项 = 未接通软告警（**允许保存**、节点与边原样保留）。
+    #[test]
+    fn unknown_node_type_is_split_by_naming_rule() {
+        let illegal = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"nodes":[{"key":"x","type":"Magic Type"}],"edges":[]}"#,
+        )
+        .unwrap();
+        assert!(
+            illegal
+                .validate()
+                .iter()
+                .any(|e| e.contains("不合命名规则")),
+            "{:?}",
+            illegal.validate()
+        );
+
+        let legal_unknown = BlueprintGraph::from_json(
+            r#"{"schema_version":2,"nodes":[{"key":"x","type":"magic"}],
+                "edges":[{"from":"x","to":"x","kind":"on","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(
+            legal_unknown.validate().is_empty(),
+            "命名合法但无注册项不得阻塞保存：{:?}",
+            legal_unknown.validate()
+        );
+        assert!(
+            legal_unknown
+                .warnings()
+                .iter()
+                .any(|w| w.contains("当前无注册项")),
+            "{:?}",
+            legal_unknown.warnings()
+        );
+        // 节点与边**原样保留**（不因未接通而删除）。
+        assert_eq!(legal_unknown.nodes.len(), 1);
+        assert_eq!(legal_unknown.edges.len(), 1);
+        assert_eq!(legal_unknown.nodes[0].node_type.as_str(), "magic");
+    }

@@ -20,10 +20,46 @@ import type { BlueprintGraph, BlueprintNode, BlueprintNodeType } from "@hamster-
 import {
   BLUEPRINT_NODE_TYPES,
   effectiveLayers,
+  nodeLayerKey,
+  panelSpec,
   structuralParentsOf,
 } from "@hamster-pouch/config";
 import type { PanelId } from "@hamster-pouch/config";
 import { PANEL_IDS } from "@hamster-pouch/config";
+
+/**
+ * 该上级**能否**承载这个新类型（RFC 0010 决策 4 / 面板标准第 5.1 节）。
+ *
+ * 目前只有一条收窄规则：**类目不能挂在无类目的面板下**（`has_class = false`）。
+ * 面板当前无注册项（插件缺失）时无从判定 → 放行，由蓝图侧按「未接通」处理
+ * （插件缺失不得绑架用户数据）。
+ */
+function parentAcceptsChild(
+  doc: BlueprintGraph,
+  parentKey: string,
+  childType: BlueprintNodeType,
+): boolean {
+  if (childType !== "class") return true;
+  const parent = doc.nodes.find((n) => n.key === parentKey);
+  const panelId = parent?.panel_id?.trim();
+  if (!panelId) return true;
+  return panelSpec(panelId)?.hasClass !== false;
+}
+
+/** 在某层内找第一个**能承载**该新类型的上级（层缺省 = 不按层过滤）。 */
+function firstAcceptingParent(
+  doc: BlueprintGraph,
+  parentType: BlueprintNodeType,
+  childType: BlueprintNodeType,
+  layerKey?: string,
+): string | undefined {
+  return doc.nodes.find(
+    (n) =>
+      n.type === parentType &&
+      (!layerKey || nodeLayerKey(doc, n) === layerKey) &&
+      parentAcceptsChild(doc, n.key, childType),
+  )?.key;
+}
 
 /** 节点 key 前缀（独立节点，无上级时用）。 */
 export const TYPE_PREFIX: Record<string, string> = {
@@ -266,7 +302,9 @@ function fallbackParent(
 ): string | undefined {
   switch (type) {
     case "class":
-      return firstOfInLayer(doc.nodes, "control", layer);
+      // 类目必须挂在**有类目**的面板下（RFC 0010 决策 4）：跳过错 `has_class = false`
+      // 的面板，避免工厂产出被后端拒绝的文档（编辑器职责，面板标准第 5.1 节）。
+      return firstAcceptingParent(doc, "control", "class", layer);
     case "object":
       return firstOfInLayer(doc.nodes, "class", layer);
     default:
@@ -531,7 +569,12 @@ export function parentHintFor(
     if (allowed.length === 0) {
       return null;
     }
-    const key = firstOfInLayer(doc.nodes, allowed[0], layerKey?.trim() || undefined);
+    const key = firstAcceptingParent(
+      doc,
+      allowed[0],
+      type,
+      layerKey?.trim() || undefined,
+    );
     return key ? { key } : null;
   }
   const wanted: BlueprintNodeType[] =
@@ -560,7 +603,7 @@ export function parentHintFor(
   const seen = new Set<string>();
   while (cursor && !seen.has(cursor.key)) {
     seen.add(cursor.key);
-    if (wanted.includes(cursor.type)) {
+    if (wanted.includes(cursor.type) && parentAcceptsChild(doc, cursor.key, type)) {
       return { key: cursor.key, explicit: true };
     }
     const parentKey = parentKeyOf(doc, cursor);

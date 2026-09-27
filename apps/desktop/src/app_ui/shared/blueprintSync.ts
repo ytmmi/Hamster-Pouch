@@ -18,7 +18,7 @@ import {
   isSyncBlueprintEnabled,
   makeEmptyBlueprint,
   normalizeLayersForSave,
-  PANEL_TITLES,
+  panelTitleKeyOf,
   SETTING_KEYS,
 } from "@hamster-pouch/config";
 import type { DockviewApi } from "dockview-react";
@@ -63,9 +63,7 @@ export function diffLayoutIntoBlueprint(
       type: "control",
       ...(layer ? { layer } : {}),
       panel_id: panelId,
-      ...(PANEL_TITLES[panelId as keyof typeof PANEL_TITLES]
-        ? { title_key: PANEL_TITLES[panelId as keyof typeof PANEL_TITLES] }
-        : {}),
+      ...(panelTitleKeyOf(panelId) ? { title_key: panelTitleKeyOf(panelId)! } : {}),
       position: { x: 60 + nodes.length * 20, y: 60 + nodes.length * 20 },
     };
     existingKeys.add(key);
@@ -144,6 +142,7 @@ export async function syncBlueprintFromLayout(
   // D59 开关（默认开）：关闭时不把布局结构同步进蓝图，只保存布局本身（不碰蓝图）。
   const enabled = await api
     .settingGet({ key: SETTING_KEYS.syncBlueprint })
+    .then((r) => (r.value === null ? null : String(r.value)))
     .catch(() => null);
   if (!isSyncBlueprintEnabled(enabled)) {
     return null;

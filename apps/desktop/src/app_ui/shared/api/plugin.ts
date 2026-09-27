@@ -11,6 +11,8 @@ import type {
   PluginStateItem,
 } from "@hamster-pouch/shared-types";
 
+import type { PluginContributions } from "../types";
+
 /** 列出已安装插件 */
 export function pluginList(): Promise<PluginItem[]> {
   return invoke<PluginItem[]>("plugin_list");
@@ -61,4 +63,14 @@ export function pluginVersions(pluginId: string): Promise<string[]> {
 /** 回滚到指定已安装版本 */
 export function pluginRollback(pluginId: string, version: string): Promise<string> {
   return invoke<string>("plugin_rollback", { pluginId, version });
+}
+
+/**
+ * 某仓库当前**已启用**插件注册的面板 / 蓝图节点类型 / 设置分节（RFC 0010）。
+ *
+ * 注册项**不落库**：宿主按当前安装与启用状态实时构造。插件未安装 / 未启用 / 宿主 API
+ * 不兼容时其注册项缺席 —— 蓝图侧按「未接通」处理（软告警、允许保存、恢复后自动恢复）。
+ */
+export function pluginContributions(repoId: string): Promise<PluginContributions> {
+  return invoke<PluginContributions>("plugin_contributions", { repoId });
 }

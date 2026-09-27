@@ -13,7 +13,11 @@ import type {
   RepoSetDefaultArgs,
   RepoSummary,
   SettingGetArgs,
+  SettingListResult,
+  SettingOkResult,
+  SettingResetArgs,
   SettingSetArgs,
+  SettingValueResult,
 } from "../types";
 
 /** 创建仓库（自动打开） */
@@ -39,14 +43,39 @@ export function repoList(): Promise<RepoListItem[]> {
   return invoke<RepoListItem[]>("repo_list");
 }
 
-/** 读取设置 */
-export function settingGet(args: SettingGetArgs): Promise<string | null> {
-  return invoke<string | null>("setting_get", { key: args.key });
+/**
+ * 读取单个设置值（`{ value | null }`，标量）。
+ *
+ * 契约见 `docs/spec/commands-events.md` 3.13：本命令已**就地迁移**为
+ * 标量值 + `repoId`（`scope = "repo"` 的项按仓库隔离）。
+ */
+export function settingGet(args: SettingGetArgs): Promise<SettingValueResult> {
+  return invoke<SettingValueResult>("setting_get", {
+    key: args.key,
+    repoId: args.repoId ?? null,
+  });
 }
 
-/** 写入设置 */
-export function settingSet(args: SettingSetArgs): Promise<void> {
-  return invoke<void>("setting_set", { key: args.key, value: args.value });
+/** 写入单个设置值（标量；返回 `{ ok }`）。 */
+export function settingSet(args: SettingSetArgs): Promise<SettingOkResult> {
+  return invoke<SettingOkResult>("setting_set", {
+    key: args.key,
+    value: args.value,
+    repoId: args.repoId ?? null,
+  });
+}
+
+/** 列出全部设置值（`{ items }`；「全部设置」界面一次读完）。 */
+export function settingList(): Promise<SettingListResult> {
+  return invoke<SettingListResult>("setting_list");
+}
+
+/** 把某项设置恢复为声明缺省值（删除该键；返回 `{ ok }`）。 */
+export function settingReset(args: SettingResetArgs): Promise<SettingOkResult> {
+  return invoke<SettingOkResult>("setting_reset", {
+    key: args.key,
+    repoId: args.repoId ?? null,
+  });
 }
 
 /** 重命名仓库 */

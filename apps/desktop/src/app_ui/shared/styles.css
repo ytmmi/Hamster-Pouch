@@ -1,7 +1,7 @@
-/* app_ui 正式界面样式 — 深色专业主题 */
+/* app_ui 正式界面样式 �?深色专业主题 */
 
 :root {
-  /* 默认：白天模式（浅色）—— 白色为强调色 */
+  /* 默认：白天模式（浅色）—�?白色为强调色 */
   --bg: #f4f5f7;
   --bg-2: #ffffff;
   --bg-3: #eceef1;
@@ -43,7 +43,7 @@ body {
   font-size: 13px;
 }
 
-/* ===== 全局细滚动条（3px → 悬停 6px） ===== */
+/* ===== 全局细滚动条�?px �?悬停 6px�?===== */
 
 ::-webkit-scrollbar {
   width: 6px;
@@ -93,7 +93,7 @@ body {
   height: 100%;
 }
 
-/* ===== 顶部功能条 ===== */
+/* ===== 顶部功能�?===== */
 
 .menubar {
   display: flex;
@@ -108,7 +108,7 @@ body {
 
 .menubar-brand {
   font-weight: 600;
-  /* 注意：不能用 var(--accent)——浅色主题下 --accent 为白色，会白底白字不可见。 */
+  /* 注意：不能用 var(--accent)——浅色主题下 --accent 为白色，会白底白字不可见�?*/
   color: var(--fg);
   margin-right: 12px;
 }
@@ -252,7 +252,7 @@ body {
   font-family: Consolas, "Courier New", monospace;
 }
 
-/* ===== 单面板窗口 ===== */
+/* ===== 单面板窗�?===== */
 
 .single-header {
   height: 30px;
@@ -382,7 +382,7 @@ button.danger {
   font-weight: 500;
 }
 
-/* 媒体源条目就地重命名（仅别名，源路径不变） */
+/* 媒体源条目就地重命名（仅别名，源路径不变�?*/
 .rename-row {
   flex: 1;
   display: flex;
@@ -413,7 +413,7 @@ button.danger {
   min-height: 0;
 }
 
-/* 相册列表与成员 */
+/* 相册列表与成�?*/
 .album-list,
 .album-members {
   flex: 1;
@@ -429,7 +429,7 @@ button.danger {
   cursor: pointer;
 }
 
-/* 相册行作为拖放目标时的高亮 */
+/* 相册行作为拖放目标时的高�?*/
 .list-row.drop-target {
   outline: 1px dashed var(--sel-border);
   outline-offset: -1px;
@@ -513,7 +513,7 @@ button.danger {
   overflow: hidden;
 }
 
-/* ===== 长任务浮窗 / 确认弹窗（界面居中，背景 0.5 白色；扫描与卸载共用） ===== */
+/* ===== 长任务浮�?/ 确认弹窗（界面居中，背景 0.5 白色；扫描与卸载共用�?===== */
 .task-overlay {
   position: fixed;
   inset: 0;
@@ -566,11 +566,9 @@ button.danger {
   transition: width 120ms linear;
 }
 
-/* 总数未知（遍历目录 / 统计成员）→ 不定进度条。
-   必须用 transform 而不是 margin-left：改 margin 每帧都会触发布局并让整页重绘
+/* 总数未知（遍历目�?/ 统计成员）→ 不定进度条�?   必须�?transform 而不�?margin-left：改 margin 每帧都会触发布局并让整页重绘
    （浮层是全屏半透明，等于每帧重绘整个窗口），足以把 WebView 主线程打满，
-   进而让后端的进度事件送不进来——表现就是"卡在正在卸载"。
-   translateX 走合成层，只重绘这条进度条自身。 */
+   进而让后端的进度事件送不进来——表现就�?卡在正在卸载"�?   translateX 走合成层，只重绘这条进度条自身�?*/
 .task-fill.indeterminate {
   width: 35%;
   will-change: transform;
@@ -618,7 +616,7 @@ button.danger {
   gap: 8px;
 }
 
-/* 确认弹窗：与进度卡片同款，只是内容换成说明 + 明细 + 两个按钮 */
+/* 确认弹窗：与进度卡片同款，只是内容换成说�?+ 明细 + 两个按钮 */
 .confirm-card {
   max-width: min(560px, 82vw);
 }
@@ -662,13 +660,13 @@ button.danger {
   white-space: nowrap;
 }
 
-/* 扫描进行中：右键菜单里的扫描项置灰 */
+/* 扫描进行中：右键菜单里的扫描项置�?*/
 .menu-item:disabled {
   opacity: 0.45;
   cursor: default;
 }
 
-/* 右键上下文菜单 */
+/* 右键上下文菜�?*/
 .context-menu {
   position: fixed;
   z-index: 2000;
@@ -696,7 +694,7 @@ button.danger {
   font-size: 12px;
 }
 
-/* 可折叠分组标题（如自动标签组） */
+/* 可折叠分组标题（如自动标签组�?*/
 .collapse-toggle {
   background: none;
   border: none;
@@ -787,7 +785,7 @@ button.danger {
   opacity: 0.8;
 }
 
-/* tag表：层级树 */
+/* tag表：层级�?*/
 .tag-tree-toolbar {
   display: flex;
   align-items: center;
@@ -889,7 +887,7 @@ button.danger {
   white-space: nowrap;
 }
 
-/* 交叉 tag（多父级）：浅蓝色 */
+/* 交叉 tag（多父级）：浅蓝�?*/
 .tag-tree-name.cross {
   color: var(--cross-tag);
 }
@@ -1154,7 +1152,7 @@ button.danger {
   color: #ffa657;
 }
 
-/* ===== 查看器面板 ===== */
+/* ===== 查看器面�?===== */
 
 .viewer-panel {
   gap: 6px;
@@ -1212,7 +1210,7 @@ button.danger {
   --scroll-thumb-hover: rgba(180, 180, 180, 0.65);
 }
 
-/* ===== dockview 主题强制覆盖（浅色，默认白天） ===== */
+/* ===== dockview 主题强制覆盖（浅色，默认白天�?===== */
 
 .app-root .dockview-theme-light {
   color-scheme: light;
@@ -1280,7 +1278,7 @@ button.danger {
   --dv-floating-titlebar-background-color: #1b1d21;
 }
 
-/* ===== 强制面板区域配色（元素级，确保白天为浅色） ===== */
+/* ===== 强制面板区域配色（元素级，确保白天为浅色�?===== */
 
 .app-root .dv-dockview,
 .app-root .dv-watermark {
@@ -1330,7 +1328,7 @@ button.danger {
   color: #9aa1a8;
 }
 
-/* ===== 对话框（独立窗口） ===== */
+/* ===== 对话框（独立窗口�?===== */
 
 .dialog {
   display: flex;
@@ -1364,7 +1362,7 @@ button.danger {
   gap: 8px;
 }
 
-/* ===== M4-8：面板级媒体嵌入渲染目标占位区 ===== */
+/* ===== M4-8：面板级媒体嵌入渲染目标占位�?===== */
 
 .player-surface {
   flex: 1;
@@ -1373,7 +1371,7 @@ button.danger {
   border-radius: 4px;
 }
 
-/* ===== M6：蓝图过渡编辑器（RFC 0007） ===== */
+/* ===== M6：蓝图过渡编辑器（RFC 0007�?===== */
 
 .bp-panel {
   display: flex;
@@ -1469,7 +1467,7 @@ button.danger {
   font-size: 12px;
 }
 
-/* ===== M6 节点式编辑器（画布拖拽连线，仿 ComfyUI，D31） ===== */
+/* ===== M6 节点式编辑器（画布拖拽连线，�?ComfyUI，D31�?===== */
 
 .bp-toolbar {
   gap: 4px;
@@ -1503,7 +1501,7 @@ button.danger {
   min-height: 260px;
 }
 
-/* 层工具条（D51）：切换/新增/重命名/删除/排序 + 无根层标记 */
+/* 层工具条（D51）：切换/新增/重命�?删除/排序 + 无根层标�?*/
 .bp-layerbar {
   display: flex;
   align-items: center;
@@ -1543,7 +1541,7 @@ button.danger {
   font-size: 11px;
 }
 
-/* 画布：深色 + 点阵网格 */
+/* 画布：深�?+ 点阵网格 */
 .bp-canvas {
   position: relative;
   flex: 1;
@@ -1697,7 +1695,7 @@ button.danger {
   pointer-events: none;
 }
 
-/* 刀痕划中的连线：标红加粗（放开右键即删除）。 */
+/* 刀痕划中的连线：标红加粗（放开右键即删除）�?*/
 .bp-edge.bladed {
   stroke-width: 5;
   opacity: 1;
@@ -1705,7 +1703,7 @@ button.danger {
   filter: drop-shadow(0 0 4px rgba(255, 77, 79, 0.9));
 }
 
-/* ── 刀痕（右键长按拖拽删除） ── */
+/* ── 刀痕（右键长按拖拽删除�?── */
 .bp-blade {
   pointer-events: none;
 }
@@ -1748,7 +1746,7 @@ button.danger {
   box-shadow: 0 0 16px rgba(255, 77, 79, 0.75);
 }
 
-/* 未接通（引用断开/无触发来源）：灰色表示"不通"，不生效，不落库 */
+/* 未接通（引用断开/无触发来源）：灰色表�?不�?，不生效，不落库 */
 .bp-node.unlinked {
   opacity: 0.62;
   filter: grayscale(0.85);
@@ -1894,4 +1892,145 @@ button.danger {
 .bp-hints {
   font-size: 10px;
   word-break: break-all;
+}
+
+/* ===== ��ȫ�����á�ϵͳ���棨RFC 0010 ���� 7 / settings-standard�� =====
+   Ӧ�ü�ϵͳ���棺���ڲ���/���֮�ϣ������벼�ֳ־û�����д�����أ������ token �������� */
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+
+.settings-window {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: min(1100px, 92vw);
+  height: min(760px, 90vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-title {
+  font-weight: 600;
+}
+
+.settings-search {
+  flex: 1;
+  min-width: 160px;
+}
+
+.settings-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.settings-nav {
+  width: 220px;
+  min-width: 160px;
+  max-width: 320px;
+  border-right: 1px solid var(--border);
+  overflow: auto;
+  padding: 8px;
+}
+
+.settings-nav-item,
+.settings-nav-sub {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--fg);
+  padding: 4px 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.settings-nav-item.active {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.settings-nav-item:hover,
+.settings-nav-sub:hover {
+  background: var(--bg-3);
+}
+
+.settings-nav-group {
+  padding-left: 10px;
+}
+
+.settings-nav-group-title {
+  display: block;
+  color: var(--fg-dim);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.settings-nav-hint {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.settings-detail {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 16px;
+}
+
+.settings-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 6px 0 10px;
+}
+
+.settings-section {
+  margin-bottom: 18px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.settings-row.locked {
+  opacity: 0.6;
+}
+
+.settings-row-label {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-row-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 14px;
 }

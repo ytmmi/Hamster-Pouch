@@ -4,8 +4,8 @@
 //! manifest 声明，宿主按信任等级与能力强制校验。
 
 use hp_core::{
-    Capability, HostApiVersion, HpError, HpResult, PluginId, PluginRegistryRow, PluginRepoState,
-    RepoId, RuntimeKind,
+    BlueprintNodeDecl, Capability, ContributionKind, HostApiVersion, HpError, HpResult, PanelDecl,
+    PanelSettingDecl, PluginId, PluginRegistryRow, PluginRepoState, RepoId, RuntimeKind,
 };
 use hp_store::GlobalDb;
 
@@ -157,4 +157,99 @@ impl PluginHost {
             grants: state.grants,
         })
     }
+
+    /// **注册表视图**：某仓库当前**已启用**插件注册的面板 / 蓝图节点类型 / 设置分节
+    /// （RFC 0010 决策 3/4/5/7）。
+    ///
+    /// 关键取舍（RFC 0010 决策 6，**插件缺失不得绑架用户数据**）：
+    /// - 只返回**已启用**插件的注册项；未安装 / 未启用 / 宿主 API 不兼容的插件，
+    ///   其注册项**不在**返回里 —— 蓝图侧对这类 `type` / `panel_id` 按「未接通」处理
+    ///   （软告警 + 灰显 + **允许保存** + 原样保留 + 恢复后自动恢复），**不是**硬错误；
+    /// - 注册项**不落库**：随插件包存在，宿主每次按当前注册表重新构造该视图；
+    /// - 命名空间由 `manifest.validate()` 强制（插件项必须是
+    ///   `plugin.<plugin_id>.<local_id>`），宿主不接受覆盖内置项的声明。
+    pub fn repo_contributions(
+        &self,
+        db: &GlobalDb,
+        repo_id: &str,
+    ) -> HpResult<Vec<RepoContribution>> {
+        let mut out = Vec::new();
+        for row in db.list_plugins()? {
+            let enabled = db
+                .get_plugin_repo_state(row.id.as_str(), repo_id)?
+                .map(|s| s.enabled)
+                .unwrap_or(false);
+            if !enabled {
+                continue;
+            }
+            // 宿主 API 版本不兼容 → 该插件的注册项按"未接通"缺席（不是错误）。
+            let Ok(manifest) = parse_manifest(&row.manifest_json) else {
+                continue;
+            };
+            if !HostApiVersion::current().is_compatible(manifest.min_host_version) {
+                continue;
+            }
+            for contribution in &manifest.contributions {
+                match contribution.kind {
+                    ContributionKind::Panel => out.push(RepoContribution {
+                        plugin_id: manifest.id.as_str().to_string(),
+                        kind: ContributionKind::Panel,
+                        panel: Some(contribution.panel_decl(Some(manifest.id.as_str()))),
+                        node: None,
+                        settings_section: None,
+                    }),
+                    ContributionKind::BlueprintNode => {
+                        if let Some(node) = contribution.node.clone() {
+                            out.push(RepoContribution {
+                                plugin_id: manifest.id.as_str().to_string(),
+                                kind: ContributionKind::BlueprintNode,
+                                panel: None,
+                                node: Some(node),
+                                settings_section: None,
+                            });
+                        }
+                    }
+                    ContributionKind::SettingsSection => out.push(RepoContribution {
+                        plugin_id: manifest.id.as_str().to_string(),
+                        kind: ContributionKind::SettingsSection,
+                        panel: None,
+                        node: None,
+                        settings_section: Some(SettingsSectionDecl {
+                            title_key: contribution.title_key.clone().unwrap_or_default(),
+                            category: contribution.category.clone().unwrap_or_default(),
+                            settings: contribution.settings.clone(),
+                        }),
+                    }),
+                    _ => {}
+                }
+            }
+        }
+        out.sort_by(|a, b| {
+            (a.plugin_id.as_str(), a.kind.as_str()).cmp(&(b.plugin_id.as_str(), b.kind.as_str()))
+        });
+        Ok(out)
+    }
+}
+
+/// 一条**注册表视图**记录（宿主按当前安装 + 启用状态构造，不落库）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepoContribution {
+    /// 注册它的插件 id。
+    pub plugin_id: String,
+    pub kind: ContributionKind,
+    /// `kind = panel` 时的面板声明。
+    pub panel: Option<PanelDecl>,
+    /// `kind = blueprintNode` 时的节点类型声明。
+    pub node: Option<BlueprintNodeDecl>,
+    /// `kind = settingsSection` 时的设置分节。
+    pub settings_section: Option<SettingsSectionDecl>,
+}
+
+/// 插件的设置分节声明（`settingsSection` 贡献点）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct SettingsSectionDecl {
+    pub title_key: String,
+    /// 归入的既有大类（插件不得新增或改名大类）。
+    pub category: String,
+    pub settings: Vec<PanelSettingDecl>,
 }

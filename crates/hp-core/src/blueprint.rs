@@ -22,6 +22,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::blueprint_registry::{NodeRegistry, SeverityLevel};
 use crate::blueprint_validate as validate_impl;
 use crate::blueprint_warnings as warnings_impl;
 
@@ -29,6 +30,8 @@ pub use crate::blueprint_node::{
     BlueprintEdge, BlueprintLayer, BlueprintNode, BlueprintPosition, NodeKey, OverlaySize,
 };
 pub use crate::blueprint_row::{BlueprintRow, BlueprintTemplateRow};
+pub use crate::blueprint_validate::NodeIssue;
+pub use crate::blueprint_registry::{PanelFact, RegisteredPluginNode};
 pub use crate::blueprint_types::{
     ActionOp, AnchorAxis, EdgeKind, GroupMode, HideDirection, NodeType, OverlayAnchor, TokenLevel,
     Trigger,
@@ -174,17 +177,59 @@ impl BlueprintGraph {
     ///
     /// 判定全部由 `blueprint_validate.rs` 承担（含图级入口），本方法只做转发，
     /// 保证"硬错误"只有一个归属地。
+    /// 节点类型注册表取**宿主内置 10 种**；插件注册项由 [`BlueprintGraph::validate_with`]
+    /// 注入（RFC 0010 决策 5/6）。
     pub fn validate(&self) -> Vec<String> {
         validate_impl::validate_graph(self)
+    }
+
+    /// 语义校验（带节点类型注册表）：返回全部**硬错误**。
+    ///
+    /// 注册表里**没有**该类型时按"当前无注册项"处理（软告警，见 `warnings_with`），
+    /// 而不是硬错误；`type` 本身不合命名规则才是硬错误（RFC 0010 决策 6）。
+    pub fn validate_with(&self, registry: &NodeRegistry) -> Vec<String> {
+        let mut issues: Vec<validate_impl::NodeIssue> =
+            validate_impl::validate_graph_with(self, registry)
+                .into_iter()
+                .filter(validate_impl::NodeIssue::is_hard)
+                .collect();
+        issues.extend(
+            warnings_impl::collect_issues(self, registry)
+                .into_iter()
+                .filter(|(_, severity)| *severity == SeverityLevel::Hard)
+                .map(|(message, _)| validate_impl::NodeIssue {
+                    message,
+                    severity: SeverityLevel::Hard,
+                }),
+        );
+        issues.into_iter().map(|i| i.message).collect()
     }
 
     /// 语义校验的"软问题"清单（未接通类）：不阻塞保存，仅供编辑提示与画布呈现。
     ///
     /// 设计意图（RFC 0007）：删除节点/断线后**不级联删除关联节点**，允许先保存中间
     /// 状态；不生效的部分由画布灰色表示，用户接回去即恢复。
-    /// 判定由 `blueprint_warnings.rs` 承担（无根层 D55、浮层未连界面 D50、缺引用等）。
+    /// 判定由 `blueprint_warnings.rs` 承担（无根层 D55、浮层未连界面 D50、缺引用、
+    /// 节点类型当前无注册项 RFC 0010 决策 6）。
     pub fn warnings(&self) -> Vec<String> {
         warnings_impl::collect(self)
+    }
+
+    /// 语义校验的软问题清单（带节点类型注册表）：宿主注入插件注册表后，
+    /// 已启用插件声明的节点类型不再被标记为「未接通」（插件恢复即自动恢复）。
+    pub fn warnings_with(&self, registry: &NodeRegistry) -> Vec<String> {
+        let mut messages: Vec<String> = warnings_impl::collect_issues(self, registry)
+            .into_iter()
+            .filter(|(_, severity)| *severity == SeverityLevel::Soft)
+            .map(|(message, _)| message)
+            .collect();
+        messages.extend(
+            validate_impl::validate_graph_with(self, registry)
+                .into_iter()
+                .filter(|i| !i.is_hard())
+                .map(|i| i.message),
+        );
+        messages
     }
 }
 

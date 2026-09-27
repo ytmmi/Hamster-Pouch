@@ -18,3 +18,4 @@ export * from "./tag";
 export * from "./rating";
 export * from "./layout";
 export * from "./blueprint";
+export * from "./plugin";

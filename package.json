@@ -20,9 +20,12 @@
     "check:blueprint-geometry": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/blueprint-geometry-check.mjs",
     "check:blueprint-slots": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/blueprint-slots-check.mjs",
     "check:controls": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/control-check.mjs",
+    "check:panels": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/check-panels.mjs",
+    "check:settings": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/check-settings.mjs",
     "check:layouts": "node tools/layout-check.mjs",
     "check:types": "cargo run -p hp-dto --bin generate && git diff --exit-code -- packages/shared-types",
     "check:line-count": "node tools/check-line-count.mjs",
-    "check:doc-status": "node tools/check-doc-status.mjs"
+    "check:doc-status": "node tools/check-doc-status.mjs",
+    "check:status": "node tools/check-status.mjs"
   }
 }

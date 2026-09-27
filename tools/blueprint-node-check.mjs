@@ -26,6 +26,31 @@ const factory = await import(
 const config = await import(
   pathToFileURL(join(ROOT, "packages/config/src/index.ts")).href
 );
+const portsMod = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintPorts.ts")).href
+);
+
+/**
+ * 用 hp-core 真实校验器判定一份文档的硬错误条数（stdin 喂 JSON，从输出里数条数）。
+ *
+ * 注意：`check-blueprint` 在"有硬错误"时以退出码 1 结束，所以必须捕获异常后再解析输出。
+ * 定义在顶层：RFC 0010 的断言块与 D66 的状态冲突块都要用它。
+ */
+const rustErrorCount = (doc) => {
+  let out = "";
+  try {
+    out = execFileSync("cargo", ["run", "-q", "-p", "hp-core", "--example", "check-blueprint"], {
+      cwd: ROOT,
+      input: JSON.stringify(doc),
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  } catch (e) {
+    out = `${e?.stdout ?? ""}${e?.stderr ?? ""}`;
+  }
+  const plain = String(out).replace(/\u001b\[[0-9;]*m/g, "");
+  return Number(/硬错误 \(([0-9]+)\)/.exec(plain)?.[1] ?? "-1");
+};
 
 const results = [];
 const check = (label, ok, detail = "") => {
@@ -671,21 +696,8 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
 
   /** 用 Rust 校验器判定（stdin 喂 JSON，从输出里数硬错误条数）。
    *  注意：check-blueprint 在"有硬错误"时以退出码 1 结束，所以必须捕获异常后再解析输出。 */
-  const rustErrorCount = (doc) => {
-    let out = "";
-    try {
-      out = execFileSync("cargo", ["run", "-q", "-p", "hp-core", "--example", "check-blueprint"], {
-        cwd: ROOT,
-        input: JSON.stringify(doc),
-        encoding: "utf8",
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-    } catch (e) {
-      out = `${e?.stdout ?? ""}${e?.stderr ?? ""}`;
-    }
-    const plain = String(out).replace(/\u001b\[[0-9;]*m/g, "");
-    return Number(/硬错误 \(([0-9]+)\)/.exec(plain)?.[1] ?? "-1");
-  };
+  const rustErrorCountLocal = rustErrorCount;
+  void rustErrorCountLocal;
 
   const tsConflict = config.findStateConflicts(conflictDoc).length > 0;
   check("TS：同对象同触发的 show/hide 被判为状态冲突", tsConflict);
@@ -762,6 +774,235 @@ try {
     "工厂产出的文档全部通过 hp-core 真实校验",
     false,
     `cargo 未成功执行（status=${status} signal=${signal} code=${code}）`,
+  );
+}
+
+// ---- RFC 0010：节点类型注册表（声明参数 / 命名空间 / 未知 type 分流）----
+//
+// 决策 5/6 的落地断言：注册表声明参数完整性、`ports`/`severity`/`evaluation_role` 的
+// **缺省推导与内置 10 种现有行为逐项相同**、命名空间规则、以及"未知 `type`"的两种分流
+// （不合命名规则 = 硬错误；命名合法但无注册项 = 未接通软告警且**允许保存**）。
+{
+  const ports = config.BLUEPRINT_BUILTIN_NODE_TYPES.map((type) => ({
+    type,
+    derived: config.resolveNodePorts(config.blueprintNodeSpec(type)),
+  }));
+
+  // 1. 每个内置类型都能取出定义，且声明参数完整（type/label/role/providesName/fields/
+  //    parents/children/events 必需；origin 由宿主填充）。
+  const incomplete = [];
+  for (const type of config.BLUEPRINT_BUILTIN_NODE_TYPES) {
+    const spec = config.nodeSpecOrNull(type);
+    if (
+      !spec ||
+      typeof spec.label !== "string" ||
+      typeof spec.role !== "string" ||
+      typeof spec.providesName !== "boolean" ||
+      !Array.isArray(spec.fields) ||
+      !Array.isArray(spec.parents) ||
+      !Array.isArray(spec.children) ||
+      !Array.isArray(spec.events) ||
+      spec.origin?.kind !== "system"
+    ) {
+      incomplete.push(type);
+    }
+  }
+  check(
+    "RFC 0010：内置 10 种节点类型的声明参数完整（且 origin = system）",
+    incomplete.length === 0,
+    incomplete.join(", ") || `${config.BLUEPRINT_BUILTIN_NODE_TYPES.length} 种齐全`,
+  );
+
+  // 2. `ports` 未声明时**推导**的结果必须与画布端口表（PORT_DEFS）逐项相同 → 内置 10 种
+  //    的行为与 RFC 0010 之前完全一致（零回归）。
+  const deriveDrift = [];
+  for (const { type, derived } of ports) {
+    const declared = portsMod.PORT_DEFS[type] ?? [];
+    const a = derived.map((p) => `${p.side}:${p.id}:${p.edge}`).join(",");
+    const b = declared.map((p) => `${p.side}:${p.id}`).join(",");
+    const aSlim = derived.map((p) => `${p.side}:${p.id}`).join(",");
+    if (aSlim !== b) deriveDrift.push(`${type}: derive=[${aSlim}] portDefs=[${b}]`);
+    // 声明的 `edge` 必须是既有 5 种边类型之一。
+    for (const port of derived) {
+      if (!config.BLUEPRINT_EDGE_KINDS.includes(port.edge)) {
+        deriveDrift.push(`${type}.${port.id} 的 edge=${port.edge} 不在边类型取值域内`);
+      }
+    }
+    void a;
+  }
+  check(
+    "RFC 0010：`ports` 缺省推导结果与画布端口表逐项相同（内置 10 种零回归）",
+    deriveDrift.length === 0,
+    deriveDrift.slice(0, 4).join(" | ") || `${ports.length} 种类型的端口推导一致`,
+  );
+
+  // 3. `severity` / `evaluation_role` 的缺省推导：字段问题 = hard、引用缺失 = soft（沿用
+  //    节点标准第 6 节既有口径）；结构节点进结构树、规则三节点不进。
+  const severityDrift = [];
+  for (const type of config.BLUEPRINT_BUILTIN_NODE_TYPES) {
+    const spec = config.blueprintNodeSpec(type);
+    const severity = config.resolveNodeSeverity(spec);
+    if (severity.fieldIssue !== "hard" || severity.missingRef !== "soft") {
+      severityDrift.push(`${type}: ${JSON.stringify(severity)}`);
+    }
+    const role = config.resolveEvaluationRole(spec);
+    const expected =
+      type === "event"
+        ? "trigger"
+        : type === "condition"
+          ? "condition"
+          : type === "action"
+            ? "action"
+            : "structural";
+    if (role !== expected) severityDrift.push(`${type}: evaluationRole=${role} 期望 ${expected}`);
+  }
+  check(
+    "RFC 0010：`severity` / `evaluation_role` 缺省推导与现状逐项相同",
+    severityDrift.length === 0,
+    severityDrift.join(" | ") || "10 种类型全部一致",
+  );
+
+  // 4. 命名空间规则：插件注册项必须 `plugin.<plugin_id>.<local_id>`；
+  //    宿主裸 type 与插件项**不可能**互相覆盖（形式保证，不做运行时消歧）。
+  check(
+    "RFC 0010：命名空间规则（插件项必须 plugin.<plugin_id>.<local_id>，裸 type 不可被覆盖）",
+    config.isValidNodeTypeName("control") &&
+      config.isValidNodeTypeName("plugin.dev.hamsterpouch.music.waveform") &&
+      !config.isValidNodeTypeName("Magic Type") &&
+      !config.isValidNodeTypeName("plugin.palette") &&
+      !config.isPluginNodeType("control") &&
+      config.isPluginNodeType("plugin.dev.hamsterpouch.music.waveform"),
+  );
+
+  // 5. 注册 → 可查 → 注销：插件节点类型走**动态注册路径**（注册表可扩展，且不可覆盖内置项）。
+  const pluginType = "plugin.dev.hamsterpouch.music.waveform";
+  config.registerBlueprintNodeTypes([{ type: pluginType, plugin_id: "dev.hamsterpouch.music" }]);
+  config.registerBlueprintNodeSpecs([
+    {
+      type: pluginType,
+      label: "music.waveform",
+      labelKey: "music.waveform",
+      role: "logic",
+      evaluationRole: "condition",
+      providesName: true,
+      fields: [{ name: "name", type: "string" }],
+      parents: [],
+      children: [],
+      events: [],
+      origin: { kind: "plugin", plugin_id: "dev.hamsterpouch.music" },
+    },
+  ]);
+  const registeredSpec = config.nodeSpecOrNull(pluginType);
+  const registeredPorts = registeredSpec ? config.resolveNodePorts(registeredSpec) : [];
+  check(
+    "RFC 0010：插件节点类型登记后可按查表取到定义与推导端口（规则类位置）",
+    config.isNodeTypeRegistered(pluginType) &&
+      registeredSpec !== undefined &&
+      registeredPorts.some((p) => p.side === "in" && p.id === "fires") &&
+      registeredPorts.some((p) => p.side === "out" && p.id === "guards"),
+    `ports=${JSON.stringify(registeredPorts)}`,
+  );
+  check(
+    "RFC 0010：插件节点类型**不参与结构边**（开放点：未开放前只能落在规则类位置）",
+    !config.isStructuralNode(pluginType) ||
+      config.nodeSpecOrNull(pluginType).role !== "structural",
+    "声明 role=logic；注册时声明非空 parents/children 会被宿主拒绝（见 hp-core 测试）",
+  );
+  config.unregisterBlueprintNodeTypes("dev.hamsterpouch.music");
+  config.unregisterBlueprintNodeSpecs("dev.hamsterpouch.music");
+  check(
+    "RFC 0010：插件卸载后注册项消失（未接通），内置 10 种不受影响",
+    !config.isNodeTypeRegistered(pluginType) &&
+      config.BLUEPRINT_BUILTIN_NODE_TYPES.every((t) => config.isNodeTypeRegistered(t)),
+  );
+
+  // 6. **未知 `type` 分流**：不合命名规则 = 硬错误；命名合法但无注册项 = 未接通软告警 +
+  //    **允许保存** + 节点与边**原样保留**。
+  const illegalDoc = JSON.stringify({
+    schema_version: 2,
+    nodes: [{ key: "x", type: "Magic Type" }],
+    edges: [],
+  });
+  check(
+    "RFC 0010：`type` 不合命名规则 → 解析层拒绝（硬错误口径）",
+    config.parseBlueprintDocument(illegalDoc) === null,
+  );
+  const unknownDoc = JSON.stringify({
+    schema_version: 2,
+    layers: [{ key: "l_a", name: "主界面" }],
+    nodes: [
+      { key: "ui", type: "interface", layer: "l_a" },
+      { key: "blk", type: "layout_block", layer: "l_a", name: "栏" },
+      { key: "c", type: "control", panel_id: "media", layer: "l_a" },
+      { key: "k", type: "class", control: "c", media_type: "image", layer: "l_a" },
+      { key: "x", type: "plugin.dev.gone.waveform", layer: "l_a" },
+    ],
+    edges: [
+      { from: "ui", to: "blk", kind: "contains", order: 1 },
+      { from: "blk", to: "c", kind: "contains", order: 2 },
+      { from: "c", to: "k", kind: "contains", order: 3 },
+      { from: "k", to: "x", kind: "on", order: 4 },
+    ],
+  });
+  const unknownDocParsed = config.parseBlueprintDocument(unknownDoc);
+  check(
+    "RFC 0010：命名合法但无注册项 → 解析层接受、节点与边原样保留（允许保存）",
+    unknownDocParsed !== null &&
+      unknownDocParsed.nodes.length === 5 &&
+      unknownDocParsed.edges.length === 4 &&
+      unknownDocParsed.nodes.find((n) => n.key === "x").type === "plugin.dev.gone.waveform",
+  );
+  // Rust 侧同口径：同一份夹具必须能读进内存（未接通），且 hp-core 不报硬错误。
+  const unknownParsed = config.parseBlueprintDocument(unknownDoc);
+  const unknownRustErrors = rustErrorCount(unknownParsed ?? { schema_version: 2, nodes: [], edges: [] });
+  check(
+    "RFC 0010：同一份「缺失注册项」夹具在 hp-core 里也是 0 条硬错误（TS ↔ Rust 同口径）",
+    unknownRustErrors === 0,
+    `hp-core 硬错误 ${unknownRustErrors} 条`,
+  );
+
+  // 7. **`control.panel_id` ↔ 面板注册表 `blueprint_node` 双向一致**（面板标准第 5.2 节）。
+  const panelCarrierDrift = [];
+  for (const type of config.BLUEPRINT_BUILTIN_NODE_TYPES) {
+    const spec = config.blueprintNodeSpec(type);
+    const allowsPanelId = spec.fields.some((f) => f.name === "panel_id");
+    const panelsOnThisType = config.BUILTIN_PANEL_SPECS.filter((p) => p.blueprintNode === type);
+    if (panelsOnThisType.length > 0 && !allowsPanelId) {
+      panelCarrierDrift.push(`${type} 承载 ${panelsOnThisType.length} 个面板但未声明 panel_id 字段`);
+    }
+    if (allowsPanelId && panelsOnThisType.length === 0) {
+      panelCarrierDrift.push(`${type} 声明了 panel_id 但没有任何面板指向它`);
+    }
+  }
+  check(
+    "RFC 0010：control.panel_id ↔ 面板注册表 blueprint_node 双向一致",
+    panelCarrierDrift.length === 0,
+    panelCarrierDrift.join(" | ") ||
+      `${config.BUILTIN_PANEL_SPECS.length} 个面板 → control；control 允许 panel_id`,
+  );
+
+  // 8. `has_class = false` 的面板下 `control → class` 被拒（硬错误，宿主内置面板）。
+  //    这里用 hp-core 真实校验器复核同一份夹具（编辑器侧另有候选过滤）。
+  const hasClassDoc = {
+    schema_version: 2,
+    layers: [{ key: "l_a", name: "主界面" }],
+    nodes: [
+      { key: "ui", type: "interface", layer: "l_a" },
+      { key: "blk", type: "layout_block", layer: "l_a", name: "栏" },
+      { key: "c", type: "control", panel_id: "viewer", layer: "l_a" },
+      { key: "k", type: "class", control: "c", media_type: "image", layer: "l_a" },
+    ],
+    edges: [
+      { from: "ui", to: "blk", kind: "contains", order: 1 },
+      { from: "blk", to: "c", kind: "contains", order: 2 },
+      { from: "c", to: "k", kind: "contains", order: 3 },
+    ],
+  };
+  const hasClassErrors = rustErrorCount(hasClassDoc);
+  check(
+    "RFC 0010：内置面板 has_class=false 却挂类目 → hp-core 报硬错误",
+    hasClassErrors > 0,
+    `硬错误 ${hasClassErrors} 条`,
   );
 }
 

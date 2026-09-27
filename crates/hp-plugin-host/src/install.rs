@@ -30,7 +30,7 @@ impl InstallSource {
 }
 
 /// 已安装的插件包。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InstalledPackage {
     pub package: PluginPackage,
     /// 安装后的版本目录。

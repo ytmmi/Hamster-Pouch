@@ -18,9 +18,9 @@ import {
 import type { Translate, TranslationKey } from "../i18n";
 
 /**
- * 节点显示名称：用户自定义 `name` 优先；控件节点回退到本地化标签名
+ * 节点显示名称：用户自定义 `name` 优先；面板节点回退到本地化标签名
  * （`title_key` → 「媒体预览」等，随语言切换）；界面节点取**层名**（D51）；其余按类型
- * 本地化生成（如 zh-CN 下「控件 1」「事件 2」）。
+ * 本地化生成（如 zh-CN 下「面板 1」「操作 2」）。
  */
 export function nodeDisplayName(
   node: BlueprintNode,
@@ -46,11 +46,23 @@ export function nodeDisplayName(
   }
   const sameType = nodes.filter((n) => n.type === node.type);
   const idx = sameType.findIndex((n) => n.key === node.key);
-  return `${t(`blueprint.type.${node.type}`)} ${idx + 1}`;
+  return `${nodeTypeLabel(node.type, t)} ${idx + 1}`;
 }
 
-/** 控件本地化标签名（`title_key` 解析；失败返回空，交由默认名兜底，不暴露 panel_id）。 */
-export function resolveControlTitle(node: BlueprintNode, t: Translate): string {
+/**
+ * 节点**类型**的本地化显示名。
+ *
+ * 宿主只内置 10 种类型的文案（`blueprint.type.*`）；插件注册项由插件自己的语言资源
+ * 提供显示名，宿主 i18n 里没有该键时**显式标注「未接通」**（RFC 0010 决策 6），
+ * 而不是把裸 key 或空串显示给用户。
+ */
+export function nodeTypeLabel(type: string, t: Translate): string {
+  const key = `blueprint.type.${type}`;
+  const resolved = t(key as TranslationKey);
+  return resolved === key ? `${type}（${t("blueprint.unlinkedTag")}）` : resolved;
+}
+
+/** 面板本地化标签名（`title_key` 解析；失败返回空，交由默认名兜底，不暴露 panel_id）。 */export function resolveControlTitle(node: BlueprintNode, t: Translate): string {
   if (node.title_key) {
     const resolved = t(node.title_key as TranslationKey);
     if (resolved && resolved !== node.title_key) {
@@ -177,5 +189,9 @@ export function nodeSummary(
       const targetName = target ? nodeDisplayName(target, t, nodes) : node.target ?? "?";
       return `${opLabel(node.op ?? "", t)} → ${targetName}`;
     }
+    default:
+      // 插件注册项 / 当前无注册项的合法类型：宿主没有摘要规格，按「未接通」呈现
+      // （节点与边原样保留，插件恢复后自动恢复，RFC 0010 决策 6）。
+      return `${node.type}（${t("blueprint.unlinkedTag")}）`;
   }
 }

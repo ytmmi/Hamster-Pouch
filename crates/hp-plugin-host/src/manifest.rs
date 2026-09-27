@@ -8,16 +8,20 @@
 use std::path::{Path, PathBuf};
 
 use hp_core::{
-    Capability, Contribution, ContributionKind, DataQueryReturns, HpError, HpResult, PluginDataQueryDecl,
-    PluginEventDecl, PluginId, PluginManifest, RuntimeKind, SourceKind, TrustLevel,
+    BlueprintNodeDecl, Capability, Contribution, ContributionKind, DataQueryReturns, HpError,
+    HpResult, NodeFieldDecl, NodePortDecl, NodeSeverityDecl, PanelDefaultSize, PanelMount,
+    PanelSettingDecl, PluginDataQueryDecl, PluginEventDecl, PluginId, PluginManifest, RuntimeKind,
+    SourceKind, TrustLevel,
 };
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// 插件包清单文件名。
 pub const MANIFEST_FILE: &str = "plugin.manifest";
 
 /// 已解析的插件包：manifest + 包根目录。
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// 只实现 `PartialEq`（`PluginManifest` 含任意 JSON 标量，不是 `Eq`）。
+#[derive(Debug, Clone, PartialEq)]
 pub struct PluginPackage {
     pub manifest: PluginManifest,
     pub root: PathBuf,
@@ -219,7 +223,287 @@ fn parse_contribution(item: &Value) -> HpResult<Contribution> {
         .get("model_kind")
         .and_then(Value::as_str)
         .map(str::to_string);
+    // ===== RFC 0010：面板 / 蓝图节点类型 / 设置分节的声明参数 =====
+    contribution.category = obj
+        .get("category")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    contribution.has_class = obj.get("has_class").and_then(Value::as_bool);
+    contribution.blueprint_node = obj
+        .get("blueprint_node")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    contribution.settings = parse_settings(obj)?;
+    contribution.capabilities = parse_string_array_of(obj, "capabilities")?;
+    contribution.mount = parse_mount(obj)?;
+    contribution.icon = obj.get("icon").and_then(Value::as_str).map(str::to_string);
+    contribution.default_size = parse_default_size(obj)?;
+    if kind == ContributionKind::BlueprintNode {
+        contribution.node = Some(parse_blueprint_node(obj)?);
+    }
     Ok(contribution)
+}
+
+/// 解析设置项数组（面板设置与设置分节共用同一形状）。
+fn parse_settings(obj: &Map<String, Value>) -> HpResult<Vec<PanelSettingDecl>> {
+    let Some(raw) = obj.get("settings") else {
+        return Ok(Vec::new());
+    };
+    let arr = raw
+        .as_array()
+        .ok_or_else(|| HpError::InvalidArgument("settings 必须为数组".into()))?;
+    let mut out = Vec::new();
+    for item in arr {
+        let s = item
+            .as_object()
+            .ok_or_else(|| HpError::InvalidArgument("settings 元素必须是对象".into()))?;
+        let key = s
+            .get("key")
+            .and_then(Value::as_str)
+            .ok_or_else(|| HpError::InvalidArgument("settings 元素缺少 key".into()))?;
+        let kind = s
+            .get("kind")
+            .and_then(Value::as_str)
+            .ok_or_else(|| HpError::InvalidArgument("settings 元素缺少 kind".into()))?;
+        let title_key = s
+            .get("title_key")
+            .and_then(Value::as_str)
+            .ok_or_else(|| HpError::InvalidArgument("settings 元素缺少 title_key".into()))?;
+        let default = s.get("default").cloned();
+        if let Some(value) = &default {
+            // 值一律是标量：嵌套对象/数组/null 一律拒绝（同 D32 口径）。
+            if value.is_object() || value.is_array() || value.is_null() {
+                return Err(HpError::InvalidArgument(format!(
+                    "settings.{key} 的 default 必须是标量（string/number/bool）"
+                )));
+            }
+        }
+        out.push(PanelSettingDecl {
+            key: key.to_string(),
+            kind: kind.to_string(),
+            title_key: title_key.to_string(),
+            default,
+            scope: s.get("scope").and_then(Value::as_str).map(str::to_string),
+            requires_capability: s
+                .get("requires_capability")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        });
+    }
+    Ok(out)
+}
+
+/// 解析 `mount`（三项缺省全开）。
+fn parse_mount(obj: &Map<String, Value>) -> HpResult<Option<PanelMount>> {
+    let Some(raw) = obj.get("mount") else {
+        return Ok(None);
+    };
+    let m = raw
+        .as_object()
+        .ok_or_else(|| HpError::InvalidArgument("mount 必须是对象".into()))?;
+    let mut mount = PanelMount::default();
+    for (field, slot) in [
+        ("overlay_content", &mut mount.overlay_content),
+        ("blueprint_ref", &mut mount.blueprint_ref),
+        ("multiple_per_interface", &mut mount.multiple_per_interface),
+    ] {
+        if let Some(value) = m.get(field) {
+            *slot = value.as_bool().ok_or_else(|| {
+                HpError::InvalidArgument(format!("mount.{field} 必须是布尔值"))
+            })?;
+        }
+    }
+    Ok(Some(mount))
+}
+
+/// 解析 `default_size`（`{ width, height }`）。
+fn parse_default_size(obj: &Map<String, Value>) -> HpResult<Option<PanelDefaultSize>> {
+    let Some(raw) = obj.get("default_size") else {
+        return Ok(None);
+    };
+    let size = raw
+        .as_object()
+        .ok_or_else(|| HpError::InvalidArgument("default_size 必须是对象".into()))?;
+    let width = size
+        .get("width")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| HpError::InvalidArgument("default_size 缺少数值 width".into()))?;
+    let height = size
+        .get("height")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| HpError::InvalidArgument("default_size 缺少数值 height".into()))?;
+    Ok(Some(PanelDefaultSize { width, height }))
+}
+
+/// 对象里的字符串数组（缺省空数组）。
+fn parse_string_array_of(obj: &Map<String, Value>, key: &str) -> HpResult<Vec<String>> {
+    match obj.get(key) {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| HpError::InvalidArgument(format!("{key} 元素必须为字符串")))
+            })
+            .collect(),
+        Some(_) => Err(HpError::InvalidArgument(format!("{key} 必须为字符串数组"))),
+    }
+}
+
+/// `blueprintNode` 贡献点允许出现的键（**白名单**）。
+///
+/// 白名单之外的键一律拒绝：插件注册的节点类型是**纯声明**，不得携带自定义渲染、
+/// 自定义画布外观或任意表达式（RFC 0010 决策 6）。
+const BLUEPRINT_NODE_KEYS: [&str; 12] = [
+    "kind",
+    "id",
+    "type",
+    "label_key",
+    "title_key",
+    "role",
+    "name_from_layer",
+    "provides_name",
+    "fields",
+    "parents",
+    "children",
+    "events",
+];
+
+/// `blueprintNode` 的端口/校验策略允许的键。
+const BLUEPRINT_NODE_EXTRA_KEYS: [&str; 2] = ["ports", "severity"];
+
+/// 解析 `blueprintNode` 贡献点的节点声明。
+fn parse_blueprint_node(obj: &Map<String, Value>) -> HpResult<BlueprintNodeDecl> {
+    for key in obj.keys() {
+        let known = BLUEPRINT_NODE_KEYS.contains(&key.as_str())
+            || BLUEPRINT_NODE_EXTRA_KEYS.contains(&key.as_str())
+            || key == "evaluation_role";
+        if !known {
+            return Err(HpError::InvalidArgument(format!(
+                "blueprintNode 贡献点出现不允许的键 {key}：插件注册的节点类型是纯声明（不得携带自定义渲染/样式/任意表达式）"
+            )));
+        }
+    }
+    let node_type = obj
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| HpError::InvalidArgument("blueprintNode 贡献点缺少 type".into()))?
+        .to_string();
+    let label_key = obj
+        .get("label_key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| HpError::InvalidArgument("blueprintNode 贡献点缺少 label_key".into()))?
+        .to_string();
+    let role = obj
+        .get("role")
+        .and_then(Value::as_str)
+        .ok_or_else(|| HpError::InvalidArgument("blueprintNode 贡献点缺少 role".into()))?
+        .to_string();
+
+    let mut fields = Vec::new();
+    if let Some(raw) = obj.get("fields") {
+        let arr = raw
+            .as_array()
+            .ok_or_else(|| HpError::InvalidArgument("blueprintNode.fields 必须为数组".into()))?;
+        for item in arr {
+            let f = item
+                .as_object()
+                .ok_or_else(|| HpError::InvalidArgument("fields 元素必须是对象".into()))?;
+            let name = f
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| HpError::InvalidArgument("fields 元素缺少 name".into()))?;
+            let field_type = f
+                .get("type")
+                .and_then(Value::as_str)
+                .ok_or_else(|| HpError::InvalidArgument("fields 元素缺少 type".into()))?;
+            fields.push(NodeFieldDecl {
+                name: name.to_string(),
+                field_type: field_type.to_string(),
+                required: f.get("required").and_then(Value::as_bool).unwrap_or(false),
+                soft_when_missing: f
+                    .get("softWhenMissing")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                values: parse_string_array_of(f, "values")?,
+            });
+        }
+    }
+
+    let mut ports = Vec::new();
+    if let Some(raw) = obj.get("ports") {
+        let arr = raw
+            .as_array()
+            .ok_or_else(|| HpError::InvalidArgument("blueprintNode.ports 必须为数组".into()))?;
+        for item in arr {
+            let p = item
+                .as_object()
+                .ok_or_else(|| HpError::InvalidArgument("ports 元素必须是对象".into()))?;
+            ports.push(NodePortDecl {
+                id: p
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| HpError::InvalidArgument("ports 元素缺少 id".into()))?
+                    .to_string(),
+                side: p
+                    .get("side")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| HpError::InvalidArgument("ports 元素缺少 side".into()))?
+                    .to_string(),
+                edge: p
+                    .get("edge")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| HpError::InvalidArgument("ports 元素缺少 edge".into()))?
+                    .to_string(),
+            });
+        }
+    }
+
+    let severity = match obj.get("severity") {
+        None | Some(Value::Null) => None,
+        Some(raw) => {
+            let s = raw
+                .as_object()
+                .ok_or_else(|| HpError::InvalidArgument("severity 必须是对象".into()))?;
+            Some(NodeSeverityDecl {
+                field_issue: s
+                    .get("fieldIssue")
+                    .and_then(Value::as_str)
+                    .unwrap_or("hard")
+                    .to_string(),
+                missing_ref: s
+                    .get("missingRef")
+                    .and_then(Value::as_str)
+                    .unwrap_or("soft")
+                    .to_string(),
+            })
+        }
+    };
+
+    Ok(BlueprintNodeDecl {
+        node_type,
+        label_key,
+        role,
+        name_from_layer: obj
+            .get("name_from_layer")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        provides_name: obj
+            .get("provides_name")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        fields,
+        parents: parse_string_array_of(obj, "parents")?,
+        children: parse_string_array_of(obj, "children")?,
+        events: parse_string_array_of(obj, "events")?,
+        ports,
+        severity,
+        evaluation_role: obj
+            .get("evaluation_role")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    })
 }
 
 /// 合并数据查询声明：顶层 `data_queries` 与 `dataQuery` 贡献点等价（去重，顶层优先）。
@@ -309,7 +593,23 @@ mod tests {
         "entry": "bin/hello.exe",
         "capabilities": ["ui.panel", "repo.read"],
         "contributions": [
-            { "kind": "panel", "id": "hello.panel", "title_key": "panel.hello", "read_only": true }
+            {
+                "kind": "panel",
+                "id": "plugin.dev.hamsterpouch.hello.hello.panel",
+                "title_key": "panel.hello",
+                "category": "system",
+                "has_class": false,
+                "blueprint_node": "control",
+                "read_only": true,
+                "settings": [
+                    {
+                        "key": "greeting_size",
+                        "kind": "numberInput",
+                        "title_key": "hello.greetingSize",
+                        "default": 12
+                    }
+                ]
+            }
         ],
         "data_queries": [{ "name": "greetings", "returns": "rows" }],
         "events": [{ "id": "greet" }],
@@ -328,7 +628,16 @@ mod tests {
         assert_eq!(m.api_version, 1);
         assert_eq!(m.contributions.len(), 1);
         assert_eq!(m.contributions[0].kind, ContributionKind::Panel);
-        assert_eq!(m.contributions[0].id, "hello.panel");
+        assert_eq!(
+            m.contributions[0].id,
+            "plugin.dev.hamsterpouch.hello.hello.panel"
+        );
+        // RFC 0010 决策 4：面板的必需声明参数与设置项都被解析出来。
+        assert_eq!(m.contributions[0].category.as_deref(), Some("system"));
+        assert_eq!(m.contributions[0].has_class, Some(false));
+        assert_eq!(m.contributions[0].blueprint_node.as_deref(), Some("control"));
+        assert_eq!(m.contributions[0].settings.len(), 1);
+        assert_eq!(m.contributions[0].settings[0].key, "greeting_size");
         assert_eq!(m.declared_query_names(), vec!["greetings"]);
         assert_eq!(m.declared_event_ids(), vec!["greet"]);
         assert_eq!(m.native_dependencies, vec!["bin/hello.dll".to_string()]);

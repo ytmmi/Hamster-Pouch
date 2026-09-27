@@ -20,8 +20,7 @@ import {
   FALLBACK_LAYER_KEY,
   FALLBACK_LAYER_NAME,
   makeEmptyBlueprint,
-  PANEL_TITLES,
-  type PanelId,
+  panelTitleKeyOf,
 } from "@hamster-pouch/config";
 import type { DockviewApi } from "dockview-react";
 
@@ -234,9 +233,7 @@ export function structureBlueprint(snapshot: StructureSnapshot | null): Blueprin
           type: "control",
           layer: layerKey,
           panel_id: panelId,
-          ...(PANEL_TITLES[panelId as PanelId]
-            ? { title_key: PANEL_TITLES[panelId as PanelId] }
-            : {}),
+          ...(panelTitleKeyOf(panelId) ? { title_key: panelTitleKeyOf(panelId)! } : {}),
           position: { x: x + COL_W, y: ORIGIN + row * ROW_H },
         });
         row += 1;

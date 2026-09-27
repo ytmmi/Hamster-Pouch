@@ -55,15 +55,66 @@ fn to_item(row: BlueprintRow) -> BlueprintItem {
 /// 解析并校验蓝图文档；非法则返回错误（含全部校验问题）。
 ///
 /// 低版本文档先迁移到当前版本再校验（D58），保证"校验的就是将要落库的形态"。
-fn parse_valid(json: &str) -> HpResult<BlueprintGraph> {
+///
+/// `registry` = 节点类型注册表 + 面板事实（RFC 0010 决策 4/5/6）：它决定
+/// 「命名合法但当前无注册项的 `type`」按**未接通**（允许保存）而不是硬错误处理，
+/// 以及 `has_class = false` 的内置面板下不许挂类目。
+fn parse_valid(json: &str, registry: &hp_core::NodeRegistry) -> HpResult<BlueprintGraph> {
     let (json, _version) =
         hp_core::normalize_document(json).map_err(HpError::InvalidArgument)?;
     let graph = BlueprintGraph::from_json(&json).map_err(HpError::InvalidArgument)?;
-    let errors = graph.validate();
+    let errors = graph.validate_with(registry);
     if !errors.is_empty() {
         return Err(HpError::InvalidArgument(errors.join("；")));
     }
     Ok(graph)
+}
+
+/// 当前仓库的**注册表上下文**：已启用插件注册的节点类型 + 面板事实。
+///
+/// 任何一步失败都退化为 `builtin_only()`（含宿主内置 13 个面板的 `has_class` 事实）：
+/// 注册表不可用**不应该**阻断用户的保存 —— 最坏情况是插件节点被标为「未接通」
+/// （软告警、允许保存、插件恢复后自动恢复，RFC 0010 决策 6）。
+fn blueprint_registry(
+    state: &State<AppState>,
+    app: &tauri::AppHandle,
+    repo_id: &str,
+) -> hp_core::NodeRegistry {
+    let fallback = hp_core::NodeRegistry::builtin_only();
+    if ensure_global(state, app).is_err() {
+        return fallback;
+    }
+    let Ok(guard) = state.global_db.lock() else {
+        return fallback;
+    };
+    let Some(g) = guard.as_ref() else {
+        return fallback;
+    };
+    let Ok(entries) = hp_plugin_host::PluginHost.repo_contributions(g, repo_id) else {
+        return fallback;
+    };
+    let mut nodes = Vec::new();
+    let mut panels = Vec::new();
+    for entry in entries {
+        if let Some(node) = entry.node {
+            nodes.push(hp_core::RegisteredPluginNode {
+                node_type: node.node_type.clone(),
+                evaluation_role: node
+                    .resolved_evaluation_role(),
+                severity: node.resolved_severity(),
+            });
+        }
+        if let Some(panel) = entry.panel {
+            panels.push(hp_core::PanelFact {
+                id: panel.id.clone(),
+                has_class: panel.has_class.unwrap_or(false),
+                overlay_content: panel.resolved_mount().overlay_content,
+                multiple_per_interface: panel.resolved_mount().multiple_per_interface,
+                plugin: true,
+            });
+        }
+    }
+    hp_core::NodeRegistry::with_plugin_nodes(nodes).with_plugin_panels(panels)
 }
 
 /// 打开当前仓库库（未打开返回错误）。
@@ -165,7 +216,8 @@ pub(crate) fn blueprint_create(
             }
         },
     };
-    parse_valid(&template_json).map_err(hp_err_to_string)?;
+    parse_valid(&template_json, &blueprint_registry(&state, &app, &repo_id))
+        .map_err(hp_err_to_string)?;
 
     let mut guard = repo_guard(&state)?;
     let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
@@ -189,7 +241,8 @@ pub(crate) fn blueprint_save(
     state: State<AppState>,
     app: tauri::AppHandle,
 ) -> Result<BlueprintItem, String> {
-    parse_valid(&blueprint_json).map_err(hp_err_to_string)?;
+    parse_valid(&blueprint_json, &blueprint_registry(&state, &app, &repo_id))
+        .map_err(hp_err_to_string)?;
     let mut guard = repo_guard(&state)?;
     let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
     let name = match name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()) {
@@ -255,15 +308,18 @@ pub(crate) fn blueprint_validate(
     repo_id: String,
     blueprint_json: String,
     state: State<AppState>,
+    app: tauri::AppHandle,
 ) -> Result<BlueprintValidateResult, String> {
-    let _ = repo_id;
-    let _ = state;
-    let errors = BlueprintGraph::validate_json(&blueprint_json);
+    let registry = blueprint_registry(&state, &app, &repo_id);
+    let (json, _version) = hp_core::normalize_document(&blueprint_json)
+        .map_err(|e| format!("蓝图 JSON 解析失败: {e}"))?;
+    let errors = match BlueprintGraph::from_json(&json) {
+        Ok(graph) => graph.validate_with(&registry),
+        Err(e) => vec![e],
+    };
     // 软告警：低版本文档同样先归一化再取告警（口径与校验一致）。
-    let warnings = hp_core::normalize_document(&blueprint_json)
-        .ok()
-        .and_then(|(json, _)| BlueprintGraph::from_json(&json).ok())
-        .map(|graph| graph.warnings())
+    let warnings = BlueprintGraph::from_json(&json)
+        .map(|graph| graph.warnings_with(&registry))
         .unwrap_or_default();
     Ok(BlueprintValidateResult { errors, warnings })
 }
@@ -359,7 +415,8 @@ pub(crate) fn blueprint_template_install(
             .ok_or_else(|| format!("蓝图模板不存在: {template_id}"))?;
         tpl.blueprint_json
     };
-    parse_valid(&template_json).map_err(hp_err_to_string)?;
+    parse_valid(&template_json, &blueprint_registry(&state, &app, &repo_id))
+        .map_err(hp_err_to_string)?;
 
     let mut guard = repo_guard(&state)?;
     let db = guard.as_mut().ok_or("未打开仓库".to_string())?;

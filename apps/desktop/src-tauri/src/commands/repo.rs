@@ -5,10 +5,96 @@ use std::path::PathBuf;
 use hp_core::RepoId;
 use hp_store::RepoDb;
 use serde::Serialize;
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::commands::shared::{default_repo_dir, ensure_global, hp_err_to_string};
 use crate::AppState;
+
+/// `app_settings` 的一行（`setting.list` 的 `items` 元素）。
+#[derive(Serialize)]
+pub(crate) struct SettingRowDto {
+    key: String,
+    value: serde_json::Value,
+}
+
+/// `setting.list` 响应（`docs/spec/commands-events.md` 3.13：`{ items }`）。
+#[derive(Serialize)]
+pub(crate) struct SettingListResult {
+    items: Vec<SettingRowDto>,
+}
+
+/// `setting.get` 响应：标量值或 `null`（未设置）。
+#[derive(Serialize)]
+pub(crate) struct SettingValueResult {
+    value: Option<serde_json::Value>,
+}
+
+/// `setting.set` / `setting.reset` 响应。
+#[derive(Serialize)]
+pub(crate) struct SettingOkResult {
+    ok: bool,
+}
+
+/// 值的**存储编码**：`app_settings` 是 TEXT 表，标量按最小形式落库
+/// （`true`/`false`、十进制数字、原文）。
+///
+/// 读回时的类型由**设置注册表的 `kind`** 决定（前端 `decodeSettingValue`），
+/// 因此这里的推断只是"未指定 kind 时的保守兜底"，不会篡改字符串设置。
+fn encode_setting_value(value: &serde_json::Value) -> Result<String, String> {
+    match value {
+        serde_json::Value::Bool(b) => Ok(if *b { "true".into() } else { "false".into() }),
+        serde_json::Value::Number(n) => Ok(n.to_string()),
+        serde_json::Value::String(s) => Ok(s.clone()),
+        // 值一律是标量：嵌套对象/数组/null 一律拒绝（同 D32 口径）。
+        _ => Err("设置值必须是标量（string / number / bool）".into()),
+    }
+}
+
+/// 由存储文本推断标量形态（保守：只有能精确往返的才当数字）。
+fn decode_setting_value(raw: &str) -> serde_json::Value {
+    match raw {
+        "true" => return serde_json::Value::Bool(true),
+        "false" => return serde_json::Value::Bool(false),
+        _ => {}
+    }
+    if let Ok(int) = raw.parse::<i64>() {
+        if int.to_string() == raw {
+            return serde_json::Value::from(int);
+        }
+    }
+    if let Ok(float) = raw.parse::<f64>() {
+        if float.to_string() == raw {
+            return serde_json::Value::from(float);
+        }
+    }
+    serde_json::Value::String(raw.to_string())
+}
+
+/// `scope = "repo"` 的设置项按仓库隔离，键为 `{key}.{repoId}`
+/// （`docs/spec/commands-events.md` 3.13）。
+fn scoped_setting_key(key: &str, repo_id: Option<&str>) -> String {
+    match repo_id.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(repo) => format!("{key}.{repo}"),
+        None => key.to_string(),
+    }
+}
+
+/// 广播设置变更（`setting.changed`）：前端据此刷新受影响的面板/界面。
+///
+/// 设置变更**不广播**仓库级事件（不触发蓝图/布局对账，3.13 规则）；
+/// 注册表本身**不落库**（随插件包存在），因此事件只带"哪个键变了"。
+fn emit_setting_changed(app: &tauri::AppHandle, key: &str) {
+    #[derive(Clone, Serialize)]
+    struct SettingChanged {
+        key: String,
+    }
+    let _ = app.emit(
+        "setting.changed",
+        SettingChanged {
+            key: key.to_string(),
+        },
+    );
+}
 
 #[derive(Serialize)]
 pub(crate) struct RepoSummary {
@@ -174,37 +260,106 @@ pub(crate) fn repo_list(
         .collect())
 }
 
-/// setting.get：读取应用设置。
+/// setting.get：读取单个设置值（`{ value | null }`，标量）。
+///
+/// `repoId` 只对 `scope = "repo"` 的设置项有意义（键为 `{key}.{repoId}`，3.13 规则）；
+/// 其余项**不得**带（带了即忽略——本实现在空串/缺省时按应用级键处理）。
 #[tauri::command]
 pub(crate) fn setting_get(
     key: String,
+    repo_id: Option<String>,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<Option<String>, String> {
+) -> Result<SettingValueResult, String> {
     ensure_global(&state, &app).map_err(hp_err_to_string)?;
     let guard = state
         .global_db
         .lock()
         .map_err(|_| "全局库锁中毒".to_string())?;
     let g = guard.as_ref().expect("ensure_global 已初始化");
-    g.get_setting(&key).map_err(hp_err_to_string)
+    let stored = g
+        .get_setting(&scoped_setting_key(&key, repo_id.as_deref()))
+        .map_err(hp_err_to_string)?;
+    Ok(SettingValueResult {
+        value: stored.as_deref().map(decode_setting_value),
+    })
 }
 
-/// setting.set：写入应用设置。
+/// setting.set：写入单个设置值（**标量**；并广播 `setting.changed`）。
+///
+/// 未知键与类型校验由**设置注册表**决定（注册表在前端，`setting.registry` 契约先行），
+/// 因此界面只写注册表里声明过的键；本命令拒绝非标量值（同 D32 口径）。
 #[tauri::command]
 pub(crate) fn setting_set(
     key: String,
-    value: String,
+    value: serde_json::Value,
+    repo_id: Option<String>,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<SettingOkResult, String> {
+    let encoded = encode_setting_value(&value)?;
+    let storage_key = scoped_setting_key(&key, repo_id.as_deref());
+    ensure_global(&state, &app).map_err(hp_err_to_string)?;
+    {
+        let guard = state
+            .global_db
+            .lock()
+            .map_err(|_| "全局库锁中毒".to_string())?;
+        let g = guard.as_ref().expect("ensure_global 已初始化");
+        g.set_setting(&storage_key, &encoded)
+            .map_err(hp_err_to_string)?;
+    }
+    emit_setting_changed(&app, &key);
+    Ok(SettingOkResult { ok: true })
+}
+
+/// setting.list：列出全部设置值（`{ items: [{ key, value }] }`；**不新增库表**）。
+#[tauri::command]
+pub(crate) fn setting_list(
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<SettingListResult, String> {
     ensure_global(&state, &app).map_err(hp_err_to_string)?;
     let guard = state
         .global_db
         .lock()
         .map_err(|_| "全局库锁中毒".to_string())?;
     let g = guard.as_ref().expect("ensure_global 已初始化");
-    g.set_setting(&key, &value).map_err(hp_err_to_string)
+    let rows = g.list_settings().map_err(hp_err_to_string)?;
+    Ok(SettingListResult {
+        items: rows
+            .into_iter()
+            .map(|(key, value)| SettingRowDto {
+                key,
+                value: decode_setting_value(&value),
+            })
+            .collect(),
+    })
+}
+
+/// setting.reset：把某项设置恢复为声明缺省值（删除该键；并广播 `setting.changed`）。
+///
+/// **注册表不落库**：缺省值来自设置注册表的声明，因此这里只删键、不写值——
+/// "未设置"与"设成缺省值"是两个可区分的状态（设置标准第 5 节）。
+#[tauri::command]
+pub(crate) fn setting_reset(
+    key: String,
+    repo_id: Option<String>,
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<SettingOkResult, String> {
+    let storage_key = scoped_setting_key(&key, repo_id.as_deref());
+    ensure_global(&state, &app).map_err(hp_err_to_string)?;
+    {
+        let guard = state
+            .global_db
+            .lock()
+            .map_err(|_| "全局库锁中毒".to_string())?;
+        let g = guard.as_ref().expect("ensure_global 已初始化");
+        g.delete_setting(&storage_key).map_err(hp_err_to_string)?;
+    }
+    emit_setting_changed(&app, &key);
+    Ok(SettingOkResult { ok: true })
 }
 
 /// repo.backup：把仓库库文件复制到目标路径；返回备份 ID。

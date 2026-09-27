@@ -11,24 +11,31 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// 节点类型（RFC 0007 决策 1；D46/D47/D50）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// 节点类型（RFC 0007 决策 1；D46/D47/D50；RFC 0010 决策 5/6 改为**开放取值域**）。
+///
+/// **内置枚举 + 字符串扩展**：10 种宿主内置类型是枚举变体；
+/// **命名合法但当前无注册项**的类型（插件未安装 / 未启用 / 宿主 API 不兼容）
+/// 落在 [`NodeType::Other`] 里**原样保留**——节点与边不删、不参与求值与结构对账、
+/// 画布灰显「未接通」、**允许保存**，插件恢复后自动恢复（RFC 0010 决策 6）。
+///
+/// **命名不合规则的 `type` 是硬错误**（由 `blueprint_validate.rs` 判定），
+/// 与"命名合法但无注册项"（软告警）区分开：前者是语法非法，后者是暂时接不通。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NodeType {
     /// 界面：层的根节点 + 页面（一个界面 = 一个页面；每层至多一个）。
     Interface,
-    /// 布局块：界面上的一个区域（如左/中/右三栏），包含标签组与面板控件。
+    /// 布局块：界面上的一个区域（如左/中/右三栏），包含标签组与面板。
     LayoutBlock,
-    /// 浮层：与布局块同级的**容器**（可 contains 面板控件与标签组），
+    /// 浮层：与布局块同级的**容器**（可 contains 面板与标签组），
     /// 并承载阴影/圆角/标签隐藏等外观档位。**不再有「浮动控件」绑定**（2026-09 取消）。
     Overlay,
-    /// 面板控件：dockview 面板实例（UI 组件实例，旧称「控件」）。
+    /// 面板：dockview 面板实例（枚举 `control` 不变；显示名由 D71 定为「面板」）。
     Control,
-    /// 类：面板控件内部条目分类（按 media_type）。
+    /// 类目：面板内部条目分类（枚举 `class` 不变；按 media_type，显示名由 D71 定为「类目」）。
     Class,
-    /// 对象：类内条目实例。
+    /// 对象：类目内条目实例。
     Object,
-    /// 组：面板控件容器（互斥/独立）。
+    /// 组：面板容器（互斥/独立）。
     Group,
     /// 事件：触发求值。
     Event,
@@ -36,10 +43,43 @@ pub enum NodeType {
     Condition,
     /// 动作：显隐/收起/界面跳转操作。
     Action,
+    /// 命名合法但不在宿主内置清单里的类型（插件注册项 / 当前无注册项）。
+    Other(String),
 }
 
 impl NodeType {
-    pub fn as_str(&self) -> &'static str {
+    /// 宿主内置节点类型的 JSON 取值（顺序与 TS `BLUEPRINT_BUILTIN_NODE_TYPES` 一致）。
+    ///
+    /// 插件注册的节点类型（`plugin.<plugin_id>.<local_id>`）**不在**这张清单里：
+    /// 它是**开放取值域**，由宿主按插件注册表判定（RFC 0010 决策 5/6）。
+    pub const BUILTIN_NAMES: [&'static str; 10] = [
+        "interface",
+        "layout_block",
+        "overlay",
+        "control",
+        "class",
+        "object",
+        "group",
+        "event",
+        "condition",
+        "action",
+    ];
+
+    /// 全部 10 种内置类型（顺序与 [`NodeType::BUILTIN_NAMES`] 一致）。
+    pub const BUILTINS: [NodeType; 10] = [
+        NodeType::Interface,
+        NodeType::LayoutBlock,
+        NodeType::Overlay,
+        NodeType::Control,
+        NodeType::Class,
+        NodeType::Object,
+        NodeType::Group,
+        NodeType::Event,
+        NodeType::Condition,
+        NodeType::Action,
+    ];
+
+    pub fn as_str(&self) -> &str {
         match self {
             NodeType::Interface => "interface",
             NodeType::LayoutBlock => "layout_block",
@@ -51,29 +91,59 @@ impl NodeType {
             NodeType::Event => "event",
             NodeType::Condition => "condition",
             NodeType::Action => "action",
+            NodeType::Other(name) => name.as_str(),
         }
     }
 
+    /// **不校验命名规则**地从字符串构造（serde 反序列化用）。
+    ///
+    /// 语法非法的 `type` 也要能读进内存，才能由 `blueprint_validate.rs` 报出
+    /// **可读的硬错误**（而不是让存储层读不出整篇文档）。
+    pub fn from_raw(s: &str) -> Self {
+        NodeType::BUILTINS
+            .iter()
+            .find(|t| t.as_str() == s)
+            .cloned()
+            .unwrap_or_else(|| NodeType::Other(s.to_string()))
+    }
+
+    /// 按命名规则解析：命名合法 → `Some`（未知类型落 [`NodeType::Other`]）；
+    /// **命名不合规则 → `None`**（调用方按硬错误处理）。
     pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "interface" => Some(NodeType::Interface),
-            "layout_block" => Some(NodeType::LayoutBlock),
-            "overlay" => Some(NodeType::Overlay),
-            "control" => Some(NodeType::Control),
-            "class" => Some(NodeType::Class),
-            "object" => Some(NodeType::Object),
-            "group" => Some(NodeType::Group),
-            "event" => Some(NodeType::Event),
-            "condition" => Some(NodeType::Condition),
-            "action" => Some(NodeType::Action),
-            _ => None,
+        if !crate::namespace::is_valid_namespaced_id(s) {
+            return None;
         }
+        Some(Self::from_raw(s))
+    }
+
+    /// 是否是宿主内置的 10 种之一。
+    pub fn is_builtin(&self) -> bool {
+        !matches!(self, NodeType::Other(_))
     }
 }
 
 impl fmt::Display for NodeType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for NodeType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for NodeType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(NodeType::from_raw(&s))
     }
 }
 

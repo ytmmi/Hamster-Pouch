@@ -8,7 +8,49 @@
   "entry": "bin/palette.exe",
   "capabilities": ["ui.panel", "repo.read"],
   "contributions": [
-    { "kind": "panel", "id": "palette.panel", "title_key": "plugin.palette.panel", "read_only": true }
+    {
+      "kind": "panel",
+      "id": "plugin.dev.hamsterpouch.system.palette.palette.panel",
+      "title_key": "plugin.palette.panel",
+      "category": "media",
+      "has_class": true,
+      "blueprint_node": "control",
+      "read_only": true
+    },
+    {
+      "kind": "blueprintNode",
+      "id": "plugin.dev.hamsterpouch.system.palette.swatch",
+      "type": "plugin.dev.hamsterpouch.system.palette.swatch",
+      "label_key": "palette.node.swatch",
+      "role": "logic",
+      "evaluation_role": "condition",
+      "fields": [
+        {
+          "name": "target",
+          "type": "ref",
+          "required": false,
+          "softWhenMissing": true,
+          "values": ["control"]
+        }
+      ],
+      "parents": [],
+      "children": [],
+      "events": []
+    },
+    {
+      "kind": "settingsSection",
+      "id": "palette.settings",
+      "title_key": "palette.settings.title",
+      "category": "plugin",
+      "settings": [
+        {
+          "key": "grid_size",
+          "kind": "numberInput",
+          "title_key": "palette.gridSize",
+          "default": 4
+        }
+      ]
+    }
   ],
   "data_queries": [{ "name": "colors", "returns": "rows" }],
   "events": [{ "id": "apply_color" }],

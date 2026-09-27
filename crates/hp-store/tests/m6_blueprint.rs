@@ -297,11 +297,34 @@ fn validate_rejects_all_spec_errors() {
     );
     assert!(errors.iter().any(|e| e.contains("不存在的起点")));
 
-    // 未知节点类型（JSON 解析层报错）
+    // 未知节点类型（RFC 0010 决策 6 的**分流**）：
+    // - 命名**不合法** → 硬错误（拒绝保存）；
+    let errors = BlueprintGraph::validate_json(
+        r#"{"schema_version":1,"nodes":[{"key":"x","type":"Magic Type"}],"edges":[]}"#,
+    );
+    assert!(!errors.is_empty());
+    assert!(
+        errors.iter().any(|e| e.contains("不合命名规则")),
+        "{errors:?}"
+    );
+    // - 命名**合法但当前无注册项**（插件未安装/未启用/API 不兼容）→ 未接通软告警，
+    //   **允许保存**，节点与边原样保留，插件恢复后自动恢复。
     let errors = BlueprintGraph::validate_json(
         r#"{"schema_version":1,"nodes":[{"key":"x","type":"magic"}],"edges":[]}"#,
     );
-    assert!(!errors.is_empty());
+    assert!(errors.is_empty(), "{errors:?}");
+    let graph = BlueprintGraph::from_json(
+        r#"{"schema_version":1,"nodes":[{"key":"x","type":"magic"}],"edges":[]}"#,
+    )
+    .expect("命名合法的未知类型必须能读进内存");
+    assert!(
+        graph
+            .warnings()
+            .iter()
+            .any(|w| w.contains("当前无注册项")),
+        "{:?}",
+        graph.warnings()
+    );
 
     // key 重复
     let errors = BlueprintGraph::validate_json(

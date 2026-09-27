@@ -210,10 +210,12 @@
 
     #[test]
     fn graph_json_roundtrip() {
+        // 类目必须挂在**有类目**的面板下（RFC 0010 决策 4 / 面板标准第 5.1 节）：
+        // 内置 13 个面板里只有 `media` 的 `has_class = true`，所以这里用 media。
         let json = r#"{
           "schema_version": 1,
           "nodes": [
-            {"key":"c_v","type":"control","panel_id":"viewer","title_key":"panel.viewer"},
+            {"key":"c_v","type":"control","panel_id":"media","title_key":"panel.media"},
             {"key":"k_i","type":"class","control":"c_v","media_type":"image"},
             {"key":"o_1","type":"object","class":"k_i","scope":"double_clicked"},
             {"key":"g_1","type":"group","mode":"exclusive","default_visible":[],

@@ -152,6 +152,33 @@ impl GlobalDb {
         Ok(value)
     }
 
+    /// 列出全部应用设置（「全部设置」界面一次读完，避免逐项往返）。
+    ///
+    /// 按 key 升序返回，保证界面呈现与诊断输出可复现。
+    pub fn list_settings(&self) -> HpResult<Vec<(String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT key, value FROM app_settings ORDER BY key")
+            .map_err(|e| store_err("准备列出应用设置", e))?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .map_err(|e| store_err("列出应用设置", e))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|e| store_err("读取应用设置行", e))?);
+        }
+        Ok(out)
+    }
+
+    /// 删除应用设置（恢复为该设置项的**声明缺省值**）。
+    pub fn delete_setting(&self, key: &str) -> HpResult<()> {
+        require_nonempty(key, "设置键")?;
+        self.conn
+            .execute("DELETE FROM app_settings WHERE key = ?1", params![key])
+            .map_err(|e| store_err("删除应用设置", e))?;
+        Ok(())
+    }
+
     /// 按 ID 查询仓库注册行；不存在返回 None。
     pub fn get_repo(&self, id: &str) -> HpResult<Option<RepoRow>> {
         let row = self
