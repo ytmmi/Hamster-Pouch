@@ -36,3 +36,47 @@ export interface TagForFileArgs {
   repoId: string;
   fileId: string;
 }
+
+/**
+ * tag 关系行（`tag.relation.*` 返回；D22/D24 的多父级 DAG 数据源）。
+ *
+ * 字段沿用后端 `TagRelationItem` 的**蛇形**序列化（D76 的包装只加外层
+ * `{ ok, data }`，不改载荷字段名；字段名统一收敛属 D77 的另一条线）。
+ */
+export interface TagRelationItem {
+  id: string;
+  repo_id: string;
+  from_tag_id: string;
+  to_tag_id: string;
+  /** `parent` / `related`（`docs/spec/database-schema.md` §4.5）。 */
+  relation_kind: string;
+  created_at: string;
+}
+
+/** `tag.relation.*` 的仓库级参数。 */
+export interface TagRelationListArgs {
+  repoId: string;
+}
+
+/** 建立 tag 关系的参数（`relationKind` ∈ `parent` / `related`）。 */
+export interface TagRelationAddArgs {
+  repoId: string;
+  fromTagId: string;
+  toTagId: string;
+  relationKind: string;
+}
+
+/** 按关系 ID 删除。 */
+export interface TagRelationRemoveArgs {
+  relationId: string;
+}
+
+/** 按 tag 取直接上级 / 下级。 */
+export interface TagRelationNeighborsArgs {
+  tagId: string;
+}
+
+/** 摘挂 tag（脱离层级，`tag.detach`）。 */
+export interface TagDetachArgs {
+  tagId: string;
+}
