@@ -52,6 +52,7 @@ pub(crate) struct SourceTreeNode {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct ScanProgressEvent {
     task_id: String,
     source_id: String,
@@ -63,6 +64,7 @@ struct ScanProgressEvent {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct ScanCompletedEvent {
     task_id: String,
     source_id: String,
@@ -75,6 +77,7 @@ struct ScanCompletedEvent {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct ScanErrorEvent {
     task_id: String,
     source_id: String,
@@ -83,6 +86,7 @@ struct ScanErrorEvent {
 
 /// 卸载进度：`phase` 见 `hp_store::PurgePhase`；`total == 0` = 总数未知（界面按不定进度显示）。
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct UnmountProgressEvent {
     task_id: String,
     source_id: String,
@@ -93,6 +97,7 @@ struct UnmountProgressEvent {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct UnmountCompletedEvent {
     task_id: String,
     source_id: String,
@@ -115,6 +120,7 @@ struct UnmountCompletedEvent {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct UnmountErrorEvent {
     task_id: String,
     source_id: String,

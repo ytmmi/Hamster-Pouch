@@ -168,6 +168,43 @@ check(
   missingD79.length ? `缺: ${missingD79.join(", ")}` : "",
 );
 
+// D77：事件 DTO 一律 `rename_all = "camelCase"`（与前端 `events.ts` 的驼峰声明同源）。
+const snakeEventFields = [];
+const missingEventAttr = [];
+for (const { file, src } of bridgeFiles) {
+  const emitRe = /\.emit\(\s*"([a-z][a-z0-9.]*)",\s*([A-Z][A-Za-z0-9_]*)\s*\{/g;
+  let m;
+  while ((m = emitRe.exec(src)) !== null) {
+    const [, eventName, dto] = m;
+    // 该 DTO 的结构体定义必须带 camelCase 属性（属性在 struct 行上方）。
+    const structIdx = src.search(new RegExp(`struct\\s+${dto}\\b`));
+    if (structIdx < 0) {
+      missingEventAttr.push(`${eventName} → 找不到 ${dto}`);
+      continue;
+    }
+    const head = src.slice(Math.max(0, structIdx - 200), structIdx);
+    if (!/rename_all\s*=\s*"camelCase"/.test(head)) {
+      missingEventAttr.push(`${eventName}（${dto} @ ${file}）`);
+    }
+  }
+}
+check(
+  "D77：全部事件 DTO 带 rename_all = camelCase",
+  missingEventAttr.length === 0,
+  missingEventAttr.length ? `缺: ${missingEventAttr.join(" | ")}` : "",
+);
+
+const eventsTs = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/types/events.ts"),
+  "utf8",
+);
+const snakeDecls = [...eventsTs.matchAll(/^\s{2}([a-z]+_[a-z_]+)\??:/gm)].map((x) => x[1]);
+check(
+  "D77：前端事件类型同样声明为驼峰（无蛇形字段）",
+  snakeDecls.length === 0,
+  snakeDecls.length ? `蛇形字段: ${[...new Set(snakeDecls)].join(", ")}` : "",
+);
+
 const passed = results.filter((r) => r.ok).length;
 console.log(`\n${passed}/${results.length} 通过`);
 process.exit(passed === results.length ? 0 : 1);

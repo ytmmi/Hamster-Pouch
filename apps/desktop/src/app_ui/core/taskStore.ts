@@ -86,8 +86,8 @@ export function startTaskEvents(): () => void {
       const walking = p.phase === "walking";
       setTask({
         titleKey: "scan.title",
-        sourceId: p.source_id,
-        subtitle: current?.sourceId === p.source_id ? (current?.subtitle ?? null) : null,
+        sourceId: p.sourceId,
+        subtitle: current?.sourceId === p.sourceId ? (current?.subtitle ?? null) : null,
         messageKey: walking ? "scan.walking" : "scan.indexing",
         messageParams: walking
           ? { count: p.processed }
@@ -145,8 +145,8 @@ export function startTaskEvents(): () => void {
                     : "unmount.preparing";
       setTask({
         titleKey: "unmount.title",
-        sourceId: p.source_id,
-        subtitle: current?.sourceId === p.source_id ? (current?.subtitle ?? null) : null,
+        sourceId: p.sourceId,
+        subtitle: current?.sourceId === p.sourceId ? (current?.subtitle ?? null) : null,
         messageKey,
         messageParams: p.total > 0 ? { processed: p.processed, total: p.total } : {},
         processed: p.processed,

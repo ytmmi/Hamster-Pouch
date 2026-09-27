@@ -51,6 +51,7 @@ pub(crate) struct AlbumRemoveResult {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct AlbumSyncProgressEvent {
     task_id: String,
     album_id: String,
@@ -60,6 +61,7 @@ struct AlbumSyncProgressEvent {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct AlbumSyncConflictEvent {
     task_id: String,
     album_id: String,

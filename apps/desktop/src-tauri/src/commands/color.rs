@@ -9,6 +9,7 @@ use crate::commands::shared::{hp_err_to_string, resolve_file_path};
 use crate::AppState;
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct ColorExtractedEvent {
     task_id: String,
     file_id: String,

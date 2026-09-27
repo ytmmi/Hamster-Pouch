@@ -216,6 +216,7 @@ fn prepare_setting_write(
 /// 注册表本身**不落库**（随插件包存在），因此事件只带"哪个键变了"。
 fn emit_setting_changed(app: &tauri::AppHandle, key: &str) {
     #[derive(Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
     struct SettingChanged {
         key: String,
     }
