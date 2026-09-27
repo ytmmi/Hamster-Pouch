@@ -1,4 +1,9 @@
 //! M2：媒体源命令桥接（挂载/卸载/重命名/列表/目录树/扫描/取消）。
+//!
+//! **D76 迁移状态：已包装**（批次 `source`，2026-09）。全部命令返回
+//! `{ ok, data?, error? }`，错误为结构化 `HpError`；前端 `api/source.ts` 经
+//! `unwrapApi` 解包，界面按 `code` 走 i18n（D27）。
+//! 两个长任务命令（`source.scan` / `source.unmount`）是异步命令，用 `ApiAsync`。
 
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
@@ -11,7 +16,9 @@ use hp_store::{build_source_tree, RepoDb};
 use serde::Serialize;
 use tauri::{Emitter, State};
 
-use crate::commands::shared::hp_err_to_string;
+use crate::commands::shared::{
+    api_async, api_from_hp, lock_repo, open_repo, open_repo_mut, ApiAsync, ApiResponse,
+};
 use crate::AppState;
 
 /// 扫描时单个外部媒体进程（ffprobe 探测 / ffmpeg 抽帧）的超时上限。
@@ -134,24 +141,22 @@ pub(crate) fn source_mount(
     alias: Option<String>,
     parent_source_id: Option<String>,
     state: State<AppState>,
-) -> Result<SourceItem, String> {
-    if local_path.trim().is_empty() {
-        return Err("媒体源路径不能为空".into());
-    }
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    let source = db
-        .mount_source(
+) -> ApiResponse<SourceItem> {
+    let outcome = (|| -> HpResult<SourceItem> {
+        if local_path.trim().is_empty() {
+            return Err(HpError::InvalidArgument("媒体源路径不能为空".into()));
+        }
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let source = db.mount_source(
             &repo_id,
             &local_path,
             alias.as_deref(),
             parent_source_id.as_deref(),
-        )
-        .map_err(hp_err_to_string)?;
-    Ok(source_to_item(source))
+        )?;
+        Ok(source_to_item(source))
+    })();
+    api_from_hp(outcome)
 }
 
 /// 卸载前的影响预估：该源牵连哪些相册、将删除多少数据。
@@ -192,38 +197,34 @@ pub(crate) fn source_unmount_preview(
     repo_id: String,
     source_id: String,
     state: State<AppState>,
-) -> Result<UnmountPreview, String> {
+) -> ApiResponse<UnmountPreview> {
     let _ = repo_id;
-    let guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
-    let counts = db
-        .source_data_counts(&source_id)
-        .map_err(hp_err_to_string)?;
-    let albums = db
-        .list_album_source_members(&source_id)
-        .map_err(hp_err_to_string)?;
-    let member_count = albums.iter().map(|a| a.members).sum();
-    Ok(UnmountPreview {
-        file_count: counts.files as i64,
-        albums: albums
-            .into_iter()
-            .map(|a| UnmountPreviewAlbum {
-                album_id: a.album_id,
-                name: a.album_name,
-                members: a.members,
-            })
-            .collect(),
-        member_count,
-        tag_count: counts.tags as i64,
-        rating_count: counts.ratings as i64,
-        color_count: counts.color_refs as i64,
-        ai_undo_count: counts.ai_undo as i64,
-        sync_album_count: counts.sync_albums as i64,
-        child_source_count: counts.child_sources as i64,
-    })
+    let outcome = (|| -> HpResult<UnmountPreview> {
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
+        let counts = db.source_data_counts(&source_id)?;
+        let albums = db.list_album_source_members(&source_id)?;
+        let member_count = albums.iter().map(|a| a.members).sum();
+        Ok(UnmountPreview {
+            file_count: counts.files as i64,
+            albums: albums
+                .into_iter()
+                .map(|a| UnmountPreviewAlbum {
+                    album_id: a.album_id,
+                    name: a.album_name,
+                    members: a.members,
+                })
+                .collect(),
+            member_count,
+            tag_count: counts.tags as i64,
+            rating_count: counts.ratings as i64,
+            color_count: counts.color_refs as i64,
+            ai_undo_count: counts.ai_undo as i64,
+            sync_album_count: counts.sync_albums as i64,
+            child_source_count: counts.child_sources as i64,
+        })
+    })();
+    api_from_hp(outcome)
 }
 
 /// source.unmount：**完全卸载**媒体源。
@@ -239,84 +240,89 @@ pub(crate) async fn source_unmount(
     source_id: String,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
-) -> Result<String, String> {
-    if source_id.trim().is_empty() {
-        return Err("媒体源 ID 不能为空".into());
-    }
-    let _ = repo_id;
-
-    if state.scanning.swap(true, Ordering::SeqCst) {
-        return Err("已有任务正在进行中，请等待其结束。".into());
-    }
-    // 新任务开始：清掉上一次的取消请求（取消标志是共享的）
-    state.task_cancel.store(false, Ordering::SeqCst);
-    let repo_path: PathBuf = match state.current_repo_path.lock() {
-        Ok(guard) => match guard.clone() {
-            Some(p) => p,
-            None => {
-                state.scanning.store(false, Ordering::SeqCst);
-                return Err("未打开仓库".into());
-            }
-        },
-        Err(_) => {
-            state.scanning.store(false, Ordering::SeqCst);
-            return Err("仓库锁中毒".into());
+) -> ApiAsync<String> {
+    let outcome = (|| -> HpResult<String> {
+        if source_id.trim().is_empty() {
+            return Err(HpError::InvalidArgument("媒体源 ID 不能为空".into()));
         }
-    };
+        let _ = repo_id;
 
-    let task_id = uuid::Uuid::new_v4().to_string();
-    let st = state.inner().clone();
-    let app_handle = app.clone();
-    let emit_source_id = source_id.clone();
-    let emit_task_id = task_id.clone();
-
-    tauri::async_runtime::spawn_blocking(move || {
-        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            run_unmount(&st, &app_handle, &emit_task_id, &source_id, &repo_path)
-        }));
-        match result {
-            Ok(Ok(outcome)) => {
-                let _ = app_handle.emit(
-                    "source.unmount.completed",
-                    UnmountCompletedEvent {
-                        task_id: emit_task_id.clone(),
-                        source_id: emit_source_id.clone(),
-                        cancelled: outcome.cancelled,
-                        members: outcome.counts.album_members,
-                        files: outcome.counts.files,
-                        tags: outcome.counts.tags,
-                        ratings: outcome.counts.ratings,
-                        colors: outcome.counts.color_refs,
-                        sync_albums: outcome.counts.sync_albums,
-                        child_sources: outcome.counts.child_sources,
-                    },
-                );
-            }
-            Ok(Err(e)) => {
-                let _ = app_handle.emit(
-                    "source.unmount.error",
-                    UnmountErrorEvent {
-                        task_id: emit_task_id.clone(),
-                        source_id: emit_source_id.clone(),
-                        error: hp_err_to_string(e),
-                    },
-                );
-            }
+        if state.scanning.swap(true, Ordering::SeqCst) {
+            return Err(HpError::AlreadyExists(
+                "已有任务正在进行中，请等待其结束。".into(),
+            ));
+        }
+        // 新任务开始：清掉上一次的取消请求（取消标志是共享的）
+        state.task_cancel.store(false, Ordering::SeqCst);
+        let repo_path: PathBuf = match state.current_repo_path.lock() {
+            Ok(guard) => match guard.clone() {
+                Some(p) => p,
+                None => {
+                    state.scanning.store(false, Ordering::SeqCst);
+                    return Err(HpError::NotFound("未打开仓库".into()));
+                }
+            },
             Err(_) => {
-                let _ = app_handle.emit(
-                    "source.unmount.error",
-                    UnmountErrorEvent {
-                        task_id: emit_task_id.clone(),
-                        source_id: emit_source_id.clone(),
-                        error: "卸载线程异常终止".into(),
-                    },
-                );
+                state.scanning.store(false, Ordering::SeqCst);
+                return Err(HpError::Store("仓库锁中毒".into()));
             }
-        }
-        st.scanning.store(false, Ordering::SeqCst);
-    });
+        };
 
-    Ok(task_id)
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let st = state.inner().clone();
+        let app_handle = app.clone();
+        let emit_source_id = source_id.clone();
+        let emit_task_id = task_id.clone();
+
+        tauri::async_runtime::spawn_blocking(move || {
+            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                run_unmount(&st, &app_handle, &emit_task_id, &source_id, &repo_path)
+            }));
+            match result {
+                Ok(Ok(outcome)) => {
+                    let _ = app_handle.emit(
+                        "source.unmount.completed",
+                        UnmountCompletedEvent {
+                            task_id: emit_task_id.clone(),
+                            source_id: emit_source_id.clone(),
+                            cancelled: outcome.cancelled,
+                            members: outcome.counts.album_members,
+                            files: outcome.counts.files,
+                            tags: outcome.counts.tags,
+                            ratings: outcome.counts.ratings,
+                            colors: outcome.counts.color_refs,
+                            sync_albums: outcome.counts.sync_albums,
+                            child_sources: outcome.counts.child_sources,
+                        },
+                    );
+                }
+                Ok(Err(e)) => {
+                    let _ = app_handle.emit(
+                        "source.unmount.error",
+                        UnmountErrorEvent {
+                            task_id: emit_task_id.clone(),
+                            source_id: emit_source_id.clone(),
+                            error: e.to_string(),
+                        },
+                    );
+                }
+                Err(_) => {
+                    let _ = app_handle.emit(
+                        "source.unmount.error",
+                        UnmountErrorEvent {
+                            task_id: emit_task_id.clone(),
+                            source_id: emit_source_id.clone(),
+                            error: "卸载线程异常终止".into(),
+                        },
+                    );
+                }
+            }
+            st.scanning.store(false, Ordering::SeqCst);
+        });
+
+        Ok(task_id)
+    })();
+    api_async(api_from_hp(outcome))
 }
 
 /// 在后台线程执行**完全卸载**（独立连接，不占用主连接锁）。
@@ -368,10 +374,10 @@ fn run_unmount(
 /// 用户就会看到一个永远转圈的"正在卸载"。前端因此定期对账——
 /// 若长时间没有进度事件且此处返回 `busy = false`，说明任务早已结束，浮窗自行收起。
 #[tauri::command]
-pub(crate) fn task_status(state: State<AppState>) -> Result<TaskStatus, String> {
-    Ok(TaskStatus {
+pub(crate) fn task_status(state: State<AppState>) -> ApiResponse<TaskStatus> {
+    api_from_hp(Ok(TaskStatus {
         busy: state.scanning.load(Ordering::SeqCst),
-    })
+    }))
 }
 
 #[derive(Serialize)]
@@ -386,29 +392,26 @@ pub(crate) fn source_rename(
     source_id: String,
     alias: String,
     state: State<AppState>,
-) -> Result<(), String> {
+) -> ApiResponse<()> {
     let _ = repo_id;
-    let mut guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_mut().ok_or("未打开仓库".to_string())?;
-    db.rename_source(&source_id, &alias)
-        .map_err(hp_err_to_string)
+    let outcome = (|| -> HpResult<()> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        db.rename_source(&source_id, &alias)
+    })();
+    api_from_hp(outcome)
 }
 
 /// source.list：列出仓库下**已添加（在线）**的媒体源。
 #[tauri::command]
-pub(crate) fn source_list(repo_id: String, state: State<AppState>) -> Result<Vec<SourceItem>, String> {
-    let guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
-    let sources = db
-        .list_mounted_sources(&repo_id)
-        .map_err(hp_err_to_string)?;
-    Ok(sources.into_iter().map(source_to_item).collect())
+pub(crate) fn source_list(repo_id: String, state: State<AppState>) -> ApiResponse<Vec<SourceItem>> {
+    let outcome = (|| -> HpResult<Vec<SourceItem>> {
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
+        let sources = db.list_mounted_sources(&repo_id)?;
+        Ok(sources.into_iter().map(source_to_item).collect())
+    })();
+    api_from_hp(outcome)
 }
 
 /// source.tree：列出仓库下媒体源目录树（实际子文件夹 + 递归文件数）。
@@ -419,38 +422,34 @@ pub(crate) fn source_list(repo_id: String, state: State<AppState>) -> Result<Vec
 pub(crate) fn source_tree(
     repo_id: String,
     state: State<AppState>,
-) -> Result<Vec<SourceTreeNode>, String> {
-    let guard = state
-        .open_repo
-        .lock()
-        .map_err(|_| "仓库锁中毒".to_string())?;
-    let db = guard.as_ref().ok_or("未打开仓库".to_string())?;
-    let sources = db
-        .list_mounted_sources(&repo_id)
-        .map_err(hp_err_to_string)?;
-    let mut out = Vec::with_capacity(sources.len());
-    for source in sources {
-        let paths = db
-            .list_relative_paths_by_source(source.id.as_str())
-            .map_err(hp_err_to_string)?;
-        let tree = build_source_tree(&paths);
-        let source_id = source.id.as_str().to_string();
-        let name = source
-            .alias
-            .clone()
-            .filter(|a| !a.trim().is_empty())
-            .unwrap_or_else(|| last_path_segment(&source.local_path));
-        out.push(SourceTreeNode {
-            key: format!("src:{source_id}"),
-            name,
-            relative_path: None,
-            local_path: Some(source.local_path.clone()),
-            source_id: Some(source_id.clone()),
-            file_count: tree.file_count,
-            children: tree_nodes_to_items(tree.children, &source_id),
-        });
-    }
-    Ok(out)
+) -> ApiResponse<Vec<SourceTreeNode>> {
+    let outcome = (|| -> HpResult<Vec<SourceTreeNode>> {
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
+        let sources = db.list_mounted_sources(&repo_id)?;
+        let mut out = Vec::with_capacity(sources.len());
+        for source in sources {
+            let paths = db.list_relative_paths_by_source(source.id.as_str())?;
+            let tree = build_source_tree(&paths);
+            let source_id = source.id.as_str().to_string();
+            let name = source
+                .alias
+                .clone()
+                .filter(|a| !a.trim().is_empty())
+                .unwrap_or_else(|| last_path_segment(&source.local_path));
+            out.push(SourceTreeNode {
+                key: format!("src:{source_id}"),
+                name,
+                relative_path: None,
+                local_path: Some(source.local_path.clone()),
+                source_id: Some(source_id.clone()),
+                file_count: tree.file_count,
+                children: tree_nodes_to_items(tree.children, &source_id),
+            });
+        }
+        Ok(out)
+    })();
+    api_from_hp(outcome)
 }
 
 /// 将 hp-store 目录树节点转换为可序列化的 `SourceTreeNode`。
@@ -499,86 +498,91 @@ pub(crate) async fn source_scan(
     full: Option<bool>,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
-) -> Result<String, String> {
-    if source_id.trim().is_empty() {
-        return Err("媒体源 ID 不能为空".into());
-    }
-    let full = full.unwrap_or(false);
-    let _ = repo_id;
-
-    // 单任务闸门
-    if state.scanning.swap(true, Ordering::SeqCst) {
-        return Err("已有任务正在进行中，请等待其结束或先取消。".into());
-    }
-    // 新任务开始：清掉上一次的取消请求（取消标志是共享的）
-    state.task_cancel.store(false, Ordering::SeqCst);
-
-    // 扫描用的仓库库路径（缺失说明仓库未打开）
-    let repo_path: PathBuf = match state.current_repo_path.lock() {
-        Ok(guard) => match guard.clone() {
-            Some(p) => p,
-            None => {
-                state.scanning.store(false, Ordering::SeqCst);
-                return Err("未打开仓库".into());
-            }
-        },
-        Err(_) => {
-            state.scanning.store(false, Ordering::SeqCst);
-            return Err("仓库锁中毒".into());
+) -> ApiAsync<String> {
+    let outcome = (|| -> HpResult<String> {
+        if source_id.trim().is_empty() {
+            return Err(HpError::InvalidArgument("媒体源 ID 不能为空".into()));
         }
-    };
+        let full = full.unwrap_or(false);
+        let _ = repo_id;
 
-    let task_id = uuid::Uuid::new_v4().to_string();
-    let st = state.inner().clone();
-    let app_handle = app.clone();
-    let emit_source_id = source_id.clone();
-    let emit_task_id = task_id.clone();
+        // 单任务闸门
+        if state.scanning.swap(true, Ordering::SeqCst) {
+            return Err(HpError::AlreadyExists(
+                "已有任务正在进行中，请等待其结束或先取消。".into(),
+            ));
+        }
+        // 新任务开始：清掉上一次的取消请求（取消标志是共享的）
+        state.task_cancel.store(false, Ordering::SeqCst);
 
-    tauri::async_runtime::spawn_blocking(move || {
-        // panic 也要收敛成一次事件，避免前端浮窗永久停留
-        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            run_scan(&st, &app_handle, &emit_task_id, &source_id, full, &repo_path)
-        }));
-        match result {
-            Ok(Ok(outcome)) => {
-                let _ = app_handle.emit(
-                    "scan.completed",
-                    ScanCompletedEvent {
-                        task_id: emit_task_id.clone(),
-                        source_id: emit_source_id.clone(),
-                        indexed: outcome.indexed,
-                        changed: outcome.changed,
-                        missing: outcome.missing,
-                        skipped: outcome.skipped,
-                        cancelled: outcome.cancelled,
-                    },
-                );
-            }
-            Ok(Err(e)) => {
-                let _ = app_handle.emit(
-                    "scan.error",
-                    ScanErrorEvent {
-                        task_id: emit_task_id.clone(),
-                        source_id: emit_source_id.clone(),
-                        error: hp_err_to_string(e),
-                    },
-                );
-            }
+        // 扫描用的仓库库路径（缺失说明仓库未打开）
+        let repo_path: PathBuf = match state.current_repo_path.lock() {
+            Ok(guard) => match guard.clone() {
+                Some(p) => p,
+                None => {
+                    state.scanning.store(false, Ordering::SeqCst);
+                    return Err(HpError::NotFound("未打开仓库".into()));
+                }
+            },
             Err(_) => {
-                let _ = app_handle.emit(
-                    "scan.error",
-                    ScanErrorEvent {
-                        task_id: emit_task_id.clone(),
-                        source_id: emit_source_id.clone(),
-                        error: "扫描线程异常终止".into(),
-                    },
-                );
+                state.scanning.store(false, Ordering::SeqCst);
+                return Err(HpError::Store("仓库锁中毒".into()));
             }
-        }
-        st.scanning.store(false, Ordering::SeqCst);
-    });
+        };
 
-    Ok(task_id)
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let st = state.inner().clone();
+        let app_handle = app.clone();
+        let emit_source_id = source_id.clone();
+        let emit_task_id = task_id.clone();
+
+        tauri::async_runtime::spawn_blocking(move || {
+            // panic 也要收敛成一次事件，避免前端浮窗永久停留
+            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                run_scan(&st, &app_handle, &emit_task_id, &source_id, full, &repo_path)
+            }));
+            match result {
+                Ok(Ok(outcome)) => {
+                    let _ = app_handle.emit(
+                        "scan.completed",
+                        ScanCompletedEvent {
+                            task_id: emit_task_id.clone(),
+                            source_id: emit_source_id.clone(),
+                            indexed: outcome.indexed,
+                            changed: outcome.changed,
+                            missing: outcome.missing,
+                            skipped: outcome.skipped,
+                            cancelled: outcome.cancelled,
+                        },
+                    );
+                }
+                Ok(Err(e)) => {
+                    let _ = app_handle.emit(
+                        "scan.error",
+                        ScanErrorEvent {
+                            task_id: emit_task_id.clone(),
+                            source_id: emit_source_id.clone(),
+                            error: e.to_string(),
+                        },
+                    );
+                }
+                Err(_) => {
+                    let _ = app_handle.emit(
+                        "scan.error",
+                        ScanErrorEvent {
+                            task_id: emit_task_id.clone(),
+                            source_id: emit_source_id.clone(),
+                            error: "扫描线程异常终止".into(),
+                        },
+                    );
+                }
+            }
+            st.scanning.store(false, Ordering::SeqCst);
+        });
+
+        Ok(task_id)
+    })();
+    api_async(api_from_hp(outcome))
 }
 
 /// 在后台线程执行扫描（独立连接，不占用主连接锁）。
@@ -589,7 +593,8 @@ fn run_scan(
     source_id: &str,
     full: bool,
     repo_path: &Path,
-) -> HpResult<ScanOutcome> {    let mut db = RepoDb::open(repo_path)?;
+) -> HpResult<ScanOutcome> {
+    let mut db = RepoDb::open(repo_path)?;
 
     let source = db
         .get_source(source_id)?
@@ -637,22 +642,22 @@ fn run_scan(
 
 /// task.cancel：取消当前长任务（扫描与卸载共用取消标志）。
 #[tauri::command]
-pub(crate) fn task_cancel(state: State<AppState>) -> Result<(), String> {
+pub(crate) fn task_cancel(state: State<AppState>) -> ApiResponse<()> {
     state.task_cancel.store(true, Ordering::SeqCst);
     state.scanner.cancel();
-    Ok(())
+    api_from_hp(Ok(()))
 }
 
 /// task.pause：暂停当前扫描（下一个文件处理前生效）。
 #[tauri::command]
-pub(crate) fn task_pause(state: State<AppState>) -> Result<(), String> {
+pub(crate) fn task_pause(state: State<AppState>) -> ApiResponse<()> {
     state.scanner.pause();
-    Ok(())
+    api_from_hp(Ok(()))
 }
 
 /// task.resume：恢复已暂停的扫描。
 #[tauri::command]
-pub(crate) fn task_resume(state: State<AppState>) -> Result<(), String> {
+pub(crate) fn task_resume(state: State<AppState>) -> ApiResponse<()> {
     state.scanner.resume();
-    Ok(())
+    api_from_hp(Ok(()))
 }

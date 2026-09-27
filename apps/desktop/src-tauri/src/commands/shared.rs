@@ -44,6 +44,9 @@ pub(crate) struct ApiError {
 }
 
 impl ApiError {
+    /// 直接以码 + 诊断串构造（用于**不是** `HpError` 来源的失败，例如桥接层的
+    /// 前置条件检查；领域错误一律走 [`ApiError::from_hp`]）。
+    #[allow(dead_code)]
     pub(crate) fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),

@@ -8,6 +8,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { getTask, setTask, useTask } from "../core/taskStore";
 import { ContextMenu } from "../menu/ContextMenu";
@@ -137,7 +138,7 @@ export function SourcePanel(): JSX.Element {
     try {
       setNodes(await api.sourceTree({ repoId: app.repoId }));
     } catch (e) {
-      app.status(app.t("source.treeFailed", { err: String(e) }), "error");
+      app.status(app.t("source.treeFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   }, [app]);
 
@@ -183,7 +184,7 @@ export function SourcePanel(): JSX.Element {
     try {
       picked = await api.pickFolder(t("source.pickFolderTitle"));
     } catch (e) {
-      app.status(t("source.pickFailed", { err: String(e) }), "error");
+      app.status(t("source.pickFailed", { err: errorTextOf(app.t, e) }), "error");
       return;
     }
     if (!picked) {
@@ -223,7 +224,7 @@ export function SourcePanel(): JSX.Element {
       app.status(t("source.added", { name: s.alias ?? name }), "ok");
       app.refresh();
     } catch (e) {
-      app.status(t("source.mountFailed", { err: String(e) }), "error");
+      app.status(t("source.mountFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -252,7 +253,7 @@ export function SourcePanel(): JSX.Element {
       setRenameValue("");
       app.refresh();
     } catch (e) {
-      app.status(t("source.renameFailed", { err: String(e) }), "error");
+      app.status(t("source.renameFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -277,7 +278,7 @@ export function SourcePanel(): JSX.Element {
     try {
       preview = await api.sourceUnmountPreview({ repoId: app.repoId, sourceId });
     } catch (e) {
-      app.status(t("source.unmountFailed", { err: String(e) }), "error");
+      app.status(t("source.unmountFailed", { err: errorTextOf(app.t, e) }), "error");
       return;
     }
 
@@ -328,7 +329,7 @@ export function SourcePanel(): JSX.Element {
       // 完成/失败由事件驱动（taskStore 会收尾并刷新）
     } catch (e) {
       setTask(null);
-      app.status(t("source.unmountFailed", { err: String(e) }), "error");
+      app.status(t("source.unmountFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -360,7 +361,7 @@ export function SourcePanel(): JSX.Element {
       });
       app.status(t("source.scanStarted"), "info");
     } catch (e) {
-      app.status(t("source.scanStartFailed", { err: String(e) }), "error");
+      app.status(t("source.scanStartFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -389,7 +390,7 @@ export function SourcePanel(): JSX.Element {
       app.setSourceId(null);
       app.refresh();
     } catch (e) {
-      app.status(t("source.copyAsAlbumFailed", { err: String(e) }), "error");
+      app.status(t("source.copyAsAlbumFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
