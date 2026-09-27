@@ -208,6 +208,34 @@ pub(crate) fn ensure_global(state: &AppState, app: &tauri::AppHandle) -> HpResul
     Ok(())
 }
 
+/// 锁住全局库（毒锁 → `Store`）。调用前先 `ensure_global`。
+pub(crate) fn lock_global(
+    state: &AppState,
+) -> HpResult<std::sync::MutexGuard<'_, Option<GlobalDb>>> {
+    state
+        .global_db
+        .lock()
+        .map_err(|_| HpError::Store("全局库锁中毒".into()))
+}
+
+/// 取全局库（未初始化 → `not_found`：全局库还没打开）。
+pub(crate) fn global<'g, 'a>(
+    guard: &'g std::sync::MutexGuard<'a, Option<GlobalDb>>,
+) -> HpResult<&'g GlobalDb> {
+    guard
+        .as_ref()
+        .ok_or_else(|| HpError::NotFound("全局库未初始化".into()))
+}
+
+/// 同 [`global`]，可变借用（写操作）。
+pub(crate) fn global_mut<'g, 'a>(
+    guard: &'g mut std::sync::MutexGuard<'a, Option<GlobalDb>>,
+) -> HpResult<&'g mut GlobalDb> {
+    guard
+        .as_mut()
+        .ok_or_else(|| HpError::NotFound("全局库未初始化".into()))
+}
+
 /// 解析文件绝对路径：源本地路径 + 相对路径。
 pub(crate) fn resolve_file_path(db: &RepoDb, file: &FileIndexRow) -> HpResult<PathBuf> {
     let source = db

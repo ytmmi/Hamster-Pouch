@@ -8,6 +8,7 @@ import type { PluginItem, PluginStateItem } from "@hamster-pouch/shared-types";
 
 import { useApp } from "../core/AppContext";
 import * as api from "../shared/api";
+import { errorTextOf } from "../shared/api/response";
 
 export function PluginPanel(): JSX.Element {
   const app = useApp();
@@ -30,7 +31,7 @@ export function PluginPanel(): JSX.Element {
         setStates({});
       }
     } catch (e) {
-      app.status(String(e), "error");
+      app.status(errorTextOf(app.t, e), "error");
     }
   }, [app]);
 
@@ -50,7 +51,7 @@ export function PluginPanel(): JSX.Element {
       await load();
       app.status(app.t("plugin.installed"), "ok");
     } catch (e) {
-      app.status(String(e), "error");
+      app.status(errorTextOf(app.t, e), "error");
     } finally {
       setBusy(false);
     }
@@ -70,7 +71,7 @@ export function PluginPanel(): JSX.Element {
         }
         await load();
       } catch (e) {
-        app.status(String(e), "error");
+        app.status(errorTextOf(app.t, e), "error");
       }
     },
     [app, load],
@@ -93,7 +94,7 @@ export function PluginPanel(): JSX.Element {
           "ok",
         );
       } catch (e) {
-        app.status(String(e), "error");
+        app.status(errorTextOf(app.t, e), "error");
       }
     },
     [app],

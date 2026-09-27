@@ -13,7 +13,9 @@ use tauri::{Emitter, State};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::commands::shared::{api_from_hp, ensure_global, hp_err_to_string, ApiResponse};
+use crate::commands::shared::{
+    api_from_hp, ensure_global, global, global_mut, lock_global, ApiResponse,
+};
 use crate::AppState;
 
 /// 广播插件注册表变化（`plugin.changed`）：前端据此重建三张注册表的插件部分
@@ -139,9 +141,12 @@ fn state_to_item(st: hp_core::PluginRepoState) -> PluginStateItem {
     }
 }
 
-fn parse_grants(raw: &[String]) -> Result<Vec<Capability>, String> {
+fn parse_grants(raw: &[String]) -> HpResult<Vec<Capability>> {
     raw.iter()
-        .map(|s| Capability::from_str(s).ok_or_else(|| format!("未知插件能力: {s}")))
+        .map(|s| {
+            Capability::from_str(s)
+                .ok_or_else(|| HpError::InvalidArgument(format!("未知插件能力: {s}")))
+        })
         .collect()
 }
 
@@ -156,29 +161,32 @@ fn now_iso() -> String {
 pub(crate) fn plugin_list(
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<Vec<PluginItem>, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
-    let rows = g.list_plugins().map_err(hp_err_to_string)?;
-    Ok(rows.into_iter().map(row_to_item).collect())
+) -> ApiResponse<Vec<PluginItem>> {
+    let outcome = (|| -> HpResult<Vec<PluginItem>> {
+        ensure_global(&state, &app)?;
+        let guard = lock_global(&state)?;
+        let g = global(&guard)?;
+        let rows = g.list_plugins()?;
+        Ok(rows.into_iter().map(row_to_item).collect())
+    })();
+    api_from_hp(outcome)
 }
 
 /// plugin.discover：扫描目录下的插件包（不安装）。
 #[tauri::command]
-pub(crate) fn plugin_discover(dir: String) -> Result<Vec<DiscoveredPlugin>, String> {
-    let packages = discover_packages(std::path::Path::new(&dir)).map_err(hp_err_to_string)?;
-    Ok(packages
-        .into_iter()
-        .map(|p| DiscoveredPlugin {
-            id: p.manifest.id.as_str().to_string(),
-            name: p.manifest.name,
-            version: p.manifest.version,
-        })
-        .collect())
+pub(crate) fn plugin_discover(dir: String) -> ApiResponse<Vec<DiscoveredPlugin>> {
+    let outcome = (|| -> HpResult<Vec<DiscoveredPlugin>> {
+        let packages = discover_packages(std::path::Path::new(&dir))?;
+        Ok(packages
+            .into_iter()
+            .map(|p| DiscoveredPlugin {
+                id: p.manifest.id.as_str().to_string(),
+                name: p.manifest.name,
+                version: p.manifest.version,
+            })
+            .collect())
+    })();
+    api_from_hp(outcome)
 }
 
 /// plugin.installLocal：安装本地路径插件包并注册。
@@ -191,23 +199,21 @@ pub(crate) fn plugin_install_local(
     path: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<PluginItem, String> {
-    let installer = PluginInstaller::new(state.plugin_root.as_ref().clone());
-    let row = installer
-        .install_registry_row(
+) -> ApiResponse<PluginItem> {
+    let outcome = (|| -> HpResult<PluginItem> {
+        let installer = PluginInstaller::new(state.plugin_root.as_ref().clone());
+        let row = installer.install_registry_row(
             &InstallSource::LocalPath(std::path::PathBuf::from(&path)),
             now_iso(),
-        )
-        .map_err(hp_err_to_string)?;
+        )?;
 
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let mut guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_mut().ok_or("全局库未初始化".to_string())?;
-    PluginHost.register(g, &row).map_err(hp_err_to_string)?;
-    Ok(row_to_item(row))
+        ensure_global(&state, &app)?;
+        let mut guard = lock_global(&state)?;
+        let g = global_mut(&mut guard)?;
+        PluginHost.register(g, &row)?;
+        Ok(row_to_item(row))
+    })();
+    api_from_hp(outcome)
 }
 
 /// plugin.enable：按仓库启用并授权能力。
@@ -218,20 +224,19 @@ pub(crate) fn plugin_enable(
     grants: Vec<String>,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<PluginStateItem, String> {
-    let requested = parse_grants(&grants)?;
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let mut guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_mut().ok_or("全局库未初始化".to_string())?;
-    let st = PluginHost
-        .enable_for_repo(g, &plugin_id, &repo_id, &requested)
-        .map_err(hp_err_to_string)?;
-    drop(guard);
-    emit_plugin_changed(&app, &repo_id);
-    Ok(state_to_item(st))
+) -> ApiResponse<PluginStateItem> {
+    let outcome = (|| -> HpResult<PluginStateItem> {
+        let requested = parse_grants(&grants)?;
+        ensure_global(&state, &app)?;
+        let st = {
+            let mut guard = lock_global(&state)?;
+            let g = global_mut(&mut guard)?;
+            PluginHost.enable_for_repo(g, &plugin_id, &repo_id, &requested)?
+        };
+        emit_plugin_changed(&app, &repo_id);
+        Ok(state_to_item(st))
+    })();
+    api_from_hp(outcome)
 }
 
 /// plugin.disable：按仓库禁用插件。
@@ -241,19 +246,18 @@ pub(crate) fn plugin_disable(
     plugin_id: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<(), String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let mut guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_mut().ok_or("全局库未初始化".to_string())?;
-    PluginHost
-        .disable_for_repo(g, &plugin_id, &repo_id)
-        .map_err(hp_err_to_string)?;
-    drop(guard);
-    emit_plugin_changed(&app, &repo_id);
-    Ok(())
+) -> ApiResponse<()> {
+    let outcome = (|| -> HpResult<()> {
+        ensure_global(&state, &app)?;
+        {
+            let mut guard = lock_global(&state)?;
+            let g = global_mut(&mut guard)?;
+            PluginHost.disable_for_repo(g, &plugin_id, &repo_id)?;
+        }
+        emit_plugin_changed(&app, &repo_id);
+        Ok(())
+    })();
+    api_from_hp(outcome)
 }
 
 /// plugin.state：查询插件在某仓库的启用与授权状态。
@@ -263,17 +267,15 @@ pub(crate) fn plugin_state(
     plugin_id: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<Option<PluginStateItem>, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
-    let st = g
-        .get_plugin_repo_state(&plugin_id, &repo_id)
-        .map_err(hp_err_to_string)?;
-    Ok(st.map(state_to_item))
+) -> ApiResponse<Option<PluginStateItem>> {
+    let outcome = (|| -> HpResult<Option<PluginStateItem>> {
+        ensure_global(&state, &app)?;
+        let guard = lock_global(&state)?;
+        let g = global(&guard)?;
+        let st = g.get_plugin_repo_state(&plugin_id, &repo_id)?;
+        Ok(st.map(state_to_item))
+    })();
+    api_from_hp(outcome)
 }
 
 /// plugin.load：加载插件（生命周期骨架）。
@@ -283,23 +285,21 @@ pub(crate) fn plugin_load(
     plugin_id: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<PluginLoadItem, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
-    let outcome = PluginHost
-        .load(g, &plugin_id, &repo_id)
-        .map_err(hp_err_to_string)?;
-    Ok(PluginLoadItem {
-        plugin_id: outcome.plugin_id,
-        repo_id: outcome.repo_id,
-        runtime_kind: outcome.runtime_kind.as_str().to_string(),
-        api_version: outcome.api_version,
-        grants: outcome.grants.iter().map(|c| c.as_str().to_string()).collect(),
-    })
+) -> ApiResponse<PluginLoadItem> {
+    let outcome = (|| -> HpResult<PluginLoadItem> {
+        ensure_global(&state, &app)?;
+        let guard = lock_global(&state)?;
+        let g = global(&guard)?;
+        let outcome = PluginHost.load(g, &plugin_id, &repo_id)?;
+        Ok(PluginLoadItem {
+            plugin_id: outcome.plugin_id,
+            repo_id: outcome.repo_id,
+            runtime_kind: outcome.runtime_kind.as_str().to_string(),
+            api_version: outcome.api_version,
+            grants: outcome.grants.iter().map(|c| c.as_str().to_string()).collect(),
+        })
+    })();
+    api_from_hp(outcome)
 }
 
 /// plugin.contributions：某仓库当前**已启用**插件注册的面板 / 蓝图节点类型 / 设置分节
@@ -314,16 +314,14 @@ pub(crate) fn plugin_contributions(
     repo_id: String,
     state: State<AppState>,
     app: tauri::AppHandle,
-) -> Result<PluginContributions, String> {
-    ensure_global(&state, &app).map_err(hp_err_to_string)?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| "全局库锁中毒".to_string())?;
-    let g = guard.as_ref().ok_or("全局库未初始化".to_string())?;
-    let entries = PluginHost
-        .repo_contributions(g, &repo_id)
-        .map_err(hp_err_to_string)?;
+) -> ApiResponse<PluginContributions> {
+    let outcome = (|| -> HpResult<PluginContributions> {
+        ensure_global(&state, &app)?;
+        let entries = {
+            let guard = lock_global(&state)?;
+            let g = global(&guard)?;
+            PluginHost.repo_contributions(g, &repo_id)?
+        };
 
     let mut panels = Vec::new();
     let mut node_types = Vec::new();
@@ -357,11 +355,13 @@ pub(crate) fn plugin_contributions(
             });
         }
     }
-    Ok(PluginContributions {
-        panels,
-        node_types,
-        settings_sections,
-    })
+        Ok(PluginContributions {
+            panels,
+            node_types,
+            settings_sections,
+        })
+    })();
+    api_from_hp(outcome)
 }
 
 /// plugin.versions：列出某插件已安装版本。
@@ -369,9 +369,9 @@ pub(crate) fn plugin_contributions(
 pub(crate) fn plugin_versions(
     plugin_id: String,
     state: State<AppState>,
-) -> Result<Vec<String>, String> {
+) -> ApiResponse<Vec<String>> {
     let installer = PluginInstaller::new(state.plugin_root.as_ref().clone());
-    installer.list_versions(&plugin_id).map_err(hp_err_to_string)
+    api_from_hp(installer.list_versions(&plugin_id))
 }
 
 /// plugin.rollback：回滚到指定已安装版本（目录切换，不依赖网络）。
@@ -380,12 +380,13 @@ pub(crate) fn plugin_rollback(
     plugin_id: String,
     version: String,
     state: State<AppState>,
-) -> Result<String, String> {
-    let installer = PluginInstaller::new(state.plugin_root.as_ref().clone());
-    let dir = installer
-        .rollback(&plugin_id, &version)
-        .map_err(hp_err_to_string)?;
-    Ok(dir.to_string_lossy().to_string())
+) -> ApiResponse<String> {
+    let outcome = (|| -> HpResult<String> {
+        let installer = PluginInstaller::new(state.plugin_root.as_ref().clone());
+        let dir = installer.rollback(&plugin_id, &version)?;
+        Ok(dir.to_string_lossy().to_string())
+    })();
+    api_from_hp(outcome)
 }
 
 // ===== 控件 schema 运行时通道（`docs/spec/control-standard.md` 第 2/7 节，D61/D62）=====

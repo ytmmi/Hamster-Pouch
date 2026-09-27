@@ -1,10 +1,9 @@
 /**
  * M5：插件命令封装（plugin.*，RFC 0004）。
  *
- * **D76 迁移状态**：`plugin.*` 整体属 D76 批次里的 `plugin` 批（**尚未迁移**，下表命令
- * 仍裸返回）；本域**新增**的两条控件通道命令（`plugin.panelSchema` /
- * `plugin.validateControl`）按 D76「新增命令一律按新口径」直接返回
- * `{ ok, data?, error? }`，因此经 [`unwrapApi`] 解包。
+ * **D76 迁移状态：已包装**（批次 `plugin`，2026-09）。本域全部命令（含两条控件通道命令）
+ * 均返回 `{ ok, data?, error? }`，这里经 [`unwrapApi`] 解包：调用方拿到的仍是原来的
+ * 领域值，失败时抛带 `code` 的 `HpApiFailure`，界面按 `code` 走 i18n（D27）。
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -23,17 +22,17 @@ import { unwrapApi, type ApiResponse } from "./response";
 
 /** 列出已安装插件 */
 export function pluginList(): Promise<PluginItem[]> {
-  return invoke<PluginItem[]>("plugin_list");
+  return invoke<ApiResponse<PluginItem[]>>("plugin_list").then(unwrapApi);
 }
 
 /** 扫描目录下的插件包（不安装） */
 export function pluginDiscover(dir: string): Promise<DiscoveredPlugin[]> {
-  return invoke<DiscoveredPlugin[]>("plugin_discover", { dir });
+  return invoke<ApiResponse<DiscoveredPlugin[]>>("plugin_discover", { dir }).then(unwrapApi);
 }
 
 /** 安装本地路径插件包并注册 */
 export function pluginInstallLocal(path: string): Promise<PluginItem> {
-  return invoke<PluginItem>("plugin_install_local", { path });
+  return invoke<ApiResponse<PluginItem>>("plugin_install_local", { path }).then(unwrapApi);
 }
 
 /** 按仓库启用并授权能力 */
@@ -42,12 +41,12 @@ export function pluginEnable(
   pluginId: string,
   grants: string[],
 ): Promise<PluginStateItem> {
-  return invoke<PluginStateItem>("plugin_enable", { repoId, pluginId, grants });
+  return invoke<ApiResponse<PluginStateItem>>("plugin_enable", { repoId, pluginId, grants }).then(unwrapApi);
 }
 
 /** 按仓库禁用插件 */
 export function pluginDisable(repoId: string, pluginId: string): Promise<void> {
-  return invoke<void>("plugin_disable", { repoId, pluginId });
+  return invoke<ApiResponse<void>>("plugin_disable", { repoId, pluginId }).then(unwrapApi);
 }
 
 /** 查询插件在某仓库的启用与授权状态 */
@@ -55,22 +54,22 @@ export function pluginState(
   repoId: string,
   pluginId: string,
 ): Promise<PluginStateItem | null> {
-  return invoke<PluginStateItem | null>("plugin_state", { repoId, pluginId });
+  return invoke<ApiResponse<PluginStateItem | null>>("plugin_state", { repoId, pluginId }).then(unwrapApi);
 }
 
 /** 加载插件（生命周期骨架） */
 export function pluginLoad(repoId: string, pluginId: string): Promise<PluginLoadItem> {
-  return invoke<PluginLoadItem>("plugin_load", { repoId, pluginId });
+  return invoke<ApiResponse<PluginLoadItem>>("plugin_load", { repoId, pluginId }).then(unwrapApi);
 }
 
 /** 列出某插件已安装版本 */
 export function pluginVersions(pluginId: string): Promise<string[]> {
-  return invoke<string[]>("plugin_versions", { pluginId });
+  return invoke<ApiResponse<string[]>>("plugin_versions", { pluginId }).then(unwrapApi);
 }
 
 /** 回滚到指定已安装版本 */
 export function pluginRollback(pluginId: string, version: string): Promise<string> {
-  return invoke<string>("plugin_rollback", { pluginId, version });
+  return invoke<ApiResponse<string>>("plugin_rollback", { pluginId, version }).then(unwrapApi);
 }
 
 /**
@@ -80,7 +79,7 @@ export function pluginRollback(pluginId: string, version: string): Promise<strin
  * 不兼容时其注册项缺席 —— 蓝图侧按「未接通」处理（软告警、允许保存、恢复后自动恢复）。
  */
 export function pluginContributions(repoId: string): Promise<PluginContributions> {
-  return invoke<PluginContributions>("plugin_contributions", { repoId });
+  return invoke<ApiResponse<PluginContributions>>("plugin_contributions", { repoId }).then(unwrapApi);
 }
 
 /** `plugin.panelSchema` 的返回项（D76 已包装）。 */
