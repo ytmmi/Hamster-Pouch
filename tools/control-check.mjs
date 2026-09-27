@@ -320,6 +320,97 @@ check(
   badEventResult.errors.join(" | "),
 );
 
+// ==================== 运行时通道与接线（控件标准第 2/7/8 节，D61/D62）====================
+//
+// 这几条防的是"渲染骨架写好了但没人接线"（旧口径下 ControlPanelView 无调用方）。
+// 纯文本断言：只查"调用点存在 + 请求名/上限与规范一致"，不重写 Rust 实现。
+
+const channelSrc = readFileSync(join(ROOT, "crates/hp-plugin-host/src/channel.rs"), "utf8");
+check(
+  "运行时通道用统一请求名 ui.panel.schema（三种运行形态同一请求名）",
+  /PANEL_SCHEMA_REQUEST:\s*&str\s*=\s*"ui\.panel\.schema"/.test(channelSrc),
+);
+check(
+  "宿主侧超时 2s 与输出上限 256 KiB 是常量（D61）",
+  /SCHEMA_QUERY_TIMEOUT:\s*Duration\s*=\s*Duration::from_secs\(2\)/.test(channelSrc) &&
+    /SCHEMA_MAX_BYTES:\s*usize\s*=\s*256\s*\*\s*1024/.test(channelSrc),
+);
+check(
+  "schema 缓存键是 (plugin_id, panel_id, plugin_version)（D61）",
+  /pub struct PanelSchemaKey\s*\{[\s\S]*?plugin_id[\s\S]*?panel_id[\s\S]*?plugin_version[\s\S]*?\}/.test(
+    channelSrc,
+  ),
+);
+
+const bridgeSrc = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/plugin.rs"),
+  "utf8",
+);
+const mainSrc = readFileSync(join(ROOT, "apps/desktop/src-tauri/src/main.rs"), "utf8");
+check(
+  "plugin.panelSchema / plugin.validateControl 已实现并注册（D61/D62）",
+  /pub\(crate\) fn plugin_panel_schema/.test(bridgeSrc) &&
+    /pub\(crate\) fn plugin_validate_control/.test(bridgeSrc) &&
+    /commands::plugin::plugin_panel_schema/.test(mainSrc) &&
+    /commands::plugin::plugin_validate_control/.test(mainSrc),
+);
+check(
+  "业务级校验复用 hp-core 的 ControlSchema::validate（不另写一份口径）",
+  /ControlSchema::from_json/.test(bridgeSrc) && /\.validate\(&ctx\)/.test(bridgeSrc),
+);
+check(
+  "失败降级为错误态 + plugin.error（不阻塞其它面板）",
+  /fn emit_plugin_error/.test(bridgeSrc) && /"plugin\.error"/.test(bridgeSrc),
+);
+
+const hostSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/PluginPanelHost.tsx"),
+  "utf8",
+);
+const apiSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/api/plugin.ts"),
+  "utf8",
+);
+check(
+  "ControlPanelView 已接进 PluginPanelHost（面板级入口不再是死代码）",
+  /ControlPanelView/.test(hostSrc) && /pluginPanelSchema|plugin_panel_schema/.test(apiSrc),
+);
+check(
+  "接线走的是运行时通道命令，而不是把 schema 写死在面板里",
+  /api\.pluginPanelSchema\(/.test(hostSrc) && /api\.pluginValidateControl\(/.test(hostSrc),
+);
+check(
+  "占位文案 schemaPending 不再是面板的唯一内容（已换成真实渲染/错误态）",
+  !/<span className="placeholder">\{app\.t\("pluginPanel\.schemaPending"\)\}<\/span>\s*<\/div>/.test(
+    hostSrc,
+  ),
+);
+
+// 新命令走 D76 统一响应包装（新增命令一律按新口径）。
+check(
+  "新增的两条控件命令走 D76 响应包装 { ok, data?, error? }",
+  /ApiResponse<PanelSchemaItem>/.test(bridgeSrc) &&
+    /ApiResponse<ControlValidateResult>/.test(bridgeSrc) &&
+    /api_from_hp\(/.test(bridgeSrc),
+);
+check(
+  "HpError 有 D76 的闭集错误码（前端按 code 走 i18n，不直显 message）",
+  /pub fn code\(&self\) -> &'static str/.test(
+    readFileSync(join(ROOT, "crates/hp-core/src/error.rs"), "utf8"),
+  ),
+);
+check(
+  "前端有统一解包层，且三套语言都有错误码文案",
+  /export function unwrapApi/.test(
+    readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/api/response.ts"), "utf8"),
+  ) &&
+    ["zh-CN", "zh-TW", "en"].every((lang) =>
+      /"error\.code\.plugin"/.test(
+        readFileSync(join(ROOT, `apps/desktop/src/app_ui/i18n/${lang}.ts`), "utf8"),
+      ),
+    ),
+);
+
 // ============================== 汇总 ==============================
 
 const passed = results.filter((r) => r.ok).length;

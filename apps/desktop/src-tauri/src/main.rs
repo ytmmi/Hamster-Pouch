@@ -47,6 +47,8 @@ pub(crate) struct AppState {
     pub(crate) media_embed: Arc<Mutex<Option<EmbedWindow>>>,
     /// 插件包存储根目录（RFC 0004）。
     pub(crate) plugin_root: Arc<PathBuf>,
+    /// 面板控件 schema 缓存，键 `(plugin_id, panel_id, plugin_version)`（D61）。
+    pub(crate) panel_schema_cache: Arc<Mutex<hp_plugin_host::PanelSchemaCache>>,
     /// AI 打标任务队列（内存，D6/D17）。
     pub(crate) ai: Arc<Mutex<AiTaggingService>>,
 }
@@ -77,6 +79,7 @@ fn make_state(app: &tauri::AppHandle) -> AppState {
         media: Arc::new(Mutex::new(None)),
         media_embed: Arc::new(Mutex::new(None)),
         plugin_root: Arc::new(plugin_root),
+        panel_schema_cache: Arc::new(Mutex::new(hp_plugin_host::PanelSchemaCache::new())),
         ai: Arc::new(Mutex::new(AiTaggingService::new())),
     }
 }
@@ -179,6 +182,8 @@ fn main() {
             commands::plugin::plugin_load,
             commands::plugin::plugin_versions,
             commands::plugin::plugin_rollback,
+            commands::plugin::plugin_panel_schema,
+            commands::plugin::plugin_validate_control,
             commands::ai::ai_config_create,
             commands::ai::ai_config_list,
             commands::ai::ai_config_remove,

@@ -1,5 +1,10 @@
 /**
  * M5：插件命令封装（plugin.*，RFC 0004）。
+ *
+ * **D76 迁移状态**：`plugin.*` 整体属 D76 批次里的 `plugin` 批（**尚未迁移**，下表命令
+ * 仍裸返回）；本域**新增**的两条控件通道命令（`plugin.panelSchema` /
+ * `plugin.validateControl`）按 D76「新增命令一律按新口径」直接返回
+ * `{ ok, data?, error? }`，因此经 [`unwrapApi`] 解包。
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -11,7 +16,10 @@ import type {
   PluginStateItem,
 } from "@hamster-pouch/shared-types";
 
+import type { ControlValidateResult } from "@hamster-pouch/config";
+
 import type { PluginContributions } from "../types";
+import { unwrapApi, type ApiResponse } from "./response";
 
 /** 列出已安装插件 */
 export function pluginList(): Promise<PluginItem[]> {
@@ -73,4 +81,48 @@ export function pluginRollback(pluginId: string, version: string): Promise<strin
  */
 export function pluginContributions(repoId: string): Promise<PluginContributions> {
   return invoke<PluginContributions>("plugin_contributions", { repoId });
+}
+
+/** `plugin.panelSchema` 的返回项（D76 已包装）。 */
+export interface PanelSchemaItem {
+  panelId: string;
+  pluginId: string;
+  pluginVersion: string;
+  apiVersion: number;
+  /** 插件返回的 schema 文本：解析层校验在前端（控件标准第 7 节）。 */
+  schemaJson: string;
+  /** 本次是否命中 `(plugin_id, panel_id, plugin_version)` 缓存（诊断用）。 */
+  cached: boolean;
+}
+
+/**
+ * 向插件查询面板控件 schema（请求名 `ui.panel.schema`，控件标准第 2 节 / D61）。
+ *
+ * 失败（超时/输出超限/协议错/插件未启用）→ 抛 [`HpApiFailure`]，由界面把**该面板**
+ * 降级为错误态；其它面板不受影响。后端同时广播 `plugin.error`。
+ */
+export function pluginPanelSchema(
+  repoId: string,
+  panelId: string,
+): Promise<PanelSchemaItem> {
+  return invoke<ApiResponse<PanelSchemaItem>>("plugin_panel_schema", {
+    repoId,
+    panelId,
+  }).then(unwrapApi);
+}
+
+/**
+ * 业务级控件校验（Rust `ControlSchema::validate`，控件标准第 7 节 / D62）。
+ *
+ * 返回 `{ errors, warnings }`：解析层问题也在这里复算，因此**命令成功不等于 schema 可用**，
+ * 调用方必须自己看 `errors`。
+ */
+export function pluginValidateControl(
+  panelId: string,
+  schemaJson: string,
+): Promise<ControlValidateResult> {
+  return invoke<ApiResponse<ControlValidateResult>>("plugin_validate_control", {
+    panelId,
+    schemaJson,
+  }).then(unwrapApi);
 }

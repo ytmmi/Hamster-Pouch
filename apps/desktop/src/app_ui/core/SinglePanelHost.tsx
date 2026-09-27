@@ -7,6 +7,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { emit } from "@tauri-apps/api/event";
 
+import { SETTING_KEYS } from "@hamster-pouch/config";
+
 import { AppContext, type AppContextValue } from "./AppContext";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { TaskOverlay } from "./TaskOverlay";
@@ -14,6 +16,7 @@ import { bindTaskActions, startTaskEvents } from "./taskStore";
 import { useConfirm } from "./useConfirm";
 import { blueprintEngine } from "./blueprintEngine";
 import { DEFAULT_LANGUAGE, isLanguage, makeTranslator, type Language } from "../i18n";
+import * as api from "../shared/api";
 import { panelRender, panelTitle, type PanelRenderCtx } from "./panelRegistry";
 import type { FileItem, StatusType } from "../shared/types";
 
@@ -31,6 +34,20 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: StatusType } | null>(null);
+  // 主题与应用级设置同源（`ui.theme`）：独立窗口也必须与主窗口一致，
+  // 否则受控渲染器（控件）会取到与宿主不同的 token 档位。
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const savedTheme = (await api.settingGet({ key: SETTING_KEYS.theme })).value;
+        if (savedTheme === "dark" || savedTheme === "light") setTheme(savedTheme);
+      } catch {
+        /* 非 Tauri 运行时忽略 */
+      }
+    })();
+  }, []);
 
   const language: Language = isLanguage(lang) ? lang : DEFAULT_LANGUAGE;
   const t = useMemo(() => makeTranslator(language), [language]);
@@ -74,6 +91,7 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
       getDockview: () => null,
       language,
       setLanguage: () => undefined,
+      theme,
       t,
     }),
     [
@@ -90,6 +108,7 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
       confirm,
       resolveConfirm,
       language,
+      theme,
       t,
     ],
   );
@@ -107,7 +126,7 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
 
   return (
     <AppContext.Provider value={ctxValue}>
-      <div className="app-root single">
+      <div className={`app-root single ${theme === "dark" ? "theme-dark" : ""}`}>
         <div className="single-header">
           <span>{panelTitle(panelId, t)}</span>
           <button

@@ -10,8 +10,82 @@ use tauri::Manager;
 use crate::AppState;
 
 /// 统一把领域错误转为前端可见字符串。
+///
+/// **仅用于尚未迁移的旧命令**（D76 的分批迁移范围内）。新命令一律走
+/// [`api_from_hp`] 的结构化错误：`message` 只是诊断，前端按 `code` 走 i18n（D27）。
 pub(crate) fn hp_err_to_string(e: HpError) -> String {
     e.to_string()
+}
+
+/// **D76 统一响应包装**：`{ ok, data?, error? }`（`docs/spec/commands-events.md` 第 2 节）。
+///
+/// 新命令**必须**用这个形状；旧命令按 D76 的批次顺序（file → album → source → tag →
+/// media → plugin → blueprint → ai → fsops → repo/layout）分批迁移。
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ApiResponse<T> {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ApiError>,
+}
+
+/// **D76 结构化错误**。
+///
+/// `code` 取闭集 `validation` / `not_found` / `permission` / `plugin` / `io` / `conflict`
+/// （来源是 `HpError::code()`）。`message` **仅作诊断**：前端不得直接显示，
+/// 必须按 `code` 渲染 i18n 文案（D27：三套语言）。
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ApiError {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+impl ApiError {
+    pub(crate) fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            details: None,
+        }
+    }
+
+    /// 领域错误 → 结构化错误（`code` 由 `HpError::code()` 统一给出）。
+    pub(crate) fn from_hp(e: HpError) -> Self {
+        Self {
+            code: e.code().to_string(),
+            message: e.to_string(),
+            details: None,
+        }
+    }
+}
+
+/// 成功响应。
+pub(crate) fn api_ok<T>(data: T) -> ApiResponse<T> {
+    ApiResponse {
+        ok: true,
+        data: Some(data),
+        error: None,
+    }
+}
+
+/// 失败响应。
+pub(crate) fn api_err<T>(error: ApiError) -> ApiResponse<T> {
+    ApiResponse {
+        ok: false,
+        data: None,
+        error: Some(error),
+    }
+}
+
+/// `HpResult<T>` → 统一响应包装。
+pub(crate) fn api_from_hp<T>(result: HpResult<T>) -> ApiResponse<T> {
+    match result {
+        Ok(value) => api_ok(value),
+        Err(e) => api_err(ApiError::from_hp(e)),
+    }
 }
 
 /// 开发期诊断日志：追加一行到应用数据目录 `debug.log`。

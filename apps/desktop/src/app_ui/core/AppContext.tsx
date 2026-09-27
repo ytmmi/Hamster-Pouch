@@ -40,6 +40,8 @@ export interface AppContextValue {
   dispatch: (input: BlueprintDispatchInput) => void;
   language: Language;
   setLanguage: (lang: Language) => void;
+  /** 当前主题（`ui.theme` 设置项；控件渲染器等受控渲染需要与宿主同一套 token）。 */
+  theme: "light" | "dark";
   t: Translate;
 }
 

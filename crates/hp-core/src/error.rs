@@ -17,6 +17,27 @@ pub enum HpError {
     Io(String),
     /// 权限不足（能力未授权、插件未启用等）。
     Permission(String),
+    /// 插件运行时错误（schema 通道失败、进程异常、输出超限等）。
+    Plugin(String),
+}
+
+impl HpError {
+    /// **D76 结构化错误码**（闭集，`docs/spec/commands-events.md` 第 2 节）。
+    ///
+    /// 前端**不得**直接显示 `message`，必须按本码走 i18n 键（D27）。
+    /// 映射口径：`InvalidArgument → validation`、`NotFound → not_found`、
+    /// `Permission → permission`、`Plugin → plugin`、`Io`/`Store → io`、
+    /// `AlreadyExists → conflict`。
+    pub fn code(&self) -> &'static str {
+        match self {
+            HpError::InvalidArgument(_) => "validation",
+            HpError::NotFound(_) => "not_found",
+            HpError::Permission(_) => "permission",
+            HpError::Plugin(_) => "plugin",
+            HpError::Io(_) | HpError::Store(_) => "io",
+            HpError::AlreadyExists(_) => "conflict",
+        }
+    }
 }
 
 impl fmt::Display for HpError {
@@ -28,6 +49,7 @@ impl fmt::Display for HpError {
             HpError::Store(m) => write!(f, "存储错误: {m}"),
             HpError::Io(m) => write!(f, "IO 错误: {m}"),
             HpError::Permission(m) => write!(f, "权限不足: {m}"),
+            HpError::Plugin(m) => write!(f, "插件错误: {m}"),
         }
     }
 }

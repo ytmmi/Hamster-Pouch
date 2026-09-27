@@ -9,7 +9,7 @@
  * 这里**不做网络/命令调用**：查询与事件回传由调用方通过 `ctx` 注入，保持渲染器纯粹。
  */
 
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 
 import {
   CONTROL_API_VERSION,
@@ -32,10 +32,28 @@ export interface ControlPanelViewProps {
   validateCtx: ControlValidateCtx;
   /** 渲染上下文（主题/i18n/数据/事件/状态）。 */
   ctx: ControlRenderContext;
+  /**
+   * **业务级复算结果**（Rust `plugin.validateControl`，控件标准第 7 节）。
+   *
+   * 解析层（本文件）与业务级（宿主命令）是两道独立闸门：两者结论**合并**后才决定渲染，
+   * 任一道报硬错误即渲染错误态。`null` / 缺省表示"尚未取到"，此时只按解析层判定。
+   */
+  serverResult?: ControlValidateResult | null;
   /** 硬错误（解析或校验失败）时的回调：宿主记录并广播 `plugin.error`。 */
   onRejected?: (errors: string[]) => void;
   /** 软告警回调（不阻塞渲染）。 */
   onWarnings?: (warnings: string[]) => void;
+}
+
+/** 合并两道闸门的结论（去重，保持各自顺序）。 */
+function mergeUnique(...groups: readonly (readonly string[] | undefined)[]): string[] {
+  const out: string[] = [];
+  for (const group of groups) {
+    for (const item of group ?? []) {
+      if (!out.includes(item)) out.push(item);
+    }
+  }
+  return out;
 }
 
 /** 解析 + 校验（纯函数，便于自检脚本直接断言）。 */
@@ -61,20 +79,33 @@ export function ControlPanelView({
   schemaJson,
   validateCtx,
   ctx,
+  serverResult,
   onRejected,
   onWarnings,
 }: ControlPanelViewProps): ReactNode {
-  const inspected = useMemo(
-    () => inspectPanelSchema(schemaJson, validateCtx),
-    [schemaJson, validateCtx],
-  );
+  const inspected = useMemo(() => {
+    const local = inspectPanelSchema(schemaJson, validateCtx);
+    return {
+      schema: local.schema,
+      errors: mergeUnique(serverResult?.errors, local.errors),
+      warnings: mergeUnique(local.warnings, serverResult?.warnings),
+    };
+  }, [schemaJson, validateCtx, serverResult]);
+
+  // 回调一律放在 effect 里：渲染期调用回调会让宿主在 render 阶段 setState。
+  useEffect(() => {
+    if (inspected.errors.length > 0) onRejected?.(inspected.errors);
+  }, [inspected, onRejected]);
+  useEffect(() => {
+    if (inspected.errors.length === 0 && inspected.warnings.length > 0) {
+      onWarnings?.(inspected.warnings);
+    }
+  }, [inspected, onWarnings]);
 
   if (inspected.errors.length > 0) {
     // 错误态由宿主组件承担（不走控件渲染映射，避免"用一个控件渲染另一个控件的错误"）。
-    onRejected?.(inspected.errors);
     return <ControlSchemaRejected theme={ctx.theme} errors={inspected.errors} />;
   }
-  if (inspected.warnings.length > 0) onWarnings?.(inspected.warnings);
   if (!inspected.schema) return null;
   return <ControlSchemaView root={inspected.schema.root} ctx={ctx} />;
 }

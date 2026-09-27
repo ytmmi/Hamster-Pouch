@@ -576,6 +576,7 @@ export function AppUiApp(): JSX.Element {
       getDockview,
       language,
       setLanguage: changeLanguage,
+      theme,
       t,
     }),
     [
@@ -596,6 +597,7 @@ export function AppUiApp(): JSX.Element {
       getDockview,
       language,
       changeLanguage,
+      theme,
       t,
     ],
   );

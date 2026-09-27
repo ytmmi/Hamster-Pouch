@@ -2,13 +2,18 @@
 //!
 //! 宿主只做校验与编排，不直接操作数据库或文件系统业务；插件运行形态由 manifest 声明。
 
+mod channel;
 mod host;
 mod install;
 mod manifest;
 mod trust;
 
+pub use channel::{
+    ExternalProcessQuery, PanelSchemaCache, PanelSchemaKey, PanelSchemaParams,
+    PANEL_SCHEMA_REQUEST, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT,
+};
 pub use host::{
-    LoadOutcome, PluginHost, RepoContribution, SettingsSectionDecl,
+    LoadOutcome, PanelOwner, PluginHost, RepoContribution, SettingsSectionDecl,
 };
 pub use install::{InstallSource, InstalledPackage, PluginInstaller};
 pub use manifest::{discover_packages, parse_manifest, read_package, PluginPackage, MANIFEST_FILE};

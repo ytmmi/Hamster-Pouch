@@ -11,6 +11,26 @@ use hp_store::GlobalDb;
 
 use crate::manifest::parse_manifest;
 
+/// 面板归属：宿主按**注册表反查**该面板由哪个已安装插件提供。
+///
+/// 为什么不用 `panel_id` 字符串切分反推 `plugin_id`：`plugin_id` 自身含点
+/// （`plugin.dev.hamsterpouch.system.palette.palette.panel`），切分天然有歧义。
+/// 反查注册表则是"宿主是最终裁决者"的直接落地——插件无法通过 id 命名左右归属。
+#[derive(Debug, Clone, PartialEq)]
+pub struct PanelOwner {
+    pub plugin_id: String,
+    pub plugin_version: String,
+    pub runtime_kind: RuntimeKind,
+    /// 已安装版本目录（注册表 `source_ref`；缺失时为 `None`）。
+    pub version_dir: Option<std::path::PathBuf>,
+    /// `entry` 按版本目录解析后的绝对路径（宿主解析，插件不能指定）。
+    pub entry_path: Option<std::path::PathBuf>,
+    /// 插件声明的查询名（`data_queries` / `dataQuery` 贡献点）。
+    pub declared_queries: Vec<String>,
+    /// 插件声明的事件 id（`events`）。
+    pub declared_events: Vec<String>,
+}
+
 /// 插件加载结果（生命周期骨架）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadOutcome {
@@ -156,6 +176,52 @@ impl PluginHost {
             api_version: HostApiVersion::current().value(),
             grants: state.grants,
         })
+    }
+
+    /// 反查面板归属：**哪个已安装插件**声明了这个面板 id（RFC 0010 决策 4）。
+    ///
+    /// 返回 `Ok(None)` = 没有任何已安装插件声明该面板（面板可能来自已卸载的插件，
+    /// 此时面板按「未接通」处理，不是错误）。
+    pub fn find_panel_owner(
+        &self,
+        db: &GlobalDb,
+        panel_id: &str,
+    ) -> HpResult<Option<PanelOwner>> {
+        for row in db.list_plugins()? {
+            // 安装目录里的清单是权威；解析失败的行跳过（该行本身已不可用）。
+            let Ok(manifest) = parse_manifest(&row.manifest_json) else {
+                continue;
+            };
+            let declared = manifest.contributions.iter().any(|c| {
+                c.kind == ContributionKind::Panel
+                    && c.panel_decl(Some(manifest.id.as_str())).id == panel_id
+            });
+            if !declared {
+                continue;
+            }
+            let version_dir = row.source_ref.as_ref().map(std::path::PathBuf::from);
+            let entry_path = version_dir
+                .as_ref()
+                .map(|dir| dir.join(&manifest.entry));
+            return Ok(Some(PanelOwner {
+                plugin_id: manifest.id.as_str().to_string(),
+                plugin_version: manifest.version.clone(),
+                runtime_kind: manifest.runtime_kind,
+                version_dir,
+                entry_path,
+                declared_queries: manifest
+                    .declared_query_names()
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+                declared_events: manifest
+                    .declared_event_ids()
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            }));
+        }
+        Ok(None)
     }
 
     /// **注册表视图**：某仓库当前**已启用**插件注册的面板 / 蓝图节点类型 / 设置分节
