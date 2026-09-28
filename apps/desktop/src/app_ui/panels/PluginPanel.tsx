@@ -57,6 +57,31 @@ export function PluginPanel(): JSX.Element {
     }
   }, [path, load, app]);
 
+  /**
+   * 安装**随应用分发**的 system 插件包（`plugin.installBundled`）。
+   *
+   * 无参数：装什么、装成什么来源都由宿主决定（调用方无法指定路径，否则 `system`
+   * 就成了自助等级）。逐项的 `skipped` / `failed` 只进控制台诊断——界面文案按
+   * `status` 走 i18n，不直显后端诊断串（D27）。
+   */
+  const installBundled = useCallback(async () => {
+    setBusy(true);
+    try {
+      const report = await api.pluginInstallBundled();
+      await load();
+      app.status(app.t("plugin.bundledDone", { count: report.items.length }), "ok");
+      for (const item of report.items) {
+        if (item.status !== "installed" && item.status !== "alreadyInstalled") {
+          console.warn("[plugin] 随包插件未安装", item.name, item.status, item.message);
+        }
+      }
+    } catch (e) {
+      app.status(errorTextOf(app.t, e), "error");
+    } finally {
+      setBusy(false);
+    }
+  }, [load, app]);
+
   const toggle = useCallback(
     async (plugin: PluginItem, enabled: boolean) => {
       if (!app.repoId) {
@@ -110,6 +135,13 @@ export function PluginPanel(): JSX.Element {
         />
         <button disabled={busy} onClick={() => void install()}>
           {app.t("plugin.install")}
+        </button>
+        <button
+          disabled={busy}
+          title={app.t("plugin.installBundledHint")}
+          onClick={() => void installBundled()}
+        >
+          {app.t("plugin.installBundled")}
         </button>
       </div>
       <div className="list">

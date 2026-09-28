@@ -159,6 +159,19 @@ pub(crate) fn default_repo_dir(app: &tauri::AppHandle) -> Result<PathBuf, String
 /// 打包后通常以 exe 所在目录为工作目录，而 `external-cli/` 位于仓库根 / exe 同级。
 /// 只按 cwd 拼一次相对路径会让两种布局**都**解析失败（表现为「未找到 mpv 可执行文件」）。
 fn find_upwards(relative: &str) -> Option<PathBuf> {
+    find_upwards_matching(relative, |p| p.is_file())
+}
+
+/// 同 [`find_upwards`]，但判据是**目录**（随包插件是目录，用文件判据永远找不到）。
+fn find_upwards_dir(relative: &str) -> Option<PathBuf> {
+    find_upwards_matching(relative, |p| p.is_dir())
+}
+
+/// 逐级向上查找的公共实现：`roots` 依次为工作目录与可执行文件目录，各自向上遍历祖先。
+fn find_upwards_matching(
+    relative: &str,
+    matches: impl Fn(&std::path::Path) -> bool,
+) -> Option<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
         roots.push(cwd);
@@ -171,12 +184,29 @@ fn find_upwards(relative: &str) -> Option<PathBuf> {
     for root in roots {
         for dir in root.ancestors() {
             let candidate = dir.join(relative);
-            if candidate.is_file() {
+            if matches(&candidate) {
                 return Some(candidate);
             }
         }
     }
     None
+}
+
+/// 随应用分发的 **system 插件包根目录**（仓库内是 `plugins/system`）。
+///
+/// 解析顺序与 [`external_bin_path`] 一致：环境变量 `HP_BUNDLED_PLUGINS_DIR` 优先
+/// （一旦设置即原样采信，不因目录不存在而静默回退——"路径写错"应在使用处如实报错），
+/// 否则自工作目录 / 可执行文件目录逐级向上查找。
+///
+/// **打包边界（本轮未落地）**：`apps/desktop/src-tauri/tauri.conf.json` 目前**没有**
+/// `bundle.resources` 声明，打包产物里**不包含** `plugins/system`。因此本函数只解析
+/// 开发期/仓库内布局；随包分发需另补 `bundle.resources`，见
+/// `docs/spec/commands-events.md` §3.11 `plugin.installBundled` 的备注。
+pub(crate) fn bundled_plugins_dir() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("HP_BUNDLED_PLUGINS_DIR") {
+        return Some(PathBuf::from(p));
+    }
+    find_upwards_dir("plugins/system")
 }
 
 /// 解析随应用发布的外部 CLI 路径：环境变量优先，其次按 `relative` 向上查找。
@@ -337,6 +367,27 @@ mod tests {
         assert!(find_upwards("external-cli/definitely-missing/nope.exe").is_none());
     }
 
+    /// 随包插件根是**目录**：必须用目录判据，文件判据永远找不到它。
+    #[test]
+    fn find_upwards_dir_finds_the_bundled_plugin_root() {
+        let found =
+            find_upwards_dir("plugins/system").expect("应从祖先目录找到仓库内的 plugins/system");
+        assert!(found.is_dir());
+        assert!(found.join("palette").join("plugin.manifest").is_file());
+        let normalized = found.to_string_lossy().replace('\\', "/");
+        assert!(
+            normalized.ends_with("plugins/system"),
+            "意外路径: {normalized}"
+        );
+    }
+
+    /// 同一条相对路径上，文件判据与目录判据结论相反——这正是"随包插件用错判据"的形态。
+    #[test]
+    fn file_and_dir_lookups_disagree_on_a_directory() {
+        assert!(find_upwards("plugins/system").is_none());
+        assert!(find_upwards_dir("plugins/system").is_some());
+    }
+
     /// 显式环境变量覆盖优先于自动查找（且不做存在性回退）。
     #[test]
     fn env_override_wins_over_lookup() {
@@ -345,5 +396,15 @@ mod tests {
         let got = external_bin_path(key, "external-cli/ffmpeg/bin/ffmpeg.exe");
         std::env::remove_var(key);
         assert_eq!(got, Some(PathBuf::from("Z:/explicit/override.exe")));
+    }
+
+    /// 随包插件根同样支持环境变量覆盖，且同样是"设置了就原样采信"。
+    #[test]
+    fn bundled_plugins_dir_honours_env_override() {
+        let key = "HP_BUNDLED_PLUGINS_DIR";
+        std::env::set_var(key, "Z:/explicit/bundled");
+        let got = bundled_plugins_dir();
+        std::env::remove_var(key);
+        assert_eq!(got, Some(PathBuf::from("Z:/explicit/bundled")));
     }
 }

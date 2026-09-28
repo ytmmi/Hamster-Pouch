@@ -35,6 +35,41 @@ export function pluginInstallLocal(path: string): Promise<PluginItem> {
   return invoke<ApiResponse<PluginItem>>("plugin_install_local", { path }).then(unwrapApi);
 }
 
+/**
+ * `plugin.installBundled` 的逐项结果。
+ *
+ * 字段是**蛇形**，与本域管理命令（`plugin.list` 的 `PluginItem`）同口径：命令返回值
+ * 不是事件载荷，不受 D77 的驼峰约束。
+ */
+export interface BundledInstallItem {
+  /** 随包目录名（`plugins/system/<name>`）。 */
+  name: string;
+  plugin_id: string | null;
+  version: string | null;
+  /** `installed` / `alreadyInstalled` / `skipped` / `failed`。 */
+  status: string;
+  /** 诊断串；界面文案按 `status` 走 i18n，**不直显**（D27）。 */
+  message: string | null;
+}
+
+/** `plugin.installBundled` 的报告。 */
+export interface BundledInstallReport {
+  /** 实际使用的随包根目录（诊断用）。 */
+  root: string;
+  items: BundledInstallItem[];
+}
+
+/**
+ * 把**随应用分发**的 system 插件包（`plugins/system/*`）装进插件根并登记注册表。
+ *
+ * **无参数**：命令既不接受路径也不接受插件 id，因此不存在"由调用方决定把什么装成
+ * `system`"的入口（缺陷 0008 的边界）。来源与信任由宿主判定，恒为 `system`。
+ * **幂等**：同版本目录已存在 → 该项 `alreadyInstalled`，不覆盖、不报错。
+ */
+export function pluginInstallBundled(): Promise<BundledInstallReport> {
+  return invoke<ApiResponse<BundledInstallReport>>("plugin_install_bundled").then(unwrapApi);
+}
+
 /** 按仓库启用并授权能力 */
 export function pluginEnable(
   repoId: string,

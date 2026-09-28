@@ -174,6 +174,7 @@ fn main() {
             commands::plugin::plugin_list,
             commands::plugin::plugin_discover,
             commands::plugin::plugin_install_local,
+            commands::plugin::plugin_install_bundled,
             commands::plugin::plugin_enable,
             commands::plugin::plugin_disable,
             commands::plugin::plugin_state,

@@ -86,18 +86,55 @@ impl PluginInstaller {
         })
     }
 
-    /// 安装插件包并构造**注册表行**：来源与信任等级由宿主按 [`InstallSource`] 判定。
+    /// 安装或**复用**同版本目录：已存在则不复制、不覆盖，直接读回已安装包。
     ///
-    /// 这是安装入口的宿主侧实现（Tauri 桥接层只做库/锁编排）：
-    /// `trust_level` 与注册表 `source_kind` 列**同源于宿主判定**，manifest 里的
-    /// `source` 自始至终不参与推导——过去本地目录自称 `system` 即可解锁 `native.code`
-    /// （RFC 0009「来源与信任判定」/ 缺陷 0008）。
-    pub fn install_registry_row(
+    /// 供"随包播种 / 修复"类入口使用（`plugin.installBundled`）：版本目录按 RFC 0004
+    /// 是**不可变**的（锁定版本 + 手动更新），所以重复播种同一版本是**幂等**操作，
+    /// 不是错误。返回 `(已安装包, 是否复用了既有目录)`。
+    ///
+    /// [`PluginInstaller::install`] 保持严格语义（同版本重复安装即 `AlreadyExists`）——
+    /// 需要"明确不许覆盖"的调用方仍走它。
+    pub fn install_or_reuse(&self, source: &InstallSource) -> HpResult<(InstalledPackage, bool)> {
+        let src_dir = source.dir();
+        let package = read_package(src_dir)?;
+        package.manifest.validate()?;
+
+        let dest = self.version_dir(package.manifest.id.as_str(), &package.manifest.version);
+        if dest.is_dir() {
+            // 复用：以**已安装目录**的清单为准（版本锁定意味着同版本即同内容）。
+            // 不比对内容——同版本出现不同内容属打包失误，不是安装器该静默覆盖的事。
+            let installed = InstalledPackage {
+                package: read_package(&dest)?,
+                dir: dest,
+            };
+            return Ok((installed, true));
+        }
+
+        copy_dir(src_dir, &dest)?;
+
+        if let InstallSource::Git { url, rev, .. } = source {
+            write_lock(&dest, url, rev)?;
+        }
+
+        Ok((
+            InstalledPackage {
+                package,
+                dir: dest,
+            },
+            false,
+        ))
+    }
+
+    /// 由已安装包构造注册表行：`source_kind` / `trust_level` **同源于宿主判定**。
+    ///
+    /// 抽成私有方法是为了让"新装"与"复用既有版本"两条路径共用**同一处**信任推导——
+    /// 一旦分叉，就又有可能长出第二条信任来源（缺陷 0008 的形态）。
+    fn registry_row_of(
         &self,
+        installed: &InstalledPackage,
         source: &InstallSource,
         installed_at: impl Into<String>,
     ) -> HpResult<PluginRegistryRow> {
-        let installed = self.install(source)?;
         let manifest = &installed.package.manifest;
         let manifest_json = std::fs::read_to_string(installed.dir.join(MANIFEST_FILE))
             .map_err(|e| HpError::Io(format!("读取插件清单失败: {e}")))?;
@@ -113,6 +150,37 @@ impl PluginInstaller {
             installed_at: installed_at.into(),
             manifest_json,
         })
+    }
+
+    /// 安装插件包并构造**注册表行**：来源与信任等级由宿主按 [`InstallSource`] 判定。
+    ///
+    /// 这是安装入口的宿主侧实现（Tauri 桥接层只做库/锁编排）：
+    /// `trust_level` 与注册表 `source_kind` 列**同源于宿主判定**，manifest 里的
+    /// `source` 自始至终不参与推导——过去本地目录自称 `system` 即可解锁 `native.code`
+    /// （RFC 0009「来源与信任判定」/ 缺陷 0008）。
+    pub fn install_registry_row(
+        &self,
+        source: &InstallSource,
+        installed_at: impl Into<String>,
+    ) -> HpResult<PluginRegistryRow> {
+        let installed = self.install(source)?;
+        self.registry_row_of(&installed, source, installed_at)
+    }
+
+    /// 同 [`PluginInstaller::install_registry_row`]，但**幂等**：同版本目录已存在时复用
+    /// 它而不是报 `AlreadyExists`。返回 `(注册表行, 是否复用了既有目录)`。
+    ///
+    /// 语义边界：复用**不比对内容**——版本目录按 RFC 0004 不可变，同版本即同内容；
+    /// 若打包侧真把同一版本写出两份不同内容，那是打包失误，应由校验发现而不是被
+    /// 安装器静默覆盖。信任推导与"新装"路径共用 [`PluginInstaller::registry_row_of`]。
+    pub fn install_or_reuse_registry_row(
+        &self,
+        source: &InstallSource,
+        installed_at: impl Into<String>,
+    ) -> HpResult<(PluginRegistryRow, bool)> {
+        let (installed, reused) = self.install_or_reuse(source)?;
+        let row = self.registry_row_of(&installed, source, installed_at)?;
+        Ok((row, reused))
     }
 
     /// 回滚：切回已存在的旧版本目录（目录切换，不依赖网络）。
@@ -276,5 +344,71 @@ mod tests {
         let tmp = tempfile::tempdir().expect("临时目录失败").keep();
         let installer = PluginInstaller::new(tmp.join("store"));
         assert!(installer.rollback("dev.hamsterpouch.hello", "9.9.9").is_err());
+    }
+
+    /// 幂等入口：重复播种同版本 = 复用既有目录（不报错、不覆盖），
+    /// 而严格入口 [`PluginInstaller::install`] 的语义**不变**（仍拒绝重复安装）。
+    #[test]
+    fn install_or_reuse_reuses_existing_version_and_keeps_install_strict() {
+        let tmp = tempfile::tempdir().expect("临时目录失败").keep();
+        let installer = PluginInstaller::new(tmp.join("store"));
+        let v1 = make_package(&tmp, "0.1.0");
+
+        let (first, reused) = installer
+            .install_or_reuse(&InstallSource::LocalPath(v1.clone()))
+            .expect("首次安装失败");
+        assert!(!reused, "首次安装不应标记为复用");
+        assert_eq!(first.package.manifest.version, "0.1.0");
+
+        let (second, reused) = installer
+            .install_or_reuse(&InstallSource::LocalPath(v1.clone()))
+            .expect("重复播种应复用既有目录，而不是报错");
+        assert!(reused, "同版本目录已存在时必须标记为复用");
+        assert_eq!(second.dir, first.dir);
+
+        // 严格入口语义不变：同版本重复安装仍被拒绝（RFC 0004 锁定版本）。
+        assert!(installer.install(&InstallSource::LocalPath(v1)).is_err());
+    }
+
+    /// 两条路径（新装 / 复用）必须给出**同一处**推导的来源与信任等级。
+    #[test]
+    fn install_or_reuse_registry_row_derives_trust_from_host_on_both_paths() {
+        use hp_core::{SourceKind, TrustLevel};
+
+        let tmp = tempfile::tempdir().expect("临时目录失败").keep();
+        let installer = PluginInstaller::new(tmp.join("store"));
+        let source = InstallSource::LocalPath(make_package(&tmp, "0.1.0"));
+
+        let (row1, reused1) = installer
+            .install_or_reuse_registry_row(&source, "t1")
+            .expect("首次注册失败");
+        let (row2, reused2) = installer
+            .install_or_reuse_registry_row(&source, "t2")
+            .expect("复用注册失败");
+
+        assert!(!reused1);
+        assert!(reused2);
+        // manifest 里 `trust.requested = local-dev`，宿主判定仍是 local-path/local-dev。
+        assert_eq!(row1.source_kind, SourceKind::LocalPath);
+        assert_eq!(row1.trust_level, TrustLevel::LocalDev);
+        assert_eq!(row2.source_kind, row1.source_kind);
+        assert_eq!(row2.trust_level, row1.trust_level);
+    }
+
+    /// 随包来源在两条路径上都是 `system`（宿主按安装入口判定，与 manifest 无关）。
+    #[test]
+    fn install_or_reuse_registry_row_keeps_bundled_as_system() {
+        use hp_core::{SourceKind, TrustLevel};
+
+        let tmp = tempfile::tempdir().expect("临时目录失败").keep();
+        let installer = PluginInstaller::new(tmp.join("store"));
+        let source = InstallSource::Bundled(make_package(&tmp, "0.1.0"));
+
+        let (row, _) = installer
+            .install_or_reuse_registry_row(&source, "t1")
+            .expect("随包注册失败");
+        assert_eq!(row.source_kind, SourceKind::System);
+        assert_eq!(row.trust_level, TrustLevel::System);
+        assert!(row.trust_level.allows_dynamic_library());
     }
 }

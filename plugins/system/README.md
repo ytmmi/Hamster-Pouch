@@ -2,6 +2,19 @@
 
 系统插件源码与打包输入，随应用发布（运行时插件目录在应用数据目录下的 `plugins/`，不在此目录）。
 
+## 装进应用
+
+随包插件经 `plugin.installBundled` 播种：宿主在**本目录的直接子目录**里找带 `plugin.manifest` 的包，
+装进应用数据目录的插件根并登记全局注册表。
+
+- **命令不带参数**：既不接受路径也不接受插件 id —— 一个"能指定安装位置"的 `system` 入口
+  等于把缺陷 0008（本地目录自封 `system`）从后门放回来。来源固定为 `InstallSource::Bundled`。
+- **幂等**：同版本目录已存在即复用（`alreadyInstalled`），不覆盖（RFC 0004 锁定版本）。
+- 目录里没有 `plugin.manifest` 的项按 `skipped` 跳过（如 `python-core/`），不影响其余插件。
+- 根目录解析：`HP_BUNDLED_PLUGINS_DIR` 优先，否则自工作目录 / 可执行文件目录向上查找 `plugins/system`。
+- **打包边界（未落地）**：`apps/desktop/src-tauri/tauri.conf.json` 目前**没有** `bundle.resources`，
+  打包产物里还不包含本目录；随应用分发需另补该声明（见 `docs/spec/commands-events.md` §3.11）。
+
 ## 内容
 
 - `palette/`：系统色彩面板插件示例（`system` 信任等级），
