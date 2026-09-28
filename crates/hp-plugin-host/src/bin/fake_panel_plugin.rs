@@ -47,6 +47,25 @@ fn main() {
         .unwrap_or("unknown.panel")
         .to_string();
 
+    // ── 控件事件回传（契约的字面方法名 `plugin.{plugin_id}.{event_id}`）──
+    //
+    // **必须写到文件**，不能只写 stderr：宿主启动插件时把 stderr 设为 `null`
+    // （`crates/hp-plugin-host/src/channel.rs` 的 `call`——一次一问一答的收尾口径），
+    // 因此往 stderr 打日志在真机上**根本看不到**，"事件有没有到插件"就变得不可证。
+    // 落一个追加文件，让真机验收有一条可核查的证据。
+    if let Some(event_id) = method.strip_prefix("plugin.") {
+        let path = std::env::temp_dir().join("hp-control-demo-events.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = writeln!(f, "{event_id}\t{params}");
+        }
+        emit_json(&json!({ "jsonrpc": "2.0", "id": 1, "result": { "ok": true } }));
+        return;
+    }
+
     // ── 取数分支（`ui.panel.query`）──
     if method == "ui.panel.query" {
         match mode.as_str() {

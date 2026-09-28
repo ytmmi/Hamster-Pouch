@@ -47,3 +47,30 @@ Copy-Item target\release\fake_panel_plugin.exe plugins\examples\control-demo\bin
 3. 打开面板「控件通道示例」。
 
 信任等级恒为 `local-dev`（来源由宿主判定，manifest 自称无效——RFC 0009）。
+
+## 事件回传怎么核查（重要）
+
+点面板里的控件后，插件会把每次事件**追加写入**：
+
+```
+%TEMP%\hp-control-demo-events.log
+```
+
+每行是 `<事件id>\t<宿主构造的载荷 JSON>`，例如：
+
+```
+dev.hamsterpouch.example.control_demo.apply	{"control_id":"items","event":"click","panel_id":"…"}
+```
+
+**为什么不是打日志到 stderr**：宿主启动插件时把 stderr 设为 `null`
+（`crates/hp-plugin-host/src/channel.rs` 的 `call`，一次一问一答的收尾口径），
+写 stderr 在真机上**根本看不到**。落文件才能让"事件到底有没有到插件"变成可核查的事实。
+
+查看：
+
+```powershell
+Get-Content "$env:TEMP\hp-control-demo-events.log"
+```
+
+> 面板标题会显示成原始键 `plugin.controlDemo.panel` ——插件语言资源通道尚未落地，
+> `tKey` 目前原样返回键名，这是**已知缺口**，不是本插件的问题。
