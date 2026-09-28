@@ -1,0 +1,39 @@
+# 文本文件的规范化与行尾策略（2026-09 新增）。
+#
+# 为什么需要它：仓库此前**没有** `.gitattributes`，而 `core.autocrlf = true`，
+# 于是每次 `git status` / `git add` 都会刷一屏 `LF will be replaced by CRLF`；
+# 更要命的是**行尾风格完全不受约束**——2026-09 实测：仓库里有 11 个工作区文件是 CRLF
+# （2 个还是 CRLF/LF **混用**），而 `core.autocrlf` 的规范化让 `git status` 显示"干净"，
+# 于是没人发现。同一类事故的另一个形态是把 BOM 写进源码（`Set-Content -Encoding UTF8`
+# 就会），`pnpm check:encoding` 此前也不查。
+#
+# 口径：
+# - 文本文件一律 **LF**、**不带 BOM**。`tools/check-encoding.mjs` 会失败于 BOM 与
+#   **混用**的行尾，并把统一 CRLF 的文件列出来（便于逐步收紧）。
+# - `text=auto` 让 git 自动识别二进制（`external-cli/**/*.exe`、`*.dll`、`*.db` 等），
+#   它们不受本行影响。
+* text=auto eol=lf
+
+# 明确声明二进制，避免任何"文本化"误判（这些是随仓库分发或本地生成的大块产物）。
+*.exe binary
+*.dll binary
+*.com binary
+*.db binary
+*.sqlite3 binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.wav binary
+*.mp3 binary
+*.mp4 binary
+*.zip binary
+
+# 锁文件与快照：由工具生成，一律按文本处理（LF）。
+Cargo.lock text eol=lf
+pnpm-lock.yaml text eol=lf

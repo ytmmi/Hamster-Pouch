@@ -11,7 +11,7 @@
  * 用法：pnpm check:blueprint-engine [仓库库路径] [蓝图id]
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const ROOT = "E:/Hamster Pouch";
@@ -726,6 +726,42 @@ if (dbPath && existsSync(dbPath)) {
     legacy.includes("show plugin.a.panel") && legacy.includes("show plugin.b.panel"),
     legacy.join(" | ") || "（无动作）",
   );
+}
+
+// ---- dockview 选择器契约守护（overlayChrome 依赖 dockview **内部类名**）----
+//
+// 浮层容器渲染落在 dockview 为浮动组生成的窗口元素上（`.dv-resize-container` 与
+// `.dv-floating-titlebar`）。这两个是**库的内部类名**：dockview 升级改名后容器会
+// **静默不再被装饰**——界面只是"没圆角/没阴影"，诊断日志里最多表现为
+// 「容器 0/N 个窗口」，没有任何东西会红。因此这里把「选择器常量 ↔ 实际安装的
+// dockview 样式表」对起来：库里改一名，本断言立刻失败。
+{
+  const cssCandidates = [
+    `${ROOT}/apps/desktop/node_modules/dockview-react/dist/styles/dockview.css`,
+    `${ROOT}/node_modules/dockview-react/dist/styles/dockview.css`,
+  ];
+  const cssPath = cssCandidates.find((p) => existsSync(p));
+  const selectors = [
+    ["FLOATING_WINDOW_SELECTOR", chrome.FLOATING_WINDOW_SELECTOR],
+    ["FLOATING_TITLEBAR_SELECTOR", chrome.FLOATING_TITLEBAR_SELECTOR],
+  ];
+  if (!cssPath) {
+    check(
+      "dockview 选择器契约：找得到 dockview 样式表",
+      false,
+      "未找到 dockview-react/dist/styles/dockview.css（先 pnpm install）",
+    );
+  } else {
+    const css = readFileSync(cssPath, "utf8");
+    const missing = selectors.filter(([, value]) => !value || !css.includes(value));
+    check(
+      "dockview 选择器契约：overlayChrome 的选择器在已安装的 dockview 样式表里真实存在",
+      missing.length === 0,
+      missing.length
+        ? missing.map(([n, v]) => `${n}=${v} 不在样式表里`).join(" | ")
+        : selectors.map(([n, v]) => `${n}=${v}`).join(" | "),
+    );
+  }
 }
 
 const failed = results.filter((r) => !r.ok);
