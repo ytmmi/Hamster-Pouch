@@ -296,6 +296,38 @@ check(
   groupMismatch.join(" | ") || `${groups.length} 个分类分组逐项一致`,
 );
 
+// ==================== 右键菜单与面板边界（2026-09 缺陷修复的守护）====================
+//
+// 防的是：dockview 在布局动画期给 `.dv-view` 加 `will-change: transform`
+// （`dockview.css` 的 `.dv-pane-container.dv-animated .dv-view` /
+// `.dv-split-view-container.dv-animation .dv-view`），使它成为 `position: fixed`
+// 的**包含块**。菜单若还渲染在面板内部，`left: clientX` 就会被当成"相对面板"的坐标，
+// 表现为**菜单跑到面板右下角、离光标很远**，并被 `.dv-groupview { overflow: hidden }`
+// **按面板边缘裁掉**。portal 到 `body` 是这条链的唯一解——所以它必须是门禁而不是注释。
+
+const contextMenuSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/menu/ContextMenu.tsx"),
+  "utf8",
+);
+const stylesSource = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/styles.css"),
+  "utf8",
+);
+check(
+  "右键菜单 portal 到 document.body（否则被 .dv-view 的 transform 俘获、按面板边缘截断）",
+  /import\s*\{[^}]*createPortal[^}]*\}\s*from\s*"react-dom"/.test(contextMenuSrc) &&
+    /createPortal\(/.test(contextMenuSrc) &&
+    /document\.body/.test(contextMenuSrc),
+);
+check(
+  "右键菜单仍是 position: fixed（portal 生效的前提；改回 absolute 会相对滚动容器定位）",
+  /\.context-menu\s*\{[^}]*position:\s*fixed/.test(stylesSource),
+);
+check(
+  "右键菜单越界时翻到光标另一侧（不是只贴边内收——那会让菜单离光标很远）",
+  /x\s*-\s*width/.test(contextMenuSrc) && /y\s*-\s*contentHeight/.test(contextMenuSrc),
+);
+
 // ============================== 汇总 ==============================
 
 const passed = results.filter((r) => r.ok).length;
