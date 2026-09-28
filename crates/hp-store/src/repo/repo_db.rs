@@ -43,8 +43,6 @@ impl RepoDb {
         let db = Self::open_inner(path)?;
         db.set_meta("name", name)?;
         db.set_meta("created_at", &now_iso())?;
-        let version = db.schema_version()?.to_string();
-        db.set_meta("schema_version", &version)?;
         Ok(db)
     }
 
@@ -73,7 +71,21 @@ impl RepoDb {
         migrate::apply(&mut conn, REPO_MIGRATIONS)?;
         // 打开即把低版本蓝图文档一次性迁移到当前版本并回写（RFC 0007 / D52）。
         crate::repo::blueprint_repo::migrate_blueprint_documents(&mut conn)?;
-        Ok(Self { conn })
+        // 版本的**唯一权威**是 `PRAGMA user_version`（database-schema.md 第 5 节）；
+        // `repo_meta.schema_version` 只是镜像键，必须在**新建与打开两条路径的唯一汇合点**回写，
+        // 否则升级过的库会与权威值分叉（缺陷 0006）。此处不能下沉到 `migrate::apply`：
+        // 那个执行器由仓库库/全局库/词库共用，且只有全局库与词库没有 `repo_meta`。
+        let db = Self { conn };
+        db.sync_schema_version_meta()?;
+        Ok(db)
+    }
+
+    /// 以 `PRAGMA user_version` 为准回写 `repo_meta.schema_version` 镜像键。
+    ///
+    /// 幂等：每次打开都写一次，值恒等于权威版本。镜像键**不得**被当作版本依据读取。
+    fn sync_schema_version_meta(&self) -> HpResult<()> {
+        let version = self.schema_version()?.to_string();
+        self.set_meta("schema_version", &version)
     }
 
     /// 当前 schema 版本。

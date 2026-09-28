@@ -83,11 +83,48 @@ fn repo_meta_roundtrip_and_version() {
     let db = RepoDb::create(&path, "元信息仓库").expect("创建失败");
     assert_eq!(db.schema_version().expect("读版本失败"), 7);
     assert_eq!(db.meta("name").expect("读名失败").as_deref(), Some("元信息仓库"));
-    assert!(db.meta("schema_version").expect("读版本失败").is_some());
+    assert_eq!(
+        db.meta("schema_version").expect("读版本失败").as_deref(),
+        Some("7"),
+        "镜像键必须等于权威版本（缺陷 0006）"
+    );
     db.close().expect("关闭失败");
 
     let db = RepoDb::open(&path).expect("重开失败");
     assert_eq!(db.schema_version().expect("读版本失败"), 7);
+    assert_eq!(db.meta("schema_version").expect("读版本失败").as_deref(), Some("7"));
+    db.close().expect("关闭失败");
+}
+
+/// 缺陷 0006 回归：由**旧版本**创建的仓库库被当前版本打开后，
+/// 权威版本（`PRAGMA user_version`）与镜像键（`repo_meta.schema_version`）必须一致。
+///
+/// 构造方式：先把库退化成 v6 形态（删掉 `repo/0007` 建的那条索引 + 两处版本一起退回 6），
+/// 再让 `RepoDb::open` 应用 `repo/0007`。修复前镜像键会停留在 6（本测试即红），
+/// 修复后两边都是 7。
+#[test]
+fn upgraded_repo_schema_version_mirror_does_not_diverge() {
+    let path = temp_repo_path("meta-upgrade");
+    RepoDb::create(&path, "旧版仓库").expect("创建失败").close().expect("关闭失败");
+
+    {
+        let conn = rusqlite::Connection::open(&path).expect("打开原始库失败");
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS idx_album_member_file;
+             PRAGMA user_version = 6;
+             INSERT INTO repo_meta (key, value) VALUES ('schema_version', '6')
+               ON CONFLICT(key) DO UPDATE SET value = '6';",
+        )
+        .expect("退化为 v6 形态失败");
+    }
+
+    let db = RepoDb::open(&path).expect("重开并升级失败");
+    assert_eq!(db.schema_version().expect("读版本失败"), 7, "迁移应把权威版本升到 7");
+    assert_eq!(
+        db.meta("schema_version").expect("读镜像键失败").as_deref(),
+        Some("7"),
+        "升级后镜像键必须跟随权威版本，不得停留在建库时的 6（缺陷 0006）"
+    );
     db.close().expect("关闭失败");
 }
 
