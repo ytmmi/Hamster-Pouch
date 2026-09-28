@@ -50,3 +50,9 @@ logs/
 # 下载的对照表缓存（ffdkj 每日更新，约 38MB）与生成的词库产物不提交 git
 tools/tagdict/data/
 tools/tagdict/output/
+
+# === 外部 CLI：体积过大，不入库，自行下载 ===
+# mpv Windows 构建（mpv.exe + d3dcompiler_43.dll 等约 100MB+）体积过大无法上传，
+# 仓库不随附，需自行下载放入该目录（下载说明见 README.md「外部依赖」）。
+# 也可用环境变量 HP_MPV_BIN 直接指定 mpv.exe 路径，不依赖本目录。
+external-cli/mpv/
