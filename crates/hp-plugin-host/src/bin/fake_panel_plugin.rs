@@ -184,6 +184,13 @@ fn schema_value(panel_id: &str) -> Value {
                     "visible_when": { "kind": "panel", "name": "items", "test": "empty" }
                 },
                 {
+                    "id": "nonzero_hint",
+                    "kind": "notice",
+                    "text_key": "demo.nonzero",
+                    "variant": "ok",
+                    "visible_when": { "kind": "panel", "name": "count", "test": "truthy" }
+                },
+                {
                     "id": "pick",
                     "kind": "button",
                     "text_key": "demo.pick",

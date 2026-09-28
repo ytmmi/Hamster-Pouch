@@ -12,8 +12,12 @@
 | `list`（`items`） | `panel:items` | `rows` | `click` → `apply`、`double_click` → `pick` |
 | `progress`（`count`） | `panel:count` | `scalar` | — |
 | `keyValue`（`summary`） | `panel:summary` | `object` | — |
-| `notice`（`empty_hint`） | — | — | 带 `visible_when`（`panel:items` 为 `empty` 时显示） |
+| `notice`（`empty_hint`） | — | — | 带 `visible_when`（`panel:items` 为 `empty` → **本次为假，不显示**） |
+| `notice`（`nonzero_hint`） | — | — | 带 `visible_when`（`panel:count` 为 `truthy` → **本次为真，显示**） |
 | `button`（`pick`） | — | — | `click` → `pick` |
+
+两个 `visible_when` **一真一假**：这样"谓词确实拿到了数据并求值"是可判定的——
+两提示都显示或都不显示，都说明谓词没接上数据。
 
 三种 `returns` 各有一个绑定——缺一种，那条形态就测不到。
 
