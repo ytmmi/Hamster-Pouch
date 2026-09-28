@@ -160,3 +160,52 @@ export function pluginValidateControl(
     schemaJson,
   }).then(unwrapApi);
 }
+
+/** `plugin.controlEvent` 的确认载荷（字段为蛇形，与本域管理命令同口径）。 */
+export interface ControlEventAck {
+  panel_id: string;
+  plugin_id: string;
+  control_id: string;
+  /** 宿主谓词表里的事件名（`click` / `double_click` / …）。 */
+  event: string;
+  /** 插件 manifest `events` 里声明的**事件 id**（schema `on` 映射的右侧）。 */
+  event_id: string;
+  /** 实际发给插件的插件侧方法名（= `plugin.{pluginId}.{eventId}`）。 */
+  method: string;
+}
+
+/** `plugin.controlEvent` 的参数（`eventId` 由宿主按 schema 的 `on` 解析后传入）。 */
+export interface ControlEventArgs {
+  repoId: string;
+  panelId: string;
+  controlId: string;
+  event: string;
+  eventId: string;
+  value?: string | number | boolean;
+  target?: string;
+}
+
+/**
+ * 把控件交互回传给插件（控件标准第 6 节 / D63）。
+ *
+ * 回传载荷由**宿主**构造，插件不得自定义结构。命令在「前端 → 宿主」这一段是通用的
+ * （Tauri 命令静态注册，无法按 `{pluginId}.{eventId}` 动态注册）；「宿主 → 插件」那一段
+ * 仍按契约的字面方法名 `plugin.{pluginId}.{eventId}` 发送。
+ *
+ * 宿主侧 fail-closed 校验：面板归属 + 插件在该仓库已启用且已获 `ui.panel`；事件名必须在
+ * 宿主谓词表内；**事件 id 必须在 manifest 里声明过**；`value` 只收标量。
+ */
+export function pluginControlEvent(args: ControlEventArgs): Promise<ControlEventAck> {
+  // 显式展开成字面量：`InvokeArgs` 要 `Record<string, unknown>`，
+  // 而具名 interface 没有隐式索引签名（缺省字段也**不能**塞成 undefined）。
+  const payload: Record<string, unknown> = {
+    repoId: args.repoId,
+    panelId: args.panelId,
+    controlId: args.controlId,
+    event: args.event,
+    eventId: args.eventId,
+  };
+  if (args.value !== undefined) payload.value = args.value;
+  if (args.target !== undefined) payload.target = args.target;
+  return invoke<ApiResponse<ControlEventAck>>("plugin_control_event", payload).then(unwrapApi);
+}

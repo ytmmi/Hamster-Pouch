@@ -12,6 +12,10 @@
  * 可用性口径与蓝图侧一致：插件未安装 / 未启用 / 宿主 API 不兼容时按**未接通**处理
  * （不阻塞、不删数据、恢复后自动恢复），画布与面板都正是这条口径。
  *
+ * **事件回传已接线（2026-09，控件标准第 6 节 / D63）**：控件事件先按 schema 的 `on`
+ * 解析出**事件 id**（`collectControlEventMap`），再经 `plugin.controlEvent` 回传插件；
+ * 未声明在 `on` 里的事件按规范「不产生任何回传」，只记一次忽略。
+ *
  * **余留**：`bind` 的数据来自宿主的受控查询（控件标准第 5 节），插件 `data_queries`
  * 的取数通道尚未落地，因此这里传空快照——绑定为空按规范就是"渲染空态 + 软告警"，
  * 不伪造数据。`tKey` 同理：插件语言资源通道未落地，暂原样返回键名。
@@ -19,12 +23,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { ControlValidateResult } from "@hamster-pouch/config";
-import { panelSpec } from "@hamster-pouch/config";
+import type { ControlEvent, ControlValidateResult } from "@hamster-pouch/config";
+import { panelSpec, parseControlSchema } from "@hamster-pouch/config";
 
 import * as api from "../shared/api";
 import { apiErrorMessage, errorCodeOf, type HpErrorCode } from "../shared/api/response";
 import { makeControlDataSnapshot } from "../shared/control/controlData";
+import {
+  collectControlEventMap,
+  controlEventIdOf,
+  type ControlEventMap,
+} from "../shared/control/controlEvents";
 import { ControlPanelView } from "../shared/control/ControlPanelView";
 import type { ControlRenderContext } from "../shared/control/controlTypes";
 import { useApp } from "../core/AppContext";
@@ -66,6 +75,61 @@ export function PluginPanelHost({ panelId }: { panelId: string }): JSX.Element {
     };
   }, [isPluginPanel, repoId, panelId, app.refreshKey]);
 
+  // schema 的 `on` 映射（事件名 → 插件声明的事件 id）：回传前必须先解析出事件 id，
+  // 因为插件侧方法名是 `plugin.{pluginId}.{eventId}`，载荷里不含 id。
+  const eventMap: ControlEventMap = useMemo(() => {
+    if (state.kind !== "ready") return new Map();
+    try {
+      return collectControlEventMap(parseControlSchema(state.schemaJson));
+    } catch {
+      // 解析层失败已由 ControlPanelView 报错；这里只需不阻塞（回传自然全部落空）。
+      return new Map();
+    }
+  }, [state]);
+
+  /**
+   * 事件回传：解析事件 id → 调宿主命令。
+   *
+   * **不 await**：交付沿用 `external-process` 的一次一问一答，每次点击起一个插件进程；
+   * 等它会把"点击"变成阻塞操作。失败只进诊断日志，不打断渲染。
+   */
+  const emit = useCallback(
+    (
+      controlId: string,
+      event: ControlEvent,
+      extras?: { value?: string | number | boolean; target?: string },
+    ) => {
+      if (!repoId) return;
+      const eventId = controlEventIdOf(eventMap, controlId, event);
+      if (!eventId) {
+        // 规范第 6 节：未声明在 `on` 里的事件不产生任何回传，宿主记一次忽略。
+        console.debug("[plugin-panel] 忽略未声明的事件", panelId, controlId, event);
+        return;
+      }
+      void api
+        .pluginControlEvent({
+          repoId,
+          panelId,
+          controlId,
+          event,
+          eventId,
+          value: extras?.value,
+          target: extras?.target,
+        })
+        .catch((e: unknown) => {
+          console.warn(
+            "[plugin-panel] 控件事件回传失败",
+            panelId,
+            controlId,
+            event,
+            eventId,
+            e,
+          );
+        });
+    },
+    [repoId, panelId, eventMap],
+  );
+
   // 渲染上下文：数据快照为空（受控取数通道未落地，绑定为空的规范行为是渲染空态）。
   const renderCtx: ControlRenderContext = useMemo(
     () => ({
@@ -73,11 +137,11 @@ export function PluginPanelHost({ panelId }: { panelId: string }): JSX.Element {
       t: app.t,
       tKey: (key: string) => key,
       data: makeControlDataSnapshot({}),
-      emit: () => undefined,
+      emit,
       getState: () => undefined,
       setState: () => undefined,
     }),
-    [app.theme, app.t],
+    [app.theme, app.t, emit],
   );
 
   const onRejected = useCallback(

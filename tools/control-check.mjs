@@ -411,6 +411,66 @@ check(
     ),
 );
 
+// ==================== 控件事件回传链（控件标准第 6 节，D63）====================
+//
+// 这一节防的是"渲染骨架点得动、但事件回不去"（旧口径下 PluginPanelHost 把 emit 置空）。
+
+const controlEvents = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/control/controlEvents.ts")).href
+);
+
+const eventSchema = config.parseControlSchema(
+  JSON.stringify({
+    api_version: 1,
+    panel_id: "fixture.panel",
+    root: {
+      id: "root",
+      kind: "column",
+      children: [
+        {
+          id: "colors",
+          kind: "thumbGrid",
+          text_key: "fixture.colors",
+          bind: { kind: "panel", name: "colors" },
+          on: { double_click: "apply_color", selection_change: "pick" },
+        },
+        { id: "title", kind: "text", text_key: "fixture.title" },
+      ],
+    },
+  }),
+);
+const eventMap = controlEvents.collectControlEventMap(eventSchema);
+check(
+  "事件映射按控件 id 收集（只收声明了 on 的控件）",
+  eventMap.size === 1 && eventMap.get("colors")?.double_click === "apply_color",
+  `size=${eventMap.size}`,
+);
+check(
+  "事件名 → 事件 id：声明过的命中，未声明的返回 undefined（按规范记一次忽略，不算失败）",
+  controlEvents.controlEventIdOf(eventMap, "colors", "double_click") === "apply_color" &&
+    controlEvents.controlEventIdOf(eventMap, "colors", "click") === undefined &&
+    controlEvents.controlEventIdOf(eventMap, "title", "click") === undefined,
+);
+check(
+  "插件侧方法名是契约的字面名 plugin.{pluginId}.{eventId}",
+  /CONTROL_EVENT_METHOD_PREFIX:\s*&str\s*=\s*"plugin\."/.test(channelSrc) &&
+    /format!\("\{CONTROL_EVENT_METHOD_PREFIX\}\{plugin_id\}\.\{event_id\}"\)/.test(channelSrc),
+);
+check(
+  "plugin.controlEvent 已实现并注册，且事件 id 必须在 manifest 声明过（fail-closed）",
+  /pub\(crate\) fn plugin_control_event/.test(bridgeSrc) &&
+    /commands::plugin::plugin_control_event/.test(mainSrc) &&
+    /ControlEvent::from_str/.test(bridgeSrc) &&
+    /declared_events[\s\S]{0,160}?any\(/.test(bridgeSrc),
+);
+check(
+  "前端接线：emit 不再是空实现，回传前解析事件 id，未声明即忽略",
+  /pluginControlEvent\(/.test(hostSrc) &&
+    /collectControlEventMap/.test(hostSrc) &&
+    /controlEventIdOf\(/.test(hostSrc) &&
+    !/emit:\s*\(\)\s*=>\s*undefined/.test(hostSrc),
+);
+
 // ============================== 汇总 ==============================
 
 const passed = results.filter((r) => r.ok).length;
