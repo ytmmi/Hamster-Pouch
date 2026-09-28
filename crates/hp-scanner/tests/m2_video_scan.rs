@@ -171,3 +171,40 @@ fn cancel_is_not_an_error_and_reports_cancelled() {
         .expect("取消不应作为错误返回");
     assert!(outcome.cancelled, "取消后应标记 cancelled");
 }
+
+/// 缺陷 0003 的回归（扫描器侧）：**外部**取消标志是"任务自己的"通道，
+/// 在扫描开始**之前**置位也必须生效——`scan_source_with_cancel` 开头的 `reset()`
+/// 只清 `Scanner` 自身的标志，不得把已登记任务的取消请求抹掉。
+///
+/// 这条正是"登记任务后立刻取消"的窗口：桥接层在启动线程**之前**登记任务并置位控制块标志，
+/// 扫描线程随后才进入 `scan_source_inner` 的 `reset()`。旧实现（只有 `Scanner` 自身标志）
+/// 会在这时丢掉取消请求，表现为"点了取消没反应"。
+#[test]
+fn external_cancel_flag_survives_scan_start_reset() {
+    let tmp = tempfile::tempdir().expect("创建临时目录失败");
+    let src_dir = tmp.path().join("photos");
+    std::fs::create_dir_all(&src_dir).expect("创建媒体源目录失败");
+    for i in 0..20u8 {
+        let img = image::GrayImage::from_fn(8, 8, |x, y| {
+            image::Luma([(x.wrapping_add(y).wrapping_add(i as u32)) as u8])
+        });
+        img.save(src_dir.join(format!("p{i:02}.png"))).expect("写测试图失败");
+    }
+
+    let mut db = RepoDb::create(tmp.path().join("repo.sqlite3"), "测试仓库").expect("创建仓库失败");
+    let source = db
+        .mount_source("test-repo", src_dir.to_str().unwrap(), None, None)
+        .expect("挂载媒体源失败");
+
+    let scanner = Scanner::new();
+    let options = ScanOptions::default();
+    // 任务登记后立刻取消：此时扫描线程还没开始，reset() 尚未执行
+    let external = std::sync::atomic::AtomicBool::new(true);
+    let mut progress = |_: &ScanProgress| {};
+    let outcome = scanner
+        .scan_source_with_cancel(&external, &mut db, &source, &options, &mut progress)
+        .expect("取消不应作为错误返回");
+
+    assert!(outcome.cancelled, "外部取消标志必须生效（不得被扫描启动时的 reset 清掉）");
+    assert_eq!(outcome.indexed, 0, "取消发生在索引之前 → 不应写入任何文件行");
+}

@@ -8,7 +8,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use hp_ai::AiTaggingService;
@@ -19,9 +18,11 @@ use tauri::Manager;
 
 use commands::shared::external_bin;
 use embed_window::EmbedWindow;
+use tasks::TaskRegistry;
 
 mod commands;
 mod embed_window;
+mod tasks;
 
 /// 应用级共享状态（Arc 包装以支持后台扫描线程）。
 #[derive(Clone)]
@@ -33,10 +34,9 @@ pub(crate) struct AppState {
     /// 当前打开的仓库库文件路径：扫描线程据此开**独立连接**，
     /// 不再长时间占用 `open_repo` 锁（否则大视频扫描会堵住整个 UI 的命令）。
     pub(crate) current_repo_path: Arc<Mutex<Option<PathBuf>>>,
-    /// 是否有扫描正在进行（同一时刻只允许一个扫描任务）。
-    pub(crate) scanning: Arc<AtomicBool>,
-    /// 长任务的取消请求（扫描 / 卸载共用；`task.cancel` 置位）。
-    pub(crate) task_cancel: Arc<AtomicBool>,
+    /// 长任务控制块注册表（扫描 / 卸载）：**单任务闸门** + 按 `task_id` 定位的
+    /// 取消/暂停/恢复（缺陷 0003）。取代了原来的全局 `scanning` + `task_cancel` 两个标志。
+    pub(crate) tasks: Arc<TaskRegistry>,
     pub(crate) scanner: Arc<Scanner>,
     pub(crate) ffmpeg_bin: Arc<Option<PathBuf>>,
     pub(crate) ffprobe_bin: Arc<Option<PathBuf>>,
@@ -70,8 +70,7 @@ fn make_state(app: &tauri::AppHandle) -> AppState {
         open_repo: Arc::new(Mutex::new(None)),
         current_repo_id: Arc::new(Mutex::new(None)),
         current_repo_path: Arc::new(Mutex::new(None)),
-        scanning: Arc::new(AtomicBool::new(false)),
-        task_cancel: Arc::new(AtomicBool::new(false)),
+        tasks: Arc::new(TaskRegistry::new()),
         scanner: Arc::new(Scanner::new()),
         ffmpeg_bin: Arc::new(external_bin("ffmpeg")),
         ffprobe_bin: Arc::new(external_bin("ffprobe")),

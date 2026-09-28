@@ -31,6 +31,8 @@ export function SourcePanel({
   const [renameId, setRenameId] = useState("");
   const [renameAlias, setRenameAlias] = useState("");
   const [scanProgress, setScanProgress] = useState<{
+    /** 任务 ID：取消必须按它定位（缺陷 0003）。 */
+    taskId: string;
     processed: number;
     total: number;
     phase: string;
@@ -64,6 +66,7 @@ export function SourcePanel({
         unlisteners.push(
           await listen<ScanProgressPayload>("scan.progress", (e) => {
             setScanProgress({
+              taskId: e.payload.taskId,
               processed: e.payload.processed,
               total: e.payload.total,
               phase: e.payload.phase,
@@ -159,7 +162,7 @@ export function SourcePanel({
     async (sourceId: string, full: boolean) => {
       if (!repoId) return;
       try {
-        setScanProgress({ processed: 0, total: 0, phase: "walking" });
+        setScanProgress({ taskId: "", processed: 0, total: 0, phase: "walking" });
         const taskId = await api.sourceScan({
           repoId,
           sourceId,
@@ -175,13 +178,18 @@ export function SourcePanel({
   );
 
   const handleCancel = useCallback(async () => {
+    const taskId = scanProgress?.taskId;
+    if (!taskId) {
+      onStatus("没有可取消的任务（尚未收到进度事件）", "info");
+      return;
+    }
     try {
-      await api.taskCancel();
-      onStatus("已请求取消任务", "info");
+      const r = await api.taskCancel(taskId);
+      onStatus(r.cancelled ? "已请求取消任务" : "该任务已结束（未改动任何状态）", "info");
     } catch (e) {
       onStatus(`取消失败: ${String(e)}`, "error");
     }
-  }, [onStatus]);
+  }, [scanProgress, onStatus]);
 
   const pct =
     scanProgress && scanProgress.total > 0

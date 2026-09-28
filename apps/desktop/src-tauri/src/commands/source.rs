@@ -7,11 +7,10 @@
 
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use hp_core::{HpError, HpResult, Source};
-use hp_scanner::{ScanOptions, ScanPhase, ScanProgress, ScanOutcome};
+use hp_scanner::{ScanOptions, ScanOutcome, ScanPhase, ScanProgress};
 use hp_store::{build_source_tree, RepoDb};
 use serde::Serialize;
 use tauri::{Emitter, State};
@@ -19,6 +18,7 @@ use tauri::{Emitter, State};
 use crate::commands::shared::{
     api_async, api_from_hp, lock_repo, open_repo, open_repo_mut, ApiAsync, ApiResponse,
 };
+use crate::tasks::{RequestOutcome, TaskControl, TaskKind};
 use crate::AppState;
 
 /// 扫描时单个外部媒体进程（ffprobe 探测 / ffmpeg 抽帧）的超时上限。
@@ -253,36 +253,36 @@ pub(crate) async fn source_unmount(
         }
         let _ = repo_id;
 
-        if state.scanning.swap(true, Ordering::SeqCst) {
-            return Err(HpError::AlreadyExists(
-                "已有任务正在进行中，请等待其结束。".into(),
-            ));
-        }
-        // 新任务开始：清掉上一次的取消请求（取消标志是共享的）
-        state.task_cancel.store(false, Ordering::SeqCst);
+        let task_id = uuid::Uuid::new_v4().to_string();
+        // 登记在启动线程**之前**：任务一旦被外部看见就已可按 `task_id` 定位（缺陷 0003）。
+        let control = state
+            .tasks
+            .start(&task_id, TaskKind::Unmount)
+            .ok_or_else(|| {
+                HpError::AlreadyExists("已有任务正在进行中，请等待其结束。".into())
+            })?;
         let repo_path: PathBuf = match state.current_repo_path.lock() {
             Ok(guard) => match guard.clone() {
                 Some(p) => p,
                 None => {
-                    state.scanning.store(false, Ordering::SeqCst);
+                    state.tasks.finish(&task_id);
                     return Err(HpError::NotFound("未打开仓库".into()));
                 }
             },
             Err(_) => {
-                state.scanning.store(false, Ordering::SeqCst);
+                state.tasks.finish(&task_id);
                 return Err(HpError::Store("仓库锁中毒".into()));
             }
         };
 
-        let task_id = uuid::Uuid::new_v4().to_string();
         let st = state.inner().clone();
         let app_handle = app.clone();
         let emit_source_id = source_id.clone();
-        let emit_task_id = task_id.clone();
 
         tauri::async_runtime::spawn_blocking(move || {
+            let emit_task_id = control.task_id().to_string();
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                run_unmount(&st, &app_handle, &emit_task_id, &source_id, &repo_path)
+                run_unmount(&app_handle, &control, &source_id, &repo_path)
             }));
             match result {
                 Ok(Ok(outcome)) => {
@@ -323,7 +323,7 @@ pub(crate) async fn source_unmount(
                     );
                 }
             }
-            st.scanning.store(false, Ordering::SeqCst);
+            st.tasks.finish(&emit_task_id);
         });
 
         Ok(task_id)
@@ -332,10 +332,12 @@ pub(crate) async fn source_unmount(
 }
 
 /// 在后台线程执行**完全卸载**（独立连接，不占用主连接锁）。
+///
+/// `control` 是**本任务自己的**控制块（来自 `TaskRegistry`）：任务 ID 与取消标志都取自它，
+/// 不再读取任何全局标志——这正是缺陷 0003 的修复点。
 fn run_unmount(
-    state: &AppState,
     app: &tauri::AppHandle,
-    task_id: &str,
+    control: &TaskControl,
     source_id: &str,
     repo_path: &Path,
 ) -> HpResult<hp_store::PurgeResult> {
@@ -344,7 +346,7 @@ fn run_unmount(
         .ok_or_else(|| HpError::NotFound(format!("媒体源不存在: {source_id}")))?;
 
     let emit_app = app.clone();
-    let emit_task_id = task_id.to_string();
+    let emit_task_id = control.task_id().to_string();
     let emit_source_id = source_id.to_string();
     let emit_phase = |phase: &str, processed: u64, total: u64| {
         let _ = emit_app.emit(
@@ -359,8 +361,7 @@ fn run_unmount(
         );
     };
 
-    let cancel = state.task_cancel.clone();
-    let should_cancel = move || cancel.load(Ordering::SeqCst);
+    let should_cancel = || control.is_cancelled();
     db.purge_source_data(source_id, &should_cancel, &mut |phase, processed, total| {
         let name = match phase {
             hp_store::PurgePhase::Counting => "counting",
@@ -374,21 +375,38 @@ fn run_unmount(
     })
 }
 
-/// task.status：长任务是否仍在进行（前端浮窗的对账依据）。
+/// task.status：长任务快照（前端浮窗的对账依据）。
 ///
 /// 浮窗只靠终止事件收尾并不可靠：事件若因界面线程繁忙而丢失，
 /// 用户就会看到一个永远转圈的"正在卸载"。前端因此定期对账——
 /// 若长时间没有进度事件且此处返回 `busy = false`，说明任务早已结束，浮窗自行收起。
+///
+/// 除 `busy` 外还回报当前任务的 `taskId` / `kind` / `paused`（`task.*` 三条控制命令
+/// 都要 `taskId`，浮窗重建后得先问清"当前是哪条任务"；缺陷 0003）。
 #[tauri::command]
 pub(crate) fn task_status(state: State<AppState>) -> ApiResponse<TaskStatus> {
+    let snapshot = state.tasks.snapshot();
+    let busy = state.tasks.is_busy();
+    let kind = snapshot.as_ref().map(|s| s.kind);
     api_from_hp(Ok(TaskStatus {
-        busy: state.scanning.load(Ordering::SeqCst),
+        busy,
+        task_id: snapshot.map(|s| s.task_id),
+        kind: kind.map(|k| k.as_str().to_string()),
+        // 只有扫描会被挂起；无任务时不给值（避免报出上一条任务遗留的扫描器状态）。
+        paused: match kind {
+            Some(TaskKind::Scan) => Some(state.scanner.is_paused()),
+            _ => None,
+        },
     }))
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct TaskStatus {
     busy: bool,
+    task_id: Option<String>,
+    kind: Option<String>,
+    paused: Option<bool>,
 }
 
 /// source.rename：重命名媒体源别名。
@@ -512,40 +530,39 @@ pub(crate) async fn source_scan(
         let full = full.unwrap_or(false);
         let _ = repo_id;
 
-        // 单任务闸门
-        if state.scanning.swap(true, Ordering::SeqCst) {
-            return Err(HpError::AlreadyExists(
-                "已有任务正在进行中，请等待其结束或先取消。".into(),
-            ));
-        }
-        // 新任务开始：清掉上一次的取消请求（取消标志是共享的）
-        state.task_cancel.store(false, Ordering::SeqCst);
+        // 单任务闸门 + 按 `task_id` 登记控制块（登记在启动线程之前，缺陷 0003）
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let control = state
+            .tasks
+            .start(&task_id, TaskKind::Scan)
+            .ok_or_else(|| {
+                HpError::AlreadyExists("已有任务正在进行中，请等待其结束或先取消。".into())
+            })?;
 
         // 扫描用的仓库库路径（缺失说明仓库未打开）
         let repo_path: PathBuf = match state.current_repo_path.lock() {
             Ok(guard) => match guard.clone() {
                 Some(p) => p,
                 None => {
-                    state.scanning.store(false, Ordering::SeqCst);
+                    state.tasks.finish(&task_id);
                     return Err(HpError::NotFound("未打开仓库".into()));
                 }
             },
             Err(_) => {
-                state.scanning.store(false, Ordering::SeqCst);
+                state.tasks.finish(&task_id);
                 return Err(HpError::Store("仓库锁中毒".into()));
             }
         };
 
-        let task_id = uuid::Uuid::new_v4().to_string();
         let st = state.inner().clone();
         let app_handle = app.clone();
         let emit_source_id = source_id.clone();
-        let emit_task_id = task_id.clone();
 
         tauri::async_runtime::spawn_blocking(move || {
+            let emit_task_id = control.task_id().to_string();
             // panic 也要收敛成一次事件，避免前端浮窗永久停留
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                run_scan(&st, &app_handle, &emit_task_id, &source_id, full, &repo_path)
+                run_scan(&st, &app_handle, &control, &source_id, full, &repo_path)
             }));
             match result {
                 Ok(Ok(outcome)) => {
@@ -583,7 +600,7 @@ pub(crate) async fn source_scan(
                     );
                 }
             }
-            st.scanning.store(false, Ordering::SeqCst);
+            st.tasks.finish(&emit_task_id);
         });
 
         Ok(task_id)
@@ -592,10 +609,13 @@ pub(crate) async fn source_scan(
 }
 
 /// 在后台线程执行扫描（独立连接，不占用主连接锁）。
+///
+/// `control` 是**本任务自己的**控制块：任务 ID 与取消标志都取自它。取消标志会传给
+/// `Scanner::scan_source_with_cancel`，因此"登记后、扫描 `reset()` 之前"发出的取消也不会丢。
 fn run_scan(
     state: &AppState,
     app: &tauri::AppHandle,
-    task_id: &str,
+    control: &TaskControl,
     source_id: &str,
     full: bool,
     repo_path: &Path,
@@ -615,7 +635,7 @@ fn run_scan(
     };
 
     let emit_app = app.clone();
-    let emit_task_id = task_id.to_string();
+    let emit_task_id = control.task_id().to_string();
     let emit_source_id = source_id.to_string();
     let mut last_emit = Instant::now() - PROGRESS_MIN_INTERVAL;
     let mut progress = move |p: &ScanProgress| {
@@ -643,27 +663,91 @@ fn run_scan(
         );
     };
 
-    state.scanner.scan_source(&mut db, &source, &options, &mut progress)
+    let cancel = control.cancel_flag();
+    state
+        .scanner
+        .scan_source_with_cancel(&cancel, &mut db, &source, &options, &mut progress)
 }
 
-/// task.cancel：取消当前长任务（扫描与卸载共用取消标志）。
-#[tauri::command]
-pub(crate) fn task_cancel(state: State<AppState>) -> ApiResponse<()> {
-    state.task_cancel.store(true, Ordering::SeqCst);
-    state.scanner.cancel();
-    api_from_hp(Ok(()))
+/// 取消请求的受理结果。`cancelled: false` = 目标不是当前任务（已结束或从未存在），
+/// **不是错误**——前端浮窗的取消按钮处在竞态窗口里，任务恰好收尾不应弹错误。
+#[derive(Serialize)]
+pub(crate) struct TaskCancelResult {
+    cancelled: bool,
 }
 
-/// task.pause：暂停当前扫描（下一个文件处理前生效）。
-#[tauri::command]
-pub(crate) fn task_pause(state: State<AppState>) -> ApiResponse<()> {
-    state.scanner.pause();
-    api_from_hp(Ok(()))
+/// 暂停/恢复请求的受理结果。
+///
+/// 两个字段缺一不可：`accepted` 说明请求是否**命中当前可暂停任务**，
+/// `paused` 说明调用之后该任务的挂起状态——`resume` 受理后 `paused` 必为 `false`，
+/// 单看 `paused` 无法把"已恢复"与"任务已结束"区分开。
+#[derive(Serialize)]
+pub(crate) struct TaskPauseResult {
+    accepted: bool,
+    paused: bool,
 }
 
-/// task.resume：恢复已暂停的扫描。
+/// task.cancel：取消**指定**长任务（`{ taskId }`；缺陷 0003）。
+///
+/// - 命中当前任务 → 置位该任务自己的取消标志；若它是扫描任务，同时置位 `Scanner`
+///   （让"已暂停中的扫描"立刻退出等待）。
+/// - 目标不是当前任务 → `cancelled: false`，**一点状态都不动**（幂等，不报错）。
 #[tauri::command]
-pub(crate) fn task_resume(state: State<AppState>) -> ApiResponse<()> {
-    state.scanner.resume();
-    api_from_hp(Ok(()))
+pub(crate) fn task_cancel(task_id: String, state: State<AppState>) -> ApiResponse<TaskCancelResult> {
+    let outcome = (|| -> HpResult<TaskCancelResult> {
+        if task_id.trim().is_empty() {
+            return Err(HpError::InvalidArgument("任务 ID 不能为空".into()));
+        }
+        let outcome = state.tasks.request_cancel(&task_id);
+        if let RequestOutcome::Accepted { kind } = outcome {
+            if kind == TaskKind::Scan {
+                state.scanner.cancel();
+            }
+        }
+        Ok(TaskCancelResult {
+            cancelled: outcome.is_accepted(),
+        })
+    })();
+    api_from_hp(outcome)
+}
+
+/// task.pause：暂停**指定**扫描任务（下一个文件处理前生效）。
+///
+/// 只有扫描支持暂停（卸载的清理循环没有暂停点）；其余情况一律 `accepted: false`。
+#[tauri::command]
+pub(crate) fn task_pause(task_id: String, state: State<AppState>) -> ApiResponse<TaskPauseResult> {
+    let outcome = (|| -> HpResult<TaskPauseResult> {
+        if task_id.trim().is_empty() {
+            return Err(HpError::InvalidArgument("任务 ID 不能为空".into()));
+        }
+        let outcome = state.tasks.request_pause(&task_id);
+        if outcome.is_accepted() {
+            state.scanner.pause();
+        }
+        Ok(TaskPauseResult {
+            accepted: outcome.is_accepted(),
+            paused: outcome.is_accepted(),
+        })
+    })();
+    api_from_hp(outcome)
+}
+
+/// task.resume：恢复**指定**已暂停的扫描任务。
+#[tauri::command]
+pub(crate) fn task_resume(task_id: String, state: State<AppState>) -> ApiResponse<TaskPauseResult> {
+    let outcome = (|| -> HpResult<TaskPauseResult> {
+        if task_id.trim().is_empty() {
+            return Err(HpError::InvalidArgument("任务 ID 不能为空".into()));
+        }
+        let outcome = state.tasks.request_resume(&task_id);
+        if outcome.is_accepted() {
+            state.scanner.resume();
+        }
+        Ok(TaskPauseResult {
+            accepted: outcome.is_accepted(),
+            // 恢复受理后必然不再挂起；未受理时也没有挂起任何东西。
+            paused: false,
+        })
+    })();
+    api_from_hp(outcome)
 }

@@ -106,12 +106,48 @@ export function sourceScan(args: SourceScanArgs): Promise<string> {
   }).then(unwrapApi);
 }
 
-/** 取消当前后台任务（扫描 / 卸载共用取消标志） */
-export function taskCancel(): Promise<void> {
-  return invoke<ApiResponse<void>>("task_cancel").then(unwrapApi);
+/**
+ * 取消**指定**后台长任务（扫描 / 卸载）。
+ *
+ * `cancelled: false` 表示该任务已不是当前任务（已结束或从未存在）——**不是错误**：
+ * 进度浮窗的取消按钮处在竞态窗口里，任务恰好收尾时不应弹错误提示（缺陷 0003）。
+ */
+export function taskCancel(taskId: string): Promise<{ cancelled: boolean }> {
+  return invoke<ApiResponse<{ cancelled: boolean }>>("task_cancel", { taskId }).then(unwrapApi);
 }
 
-/** 长任务是否仍在进行（进度浮窗与后端对账用，防止终止事件丢失后永远转圈） */
-export function taskStatus(): Promise<{ busy: boolean }> {
-  return invoke<ApiResponse<{ busy: boolean }>>("task_status").then(unwrapApi);
+/**
+ * 暂停**指定**扫描任务（下一个文件处理前生效）。
+ *
+ * 只有扫描可以暂停；卸载的清理循环没有暂停点，此时 `accepted: false`（不报错）。
+ */
+export function taskPause(taskId: string): Promise<TaskPauseResult> {
+  return invoke<ApiResponse<TaskPauseResult>>("task_pause", { taskId }).then(unwrapApi);
+}
+
+/** 恢复**指定**已暂停的扫描任务。 */
+export function taskResume(taskId: string): Promise<TaskPauseResult> {
+  return invoke<ApiResponse<TaskPauseResult>>("task_resume", { taskId }).then(unwrapApi);
+}
+
+/** 暂停/恢复结果：`accepted` = 请求是否命中当前可暂停任务；`paused` = 调用后的挂起状态。 */
+export interface TaskPauseResult {
+  accepted: boolean;
+  paused: boolean;
+}
+
+/** 长任务快照（进度浮窗与后端对账用，防止终止事件丢失后永远转圈）。 */
+export interface TaskStatusSnapshot {
+  busy: boolean;
+  /** 当前任务 ID；无任务为 `null`。 */
+  taskId: string | null;
+  /** `scan` / `unmount`；无任务为 `null`。 */
+  kind: string | null;
+  /** 是否处于挂起状态；只有扫描任务有值。 */
+  paused: boolean | null;
+}
+
+/** 长任务是否仍在进行，以及当前是哪一条（`task.*` 控制命令都要 `taskId`）。 */
+export function taskStatus(): Promise<TaskStatusSnapshot> {
+  return invoke<ApiResponse<TaskStatusSnapshot>>("task_status").then(unwrapApi);
 }

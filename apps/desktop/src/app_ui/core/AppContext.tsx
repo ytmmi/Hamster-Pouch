@@ -53,6 +53,11 @@ export interface AppContextValue {
 export interface TaskProgress {
   /** 浮窗标题。 */
   titleKey: TranslationKey;
+  /**
+   * 后端任务 ID（缺陷 0003）：`task.cancel` / `task.pause` / `task.resume`
+   * 都按它定位任务，浮窗按钮必须传**本条任务自己的** ID。
+   */
+  taskId: string;
   /** 关联的媒体源 ID（用于把进度事件与已设好的标题/副标题对齐）。 */
   sourceId: string | null;
   /** 副标题：媒体源名等。 */
@@ -67,6 +72,8 @@ export interface TaskProgress {
   current: string | null;
   /** 是否显示取消按钮（可取消的长任务才给）。 */
   cancellable: boolean;
+  /** 是否支持暂停/恢复：**只有扫描**支持（卸载的清理循环没有暂停点）。 */
+  pausable: boolean;
   /** 最近一次进度事件的时间戳（卡住检测与后端对账用）。 */
   updatedAt: number;
 }

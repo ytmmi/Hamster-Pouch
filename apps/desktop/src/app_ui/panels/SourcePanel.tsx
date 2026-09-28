@@ -310,8 +310,11 @@ export function SourcePanel(): JSX.Element {
       app.setDirPath(null);
     }
     // 立即挂上进度浮窗（后端第一帧进度到达前也要有反馈）
+    // `taskId` 此刻还不知道（命令尚未返回）；浮窗按 `taskId` 空值禁用控制按钮，
+    // 第一帧进度事件（带 taskId）到达后即可按任务操作。
     setTask({
       titleKey: "unmount.title",
+      taskId: "",
       sourceId,
       subtitle: name,
       messageKey: "unmount.preparing",
@@ -321,6 +324,8 @@ export function SourcePanel(): JSX.Element {
       current: null,
       // 卸载可取消：后端的清理循环在相册之间采样取消标志，不会把界面锁死
       cancellable: true,
+      // 卸载不可暂停：清理循环没有暂停点
+      pausable: false,
       updatedAt: Date.now(),
     });
 
@@ -345,10 +350,12 @@ export function SourcePanel(): JSX.Element {
     }
     const name = nodes.find((n) => n.source_id === sourceId)?.name ?? null;
     try {
-      await api.sourceScan({ repoId: app.repoId, sourceId, full });
+      // 扫描命令返回 taskId：立刻用它挂浮窗，取消/暂停从第一帧起就能按任务定位（缺陷 0003）
+      const taskId = await api.sourceScan({ repoId: app.repoId, sourceId, full });
       // 立刻置为"遍历中、总数未知"：后端第一帧进度可能还要等一会儿才到
       setTask({
         titleKey: "scan.title",
+        taskId,
         sourceId,
         subtitle: name,
         messageKey: "scan.walking",
@@ -357,6 +364,8 @@ export function SourcePanel(): JSX.Element {
         total: 0,
         current: null,
         cancellable: true,
+        // 扫描是唯一支持暂停/恢复的长任务
+        pausable: true,
         updatedAt: Date.now(),
       });
       app.status(t("source.scanStarted"), "info");

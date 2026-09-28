@@ -26,12 +26,14 @@ export function TaskOverlay(): JSX.Element | null {
   const task = useTask();
   const [cancelRequested, setCancelRequested] = useState(false);
   const [stale, setStale] = useState(false);
+  const [paused, setPaused] = useState(false);
 
   // 任务结束后复位本地标记
   useEffect(() => {
     if (!task) {
       setCancelRequested(false);
       setStale(false);
+      setPaused(false);
     }
   }, [task]);
 
@@ -101,13 +103,33 @@ export function TaskOverlay(): JSX.Element | null {
 
         <div className="task-actions">
           {stale && <button onClick={() => setTask(null)}>{t("task.close")}</button>}
+          {/* `taskId` 为空 = 后端任务 ID 还没到（扫描命令返回前的那一瞬间）：
+              此时无法按任务定位，控制按钮保持禁用而不是发一条无 id 的请求。 */}
+          {task.cancellable && task.pausable && (
+            <button
+              disabled={!task.taskId}
+              onClick={() => {
+                // 按**本条任务自己的** taskId 暂停/恢复（缺陷 0003）；
+                // 后端回报的 paused 才是权威结果（任务可能恰好结束）。
+                const next = !paused;
+                setPaused(next);
+                const call = next ? api.taskPause(task.taskId) : api.taskResume(task.taskId);
+                call
+                  .then((r) => setPaused(r.paused))
+                  .catch(() => setPaused(!next));
+              }}
+            >
+              {t(paused ? "common.resume" : "common.pause")}
+            </button>
+          )}
           {task.cancellable && (
             <button
               className="danger"
-              disabled={cancelRequested}
+              disabled={cancelRequested || !task.taskId}
               onClick={() => {
                 setCancelRequested(true);
-                void api.taskCancel();
+                // `cancelled: false`（任务已结束）不是错误；只有真正的调用失败才复位按钮
+                api.taskCancel(task.taskId).catch(() => setCancelRequested(false));
               }}
             >
               {t("common.cancel")}

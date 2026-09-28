@@ -78,7 +78,10 @@ export function sourceScan(args: SourceScanArgs): Promise<string> {
   }).then(unwrapApi);
 }
 
-/** 取消当前后台任务 */
-export function taskCancel(): Promise<void> {
-  return invoke<ApiResponse<void>>("task_cancel").then(unwrapApi);
+/**
+ * 取消**指定**后台长任务（缺陷 0003：必须带 `taskId`）。
+ * `cancelled: false` = 该任务已结束，不是错误。
+ */
+export function taskCancel(taskId: string): Promise<{ cancelled: boolean }> {
+  return invoke<ApiResponse<{ cancelled: boolean }>>("task_cancel", { taskId }).then(unwrapApi);
 }

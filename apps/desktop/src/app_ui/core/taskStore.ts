@@ -86,6 +86,7 @@ export function startTaskEvents(): () => void {
       const walking = p.phase === "walking";
       setTask({
         titleKey: "scan.title",
+        taskId: p.taskId,
         sourceId: p.sourceId,
         subtitle: current?.sourceId === p.sourceId ? (current?.subtitle ?? null) : null,
         messageKey: walking ? "scan.walking" : "scan.indexing",
@@ -96,6 +97,8 @@ export function startTaskEvents(): () => void {
         total: p.total,
         current: p.current ?? null,
         cancellable: true,
+        // 扫描是唯一支持暂停/恢复的长任务
+        pausable: true,
         updatedAt: now(),
       });
     }),
@@ -145,6 +148,7 @@ export function startTaskEvents(): () => void {
                     : "unmount.preparing";
       setTask({
         titleKey: "unmount.title",
+        taskId: p.taskId,
         sourceId: p.sourceId,
         subtitle: current?.sourceId === p.sourceId ? (current?.subtitle ?? null) : null,
         messageKey,
@@ -153,6 +157,8 @@ export function startTaskEvents(): () => void {
         total: p.total,
         current: null,
         cancellable: true,
+        // 卸载不可暂停：清理循环在单事务里推进，没有暂停点
+        pausable: false,
         updatedAt: now(),
       });
     }),

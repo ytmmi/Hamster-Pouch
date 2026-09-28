@@ -130,19 +130,19 @@ impl Scanner {
         self.paused.store(false, Ordering::SeqCst);
     }
 
-    fn is_cancelled(&self) -> bool {
-        self.cancel.load(Ordering::SeqCst)
+    fn is_cancelled(&self, extra: Option<&AtomicBool>) -> bool {
+        self.cancel.load(Ordering::SeqCst) || extra.is_some_and(|c| c.load(Ordering::SeqCst))
     }
 
     /// 暂停等待：返回 `true` 表示可继续，`false` 表示已请求取消。
-    fn wait_if_paused(&self) -> HpResult<bool> {
+    fn wait_if_paused(&self, extra: Option<&AtomicBool>) -> HpResult<bool> {
         while self.is_paused() {
-            if self.is_cancelled() {
+            if self.is_cancelled(extra) {
                 return Ok(false);
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        Ok(!self.is_cancelled())
+        Ok(!self.is_cancelled(extra))
     }
 
     /// 扫描单个媒体源并更新仓库文件索引。
@@ -151,6 +151,33 @@ impl Scanner {
     /// （定期全量校验兜底，D9）。
     pub fn scan_source(
         &self,
+        db: &mut RepoDb,
+        source: &Source,
+        options: &ScanOptions,
+        on_progress: &mut dyn FnMut(&ScanProgress),
+    ) -> HpResult<ScanOutcome> {
+        self.scan_source_inner(None, db, source, options, on_progress)
+    }
+
+    /// 扫描并同时承认一个**外部**取消标志（长任务按 `task_id` 登记后使用；缺陷 0003）。
+    ///
+    /// 与 [`Scanner::cancel`] 的区别：外部标志**不会被本方法开头的 `reset()` 清掉**，
+    /// 因此"登记任务后立刻取消"不会在扫描真正启动时被丢掉。
+    /// 暂停/恢复仍走 `Scanner` 自身（扫描单实例 + 单任务闸门 ⇒ 同一时刻只有一条扫描）。
+    pub fn scan_source_with_cancel(
+        &self,
+        extra_cancel: &AtomicBool,
+        db: &mut RepoDb,
+        source: &Source,
+        options: &ScanOptions,
+        on_progress: &mut dyn FnMut(&ScanProgress),
+    ) -> HpResult<ScanOutcome> {
+        self.scan_source_inner(Some(extra_cancel), db, source, options, on_progress)
+    }
+
+    fn scan_source_inner(
+        &self,
+        extra_cancel: Option<&AtomicBool>,
         db: &mut RepoDb,
         source: &Source,
         options: &ScanOptions,
@@ -173,7 +200,7 @@ impl Scanner {
         let mut entries: Vec<PathBuf> = Vec::new();
         let mut last_walk_report = Instant::now();
         for entry in WalkDir::new(root).follow_links(false).into_iter() {
-            if !self.wait_if_paused()? {
+            if !self.wait_if_paused(extra_cancel)? {
                 outcome.cancelled = true;
                 return Ok(outcome);
             }
@@ -214,7 +241,7 @@ impl Scanner {
 
         // 2. 逐文件处理
         for (i, path) in entries.iter().enumerate() {
-            if !self.wait_if_paused()? {
+            if !self.wait_if_paused(extra_cancel)? {
                 outcome.cancelled = true;
                 return Ok(outcome);
             }
