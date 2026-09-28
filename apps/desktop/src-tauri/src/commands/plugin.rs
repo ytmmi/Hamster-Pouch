@@ -460,6 +460,26 @@ pub(crate) fn plugin_state(
     api_from_hp(outcome)
 }
 
+/// 广播 `plugin.loaded`：某插件在某仓库**加载完成**（契约 §4）。
+///
+/// 语义：校验通过、`LoadOutcome` 已产出即算加载完成（**生命周期骨架**，
+/// 不代表常驻进程已拉起——那属 `external-process` 监督，仍未实现）。
+fn emit_plugin_loaded(app: &tauri::AppHandle, repo_id: &str, plugin_id: &str) {
+    #[derive(Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PluginLoaded {
+        plugin_id: String,
+        repo_id: String,
+    }
+    let _ = app.emit(
+        "plugin.loaded",
+        PluginLoaded {
+            plugin_id: plugin_id.to_string(),
+            repo_id: repo_id.to_string(),
+        },
+    );
+}
+
 /// plugin.load：加载插件（生命周期骨架）。
 #[tauri::command]
 pub(crate) fn plugin_load(
@@ -481,6 +501,10 @@ pub(crate) fn plugin_load(
             grants: outcome.grants.iter().map(|c| c.as_str().to_string()).collect(),
         })
     })();
+    // 只在**加载成功后**广播：失败是命令级错误，不该伴随"已加载"事件。
+    if let Ok(item) = &outcome {
+        emit_plugin_loaded(&app, &item.repo_id, &item.plugin_id);
+    }
     api_from_hp(outcome)
 }
 

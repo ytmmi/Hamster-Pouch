@@ -2,13 +2,16 @@
  * 插件面板 — 已安装插件列表、按仓库启用/禁用与能力授权、加载与回滚（RFC 0004）。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { listen } from "@tauri-apps/api/event";
 
 import type { PluginItem, PluginStateItem } from "@hamster-pouch/shared-types";
 
 import { useApp } from "../core/AppContext";
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
+import type { PluginLoadedPayload } from "../shared/types/events";
 
 export function PluginPanel(): JSX.Element {
   const app = useApp();
@@ -39,6 +42,36 @@ export function PluginPanel(): JSX.Element {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [app.repoId, app.refreshKey]);
+
+  /**
+   * `plugin.loaded`（契约 §4，2026-09 补发射点）：**任何**窗口加载完插件后刷新本列表
+   * 与启用状态。刻意**不弹状态条**——本面板自己的「加载」按钮已经提示过，
+   * 再加一条只会变成噪音；事件的实质消费者就是这次刷新。
+   */
+  const unlistenRef = useRef<Array<() => void>>([]);
+  useEffect(() => {
+    void (async () => {
+      try {
+        unlistenRef.current.push(
+          await listen<PluginLoadedPayload>("plugin.loaded", () => {
+            void load();
+          }),
+        );
+      } catch {
+        /* 非 Tauri 运行时忽略 */
+      }
+    })();
+    return () => {
+      for (const off of unlistenRef.current) {
+        try {
+          off();
+        } catch {
+          /* ignore */
+        }
+      }
+      unlistenRef.current = [];
+    };
+  }, [load]);
 
   const install = useCallback(async () => {
     if (!path.trim()) {

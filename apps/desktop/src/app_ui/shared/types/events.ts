@@ -112,3 +112,14 @@ export interface ColorExtractedPayload {
   fileId: string;
   palette: string[];
 }
+
+/**
+ * plugin.loaded 事件（**2026-09 补发射点**，契约 §4）。
+ *
+ * 语义：校验通过、`LoadOutcome` 已产出即算"加载完成"（**生命周期骨架**）——
+ * **不代表**常驻进程已拉起，那属 `external-process` 监督（仍未实现）。
+ */
+export interface PluginLoadedPayload {
+  pluginId: string;
+  repoId: string;
+}
