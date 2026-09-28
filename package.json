@@ -25,6 +25,7 @@
     "check:layouts": "node tools/layout-check.mjs",
     "check:types": "cargo run -p hp-dto --bin generate && git diff --exit-code -- packages/shared-types",
     "check:line-count": "node tools/check-line-count.mjs",
+    "check:encoding": "node tools/check-encoding.mjs",
     "check:commands": "node tools/check-commands.mjs",
     "check:doc-status": "node tools/check-doc-status.mjs",
     "check:status": "node tools/check-status.mjs"
