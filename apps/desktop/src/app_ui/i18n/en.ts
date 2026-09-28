@@ -129,6 +129,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "plugin.installBundledHint": "Install system plugin packages shipped with the app (source and trust are decided by the host; no other source is accepted)",
   "plugin.bundledDone": "Processed {count} bundled plugin(s) — see the list below",
   "plugin.pathPlaceholder": "Plugin package directory",
+  "plugin.browse": "Browse…",
+  "plugin.pickFolderTitle": "Choose a plugin package folder",
   "plugin.enable": "Enable",
   "plugin.disable": "Disable",
   "plugin.load": "Load",

@@ -129,6 +129,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "plugin.installBundledHint": "安裝隨應用分發的 system 外掛套件（來源與信任由宿主判定，不接受其它來源）",
   "plugin.bundledDone": "隨包外掛已處理 {count} 項（結果見下方清單）",
   "plugin.pathPlaceholder": "外掛套件目錄路徑",
+  "plugin.browse": "選擇資料夾",
+  "plugin.pickFolderTitle": "選擇外掛套件目錄",
   "plugin.enable": "啟用",
   "plugin.disable": "停用",
   "plugin.load": "載入",

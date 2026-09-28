@@ -133,6 +133,8 @@ export const zhCN = {
   "plugin.installBundledHint": "安装随应用分发的 system 插件包（来源与信任由宿主判定，不接受其它来源）",
   "plugin.bundledDone": "随包插件已处理 {count} 项（结果见下方列表）",
   "plugin.pathPlaceholder": "插件包目录路径",
+  "plugin.browse": "选择文件夹",
+  "plugin.pickFolderTitle": "选择插件包目录",
   "plugin.enable": "启用",
   "plugin.disable": "禁用",
   "plugin.load": "加载",

@@ -158,6 +158,21 @@ export function PluginPanel(): JSX.Element {
     [app],
   );
 
+  /**
+   * 选取插件包目录（原生系统对话框）。
+   *
+   * 与「添加媒体源」同一条口径：路径**可以**手工输入（便于粘贴），但必须提供系统
+   * 文件夹选择器——手输路径对普通用户是不可用的。用户取消时保持原值不动。
+   */
+  const browse = useCallback(async () => {
+    try {
+      const picked = await api.pickFolder(app.t("plugin.pickFolderTitle"));
+      if (picked) setPath(picked);
+    } catch (e) {
+      app.status(errorTextOf(app.t, e), "error");
+    }
+  }, [app]);
+
   return (
     <div className="panel">
       <div className="row">
@@ -166,6 +181,9 @@ export function PluginPanel(): JSX.Element {
           placeholder={app.t("plugin.pathPlaceholder")}
           onChange={(e) => setPath(e.target.value)}
         />
+        <button disabled={busy} onClick={() => void browse()}>
+          {app.t("plugin.browse")}
+        </button>
         <button disabled={busy} onClick={() => void install()}>
           {app.t("plugin.install")}
         </button>
