@@ -24,6 +24,12 @@
 //! （[`ExternalProcessQuery::call`]）。**代价要如实说**：每次点击都会起一个进程——
 //! `external-process` 的常驻进程与重启退避/不健康标记（插件标准第 10 节）仍是**未实现**项，
 //! 这里只是把「一次一问一答」这条既有口径沿用到事件上，**不假装**已经做了监督。
+//!
+//! **面板取数**（控件标准第 5 节 `bind`）同样复用这条通道：请求名
+//! [`PANEL_QUERY_REQUEST`]，一次带该面板**全部** `bind`（含 `visible_when` 引用的查询名），
+//! 由 [`ExternalProcessQuery::query_panel_data`] 发出。**取数结果不缓存**——数据的陈旧风险
+//! 与 schema 不同（schema 随插件版本变化即可失效，数据随时会变），因此每次面板挂载或
+//! `refreshKey` 变化都重新问一次；schema 仍按 `(plugin_id, panel_id, plugin_version)` 缓存。
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -39,6 +45,13 @@ use serde_json::{json, Value};
 
 /// 三种运行形态统一的请求名（D61 / 控件标准第 2 节）。
 pub const PANEL_SCHEMA_REQUEST: &str = "ui.panel.schema";
+
+/// 三种运行形态统一的**取数**请求名（控件标准第 5 节 / 第 4 轮补入）。
+///
+/// 与 [`PANEL_SCHEMA_REQUEST`] 并列：schema 给"画什么"，本请求给"画的内容"。
+/// 一次请求带**该面板全部 `bind`**（含 `visible_when` 引用的查询名），插件按 `key`
+/// 回填结果——面板装载因此只需一次插件进程启动（进程启动是主要成本）。
+pub const PANEL_QUERY_REQUEST: &str = "ui.panel.query";
 
 /// **控件事件回传**的插件侧方法名前缀（控件标准第 6 节）。
 ///
@@ -62,6 +75,12 @@ pub const SCHEMA_QUERY_TIMEOUT: Duration = Duration::from_secs(2);
 /// 单次面板 schema 查询的输出字节上限（D61 默认 256 KiB）。
 pub const SCHEMA_MAX_BYTES: usize = 256 * 1024;
 
+/// 单次面板**取数**查询的超时（与 schema 同口径：2s）。
+pub const QUERY_TIMEOUT: Duration = SCHEMA_QUERY_TIMEOUT;
+
+/// 单次面板**取数**查询的输出字节上限（与 schema 同口径：256 KiB）。
+pub const QUERY_MAX_BYTES: usize = SCHEMA_MAX_BYTES;
+
 /// `ui.panel.schema` 的请求参数（控件标准第 2 节）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PanelSchemaParams {
@@ -74,6 +93,86 @@ impl PanelSchemaParams {
         Self {
             panel_id: panel_id.into(),
             api_version,
+        }
+    }
+}
+
+/// 一条 `bind` 的取数请求项（控件标准第 5 节）。
+///
+/// `key` 由**宿主**构造，等于前端快照的查键 `"{kind}:{name}"`（与 `controlData.ts` 的
+/// `makeControlDataSnapshot` 逐字同口径）；插件按 `key` 回填，宿主不必再猜映射。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PanelQuerySpec {
+    /// 快照键 `"{kind}:{name}"`（宿主构造，插件原样回填）。
+    pub key: String,
+    /// 查询名；必须是 manifest `data_queries` 声明过的名字（未声明即硬错误，由调用方校验）。
+    pub name: String,
+    /// `panel` / `selection`（控件标准第 5 节第一版开放的两种）。
+    pub kind: String,
+    /// 可选**标量**参数（不接受嵌套表达式）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args: Option<Value>,
+}
+
+impl PanelQuerySpec {
+    /// 快照键口径：`"{kind}:{name}"`。**只此一处定义**，避免宿主与前端各写一份。
+    pub fn snapshot_key(kind: &str, name: &str) -> String {
+        format!("{kind}:{name}")
+    }
+
+    pub fn new(kind: impl Into<String>, name: impl Into<String>, args: Option<Value>) -> Self {
+        let kind = kind.into();
+        let name = name.into();
+        Self {
+            key: Self::snapshot_key(&kind, &name),
+            name,
+            kind,
+            args,
+        }
+    }
+}
+
+/// 取数时的「当前选中文件」上下文（`selection` 绑定的数据源）。
+///
+/// 宿主只把**标量身份**（文件 id）交给插件，不把仓库数据搬进 UI 进程；插件据它决定
+/// 返回什么。无选中项时整个字段**缺省**（而不是空对象——插件据此区分"没选中"）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PanelSelectionContext {
+    pub file_id: String,
+}
+
+impl PanelSelectionContext {
+    pub fn new(file_id: impl Into<String>) -> Self {
+        Self {
+            file_id: file_id.into(),
+        }
+    }
+}
+
+/// `ui.panel.query` 的请求参数（控件标准第 5 节）。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PanelQueryParams {
+    pub panel_id: String,
+    pub api_version: u32,
+    /// 当前选中文件；无选中项时缺省。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection: Option<PanelSelectionContext>,
+    /// 该面板的全部 `bind`（含 `visible_when` 引用的查询名）——**一次问完**。
+    pub queries: Vec<PanelQuerySpec>,
+}
+
+impl PanelQueryParams {
+    pub fn new(
+        panel_id: impl Into<String>,
+        api_version: u32,
+        selection: Option<PanelSelectionContext>,
+        queries: Vec<PanelQuerySpec>,
+    ) -> Self {
+        Self {
+            panel_id: panel_id.into(),
+            api_version,
+            selection,
+            queries,
         }
     }
 }
@@ -174,6 +273,20 @@ impl ExternalProcessQuery {
         self.call(PANEL_SCHEMA_REQUEST, request, timeout, max_bytes)
     }
 
+    /// 发一次**面板取数**查询（请求名 [`PANEL_QUERY_REQUEST`]，控件标准第 5 节）。
+    ///
+    /// 与 [`ExternalProcessQuery::query`] 完全同口径：一次一问一答、同一超时与字节上限、
+    /// 失败同为 [`HpError::Plugin`]。返回插件给的 `result` 文本（字符串或 JSON 文本），
+    /// 由调用方解析其中的 `results` 映射并做 returns 类型核对。
+    pub fn query_panel_data(
+        &mut self,
+        request: &PanelQueryParams,
+        timeout: Duration,
+        max_bytes: usize,
+    ) -> HpResult<String> {
+        self.call(PANEL_QUERY_REQUEST, request, timeout, max_bytes)
+    }
+
     /// 发一次**任意方法名**的 JSON-RPC 请求（`params` 原样序列化）。
     ///
     /// 控件事件回传走 [`control_event_method`]（`plugin.{plugin_id}.{event_id}`）；
@@ -193,6 +306,10 @@ impl ExternalProcessQuery {
             "params": params,
         }))
         .map_err(|e| HpError::Plugin(format!("序列化插件请求失败: {e}")))?;
+
+        // 读线程是 `move` 闭包，因此需要一个**拥有所有权**的方法名副本随它进线程
+        // （`method: &str` 的生命周期不够 `'static`）。线程外的超时文案仍用借用版。
+        let method_in_reader = method.to_string();
 
         let mut command = &mut self.command;
         command
@@ -223,14 +340,16 @@ impl ExternalProcessQuery {
                 let mut buf = String::new();
                 match reader.read_line(&mut buf) {
                     Ok(0) => {
-                        let _ = tx.send(Err("插件进程未返回面板 schema（stdout 已关闭）".into()));
+                        let _ = tx.send(Err(format!(
+                            "插件进程未返回结果（{method_in_reader}，stdout 已关闭）"
+                        )));
                         return;
                     }
                     Ok(n) => {
                         total += n;
                         if total > max_bytes {
                             let _ = tx.send(Err(format!(
-                                "面板 schema 输出超过上限 {} KiB",
+                                "插件输出超过上限 {} KiB（{method_in_reader}）",
                                 max_bytes / 1024
                             )));
                             return;
@@ -259,7 +378,7 @@ impl ExternalProcessQuery {
             Ok(Ok(text)) => decode_response(&text),
             Ok(Err(message)) => Err(HpError::Plugin(message)),
             Err(RecvTimeoutError::Timeout) => Err(HpError::Plugin(format!(
-                "面板 schema 查询超时（{} ms）",
+                "插件查询超时（{} ms，{method}）",
                 timeout.as_millis()
             ))),
             Err(RecvTimeoutError::Disconnected) => {
@@ -335,6 +454,45 @@ mod tests {
         assert!(matches!(err, HpError::Plugin(_)));
         assert!(decode_response("not json").is_err());
         assert!(decode_response(r#"{"jsonrpc":"2.0","id":1}"#).is_err());
+    }
+
+    #[test]
+    fn panel_data_request_name_and_limits_follow_the_spec() {
+        // 控件标准第 5 节：与 schema 并列的独立请求名，超时/字节上限同口径。
+        assert_eq!(PANEL_QUERY_REQUEST, "ui.panel.query");
+        assert_eq!(QUERY_TIMEOUT, Duration::from_secs(2));
+        assert_eq!(QUERY_MAX_BYTES, 256 * 1024);
+    }
+
+    #[test]
+    fn query_spec_key_matches_the_frontend_snapshot_key() {
+        // 宿主构造的快照键必须与 `controlData.ts` 的 `"${kind}:${name}"` **逐字一致**，
+        // 否则插件的回填会全部落空（面板表现为永远空态），且不会有任何编译错误。
+        let spec = PanelQuerySpec::new("panel", "colors", None);
+        assert_eq!(spec.key, "panel:colors");
+        assert_eq!(spec.key, PanelQuerySpec::snapshot_key("panel", "colors"));
+
+        // 参数缺省时不得序列化出 `args` 键（插件的宽松解析不该被迫处理 null）。
+        let json = serde_json::to_string(&spec).expect("序列化");
+        assert!(!json.contains("args"), "缺省 args 不应出现在请求里: {json}");
+        assert!(json.contains("\"key\":\"panel:colors\""), "意外形状: {json}");
+    }
+
+    #[test]
+    fn query_params_omit_selection_when_nothing_is_selected() {
+        // 无选中项 → 整个 `selection` 字段缺省（插件据此区分"没选中"，而不是空对象）。
+        let params = PanelQueryParams::new("p.panel", 1, None, vec![PanelQuerySpec::new("panel", "x", None)]);
+        let json = serde_json::to_string(&params).expect("序列化");
+        assert!(!json.contains("selection"), "无选中项时不应带 selection: {json}");
+
+        let with = PanelQueryParams::new(
+            "p.panel",
+            1,
+            Some(PanelSelectionContext::new("file-1")),
+            vec![],
+        );
+        let json = serde_json::to_string(&with).expect("序列化");
+        assert!(json.contains("\"selection\":{\"file_id\":\"file-1\"}"), "意外形状: {json}");
     }
 
     #[test]

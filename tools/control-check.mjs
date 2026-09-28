@@ -471,6 +471,124 @@ check(
     !/emit:\s*\(\)\s*=>\s*undefined/.test(hostSrc),
 );
 
+// ==================== 受控取数通道（控件标准第 5 节）====================
+//
+// 这一节防的是"面板渲染得出来、但 bind 永远拿不到数据"（旧口径下 PluginPanelHost
+// 直接传空快照）。取数链最阴的失效模式是**快照键口径漂移**：宿主与前端各写一份
+// `"{kind}:{name}"`，任何一处改了都会让插件回填全部落空，而且**没有任何编译错误**
+// ——面板只是永远显示空态。因此键口径必须三处对齐并在这里断言。
+
+const controlBinds = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/control/controlBinds.ts")).href
+);
+
+// 取数通道已从 plugin.rs 拆出（plugin.rs 触到 1200 行文件规则上限）——
+// 这一段的断言要读**新模块**，否则门禁会因为"文件里找不到符号"而误报。
+const panelDataSrc = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/plugin_panel_data.rs"),
+  "utf8",
+);
+
+check(
+  "取数请求名 ui.panel.query 是独立常量，且规范第 2 节已登记",
+  /PANEL_QUERY_REQUEST:\s*&str\s*=\s*"ui\.panel\.query"/.test(channelSrc) &&
+    readFileSync(join(ROOT, "docs/spec/control-standard.md"), "utf8").includes("ui.panel.query"),
+);
+check(
+  "取数的超时与字节上限与 schema 同口径（2s / 256 KiB）",
+  /QUERY_TIMEOUT:\s*Duration\s*=\s*SCHEMA_QUERY_TIMEOUT/.test(channelSrc) &&
+    /QUERY_MAX_BYTES:\s*usize\s*=\s*SCHEMA_MAX_BYTES/.test(channelSrc),
+);
+check(
+  "plugin.panelData 已实现并注册，且 bind.name 必须在 manifest 声明过（fail-closed）",
+  /pub\(crate\) fn plugin_panel_data/.test(panelDataSrc) &&
+    /commands::plugin_panel_data::plugin_panel_data/.test(mainSrc) &&
+    /declared_queries[\s\S]{0,160}?any\(/.test(panelDataSrc),
+);
+
+// 键口径三处对齐：Rust 构造、前端收集、前端查表。
+check(
+  "快照键口径三处一致（宿主 snapshot_key == 前端 controlBindKey == makeControlDataSnapshot）",
+  /pub fn snapshot_key\(kind: &str, name: &str\) -> String\s*\{\s*format!\("\{kind\}:\{name\}"\)/.test(
+    channelSrc,
+  ) &&
+    /return `\$\{bind\.kind\}:\$\{bind\.name\}`/.test(
+      readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/control/controlBinds.ts"), "utf8"),
+    ) &&
+    /results\[`\$\{bind\.kind\}:\$\{bind\.name\}`\]/.test(
+      readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/control/controlData.ts"), "utf8"),
+    ),
+);
+
+// 行为断言：收集必须含 visible_when、必须去重、必须保留 args。
+const bindsSchema = config.parseControlSchema(
+  JSON.stringify({
+    api_version: 1,
+    panel_id: "fixture.panel",
+    root: {
+      id: "root",
+      kind: "column",
+      children: [
+        {
+          id: "colors",
+          kind: "thumbGrid",
+          text_key: "fixture.colors",
+          bind: { kind: "panel", name: "colors", args: { max: 12 } },
+        },
+        {
+          id: "again",
+          kind: "list",
+          text_key: "fixture.again",
+          bind: { kind: "panel", name: "colors" },
+        },
+        {
+          id: "onlyVisible",
+          kind: "text",
+          text_key: "fixture.v",
+          visible_when: { kind: "panel", name: "colors", test: "empty" },
+        },
+        {
+          id: "sel",
+          kind: "list",
+          text_key: "fixture.sel",
+          bind: { kind: "selection", name: "current" },
+        },
+      ],
+    },
+  }),
+);
+const collected = controlBinds.collectControlBinds(bindsSchema);
+check(
+  "取数收集含 visible_when 的查询名（谓词也要数据，否则永远按结果缺失求值）",
+  collected.some((b) => b.kind === "panel" && b.name === "colors") && collected.length === 2,
+  collected.map((b) => `${b.kind}:${b.name}`).join(","),
+);
+check(
+  "取数按快照键去重（同一查询被多个控件引用只问一次）",
+  collected.filter((b) => b.kind === "panel" && b.name === "colors").length === 1,
+);
+check(
+  "取数携带标量 args（首次出现的那次带上）",
+  collected.find((b) => b.name === "colors")?.args?.max === 12,
+);
+check(
+  "selection 类也被收集（第一版开放的两种 kind 都要问）",
+  collected.some((b) => b.kind === "selection" && b.name === "current"),
+);
+
+check(
+  "前端接线：一次问完、只在 schema 通过校验时取数、且随 refreshKey/选中文件重查",
+  /pluginPanelData\(/.test(hostSrc) &&
+    /collectControlBinds\(/.test(hostSrc) &&
+    /serverResult\.errors\.length === 0/.test(hostSrc) &&
+    /\[isPluginPanel, repoId, panelId, app\.refreshKey, selectedFileId\]/.test(hostSrc) &&
+    /state\.kind === "ready" \? state\.data : makeControlDataSnapshot\(\{\}\)/.test(hostSrc),
+);
+check(
+  "取数结果**不缓存**（数据陈旧风险与 schema 不同：无 PanelDataCache 一类结构）",
+  !/PanelDataCache/.test(channelSrc) && !/panel_data_cache/.test(mainSrc),
+);
+
 // ============================== 汇总 ==============================
 
 const passed = results.filter((r) => r.ok).length;

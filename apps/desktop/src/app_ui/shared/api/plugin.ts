@@ -17,6 +17,8 @@ import type {
 
 import type { ControlValidateResult } from "@hamster-pouch/config";
 
+import type { ControlBindRequest } from "../control/controlBinds";
+import type { ControlQueryResult } from "../control/controlData";
 import type { PluginContributions } from "../types";
 import { unwrapApi, type ApiResponse } from "./response";
 
@@ -159,6 +161,48 @@ export function pluginValidateControl(
     panelId,
     schemaJson,
   }).then(unwrapApi);
+}
+
+/**
+ * `plugin.panelData` 的返回项（字段蛇形，与本域管理命令同口径）。
+ *
+ * `results` 的键是**宿主构造**的快照键 `"{kind}:{name}"`，与
+ * `makeControlDataSnapshot` 的查键口径逐字一致——拿到即可直接交给渲染层。
+ */
+export interface PanelDataItem {
+  panel_id: string;
+  plugin_id: string;
+  plugin_version: string;
+  /** 快照键 → 查询结果。**单条结果的领域形状由前端解析层校验**（控件标准第 7 节）。 */
+  results: Record<string, ControlQueryResult>;
+  /** 插件未返回的键：按**空结果**渲染空态，**不是错误**（诊断用）。 */
+  missing: string[];
+}
+
+/**
+ * 面板 `bind` 的受控取数（控件标准第 5 节 / 请求名 `ui.panel.query`）。
+ *
+ * **一次问完**：把该面板全部 `bind`（含 `visible_when` 引用的查询名）装在一次请求里
+ * ——`external-process` 每次调用都要起一个插件进程。**不跨挂载缓存**：数据的陈旧风险
+ * 与 schema 不同，每次挂载 / `refreshKey` 变化都重查。
+ *
+ * 失败语义与 `plugin.panelSchema` 同口径：抛 [`HpApiFailure`]，由界面把**该面板**
+ * 降级为错误态；后端同时广播 `plugin.error`。
+ */
+export function pluginPanelData(args: {
+  repoId: string;
+  panelId: string;
+  /** 当前选中文件 id；无选中项时**不传**（不是传 null——宿主据此省略 selection 字段）。 */
+  selectedFileId?: string;
+  binds: ControlBindRequest[];
+}): Promise<PanelDataItem> {
+  const payload: Record<string, unknown> = {
+    repoId: args.repoId,
+    panelId: args.panelId,
+    binds: args.binds,
+  };
+  if (args.selectedFileId) payload.selectedFileId = args.selectedFileId;
+  return invoke<ApiResponse<PanelDataItem>>("plugin_panel_data", payload).then(unwrapApi);
 }
 
 /** `plugin.controlEvent` 的确认载荷（字段为蛇形，与本域管理命令同口径）。 */

@@ -601,7 +601,7 @@ pub(crate) fn plugin_rollback(
 ///
 /// 语义（控件标准第 2 节）：**该面板**渲染错误态，**不阻塞其它面板**。
 /// `error` 是诊断串（不面向用户显示）；界面文案由前端按结构化 `code` 走 i18n（D27）。
-fn emit_plugin_error(app: &tauri::AppHandle, repo_id: &str, plugin_id: &str, error: &str) {
+pub(crate) fn emit_plugin_error(app: &tauri::AppHandle, repo_id: &str, plugin_id: &str, error: &str) {
     #[derive(Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     struct PluginError {
@@ -634,7 +634,7 @@ pub(crate) struct PanelSchemaItem {
 }
 
 /// 反查面板归属并校验可用性（持库锁期间只做纯查询，绝不跨进程等待）。
-fn panel_owner_enabled(
+pub(crate) fn panel_owner_enabled(
     state: &AppState,
     repo_id: &str,
     panel_id: &str,
@@ -783,6 +783,7 @@ pub(crate) fn plugin_validate_control(
     })();
     api_from_hp(outcome)
 }
+
 
 // ===== 控件事件回传链（`docs/spec/control-standard.md` 第 6 节 / D63）=====
 

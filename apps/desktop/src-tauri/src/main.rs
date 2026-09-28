@@ -186,6 +186,7 @@ fn main() {
             commands::plugin::plugin_versions,
             commands::plugin::plugin_rollback,
             commands::plugin::plugin_panel_schema,
+            commands::plugin_panel_data::plugin_panel_data,
             commands::plugin::plugin_validate_control,
             commands::plugin::plugin_control_event,
             commands::ai::ai_config_create,

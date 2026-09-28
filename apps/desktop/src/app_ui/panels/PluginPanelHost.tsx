@@ -16,9 +16,11 @@
  * 解析出**事件 id**（`collectControlEventMap`），再经 `plugin.controlEvent` 回传插件；
  * 未声明在 `on` 里的事件按规范「不产生任何回传」，只记一次忽略。
  *
- * **余留**：`bind` 的数据来自宿主的受控查询（控件标准第 5 节），插件 `data_queries`
- * 的取数通道尚未落地，因此这里传空快照——绑定为空按规范就是"渲染空态 + 软告警"，
- * 不伪造数据。`tKey` 同理：插件语言资源通道未落地，暂原样返回键名。
+ * **受控取数已接线（2026-09，控件标准第 5 节）**：schema 通过校验后，按解析出的
+ * `bind`（含 `visible_when` 引用的查询名）**一次问完**（`plugin.panelData` →
+ * 插件侧 `ui.panel.query`）并装配成数据快照交给渲染层。取数**不跨挂载缓存**。
+ *
+ * **余留**：`tKey` 的插件语言资源通道未落地，暂原样返回键名。
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -32,7 +34,11 @@ import { BLUEPRINT_TRIGGERS, panelSpec, parseControlSchema } from "@hamster-pouc
 
 import * as api from "../shared/api";
 import { apiErrorMessage, errorCodeOf, type HpErrorCode } from "../shared/api/response";
-import { makeControlDataSnapshot } from "../shared/control/controlData";
+import { collectControlBinds } from "../shared/control/controlBinds";
+import {
+  makeControlDataSnapshot,
+  type ControlDataSnapshot,
+} from "../shared/control/controlData";
 import {
   collectControlEventMap,
   controlEventIdOf,
@@ -45,7 +51,13 @@ import { useApp } from "../core/AppContext";
 /** 面板 schema 的装载状态。 */
 type PanelSchemaState =
   | { kind: "loading" }
-  | { kind: "ready"; schemaJson: string; serverResult: ControlValidateResult }
+  | {
+      kind: "ready";
+      schemaJson: string;
+      serverResult: ControlValidateResult;
+      /** 受控取数的数据快照（控件标准第 5 节）；取数失败时为**空快照**（渲染空态）。 */
+      data: ControlDataSnapshot;
+    }
   | { kind: "failed"; code: HpErrorCode };
 
 export function PluginPanelHost({ panelId }: { panelId: string }): JSX.Element {
@@ -54,6 +66,8 @@ export function PluginPanelHost({ panelId }: { panelId: string }): JSX.Element {
   const isPluginPanel = spec !== undefined && spec.origin.kind === "plugin";
   const repoId = app.repoId;
   const [state, setState] = useState<PanelSchemaState>({ kind: "loading" });
+
+  const selectedFileId = app.selectedFile?.id;
 
   useEffect(() => {
     if (!isPluginPanel || !repoId) {
@@ -67,8 +81,27 @@ export function PluginPanelHost({ panelId }: { panelId: string }): JSX.Element {
         const item = await api.pluginPanelSchema(repoId, panelId);
         // 业务级复算：命令成功 ≠ schema 可用，`errors` 由 ControlPanelView 一并判定。
         const serverResult = await api.pluginValidateControl(panelId, item.schemaJson);
+        // 受控取数（控件标准第 5 节）：**只在 schema 通过校验时问**——校验不过时
+        // 界面渲染的是错误态，白起一次插件进程没有意义。
+        let data = makeControlDataSnapshot({});
+        if (serverResult.errors.length === 0) {
+          try {
+            const binds = collectControlBinds(parseControlSchema(item.schemaJson));
+            const panelData = await api.pluginPanelData({
+              repoId,
+              panelId,
+              selectedFileId,
+              binds,
+            });
+            data = makeControlDataSnapshot(panelData.results);
+          } catch (e) {
+            // 取数失败：**不**把整面板打成错误态（schema 是好的、只是这一次没数据），
+            // 按规范"绑定为空即渲染空态"处理，并把原因留在控制台便于诊断。
+            console.warn("[plugin-panel] 取数失败，按空态渲染", panelId, e);
+          }
+        }
         if (!cancelled) {
-          setState({ kind: "ready", schemaJson: item.schemaJson, serverResult });
+          setState({ kind: "ready", schemaJson: item.schemaJson, serverResult, data });
         }
       } catch (e) {
         if (!cancelled) setState({ kind: "failed", code: errorCodeOf(e) });
@@ -77,7 +110,9 @@ export function PluginPanelHost({ panelId }: { panelId: string }): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [isPluginPanel, repoId, panelId, app.refreshKey]);
+    // `selectedFileId` 变化必须重查：`selection` 绑定的数据源就是当前选中文件。
+    // 取数**不跨挂载缓存**——数据的陈旧风险与 schema 不同。
+  }, [isPluginPanel, repoId, panelId, app.refreshKey, selectedFileId]);
 
   // schema 的 `on` 映射（事件名 → 插件声明的事件 id）：回传前必须先解析出事件 id，
   // 因为插件侧方法名是 `plugin.{pluginId}.{eventId}`，载荷里不含 id。
@@ -145,18 +180,19 @@ export function PluginPanelHost({ panelId }: { panelId: string }): JSX.Element {
     [repoId, panelId, eventMap, app],
   );
 
-  // 渲染上下文：数据快照为空（受控取数通道未落地，绑定为空的规范行为是渲染空态）。
+  // 渲染上下文：数据来自受控取数通道（控件标准第 5 节）。
+  // 未就绪 / 取数失败 → 空快照，按规范就是"绑定为空即渲染空态"，不伪造数据。
   const renderCtx: ControlRenderContext = useMemo(
     () => ({
       theme: app.theme,
       t: app.t,
       tKey: (key: string) => key,
-      data: makeControlDataSnapshot({}),
+      data: state.kind === "ready" ? state.data : makeControlDataSnapshot({}),
       emit,
       getState: () => undefined,
       setState: () => undefined,
     }),
-    [app.theme, app.t, emit],
+    [app.theme, app.t, emit, state],
   );
 
   const onRejected = useCallback(

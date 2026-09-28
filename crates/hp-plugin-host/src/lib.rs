@@ -9,9 +9,10 @@ mod manifest;
 mod trust;
 
 pub use channel::{
-    control_event_method, ExternalProcessQuery, PanelSchemaCache, PanelSchemaKey,
-    PanelSchemaParams, CONTROL_EVENT_METHOD_PREFIX, PANEL_SCHEMA_REQUEST, SCHEMA_MAX_BYTES,
-    SCHEMA_QUERY_TIMEOUT,
+    control_event_method, ExternalProcessQuery, PanelQueryParams, PanelQuerySpec,
+    PanelSchemaCache, PanelSchemaKey, PanelSchemaParams, PanelSelectionContext,
+    CONTROL_EVENT_METHOD_PREFIX, PANEL_QUERY_REQUEST, PANEL_SCHEMA_REQUEST, QUERY_MAX_BYTES,
+    QUERY_TIMEOUT, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT,
 };
 pub use host::{
     LoadOutcome, PanelOwner, PluginHost, RepoContribution, SettingsSectionDecl,
