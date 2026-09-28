@@ -23,8 +23,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { ControlEvent, ControlValidateResult } from "@hamster-pouch/config";
-import { panelSpec, parseControlSchema } from "@hamster-pouch/config";
+import type {
+  BlueprintTrigger,
+  ControlEvent,
+  ControlValidateResult,
+} from "@hamster-pouch/config";
+import { BLUEPRINT_TRIGGERS, panelSpec, parseControlSchema } from "@hamster-pouch/config";
 
 import * as api from "../shared/api";
 import { apiErrorMessage, errorCodeOf, type HpErrorCode } from "../shared/api/response";
@@ -106,6 +110,17 @@ export function PluginPanelHost({ panelId }: { panelId: string }): JSX.Element {
         console.debug("[plugin-panel] 忽略未声明的事件", panelId, controlId, event);
         return;
       }
+      // **同时作为蓝图事件源上报**（规范第 6 节）：只有与蓝图触发词表重合的三个事件
+      // 才有对应触发词（`BLUEPRINT_TRIGGERS` = click / double_click / selection_change）；
+      // 其余三个（value_change / submit / toggle）只回传插件——蓝图没有对应触发词，
+      // 替它们发明一个会扩宽蓝图契约。
+      if (BLUEPRINT_TRIGGERS.includes(event as BlueprintTrigger)) {
+        app.dispatch({
+          trigger: event as BlueprintTrigger,
+          target: { panelId, controlId },
+        });
+      }
+
       void api
         .pluginControlEvent({
           repoId,
@@ -127,7 +142,7 @@ export function PluginPanelHost({ panelId }: { panelId: string }): JSX.Element {
           );
         });
     },
-    [repoId, panelId, eventMap],
+    [repoId, panelId, eventMap, app],
   );
 
   // 渲染上下文：数据快照为空（受控取数通道未落地，绑定为空的规范行为是渲染空态）。

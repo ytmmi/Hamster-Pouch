@@ -257,8 +257,17 @@ export class BlueprintEngine {
     graph: BlueprintGraph,
   ): boolean {
     if (node.type === "control") {
-      // 对象 = 控件本身（面板级操作）：无媒体类型的上报即命中。
-      return !target.mediaType;
+      // 对象 = 面板本身（面板级操作）：带媒体类型的上报不命中。
+      if (target.mediaType) {
+        return false;
+      }
+      // **控件事件上报**（带 panelId，控件标准第 6 节 / D63）只命中声明了同一个
+      // `panel_id` 的节点；**不带** panelId 的上报（媒体条目链路）保持既有行为，
+      // 既有蓝图因此零回归。`controlId` 刻意不参与匹配（见 `BlueprintTargetRef`）。
+      if (target.panelId === undefined) {
+        return true;
+      }
+      return node.panel_id === target.panelId;
     }
     if (node.type === "class") {
       return node.media_type === target.mediaType;

@@ -661,6 +661,73 @@ if (dbPath && existsSync(dbPath)) {
   console.error(`仓库库不存在，跳过诊断：${dbPath}`);
 }
 
+// ---- 控件事件作为蓝图事件源（控件标准第 6 节 / D63）：panelId 选择加入式匹配 ----
+//
+// 规范要求控件事件**同时**作为蓝图事件源上报。带 `panelId` 的上报只命中声明了同一个
+// `panel_id` 的 `control` 节点；**不带** `panelId` 的上报（媒体条目链路）保持既有行为。
+// `controlId` 刻意不参与匹配——那是 2026-09 已取消的 D56「浮动控件」绑定口径。
+//
+// 注意匹配的作用点：`panelId` 决定**事件节点是否触发**，不决定它后续动作的取舍。
+// 因此要用**两个各自成链的事件**（c_a→e_a→a_show_a、c_b→e_b→a_show_b）才观测得到差异
+// ——共用一个事件节点时，只要有一个对象命中，该事件的全部 fires 都会执行。
+{
+  const graph = {
+    schema_version: 2,
+    layers: [{ key: "l_main", name: "主界面" }],
+    nodes: [
+      { key: "ui", type: "interface", layer: "l_main" },
+      { key: "c_a", type: "control", layer: "l_main", panel_id: "plugin.a.panel" },
+      { key: "c_b", type: "control", layer: "l_main", panel_id: "plugin.b.panel" },
+      { key: "e_a", type: "event", layer: "l_main", trigger: "click" },
+      { key: "e_b", type: "event", layer: "l_main", trigger: "click" },
+      { key: "a_show_a", type: "action", layer: "l_main", op: "show", target: "c_a" },
+      { key: "a_show_b", type: "action", layer: "l_main", op: "show", target: "c_b" },
+    ],
+    edges: [
+      { from: "ui", to: "c_a", kind: "contains", order: 1 },
+      { from: "ui", to: "c_b", kind: "contains", order: 2 },
+      { from: "c_a", to: "e_a", kind: "on", order: 3 },
+      { from: "c_b", to: "e_b", kind: "on", order: 4 },
+      { from: "e_a", to: "a_show_a", kind: "fires", order: 5 },
+      { from: "e_b", to: "a_show_b", kind: "fires", order: 6 },
+    ],
+  };
+
+  const fireControlEvent = (target) => {
+    const engine = new BlueprintEngine();
+    engine.setGraph(graph);
+    engine.setLayer("l_main");
+    const ops = [];
+    engine.setExecutor({
+      showPanel: (id, floating) => ops.push(`show ${id}${floating ? " (floating)" : ""}`),
+      hidePanel: (id) => ops.push(`hide ${id}`),
+      togglePanel: (id, floating) => ops.push(`toggle ${id}${floating ? " (floating)" : ""}`),
+      collapsePanels: () => ops.push("collapse"),
+      expandPanels: () => ops.push("expand"),
+      playFile: (fileId) => ops.push(`play ${fileId}`),
+      navigateLayer: (layerKey) => ops.push(`navigate ${layerKey}`),
+      applyOverlay: () => ops.push("overlay"),
+      showOverlayPanel: () => ops.push("float"),
+    });
+    engine.dispatch({ trigger: "click", target });
+    return ops;
+  };
+
+  const scoped = fireControlEvent({ panelId: "plugin.a.panel", controlId: "colors" });
+  check(
+    "控件事件（带 panelId）只命中声明同一 panel_id 的 control 节点",
+    scoped.includes("show plugin.a.panel") && !scoped.includes("show plugin.b.panel"),
+    scoped.join(" | ") || "（无动作）",
+  );
+
+  const legacy = fireControlEvent({ controlId: "colors" });
+  check(
+    "不带 panelId 的上报保持既有行为（既有蓝图零回归）",
+    legacy.includes("show plugin.a.panel") && legacy.includes("show plugin.b.panel"),
+    legacy.join(" | ") || "（无动作）",
+  );
+}
+
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} 通过`);
 process.exit(failed.length === 0 ? 0 : 1);

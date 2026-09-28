@@ -209,7 +209,7 @@ export interface BlueprintGraph {
   edges: BlueprintEdge[];
 }
 
-/** 引擎求值目标引用（预览条目单击/双击/选中时上报）。 */
+/** 引擎求值目标引用（预览条目单击/双击/选中时上报；控件事件亦复用）。 */
 export interface BlueprintTargetRef {
   /** 条目媒体类型（image/video/audio）。 */
   mediaType?: string;
@@ -217,6 +217,24 @@ export interface BlueprintTargetRef {
   fileId?: string;
   /** 显式 scope（clicked / double_clicked / selected）；缺省按 trigger 推导。 */
   scope?: string;
+  /**
+   * **控件事件来源**：插件面板的 panel id（控件标准第 6 节 / D63）。
+   *
+   * 带 `panelId` 的上报是**选择加入式**过滤：只命中声明了同一个 `panel_id` 的
+   * `control` 节点；**不带** `panelId` 的上报（媒体条目链路）保持既有行为，
+   * 因此既有蓝图零回归。
+   */
+  panelId?: string;
+  /**
+   * **控件事件来源**：面板内控件 id。
+   *
+   * ⚠️ **当前不可匹配**：蓝图节点没有、也不应有承载"某个具体控件实例"的字段——
+   * 那是 2026-09 已取消的「浮动控件」绑定（D56：`control_id` 已从模型删除，
+   * 见 `docs/architecture/decision-checklist.md:63` 与
+   * `crates/hp-core/src/blueprint_validate.rs:455`）。本字段由宿主按规范载荷原样带回，
+   * 供诊断与后续裁决使用；**引擎忽略它**。
+   */
+  controlId?: string;
 }
 
 // ============================== 常量 ==============================
