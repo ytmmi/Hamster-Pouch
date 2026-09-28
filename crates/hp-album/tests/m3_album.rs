@@ -154,6 +154,64 @@ fn follow_source_mirror_removes_unmatched_but_keeps_pinned() {
     assert_eq!(out.removed, 1, "非 pinned 成员应被移除");
     assert_eq!(out.pinned_kept, 1, "pinned 成员应保留");
     assert_eq!(db.count_album_members(album.id.as_str()).expect("统计失败"), 1);
+
+    // 缺陷 0004 回归：这条"本应移除却被 pinned 保留"的成员必须作为**逐文件冲突**
+    // 抛给命令层，且带**真实 file_id**（旧实现只累加计数，命令层只能发一个 fileId 为空串的事件）。
+    assert_eq!(out.conflicts.len(), 1, "每个 pinned 保留成员都是一条冲突");
+    assert_eq!(out.conflicts[0].file_id, f2.as_str(), "冲突必须带真实 file_id");
+    assert_eq!(out.conflicts[0].reason, hp_album::CONFLICT_REASON_PINNED_KEPT);
+}
+
+/// 逐文件冲突只在"规则想移除、用户 pin 住了"时产生：
+/// `add_only` 不产生（它本来就不移除），完全匹配的 `mirror` 也不产生（缺陷 0004）。
+#[test]
+fn conflicts_are_produced_only_when_a_pinned_member_stops_matching() {
+    let mut db = temp_db("m3_conflict_scope");
+    let s = db
+        .mount_source("repo-1", "C:/photos", None, None)
+        .expect("挂载失败");
+    let f1 = seed_file(&mut db, &s.id, "a.jpg", MediaType::Image);
+
+    // add_only + pinned + 不再匹配 → 没有"移除意图"，因此**没有**冲突
+    let add_only = AlbumService::create_follow_source(
+        &mut db,
+        "repo-1",
+        "增量",
+        Some(AlbumMediaType::Image),
+        None,
+        s.id.as_str(),
+        SyncMode::AddOnly,
+        false,
+        None,
+    )
+    .expect("创建跟随型相册失败");
+    AlbumService::sync(&mut db, "repo-1", add_only.id.as_str()).expect("同步失败");
+    db.set_member_pinned(add_only.id.as_str(), f1.as_str(), true)
+        .expect("设置 pinned 失败");
+    change_media_type(&mut db, &f1, MediaType::Audio);
+    let out = AlbumService::sync(&mut db, "repo-1", add_only.id.as_str()).expect("同步失败");
+    assert!(out.conflicts.is_empty(), "add_only 不产生冲突（它不移除成员）");
+
+    // mirror + 仍然匹配 → 无冲突
+    change_media_type(&mut db, &f1, MediaType::Image);
+    let mirror = AlbumService::create_follow_source(
+        &mut db,
+        "repo-1",
+        "镜像",
+        Some(AlbumMediaType::Image),
+        None,
+        s.id.as_str(),
+        SyncMode::Mirror,
+        false,
+        None,
+    )
+    .expect("创建跟随型相册失败");
+    AlbumService::sync(&mut db, "repo-1", mirror.id.as_str()).expect("同步失败");
+    db.set_member_pinned(mirror.id.as_str(), f1.as_str(), true)
+        .expect("设置 pinned 失败");
+    let out = AlbumService::sync(&mut db, "repo-1", mirror.id.as_str()).expect("同步失败");
+    assert!(out.conflicts.is_empty(), "成员仍匹配规则时没有冲突");
+    assert_eq!(out.pinned_kept, 0);
 }
 
 /// 相册只显示属性匹配类型的文件。

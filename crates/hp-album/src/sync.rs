@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use hp_core::{AddedBy, AlbumKind, AlbumSyncState, HpError, HpResult, SyncMode};
 use hp_store::RepoDb;
 
-use crate::service::SyncOutcome;
+use crate::service::{CONFLICT_REASON_PINNED_KEPT, SyncConflict, SyncOutcome};
 
 /// 执行一次跟随源同步。
 pub fn run_sync(db: &mut RepoDb, repo_id: &str, album_id: &str) -> HpResult<SyncOutcome> {
@@ -25,6 +25,7 @@ pub fn run_sync(db: &mut RepoDb, repo_id: &str, album_id: &str) -> HpResult<Sync
             added: 0,
             removed: 0,
             pinned_kept: 0,
+            conflicts: Vec::new(),
         });
     }
 
@@ -47,6 +48,7 @@ pub fn run_sync(db: &mut RepoDb, repo_id: &str, album_id: &str) -> HpResult<Sync
             added: 0,
             removed: 0,
             pinned_kept: 0,
+            conflicts: Vec::new(),
         });
     }
 
@@ -85,8 +87,13 @@ pub fn run_sync(db: &mut RepoDb, repo_id: &str, album_id: &str) -> HpResult<Sync
     }
 
     // mirror：移除非 pinned 且不再匹配的成员；pinned 成员保留。
+    //
+    // 每个"本应移除但因 pinned 保留"的成员都是一条**逐文件的冲突**（缺陷 0004）：
+    // RFC 0002 要求 UI 明确提示"mirror 会移除用户以为还存在的成员"，
+    // 所以这里不能只累加计数，必须把**真实 file_id** 带上抛给命令层。
     let mut removed = 0u64;
     let mut pinned_kept = 0u64;
+    let mut conflicts: Vec<SyncConflict> = Vec::new();
     if rule.sync_mode == SyncMode::Mirror {
         let members = db.list_album_members(album_id)?;
         let mut to_remove = Vec::new();
@@ -95,6 +102,10 @@ pub fn run_sync(db: &mut RepoDb, repo_id: &str, album_id: &str) -> HpResult<Sync
             if member.pinned {
                 if !matched_now {
                     pinned_kept += 1;
+                    conflicts.push(SyncConflict {
+                        file_id: member.file_id.as_str().to_string(),
+                        reason: CONFLICT_REASON_PINNED_KEPT.to_string(),
+                    });
                 }
                 continue;
             }
@@ -120,6 +131,7 @@ pub fn run_sync(db: &mut RepoDb, repo_id: &str, album_id: &str) -> HpResult<Sync
         added,
         removed,
         pinned_kept,
+        conflicts,
     })
 }
 

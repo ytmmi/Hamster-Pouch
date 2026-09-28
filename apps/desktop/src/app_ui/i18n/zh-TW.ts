@@ -315,6 +315,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "task.scanError": "掃描錯誤 {payload}",
   "task.albumSync": "相簿同步 {payload}",
   "task.albumConflict": "相簿衝突 {payload}",
+  "task.albumSyncFailed": "相簿同步失敗 {payload}",
   "task.colorExtracted": "色彩擷取 {payload}",
   "task.currentRepo": "目前倉庫",
   "task.empty": "尚無任務事件",

@@ -41,6 +41,10 @@ export function TaskPanel(): JSX.Element {
           await listen("album.sync.conflict", (e) =>
             push(app.t("task.albumConflict", { payload: JSON.stringify(e.payload) })),
           ),
+          // 整体失败是独立事件（缺陷 0004）：以前它与"单文件冲突"挤在同一个事件名里
+          await listen("album.sync.failed", (e) =>
+            push(app.t("task.albumSyncFailed", { payload: JSON.stringify(e.payload) })),
+          ),
           await listen("color.extracted", (e) =>
             push(app.t("task.colorExtracted", { payload: JSON.stringify(e.payload) })),
           ),

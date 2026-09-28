@@ -85,12 +85,25 @@ export interface AlbumSyncProgressPayload {
   pinned: number;
 }
 
-/** album.sync.conflict 事件 */
+/**
+ * album.sync.conflict 事件（**逐文件**，缺陷 0004）。
+ *
+ * 一个冲突成员一条事件：`fileId` 是**真实**成员 ID，`reason` 是稳定原因码
+ * （当前只有 `pinned_kept`：成员已被用户固定，`mirror` 本应移除却保留）。
+ * 整体失败不再是本事件，见 [`AlbumSyncFailedPayload`]。
+ */
 export interface AlbumSyncConflictPayload {
   taskId: string;
   albumId: string;
   fileId: string;
   reason: string;
+}
+
+/** album.sync.failed 事件（**整体失败**，缺陷 0004）：与逐文件冲突分开。 */
+export interface AlbumSyncFailedPayload {
+  taskId: string;
+  albumId: string;
+  error: string;
 }
 
 /** color.extracted 事件 */

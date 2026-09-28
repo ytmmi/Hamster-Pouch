@@ -41,12 +41,19 @@ export interface AlbumSyncProgressPayload {
   pinned: number;
 }
 
-/** album.sync.conflict 事件 */
+/** album.sync.conflict 事件（逐文件，缺陷 0004：`fileId` 是真实成员 ID） */
 export interface AlbumSyncConflictPayload {
   taskId: string;
   albumId: string;
   fileId: string;
   reason: string;
+}
+
+/** album.sync.failed 事件（整体失败，缺陷 0004） */
+export interface AlbumSyncFailedPayload {
+  taskId: string;
+  albumId: string;
+  error: string;
 }
 
 /** color.extracted 事件 */

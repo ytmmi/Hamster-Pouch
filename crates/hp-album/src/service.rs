@@ -24,13 +24,33 @@ pub struct AddMembersOutcome {
     pub added: u64,
 }
 
+/// 单文件同步冲突的原因码：成员已被用户固定（pinned），`mirror` 本应移除却保留。
+pub const CONFLICT_REASON_PINNED_KEPT: &str = "pinned_kept";
+
+/// 单文件同步冲突（缺陷 0004）。
+///
+/// 语义是**逐文件**的：某个成员不再匹配当前同步规则，但被用户显式固定（pinned）而保留
+/// —— RFC 0002 明确要求「`mirror` 模式可能移除用户以为还存在的成员，需要 UI 明确提示」，
+/// 因此这条信号必须带**真实 `file_id`**，让界面能逐条列出。
+///
+/// 与"整体失败"是两件事：后者走事件 `album.sync.failed`，`file_id` 与它无关。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncConflict {
+    /// 冲突成员的 file ID（真实值，**不再是空串**）。
+    pub file_id: String,
+    /// 稳定原因码，见 [`CONFLICT_REASON_PINNED_KEPT`]。
+    pub reason: String,
+}
+
 /// 跟随源同步结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncOutcome {
     pub added: u64,
     pub removed: u64,
-    /// `mirror` 模式下因 pinned 而保留的成员数。
+    /// `mirror` 模式下因 pinned 而保留的成员数（等于 `conflicts.len()`，保留以便兼容既有展示）。
     pub pinned_kept: u64,
+    /// 逐文件冲突明细（缺陷 0004）：每条都带真实 `file_id`。
+    pub conflicts: Vec<SyncConflict>,
 }
 
 /// 相册业务服务入口。

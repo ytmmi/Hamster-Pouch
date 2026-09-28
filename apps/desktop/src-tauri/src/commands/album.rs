@@ -60,13 +60,26 @@ struct AlbumSyncProgressEvent {
     pinned: u64,
 }
 
+/// 单文件同步冲突（缺陷 0004）：**一个成员一条事件**，`fileId` 是真实值。
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct AlbumSyncConflictEvent {
     task_id: String,
     album_id: String,
+    /// 冲突成员的 file ID——**不再是空串**。
     file_id: String,
+    /// 稳定原因码（`pinned_kept`：成员已被用户固定，`mirror` 本应移除却保留）。
     reason: String,
+}
+
+/// 同步**整体失败**（缺陷 0004）：与"单文件冲突"分开，避免两种语义挤在一个事件名里。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AlbumSyncFailedEvent {
+    task_id: String,
+    album_id: String,
+    /// 诊断串（结构化错误码仍以命令层/`code` 为准）。
+    error: String,
 }
 
 /// 解析相册媒体属性字符串；缺省或空串表示继承父相册。
@@ -251,13 +264,17 @@ pub(crate) fn album_members(
     api_from_hp(outcome)
 }
 
-/// album.sync：执行跟随源同步，后台运行并发出进度/冲突事件。
+/// album.sync：执行跟随源同步，后台运行并发出进度 / 逐文件冲突 / 整体失败事件。
 ///
 /// 异步命令（含 `State<'_, _>` 引用）按 Tauri 的要求返回 `Result`，
 /// 由 [`ApiAsync`] 承载——包装仍落在**成功值**里。
 ///
-/// 返回的是 `taskId`：真正的同步在后台线程执行，失败经 `album.sync.conflict`
-/// 事件上报（`docs/issues/0004` 记录了该事件的语义漂移：当前只代表"整体失败"）。
+/// 返回的是 `taskId`：真正的同步在后台线程执行。**三种结果各有其事件**（缺陷 0004）：
+/// - 成功 → `album.sync.progress`（计数汇总）；
+/// - 成功但存在"本应移除却被 pinned 保留"的成员 → 每个成员一条 `album.sync.conflict`
+///   （带**真实 `fileId`** 与原因码 `pinned_kept`），其余成员照常同步；
+/// - 整体失败（相册/规则不存在、库错误等）→ `album.sync.failed`。
+/// 旧实现把整体失败也发成 `album.sync.conflict` 且 `fileId` 填空串，前端无法定位冲突文件。
 #[tauri::command]
 pub(crate) async fn album_sync(
     repo_id: String,
@@ -287,15 +304,26 @@ pub(crate) async fn album_sync(
                         pinned: outcome.pinned_kept,
                     },
                 );
+                // 逐文件冲突：一个成员一条事件，fileId 一定非空（缺陷 0004）
+                for conflict in &outcome.conflicts {
+                    let _ = app_handle.emit(
+                        "album.sync.conflict",
+                        AlbumSyncConflictEvent {
+                            task_id: emit_task_id.clone(),
+                            album_id: emit_album_id.clone(),
+                            file_id: conflict.file_id.clone(),
+                            reason: conflict.reason.clone(),
+                        },
+                    );
+                }
             }
             Err(e) => {
                 let _ = app_handle.emit(
-                    "album.sync.conflict",
-                    AlbumSyncConflictEvent {
+                    "album.sync.failed",
+                    AlbumSyncFailedEvent {
                         task_id: emit_task_id.clone(),
                         album_id: emit_album_id.clone(),
-                        file_id: String::new(),
-                        reason: e.to_string(),
+                        error: e.to_string(),
                     },
                 );
             }

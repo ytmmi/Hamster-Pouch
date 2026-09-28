@@ -9,6 +9,7 @@ import * as api from "../api";
 import type {
   AlbumItem,
   AlbumSyncConflictPayload,
+  AlbumSyncFailedPayload,
   AlbumSyncProgressPayload,
   FileItem,
   StatusHandler,
@@ -116,7 +117,17 @@ export function AlbumPanel({
           await listen<AlbumSyncConflictPayload>(
             "album.sync.conflict",
             (e) => {
-              onStatus(`同步冲突: ${e.payload.reason}`, "error");
+              // 逐文件冲突（缺陷 0004）：一个成员一条，fileId 是真实值，同步本身并未失败
+              onStatus(`同步冲突（未移除）: fileId=${e.payload.fileId} 原因=${e.payload.reason}`, "info");
+            },
+          ),
+        );
+        unlisteners.push(
+          await listen<AlbumSyncFailedPayload>(
+            "album.sync.failed",
+            (e) => {
+              // 整体失败是独立事件（缺陷 0004）
+              onStatus(`同步失败: ${e.payload.error}`, "error");
               setSyncInfo(null);
             },
           ),

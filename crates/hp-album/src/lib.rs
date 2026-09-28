@@ -7,4 +7,7 @@ mod media;
 mod service;
 mod sync;
 
-pub use service::{AddMembersOutcome, AlbumService, SetMediaTypeOutcome, SyncOutcome};
+pub use service::{
+    AddMembersOutcome, AlbumService, SetMediaTypeOutcome, SyncConflict, SyncOutcome,
+    CONFLICT_REASON_PINNED_KEPT,
+};

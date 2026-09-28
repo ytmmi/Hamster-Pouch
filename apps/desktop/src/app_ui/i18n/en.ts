@@ -315,6 +315,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "task.scanError": "Scan error {payload}",
   "task.albumSync": "Album sync {payload}",
   "task.albumConflict": "Album conflict {payload}",
+  "task.albumSyncFailed": "Album sync failed {payload}",
   "task.colorExtracted": "Color extracted {payload}",
   "task.currentRepo": "Current repository",
   "task.empty": "No task events",

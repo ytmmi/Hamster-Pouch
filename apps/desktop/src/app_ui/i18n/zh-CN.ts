@@ -331,6 +331,7 @@ export const zhCN = {
   "task.scanError": "扫描错误 {payload}",
   "task.albumSync": "相册同步 {payload}",
   "task.albumConflict": "相册冲突 {payload}",
+  "task.albumSyncFailed": "相册同步失败 {payload}",
   "task.colorExtracted": "色彩提取 {payload}",
   "task.currentRepo": "当前仓库",
   "task.empty": "暂无任务事件",
