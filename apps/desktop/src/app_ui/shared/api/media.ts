@@ -7,6 +7,11 @@
  * **注意**：自 2026-09 起播放器面板改用 DOM `<video>`（与查看器同构），libmpv 原生
  * 窗口路径**退役休眠**——本文件当前**没有调用方**；保留封装是为了不改动休眠代码的
  * 形状，将来若复活只需按既有调用习惯使用。
+ *
+ * **休眠标注是系统性的**（同一批）：桥接层 `commands/media.rs`（命令实现）、
+ * `embed_window.rs`（原生子窗口）、`main.rs` 的 `media.*` 注册段（含 `===== 休眠段 =====`
+ * 分隔）与 `AppState.media` / `media_embed` 字段、`crates/hp-media` 的 `player` 模块，
+ * 以及契约 §4 的 `media.surface.click`。判定依据见缺陷 `docs/issues/0001` / `0010`。
  */
 
 import { invoke } from "@tauri-apps/api/core";

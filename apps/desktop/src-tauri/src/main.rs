@@ -42,8 +42,11 @@ pub(crate) struct AppState {
     pub(crate) ffprobe_bin: Arc<Option<PathBuf>>,
     pub(crate) thumb_cache: Arc<ThumbnailCache>,
     /// 媒体子进程（libmpv，单实例常驻，D14）。
+    ///
+    /// **休眠（2026-09）**：libmpv 播放路径已退役（播放器改走 DOM `<video>`，缺陷
+    /// `docs/issues/0001`）。该字段与 `media_embed` 一起**保留不删**，仅作将来复活参考。
     pub(crate) media: Arc<Mutex<Option<MediaProcess>>>,
-    /// 面板级嵌入的原生渲染子窗口（D14）。
+    /// 面板级嵌入的原生渲染子窗口（D14）。**同上休眠**，见 `media` 字段的说明。
     pub(crate) media_embed: Arc<Mutex<Option<EmbedWindow>>>,
     /// 插件包存储根目录（RFC 0004）。
     pub(crate) plugin_root: Arc<PathBuf>,
@@ -191,6 +194,11 @@ fn main() {
             commands::ai::ai_tagging_submit,
             commands::ai::ai_tagging_status,
             commands::ai::ai_tagging_run,
+            // ===== 休眠段：libmpv 播放路径（2026-09 起播放器走 DOM `<video>`，见 docs/issues/0001）=====
+            // 下面 11 条 `media.*` 命令**全部休眠**：正式界面 `app_ui` 里 0 处调用，
+            // 唯一调用方是 dev harness `test_ui`；`external-cli/mpv/` 也不入库。
+            // **保留注册**（而非删除）是为了不改动休眠代码的形状，将来复活时无需重接线。
+            // 改这里的任何一条前，先确认没有把「休眠」读成「可用」。
             commands::media::media_play,
             commands::media::media_pause,
             commands::media::media_toggle_pause,
@@ -202,6 +210,7 @@ fn main() {
             commands::media::media_embed_visible,
             commands::media::media_embed_click_through,
             commands::media::media_playback_state,
+            // ===== 休眠段结束 =====
             commands::layout::layout_save,
             commands::layout::layout_list,
             commands::layout::layout_get,

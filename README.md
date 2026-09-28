@@ -143,6 +143,7 @@ set HP_MPV_BIN=D:\path\to\mpv.exe
 
 - `check-encoding.mjs` —— 文本文件必须 UTF-8 无 BOM、统一 LF（回退即红）
 - `check-commands.mjs` —— 命令 / 事件契约双向守护（前端封装与后端命令一致性）
+- `check-dormant-media.mjs` —— `media.*`（libmpv）休眠断言守护：保证休眠标注自洽且**正式界面 0 处调用**
 - `check-doc-status.mjs`、`check-status.mjs` —— 文档与实现状态对账
 - `check-line-count.mjs`、`check-panels.mjs`、`check-settings.mjs` —— 结构与门禁完整性
 - `blueprint-*.mjs` —— 事件蓝图引擎各维度的行为检查
