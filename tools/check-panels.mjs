@@ -328,6 +328,54 @@ check(
   /x\s*-\s*width/.test(contextMenuSrc) && /y\s*-\s*contentHeight/.test(contextMenuSrc),
 );
 
+// ==================== 「扩展」菜单：装了但没启用必须可见（2026-09 缺陷修复的守护）====================
+//
+// 防的是：装完插件后「扩展」菜单里**什么都不出现**、界面也无任何提示，
+// 用户只能得出"装了没反应"的结论（`hello` / `control-demo` 都踩过）。
+// 根因是 `plugin.panelCatalog` 这条"含未启用"的口径此前根本不存在——菜单是个占位。
+
+const menuBarSrc = readFileSync(join(ROOT, "apps/desktop/src/app_ui/menu/MenuBar.tsx"), "utf8");
+const apiPluginSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/api/plugin.ts"),
+  "utf8",
+);
+const catalogSrc = readFileSync(
+  join(ROOT, "crates/hp-plugin-host/src/host.rs"),
+  "utf8",
+);
+
+check(
+  "「扩展」菜单不再是占位：渲染面板目录并带启用开关",
+  /pluginPanelCatalog\(/.test(menuBarSrc) &&
+    /panelCatalog\.map\(/.test(menuBarSrc) &&
+    /togglePluginEnabled/.test(menuBarSrc) &&
+    /type="checkbox"/.test(menuBarSrc),
+);
+check(
+  "未启用 → 灰显且不可点击（按钮 disabled），由右侧开关负责启用",
+  /disabled=\{!item\.enabled\}/.test(menuBarSrc) && /\$\{item\.enabled \? "" : " dim"\}/.test(menuBarSrc),
+);
+check(
+  "面板目录**含未启用**（host 侧不按 enabled 过滤，只如实报出该字段）",
+  /fn panel_catalog/.test(catalogSrc) &&
+    // 关键：panel_catalog 里**没有** `if !enabled { continue }` 这种过滤
+    !/fn panel_catalog[\s\S]{0,2000}?if !enabled\s*\{/.test(catalogSrc) &&
+    /pub enabled: bool/.test(catalogSrc),
+);
+check(
+  "启用走既有授权口径（只传 repo.read，ui.panel 由宿主按 manifest 自动授予）",
+  /pluginEnable\(repoId, item\.pluginId, \["repo\.read"\]\)/.test(menuBarSrc) &&
+    /pluginDisable\(repoId, item\.pluginId\)/.test(menuBarSrc),
+);
+check(
+  "面板目录是独立命令（不污染只含已启用的 plugin.contributions 注册表口径）",
+  /export function pluginPanelCatalog/.test(apiPluginSrc) &&
+    /"plugin_panel_catalog"/.test(apiPluginSrc) &&
+    /pub\(crate\) fn plugin_panel_catalog/.test(
+      readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/plugin.rs"), "utf8"),
+    ),
+);
+
 // ============================== 汇总 ==============================
 
 const passed = results.filter((r) => r.ok).length;

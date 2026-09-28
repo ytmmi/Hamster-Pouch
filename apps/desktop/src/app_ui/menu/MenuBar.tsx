@@ -58,6 +58,57 @@ export function MenuBar({
   const [open, setOpen] = useState<string | null>(null);
   const [submenu, setSubmenu] = useState<string | null>(null);
   const [layouts, setLayouts] = useState<string[]>([]);
+  /** 「扩展」菜单的面板目录（**含未启用**的插件面板）。 */
+  const [panelCatalog, setPanelCatalog] = useState<api.PluginPanelCatalogItem[]>([]);
+  const [extBusy, setExtBusy] = useState(false);
+
+  /** 拉取面板目录。打开菜单时按需拉取 → 启用/禁用后天然不会陈旧。 */
+  const loadCatalog = useCallback(async () => {
+    if (!repoId) {
+      setPanelCatalog([]);
+      return;
+    }
+    try {
+      setPanelCatalog(await api.pluginPanelCatalog(repoId));
+    } catch (e) {
+      app.status(errorTextOf(app.t, e), "error");
+      setPanelCatalog([]);
+    }
+  }, [repoId, app]);
+
+  useEffect(() => {
+    if (open === "ext") void loadCatalog();
+  }, [open, loadCatalog]);
+
+  /**
+   * 就地启用/禁用某个插件（「扩展」菜单右侧的开关）。
+   *
+   * 授权口径与插件面板一致：只传 `repo.read`，`ui.panel` 由宿主按 manifest 声明
+   * **自动授予**（`hp-plugin-host` 的 `enable`：声明了 `ui.panel` 就一并授）。
+   * 启用后宿主广播 `plugin.changed`，面板注册表随之重建，该面板即可打开。
+   */
+  const togglePluginEnabled = useCallback(
+    async (item: api.PluginPanelCatalogItem) => {
+      if (!repoId) {
+        app.status(app.t("common.selectRepo"), "error");
+        return;
+      }
+      setExtBusy(true);
+      try {
+        if (item.enabled) {
+          await api.pluginDisable(repoId, item.pluginId);
+        } else {
+          await api.pluginEnable(repoId, item.pluginId, ["repo.read"]);
+        }
+        await loadCatalog();
+      } catch (e) {
+        app.status(errorTextOf(app.t, e), "error");
+      } finally {
+        setExtBusy(false);
+      }
+    },
+    [repoId, app, loadCatalog],
+  );
   const [savingLayout, setSavingLayout] = useState(false);
   const [layoutName, setLayoutName] = useState("");
   const [layoutMenu, setLayoutMenu] = useState<{ x: number; y: number; name: string } | null>(
@@ -521,7 +572,44 @@ export function MenuBar({
         </button>
         {open === "ext" && (
           <div className="menu-pop">
-            <span className="menu-item dim">{t("menubar.extensionsHint")}</span>
+            {panelCatalog.length === 0 && (
+              <span className="menu-item dim">{t("menubar.extensionsHint")}</span>
+            )}
+            {panelCatalog.map((item) => {
+              const inLayout = Boolean(apiRef.current?.getPanel(item.panelId));
+              return (
+                <div key={item.panelId} className="menu-item-row">
+                  <button
+                    className={`menu-item grow${item.enabled ? "" : " dim"}`}
+                    // 未启用 → 打不开（面板还没登记进注册表），按钮置灰、由右侧开关负责启用。
+                    disabled={!item.enabled}
+                    title={item.enabled ? item.panelId : t("menubar.extensionsNeedsEnable")}
+                    onClick={() => togglePanel(item.panelId)}
+                  >
+                    {inLayout ? "✓ " : "　"}
+                    {item.pluginName}
+                    {/* 插件语言资源通道未落地 → 这里直接显示标题键，不做 i18n 查询 */}
+                    <span className="dim"> · {item.titleKey}</span>
+                  </button>
+                  <label
+                    className="ext-toggle"
+                    title={
+                      item.enabled
+                        ? t("plugin.disable")
+                        : `${t("menubar.extensionsNeedsEnable")} — ${t("menubar.extensionsEnableHint")}`
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      checked={item.enabled}
+                      disabled={extBusy || !repoId}
+                      onChange={() => void togglePluginEnabled(item)}
+                    />
+                    <span>{t("plugin.enable")}</span>
+                  </label>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

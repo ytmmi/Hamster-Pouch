@@ -30,7 +30,9 @@ export const zhCN = {
   "menubar.language.zhTW": "繁體中文",
   "menubar.language.en": "English",
   "menubar.settingsHint": "设置项将在后续里程碑提供",
-  "menubar.extensionsHint": "插件与 AI 扩展将在 M5 提供",
+  "menubar.extensionsHint": "还没有安装插件（在插件面板里安装）",
+  "menubar.extensionsNeedsEnable": "该面板所属插件未在本仓库启用",
+  "menubar.extensionsEnableHint": "启用后即可打开该面板（启用即授权其声明的能力）",
 
   // 标签页右键菜单
   "tabmenu.close": "关闭",

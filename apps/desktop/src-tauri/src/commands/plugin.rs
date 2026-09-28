@@ -122,6 +122,24 @@ pub(crate) struct PluginContributions {
     settings_sections: Vec<SettingsSectionItem>,
 }
 
+/// 「扩展」菜单用的一行：**已安装**插件的面板（含**未启用**的）。
+///
+/// 与 `panel.contributions` 的分工：那个**只含已启用**的（注册表的安全口径），
+/// 本项额外把 `enabled` 报出来，界面才能把"装了但没启用"显示成灰显 + 开关。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PanelCatalogItem {
+    plugin_id: String,
+    /// 插件显示名（`manifest.name`），界面上说明"这个面板来自哪个插件"。
+    plugin_name: String,
+    trust_level: String,
+    panel_id: String,
+    /// 面板标题的 i18n 键（插件语言资源未落地时界面原样显示键名）。
+    title_key: String,
+    /// **该仓库**是否已启用。
+    enabled: bool,
+}
+
 fn row_to_item(r: PluginRegistryRow) -> PluginItem {
     PluginItem {
         id: r.id.as_str().to_string(),
@@ -515,6 +533,40 @@ pub(crate) fn plugin_load(
 /// 插件未安装 / 未启用 / 宿主 API 不兼容时，其注册项**缺席**——蓝图侧对这类
 /// `type` / `panel_id` 按「未接通」处理（软告警 + 灰显 + 允许保存 + 恢复后自动恢复），
 /// 见 `docs/spec/panel-standard.md` 第 7.2 节与 RFC 0010 决策 6。
+/// plugin.panelCatalog：「扩展」菜单的**面板目录**——已安装插件声明的面板，**含未启用**。
+///
+/// 与 `plugin.contributions` 是**两条不同的口径**，不要合并：
+/// - `plugin.contributions` 只报**该仓库已启用**的插件（注册表用；启用即授权，属安全口径）；
+/// - 本命令报**全部已安装**的，附带 `enabled`，让界面能把"装了但没启用"显示出来。
+///
+/// 起因是一个真实缺陷：装完插件后「扩展」菜单里什么都不出现、界面也无任何提示，
+/// 用户只能得出"装了没反应"的结论（`hello` / `control-demo` 都踩过）。
+#[tauri::command]
+pub(crate) fn plugin_panel_catalog(
+    repo_id: String,
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> ApiResponse<Vec<PanelCatalogItem>> {
+    let outcome = (|| -> HpResult<Vec<PanelCatalogItem>> {
+        ensure_global(&state, &app)?;
+        let guard = lock_global(&state)?;
+        let db = global(&guard)?;
+        Ok(PluginHost
+            .panel_catalog(db, &repo_id)?
+            .into_iter()
+            .map(|e| PanelCatalogItem {
+                plugin_id: e.plugin_id,
+                plugin_name: e.plugin_name,
+                trust_level: e.trust_level,
+                panel_id: e.panel_id,
+                title_key: e.title_key,
+                enabled: e.enabled,
+            })
+            .collect())
+    })();
+    api_from_hp(outcome)
+}
+
 #[tauri::command]
 pub(crate) fn plugin_contributions(
     repo_id: String,

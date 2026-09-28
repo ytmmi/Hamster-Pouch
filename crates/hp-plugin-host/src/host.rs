@@ -320,6 +320,69 @@ impl PluginHost {
         });
         Ok(out)
     }
+
+    /// **已安装**插件声明的面板目录（含**未启用**的），供界面把"还要启用"这件事显示出来。
+    ///
+    /// 与 [`PluginHost::repo_contributions`] 的区别只有一条：**不按启用状态过滤**，
+    /// 而是把 `enabled` 原样报出来。注册表仍只登记已启用的（那是安全口径），
+    /// 本方法只服务"展示 + 就地启用"。
+    ///
+    /// 为什么需要它：装完插件后面板菜单里**什么都不出现**，界面又没有任何提示，
+    /// 用户只能得出"装了没反应"的结论——`hello` / `control-demo` 都踩过这条。
+    pub fn panel_catalog(
+        &self,
+        db: &GlobalDb,
+        repo_id: &str,
+    ) -> HpResult<Vec<PanelCatalogEntry>> {
+        let mut out = Vec::new();
+        for row in db.list_plugins()? {
+            let enabled = db
+                .get_plugin_repo_state(row.id.as_str(), repo_id)?
+                .map(|s| s.enabled)
+                .unwrap_or(false);
+            let Ok(manifest) = parse_manifest(&row.manifest_json) else {
+                continue;
+            };
+            // 宿主 API 不兼容 → 该插件整条缺席（与 repo_contributions 同口径：不是错误）。
+            if !HostApiVersion::current().is_compatible(manifest.min_host_version) {
+                continue;
+            }
+            for contribution in &manifest.contributions {
+                if contribution.kind != ContributionKind::Panel {
+                    continue;
+                }
+                let panel = contribution.panel_decl(Some(manifest.id.as_str()));
+                out.push(PanelCatalogEntry {
+                    plugin_id: manifest.id.as_str().to_string(),
+                    plugin_name: manifest.name.clone(),
+                    trust_level: row.trust_level.as_str().to_string(),
+                    panel_id: panel.id.clone(),
+                    title_key: panel.title_key.clone().unwrap_or_default(),
+                    enabled,
+                });
+            }
+        }
+        out.sort_by(|a, b| {
+            (a.plugin_id.as_str(), a.panel_id.as_str())
+                .cmp(&(b.plugin_id.as_str(), b.panel_id.as_str()))
+        });
+        Ok(out)
+    }
+}
+
+/// 面板目录项（[`PluginHost::panel_catalog`] 的元素）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PanelCatalogEntry {
+    pub plugin_id: String,
+    /// 插件显示名（`manifest.name`），用于"这个面板来自哪个插件"。
+    pub plugin_name: String,
+    /// 信任等级（诊断与界面提示用）。
+    pub trust_level: String,
+    pub panel_id: String,
+    /// 面板标题的 i18n 键（插件语言资源通道未落地时界面会原样显示键名）。
+    pub title_key: String,
+    /// **该仓库**是否已启用（未启用 → 界面灰显 + 提供启用开关）。
+    pub enabled: bool,
 }
 
 /// manifest 声明的**全部**设置项（`panel.settings` 与 `settingsSection.settings` 两处）。

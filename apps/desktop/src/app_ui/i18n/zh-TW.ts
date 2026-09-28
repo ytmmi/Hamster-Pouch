@@ -31,7 +31,9 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "menubar.language.zhTW": "繁體中文",
   "menubar.language.en": "English",
   "menubar.settingsHint": "設定項將於後續里程碑提供",
-  "menubar.extensionsHint": "外掛與 AI 擴充將於 M5 提供",
+  "menubar.extensionsHint": "還沒有安裝外掛（在外掛面板安裝）",
+  "menubar.extensionsNeedsEnable": "該面板所屬外掛未在本倉庫啟用",
+  "menubar.extensionsEnableHint": "啟用後即可開啟該面板（啟用即授權其宣告的能力）",
 
   "tabmenu.close": "關閉",
   "tabmenu.float": "浮動",

@@ -31,7 +31,9 @@ export const en: Record<keyof DictZhCN, string> = {
   "menubar.language.zhTW": "繁體中文",
   "menubar.language.en": "English",
   "menubar.settingsHint": "More settings coming in later milestones",
-  "menubar.extensionsHint": "Plugins and AI extensions arrive in M5",
+  "menubar.extensionsHint": "No plugins installed yet (install them in the Plugins panel)",
+  "menubar.extensionsNeedsEnable": "This panel's plugin is not enabled for this repository",
+  "menubar.extensionsEnableHint": "Enable it to open this panel (enabling grants its declared capabilities)",
 
   "tabmenu.close": "Close",
   "tabmenu.float": "Float",

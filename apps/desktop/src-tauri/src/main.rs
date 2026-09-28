@@ -254,6 +254,7 @@ fn main() {
             commands::plugin::plugin_disable,
             commands::plugin::plugin_state,
             commands::plugin::plugin_contributions,
+            commands::plugin::plugin_panel_catalog,
             commands::plugin::plugin_load,
             commands::plugin::plugin_versions,
             commands::plugin::plugin_rollback,

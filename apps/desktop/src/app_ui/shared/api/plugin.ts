@@ -119,6 +119,32 @@ export function pluginContributions(repoId: string): Promise<PluginContributions
   return invoke<ApiResponse<PluginContributions>>("plugin_contributions", { repoId }).then(unwrapApi);
 }
 
+/** 「扩展」菜单的一行：**已安装**插件的面板（含未启用）。 */
+export interface PluginPanelCatalogItem {
+  pluginId: string;
+  /** 插件显示名（`manifest.name`）。 */
+  pluginName: string;
+  trustLevel: string;
+  panelId: string;
+  /** 面板标题的 i18n 键（插件语言资源未落地时界面会原样显示键名）。 */
+  titleKey: string;
+  /** **该仓库**是否已启用；`false` → 界面灰显并提供启用开关。 */
+  enabled: boolean;
+}
+
+/**
+ * 「扩展」菜单的面板目录（**含未启用**的插件面板）。
+ *
+ * 与 [`pluginContributions`] 是**两条不同口径**，不要合并：那个只报已启用的（注册表用，
+ * 启用即授权能力，属安全口径）；本命令报全部已安装的并附带 `enabled`，
+ * 让"装了但没启用"在界面上可见——此前装完插件后面板菜单里毫无迹象。
+ */
+export function pluginPanelCatalog(repoId: string): Promise<PluginPanelCatalogItem[]> {
+  return invoke<ApiResponse<PluginPanelCatalogItem[]>>("plugin_panel_catalog", { repoId }).then(
+    unwrapApi,
+  );
+}
+
 /** `plugin.panelSchema` 的返回项（D76 已包装）。 */
 export interface PanelSchemaItem {
   panelId: string;
