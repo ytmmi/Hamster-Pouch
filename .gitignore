@@ -56,3 +56,10 @@ tools/tagdict/output/
 # 仓库不随附，需自行下载放入该目录（下载说明见 README.md「外部依赖」）。
 # 也可用环境变量 HP_MPV_BIN 直接指定 mpv.exe 路径，不依赖本目录。
 external-cli/mpv/
+
+# === 插件可执行入口：构建产物，不入库 ===
+# 插件入口是**本地构建**的可执行文件（源码是测试夹具 crates/hp-plugin-host/src/bin/，
+# 一份代码同时当测试对端与示例）；与 mpv 同理不入库——二进制不该进版本库，
+# 而且构建机与目标机的 ABI 未必一致。构建办法见 plugins/examples/control-demo/README.md。
+# 只忽略 bin/ 下的 .exe：同目录的 README.md 等说明文档仍入库（见 plugins/examples/hello/bin/）。
+plugins/**/bin/*.exe
