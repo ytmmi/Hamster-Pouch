@@ -1,0 +1,28 @@
+{
+  "id": "dev.hamsterpouch.example.control_demo",
+  "name": "控件通道示例插件",
+  "version": "0.1.0",
+  "min_host_version": 1,
+  "api_version": 1,
+  "runtime": { "kind": "external-process" },
+  "entry": "bin/control-demo.exe",
+  "capabilities": ["ui.panel", "repo.read"],
+  "contributions": [
+    {
+      "kind": "panel",
+      "id": "plugin.dev.hamsterpouch.example.control_demo.demo.panel",
+      "title_key": "plugin.controlDemo.panel",
+      "category": "system",
+      "has_class": false,
+      "blueprint_node": "control",
+      "read_only": true
+    }
+  ],
+  "data_queries": [
+    { "name": "items", "returns": "rows" },
+    { "name": "summary", "returns": "object" },
+    { "name": "count", "returns": "scalar" }
+  ],
+  "events": [{ "id": "apply" }, { "id": "pick" }],
+  "trust": { "requested": "local-dev" }
+}

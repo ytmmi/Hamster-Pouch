@@ -150,3 +150,43 @@ fn garbage_output_is_rejected() {
     let err = query("garbage", None, QUERY_TIMEOUT).expect_err("非 JSON 应失败");
     assert!(matches!(err, HpError::Plugin(_)));
 }
+
+/// 夹具的默认 schema 也**当示例插件用**（`plugins/examples/control-demo/`）。
+/// 这里用 hp-core 的**真**校验器复算一遍：声明名与 schema 里的 `bind` / `visible_when` /
+/// `on` 必须完全对得上，否则真机打开面板只会看到一个校验错误态，
+/// 而"示例不能用"会被误当成"取数通道坏了"。
+#[test]
+fn demo_schema_passes_the_real_validator_with_the_demo_manifest_declarations() {
+    // 注意：这里要的是 **schema** 请求（`ui.panel.schema`），不是取数请求——
+    // 本文件的 `query()` 走的是 `ui.panel.query`，拿不到 schema。
+    const PANEL: &str = "plugin.dev.hamsterpouch.system.palette.palette.panel";
+    let text = fixture("ok")
+        .query(
+            &hp_plugin_host::PanelSchemaParams::new(PANEL, 1),
+            QUERY_TIMEOUT,
+            QUERY_MAX_BYTES,
+        )
+        .expect("夹具应返回 schema");
+    let schema = hp_core::ControlSchema::from_json(&text).expect("示例 schema 应可解析");
+    let ctx = hp_core::ControlValidateCtx {
+        expected_panel_id: Some(PANEL.into()),
+        declared_queries: vec!["items".into(), "summary".into(), "count".into()],
+        declared_events: vec!["apply".into(), "pick".into()],
+    };
+    let result = schema.validate(&ctx);
+    assert!(
+        result.errors.is_empty(),
+        "示例 schema 不该有硬错误（真机上会表现为面板打不开）: {:?}",
+        result.errors
+    );
+
+    // 三种 returns 各有一个 bind —— 少一种，真机测试就覆盖不到那条形态。
+    for name in ["items", "summary", "count"] {
+        assert!(
+            text.contains(&format!("\"name\":\"{name}\"")),
+            "示例 schema 缺少 bind：{name}"
+        );
+    }
+    assert!(text.contains("\"visible_when\""), "示例应带一个 visible_when");
+    assert!(text.contains("\"on\""), "示例应带事件映射");
+}

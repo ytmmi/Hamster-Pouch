@@ -131,23 +131,67 @@ fn main() {
         }
         _ => {
             // `ok`：`result` 直接是 schema 对象。
-            emit_json(&json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "result": {
-                    "api_version": 1,
-                    "panel_id": panel_id,
-                    "root": {
-                        "id": "root",
-                        "kind": "column",
-                        "children": [
-                            { "id": "title", "kind": "text", "text_key": "fixture.title" }
-                        ]
-                    }
-                }
-            }));
+            emit_json(&json!({ "jsonrpc": "2.0", "id": 1, "result": schema_value(&panel_id) }));
         }
     }
+}
+
+/// 夹具的**默认面板 schema**——刻意做成"有数据、有事件"的可用面板，
+/// 这样它既能当 `tests/` 的被测对端，也能当**真机验收的示例插件**（见
+/// `plugins/examples/control-demo/`）。三个 `bind` 各覆盖一种 `returns`：
+///
+/// | 控件 | bind | `returns` |
+/// | --- | --- | --- |
+/// | `list` | `panel:items` | `rows` |
+/// | `keyValue` | `panel:summary` | `object` |
+/// | `progress` | `panel:count` | `scalar` |
+///
+/// 另含一个 `visible_when`（`panel:items` 为 `empty` 时显示"无数据"提示）与两个事件
+/// （`on.click` / `on.double_click`）。**改这里必须同步改该示例插件的 manifest 声明**
+/// （`data_queries` 与 `events` 的名字/取值），否则宿主侧 fail-closed 校验会直接拒。
+fn schema_value(panel_id: &str) -> Value {
+    json!({
+        "api_version": 1,
+        "panel_id": panel_id,
+        "root": {
+            "id": "root",
+            "kind": "column",
+            "children": [
+                { "id": "title", "kind": "text", "text_key": "demo.title" },
+                {
+                    "id": "items",
+                    "kind": "list",
+                    "bind": { "kind": "panel", "name": "items" },
+                    "item_text": "name",
+                    "on": { "click": "apply", "double_click": "pick" }
+                },
+                {
+                    "id": "count",
+                    "kind": "progress",
+                    "bind": { "kind": "panel", "name": "count" },
+                    "max": 10
+                },
+                {
+                    "id": "summary",
+                    "kind": "keyValue",
+                    "bind": { "kind": "panel", "name": "summary" }
+                },
+                {
+                    "id": "empty_hint",
+                    "kind": "notice",
+                    "text_key": "demo.empty",
+                    "variant": "warn",
+                    "visible_when": { "kind": "panel", "name": "items", "test": "empty" }
+                },
+                {
+                    "id": "pick",
+                    "kind": "button",
+                    "text_key": "demo.pick",
+                    "on": { "click": "pick" }
+                }
+            ]
+        }
+    })
 }
 
 /// 按请求里的 `queries` 逐键回填结果（夹具的"正常"行为）。
@@ -174,6 +218,9 @@ fn data_results(mode: &str, params: &Value) -> Value {
         }
         let key = q.get("key").and_then(Value::as_str).unwrap_or("").to_string();
         let kind = q.get("kind").and_then(Value::as_str).unwrap_or("panel");
+        let name = q.get("name").and_then(Value::as_str).unwrap_or("");
+        // 按**查询名**给不同形态，好让示例面板同时覆盖 rows / object / scalar 三种 returns。
+        // 其余名字（含 `tests/` 用的 `colors`）一律回行集。
         let value = if kind == "selection" {
             json!({
                 "kind": "object",
@@ -182,25 +229,32 @@ fn data_results(mode: &str, params: &Value) -> Value {
                 ]
             })
         } else {
-            json!({ "kind": "rows", "rows": [{ "id": "row-1", "text": key }] })
+            match name {
+                "count" => json!({ "kind": "scalar", "value": 3 }),
+                "summary" => json!({
+                    "kind": "object",
+                    "entries": [
+                        { "key": "plugin", "value": "control-demo" },
+                        { "key": "queries", "value": queries.len() }
+                    ]
+                }),
+                _ => json!({
+                    "kind": "rows",
+                    "rows": [
+                        { "id": "row-1", "text": key },
+                        { "id": "row-2", "text": "second" }
+                    ]
+                }),
+            }
         };
         results.insert(key, value);
     }
     Value::Object(results)
 }
 
-/// 最小合法 schema 的 JSON 文本（`result` 为字符串时使用）。
+/// 默认面板 schema 的 JSON 文本（`result` 为字符串时使用；内容与 `schema_value` 一致）。
 fn schema_text(panel_id: &str) -> String {
-    json!({
-        "api_version": 1,
-        "panel_id": panel_id,
-        "root": {
-            "id": "root",
-            "kind": "column",
-            "children": [{ "id": "title", "kind": "text", "text_key": "fixture.title" }]
-        }
-    })
-    .to_string()
+    schema_value(panel_id).to_string()
 }
 
 fn ok_response(panel_id: &str, result: Option<Value>) -> Value {
