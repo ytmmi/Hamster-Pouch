@@ -1364,7 +1364,12 @@ button.danger {
   gap: 8px;
 }
 
-/* ===== M4-8：面板级媒体嵌入渲染目标占位区 ===== */
+/* ===== M4-8：面板级媒体嵌入渲染目标占位区（**休眠**）=====
+   ⚠️ 本节规则描述的是 **libmpv 原生子窗口**方案（`media.embed.*` + `embed_window.rs`），
+   该方案已于 2026-09 被**方案级替换**：播放器面板改用与查看器同构的 DOM `<video>`
+   （`MediaPlayerPanel.tsx` 的 `.player-video`，见本文件末尾），`media.*` 路径**已无调用方**、
+   仅保留待复活评估（见 `docs/issues/0001` 的「终期处置」与 `docs/rfc/0005-media-capabilities.md`）。
+   因此本节规则当前**不生效**，保留仅为避免误删。 */
 
 /* 播放画面区：原生渲染子窗口盖在 .player-surface 之上；
    .player-click-layer 是接收点击的透明覆盖层（子窗口已设为穿透）。 */
@@ -1399,7 +1404,7 @@ button.danger {
   cursor: default;
 }
 
-/* 未播放 / 已暂停时给一行居中提示（画面本身在原生窗口里，DOM 看不到） */
+/* 未播放 / 已暂停时给一行居中提示（休眠：原方案下画面在原生窗口里，DOM 看不到） */
 .player-overlay-hint {
   padding: 4px 10px;
   border-radius: 4px;
