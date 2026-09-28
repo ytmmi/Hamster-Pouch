@@ -98,7 +98,13 @@ cargo test
 
 ## 外部依赖：mpv（需自行下载）
 
-媒体播放需要 **mpv Windows 构建**（`mpv.exe` 及配套 DLL，约 100MB+）。因其体积过大无法随仓库上传，
+> **⚠️ 只有休眠的 libmpv 路径需要 mpv —— 日常使用不需要。**
+> 自 2026-09 起播放器面板改走 **DOM `<video>`**（缺陷 `docs/issues/0001` 的修复），
+> `media.*` 这组命令在正式界面 `apps/desktop/src/app_ui` 里**没有任何调用方**
+> （唯一调用方是 dev harness `apps/desktop/src/test_ui`）。本节记录的是**已休眠**的
+> libmpv 原生窗口路径，供将来复活时参考；**缺失 mpv 不影响现有播放功能**。
+
+libmpv 路径需要 **mpv Windows 构建**（`mpv.exe` 及配套 DLL，约 100MB+）。因其体积过大无法随仓库上传，
 `external-cli/mpv/` 已被 `.gitignore` 排除，**不会随代码仓库分发**，需要自行下载。
 
 1. 从 mpv 官网安装说明页获取 Windows 构建：<https://mpv.io/installation/>
@@ -119,7 +125,8 @@ cargo test
 set HP_MPV_BIN=D:\path\to\mpv.exe
 ```
 
-两者都未提供时，媒体播放命令会返回「未找到 mpv 可执行文件」的错误提示。
+两者都未提供时，`media.*` 命令会返回「未找到 mpv 可执行文件」的错误提示
+（正式界面不调用这些命令，因此**不影响**现有播放功能）。
 
 ## 环境变量
 
