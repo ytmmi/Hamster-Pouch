@@ -14,7 +14,8 @@
  *   如需隐藏/收起请用显式 hide/collapse 动作；
  * - `navigate`（D48）= 切换到目标界面（层），幂等（已在该层无操作）；
  * - `show`/`hide`/`toggle` 指向**浮层**（D50，容器）时，驱动浮层内容（它 contains 的
- *   面板控件）以**浮动**方式显示/隐藏，并把容器期望可见态告知宿主；
+ *   面板控件）以**浮动**方式显示/隐藏，并把「容器期望可见态 + 外观档位 + 内容面板」
+ *   交给宿主渲染容器本身（圆角/阴影/标签隐藏/叠放）；
  * - 幂等：重复触发不产生额外副作用（show 已存在面板 = 激活）。
  *
  * 组收起/拉伸（collapse/expand）与隐藏方向（hide_direction）的 dockview 映射属于
@@ -29,13 +30,33 @@ import type {
   BlueprintTargetRef,
   BlueprintTrigger,
   HideDirectionAxis,
+  OverlayAppearance,
 } from "@hamster-pouch/config";
 import {
   DEFAULT_OVERLAY_ANCHOR,
   nodeLayerKey,
   parseBlueprintDocument,
+  resolveOverlayAppearance,
   resolveOverlaySize,
 } from "@hamster-pouch/config";
+
+/**
+ * 浮层容器交给宿主渲染的**请求**（D50）。
+ *
+ * 引擎掌握"哪些面板属于这个浮层"与"外观档位"，宿主掌握 dockview 与设计 token；
+ * 因此一次请求把两者都给宿主：`panelIds` 用来找到内容面板所在的浮动窗口，
+ * `appearance` 是档位（宿主按 `packages/ui` 的 token 落成像素）。
+ */
+export interface OverlayHostRequest {
+  /** 浮层节点 key（宿主用它登记/取回容器装饰）。 */
+  key: string;
+  /** 容器期望可见态（`visible` 字段只是初始值，这里是运行时结论）。 */
+  visible: boolean;
+  /** 该浮层 `contains` 的内容面板 id（含经标签组间接包含）。 */
+  panelIds: string[];
+  /** 容器外观档位（圆角/阴影/标签隐藏/叠放高度）。 */
+  appearance: OverlayAppearance;
+}
 
 /** 引擎对外执行器（由应用装配层注入，与 dockview/媒体命令解耦）。 */
 export interface BlueprintExecutor {
@@ -74,11 +95,11 @@ export interface BlueprintExecutor {
     },
   ) => void;
   /**
-   * 浮层容器显隐（D50）：`overlayKey` = 浮层节点 key（2026-09 取消「浮动控件」，不再有绑定 id）。
-   * 引擎已按浮动面板显示/隐藏浮层**内容**（它 contains 的面板控件）；宿主据此刷新浮层容器本身
-   * （定位/外观档位：圆角/阴影/标签隐藏）。
+   * 浮层**容器**的显隐与外观（D50）：`key` = 浮层节点 key（2026-09 取消「浮动控件」，
+   * 不再有绑定 id）。引擎已按浮动面板显示/隐藏浮层**内容**；宿主据此渲染容器本身
+   * （圆角/阴影/标签隐藏/叠放层级），并带上属于该浮层的内容面板。
    */
-  setOverlayVisible: (overlayKey: string, visible: boolean) => void;
+  applyOverlay: (request: OverlayHostRequest) => void;
 }
 
 /** dispatch 入参（单击/双击/选中变化 + 目标条目）。 */
@@ -445,7 +466,8 @@ export class BlueprintEngine {
    * 浮层显隐（D50，容器语义 / 2026-09 取消「浮动控件」）：
    * 浮层的内容就是它 `contains` 的**面板控件**（含经标签组间接包含的），
    * 因此 `show` = 把这些面板以浮动方式显示、`hide` = 关闭它们；
-   * 同时把浮层容器的期望可见态告诉宿主（宿主负责容器本身的外观档位渲染）。
+   * 同时把「容器期望可见态 + 外观档位 + 属于它的内容面板」一并交给宿主，
+   * 由宿主渲染**容器本身**（圆角/阴影/标签隐藏/叠放；像素取 `packages/ui` 的 token）。
    */
   private setOverlay(node: BlueprintNode, visible: boolean, graph: BlueprintGraph): void {
     // 未连接到界面（未接通）时**不允许显示**；隐藏仍然执行，用于断开连接后的收尾。
@@ -472,9 +494,11 @@ export class BlueprintEngine {
         this.executor?.hidePanel(panelId);
       }
     }
-    this.executor?.setOverlayVisible(node.key, visible);
+    // 容器渲染请求放在内容面板之后：宿主要靠它们已经浮动，才找得到容器元素。
+    const appearance = resolveOverlayAppearance(node);
+    this.executor?.applyOverlay({ key: node.key, visible, panelIds, appearance });
     this.log(
-      `[engine] 浮层 ${node.key} ${visible ? "显示" : "隐藏"}：内容面板=[${panelIds.join(", ") || "（空浮层）"}] ${size.width}×${size.height} @${box.anchor}(${box.offsetX}, ${box.offsetY})`,
+      `[engine] 浮层 ${node.key} ${visible ? "显示" : "隐藏"}：内容面板=[${panelIds.join(", ") || "（空浮层）"}] ${size.width}×${size.height} @${box.anchor}(${box.offsetX}, ${box.offsetY}) 外观 shadow=${appearance.shadow} radius=${appearance.radius} 标签${appearance.hideLabel ? "隐藏" : "显示"} height=${appearance.height}`,
     );
   }
 

@@ -73,6 +73,69 @@ export function overlaySizeLabel(size?: { width?: number; height?: number }): st
   return `${resolved.width}×${resolved.height}`;
 }
 
+// ============================== 容器外观档位（D50） ==============================
+
+/**
+ * 浮层外观的**缺省档位**（蓝图未声明时）。
+ *
+ * 取 `md` 的理由不是"看起来合适"，而是**零变化**：`packages/ui` 的 `SHADOW.md` 与
+ * `RADIUS.md` 刻意等于宿主既有浮动窗口的观感，因此"未声明档位"与"声明成缺省档位"
+ * 视觉等价——浮层容器渲染不会让任何既有蓝图换一个样子。
+ */
+export const DEFAULT_OVERLAY_SHADOW: TokenLevel = "md";
+export const DEFAULT_OVERLAY_RADIUS: TokenLevel = "md";
+
+/**
+ * 叠放高度参数 `height` 的缺省值（RFC 0007 浮层节点 / D57：默认 1，范围 1–10，值大者在上）。
+ *
+ * **取值范围不在这里校验**：`1–10` 由解析层强制（越界是硬错误，见 `blueprint.ts` 的
+ * `OVERLAY_HEIGHT_MIN`/`OVERLAY_HEIGHT_MAX`，取值域在 `blueprintValues.ts`）。
+ * 渲染器**不重复实现校验**——同一口径只写一处；引擎拿到的文档必然已经过解析层。
+ * 这里只负责"没写就用默认值"。
+ */
+export const DEFAULT_OVERLAY_HEIGHT = 1;
+
+/** 浮层容器**解析后**的外观：档位取值 + 标签显隐 + 叠放高度（不含像素）。 */
+export interface OverlayAppearance {
+  shadow: TokenLevel;
+  radius: TokenLevel;
+  /** 隐藏组件标签（浮层窗口不显示标题/标签，内容占满框体）。 */
+  hideLabel: boolean;
+  /** 叠放高度参数（**不是像素**）：同界面内多个浮层按它比较，值大者在上。 */
+  height: number;
+}
+
+/** 档位取值兜底：解析层已保证枚举合法，这里只防未知值（回落缺省档位）。 */
+function tokenLevelOr(value: unknown, fallback: TokenLevel): TokenLevel {
+  return typeof value === "string" && (TOKEN_LEVELS as readonly string[]).includes(value)
+    ? (value as TokenLevel)
+    : fallback;
+}
+
+/**
+ * 解析浮层**容器**的外观：缺省档位 + 标签显隐 + 叠放高度。
+ *
+ * 纯函数，供蓝图引擎与宿主执行器共用。**只解析档位、不碰像素**——"外观取 token 档位、
+ * 像素由 `packages/ui` 决定"（RFC 0007 浮层节点 / D44）由渲染处落实。
+ */
+export function resolveOverlayAppearance(node?: {
+  shadow?: TokenLevel;
+  radius?: TokenLevel;
+  hide_label?: boolean;
+  height?: number;
+}): OverlayAppearance {
+  const height = node?.height;
+  return {
+    shadow: tokenLevelOr(node?.shadow, DEFAULT_OVERLAY_SHADOW),
+    radius: tokenLevelOr(node?.radius, DEFAULT_OVERLAY_RADIUS),
+    hideLabel: node?.hide_label === true,
+    height:
+      typeof height === "number" && Number.isFinite(height)
+        ? Math.round(height)
+        : DEFAULT_OVERLAY_HEIGHT,
+  };
+}
+
 /** 锚点的水平/垂直分量：起 / 中 / 末。 */
 export function anchorAxis(
   anchor: OverlayAnchor,

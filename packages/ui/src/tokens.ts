@@ -41,6 +41,23 @@ export const RADIUS = {
   lg: 6,
 } as const;
 
+/**
+ * 阴影档位（浮层容器外观，D50 / RFC 0007 浮层节点）。
+ *
+ * 只给**档位**，像素与不透明度集中在这里；`alpha` 分浅色/深色——同一档位在深色主题下
+ * 需要更高的不透明度才有等效层次感，这与 `COLORS` 分主题是同一个理由。
+ *
+ * `md` 刻意等于宿主既有浮动窗口的观感（`apps/desktop/src/app_ui/shared/styles.css` 的
+ * `--dv-floating-box-shadow`：浅色 `0 8px 32px rgba(0,0,0,.15)`、深色 `…,.4`），
+ * 于是**蓝图未声明档位时视觉零变化**——这是浮层容器渲染的默认档位。
+ */
+export const SHADOW = {
+  none: { y: 0, blur: 0, alpha: { light: 0, dark: 0 } },
+  sm: { y: 2, blur: 8, alpha: { light: 0.12, dark: 0.3 } },
+  md: { y: 8, blur: 32, alpha: { light: 0.15, dark: 0.4 } },
+  lg: { y: 16, blur: 48, alpha: { light: 0.26, dark: 0.52 } },
+} as const;
+
 export const FONT_SIZE = {
   xs: 10,
   sm: 11,

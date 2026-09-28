@@ -24,11 +24,38 @@ const { pickNeighborByDirection, adjacencyAxis } = await import(
   pathToFileURL(`${ROOT}/apps/desktop/src/app_ui/shared/blueprintLayout.ts`).href
 );
 
+const chrome = await import(
+  pathToFileURL(`${ROOT}/apps/desktop/src/app_ui/shared/overlayChrome.ts`).href
+);
+
+const ui = await import(pathToFileURL(`${ROOT}/packages/ui/src/index.ts`).href);
+
 const results = [];
 const check = (label, ok, detail = "") => {
   results.push({ label, ok });
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
+
+/**
+ * 浮层容器请求 → 可断言的一行。
+ *
+ * 断言里带上**内容面板**与**外观档位**，因为它们是宿主渲染容器所必需的输入
+ * （D50 容器渲染：宿主靠 panelIds 找容器元素、靠外观档位取 token）。
+ */
+const overlayOp = (req) =>
+  `overlay ${req.key} ${req.visible ? "show" : "hide"}` +
+  ` panels=[${req.panelIds.join(",")}] shadow=${req.appearance.shadow}` +
+  ` radius=${req.appearance.radius} label=${req.appearance.hideLabel ? "hidden" : "shown"}` +
+  ` height=${req.appearance.height}`;
+
+/**
+ * ops 里是否存在该浮层的请求行。
+ *
+ * 用**前缀**判定而不是 `Array.includes(整行)`：整行里还有内容面板与外观档位，
+ * 只关心显隐的断言不该随这些字段变化而失效。
+ */
+const hasOverlay = (ops, key, visible) =>
+  ops.some((op) => op.startsWith(`overlay ${key} ${visible ? "show" : "hide"}`));
 
 /** 双层的合成图：l_main 里双击图像 → 显示查看器；单击 → 跳转到 l_edit；l_edit 里显示浮层。 */
 function syntheticGraph() {
@@ -110,8 +137,7 @@ function run(graph, layer, trigger, mediaType, context) {
     expandPanels: (ids) => ops.push(`expand [${ids.join(", ")}]`),
     playFile: (fileId) => ops.push(`play ${fileId}`),
     navigateLayer: (layerKey) => ops.push(`navigate ${layerKey}`),
-    setOverlayVisible: (overlayKey, visible) =>
-      ops.push(`overlay ${overlayKey} ${visible ? "show" : "hide"}`),
+    applyOverlay: (req) => ops.push(overlayOp(req)),
     showOverlayPanel: (panelId, box) =>
       ops.push(`float ${panelId} ${box.width}×${box.height} @${box.anchor}(${box.offsetX}, ${box.offsetY})`),
   });
@@ -150,11 +176,35 @@ function run(graph, layer, trigger, mediaType, context) {
 
   const edit = run(graph, "l_edit", "double_click", "image");
   check(
-    "D50：浮层是容器 → 显示浮层 = 内容面板以浮动方式显示（未写尺寸/定位时取默认最小与居中）+ 通知宿主",
-    edit.includes("float tasks 240×160 @center(0, 0)") &&
-      edit.includes("overlay ov_float show"),
+    "D50：浮层是容器 → 显示浮层 = 内容面板以浮动方式显示（未写尺寸/定位时取默认最小与居中）",
+    edit.includes("float tasks 240×160 @center(0, 0)"),
     edit.join(" ; ") || "（无动作）",
   );
+  // 容器渲染的**输入完整性**：宿主拿不到内容面板就找不到容器元素、拿不到外观档位就只能猜像素。
+  const shownOp = edit.find((op) => op.startsWith("overlay ov_float show")) ?? "";
+  check(
+    "D50：容器请求带内容面板与蓝图声明的外观档位（panels/shadow/radius/hide_label/height）",
+    shownOp.includes("panels=[tasks] shadow=lg radius=md label=hidden height=3"),
+    shownOp || "（无浮层请求）",
+  );
+
+  // 未声明外观档位 → 取缺省档位；`md` 刻意等于宿主既有浮动窗口观感，因此零视觉变化。
+  {
+    const bare = syntheticGraph();
+    const ov = bare.nodes.find((n) => n.key === "ov_float");
+    delete ov.shadow;
+    delete ov.radius;
+    delete ov.hide_label;
+    delete ov.height;
+    ov.visible = true;
+    const bareOps = run(bare, "l_edit", "double_click", "image");
+    const op = bareOps.find((o) => o.startsWith("overlay ov_float show")) ?? "";
+    check(
+      "D50：未声明外观档位 → 取缺省（shadow=md radius=md 标签显示 height=1，零视觉变化）",
+      op.includes("shadow=md radius=md label=shown height=1"),
+      op || "（无浮层请求）",
+    );
+  }
 
   // 回归：`visible: true` 的浮层必须在**装载对账**时就显示其内容
   // （旧缺陷：只在事件动作里显隐，浮层内容永远不出现）。
@@ -171,8 +221,7 @@ function run(graph, layer, trigger, mediaType, context) {
       expandPanels: (ids) => ops.push(`expand [${ids.join(", ")}]`),
       playFile: (id) => ops.push(`play ${id}`),
       navigateLayer: (key) => ops.push(`navigate ${key}`),
-      setOverlayVisible: (key, visible) =>
-        ops.push(`overlay ${key} ${visible ? "show" : "hide"}`),
+      applyOverlay: (req) => ops.push(overlayOp(req)),
       showOverlayPanel: (id, box) =>
         ops.push(`float ${id} ${box.width}×${box.height} @${box.anchor}(${box.offsetX}, ${box.offsetY})`),
     });
@@ -187,7 +236,7 @@ function run(graph, layer, trigger, mediaType, context) {
     check(
       "浮层初始显隐对账：visible=true 的浮层在装载时即显示内容（含尺寸与九宫格定位）",
       ops.includes("float tasks 420×300 @bottom_right(-24, 0)") &&
-        ops.includes("overlay ov_float show"),
+        hasOverlay(ops, "ov_float", true),
       ops.join(" ; ") || "（无动作）",
     );
     // 再对账一次：状态未变 → 不重复执行（幂等，不打扰使用者）
@@ -214,7 +263,7 @@ function run(graph, layer, trigger, mediaType, context) {
     engine.applyOverlayDefaults(hiddenGraph, "l_edit");
     check(
       "浮层初始显隐对账：蓝图改为不显示 → 隐藏其内容",
-      ops.includes("hide tasks") && ops.includes("overlay ov_float hide"),
+      ops.includes("hide tasks") && hasOverlay(ops, "ov_float", false),
       ops.join(" ; ") || "（无动作）",
     );
 
@@ -236,7 +285,7 @@ function run(graph, layer, trigger, mediaType, context) {
       check(
         "回归：断开 界面→浮层 连接后 → 浮层收起（hide）且不再显示",
         ops.includes("hide tasks") &&
-          ops.includes("overlay ov_float hide") &&
+          hasOverlay(ops, "ov_float", false) &&
           !ops.some((op) => op.startsWith("float ")),
         ops.join(" ; ") || "（无动作）",
       );
@@ -254,7 +303,7 @@ function run(graph, layer, trigger, mediaType, context) {
         expandPanels: () => undefined,
         playFile: () => undefined,
         navigateLayer: (k) => ops2.push(`navigate ${k}`),
-        setOverlayVisible: (k, v) => ops2.push(`overlay ${k} ${v ? "show" : "hide"}`),
+        applyOverlay: (req) => ops2.push(overlayOp(req)),
         showOverlayPanel: (id) => ops2.push(`float ${id}`),
       });
       fresh.applyOverlayDefaults(detachedGraph, "l_edit");
@@ -272,7 +321,7 @@ function run(graph, layer, trigger, mediaType, context) {
       check(
         "回归：show 动作指向未连接界面的浮层 → 不显示（未接通）",
         !ops3.some((op) => op.startsWith("float ")) &&
-          !ops3.includes("overlay ov_float show"),
+          !hasOverlay(ops3, "ov_float", true),
         ops3.join(" ; ") || "（无动作）",
       );
     }
@@ -292,8 +341,7 @@ function run(graph, layer, trigger, mediaType, context) {
       expandPanels: (ids) => ops.push(`expand [${ids.join(", ")}]`),
       playFile: (id) => ops.push(`play ${id}`),
       navigateLayer: (key) => ops.push(`navigate ${key}`),
-      setOverlayVisible: (key, visible) =>
-        ops.push(`overlay ${key} ${visible ? "show" : "hide"}`),
+      applyOverlay: (req) => ops.push(overlayOp(req)),
       showOverlayPanel: (id, box) =>
         ops.push(`float ${id} ${box.width}×${box.height} @${box.anchor}(${box.offsetX}, ${box.offsetY})`),
     });
@@ -303,7 +351,7 @@ function run(graph, layer, trigger, mediaType, context) {
     engine.dispatch({ trigger: "double_click", target: { mediaType: "image", fileId: "f" } });
     check(
       "D50：隐藏浮层 → 关闭其内容面板（浮动控件概念已取消，无需绑定）",
-      ops.includes("hide tasks") && ops.includes("overlay ov_float hide"),
+      ops.includes("hide tasks") && hasOverlay(ops, "ov_float", false),
       ops.join(" ; ") || "（无动作）",
     );
   }
@@ -446,6 +494,134 @@ function run(graph, layer, trigger, mediaType, context) {
     "几何：同垂直带判定为垂直相邻轴",
     adjacencyAxis(Bv.box, Av.box) === "vertical",
   );
+}
+
+// ---- 宿主侧容器渲染：档位 → token，DOM 应用与撤销（D50 / control-standard 第 8 节末） ----
+{
+  // 假元素：只实现 overlayChrome 真正用到的那几个能力，因此自检不需要引入 jsdom。
+  const makeEl = ({ titlebar = null, windowEl = null } = {}) => {
+    const props = new Map();
+    const attrs = new Map();
+    return {
+      props,
+      attrs,
+      style: {
+        setProperty: (k, v) => props.set(k, v),
+        removeProperty: (k) => {
+          const old = props.get(k);
+          props.delete(k);
+          return old ?? "";
+        },
+      },
+      setAttribute: (k, v) => attrs.set(k, v),
+      removeAttribute: (k) => attrs.delete(k),
+      getAttribute: (k) => attrs.get(k) ?? null,
+      querySelector: (sel) => (sel === chrome.FLOATING_TITLEBAR_SELECTOR ? titlebar : null),
+      closest: (sel) => (sel === chrome.FLOATING_WINDOW_SELECTOR ? windowEl : null),
+    };
+  };
+
+  // 档位 → 像素必须**来自 token**（规范："外观只取 token 档位、像素由 packages/ui 决定"）。
+  check(
+    "容器外观：圆角档位取 packages/ui 的 RADIUS（none=0，sm/md/lg 与 token 逐项一致）",
+    chrome.overlayRadiusPx("none") === 0 &&
+      chrome.overlayRadiusPx("sm") === ui.RADIUS.sm &&
+      chrome.overlayRadiusPx("md") === ui.RADIUS.md &&
+      chrome.overlayRadiusPx("lg") === ui.RADIUS.lg,
+  );
+
+  const shadowLight = chrome.overlayShadowCss("md", "light");
+  const shadowDark = chrome.overlayShadowCss("md", "dark");
+  check(
+    "容器外观：阴影档位取 packages/ui 的 SHADOW，且浅色/深色不透明度不同",
+    shadowLight.includes(`${ui.SHADOW.md.y}px`) &&
+      shadowLight.includes(`${ui.SHADOW.md.blur}px`) &&
+      shadowLight.includes(String(ui.SHADOW.md.alpha.light)) &&
+      shadowDark.includes(String(ui.SHADOW.md.alpha.dark)) &&
+      shadowLight !== shadowDark,
+    `${shadowLight} / ${shadowDark}`,
+  );
+  check(
+    "容器外观：none 档位 = 无阴影（不是「不透明度为 0 的阴影」）",
+    chrome.overlayShadowCss("none", "light") === "none" &&
+      chrome.overlayShadowCss("none", "dark") === "none",
+  );
+  check(
+    "容器外观：叠放高度只在浮层之间比较（基准 + height，值大者在上）",
+    chrome.overlayZIndex(1) === chrome.OVERLAY_Z_BASE + 1 &&
+      chrome.overlayZIndex(10) > chrome.overlayZIndex(1),
+  );
+
+  // apply：标记属性 + 圆角 + 裁剪 + 阴影变量 + 叠放变量 + 隐藏标题栏
+  {
+    const tb = makeEl();
+    const win = makeEl({ titlebar: tb });
+    const appearance = { shadow: "lg", radius: "sm", hideLabel: true, height: 4 };
+    chrome.applyOverlayChrome(win, { key: "ov_1", appearance, theme: "light" });
+    check(
+      "容器渲染：apply 写入标记属性 + 圆角/裁剪 + 阴影与叠放变量 + 隐藏标题栏",
+      win.getAttribute(chrome.OVERLAY_CHROME_ATTR) === "ov_1" &&
+        win.props.get("border-radius") === `${ui.RADIUS.sm}px` &&
+        win.props.get("overflow") === "hidden" &&
+        win.props.get("--dv-floating-box-shadow") === chrome.overlayShadowCss("lg", "light") &&
+        win.props.get("--dv-overlay-z-index") === String(chrome.overlayZIndex(4)) &&
+        tb.props.get("display") === "none",
+      JSON.stringify([...win.props]),
+    );
+
+    const before = JSON.stringify([...win.props]);
+    chrome.applyOverlayChrome(win, { key: "ov_1", appearance, theme: "light" });
+    check(
+      "容器渲染：apply 幂等（重复应用结果一致，不会叠加出别的值）",
+      JSON.stringify([...win.props]) === before,
+    );
+
+    chrome.clearOverlayChrome(win);
+    check(
+      "容器渲染：clear 与 apply 严格对称（标记属性/圆角/裁剪/两个变量/标题栏全部还原）",
+      win.getAttribute(chrome.OVERLAY_CHROME_ATTR) === null &&
+        win.props.size === 0 &&
+        tb.props.size === 0,
+      JSON.stringify([...win.props]),
+    );
+
+    const tb2 = makeEl();
+    const win2 = makeEl({ titlebar: tb2 });
+    chrome.applyOverlayChrome(win2, {
+      key: "ov_2",
+      appearance: { shadow: "md", radius: "none", hideLabel: false, height: 1 },
+      theme: "dark",
+    });
+    check(
+      "容器渲染：radius=none → 直角（0px）且**不做裁剪**（手柄不受影响），hide_label=false → 标题栏保持显示",
+      win2.props.get("border-radius") === "0px" &&
+        !win2.props.has("overflow") &&
+        tb2.props.get("display") === "",
+      JSON.stringify([...win2.props]),
+    );
+  }
+
+  // floatingWindowOf：只有**浮动**组才是浮层容器
+  {
+    const container = makeEl();
+    const groupEl = makeEl({ windowEl: container });
+    const dv = (location, panelFound = true) => ({
+      getPanel: () =>
+        panelFound ? { api: { group: { api: { location }, element: groupEl } } } : undefined,
+    });
+    check(
+      "容器落点：浮动组 → 返回 .dv-resize-container 容器元素",
+      chrome.floatingWindowOf(dv({ type: "floating" }), "tasks") === container,
+    );
+    check(
+      "容器落点：停靠组 → null（浮层容器只对浮动组生效）",
+      chrome.floatingWindowOf(dv({ type: "grid" }), "tasks") === null,
+    );
+    check(
+      "容器落点：面板不存在 → null（不抛错，布局不受影响）",
+      chrome.floatingWindowOf(dv({ type: "floating" }, false), "tasks") === null,
+    );
+  }
 }
 
 // ---- 诊断（可选）：对给定仓库库跑一遍典型交互 ----

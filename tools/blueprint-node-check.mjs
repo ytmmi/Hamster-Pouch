@@ -466,6 +466,42 @@ const hasEdge = (doc, from, to, kind) =>
       config.overlaySizeLabel({ width: 420, height: 300 }) === "420×300",
     `默认最小=${min.width}×${min.height} 80×40→${JSON.stringify(config.resolveOverlaySize({ width: 80, height: 40 }))} 展示=${config.overlaySizeLabel({ width: 420, height: 300 })}`,
   );
+
+  // 容器外观档位（D50）：声明即透传、未声明取缺省、未知值回落缺省。
+  // 缺省刻意取 md（与宿主既有浮动窗口观感一致）→「未声明」与「声明成缺省」视觉等价。
+  const appDeclared = config.resolveOverlayAppearance({
+    shadow: "lg",
+    radius: "sm",
+    hide_label: true,
+    height: 4,
+  });
+  const appDefault = config.resolveOverlayAppearance(undefined);
+  const appBogus = config.resolveOverlayAppearance({
+    shadow: "xl",
+    radius: 7,
+    hide_label: "yes",
+    height: Number.NaN,
+  });
+  check(
+    "浮层外观档位：声明即透传、未声明取缺省（md/md/不隐藏/1）、未知值回落缺省",
+    JSON.stringify(appDeclared) ===
+      JSON.stringify({ shadow: "lg", radius: "sm", hideLabel: true, height: 4 }) &&
+      JSON.stringify(appDefault) ===
+        JSON.stringify({
+          shadow: config.DEFAULT_OVERLAY_SHADOW,
+          radius: config.DEFAULT_OVERLAY_RADIUS,
+          hideLabel: false,
+          height: config.DEFAULT_OVERLAY_HEIGHT,
+        }) &&
+      appDefault.shadow === "md" &&
+      appDefault.radius === "md" &&
+      appDefault.height === 1 &&
+      appBogus.shadow === "md" &&
+      appBogus.radius === "md" &&
+      appBogus.hideLabel === false &&
+      appBogus.height === config.DEFAULT_OVERLAY_HEIGHT,
+    `声明=${JSON.stringify(appDeclared)} 缺省=${JSON.stringify(appDefault)} 非法=${JSON.stringify(appBogus)}`,
+  );
 }
 
 // ---- 6. 空图只加一个"状态"（最苛刻：无任何上级可复用）----

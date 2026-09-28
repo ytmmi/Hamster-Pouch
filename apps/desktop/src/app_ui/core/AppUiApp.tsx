@@ -44,7 +44,8 @@ import { TaskOverlay } from "./TaskOverlay";
 import { bindTaskActions, startTaskEvents } from "./taskStore";
 import { requestPlayerPlay } from "./playerPlayStore";
 import { useConfirm } from "./useConfirm";
-import { blueprintEngine, type BlueprintCollapseAbsorb, type BlueprintDispatchInput } from "./blueprintEngine";
+import { blueprintEngine, type BlueprintCollapseAbsorb, type BlueprintDispatchInput, type OverlayHostRequest } from "./blueprintEngine";
+import { applyOverlayChrome, clearOverlayChrome, floatingWindowOf } from "../shared/overlayChrome";
 import {
   DEFAULT_LANGUAGE,
   isLanguage,
@@ -88,8 +89,14 @@ export function AppUiApp(): JSX.Element {
   const [language, setLanguageState] = useState<Language>(DEFAULT_LANGUAGE);
   const apiRef = useRef<DockviewApi | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
-  /** 浮层容器期望可见态（D50）：按浮层节点 key 记录，供浮层宿主消费。 */
-  const overlayStateRef = useRef<Map<string, boolean>>(new Map());
+  /**
+   * 浮层容器渲染的登记表（D50）：浮层节点 key → 已按外观档位装饰过的浮动窗口元素。
+   *
+   * 存在的理由是**撤销**：档位改动、隐藏、以及布局重建（`fromJSON`）后的重显都必须从
+   * 干净状态开始，否则新旧内联样式会叠加。布局重建会销毁这些元素，此时对残留元素
+   * 调撤销是无害的空操作。
+   */
+  const overlayChromeRef = useRef<Map<string, HTMLElement[]>>(new Map());
 
   const t = useMemo(() => makeTranslator(language), [language]);
 
@@ -411,20 +418,51 @@ export function AppUiApp(): JSX.Element {
           );
         });
       },
-      // 浮层容器显隐（D50）：内容面板已由引擎按浮动方式显示/隐藏；这里只记录**浮层容器**
-      // 的期望可见态，供后续的浮层宿主按外观档位（圆角/阴影/标签隐藏）渲染容器本身。
-      setOverlayVisible: (overlayKey: string, visible: boolean) => {
-        overlayStateRef.current.set(overlayKey, visible);
+      // 浮层**容器**渲染（D50 / RFC 0007 浮层节点）：引擎已把内容面板按尺寸浮动显示，
+      // 这里只负责容器本身——按外观档位装饰它们的浮动窗口（圆角/阴影/标签隐藏/叠放）。
+      // 幂等：每次先清掉上一次的装饰，否则档位改动会与新值叠加、布局重建后会残留。
+      applyOverlay: (request: OverlayHostRequest) => {
+        const stale = overlayChromeRef.current.get(request.key);
+        if (stale) {
+          for (const el of stale) clearOverlayChrome(el);
+        }
+        overlayChromeRef.current.delete(request.key);
+        const dv = apiRef.current;
+        // 隐藏（或 dockview 未就绪）：装饰已清除即完成——内容面板由引擎的 hidePanel 收起。
+        if (!dv || !request.visible) {
+          const reason = !dv ? "dockview 尚未就绪" : "隐藏";
+          void import("../shared/blueprintRuntime")
+            .then((m) =>
+              m.traceBlueprint(`[overlay] 浮层 ${request.key} → ${reason}（容器装饰已清除）`),
+            )
+            .catch(() => undefined);
+          return;
+        }
+        const applied: HTMLElement[] = [];
+        const seen = new Set<HTMLElement>();
+        for (const panelId of request.panelIds) {
+          const el = floatingWindowOf(dv, panelId);
+          // 一个浮动窗口可承载多个面板（嵌套布局），按元素去重，避免同一窗口被装饰两次。
+          if (!el || seen.has(el)) {
+            continue;
+          }
+          seen.add(el);
+          applyOverlayChrome(el, { key: request.key, appearance: request.appearance, theme });
+          applied.push(el);
+        }
+        overlayChromeRef.current.set(request.key, applied);
+        const a = request.appearance;
         void import("../shared/blueprintRuntime")
           .then((m) =>
             m.traceBlueprint(
-              `[overlay] 浮层 ${overlayKey} → ${visible ? "显示" : "隐藏"}（容器外观渲染待控件标准落地）`,
+              `[overlay] 浮层 ${request.key} → 显示：容器 ${applied.length}/${request.panelIds.length} 个窗口` +
+                `（shadow=${a.shadow} radius=${a.radius} 标签${a.hideLabel ? "隐藏" : "显示"} height=${a.height}）`,
             ),
           )
           .catch(() => undefined);
       },
     }),
-    [focusPanel, repoId, status, t],
+    [focusPanel, repoId, status, t, theme],
   );
 
   // 装配引擎：executor 变更时注入。
