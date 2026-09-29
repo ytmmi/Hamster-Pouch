@@ -1076,6 +1076,8 @@ button.danger {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* 面板窄到放不下「模式 + 筛选 + 计数 + 两个下拉」时换行，而不是把右侧下拉挤没。 */
+  flex-wrap: wrap;
 }
 
 .mp-toggle {
@@ -1108,12 +1110,14 @@ button.danger {
   overflow: auto;
 }
 
-/* 网格可聚焦（支持 Ctrl+A / Esc 多选快捷键），仅键盘聚焦时显示描边 */
-.mp-grid:focus {
+/* 网格 / 瀑布流可聚焦（支持 Ctrl+A / Esc 多选快捷键），仅键盘聚焦时显示描边 */
+.mp-grid:focus,
+.mp-masonry:focus {
   outline: none;
 }
 
-.mp-grid:focus-visible {
+.mp-grid:focus-visible,
+.mp-masonry:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
@@ -1231,6 +1235,261 @@ button.danger {
 }
 .mp-badge.audio {
   color: #ffa657;
+}
+
+/* --- 视图（右上角下拉 + 图片尺寸滑条）：三种视图只在**容器与缩略图区**上不同 ---
+   图片尺寸由面板以 CSS 变量 `--mp-image-size` 下发（值来自滑条 / 面板设置 `imageSize`），
+   三种视图各自消费同一个值：平铺 = 单元格宽度、瀑布流 = 列宽、自适应 = 行高。
+   缺省值 160px 与注册表缺省一致（面板未渲染时也不会塌成 0）。 */
+
+/* 平铺：单元格宽度**固定**（列数随面板宽度自适应），缩略图统一方形并裁剪填满。
+   `justify-content: center` 是关键：宽度定死时 `auto-fill` 会在**行尾**留下放不下一格的
+   余量，不居中就是右侧一大条空白（用户反馈"设置了宽度后右边空出白色"）；居中后余量
+   左右均分。 */
+.mp-grid.mp-view-tile {
+  grid-template-columns: repeat(auto-fill, var(--mp-image-size, 160px));
+  justify-content: center;
+}
+
+.mp-grid.mp-view-tile .mp-thumb {
+  height: auto;
+  aspect-ratio: 1 / 1;
+}
+
+.mp-grid.mp-view-tile .mp-thumb img,
+.mp-grid.mp-view-tile .mp-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/*
+ * 自适应：**逐行两端对齐**（"justified"排布）——行内各格**等高**，高度由该行反推，
+ * 不同行高度不必相同，每行左右边缘都顶到面板两边。
+ *
+ * 怎么做到的（纯 CSS，不需要 JS 算行）：
+ * 1. 每个格子的 `flex-basis = 宽高比 × 目标行高`、`flex-grow = 宽高比`。`<img>` 解码后
+ *    量到的宽高比由面板以 `--mp-cell-ratio` 下发；
+ * 2. `flex-wrap` 用**基准宽度**断行（所以断行结果等价于"按目标行高铺满一行"）；
+ * 3. 断好行后，剩余空间按 `flex-grow`（=宽高比）分给该行各格 → 行宽正好等于容器宽
+ *    （**左右两边对齐**），而每格的宽度仍与宽高比成正比 → 由 `aspect-ratio` 推出的
+ *    缩略图高度 **行内一致**、行与行之间不同。
+ *
+ * 因此这里**不能**有会破坏"宽度 ∝ 宽高比"的东西：内边距与边框都去掉了（它们会在
+ * 宽度上各加一个常数，导致 高度 = (宽 - 常数)/宽高比 逐格不同、行底参差）；
+ * 选中态改用 `outline`（不占布局）。
+ */
+.mp-grid.mp-view-adaptive {
+  display: flex;
+  flex-wrap: wrap;
+  /* 行内宽度不等；行被撑满时它不起作用，只有被 `max-width` 截住的行靠它居中。 */
+  justify-content: center;
+  align-content: flex-start;
+  /*
+   * 行高上限 = 目标尺寸 × 该系数。
+   *
+   * 这是"尽量两端对齐"的**例外**：某行只剩极少的图时（尤其最后一行只有一张竖图），
+   * 撑满一行会把这张图放大到上千像素高。到上限就停手、把余量居中留白，
+   * 而不是把图放大到荒唐的尺寸。
+   */
+  --mp-row-max-factor: 2;
+}
+
+.mp-grid.mp-view-adaptive .mp-cell {
+  width: auto;
+  min-width: 0;
+  /* 无内边距、无边框：见上面的推导（宽度必须严格正比于宽高比）。 */
+  padding: 0;
+  border: none;
+  /* 选中态用 outline（不占布局，因此不破坏行内等高）。 */
+  outline: 1px solid transparent;
+  outline-offset: -1px;
+  background: transparent;
+  overflow: hidden;
+  /* 断行用基准宽度、行内按宽高比分配剩余空间（两端对齐的关键两行）。 */
+  flex-grow: var(--mp-cell-ratio, 1);
+  flex-basis: calc(var(--mp-cell-ratio, 1) * var(--mp-image-size, 160px));
+  /* 极端宽高比 / 稀疏行：不超出行高上限，也不撑破面板。 */
+  max-width: calc(
+    var(--mp-cell-ratio, 1) * var(--mp-image-size, 160px) * var(--mp-row-max-factor, 2)
+  );
+}
+
+.mp-grid.mp-view-adaptive .mp-cell.selected {
+  outline-color: var(--sel-border);
+  background: var(--sel-bg);
+}
+
+/* 缩略图区：宽度交给 flex，高度由宽高比推出（于是行内等高、行间不等）。 */
+.mp-grid.mp-view-adaptive .mp-thumb {
+  width: 100%;
+  height: auto;
+  border: none;
+  aspect-ratio: var(--mp-cell-ratio, 1);
+}
+
+.mp-grid.mp-view-adaptive .mp-thumb img,
+.mp-grid.mp-view-adaptive .mp-thumb video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  /* 盒子比例 = 图片比例，`contain` 即精确贴合（留不下黑边）。 */
+  object-fit: contain;
+}
+
+/* 未解码 / 不可用时的占位：盒子已由宽高比给出，这里只需居中。 */
+.mp-grid.mp-view-adaptive .mp-thumb-placeholder,
+.mp-grid.mp-view-adaptive .mp-fallback {
+  text-align: center;
+}
+
+/* 音频：盒子按 `AUDIO_CARD_RATIO` 给（JS 下发），波形填满它。 */
+.mp-grid.mp-view-adaptive .mp-wave {
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * 文件名**不参与**单元格的内在尺寸计算：它是 `white-space: nowrap`，若不隔离，
+ * 一个 40 字的长文件名会把格子顶宽（图片只有 120px）——"按宽高比配平"当场失效。
+ * `contain: inline-size` 让这一行的尺寸不影响父级内在尺寸，格子宽度就只由 flex 分配决定；
+ * 标签自身仍会拉伸到格子宽度并正常省略号截断。
+ */
+.mp-grid.mp-view-adaptive .mp-name {
+  contain: inline-size;
+}
+
+/*
+ * 关掉跳过渲染：自适应行高由"宽度 ÷ 宽高比"推出，`.mp-cell` 的
+ * `contain-intrinsic-size: auto 140px` 与真实高度无关，跳过渲染会让滚动高度在滚动中变化
+ * （滚动条抖动、位置漂移）。宁可少一点跳过渲染的收益，也不要滚动抖动。
+ */
+.mp-grid.mp-view-adaptive .mp-cell {
+  content-visibility: visible;
+}
+
+/* --- 瀑布流 --- */
+
+/*
+ * 固定列宽的多列容器，列内纵向堆叠。
+ *
+ * 列数由 JS 按容器宽度与**图片尺寸**算（`panels/mediaPreviewView.ts` 的
+ * `masonryColumnCount`，公式与 `repeat(auto-fill, …)` 一致），因此瀑布流与平铺
+ * **同宽同列数**——两者只在"行高是否随图变化"上有区别。
+ *
+ * 这里**不用 CSS `columns`**：多列布局按**列优先**填充，会把排序结果读成
+ * "先往下、再往右"，与网格/列表的阅读顺序不一致。
+ */
+.mp-masonry {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  overflow: auto;
+  /* 列宽固定时同样会余下"放不下一列"的空间：居中而非堆在右边（与平铺一致）。 */
+  justify-content: center;
+}
+
+/* 固定列宽 = 图片尺寸。
+   这里**不再**用 `flex: 1 1 0` 等分：那会让列宽随面板宽度漂移，与平铺的固定单元格对不上
+   ——正是用户反馈的"两者相差过大"。 */
+.mp-masonry-col {
+  flex: 0 0 var(--mp-image-size, 160px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 缩略图按**自身宽高比**铺满列宽：行高随图变化，这正是"瀑布流"与整齐网格的区别。 */
+.mp-masonry .mp-thumb {
+  height: auto;
+  display: block;
+}
+
+.mp-masonry .mp-thumb img,
+.mp-masonry .mp-thumb video {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: none;
+}
+
+/*
+ * 关掉跳过渲染：`.mp-cell` 的 `contain-intrinsic-size: auto 140px` 是给**行高一致**的
+ * 网格用的；在行高不等的瀑布流里，离屏单元塌成 140px 会让滚动高度随滚动不断变化
+ * （滚动条抖动、滚动位置漂移）。
+ */
+.mp-masonry .mp-cell {
+  content-visibility: visible;
+}
+
+/* 音频没有宽高比可用（波形图自带尺寸），给个固定高度避免单元塌掉。 */
+.mp-masonry .mp-wave {
+  height: 48px;
+}
+
+/* --- 右上角的图片尺寸滑条 + 两个下拉（视图 / 排序）--- */
+
+/* 图片尺寸滑条：位置在「视图」左边（用户口径）。 */
+.mp-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  white-space: nowrap;
+}
+
+.mp-size-label {
+  color: var(--fg-dim);
+}
+
+.mp-size-range {
+  width: 96px;
+  /* 原生 range 的滑块高度由浏览器给，这里只约束宽度，避免在工具条里抢宽度。 */
+  min-width: 0;
+}
+
+.mp-size-range:disabled {
+  opacity: 0.45;
+}
+
+.mp-size-value {
+  color: var(--fg-dim);
+  font-size: 11px;
+  /* 数字变化时宽度不跳（右对齐且定宽够 3 位数）。 */
+  min-width: 26px;
+  text-align: right;
+}
+
+/* 弹出层复用 `ContextMenu`（portal 到 body），这里只有触发按钮。 */
+.mp-dd {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  max-width: 200px;
+  white-space: nowrap;
+}
+
+.mp-dd:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.mp-dd-label,
+.mp-dd-caret {
+  color: var(--fg-dim);
+}
+
+.mp-dd-caret {
+  font-size: 10px;
+}
+
+.mp-dd-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ===== 查看器面板 ===== */

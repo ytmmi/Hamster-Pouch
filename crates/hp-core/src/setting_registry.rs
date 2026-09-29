@@ -226,6 +226,57 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &["hex", "decimal"],
         requires_capability: None,
     },
+    // 媒体预览（`panel.media.*`）：**缺省**视图与排序（面板右上角的下拉只在本会话内覆盖）。
+    // 候选与 `packages/config/src/panels.ts` 的 `media.settings`、
+    // `apps/desktop/src/app_ui/panels/mediaPreviewView.ts` 的枚举三方一致。
+    SettingDeclFact {
+        id: "view",
+        owner_kind: "panel",
+        owner_id: Some("media"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["tile", "adaptive", "masonry"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        // 图片尺寸：平铺 / 瀑布流 = 单元格宽度，自适应 = 行高。范围由面板夹紧
+        // （声明层没有 min/max），因此这里只镜像 kind。
+        id: "imageSize",
+        owner_kind: "panel",
+        owner_id: Some("media"),
+        kind: "numberInput",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        // 是否显示缩略图下的文件名（缺省显示 = 与既有观感一致）。
+        id: "showFileName",
+        owner_kind: "panel",
+        owner_id: Some("media"),
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "sortKey",
+        owner_kind: "panel",
+        owner_id: Some("media"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["name", "time", "size", "type"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "sortDir",
+        owner_kind: "panel",
+        owner_id: Some("media"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["asc", "desc"],
+        requires_capability: None,
+    },
 ];
 
 /// 按**落库键**查宿主/面板声明（插件项走 manifest 反查，不在此列）。

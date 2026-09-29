@@ -276,6 +276,24 @@ export const zhCN = {
   "media.delete": "删除",
   "media.addToAlbum": "加入相册",
   "media.removeFromAlbumAction": "移出相册",
+  // 视图（右上角下拉；面板设置的缺省值也在这一组键上）
+  "media.settings.view": "视图",
+  "media.settings.view.tile": "平铺",
+  "media.settings.view.adaptive": "自适应",
+  "media.settings.view.masonry": "瀑布流",
+  "media.viewOnlyInThumb": "「视图」仅在「预览图」下有效",
+  "media.settings.imageSize": "图片宽度",
+  "media.imageSizeHint": "图片宽度（自适应视图下为行高）",
+  "media.settings.showFileName": "显示文件名",
+  // 排序（右上角下拉：排序键 + 横线 + 正序/倒序）
+  "media.settings.sortKey": "排序",
+  "media.settings.sortKey.name": "名称",
+  "media.settings.sortKey.time": "时间",
+  "media.settings.sortKey.size": "大小",
+  "media.settings.sortKey.type": "类型",
+  "media.settings.sortDir": "顺序",
+  "media.settings.sortDir.asc": "正序",
+  "media.settings.sortDir.desc": "倒序",
 
   // 媒体播放器
   "player.selectFileFirst": "请先选中文件",

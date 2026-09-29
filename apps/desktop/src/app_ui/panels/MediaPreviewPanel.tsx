@@ -1,183 +1,121 @@
 /**
  * 媒体预览面板。
  *
- * 默认「预览图」视图：图像缩略图 / 视频首帧 / 音频波形（波纹图）；
- * 可切换为「文件名」列表视图。支持媒体类型筛选。
+ * 顶部左侧是**模式**切换（「预览图」/「文件名」）；右侧是**视图**与**排序**两个下拉。
+ *
+ * ## 视图（只在「预览图」模式下有效）
+ *
+ * - **平铺**（`tile`）：单元格**宽度固定**、缩略图统一**方形并裁剪填满**（`cover`）；
+ * - **自适应**（`adaptive`，缺省）：单元格宽度**随面板宽度伸展**、缩略图按**自身宽高比完整显示**；
+ * - **瀑布流**（`masonry`）：**固定列宽**、**行高随图像宽高比**变化的多列排布。
+ *
+ * 三者的取值域、判定与列分配都在 `mediaPreviewView.ts`（纯函数、无框架依赖，
+ * 门禁可直接 import 断言），本文件只负责渲染。切到「文件名」模式时视图下拉**置灰**
+ * ——它只改变缩略图的排布方式。
+ *
+ * ## 排序
+ *
+ * 排序键（名称 / 时间 / 大小 / 类型）与方向（正序 / 倒序，下拉里由一条横线分隔）
+ * 对两种模式同时生效。排序是**前端**的：只作用于面板**已加载**的那一页
+ * （`file.query` 的 `limit`），后端的查询顺序是分页游标的基准（D78），不在这里改。
+ *
+ * ## 视图与排序的缺省值来自**面板设置**
+ *
+ * 声明在 `packages/config/src/panels.ts` 的 `media.settings`（「全部设置 → 面板 → 媒体预览」），
+ * 读取与热加载走 `shared/settingValue.ts` 的四条触发源。面板右上角的下拉是**本会话内**的
+ * 临时覆盖（模块级变量，与滚动位置同一口径：面板被 dockview 卸载重建后仍保持）。
+ * 用户在「全部设置」里改动该项时**放弃**本次会话的覆盖——否则就是
+ * `docs/spec/panel-standard.md` 点名的那类缺陷："改了设置没反应"。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent, MouseEvent } from "react";
+import type {
+  CSSProperties,
+  DragEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+} from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+
+import { panelSettingStorageKey, resolveSizeUnit, SETTING_KEYS } from "@hamster-pouch/config";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
-import { resolveThumbUrl } from "../shared/thumbUrl";
+import { formatByteSize } from "../shared/format";
+import {
+  useHostSettingValue,
+  usePanelSettingValue,
+  usePanelSwitch,
+} from "../shared/settingValue";
 import { useApp } from "../core/AppContext";
+import { subscribeSettingChanged } from "../core/settingChangeStore";
+import type { PanelRenderCtx } from "../core/panelRegistry";
 import { ContextMenu } from "../menu/ContextMenu";
-import type { Translate } from "../i18n";
+import type { TranslationKey } from "../i18n";
 import type { FileItem, SourceItem } from "../shared/types";
-import { drawWaveform, extractWaveform } from "../shared/waveform";
+import { ThumbCell } from "./mediaPreviewCell";
+import { ToolbarDropdown, type DropdownOption } from "./mediaPreviewDropdown";
+import {
+  MEDIA_IMAGE_SIZE_MAX,
+  MEDIA_IMAGE_SIZE_MIN,
+  MEDIA_IMAGE_SIZE_STEP,
+  MEDIA_PANEL_ID,
+  MEDIA_SORT_KEYS,
+  MEDIA_VIEW_MODES,
+  MASONRY_GAP,
+  SORT_DIRECTIONS,
+  clampImageSize,
+  distributeColumns,
+  fileName,
+  isMediaSortKey,
+  isMediaViewMode,
+  isSortDirection,
+  masonryColumnCount,
+  mediaViewClass,
+  sortFiles,
+  type MediaSortKey,
+  type MediaViewMode,
+  type SortDirection,
+} from "./mediaPreviewView";
 
+/** 模式：预览图（三种视图）/ 文件名列表。 */
 type ViewMode = "thumb" | "name";
 type TypeFilter = "all" | "image" | "video" | "audio";
 
-/** 跨挂载保存滚动位置：面板被 dockview 卸载重建时也能恢复浏览进度。 */
+/** 面板设置的落库键（`panel.media.<key>`；声明见 `packages/config/src/panels.ts`）。 */
+const VIEW_STORAGE_KEY = panelSettingStorageKey(MEDIA_PANEL_ID, "view");
+const IMAGE_SIZE_STORAGE_KEY = panelSettingStorageKey(MEDIA_PANEL_ID, "imageSize");
+const SORT_KEY_STORAGE_KEY = panelSettingStorageKey(MEDIA_PANEL_ID, "sortKey");
+const SORT_DIR_STORAGE_KEY = panelSettingStorageKey(MEDIA_PANEL_ID, "sortDir");
+
+/**
+ * 跨挂载保存面板内选择：面板被 dockview 卸载重建时也能恢复浏览进度与排布方式。
+ *
+ * `session*` 为 `null` = 跟随面板设置（注册表缺省或用户在「全部设置」里的选择）。
+ */
 let savedThumbScroll = 0;
 let savedNameScroll = 0;
+let sessionView: MediaViewMode | null = null;
+let sessionImageSize: number | null = null;
+let sessionSortKey: MediaSortKey | null = null;
+let sessionSortDir: SortDirection | null = null;
+
+/** 视图 / 排序键 / 方向 → i18n 键（与注册表候选的 `title_key` 同形）。 */
+function viewLabelKey(view: MediaViewMode): TranslationKey {
+  return `media.settings.view.${view}`;
+}
+function sortKeyLabelKey(key: MediaSortKey): TranslationKey {
+  return `media.settings.sortKey.${key}`;
+}
+function sortDirLabelKey(dir: SortDirection): TranslationKey {
+  return `media.settings.sortDir.${dir}`;
+}
 
 /** 拼接本地绝对路径（按 base 的分隔符风格）。 */
 function joinPath(base: string, rel: string): string {
   const sep = base.includes("\\") ? "\\" : "/";
   const normalized = rel.replace(/[\\/]/g, sep);
   return base.endsWith(sep) ? `${base}${normalized}` : `${base}${sep}${normalized}`;
-}
-
-function fileName(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] || path;
-}
-
-/** 音频波形画布。 */
-function AudioWaveform({ url, t }: { url: string; t: Translate }): JSX.Element {
-  const ref = useRef<HTMLCanvasElement>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setFailed(false);
-    void (async () => {
-      try {
-        const peaks = await extractWaveform(url, 72);
-        if (!cancelled && ref.current) {
-          drawWaveform(ref.current, peaks);
-        }
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [url]);
-
-  if (failed) {
-    return <span className="mp-fallback">{t("media.waveUnavailable")}</span>;
-  }
-  return <canvas ref={ref} className="mp-wave" />;
-}
-
-/**
- * 媒体缩略图单元。
- *
- * 使用 IntersectionObserver（rootMargin 200px）在接近视口时才：
- * - 图片/视频：请求并显示后端缓存的缩略图（而非原始全分辨率文件）；
- * - 音频：挂载波形组件并开始解码（而非一次性预解码全部音频）。
- * 离屏时显示占位符，节省网络与 CPU。
- *
- * 缩略图 URL 走 `shared/thumbUrl.ts` 的**共享**缓存与请求去重（图像查看器胶片栏同源）。
- */
-function ThumbCell({
-  file,
-  repoId,
-  url,
-  selected,
-  onSelect,
-  onDoubleClick,
-  onDragStart,
-  onContextMenu,
-  t,
-}: {
-  file: FileItem;
-  repoId: string;
-  url: string;
-  selected: boolean;
-  onSelect: (file: FileItem, mods: { shift: boolean; ctrl: boolean }) => void;
-  onDoubleClick: () => void;
-  /** 拖拽起始：父级负责写入 dataTransfer 载荷并按需更新选中集。 */
-  onDragStart: (file: FileItem, e: DragEvent) => void;
-  /** 右键菜单：父级负责定位、选中和渲染菜单。 */
-  onContextMenu: (file: FileItem, e: MouseEvent) => void;
-  /** 翻译函数（供占位/降级文案使用）。 */
-  t: Translate;
-}): JSX.Element {
-  const cellRef = useRef<HTMLButtonElement>(null);
-  const [visible, setVisible] = useState(false);
-
-  // 图片/视频需要请求缩略图 URL；音频走波形懒加载
-  const needsThumb =
-    file.media_type === "image" || file.media_type === "video";
-  // undefined=尚未请求；null=请求了但不可用；string=已就绪
-  const [thumbUrl, setThumbUrl] = useState<string | null | undefined>(
-    undefined,
-  );
-
-  // 进入视口附近后标记可见（仅触发一次，随后断开观察器）
-  useEffect(() => {
-    const el = cellRef.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setVisible(true);
-            obs.disconnect();
-          }
-        }
-      },
-      { rootMargin: "200px" },
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
-
-  // 可见后请求缩略图（带模块级缓存 + in-flight 去重）
-  useEffect(() => {
-    if (!visible || !needsThumb) return;
-    let cancelled = false;
-    void resolveThumbUrl(repoId, file.id).then((resolved) => {
-      if (!cancelled) setThumbUrl(resolved);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [visible, needsThumb, repoId, file.id]);
-
-  return (
-    <button
-      ref={cellRef}
-      className={`mp-cell ${selected ? "selected" : ""}`}
-      draggable
-      onClick={(e) =>
-        onSelect(file, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })
-      }
-      onDoubleClick={onDoubleClick}
-      onDragStart={(e) => onDragStart(file, e)}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onContextMenu(file, e);
-      }}
-      title={file.relative_path}
-    >
-      <div className="mp-thumb">
-        {!url ? (
-          <span className="mp-fallback">{t("media.noPath")}</span>
-        ) : needsThumb ? (
-          thumbUrl === undefined ? (
-            <span className="mp-thumb-placeholder">{file.media_type}</span>
-          ) : thumbUrl === null ? (
-            <span className="mp-fallback">{t("media.unavailable")}</span>
-          ) : (
-            <img src={thumbUrl} alt={file.relative_path} loading="lazy" />
-          )
-        ) : visible ? (
-          <AudioWaveform url={url} t={t} />
-        ) : (
-          <span className="mp-thumb-placeholder">audio</span>
-        )}
-      </div>
-      <span className="mp-name">{fileName(file.relative_path)}</span>
-    </button>
-  );
 }
 
 /** 右键上下文菜单位置与目标文件。 */
@@ -187,7 +125,17 @@ interface ContextMenuState {
   file: FileItem;
 }
 
-export function MediaPreviewPanel(): JSX.Element {
+export interface MediaPreviewPanelProps {
+  /**
+   * dockview 面板 API（可选）。
+   *
+   * 用途只有一个：面板从后台标签回到前台时补读一次面板设置——用户在后台标签期间改了
+   * 缺省视图/排序，切回来必须已经生效。独立单面板窗口传的是恒激活替身，同样可用。
+   */
+  api?: PanelRenderCtx["api"];
+}
+
+export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}): JSX.Element {
   const app = useApp();
   const [viewMode, setViewMode] = useState<ViewMode>("thumb");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -200,6 +148,93 @@ export function MediaPreviewPanel(): JSX.Element {
   // 内联重命名输入状态
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
+
+  // 面板设置的**缺省**视图/尺寸/排序：`usePanelSettingValue` 已按声明归一化
+  // （非法取值回落缺省），并带四条独立热加载触发源。
+  const defaultView = usePanelSettingValue(MEDIA_PANEL_ID, "view", panelApi);
+  const defaultImageSize = usePanelSettingValue(MEDIA_PANEL_ID, "imageSize", panelApi);
+  const defaultSortKey = usePanelSettingValue(MEDIA_PANEL_ID, "sortKey", panelApi);
+  const defaultSortDir = usePanelSettingValue(MEDIA_PANEL_ID, "sortDir", panelApi);
+  // 开关型面板设置（缩略图下是否显示文件名）：读法与查看器的信息栏开关同款。
+  const showFileName = usePanelSwitch(MEDIA_PANEL_ID, "showFileName", { api: panelApi });
+  /**
+   * 体积单位制是**宿主设置**（全部设置 → 界面 → 其他设置 → 体积单位），元数据面板已在用；
+   * 列表视图这里只**消费**同一份口径（`formatByteSize` + `resolveSizeUnit`），
+   * **不**自带同名面板设置——两套单位解析必然漂移（`docs/spec/panel-standard.md` 第 5.3 节）。
+   */
+  const sizeUnit = resolveSizeUnit(useHostSettingValue(SETTING_KEYS.sizeUnit, panelApi));
+
+  // 本会话内的覆盖（`null` = 跟随面板设置）；初值取自模块级变量，跨面板重建保持。
+  const [viewOverride, setViewOverride] = useState<MediaViewMode | null>(() => sessionView);
+  const [imageSizeOverride, setImageSizeOverride] = useState<number | null>(
+    () => sessionImageSize,
+  );
+  const [sortKeyOverride, setSortKeyOverride] = useState<MediaSortKey | null>(
+    () => sessionSortKey,
+  );
+  const [sortDirOverride, setSortDirOverride] = useState<SortDirection | null>(
+    () => sessionSortDir,
+  );
+
+  const view: MediaViewMode =
+    viewOverride ?? (isMediaViewMode(defaultView) ? defaultView : "adaptive");
+  /** 图片尺寸（px）：平铺 / 瀑布流 = 单元格宽度，自适应 = 行高。范围由面板夹紧。 */
+  const imageSize = clampImageSize(imageSizeOverride ?? defaultImageSize);
+  const sortKey: MediaSortKey =
+    sortKeyOverride ?? (isMediaSortKey(defaultSortKey) ? defaultSortKey : "name");
+  const sortDir: SortDirection =
+    sortDirOverride ?? (isSortDirection(defaultSortDir) ? defaultSortDir : "asc");
+
+  /**
+   * 用户在「全部设置」里显式改动了本面板的设置 → **放弃**本会话的手动覆盖。
+   *
+   * 只认「本窗口的显式写入」这一条通路（本地广播携带落库键），不做"缺省值变了就清覆盖"
+   * 的推断：后者会在面板重建时（设置异步读回、首帧还是声明缺省）把用户刚选的视图抹掉。
+   */
+  useEffect(
+    () =>
+      subscribeSettingChanged((key) => {
+        if (key === VIEW_STORAGE_KEY) {
+          sessionView = null;
+          setViewOverride(null);
+        } else if (key === IMAGE_SIZE_STORAGE_KEY) {
+          sessionImageSize = null;
+          setImageSizeOverride(null);
+        } else if (key === SORT_KEY_STORAGE_KEY) {
+          sessionSortKey = null;
+          setSortKeyOverride(null);
+        } else if (key === SORT_DIR_STORAGE_KEY) {
+          sessionSortDir = null;
+          setSortDirOverride(null);
+        }
+      }),
+    [],
+  );
+
+  /** 面板内选视图（本会话内记住）。 */
+  const chooseView = useCallback((next: string) => {
+    if (!isMediaViewMode(next)) return;
+    sessionView = next;
+    setViewOverride(next);
+  }, []);
+
+  /** 面板内拖滑条改图片尺寸（本会话内记住）。 */
+  const chooseImageSize = useCallback((next: number) => {
+    const clamped = clampImageSize(next);
+    sessionImageSize = clamped;
+    setImageSizeOverride(clamped);
+  }, []);
+
+  /** 面板内选排序：排序键与方向共用一个下拉（`value` 决定改哪一项）。 */
+  const chooseSort = useCallback((next: string) => {
+    if (isMediaSortKey(next)) {
+      sessionSortKey = next;
+      setSortKeyOverride(next);
+    } else if (isSortDirection(next)) {
+      sessionSortDir = next;
+      setSortDirOverride(next);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     if (!app.repoId) {
@@ -235,8 +270,9 @@ export function MediaPreviewPanel(): JSX.Element {
     void load();
   }, [load, app.refreshKey]);
 
-  // 缩略图视图：恢复并跟踪滚动位置（跨面板卸载重建）
+  // 预览图模式（网格 / 瀑布流共用同一容器引用）：恢复并跟踪滚动位置
   useEffect(() => {
+    if (viewMode !== "thumb") return;
     const el = gridRef.current;
     if (!el) return;
     el.scrollTop = savedThumbScroll;
@@ -245,9 +281,9 @@ export function MediaPreviewPanel(): JSX.Element {
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [viewMode, app.repoId, files.length > 0]);
+  }, [viewMode, view, app.repoId, files.length > 0]);
 
-  // 列表视图：恢复并跟踪滚动位置
+  // 列表模式：恢复并跟踪滚动位置
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
@@ -267,14 +303,53 @@ export function MediaPreviewPanel(): JSX.Element {
     return map;
   }, [sources]);
 
+  /** 排序后的文件（面板已加载的那一页；后端查询顺序是分页游标的基准，不在这里改）。 */
+  const sortedFiles = useMemo(
+    () => sortFiles(files, sortKey, sortDir),
+    [files, sortKey, sortDir],
+  );
+
   const items = useMemo(
     () =>
-      files.map((file) => {
+      sortedFiles.map((file) => {
         const base = sourceMap.get(file.source_id) ?? "";
         const full = base ? joinPath(base, file.relative_path) : "";
         return { file, url: full ? convertFileSrc(full) : "" };
       }),
-    [files, sourceMap],
+    [sortedFiles, sourceMap],
+  );
+
+  /**
+   * 瀑布流列数（按容器宽度与**图片尺寸**算，`ResizeObserver` 跟随面板尺寸变化）。
+   * 只在瀑布流视图下测量：其余视图不需要 JS 参与布局。
+   */
+  const [masonryColumns, setMasonryColumns] = useState(1);
+  useEffect(() => {
+    if (view !== "masonry" || viewMode !== "thumb") return;
+    const el = gridRef.current;
+    if (!el) return;
+    const measure = () =>
+      setMasonryColumns(masonryColumnCount(el.clientWidth, imageSize, MASONRY_GAP));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [view, viewMode, imageSize, app.repoId, items.length > 0]);
+
+  /**
+   * 图片尺寸以 **CSS 变量**下发（`--mp-image-size`），三种视图各自消费：
+   * 平铺 = `grid-template-columns`、瀑布流 = 列宽 `flex-basis`、自适应 = 缩略图**行高**。
+   * 一处设置、三种排布同一口径，也就不会再出现"瀑布流比平铺宽一大截"。
+   */
+  const containerStyle = useMemo(
+    () => ({ "--mp-image-size": `${imageSize}px` }) as CSSProperties,
+    [imageSize],
+  );
+
+  /** 分到各列的条目（保持从左到右的序号顺序；见 `distributeColumns` 的口径说明）。 */
+  const columns = useMemo(
+    () => distributeColumns(items, masonryColumns),
+    [items, masonryColumns],
   );
 
   const repoId = app.repoId;
@@ -379,6 +454,17 @@ export function MediaPreviewPanel(): JSX.Element {
     [app, items, dispatchSelectionChange],
   );
 
+  /** 双击上报（默认蓝图据此切换查看器 / 播放器）。 */
+  const handleDoubleClick = useCallback(
+    (file: FileItem) => {
+      app.dispatch({
+        trigger: "double_click",
+        target: { mediaType: file.media_type, fileId: file.id },
+      });
+    },
+    [app],
+  );
+
   const selectedCount = useMemo(
     () => items.reduce((n, it) => (app.selectedIds.has(it.file.id) ? n + 1 : n), 0),
     [items, app.selectedIds],
@@ -427,7 +513,7 @@ export function MediaPreviewPanel(): JSX.Element {
    * 在光标位置打开自定义上下文菜单。
    */
   const handleContextMenu = useCallback(
-    (file: FileItem, e: MouseEvent) => {
+    (file: FileItem, e: ReactMouseEvent) => {
       e.preventDefault();
       if (!app.selectedIds.has(file.id)) {
         app.setSelectedIds(new Set([file.id]));
@@ -522,6 +608,94 @@ export function MediaPreviewPanel(): JSX.Element {
     }
   }, [menu, app]);
 
+  /**
+   * 容器级快捷键（网格 / 瀑布流 / 列表共用）：
+   * Ctrl+A 全选、Esc 取消、Delete 删除选中。
+   */
+  const handleContainerKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        app.setSelectedIds(new Set(items.map((it) => it.file.id)));
+      } else if (e.key === "Escape") {
+        app.setSelectedIds(new Set());
+      } else if (e.key === "Delete" && app.selectedIds.size > 0) {
+        e.preventDefault();
+        void handleDelete();
+      }
+    },
+    [app, items, handleDelete],
+  );
+
+  /** 点空白处取消选择（网格 / 瀑布流的容器本身，不含单元）。 */
+  const handleContainerClick = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      if (e.target === e.currentTarget) {
+        app.setSelectedIds(new Set());
+        app.setSelectedFile(null);
+      }
+    },
+    [app],
+  );
+
+  const renderCell = useCallback(
+    (file: FileItem, url: string) => (
+      <ThumbCell
+        key={file.id}
+        file={file}
+        repoId={repoId ?? ""}
+        url={url}
+        selected={app.selectedIds.has(file.id)}
+        showName={showFileName}
+        onSelect={handleSelect}
+        onDoubleClick={() => handleDoubleClick(file)}
+        onDragStart={handleDragStart}
+        onContextMenu={handleContextMenu}
+        t={app.t}
+      />
+    ),
+    [
+      repoId,
+      app.selectedIds,
+      app.t,
+      showFileName,
+      handleSelect,
+      handleDoubleClick,
+      handleDragStart,
+      handleContextMenu,
+    ],
+  );
+
+  /**
+   * 「视图」下拉：**由取值域派生**（不写第二份清单），仅在「预览图」模式下有效
+   * （列表模式置灰并给出原因）。
+   */
+  const viewOptions: DropdownOption[] = MEDIA_VIEW_MODES.map((mode) => ({
+    value: mode,
+    label: app.t(viewLabelKey(mode)),
+    selected: view === mode,
+  }));
+
+  /**
+   * 「排序」下拉：四个排序键 + **一条横线** + 正序 / 倒序（用户口径）。
+   *
+   * 两组都由各自的取值域派生，横线挂在**方向组的第一项**之前（`ruleBefore`），
+   * 因此它既不会跑到最上面，也不会在项数变化时错位。
+   */
+  const sortOptions: DropdownOption[] = [
+    ...MEDIA_SORT_KEYS.map((key) => ({
+      value: key,
+      label: app.t(sortKeyLabelKey(key)),
+      selected: sortKey === key,
+    })),
+    ...SORT_DIRECTIONS.map((dir, index) => ({
+      value: dir,
+      label: app.t(sortDirLabelKey(dir)),
+      selected: sortDir === dir,
+      ruleBefore: index === 0,
+    })),
+  ];
+
   return (
     <div className="panel mp-panel">
       <div className="mp-toolbar">
@@ -556,54 +730,77 @@ export function MediaPreviewPanel(): JSX.Element {
               })
             : app.t("media.itemCount", { count: items.length })}
         </span>
+        {/* 图片尺寸滑条：位置固定在「视图」**左边**（用户口径），只影响「预览图」模式。 */}
+        <span className="mp-size">
+          <span className="mp-size-label">{app.t("media.settings.imageSize")}</span>
+          <input
+            type="range"
+            className="mp-size-range"
+            min={MEDIA_IMAGE_SIZE_MIN}
+            max={MEDIA_IMAGE_SIZE_MAX}
+            step={MEDIA_IMAGE_SIZE_STEP}
+            value={imageSize}
+            disabled={viewMode !== "thumb"}
+            aria-label={app.t("media.settings.imageSize")}
+            title={`${app.t("media.imageSizeHint")} — ${imageSize}px`}
+            onChange={(e) => chooseImageSize(Number(e.target.value))}
+          />
+          <span className="mp-size-value">{imageSize}</span>
+        </span>
+        <ToolbarDropdown
+          labelKey="media.settings.view"
+          currentLabel={app.t(viewLabelKey(view))}
+          options={viewOptions}
+          disabled={viewMode !== "thumb"}
+          disabledHint={app.t("media.viewOnlyInThumb")}
+          t={app.t}
+          onSelect={chooseView}
+        />
+        <ToolbarDropdown
+          labelKey="media.settings.sortKey"
+          currentLabel={`${app.t(sortKeyLabelKey(sortKey))} · ${app.t(sortDirLabelKey(sortDir))}`}
+          options={sortOptions}
+          t={app.t}
+          onSelect={chooseSort}
+        />
       </div>
 
       {!repoId && <span className="placeholder">{app.t("common.pleaseOpenRepo")}</span>}
 
-      {repoId && viewMode === "thumb" && (
+      {repoId && viewMode === "thumb" && view === "masonry" && (
         <div
-          className="mp-grid"
+          className="mp-masonry"
           ref={gridRef}
+          style={containerStyle}
           tabIndex={0}
-          onKeyDown={(e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
-              e.preventDefault();
-              app.setSelectedIds(new Set(items.map((it) => it.file.id)));
-            } else if (e.key === "Escape") {
-              app.setSelectedIds(new Set());
-            } else if (e.key === "Delete" && app.selectedIds.size > 0) {
-              e.preventDefault();
-              void handleDelete();
-            }
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              app.setSelectedIds(new Set());
-              app.setSelectedFile(null);
-            }
-          }}
+          onKeyDown={handleContainerKeyDown}
+          onClick={handleContainerClick}
         >
-          {items.map(({ file, url }) => (
-            <ThumbCell
-              key={file.id}
-              file={file}
-              repoId={repoId}
-              url={url}
-              selected={app.selectedIds.has(file.id)}
-              onSelect={handleSelect}
-              onDoubleClick={() =>
-                app.dispatch({
-                  trigger: "double_click",
-                  target: { mediaType: file.media_type, fileId: file.id },
-                })
-              }
-              onDragStart={handleDragStart}
-              onContextMenu={handleContextMenu}
-              t={app.t}
-            />
-          ))}
-          {items.length === 0 && (
+          {items.length === 0 ? (
             <span className="placeholder">{app.t("media.noFiles")}</span>
+          ) : (
+            columns.map((column, index) => (
+              <div className="mp-masonry-col" key={index}>
+                {column.map(({ file, url }) => renderCell(file, url))}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {repoId && viewMode === "thumb" && view !== "masonry" && (
+        <div
+          className={`mp-grid ${mediaViewClass(view)}`}
+          ref={gridRef}
+          style={containerStyle}
+          tabIndex={0}
+          onKeyDown={handleContainerKeyDown}
+          onClick={handleContainerClick}
+        >
+          {items.length === 0 ? (
+            <span className="placeholder">{app.t("media.noFiles")}</span>
+          ) : (
+            items.map(({ file, url }) => renderCell(file, url))
           )}
         </div>
       )}
@@ -613,17 +810,7 @@ export function MediaPreviewPanel(): JSX.Element {
           className="mp-list"
           ref={listRef}
           tabIndex={0}
-          onKeyDown={(e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
-              e.preventDefault();
-              app.setSelectedIds(new Set(items.map((it) => it.file.id)));
-            } else if (e.key === "Escape") {
-              app.setSelectedIds(new Set());
-            } else if (e.key === "Delete" && app.selectedIds.size > 0) {
-              e.preventDefault();
-              void handleDelete();
-            }
-          }}
+          onKeyDown={handleContainerKeyDown}
         >
           {items.map(({ file }) => (
             <button
@@ -638,12 +825,7 @@ export function MediaPreviewPanel(): JSX.Element {
                   ctrl: e.ctrlKey || e.metaKey,
                 })
               }
-              onDoubleClick={() =>
-                app.dispatch({
-                  trigger: "double_click",
-                  target: { mediaType: file.media_type, fileId: file.id },
-                })
-              }
+              onDoubleClick={() => handleDoubleClick(file)}
               onDragStart={(e) => handleDragStart(file, e)}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -654,7 +836,9 @@ export function MediaPreviewPanel(): JSX.Element {
                 {file.media_type}
               </span>
               <span className="mp-row-name">{file.relative_path}</span>
-              <span className="mp-row-size">{file.size}</span>
+              {/* 体积走**宿主设置**的体积单位（二进制 KiB/MiB/GiB ↔ 十进制 KB/MB/GB），
+                  与元数据面板同一份格式化函数；此前这里直接印裸字节数。 */}
+              <span className="mp-row-size">{formatByteSize(file.size, sizeUnit)}</span>
             </button>
           ))}
           {items.length === 0 && (

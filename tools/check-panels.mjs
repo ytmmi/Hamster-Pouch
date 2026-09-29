@@ -473,6 +473,352 @@ check(
     !/\.palette\s*\{[^}]*overflow:/.test(stylesSource),
 );
 
+// ============ 媒体预览（`panel.media`）：缺省视图 / 排序 设置 + 面板消费 ============
+//
+// 与查看器 / 色彩参考同一套闭环：**声明**（注册表）↔ **取值域**（声明候选 ↔ 面板纯函数
+// 逐项一致）↔ **归一化**（非法取值回落缺省）↔ **面板消费**（真的按设置排布与排序）↔
+// **热加载**（共享钩子的四条触发源 + `viewer`/`color` 同款的 dockview 面板 API）。
+//
+// 另加两条本面板特有的口径：
+// 1. 面板右上角的下拉是**本会话内**的临时覆盖（模块级变量），设置里的值才是缺省；
+//    用户在「全部设置」里改动该项时必须**放弃**覆盖，否则就是"改了设置没反应"；
+// 2. 排序下拉是「四个排序键 + 横线 + 正序/倒序」，横线由 `menu-sep` 画（不是两个下拉）。
+
+const mediaPanelSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/MediaPreviewPanel.tsx"),
+  "utf8",
+);
+// 单元与下拉各自成文件（单文件 1200 行上限）：断言跟着代码走，不看它原来在哪。
+const mediaCellSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewCell.tsx"),
+  "utf8",
+);
+const mediaDropdownSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewDropdown.tsx"),
+  "utf8",
+);
+const mediaView = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewView.ts")).href
+);
+const mediaSpec = config.panelSpec("media");
+const mediaSettingKeys = (mediaSpec?.settings ?? []).map((s) => s.key);
+check(
+  "媒体预览声明了 5 项面板设置（view / imageSize / showFileName / sortKey / sortDir），都带 i18n 键",
+  eqList(mediaSettingKeys, ["view", "imageSize", "showFileName", "sortKey", "sortDir"]) &&
+    (mediaSpec?.settings ?? []).every(
+      (s) => typeof s.title_key === "string" && s.title_key.length > 0,
+    ),
+  `decls=${mediaSettingKeys.join(",") || "（无）"}`,
+);
+check(
+  "三项 select（视图 / 排序键 / 方向）+ numberInput（图片尺寸）+ switch（显示文件名）：`slider` 会把值夹在浏览器默认的 0–100，声明层没有 min/max",
+  mediaSpec?.settings?.find((s) => s.key === "view")?.kind === "select" &&
+    mediaSpec?.settings?.find((s) => s.key === "sortKey")?.kind === "select" &&
+    mediaSpec?.settings?.find((s) => s.key === "sortDir")?.kind === "select" &&
+    mediaSpec?.settings?.find((s) => s.key === "imageSize")?.kind === "numberInput" &&
+    mediaSpec?.settings?.find((s) => s.key === "showFileName")?.kind === "switch" &&
+    // 宿主 `slider` 渲染是裸 `<input type="range">`（无 min/max）→ 值域会被压在 0–100，
+    // 图片尺寸 80–400 会被截断，故**不得**用 slider。
+    !(mediaSpec?.settings ?? []).some((s) => s.kind === "slider"),
+);
+check(
+  "媒体预览的 select 候选 ↔ 面板纯函数取值域逐项一致（视图 / 排序键 / 方向）",
+  eqList(optionValues("media", "view"), [...mediaView.MEDIA_VIEW_MODES]) &&
+    eqList(optionValues("media", "sortKey"), [...mediaView.MEDIA_SORT_KEYS]) &&
+    eqList(optionValues("media", "sortDir"), [...mediaView.SORT_DIRECTIONS]),
+  `view=${optionValues("media", "view").join(",")} ` +
+    `sortKey=${optionValues("media", "sortKey").join(",")} ` +
+    `sortDir=${optionValues("media", "sortDir").join(",")}`,
+);
+check(
+  "缺省视图是「自适应」、缺省排序是「名称 · 正序」、缺省图片尺寸落在面板夹紧范围内",
+  mediaView.MEDIA_VIEW_MODES.includes("adaptive") &&
+    mediaSpec?.settings?.find((s) => s.key === "view")?.default === "adaptive" &&
+    mediaSpec?.settings?.find((s) => s.key === "sortKey")?.default === "name" &&
+    mediaSpec?.settings?.find((s) => s.key === "sortDir")?.default === "asc" &&
+    typeof mediaSpec?.settings?.find((s) => s.key === "imageSize")?.default === "number" &&
+    mediaSpec.settings.find((s) => s.key === "imageSize").default >=
+      mediaView.MEDIA_IMAGE_SIZE_MIN &&
+    mediaSpec.settings.find((s) => s.key === "imageSize").default <=
+      mediaView.MEDIA_IMAGE_SIZE_MAX,
+);
+check(
+  "图片尺寸夹紧：0 / 负数 / 非数值回落兜底值，超界夹到 [MIN, MAX]，正常值取整",
+  mediaView.clampImageSize(0) === mediaView.MEDIA_IMAGE_SIZE_FALLBACK &&
+    mediaView.clampImageSize(-10) === mediaView.MEDIA_IMAGE_SIZE_FALLBACK &&
+    mediaView.clampImageSize(Number.NaN) === mediaView.MEDIA_IMAGE_SIZE_FALLBACK &&
+    mediaView.clampImageSize("bad") === mediaView.MEDIA_IMAGE_SIZE_FALLBACK &&
+    mediaView.clampImageSize(1) === mediaView.MEDIA_IMAGE_SIZE_MIN &&
+    mediaView.clampImageSize(100000) === mediaView.MEDIA_IMAGE_SIZE_MAX &&
+    mediaView.clampImageSize(200.4) === 200 &&
+    mediaView.MEDIA_IMAGE_SIZE_MIN === 80 &&
+    mediaView.MEDIA_IMAGE_SIZE_MAX === 400,
+  `[${mediaView.MEDIA_IMAGE_SIZE_MIN}, ${mediaView.MEDIA_IMAGE_SIZE_MAX}] 兜底 ${mediaView.MEDIA_IMAGE_SIZE_FALLBACK}`,
+);
+check(
+  "媒体预览设置按声明归一化：非法取值回落缺省、未注册面板返回 undefined",
+  config.normalizePanelSettingValue("media", "view", "masonry") === "masonry" &&
+    config.normalizePanelSettingValue("media", "view", "grid") === "adaptive" &&
+    config.normalizePanelSettingValue("media", "view", null) === "adaptive" &&
+    config.normalizePanelSettingValue("media", "imageSize", 220) === 220 &&
+    config.normalizePanelSettingValue("media", "imageSize", "240") === 240 &&
+    config.normalizePanelSettingValue("media", "imageSize", "big") === 160 &&
+    config.normalizePanelSettingValue("media", "imageSize", null) === 160 &&
+    config.normalizePanelSettingValue("media", "showFileName", false) === false &&
+    config.normalizePanelSettingValue("media", "showFileName", "false") === false &&
+    // 开关的缺省是**显示**（与既有观感一致）；非法值回落缺省。
+    config.normalizePanelSettingValue("media", "showFileName", "yes") === true &&
+    config.normalizePanelSettingValue("media", "showFileName", null) === true &&
+    config.normalizePanelSettingValue("media", "sortKey", "date") === "name" &&
+    config.normalizePanelSettingValue("media", "sortDir", "up") === "asc" &&
+    config.normalizePanelSettingValue("media", "sortDir", "desc") === "desc" &&
+    config.normalizePanelSettingValue("ghost", "view", "tile") === undefined,
+);
+check(
+  "「显示文件名」开关被面板真的消费（关掉只影响缩略图视图的标签，列表视图文件名照旧）",
+  mediaSpec?.settings?.find((s) => s.key === "showFileName")?.default === true &&
+    /usePanelSwitch\(MEDIA_PANEL_ID, "showFileName", \{ api: panelApi \}\)/.test(mediaPanelSrc) &&
+    /showName=\{showFileName\}/.test(mediaPanelSrc) &&
+    // 单元按开关条件渲染标签；列表视图的文件名是条目本体，不受开关影响。
+    /\{showName && <span className="mp-name">/.test(mediaCellSrc) &&
+    /<span className="mp-row-name">\{file\.relative_path\}<\/span>/.test(mediaPanelSrc),
+);
+check(
+  "列表视图的体积走**宿主设置** `ui.sizeUnit`（与元数据面板同一份格式化），不另立同名面板设置",
+  // 面板设置里不得出现 sizeUnit / dateFormat 这类宿主项的同名副本（两套口径必然漂移）。
+  !(mediaSpec?.settings ?? []).some((s) => s.key === "sizeUnit") &&
+    !(mediaSpec?.settings ?? []).some((s) => s.key === "dateFormat") &&
+    /const sizeUnit = resolveSizeUnit\(useHostSettingValue\(SETTING_KEYS\.sizeUnit, panelApi\)\)/.test(
+      mediaPanelSrc,
+    ) &&
+    /formatByteSize\(file\.size, sizeUnit\)/.test(mediaPanelSrc) &&
+    // 不许退回裸字节数（用户反馈的就是这个）。
+    !/<span className="mp-row-size">\{file\.size\}<\/span>/.test(mediaPanelSrc),
+);
+check(
+  "媒体预览设置用 `divider_before` 分成两组（视图 / 排序），首项无分隔线",
+  eqList(
+    (mediaSpec?.settings ?? []).filter((s) => s.divider_before).map((s) => s.key),
+    ["sortKey"],
+  ) && mediaSpec?.settings?.[0]?.divider_before !== true,
+);
+const mkFile = (relative_path, size, mtime, media_type) => ({
+  relative_path,
+  size,
+  mtime,
+  media_type,
+});
+const mediaRows = [
+  mkFile("b\\img10.jpg", 300, "1600000000000000000", "image"),
+  mkFile("a\\img2.jpg", 100, "1700000000000000000", "image"),
+  mkFile("c\\clip.mp4", 200, "1500000000000000000", "video"),
+];
+const nameOf = (list) => list.map((f) => f.relative_path).join(",");
+const sortBy = (key, dir) => nameOf(mediaView.sortFiles(mediaRows, key, dir));
+check(
+  "排序纯函数：四个键 × 两个方向（名称**数字感知** `img2` < `img10`、时间按 epoch 纳秒、大小按字节）",
+  sortBy("name", "asc") === "c\\clip.mp4,a\\img2.jpg,b\\img10.jpg" &&
+    sortBy("name", "desc") === "b\\img10.jpg,a\\img2.jpg,c\\clip.mp4" &&
+    sortBy("size", "asc") === "a\\img2.jpg,c\\clip.mp4,b\\img10.jpg" &&
+    sortBy("time", "asc") === "c\\clip.mp4,b\\img10.jpg,a\\img2.jpg" &&
+    // 「类型」同类型内再按名称，否则组内顺序由查询顺序决定（看起来在抖）。
+    sortBy("type", "asc") === "a\\img2.jpg,b\\img10.jpg,c\\clip.mp4",
+  `name=${sortBy("name", "asc")} | size=${sortBy("size", "asc")} | time=${sortBy("time", "asc")}`,
+);
+check(
+  "排序是纯函数（不改动入参数组）且从**路径最后一段**取名（`\\` 与 `/` 都认）",
+  mediaRows[0].relative_path === "b\\img10.jpg" &&
+    mediaView.fileName("a\\b\\c.jpg") === "c.jpg" &&
+    mediaView.fileName("a/b/c.jpg") === "c.jpg" &&
+    mediaView.fileName("noext") === "noext",
+);
+const masonry = mediaView.distributeColumns([1, 2, 3, 4, 5, 6, 7], 3);
+check(
+  "瀑布流列分配：按序号从左到右（`i % columns`）、列数恒等于请求列数；宽度不可用时退 1 列",
+  JSON.stringify(masonry) === JSON.stringify([[1, 4, 7], [2, 5], [3, 6]]) &&
+    mediaView.distributeColumns([1, 2], 1.5).length === 1 &&
+    mediaView.masonryColumnCount(0) === 1 &&
+    mediaView.masonryColumnCount(-10) === 1 &&
+    // 列数公式与 CSS `repeat(auto-fill, <单元格宽度>)` 一致（`n*w + (n-1)*gap <= 容器宽`）——
+    // 平铺与瀑布流因此**永远同列数**（两者单元格同宽是用户口径）。
+    mediaView.masonryColumnCount(400, 160, 8) === Math.floor((400 + 8) / (160 + 8)) &&
+    mediaView.masonryColumnCount(1000, 160, 8) === Math.floor((1000 + 8) / (160 + 8)) &&
+    // 808 = 400 + 8 + 400：刚好放得下两列（再多 1px 就只能放一列）。
+    mediaView.masonryColumnCount(808, 400, 8) === 2 &&
+    mediaView.masonryColumnCount(800, 400, 8) === 1,
+  `400px→${mediaView.masonryColumnCount(400, 160, 8)} 1000px→${mediaView.masonryColumnCount(1000, 160, 8)}（单元格 160 / 间距 8）`,
+);
+check(
+  "媒体预览面板真的消费四项设置（缺省读取 + 排序 + 三种视图 + 图片尺寸下发与列数）",
+  /usePanelSettingValue\(MEDIA_PANEL_ID, "view", panelApi\)/.test(mediaPanelSrc) &&
+    /usePanelSettingValue\(MEDIA_PANEL_ID, "imageSize", panelApi\)/.test(mediaPanelSrc) &&
+    /usePanelSettingValue\(MEDIA_PANEL_ID, "sortKey", panelApi\)/.test(mediaPanelSrc) &&
+    /usePanelSettingValue\(MEDIA_PANEL_ID, "sortDir", panelApi\)/.test(mediaPanelSrc) &&
+    /sortFiles\(files, sortKey, sortDir\)/.test(mediaPanelSrc) &&
+    /mediaViewClass\(view\)/.test(mediaPanelSrc) &&
+    /distributeColumns\(items, masonryColumns\)/.test(mediaPanelSrc) &&
+    // 图片尺寸经 CSS 变量下发（一种设置、三种排布同一口径）。
+    /"--mp-image-size": `\$\{imageSize\}px`/.test(mediaPanelSrc) &&
+    /style=\{containerStyle\}/.test(mediaPanelSrc) &&
+    /masonryColumnCount\(el\.clientWidth, imageSize, MASONRY_GAP\)/.test(mediaPanelSrc) &&
+    /new ResizeObserver\(measure\)/.test(mediaPanelSrc),
+);
+check(
+  "图片尺寸滑条在「视图」**左边**，取值域来自纯函数常量，列表模式下置灰",
+  // 工具条顺序：滑条块在 `<ToolbarDropdown labelKey="media.settings.view"` 之前。
+  /className="mp-size"[\s\S]*?<ToolbarDropdown\s+labelKey="media\.settings\.view"/.test(mediaPanelSrc) &&
+    /min=\{MEDIA_IMAGE_SIZE_MIN\}/.test(mediaPanelSrc) &&
+    /max=\{MEDIA_IMAGE_SIZE_MAX\}/.test(mediaPanelSrc) &&
+    /value=\{imageSize\}/.test(mediaPanelSrc) &&
+    /onChange=\{\(e\) => chooseImageSize\(Number\(e\.target\.value\)\)\}/.test(mediaPanelSrc) &&
+    // 与视图下拉同一处置：只在「预览图」模式下有效。
+    /disabled=\{viewMode !== "thumb"\}/.test(mediaPanelSrc) &&
+    /const clamped = clampImageSize\(next\);/.test(mediaPanelSrc),
+);
+check(
+  "面板内的改动只做**本会话**覆盖，且「全部设置」显式改动时放弃覆盖（否则＝改了设置没反应）",
+  /let sessionView: MediaViewMode \| null = null;/.test(mediaPanelSrc) &&
+    /let sessionImageSize: number \| null = null;/.test(mediaPanelSrc) &&
+    /sessionView = next;/.test(mediaPanelSrc) &&
+    /sessionImageSize = clamped;/.test(mediaPanelSrc) &&
+    /sessionSortKey = next;/.test(mediaPanelSrc) &&
+    /sessionSortDir = next;/.test(mediaPanelSrc) &&
+    /subscribeSettingChanged\(\(key\) => \{/.test(mediaPanelSrc) &&
+    /key === VIEW_STORAGE_KEY/.test(mediaPanelSrc) &&
+    /key === IMAGE_SIZE_STORAGE_KEY/.test(mediaPanelSrc) &&
+    /key === SORT_KEY_STORAGE_KEY/.test(mediaPanelSrc) &&
+    /key === SORT_DIR_STORAGE_KEY/.test(mediaPanelSrc) &&
+    (mediaPanelSrc.match(/= null;\n\s+set\w+Override\(null\);/g) ?? []).length === 4,
+);
+check(
+  "排序下拉 =「名称 / 时间 / 大小 / 类型」+ **一条横线** +「正序 / 倒序」（两组都由取值域派生）",
+  // 取值域本身的顺序就是界面顺序（注册表候选与之逐项一致，见上面的 `eqList`）。
+  eqList([...mediaView.MEDIA_SORT_KEYS], ["name", "time", "size", "type"]) &&
+    eqList([...mediaView.SORT_DIRECTIONS], ["asc", "desc"]) &&
+    /MEDIA_SORT_KEYS\.map\(/.test(mediaPanelSrc) &&
+    /SORT_DIRECTIONS\.map\(/.test(mediaPanelSrc) &&
+    // 横线挂在**方向组第一项**之前（`index === 0`），不会跑到最上面或错位。
+    /ruleBefore: index === 0/.test(mediaPanelSrc) &&
+    /\{option\.ruleBefore && <div className="menu-sep" \/>\}/.test(mediaDropdownSrc),
+  `sortKeys=${[...mediaView.MEDIA_SORT_KEYS].join(",")} directions=${[...mediaView.SORT_DIRECTIONS].join(",")}`,
+);
+check(
+  "「视图」下拉只在「预览图」模式下有效（列表模式下置灰并给出原因）",
+  /disabled=\{viewMode !== "thumb"\}/.test(mediaPanelSrc) &&
+    /disabledHint=\{app\.t\("media\.viewOnlyInThumb"\)\}/.test(mediaPanelSrc) &&
+    // 下拉组件本身必须接住 `disabled`（否则"置灰"只是面板一厢情愿）。
+    /disabled=\{disabled\}/.test(mediaDropdownSrc) &&
+    /import \{ ToolbarDropdown, type DropdownOption \} from "\.\/mediaPreviewDropdown";/.test(
+      mediaPanelSrc,
+    ),
+);
+const contextMenuForDropdownSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/menu/ContextMenu.tsx"),
+  "utf8",
+);
+check(
+  "两个下拉复用 portal 的 `ContextMenu`，且「点外部关闭」**同时排除按钮与弹出层**",
+  // 弹出层由 `ContextMenu` portal 到 `document.body`：它的 DOM **不在按钮里**，
+  // 只排除按钮的话，按在选项上的 mousedown 会先关掉下拉、卸载弹出层，
+  // 选项的 click 永远不会发生（"下拉能开、选什么都没反应"）。
+  /<ContextMenu x=\{anchor\.x\} y=\{anchor\.y\}>/.test(mediaDropdownSrc) &&
+    /btnRef\.current\?\.contains\(target\)/.test(mediaDropdownSrc) &&
+    /target\.closest\("\.context-menu"\)/.test(mediaDropdownSrc) &&
+    // 判定收在纯函数里（下面按行为断言），组件不得再手写一份 if。
+    /shouldCloseDropdown\(inButton, inPopup\)/.test(mediaDropdownSrc) &&
+    // 类名两侧必须对得上：弹出层的容器类由 `ContextMenu` 定义。
+    /className="context-menu"/.test(contextMenuForDropdownSrc) &&
+    // 顺序：先判"是不是外部"，再关；反过来等于没排除。
+    /if \(!shouldCloseDropdown\(inButton, inPopup\)\) return;[\s\S]{0,80}?setAnchor\(null\);/.test(
+      mediaDropdownSrc,
+    ),
+);
+check(
+  "「点外部关闭」的不变量：按在**弹出层内**不关闭（谁也不能化简回 `!inButton`）",
+  mediaView.shouldCloseDropdown(false, false) === true &&
+    mediaView.shouldCloseDropdown(true, false) === false &&
+    mediaView.shouldCloseDropdown(false, true) === false &&
+    mediaView.shouldCloseDropdown(true, true) === false,
+  `(按钮内,弹出层内)=(${mediaView.shouldCloseDropdown(true, false)},${mediaView.shouldCloseDropdown(false, true)})`,
+);
+check(
+  "media 面板拿到 dockview 面板 API（第 4 条触发源「面板激活」才可达）",
+  /\{ id: "media", titleKey: "panel\.media", render: \(ctx\) => <MediaPreviewPanel api=\{ctx\.api\} \/> \}/.test(
+    registrySource,
+  ),
+);
+check(
+  "三种视图的样式齐全且**共用一个图片尺寸变量**：平铺（固定列宽）/ 自适应（逐行两端对齐）/ 瀑布流（固定列宽）",
+  // 平铺：固定列宽 = 图片尺寸；自适应：见下面那条专测（行内按宽高比配平）。
+  /\.mp-grid\.mp-view-tile\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, var\(--mp-image-size/.test(
+    stylesSource,
+  ) &&
+    /\.mp-view-tile \.mp-thumb img[\s\S]{0,120}?object-fit:\s*cover/.test(stylesSource) &&
+    // 瀑布流：列宽 = 同一个变量（**不再 `flex: 1 1 0` 等分**，那会让列宽随面板漂移）。
+    /\.mp-masonry\s*\{[^}]*display:\s*flex/.test(stylesSource) &&
+    /\.mp-masonry-col\s*\{[^}]*flex:\s*0 0 var\(--mp-image-size/.test(stylesSource) &&
+    !/\.mp-masonry-col\s*\{[^}]*flex:\s*1 1 0/.test(stylesSource) &&
+    /\.mp-masonry \.mp-thumb img[\s\S]{0,160}?height:\s*auto/.test(stylesSource) &&
+    // 行高不等的瀑布流必须关掉跳过渲染，否则滚动高度随滚动变化。
+    /\.mp-masonry \.mp-cell\s*\{[^}]*content-visibility:\s*visible/.test(stylesSource) &&
+    /\.mp-size-range\s*\{/.test(stylesSource) &&
+    /\.mp-dd\s*\{/.test(stylesSource),
+);
+check(
+  "自适应 = **逐行两端对齐**：断行用基准宽度、行内按宽高比分配剩余空间（`flex-grow`/`flex-basis` 同为宽高比）",
+  /\.mp-grid\.mp-view-adaptive\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/.test(stylesSource) &&
+    /\.mp-grid\.mp-view-adaptive\s*\{[^}]*--mp-row-max-factor:\s*2/.test(stylesSource) &&
+    // 两端对齐的两行：grow 与 basis 都必须取宽高比，缺一就退化成"等高不齐边"。
+    /\.mp-view-adaptive \.mp-cell\s*\{[^}]*flex-grow:\s*var\(--mp-cell-ratio/.test(stylesSource) &&
+    /\.mp-view-adaptive \.mp-cell\s*\{[^}]*flex-basis:\s*calc\(var\(--mp-cell-ratio/.test(
+      stylesSource,
+    ) &&
+    // 内边距/边框必须在自适应下清零：它们会在宽度上加常数，破坏"高度 = 宽 ÷ 宽高比"，
+    // 表现为同一行内各格高度参差（行底部不齐）。
+    /\.mp-view-adaptive \.mp-cell\s*\{[^}]*padding:\s*0/.test(stylesSource) &&
+    /\.mp-view-adaptive \.mp-cell\s*\{[^}]*border:\s*none/.test(stylesSource) &&
+    /\.mp-view-adaptive \.mp-cell\.selected\s*\{[^}]*outline-color/.test(stylesSource) &&
+    // 缩略图高度由宽高比推出（行内等高、行间不等）。
+    /\.mp-view-adaptive \.mp-thumb\s*\{[^}]*aspect-ratio:\s*var\(--mp-cell-ratio/.test(
+      stylesSource,
+    ) &&
+    // 稀疏行不把单张图放大到上千像素：到行高上限即停手。
+    /\.mp-view-adaptive \.mp-cell\s*\{[^}]*max-width:\s*calc\([\s\S]{0,160}?--mp-row-max-factor/.test(
+      stylesSource,
+    ) &&
+    // 长文件名不得顶宽单元格（否则"按宽高比配平"失效）。
+    /\.mp-view-adaptive \.mp-name\s*\{[^}]*contain:\s*inline-size/.test(stylesSource) &&
+    // 行高由宽高比推出 → 跳过渲染的 140px 提示与真实高度无关，必须关掉。
+    /\.mp-view-adaptive \.mp-cell\s*\{[^}]*content-visibility:\s*visible/.test(stylesSource),
+);
+check(
+  "宽高比是自适应配平的输入：纯函数带兜底（0 / 负数 / NaN 不得进入 flex 计算）并**量后缓存**",
+  mediaView.imageRatio(1600, 900) === 1600 / 900 &&
+    mediaView.imageRatio(900, 1600) === 900 / 1600 &&
+    mediaView.imageRatio(0, 100) === mediaView.DEFAULT_CELL_RATIO &&
+    mediaView.imageRatio(100, 0) === mediaView.DEFAULT_CELL_RATIO &&
+    mediaView.imageRatio(Number.NaN, 5) === mediaView.DEFAULT_CELL_RATIO &&
+    mediaView.imageRatio(-3, 5) === mediaView.DEFAULT_CELL_RATIO &&
+    mediaView.DEFAULT_CELL_RATIO === 1 &&
+    mediaView.AUDIO_CARD_RATIO === 1.5 &&
+    // 单元（`mediaPreviewCell.tsx`）：以 `--mp-cell-ratio` 下发 + 解码后量一次并写缓存
+    // （重挂载不再重排一遍）；音频没有宽高比，用固定卡片比例，免得在自适应里成一张方块。
+    /"--mp-cell-ratio": String\(ratio\)/.test(mediaCellSrc) &&
+    /const next = imageRatio\(naturalWidth, naturalHeight, ratio\);/.test(mediaCellSrc) &&
+    /ratioCache\.set\(file\.id, next\);/.test(mediaCellSrc) &&
+    /export const ratioCache = new Map<string, number>\(\);/.test(mediaCellSrc) &&
+    /file\.media_type === "audio"\s*\?\s*AUDIO_CARD_RATIO/.test(mediaCellSrc) &&
+    // 面板必须真的用它渲染条目（不是留着两条渲染路径）。
+    /import \{ ThumbCell \} from "\.\/mediaPreviewCell";/.test(mediaPanelSrc) &&
+    /<ThumbCell/.test(mediaPanelSrc),
+);
+check(
+  "三种视图都**居中对齐**（图片宽度定死时余量左右均分，不许堆在右边留一条空白）；自适应被行高上限截住的行同理",
+  /\.mp-grid\.mp-view-tile\s*\{[^}]*justify-content:\s*center/.test(stylesSource) &&
+    /\.mp-grid\.mp-view-adaptive\s*\{[^}]*justify-content:\s*center/.test(stylesSource) &&
+    /\.mp-masonry\s*\{[^}]*justify-content:\s*center/.test(stylesSource),
+);
+
 // ============ 元数据面板：宿主格式设置 ↔ 面板实现（体积 / 日期 / 类型自适应）============
 //
 // 体积单位与日期格式是**宿主项**（跨面板共用的通用口径，落在「界面 → 其他设置」），

@@ -57,7 +57,9 @@ export const PANEL_DEFS: PanelDef[] = [
   { id: "repo", titleKey: "panel.repo", render: () => <RepoPanel /> },
   { id: "sources", titleKey: "panel.sources", render: () => <SourcePanel /> },
   { id: "albums", titleKey: "panel.albums", render: () => <AlbumPanel /> },
-  { id: "media", titleKey: "panel.media", render: () => <MediaPreviewPanel /> },
+  // 媒体预览需要 dockview 面板 API：面板设置（缺省视图/排序）的第 4 条热加载触发源
+  // 「面板从后台标签回到前台时补读一次」靠它可达（与 `viewer` 同款）。
+  { id: "media", titleKey: "panel.media", render: (ctx) => <MediaPreviewPanel api={ctx.api} /> },
   // 查看器持有面板设置（`viewer.infoBarEnabled`），需要激活状态才凑齐四条热加载触发源。
   { id: "viewer", titleKey: "panel.viewer", render: (ctx) => <ViewerPanel api={ctx.api} /> },
   { id: "imageviewer", titleKey: "panel.imageviewer", render: (ctx) => <ImageViewerPanel api={ctx.api} /> },

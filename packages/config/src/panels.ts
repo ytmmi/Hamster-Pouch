@@ -189,7 +189,72 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
   { id: "repo", titleKey: "panel.repo", category: "source", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "sources", titleKey: "panel.sources", category: "source", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "albums", titleKey: "panel.albums", category: "source", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
-  { id: "media", titleKey: "panel.media", category: "media", hasClass: true, blueprintNode: "control", origin: SYSTEM_ORIGIN },
+  {
+    id: "media",
+    titleKey: "panel.media",
+    category: "media",
+    hasClass: true,
+    blueprintNode: "control",
+    origin: SYSTEM_ORIGIN,
+    // 面板设置（`docs/spec/panel-standard.md` 第 5.3 节）：**缺省**视图与排序。
+    // 面板右上角的两个下拉是**本会话内**的临时覆盖（`MediaPreviewPanel`），
+    // 这里声明的才是缺省值——用户没在面板里改过时，面板显示的就是这里选的值。
+    // 取值域与 `panels/mediaPreviewView.ts` 的枚举逐项对齐（`pnpm check:panels` 断言）；
+    // 排序两项之间用 `divider_before` 在「全部设置」里画一条横线（视图 / 排序两组）。
+    settings: [
+      {
+        key: "view",
+        kind: "select",
+        title_key: "media.settings.view",
+        default: "adaptive",
+        options: [
+          { value: "tile", title_key: "media.settings.view.tile" },
+          { value: "adaptive", title_key: "media.settings.view.adaptive" },
+          { value: "masonry", title_key: "media.settings.view.masonry" },
+        ],
+      },
+      {
+        // 图片尺寸：平铺 / 瀑布流 = 单元格宽度，自适应 = 行高（该视图宽度随图）。
+        // `numberInput` 而不是 `slider`：设置声明没有 min/max，宿主 `slider` 会把值夹在
+        // 浏览器默认的 0–100，尺寸范围只能由面板夹紧（与 `imageviewer.filmstripSize` 同理）。
+        key: "imageSize",
+        kind: "numberInput",
+        title_key: "media.settings.imageSize",
+        default: 160,
+      },
+      {
+        // 是否显示缩略图下的文件名（三种「预览图」视图共用；「文件名」列表视图不受影响
+        // ——那里的文件名就是条目本身）。缺省显示 = 与既有观感一致（零行为变化）。
+        key: "showFileName",
+        kind: "switch",
+        title_key: "media.settings.showFileName",
+        default: true,
+      },
+      {
+        key: "sortKey",
+        kind: "select",
+        title_key: "media.settings.sortKey",
+        default: "name",
+        divider_before: true,
+        options: [
+          { value: "name", title_key: "media.settings.sortKey.name" },
+          { value: "time", title_key: "media.settings.sortKey.time" },
+          { value: "size", title_key: "media.settings.sortKey.size" },
+          { value: "type", title_key: "media.settings.sortKey.type" },
+        ],
+      },
+      {
+        key: "sortDir",
+        kind: "select",
+        title_key: "media.settings.sortDir",
+        default: "asc",
+        options: [
+          { value: "asc", title_key: "media.settings.sortDir.asc" },
+          { value: "desc", title_key: "media.settings.sortDir.desc" },
+        ],
+      },
+    ],
+  },
   {
     id: "viewer",
     titleKey: "panel.viewer",
