@@ -33,6 +33,7 @@ import {
   type ControlDataRow,
   type ControlQueryResult,
 } from "./controlData";
+import { SwitchToggle } from "../SwitchToggle";
 import {
   alignToken,
   baseTextStyle,
@@ -264,40 +265,20 @@ const button: ControlComponent = ({ node, theme, text, ctx }) => {
   );
 };
 
+/**
+ * `switch` 控件：胶囊 + 圆形滑块（与「全部设置」的开关**同一组件**，形态只有一份）。
+ *
+ * 契约不变：`data.value` 是布尔，点击回传 `value_change`（`docs/spec/control-standard.md`
+ * 第 5 节的事件表）；形态与取色从这里的实现搬到了 `shared/SwitchToggle.tsx`。
+ */
 const switchControl: ControlComponent = ({ node, theme, data, ctx }) => {
-  const palette = COLORS[theme];
   const value = data?.value === undefined ? false : booleanOf(data.value, false);
-  const emit = () => ctx.emit(node.id, "value_change", { value: !value });
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={value}
-      className="hp-control-switch"
-      onClick={emit}
-      style={{
-        width: 32,
-        height: 16,
-        borderRadius: 8,
-        border: `1px solid ${palette.border}`,
-        background: value ? palette.accent : palette.bg,
-        position: "relative",
-        cursor: "pointer",
-        padding: 0,
-      }}
-    >
-      <span
-        style={{
-          position: "absolute",
-          top: 1,
-          left: value ? 17 : 1,
-          width: 12,
-          height: 12,
-          borderRadius: 6,
-          background: palette.panel,
-        }}
-      />
-    </button>
+    <SwitchToggle
+      checked={value}
+      theme={theme}
+      onChange={(next) => ctx.emit(node.id, "value_change", { value: next })}
+    />
   );
 };
 

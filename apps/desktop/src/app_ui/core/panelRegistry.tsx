@@ -1,7 +1,7 @@
 /**
  * 面板注册表 — 面板 id / 标题 / 渲染函数，供 dockview 与菜单共用。
  *
- * **内置 13 个面板**的组件表在 `PANEL_DEFS`（行为与 RFC 0010 之前完全一致）；
+ * **内置 14 个面板**的组件表在 `PANEL_DEFS`（行为与 RFC 0010 之前完全一致）；
  * **插件注册的面板**（`docs/spec/panel-standard.md`）走 `allPanelDefs()` 的动态路径：
  * 宿主按注册表里的声明生成面板项，内部 UI 仍由控件 schema 与宿主白名单决定
  * （`docs/spec/control-standard.md`），插件不得创建自由 React 组件（D44/RFC 0010 决策 2）。
@@ -21,6 +21,7 @@ import type { Translate, TranslationKey } from "../i18n";
 import { AlbumPanel } from "../panels/AlbumPanel";
 import { BlueprintPanel } from "../panels/BlueprintPanel";
 import { ColorPanel } from "../panels/ColorPanel";
+import { ImageViewerPanel } from "../panels/imageviewer/ImageViewerPanel";
 import { MediaPlayerPanel } from "../panels/MediaPlayerPanel";
 import { MediaPreviewPanel } from "../panels/MediaPreviewPanel";
 import { MetadataPanel } from "../panels/MetadataPanel";
@@ -51,13 +52,14 @@ export interface PanelDef {
   render: (ctx: PanelRenderCtx) => JSX.Element;
 }
 
-/** 宿主内置 13 个面板（顺序与 `PANEL_IDS` 一致）。 */
+/** 宿主内置 14 个面板（顺序与 `PANEL_IDS` 一致）。 */
 export const PANEL_DEFS: PanelDef[] = [
   { id: "repo", titleKey: "panel.repo", render: () => <RepoPanel /> },
   { id: "sources", titleKey: "panel.sources", render: () => <SourcePanel /> },
   { id: "albums", titleKey: "panel.albums", render: () => <AlbumPanel /> },
   { id: "media", titleKey: "panel.media", render: () => <MediaPreviewPanel /> },
   { id: "viewer", titleKey: "panel.viewer", render: () => <ViewerPanel /> },
+  { id: "imageviewer", titleKey: "panel.imageviewer", render: (ctx) => <ImageViewerPanel api={ctx.api} /> },
   { id: "metadata", titleKey: "panel.metadata", render: () => <MetadataPanel /> },
   { id: "tags", titleKey: "panel.tags", render: () => <TagRatingPanel /> },
   { id: "tagtable", titleKey: "panel.tagtable", render: () => <TagTablePanel /> },
@@ -83,7 +85,7 @@ function pluginPanelDef(spec: PanelSpec): PanelDef {
   };
 }
 
-/** 全部面板项（内置 13 个 + 当前已注册的插件面板）。 */
+/** 全部面板项（内置 14 个 + 当前已注册的插件面板）。 */
 export function allPanelDefs(): PanelDef[] {
   const pluginSpecs = pluginRegisteredPanels();
   return pluginSpecs.length === 0
@@ -115,7 +117,7 @@ export function panelRender(id: string, ctx: PanelRenderCtx): JSX.Element | null
   return def ? def.render(ctx) : null;
 }
 
-/** dockview 组件表（内置 13 个；与 `PANEL_DEFS` 一一对应）。 */
+/** dockview 组件表（内置 14 个；与 `PANEL_DEFS` 一一对应）。 */
 export const DOCK_COMPONENTS: Record<string, FC<IDockviewPanelProps>> = buildComponents(
   PANEL_DEFS,
 );

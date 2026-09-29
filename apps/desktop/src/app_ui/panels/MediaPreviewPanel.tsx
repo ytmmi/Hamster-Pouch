@@ -11,6 +11,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
+import { resolveThumbUrl } from "../shared/thumbUrl";
 import { useApp } from "../core/AppContext";
 import { ContextMenu } from "../menu/ContextMenu";
 import type { Translate } from "../i18n";
@@ -65,41 +66,6 @@ function AudioWaveform({ url, t }: { url: string; t: Translate }): JSX.Element {
   return <canvas ref={ref} className="mp-wave" />;
 }
 
-/** 缩略图 URL 缓存：fileId -> 已解析的 asset url（null=不可用）。 */
-const thumbUrlCache = new Map<string, string | null>();
-/** in-flight 请求去重：fileId -> 正在进行的 Promise，防止重复请求。 */
-const thumbPromiseCache = new Map<string, Promise<string | null>>();
-
-/** 解析文件缩略图 URL（命中缓存直接返回；否则发起请求并缓存结果）。 */
-function resolveThumbUrl(
-  repoId: string,
-  fileId: string,
-): Promise<string | null> {
-  const cached = thumbUrlCache.get(fileId);
-  if (cached !== undefined) {
-    return Promise.resolve(cached);
-  }
-  const inflight = thumbPromiseCache.get(fileId);
-  if (inflight) {
-    return inflight;
-  }
-  const promise = api
-    .thumbGet({ repoId, fileId })
-    .then((path): string | null => {
-      const url = path ? convertFileSrc(path) : null;
-      thumbUrlCache.set(fileId, url);
-      thumbPromiseCache.delete(fileId);
-      return url;
-    })
-    .catch((): null => {
-      thumbUrlCache.set(fileId, null);
-      thumbPromiseCache.delete(fileId);
-      return null;
-    });
-  thumbPromiseCache.set(fileId, promise);
-  return promise;
-}
-
 /**
  * 媒体缩略图单元。
  *
@@ -107,6 +73,8 @@ function resolveThumbUrl(
  * - 图片/视频：请求并显示后端缓存的缩略图（而非原始全分辨率文件）；
  * - 音频：挂载波形组件并开始解码（而非一次性预解码全部音频）。
  * 离屏时显示占位符，节省网络与 CPU。
+ *
+ * 缩略图 URL 走 `shared/thumbUrl.ts` 的**共享**缓存与请求去重（图像查看器胶片栏同源）。
  */
 function ThumbCell({
   file,

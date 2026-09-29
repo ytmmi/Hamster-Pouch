@@ -95,15 +95,89 @@ pub const SYSTEM_SETTING_DECLS: &[SettingDeclFact] = &[
 ];
 
 /// 面板设置声明（**镜像** `packages/config/src/panels.ts` 各面板的 `settings`）。
-pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[SettingDeclFact {
-    id: "autoPauseOnTabSwitch",
-    owner_kind: "panel",
-    owner_id: Some("player"),
-    kind: "switch",
-    scope: SettingScope::App,
-    options: &[],
-    requires_capability: None,
-}];
+///
+/// `select` 的候选必须逐项列出：`validate_setting_value` 对**空 `options` 的 `select`**
+/// 直接拒绝（失败关闭），因此镜像漏写候选会让该项在真机上完全无法写入。
+pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
+    SettingDeclFact {
+        id: "autoPauseOnTabSwitch",
+        owner_kind: "panel",
+        owner_id: Some("player"),
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    // 图像查看器（`panel.imageviewer.*`）：导航器 / 胶片栏的启用与位置、滚轮缩放中心。
+    SettingDeclFact {
+        id: "navigatorEnabled",
+        owner_kind: "panel",
+        owner_id: Some("imageviewer"),
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "navigatorPosition",
+        owner_kind: "panel",
+        owner_id: Some("imageviewer"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["top-left", "top-right", "bottom-left", "bottom-right"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "filmstripEnabled",
+        owner_kind: "panel",
+        owner_id: Some("imageviewer"),
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "filmstripPosition",
+        owner_kind: "panel",
+        owner_id: Some("imageviewer"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["left", "right", "top", "bottom"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        // 胶片栏厚度：左右边为宽、上下边为高。数值范围由面板夹紧（声明层无 min/max）。
+        id: "filmstripSize",
+        owner_kind: "panel",
+        owner_id: Some("imageviewer"),
+        kind: "numberInput",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        // 胶片栏视图：自适应（按图像宽高比完整显示）/ 平铺（统一方形、裁剪填满）。
+        // `divider_before` 是纯展示字段，**不进镜像**（镜像只存校验所需的事实）。
+        id: "filmstripView",
+        owner_kind: "panel",
+        owner_id: Some("imageviewer"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["adaptive", "tile"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "zoomAnchor",
+        owner_kind: "panel",
+        owner_id: Some("imageviewer"),
+        kind: "select",
+        scope: SettingScope::App,
+        // 缺省仍是「以指针为中心」：默认值不在镜像里（镜像只存校验事实），
+        // 缺省只在前端 `panels.ts` 的 `settings[].default` 一处声明。
+        options: &["pointer", "center"],
+        requires_capability: None,
+    },
+];
 
 /// 按**落库键**查宿主/面板声明（插件项走 manifest 反查，不在此列）。
 pub fn registry_decl_for_storage_key(key: &str) -> Option<&'static SettingDeclFact> {

@@ -13,7 +13,7 @@
  * 打开入口是顶部设置区的「更多设置」（`MenuBar`）。
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   SETTING_CATEGORIES,
@@ -25,7 +25,9 @@ import {
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
+import { SwitchToggle } from "../shared/SwitchToggle";
 import { useApp } from "../core/AppContext";
+import { publishSettingChanged } from "../core/settingChangeStore";
 import type { Translate, TranslationKey } from "../i18n";
 import {
   allSettingCategories,
@@ -98,6 +100,9 @@ export function SettingsApp({
       try {
         await api.settingSet({ key, value: value as string | number | boolean });
         setValues((prev) => ({ ...prev, [key]: encodeSettingValue(value) }));
+        // 同窗口即时生效：面板订阅这个本地广播，不必等 `setting.changed` 的 IPC 往返
+        // （跨窗口仍是后端事件负责，见 `core/settingChangeStore.ts`）。
+        publishSettingChanged(key);
         app.status(t("settings.saved", { name: t(decl.title_key as TranslationKey) }), "ok");
         // 宿主设置里的主题/语言即时生效（与旧的顶部设置同一行为）。
         if (key === "ui.theme" && (value === "light" || value === "dark")) {
@@ -126,6 +131,8 @@ export function SettingsApp({
           delete next[key];
           return next;
         });
+        // 恢复缺省同样要即时生效（面板回到声明缺省值）。
+        publishSettingChanged(key);
         app.status(t("settings.resetDone"), "ok");
       } catch (e) {
         app.status(t("settings.saveFailed", { err: errorTextOf(t, e) }), "error");
@@ -242,15 +249,24 @@ export function SettingsApp({
                 <section key={section.anchor} className="settings-section">
                   <div className="section-title">{t(section.titleKey as TranslationKey)}</div>
                   <hr className="settings-divider" />
-                  {section.decls.map((decl) => (
-                    <SettingRow
-                      key={storageKeyOf(decl)}
-                      decl={decl}
-                      raw={values[storageKeyOf(decl)]}
-                      t={t}
-                      onWrite={writeValue}
-                      onReset={resetValue}
-                    />
+                  {section.decls.map((decl, index) => (
+                    <Fragment key={storageKeyOf(decl)}>
+                      {/*
+                        分组分隔线：声明里 `divider_before = true` 的项**之前**画一条横线。
+                        分节内的第一项上写它无意义（上面已经有分节标题的分隔线），忽略掉。
+                      */}
+                      {decl.divider_before && index > 0 && (
+                        <div className="settings-row-divider" role="separator" />
+                      )}
+                      <SettingRow
+                        decl={decl}
+                        raw={values[storageKeyOf(decl)]}
+                        t={t}
+                        theme={app.theme}
+                        onWrite={writeValue}
+                        onReset={resetValue}
+                      />
+                    </Fragment>
                   ))}
                 </section>
               ))}
@@ -278,12 +294,15 @@ function SettingRow({
   decl,
   raw,
   t,
+  theme,
   onWrite,
   onReset,
 }: {
   decl: SettingDecl;
   raw: string | undefined;
   t: Translate;
+  /** 当前主题（胶囊开关按 token 表取色）。 */
+  theme: "light" | "dark";
   onWrite: (decl: SettingDecl, value: SettingValue) => void;
   onReset: (decl: SettingDecl) => void;
 }): JSX.Element {
@@ -296,7 +315,18 @@ function SettingRow({
 
   const control = () => {
     switch (decl.kind) {
+      // `switch` = 立即生效的开关 → 胶囊按钮（`shared/SwitchToggle.tsx`，与控件标准的 switch 同一形态）。
       case "switch":
+        return (
+          <SwitchToggle
+            checked={value === true}
+            theme={theme}
+            label={title}
+            disabled={locked}
+            onChange={(next) => onWrite(decl, next)}
+          />
+        );
+      // `checkbox` = 表单式布尔值，保持原生复选框（两种 `kind` **不再同形**）。
       case "checkbox":
         return (
           <input

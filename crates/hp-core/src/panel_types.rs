@@ -2,7 +2,7 @@
 //! `docs/spec/panel-standard.md`）。
 //!
 //! 「面板」是 dockview 承载单元与功能边界（蓝图节点枚举 `control`），**可注册**：
-//! 宿主内置 13 个 + 插件注册项（`plugin.<plugin_id>.<local_id>`）。它与「控件」
+//! 宿主内置 14 个 + 插件注册项（`plugin.<plugin_id>.<local_id>`）。它与「控件」
 //! （面板**内部**的 26 种宿主 UI 单元，`crates/hp-core/src/control_types.rs`）不是一回事。
 //!
 //! 本文件只承载**纯数据与纯校验**：不依赖 Tauri/SQLite/文件系统，也不持有

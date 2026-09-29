@@ -468,14 +468,15 @@ pub struct PanelFact {
 /// 宿主内置面板的事实（与 `packages/config/src/panels.ts` 的 `BUILTIN_PANEL_SPECS`
 /// 逐项对齐，由 `pnpm check:panels` 断言）。
 ///
-/// 只有**媒体预览**（`media`）有类目（图像 / 视频 / 音频），其余 12 个没有条目分类；
+/// 只有**媒体预览**（`media`）有类目（图像 / 视频 / 音频），其余 13 个没有条目分类；
 /// 内置面板都没收窄 `mount`（三项全开）。
-pub const BUILTIN_PANEL_FACTS: [(&str, bool); 13] = [
+pub const BUILTIN_PANEL_FACTS: [(&str, bool); 14] = [
     ("repo", false),
     ("sources", false),
     ("albums", false),
     ("media", true),
     ("viewer", false),
+    ("imageviewer", false),
     ("metadata", false),
     ("tags", false),
     ("tagtable", false),
@@ -489,7 +490,7 @@ pub const BUILTIN_PANEL_FACTS: [(&str, bool); 13] = [
 /// 节点类型注册表：宿主内置 10 种 + 宿主注入的插件注册项 + 面板事实（`has_class`）。
 ///
 /// `builtin_only()` 是 hp-core 的默认形态（crate 不持有"当前有哪些插件"这类宿主状态），
-/// 但它**包含宿主内置 13 个面板的 `has_class` 事实**——那是宿主内置声明，与
+/// 但它**包含宿主内置 14 个面板的 `has_class` 事实**——那是宿主内置声明，与
 /// [`BUILTIN_NODE_SPECS`] 同属编译期常量，不依赖插件。
 /// 命令桥接层再按插件注册表补上插件节点类型与插件面板事实。
 #[derive(Debug, Clone, Default)]
@@ -515,7 +516,7 @@ impl NodeRegistry {
         }
     }
 
-    /// 补上插件注册的面板事实（宿主注入；内置 13 个恒在）。
+    /// 补上插件注册的面板事实（宿主注入；内置 14 个恒在）。
     pub fn with_plugin_panels(mut self, panels: Vec<PanelFact>) -> Self {
         self.plugin_panels = panels;
         self

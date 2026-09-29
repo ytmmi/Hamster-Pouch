@@ -110,6 +110,13 @@ export interface SettingDecl {
   default?: SettingValue;
   /** `select` 的可选项。 */
   options?: readonly SettingOption[];
+  /**
+   * **该项之前画一条横线**（设置列表内的分组分隔符；纯展示）。
+   *
+   * 与面板设置同形（`docs/spec/panel-standard.md` 第 5.3 节）：本版只做一级分隔线，
+   * 不做分组标题、不做嵌套/折叠，因此**不需要 i18n 键**（D27 无文案可译）。
+   */
+  divider_before?: boolean;
   scope?: SettingScope;
   requires_capability?: string;
   /** 搜索补充关键词（第 6 节）。 */
@@ -194,6 +201,10 @@ export function panelSettingDecls(): readonly SettingDecl[] {
         title_key: setting.title_key,
         kind: setting.kind,
         default: setting.default,
+        // `options` 只对 `select` 有意义（面板标准第 5.3 节 + 设置标准第 5 节）。
+        options: setting.options,
+        // 分组分隔线是同形的展示字段（不参与取值与校验）。
+        divider_before: setting.divider_before,
         scope: setting.scope,
         requires_capability: setting.requires_capability,
       });

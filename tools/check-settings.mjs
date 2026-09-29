@@ -509,6 +509,56 @@ check(
     ),
 );
 
+// ============================== 8.5 开关的渲染形态（胶囊按钮） ==============================
+//
+// 防的是"设置里的开关又变回原生复选框"：`switch` 与 `checkbox` 是**两种** kind，
+// 前者是立即生效的开关（胶囊 + 圆形滑块，位置与颜色表示状态），后者是表单式布尔值（原生复选框）。
+// 形态只允许有一份实现（`shared/SwitchToggle.tsx`），设置项与控件标准共用。
+
+const settingsAppSwitchSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/settings/SettingsApp.tsx"),
+  "utf8",
+);
+const switchToggleSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/SwitchToggle.tsx"),
+  "utf8",
+);
+const controlRendererSwitchSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/control/ControlRenderer.tsx"),
+  "utf8",
+);
+const stylesSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/styles.css"),
+  "utf8",
+);
+check(
+  "设置里的 `switch` 渲染为胶囊开关组件（不再是原生复选框）",
+  /case "switch":/.test(settingsAppSwitchSrc) &&
+    /<SwitchToggle/.test(settingsAppSwitchSrc) &&
+    /theme=\{app\.theme\}/.test(settingsAppSwitchSrc),
+);
+check(
+  "胶囊开关 = 胶囊 + 圆形滑块：**位置与颜色**共同表示开关状态",
+  /role="switch"/.test(switchToggleSrc) &&
+    /aria-checked=\{checked\}/.test(switchToggleSrc) &&
+    /className="hp-switch-knob"/.test(switchToggleSrc) &&
+    /left: checked \? 17 : 1/.test(switchToggleSrc) &&
+    /background: checked \? palette\.accent : palette\.bg/.test(switchToggleSrc) &&
+    /\.hp-switch\s*\{[^}]*border-radius:\s*8px/.test(stylesSrc) &&
+    /\.hp-switch-knob\s*\{[^}]*border-radius:\s*6px/.test(stylesSrc),
+);
+check(
+  "`checkbox` 仍是原生复选框（两种 kind 不同形，不再共用一套渲染）",
+  /case "checkbox":/.test(settingsAppSwitchSrc) &&
+    /type="checkbox"/.test(settingsAppSwitchSrc),
+);
+check(
+  "控件标准的 `switch` 复用同一组件（全应用只有一种开关形态）",
+  /SwitchToggle/.test(controlRendererSwitchSrc) &&
+    /value_change/.test(controlRendererSwitchSrc) &&
+    !/hp-control-switch/.test(controlRendererSwitchSrc),
+);
+
 // ============================== 汇总 ==============================
 
 const passed = results.filter((r) => r.ok).length;

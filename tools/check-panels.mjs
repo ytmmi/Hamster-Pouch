@@ -43,6 +43,21 @@ const eqList = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 const doc = readFileSync(join(ROOT, "docs/spec/panel-standard.md"), "utf8");
 const rustPanels = readFileSync(join(ROOT, "crates/hp-core/src/panel_types.rs"), "utf8");
 
+// 被断言的前端源码：**提前读**，供多处断言共用。
+// （写在断言之后会踩 `const` 的 TDZ 陷阱：脚本是顺序执行的，不是函数体。）
+const viewerSettingsSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/useViewerSettings.ts"),
+  "utf8",
+);
+const settingsAppSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/settings/SettingsApp.tsx"),
+  "utf8",
+);
+const stylesSource = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/styles.css"),
+  "utf8",
+);
+
 // ============================== 1. 注册表 ↔ PANEL_IDS ↔ PANEL_DEFS / PANEL_TITLES ==============================
 
 const builtinIds = config.BUILTIN_PANEL_SPECS.map((s) => s.id);
@@ -73,8 +88,8 @@ check(
   titleMismatch.map((s) => `${s.id}: ${config.PANEL_TITLES[s.id]} != ${s.titleKey}`).join(" | "),
 );
 check(
-  "内置面板恰好 13 个",
-  builtinIds.length === 13,
+  "内置面板恰好 14 个",
+  builtinIds.length === 14,
   `实际 ${builtinIds.length}`,
 );
 
@@ -121,7 +136,125 @@ for (const spec of config.BUILTIN_PANEL_SPECS) {
 check(
   "control.panel_id ↔ 面板注册表 blueprint_node 双向一致",
   carrierProblems.length === 0,
-  carrierProblems.join(" | ") || "13 个面板全部指向 control，且 control 允许 panel_id",
+  carrierProblems.join(" | ") || "14 个面板全部指向 control，且 control 允许 panel_id",
+);
+
+// 面板设置里 `select` 必须有候选（否则「全部设置」渲染不出、后端也拒写）。
+const badSelects = [];
+for (const spec of config.allPanels()) {
+  for (const setting of spec.settings ?? []) {
+    if (setting.kind !== "select") continue;
+    const options = setting.options ?? [];
+    if (options.length === 0) badSelects.push(`${spec.id}.${setting.key} 缺 options`);
+    for (const option of options) {
+      if (!option.title_key) badSelects.push(`${spec.id}.${setting.key} 的候选缺 title_key`);
+      if (typeof option.value !== "string" || !option.value) {
+        badSelects.push(`${spec.id}.${setting.key} 的候选 value 非法`);
+      }
+    }
+  }
+}
+check(
+  "面板设置里 kind = select 的项都给了非空 options（且候选带 i18n 键）",
+  badSelects.length === 0,
+  badSelects.join(" | ") || "全部 select 设置项候选完整",
+);
+
+// 面板设置的候选 ↔ 面板实现里的取值域（声明与实现漂移是最难发现的一类缺陷：
+// 设置界面能选、面板代码认不出，表现为"改了设置没反应"）。
+const placement = await import(
+  pathToFileURL(
+    join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerPlacement.ts"),
+  ).href
+);
+const imageViewerSpec = config.panelSpec("imageviewer");
+const optionValues = (panelId, key) =>
+  (config.panelSpec(panelId)?.settings?.find((s) => s.key === key)?.options ?? []).map(
+    (o) => o.value,
+  );
+check(
+  "imageviewer 的 select 候选 ↔ 面板实现取值域逐项一致（导航器四角 / 胶片栏四边 / 视图 / 缩放中心）",
+  Boolean(imageViewerSpec) &&
+    eqList(optionValues("imageviewer", "navigatorPosition"), [...placement.NAVIGATOR_CORNERS]) &&
+    eqList(optionValues("imageviewer", "filmstripPosition"), [...placement.FILMSTRIP_EDGES]) &&
+    eqList(optionValues("imageviewer", "filmstripView"), [...placement.FILMSTRIP_VIEWS]) &&
+    eqList(optionValues("imageviewer", "zoomAnchor"), [...placement.ZOOM_ANCHORS]),
+  `nav=${optionValues("imageviewer", "navigatorPosition").join(",")} ` +
+    `film=${optionValues("imageviewer", "filmstripPosition").join(",")} ` +
+    `view=${optionValues("imageviewer", "filmstripView").join(",")} ` +
+    `anchor=${optionValues("imageviewer", "zoomAnchor").join(",")}`,
+);
+check(
+  "滚轮缩放中心的**缺省**是「指针位置」（不是图像中心）",
+  imageViewerSpec?.settings?.find((s) => s.key === "zoomAnchor")?.default === "pointer" &&
+    placement.ZOOM_ANCHORS.includes("pointer"),
+);
+check(
+  "imageviewer 的开关型设置缺省为真（导航器 / 胶片栏默认启用的声明）",
+  imageViewerSpec?.settings?.find((s) => s.key === "navigatorEnabled")?.default === true &&
+    imageViewerSpec?.settings?.find((s) => s.key === "filmstripEnabled")?.default === true,
+);
+check(
+  "imageviewer 声明了 7 项面板设置（导航器启用/位置、胶片栏启用/位置/尺寸/视图、缩放中心）",
+  (imageViewerSpec?.settings ?? []).length === 7,
+  `实际 ${(imageViewerSpec?.settings ?? []).length}`,
+);
+check(
+  "胶片栏视图缺省是「自适应」（不是平铺）",
+  imageViewerSpec?.settings?.find((s) => s.key === "filmstripView")?.default === "adaptive" &&
+    placement.FILMSTRIP_VIEWS.includes("adaptive") &&
+    placement.FILMSTRIP_VIEWS.includes("tile"),
+);
+// 设置的分组分隔线：`divider_before` 只用来在「全部设置」里画横线，
+// 必须是"分组起点"（第一项上写它无意义），且渲染层真的消费了它。
+const dividerKeys = (imageViewerSpec?.settings ?? [])
+  .filter((s) => s.divider_before)
+  .map((s) => s.key);
+check(
+  "面板设置用 `divider_before` 分成三组（导航器 / 胶片栏 / 缩放），首项无分隔线",
+  eqList(dividerKeys, ["filmstripEnabled", "zoomAnchor"]) &&
+    imageViewerSpec?.settings?.[0]?.divider_before !== true,
+  `divider_before: ${dividerKeys.join(",") || "（无）"}`,
+);
+check(
+  "「全部设置」渲染层消费 `divider_before`（画横线且跳过首项）",
+  /decl\.divider_before && index > 0/.test(settingsAppSrc) &&
+    /settings-row-divider/.test(settingsAppSrc) &&
+    /\.settings-row-divider\s*\{/.test(stylesSource),
+);
+// 胶片栏尺寸：**一个数值两用**（左右 = 宽、上下 = 高），数值范围由面板夹紧。
+const filmstripSizeDecl = imageViewerSpec?.settings?.find((s) => s.key === "filmstripSize");
+check(
+  "胶片栏尺寸是单个数值设置（kind = numberInput，缺省落在面板夹紧范围内）",
+  filmstripSizeDecl?.kind === "numberInput" &&
+    typeof filmstripSizeDecl?.default === "number" &&
+    filmstripSizeDecl.default >= placement.FILMSTRIP_SIZE_MIN &&
+    filmstripSizeDecl.default <= placement.FILMSTRIP_SIZE_MAX,
+  `kind=${filmstripSizeDecl?.kind} default=${filmstripSizeDecl?.default}`,
+);
+check(
+  "胶片栏尺寸的夹紧函数与声明范围一致（0/负数/超大值都被夹进 [MIN, MAX]）",
+  placement.clampFilmstripSize(0) === placement.FILMSTRIP_SIZE_FALLBACK &&
+    placement.clampFilmstripSize(-10) === placement.FILMSTRIP_SIZE_FALLBACK &&
+    placement.clampFilmstripSize(Number.NaN) === placement.FILMSTRIP_SIZE_FALLBACK &&
+    placement.clampFilmstripSize(1) === placement.FILMSTRIP_SIZE_MIN &&
+    placement.clampFilmstripSize(100000) === placement.FILMSTRIP_SIZE_MAX &&
+    placement.clampFilmstripSize(120) === 120,
+);
+// 设置热加载：面板不能只依赖 `setting.changed` 事件（订阅时机/运行时环境都可能让它不达），
+// 同窗口本地广播 + 窗口焦点 + 面板激活都必须订阅（缺一条就会出现"改了设置没反应"）。
+check(
+  "设置热加载走多条独立触发源（本地广播 + 后端事件 + 焦点 + 面板激活）",
+  /subscribeSettingChanged\(/.test(viewerSettingsSrc) &&
+    /listen\("setting\.changed"/.test(viewerSettingsSrc) &&
+    /window\.addEventListener\("focus"/.test(viewerSettingsSrc) &&
+    /onDidActiveChange/.test(viewerSettingsSrc) &&
+    /onDidVisibilityChange/.test(viewerSettingsSrc),
+);
+check(
+  "「全部设置」写入/恢复后广播本地变更（同窗口即时生效，不等 IPC 往返）",
+  /publishSettingChanged\(key\)/.test(settingsAppSrc) &&
+    (settingsAppSrc.match(/publishSettingChanged\(key\)/g) ?? []).length >= 2,
 );
 
 // ============================== 3. 文档一致性 ==============================
@@ -225,7 +358,7 @@ const afterRegister = config.allPanels().map((p) => p.id);
 const registeredOk =
   afterRegister.includes(pluginPanelId) &&
   config.panelTitleKeyOf(pluginPanelId) === "plugin.palette.panel" &&
-  // 组件表的**动态注册路径**：面板项清单由注册表派生（不是写死的 13 项），
+  // 组件表的**动态注册路径**：面板项清单由注册表派生（不是写死的 14 项），
   // dockview 组件表也走订阅版（插件注册/卸载后重建）。
   /pluginRegisteredPanels\(\)/.test(registrySource) &&
   /export function useDockComponents/.test(registrySource) &&
@@ -240,7 +373,7 @@ config.unregisterPluginPanels("dev.hamsterpouch.palette");
 const afterUnregister = config.allPanels().map((p) => p.id);
 check(
   "插件卸载后注册项消失（节点与边由蓝图侧按「未接通」保留，不在此删除用户数据）",
-  !afterUnregister.includes(pluginPanelId) && afterUnregister.length === 13,
+  !afterUnregister.includes(pluginPanelId) && afterUnregister.length === 14,
   `panels=${afterUnregister.length}`,
 );
 
@@ -307,10 +440,6 @@ check(
 
 const contextMenuSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/menu/ContextMenu.tsx"),
-  "utf8",
-);
-const stylesSource = readFileSync(
-  join(ROOT, "apps/desktop/src/app_ui/shared/styles.css"),
   "utf8",
 );
 check(

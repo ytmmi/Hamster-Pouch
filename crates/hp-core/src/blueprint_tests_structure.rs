@@ -211,7 +211,7 @@
     #[test]
     fn graph_json_roundtrip() {
         // 类目必须挂在**有类目**的面板下（RFC 0010 决策 4 / 面板标准第 5.1 节）：
-        // 内置 13 个面板里只有 `media` 的 `has_class = true`，所以这里用 media。
+        // 内置 14 个面板里只有 `media` 的 `has_class = true`，所以这里用 media。
         let json = r#"{
           "schema_version": 1,
           "nodes": [

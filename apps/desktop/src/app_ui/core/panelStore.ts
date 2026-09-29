@@ -16,7 +16,7 @@ import {
   type PanelSpec,
 } from "@hamster-pouch/config";
 
-/** 全部已注册面板（内置 13 个 + 插件项）；注册表变化时自动重渲染。 */
+/** 全部已注册面板（内置 14 个 + 插件项）；注册表变化时自动重渲染。 */
 export function useAllPanels(): readonly PanelSpec[] {
   const revision = useSyncExternalStore(subscribePanels, panelsRevision, panelsRevision);
   return useMemo(() => allPanels(), [revision]);

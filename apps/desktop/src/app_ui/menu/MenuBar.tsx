@@ -51,7 +51,7 @@ export function MenuBar({
 }: MenuBarProps): JSX.Element {
   const app = useApp();
   const { t } = app;
-  // 面板注册表（内置 13 个 + 插件注册项）：重置布局与组件菜单都用这一份清单。
+  // 面板注册表（内置 14 个 + 插件注册项）：重置布局与组件菜单都用这一份清单。
   const panelDefs = useAllPanelDefs();
   // 布局按仓库隔离（D1）：未打开仓库时用空串表示全局默认。
   const repoId = app.repoId ?? "";

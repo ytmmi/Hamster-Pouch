@@ -2130,3 +2130,307 @@ button.danger {
   border-radius: 4px;
   display: block;
 }
+
+/* ===== 图像查看器面板 ===== */
+
+.iv-panel {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  gap: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: row;
+  /* 面板自身不滚动：舞台裁剪、胶片栏各自滚动（避免整块面板被顶走）。 */
+  overflow: hidden;
+  outline: none;
+}
+
+.iv-panel:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* 胶片栏在上下边时面板转成纵向排布（左右边保持横向）。 */
+.iv-panel.iv-stack {
+  flex-direction: column;
+}
+
+.iv-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+}
+
+/* ---- 舞台 ---- */
+
+.iv-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--media-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  touch-action: none;
+}
+
+.iv-stage-pannable {
+  cursor: grab;
+}
+
+.iv-stage-dragging {
+  cursor: grabbing;
+}
+
+.iv-image {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-drag: none;
+  /* 放大到超过 1:1 时仍需平滑插值，否则大图会呈块状。 */
+  image-rendering: auto;
+}
+
+/* 尚未解码：按 contain 兜底显示，避免"一张占满全屏的未布局图"。 */
+.iv-image-pending {
+  max-width: 100%;
+  max-height: 100%;
+  transform: translate(-50%, -50%);
+}
+
+/* ---- 导航器（浮层：随舞台四角定位） ---- */
+
+.iv-nav {
+  position: absolute;
+  z-index: 2;
+  padding: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  opacity: 0.92;
+}
+
+.iv-nav:hover {
+  opacity: 1;
+}
+
+.iv-nav-top-left {
+  left: 8px;
+  top: 8px;
+}
+
+.iv-nav-top-right {
+  right: 8px;
+  top: 8px;
+}
+
+.iv-nav-bottom-left {
+  left: 8px;
+  bottom: 8px;
+}
+
+.iv-nav-bottom-right {
+  right: 8px;
+  bottom: 8px;
+}
+
+.iv-nav-frame {
+  position: relative;
+  overflow: hidden;
+  cursor: crosshair;
+  background: var(--media-bg);
+  border-radius: 2px;
+}
+
+.iv-nav-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* 视口框：舞台当前可见区域在整图上的位置。 */
+.iv-nav-view {
+  position: absolute;
+  border: 1px solid var(--focus-ring);
+  background: rgba(59, 130, 246, 0.18);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+/* ---- 胶片栏 ---- */
+
+.iv-film {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  overflow: auto;
+  background: var(--bg-2, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  scrollbar-width: thin;
+}
+
+/* 左右边：纵向滚动，固定宽度。 */
+.iv-film-left,
+.iv-film-right {
+  flex-direction: column;
+  width: 76px;
+  flex: 0 0 auto;
+}
+
+.iv-film-left {
+  order: -1;
+  border-left: none;
+}
+
+.iv-film-right {
+  border-right: none;
+}
+
+/* 上下边：横向滚动，固定高度。 */
+.iv-film-horizontal {
+  flex-direction: row;
+  height: 76px;
+  flex: 0 0 auto;
+}
+
+.iv-film-top {
+  order: -1;
+  border-top: none;
+}
+
+.iv-film-bottom {
+  border-bottom: none;
+}
+
+/**
+ * 胶片单元：**主尺寸由 `aspect-ratio` 决定、交叉轴交给 flex stretch**。
+ *
+ * - 主尺寸不再写死像素：自适应模式由单元内联的 `aspect-ratio`（图像真实宽高比）决定，
+ *   平铺模式固定 `1`（方形）。两个方向都写死会让"宽高两用"的厚度设置失效；
+ * - 交叉轴（左右栏是宽、上下栏是高）由 flex 的 `align-items: stretch` 撑满，
+ *   因此胶片栏厚度设置直接决定缩略图的另一条边。
+ */
+.iv-film-cell {
+  flex: 0 0 auto;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--media-bg);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+/* 自适应：整张图完整可见（单元宽高比 = 图像宽高比，故无黑边、无裁剪）。 */
+.iv-film-cell-adaptive .iv-film-thumb {
+  object-fit: contain;
+}
+
+/* 平铺：统一方形并裁剪填满，排成整齐的一列/一行。 */
+.iv-film-cell-tile .iv-film-thumb {
+  object-fit: cover;
+}
+
+.iv-film-cell:hover {
+  border-color: var(--hover-border);
+}
+
+.iv-film-cell-active {
+  border-color: var(--sel-border);
+  box-shadow: inset 0 0 0 1px var(--sel-border);
+}
+
+.iv-film-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.iv-film-placeholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--bg-2, var(--bg));
+}
+
+/* ---- 底部基础信息栏 ---- */
+
+.iv-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  min-height: 20px;
+  padding: 0 2px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.iv-info-item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 缩放比例钉在右端（与参考实现一致），不被前面的长路径挤走。 */
+.iv-info-zoom {
+  margin-left: auto;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 设置行的分组分隔线（`SettingDecl.divider_before`） ---- */
+
+.settings-row-divider {
+  height: 1px;
+  margin: 10px 0;
+  background: var(--border);
+}
+
+/* ---- 胶囊开关（`shared/SwitchToggle.tsx`：设置项与控件标准的 switch 共用） ---- */
+
+/* 几何（尺寸/圆角/过渡）在这里；颜色与滑块位置由组件按主题 token 内联给出。 */
+.hp-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 16px;
+  padding: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.hp-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.hp-switch:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.hp-switch-knob {
+  position: absolute;
+  top: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  transition: left 120ms ease;
+}

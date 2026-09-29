@@ -75,7 +75,7 @@ fn parse_valid(json: &str, registry: &hp_core::NodeRegistry) -> HpResult<Bluepri
 
 /// 当前仓库的**注册表上下文**：已启用插件注册的节点类型 + 面板事实。
 ///
-/// 任何一步失败都退化为 `builtin_only()`（含宿主内置 13 个面板的 `has_class` 事实）：
+/// 任何一步失败都退化为 `builtin_only()`（含宿主内置 14 个面板的 `has_class` 事实）：
 /// 注册表不可用**不应该**阻断用户的保存 —— 最坏情况是插件节点被标为「未接通」
 /// （软告警、允许保存、插件恢复后自动恢复，RFC 0010 决策 6）。
 fn blueprint_registry(

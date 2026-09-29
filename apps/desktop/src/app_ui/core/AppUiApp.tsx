@@ -100,7 +100,7 @@ export function AppUiApp(): JSX.Element {
 
   const t = useMemo(() => makeTranslator(language), [language]);
 
-  // 面板注册表（内置 13 个 + 插件注册项）：插件注册/卸载时自动更新菜单与 dockview 组件表。
+  // 面板注册表（内置 14 个 + 插件注册项）：插件注册/卸载时自动更新菜单与 dockview 组件表。
   const panelDefs = useAllPanelDefs();
   const dockComponents = useDockComponents();
 
