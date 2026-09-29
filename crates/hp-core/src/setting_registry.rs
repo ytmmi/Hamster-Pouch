@@ -92,6 +92,35 @@ pub const SYSTEM_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &[],
         requires_capability: None,
     },
+    // 显示格式三项（2026-09）：「全部设置 → 界面 → 其他设置」。跨面板共用的通用口径，
+    // 因此是**宿主项**，而不是某个面板的设置项。
+    SettingDeclFact {
+        id: "ui.sizeUnit",
+        owner_kind: "system",
+        owner_id: None,
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["binary", "decimal"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "ui.dateFormat",
+        owner_kind: "system",
+        owner_id: None,
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["iso", "us", "eu"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "ui.dateShowTime",
+        owner_kind: "system",
+        owner_id: None,
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
 ];
 
 /// 面板设置声明（**镜像** `packages/config/src/panels.ts` 各面板的 `settings`）。

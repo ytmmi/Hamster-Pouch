@@ -11,6 +11,7 @@
 
 import { allPanels, panelSettingStorageKey } from "./panels";
 import { isBareId, isValidPluginId } from "./namespace";
+import { normalizeDeclaredValue } from "./settingValue";
 
 /** 界面主题。 */
 export type Theme = "light" | "dark";
@@ -24,6 +25,12 @@ export const SETTING_KEYS = {
   language: "ui.language",
   /** 保存布局时是否把 dockview 结构自动同步进默认蓝图（D59，默认开）。 */
   syncBlueprint: "layout.syncBlueprint",
+  /** 体积单位制：二进制（KiB/MiB/GiB）或十进制（KB/MB/GB）；**永远按体积自适应**换单位。 */
+  sizeUnit: "ui.sizeUnit",
+  /** 日期格式（`iso` = YYYY-MM-DD / `us` = MM/DD/YYYY / `eu` = DD/MM/YYYY）。 */
+  dateFormat: "ui.dateFormat",
+  /** 日期之后是否再显示时间（HH:MM:SS）。 */
+  dateShowTime: "ui.dateShowTime",
 } as const;
 
 /** 默认主题：白天浅色。 */
@@ -43,6 +50,51 @@ export function isLanguage(value: string | null | undefined): value is Language 
 /** D59：布局→蓝图自动同步开关是否开启（未设置 = 开）。 */
 export function isSyncBlueprintEnabled(value: string | null | undefined): boolean {
   return value === null || value === undefined || value === "true";
+}
+
+// ============ 显示格式设置（2026-09；「全部设置 → 界面 → 其他设置」） ============
+
+/**
+ * 体积单位制：`binary` = 1024 进制（KiB / MiB / GiB…）、`decimal` = 1000 进制（KB / MB / GB…）。
+ *
+ * **永远按体积自适应换单位**（本版**没有**"固定 KiB"模式）：`1536` → `1.50 KiB`，
+ * `1.5 GiB` 仍是 `1.50 GiB`。
+ */
+export const SIZE_UNITS = ["binary", "decimal"] as const;
+export type SizeUnit = (typeof SIZE_UNITS)[number];
+
+/** 缺省体积单位：二进制（KiB / MiB / GiB），与资源管理器口径一致。 */
+export const DEFAULT_SIZE_UNIT: SizeUnit = "binary";
+
+export function isSizeUnit(value: unknown): value is SizeUnit {
+  return value === "binary" || value === "decimal";
+}
+
+/** 把（可能缺失/非法的）设置值收敛为合法单位制，调用方不必再判。 */
+export function resolveSizeUnit(value: unknown): SizeUnit {
+  return isSizeUnit(value) ? value : DEFAULT_SIZE_UNIT;
+}
+
+/** 日期格式三选（缺省 `iso` = YYYY-MM-DD）。 */
+export const DATE_FORMATS = ["iso", "us", "eu"] as const;
+export type DateFormat = (typeof DATE_FORMATS)[number];
+
+/** 缺省日期格式：`YYYY-MM-DD`。 */
+export const DEFAULT_DATE_FORMAT: DateFormat = "iso";
+
+export function isDateFormat(value: unknown): value is DateFormat {
+  return value === "iso" || value === "us" || value === "eu";
+}
+
+export function resolveDateFormat(value: unknown): DateFormat {
+  return isDateFormat(value) ? value : DEFAULT_DATE_FORMAT;
+}
+
+/** 日期后是否显示时间；缺省**不显示**（只到日）。 */
+export const DEFAULT_DATE_SHOW_TIME = false;
+
+export function resolveDateShowTime(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_DATE_SHOW_TIME;
 }
 
 // ============================== 设置注册表 ==============================
@@ -157,6 +209,47 @@ export const SYSTEM_SETTING_DECLS: readonly SettingDecl[] = [
     ],
     keywords: ["theme", "dark", "light", "主题", "深色", "浅色"],
     section_key: "settings.section.appearance",
+  },
+  // 显示格式三项（2026-09）：跨面板共用的**通用**口径，因此是宿主项而不是某个面板的设置项
+  // ——「界面 → 其他设置」分节（大类是封闭枚举，不新增大类，用 `section_key` 分节）。
+  {
+    id: SETTING_KEYS.sizeUnit,
+    category: "interface",
+    owner: { kind: "system" },
+    title_key: "settings.interface.sizeUnit",
+    kind: "select",
+    default: DEFAULT_SIZE_UNIT,
+    options: [
+      { value: "binary", title_key: "settings.interface.sizeUnit.binary" },
+      { value: "decimal", title_key: "settings.interface.sizeUnit.decimal" },
+    ],
+    keywords: ["size", "unit", "KiB", "MiB", "GiB", "KB", "MB", "GB", "体积", "大小", "单位"],
+    section_key: "settings.section.other",
+  },
+  {
+    id: SETTING_KEYS.dateFormat,
+    category: "interface",
+    owner: { kind: "system" },
+    title_key: "settings.interface.dateFormat",
+    kind: "select",
+    default: DEFAULT_DATE_FORMAT,
+    options: [
+      { value: "iso", title_key: "settings.interface.dateFormat.iso" },
+      { value: "us", title_key: "settings.interface.dateFormat.us" },
+      { value: "eu", title_key: "settings.interface.dateFormat.eu" },
+    ],
+    keywords: ["date", "format", "iso", "日期", "日期格式"],
+    section_key: "settings.section.other",
+  },
+  {
+    id: SETTING_KEYS.dateShowTime,
+    category: "interface",
+    owner: { kind: "system" },
+    title_key: "settings.interface.dateShowTime",
+    kind: "switch",
+    default: DEFAULT_DATE_SHOW_TIME,
+    keywords: ["time", "clock", "hh:mm:ss", "时间", "時分秒"],
+    section_key: "settings.section.other",
   },
   {
     id: SETTING_KEYS.language,
@@ -294,6 +387,19 @@ export function allSettingDecls(): readonly SettingDecl[] {
 /** 按落库键取设置声明（未注册返回 `undefined`）。 */
 export function settingDeclByKey(key: string): SettingDecl | undefined {
   return allSettingDecls().find((d) => settingStorageKey(d) === key);
+}
+
+/**
+ * **宿主设置值**的归一化：按声明把 `app_settings` 里的原始值转成标量。
+ *
+ * 规则本体与面板项共用同一份内核（`settingValue.ts` 的 `normalizeDeclaredValue`），
+ * 因此"非法取值回落声明缺省、`select` 越界回落缺省"的口径处处一致。
+ * 未注册的键返回 `undefined`（写入路径同样按未知键拒绝，见契约 3.13 规则①）。
+ */
+export function normalizeHostSettingValue(key: string, raw: unknown): SettingValue | undefined {
+  const decl = settingDeclByKey(key);
+  if (!decl) return undefined;
+  return normalizeDeclaredValue(decl, raw);
 }
 
 /** 某大类下的设置项。 */

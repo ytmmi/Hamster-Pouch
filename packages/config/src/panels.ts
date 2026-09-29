@@ -144,6 +144,7 @@ export {
 } from "./namespace";
 
 import { isBareId, isPluginNamespacedId } from "./namespace";
+import { normalizeDeclaredValue } from "./settingValue";
 
 /** 面板 id 是否符合命名规则（宿主裸 id 或插件命名空间 id）。 */
 export function isValidPanelId(id: string): boolean {
@@ -403,13 +404,10 @@ export function panelSettingStorageKey(panelId: string, key: string): string {
 /**
  * 面板设置值的**归一化**：把 `app_settings` 里的原始值按声明转成标量。
  *
- * 口径与 `panels/imageviewer/viewerPlacement.ts` 的归一化一致，但**以声明为唯一权威**：
- * 取值不是该 `kind` 要的类型、`select` 不在候选内、`switch` 收到非布尔字符串
- * （如 `"yes"`）一律回落声明缺省（失败关闭）；声明缺项 / 缺省本身不合法则返回
- * `undefined`，由调用方决定兜底。
+ * 规则本体在 `settingValue.ts` 的 [`normalizeDeclaredValue`]（宿主项与面板项共用一份，
+ * 避免两套解析规则漂移）；这里只做"按面板 id + key 找声明"。
  *
- * 放在注册表旁边而不是各面板里：`kind` 与 `default` 只有这一份权威（第 5.3 节），
- * 面板不该再写第二份解析规则（两处默认值就是漂移源）。
+ * 放在注册表旁边而不是各面板里：`kind` 与 `default` 只有这一份权威（第 5.3 节）。
  */
 export function normalizePanelSettingValue(
   panelId: string,
@@ -418,34 +416,7 @@ export function normalizePanelSettingValue(
 ): PanelSettingValue | undefined {
   const decl = panelSpec(panelId)?.settings?.find((setting) => setting.key === key);
   if (!decl) return undefined;
-  const fallback = decl.default;
-  const fallbackNumber = typeof fallback === "number" && Number.isFinite(fallback) ? fallback : undefined;
-  const fallbackString = typeof fallback === "string" ? fallback : undefined;
-  const options = decl.options ?? [];
-  switch (decl.kind) {
-    case "switch":
-    case "checkbox":
-      if (typeof raw === "boolean") return raw;
-      if (raw === "true" || raw === "false") return raw === "true";
-      return typeof fallback === "boolean" ? fallback : undefined;
-    case "numberInput":
-    case "slider": {
-      const num = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : Number.NaN;
-      if (Number.isFinite(num)) return num;
-      return fallbackNumber;
-    }
-    case "select":
-      if (typeof raw === "string" && options.some((option) => option.value === raw)) return raw;
-      // 缺省不在候选内 = 声明本身有问题：不静默采用，交回 `undefined`。
-      return fallbackString !== undefined && options.some((option) => option.value === fallbackString)
-        ? fallbackString
-        : undefined;
-    case "textInput":
-      if (typeof raw === "string") return raw;
-      return fallbackString;
-    default:
-      return undefined;
-  }
+  return normalizeDeclaredValue(decl, raw);
 }
 
 /**

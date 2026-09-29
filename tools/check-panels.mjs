@@ -51,12 +51,16 @@ const viewerSettingsSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/useViewerSettings.ts"),
   "utf8",
 );
-const panelSettingSrc = readFileSync(
-  join(ROOT, "apps/desktop/src/app_ui/shared/panelSetting.ts"),
+const settingValueSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/settingValue.ts"),
   "utf8",
 );
 const viewerPanelSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/ViewerPanel.tsx"),
+  "utf8",
+);
+const metadataPanelSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/MetadataPanel.tsx"),
   "utf8",
 );
 const settingsAppSrc = readFileSync(
@@ -298,11 +302,11 @@ check(
 );
 check(
   "面板设置热加载走多条独立触发源（共享钩子：本地广播 + 后端事件 + 焦点 + 面板激活）",
-  /subscribeSettingChanged\(/.test(panelSettingSrc) &&
-    /listen\("setting\.changed"/.test(panelSettingSrc) &&
-    /window\.addEventListener\("focus"/.test(panelSettingSrc) &&
-    /onDidActiveChange/.test(panelSettingSrc) &&
-    /onDidVisibilityChange/.test(panelSettingSrc),
+  /subscribeSettingChanged\(/.test(settingValueSrc) &&
+    /listen\("setting\.changed"/.test(settingValueSrc) &&
+    /window\.addEventListener\("focus"/.test(settingValueSrc) &&
+    /onDidActiveChange/.test(settingValueSrc) &&
+    /onDidVisibilityChange/.test(settingValueSrc),
 );
 check(
   "查看器面板真的按该设置条件渲染顶部基础信息栏",
@@ -315,6 +319,243 @@ check(
   /\{ id: "viewer", titleKey: "panel\.viewer", render: \(ctx\) => <ViewerPanel api=\{ctx\.api\} \/> \}/.test(
     registrySource,
   ),
+);
+
+// ============ 元数据面板：宿主格式设置 ↔ 面板实现（体积 / 日期 / 类型自适应）============
+//
+// 体积单位与日期格式是**宿主项**（跨面板共用的通用口径，落在「界面 → 其他设置」），
+// 因此"声明 ↔ Rust 镜像"的一致性由 `pnpm check:settings` 负责；这里断言三件这里才看得见的事：
+// ① 归一化/收敛口径（越界与非法取值都回落缺省）；② 纯函数行为（格式化 + JSON 解析）；
+// ③ 面板真的消费它们，并**按媒体类型**自适应渲染。
+
+const format = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/format.ts")).href
+);
+const metadataInfo = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/metadataInfo.ts")).href
+);
+
+check(
+  "「其他设置」三项宿主设置齐备（体积单位 / 日期格式 / 显示时间，类别与分节固定）",
+  (() => {
+    const sizeUnit = config.settingDeclByKey("ui.sizeUnit");
+    const dateFormat = config.settingDeclByKey("ui.dateFormat");
+    const dateShowTime = config.settingDeclByKey("ui.dateShowTime");
+    return (
+      sizeUnit?.kind === "select" &&
+      sizeUnit.category === "interface" &&
+      sizeUnit.section_key === "settings.section.other" &&
+      sizeUnit.default === "binary" &&
+      eqList(
+        (sizeUnit.options ?? []).map((o) => o.value),
+        ["binary", "decimal"],
+      ) &&
+      dateFormat?.default === "iso" &&
+      eqList(
+        (dateFormat.options ?? []).map((o) => o.value),
+        ["iso", "us", "eu"],
+      ) &&
+      dateShowTime?.kind === "switch" &&
+      dateShowTime.default === false
+    );
+  })(),
+);
+
+check(
+  "宿主设置值归一化：越界/非法回落声明缺省、未注册键为 undefined、解析器收敛",
+  config.normalizeHostSettingValue("ui.sizeUnit", "decimal") === "decimal" &&
+    config.normalizeHostSettingValue("ui.sizeUnit", "kib") === "binary" &&
+    config.normalizeHostSettingValue("ui.dateFormat", "us") === "us" &&
+    config.normalizeHostSettingValue("ui.dateFormat", "29/09/2026") === "iso" &&
+    config.normalizeHostSettingValue("ui.dateShowTime", "true") === true &&
+    config.normalizeHostSettingValue("ui.dateShowTime", "yes") === false &&
+    config.normalizeHostSettingValue("ui.theme", "blue") === "light" &&
+    config.normalizeHostSettingValue("ui.notRegistered", true) === undefined &&
+    config.resolveSizeUnit("kib") === "binary" &&
+    config.resolveSizeUnit("decimal") === "decimal" &&
+    config.resolveDateFormat("eu") === "eu" &&
+    config.resolveDateFormat(undefined) === "iso" &&
+    config.resolveDateShowTime("true") === false &&
+    config.resolveDateShowTime(true) === true,
+);
+
+check(
+  "体积格式化：二进制按 1024 换单位（KiB/MiB/GiB）、十进制按 1000（KB/MB/GB），都按体积自适应",
+  format.formatByteSize(512, "binary") === "512 B" &&
+    format.formatByteSize(1024, "binary") === "1.00 KiB" &&
+    format.formatByteSize(1536, "binary") === "1.50 KiB" &&
+    format.formatByteSize(1024 * 1024 * 3.5, "binary") === "3.50 MiB" &&
+    format.formatByteSize(1024 ** 3, "binary") === "1.00 GiB" &&
+    format.formatByteSize(1500, "decimal") === "1.50 KB" &&
+    format.formatByteSize(1_000_000, "decimal") === "1.00 MB" &&
+    format.formatByteSize(1_000_000_000, "decimal") === "1.00 GB" &&
+    format.formatByteSize(-1, "binary") === "—" &&
+    format.formatByteSize(null, "binary") === "—",
+  `binary(1536)=${format.formatByteSize(1536, "binary")} decimal(1500)=${format.formatByteSize(1500, "decimal")}`,
+);
+
+// 时区无关：时间戳由**本地时间分量**构造，断言的是格式而不是某个时区下的偏移。
+const localStamp = String(new Date(2026, 8, 29, 16, 2, 3).getTime() * 1e6);
+check(
+  "日期格式化：YYYY-MM-DD（缺省）/ MM-DD-YYYY / DD-MM-YYYY 三选，另可按开关补 HH:MM:SS",
+  format.formatDateValue(localStamp, "iso", false) === "2026-09-29" &&
+    format.formatDateValue(localStamp, "us", false) === "09/29/2026" &&
+    format.formatDateValue(localStamp, "eu", false) === "29/09/2026" &&
+    format.formatDateValue(localStamp, "iso", true) === "2026-09-29 16:02:03" &&
+    format.formatDateValue("2026-09-29T16:02:03", "iso", true) === "2026-09-29 16:02:03" &&
+    format.formatDateValue(null, "iso", false) === "—" &&
+    format.formatDateValue("not a date", "iso", false) === "not a date",
+  `iso=${format.formatDateValue(localStamp, "iso", false)} eu=${format.formatDateValue(localStamp, "eu", false)}`,
+);
+
+check(
+  "时长/码率/帧率格式化：M:SS 与 H:MM:SS、十进制码率、两位小数帧率",
+  format.formatDurationMs(0) === "0:00" &&
+    format.formatDurationMs(307_000) === "5:07" &&
+    format.formatDurationMs(3_723_000) === "1:02:03" &&
+    format.formatDurationSeconds(1.5) === "0:01" &&
+    format.formatDurationMs(null) === "—" &&
+    format.formatBitRate(320_000) === "320 kbps" &&
+    format.formatBitRate(1_450_000) === "1.45 Mbps" &&
+    format.formatBitRate(0) === "—" &&
+    format.formatFrameRate(30000 / 1001) === "29.97 fps" &&
+    format.formatFrameRate(30) === "30 fps" &&
+    format.formatFrameRate(null) === "—",
+);
+
+const ffprobeFixture = JSON.stringify({
+  streams: [
+    {
+      codec_type: "video",
+      width: 1920,
+      height: 1080,
+      codec_name: "h264",
+      avg_frame_rate: "30000/1001",
+      bit_rate: "1450000",
+    },
+    { codec_type: "audio", codec_name: "aac" },
+  ],
+  format: { duration: "12.345", bit_rate: "1500000", format_name: "mov,mp4" },
+});
+const ffprobeFacts = metadataInfo.parseMediaInfo(ffprobeFixture);
+check(
+  "ffprobe 原始 JSON → 尺寸/时长/编码/码率/帧率（键名与 `crates/hp-media/src/probe.rs` 一致）",
+  ffprobeFacts?.width === 1920 &&
+    ffprobeFacts?.height === 1080 &&
+    ffprobeFacts?.durationMs === 12345 &&
+    ffprobeFacts?.codec === "h264" &&
+    ffprobeFacts?.bitRate === 1500000 &&
+    Math.abs((ffprobeFacts?.frameRate ?? 0) - 30000 / 1001) < 1e-6,
+  JSON.stringify(ffprobeFacts),
+);
+check(
+  "ffprobe 缺项按「有就显示」降级：只有 format.duration 也能取时长，坏 JSON 返回 null",
+  metadataInfo.parseMediaInfo('{"format":{"duration":"1.5"}}')?.durationMs === 1500 &&
+    metadataInfo.parseMediaInfo('{"format":{"duration":"1.5"}}')?.width === null &&
+    metadataInfo.parseMediaInfo('{"format":{"duration":"1.5"}}')?.frameRate === null &&
+    metadataInfo.parseMediaInfo("not json") === null &&
+    metadataInfo.parseMediaInfo(null) === null,
+);
+check(
+  "EXIF 摘要 JSON → 像素尺寸（PNG 等全 null 不抛错；坏 JSON 返回 null）",
+  metadataInfo.parseExifSummary('{"width":4000,"height":3000}')?.width === 4000 &&
+    metadataInfo.parseExifSummary('{"width":4000,"height":3000}')?.height === 3000 &&
+    metadataInfo.parseExifSummary('{"make":null,"width":null,"height":null}')?.width === null &&
+    metadataInfo.parseExifSummary("") === null,
+);
+
+check(
+  "元数据面板消费三项宿主设置（体积按单位制、日期按格式 + 时间开关）",
+  /useHostSettingValue\(SETTING_KEYS\.sizeUnit/.test(metadataPanelSrc) &&
+    /useHostSettingValue\(SETTING_KEYS\.dateFormat/.test(metadataPanelSrc) &&
+    /useHostSettingValue\(SETTING_KEYS\.dateShowTime/.test(metadataPanelSrc) &&
+    /formatByteSize\(meta\.size, sizeUnit\)/.test(metadataPanelSrc) &&
+    /formatDateValue\(meta\.mtime, dateFormat, dateShowTime\)/.test(metadataPanelSrc),
+);
+check(
+  "元数据面板按类型自适应：图像解码取像素、视频五项各占一行、音频读一次时长",
+  /media_type === "image"/.test(metadataPanelSrc) &&
+    /new Image\(\)/.test(metadataPanelSrc) &&
+    /isImage\s*\?\s*formatPixelSize\(probed\.width \?\? exifFacts\?\.width/.test(metadataPanelSrc) &&
+    /formatPixelSize\(mediaFacts\?\.width \?\? probed\.width/.test(metadataPanelSrc) &&
+    /new Audio\(\)/.test(metadataPanelSrc) &&
+    /preload = "metadata"/.test(metadataPanelSrc) &&
+    /parseMediaInfo\(meta\?\.media_info_json\)/.test(metadataPanelSrc) &&
+    /metadata\.dimensions/.test(metadataPanelSrc) &&
+    /metadata\.duration/.test(metadataPanelSrc) &&
+    /metadata\.codec/.test(metadataPanelSrc) &&
+    /metadata\.bitrate/.test(metadataPanelSrc) &&
+    /metadata\.frameRate/.test(metadataPanelSrc),
+);
+// 视频的 DOM 兜底：索引里的 `media_info_json` 只在扫描时 ffprobe 可用才写入，
+// 早于该状态的索引行永远是空的（库内实测存在），只靠缓存会"什么都不显示"。
+check(
+  "视频有 DOM 兜底：索引无 ffprobe 缓存时用 `<video>` 探尺寸与时长，且缓存优先",
+  /document\.createElement\("video"\)/.test(metadataPanelSrc) &&
+    /video\.videoWidth/.test(metadataPanelSrc) &&
+    /video\.videoHeight/.test(metadataPanelSrc) &&
+    /mediaFacts\?\.width \?\? probed\.width/.test(metadataPanelSrc) &&
+    /mediaFacts\?\.durationMs \?\? probed\.durationMs/.test(metadataPanelSrc),
+);
+// 取不到值的类型行**仍然渲染**（显示 `—`）：否则"索引里没数据"与"面板坏了"外观完全一样，
+// 用户无法区分——这正是本轮实测踩到的那次。
+check(
+  "类型相关的行不因取不到值而消失（缺值显示 `—`，不是静默省略）",
+  /mediaFacts\?\.codec \?\? "—"/.test(metadataPanelSrc) &&
+    /formatBitRate\(mediaFacts\?\.bitRate\)/.test(metadataPanelSrc) &&
+    /label: app\.t\("metadata\.duration"\)/.test(metadataPanelSrc) &&
+    !/if \(dimensions !== "—"\)/.test(metadataPanelSrc) &&
+    !/if \(duration !== "—"\)/.test(metadataPanelSrc),
+);
+// 图像查看器信息栏与元数据面板同口径：体积/日期走宿主设置，宽高比/百万像素/缩放仍归它自己。
+// 防的是"信息栏又自带一套 1024 进制却标 KB 的旧口径"。
+const viewerInfoBarSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/ViewerInfoBar.tsx"),
+  "utf8",
+);
+const viewerFormatSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerFormat.ts"),
+  "utf8",
+);
+const imageViewerPanelSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/ImageViewerPanel.tsx"),
+  "utf8",
+);
+check(
+  "图像查看器信息栏的体积/日期改用宿主设置与共享格式化（不再自带旧口径）",
+  format.formatByteSize(1024, "binary") === "1.00 KiB" &&
+    /formatByteSize\(totalBytes, sizeUnit\)/.test(viewerInfoBarSrc) &&
+    /formatByteSize\(file\.size, sizeUnit\)/.test(viewerInfoBarSrc) &&
+    /formatDateValue\(file\.mtime, dateFormat, dateShowTime\)/.test(viewerInfoBarSrc) &&
+    /formatPixelSize\(natural\?\.width/.test(viewerInfoBarSrc) &&
+    /resolveSizeUnit\(useHostSettingValue\(SETTING_KEYS\.sizeUnit/.test(imageViewerPanelSrc) &&
+    /sizeUnit=\{sizeUnit\}/.test(imageViewerPanelSrc) &&
+    // 旧实现必须真的删掉：留着就还能被再次接上（`KB` 错标的来源）。
+    !/formatBytes/.test(viewerFormatSrc) &&
+    !/formatDateTime/.test(viewerFormatSrc) &&
+    !/formatDimensions/.test(viewerFormatSrc),
+);
+check(
+  "元数据面板拿到 dockview 面板 API（宿主设置热加载第 4 条触发源）",
+  /\{ id: "metadata", titleKey: "panel\.metadata", render: \(ctx\) => <MetadataPanel api=\{ctx\.api\} \/> \}/.test(
+    registrySource,
+  ),
+);
+check(
+  "元数据面板**不自带面板设置**（体积/日期是全仓库共用的宿主项，避免两套口径）",
+  (config.panelSpec("metadata")?.settings ?? []).length === 0,
+);
+check(
+  "宿主项与面板项共用同一份归一化内核与订阅内核（只在 config/settingValue.ts 与 shared/settingValue.ts 各一份）",
+  /normalizeDeclaredValue/.test(
+    readFileSync(join(ROOT, "packages/config/src/panels.ts"), "utf8"),
+  ) &&
+    /normalizeDeclaredValue/.test(
+      readFileSync(join(ROOT, "packages/config/src/settings.ts"), "utf8"),
+    ) &&
+    /useStoredSetting/.test(settingValueSrc) &&
+    /useHostSettingValue/.test(settingValueSrc) &&
+    /usePanelSettingValue/.test(settingValueSrc),
 );
 
 // ============================== 3. 文档一致性 ==============================

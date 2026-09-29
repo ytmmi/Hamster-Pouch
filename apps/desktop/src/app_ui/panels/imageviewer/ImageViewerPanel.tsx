@@ -24,10 +24,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
+import {
+  resolveDateFormat,
+  resolveDateShowTime,
+  resolveSizeUnit,
+  SETTING_KEYS,
+} from "@hamster-pouch/config";
+
 import * as api from "../../shared/api";
 import { errorTextOf } from "../../shared/api/response";
 import { useApp } from "../../core/AppContext";
 import type { PanelRenderCtx } from "../../core/panelRegistry";
+import { useHostSettingValue } from "../../shared/settingValue";
 import { ViewerFilmstrip } from "./ViewerFilmstrip";
 import { ViewerInfoBar } from "./ViewerInfoBar";
 import { ViewerNavigator } from "./ViewerNavigator";
@@ -61,6 +69,13 @@ export interface ImageViewerPanelProps {
 
 export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}): JSX.Element {
   const app = useApp();
+  // 信息栏的体积 / 日期口径来自**宿主设置**（与元数据面板同一批，见 `shared/format.ts`）：
+  // 面板自己声明的 7 项设置管布局（导航器 / 胶片栏 / 缩放中心），显示格式不在这里重复声明。
+  const sizeUnit = resolveSizeUnit(useHostSettingValue(SETTING_KEYS.sizeUnit, panelApi));
+  const dateFormat = resolveDateFormat(useHostSettingValue(SETTING_KEYS.dateFormat, panelApi));
+  const dateShowTime = resolveDateShowTime(
+    useHostSettingValue(SETTING_KEYS.dateShowTime, panelApi),
+  );
   const settings = useViewerSettings(panelApi);
   const sequence = useViewerSequence(app);
 
@@ -295,6 +310,9 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
           truncated={sequence.truncated}
           natural={natural}
           zoom={transform.zoom}
+          sizeUnit={sizeUnit}
+          dateFormat={dateFormat}
+          dateShowTime={dateShowTime}
           t={app.t}
         />
       </div>

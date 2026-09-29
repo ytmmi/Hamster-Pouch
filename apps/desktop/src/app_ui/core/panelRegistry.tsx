@@ -61,7 +61,8 @@ export const PANEL_DEFS: PanelDef[] = [
   // 查看器持有面板设置（`viewer.infoBarEnabled`），需要激活状态才凑齐四条热加载触发源。
   { id: "viewer", titleKey: "panel.viewer", render: (ctx) => <ViewerPanel api={ctx.api} /> },
   { id: "imageviewer", titleKey: "panel.imageviewer", render: (ctx) => <ImageViewerPanel api={ctx.api} /> },
-  { id: "metadata", titleKey: "panel.metadata", render: () => <MetadataPanel /> },
+  // 元数据面板消费宿主设置（体积单位 / 日期格式），同样需要激活状态凑齐四条热加载触发源。
+  { id: "metadata", titleKey: "panel.metadata", render: (ctx) => <MetadataPanel api={ctx.api} /> },
   { id: "tags", titleKey: "panel.tags", render: () => <TagRatingPanel /> },
   { id: "tagtable", titleKey: "panel.tagtable", render: () => <TagTablePanel /> },
   { id: "color", titleKey: "panel.color", render: () => <ColorPanel /> },

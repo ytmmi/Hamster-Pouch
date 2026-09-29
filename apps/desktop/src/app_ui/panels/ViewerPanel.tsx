@@ -5,7 +5,7 @@
  * - `infoBarEnabled`：**顶部基础信息栏**（`relative_path` + 媒体类型 · 体积）是否显示；
  *   缺省显示 = 与既有观感一致（零行为变化），关掉即只留预览舞台。
  *
- * 设置的读取与热加载走 `shared/panelSetting.ts`（四条独立触发源），本文件只消费结果。
+ * 设置的读取与热加载走 `shared/settingValue.ts`（四条独立触发源），本文件只消费结果。
  */
 
 import { useEffect, useState } from "react";
@@ -15,7 +15,7 @@ import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import type { PanelRenderCtx } from "../core/panelRegistry";
-import { usePanelSwitch } from "../shared/panelSetting";
+import { usePanelSwitch } from "../shared/settingValue";
 
 /** 面板 id（与 `BUILTIN_PANEL_IDS` 一致；设置落库键 `panel.viewer.<key>`）。 */
 const VIEWER_PANEL_ID = "viewer";

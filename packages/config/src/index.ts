@@ -3,6 +3,7 @@
  */
 
 export * from "./settings";
+export * from "./settingValue";
 export * from "./panels";
 export * from "./layout";
 export * from "./blueprint";
