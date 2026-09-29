@@ -95,6 +95,12 @@ cargo test
 
 > 行尾规范：文本文件一律 LF、不带 BOM（`.gitattributes` + `tools/check-encoding.mjs` 门禁）；
 > `Cargo.lock` / `pnpm-lock.yaml` 随仓库提交。
+>
+> **⚠️ 改了 `crates/**` 必须重启 `pnpm tauri dev`**：dev 进程只监听
+> `apps/desktop/src-tauri`（启动日志里的 `Watching …src-tauri for changes`），
+> `crates/**` 的改动**不会**触发 Rust 重编。设置声明、命令、DTO 等的宿主侧镜像都在
+> `crates/` 里，只热更新前端会出现一种假象——**界面已经有新设置项，写进去却被后端按
+> "未知设置键"拒掉**（开关弹回去、下拉改不动），看起来像前端 bug，其实是后端二进制还是旧的。
 
 ## 外部依赖：mpv（需自行下载）
 
