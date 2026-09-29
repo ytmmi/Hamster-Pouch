@@ -19,7 +19,7 @@
  * 用法：pnpm check:settings
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -548,15 +548,51 @@ check(
     /\.hp-switch-knob\s*\{[^}]*border-radius:\s*6px/.test(stylesSrc),
 );
 check(
-  "`checkbox` 仍是原生复选框（两种 kind 不同形，不再共用一套渲染）",
-  /case "checkbox":/.test(settingsAppSwitchSrc) &&
-    /type="checkbox"/.test(settingsAppSwitchSrc),
+  "`checkbox` kind 也渲染为胶囊开关（与 `switch` 同形，宿主不为它维护第二套外观）",
+  (settingsAppSwitchSrc.match(/<SwitchToggle/g) ?? []).length >= 2 &&
+    /case "checkbox":/.test(settingsAppSwitchSrc) &&
+    !/type="checkbox"/.test(settingsAppSwitchSrc),
 );
 check(
-  "控件标准的 `switch` 复用同一组件（全应用只有一种开关形态）",
+  "控件标准的 `switch` / `checkbox` 都复用同一组件（全应用只有一种勾选框形态）",
   /SwitchToggle/.test(controlRendererSwitchSrc) &&
     /value_change/.test(controlRendererSwitchSrc) &&
-    !/hp-control-switch/.test(controlRendererSwitchSrc),
+    !/hp-control-switch|hp-control-checkbox|type="checkbox"/.test(controlRendererSwitchSrc),
+);
+// "所有的勾选框都是胶囊按钮"：`app_ui` 里**不得**再出现原生复选框输入。
+// 递归扫描（这是唯一能保证"所有"的判据——逐点断言总会漏掉新加的那一处）。
+/** 去掉块注释（含 JSX 注释）后再判——注释里提到标签名或属性名不算违规。 */
+const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "");
+function tsxFilesUnder(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...tsxFilesUnder(path));
+    else if (/\.tsx?$/.test(entry.name)) out.push(path);
+  }
+  return out;
+}
+const nativeCheckboxFiles = tsxFilesUnder(join(ROOT, "apps/desktop/src/app_ui"))
+  .filter((file) => /type="checkbox"/.test(stripComments(readFileSync(file, "utf8"))))
+  .map((file) => file.slice(ROOT.length + 1));
+check(
+  "`app_ui` 内不再出现原生复选框输入（所有勾选框都走胶囊开关）",
+  nativeCheckboxFiles.length === 0,
+  nativeCheckboxFiles.join(", ") || "0 处",
+);
+const labelWrapSources = [
+  "apps/desktop/src/app_ui/settings/SettingsApp.tsx",
+  "apps/desktop/src/app_ui/menu/MenuBar.tsx",
+  "apps/desktop/src/app_ui/panels/BlueprintPanel.tsx",
+  "apps/desktop/src/app_ui/panels/BlueprintInspector.tsx",
+].map((rel) => [rel, stripComments(readFileSync(join(ROOT, rel), "utf8"))]);
+const labelWrapping = labelWrapSources
+  .filter(([, src]) => /<label[\s\S]{0,240}?<SwitchToggle/.test(src))
+  .map(([rel]) => rel);
+check(
+  "`<label>` 不再包住胶囊开关（label 不得包含其它可交互元素）",
+  labelWrapping.length === 0,
+  labelWrapping.join(", ") || "4 处调用点均用 `<span>` 容器 + `label` 属性",
 );
 
 // ============================== 汇总 ==============================

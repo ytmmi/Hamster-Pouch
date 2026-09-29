@@ -392,13 +392,19 @@ const slider: ControlComponent = ({ node, data, ctx }) => {
   );
 };
 
+/**
+ * `checkbox` 控件：布尔值。
+ *
+ * **渲染形态与 `switch` 相同**（都走 `shared/SwitchToggle.tsx` 的胶囊开关）：
+ * 宿主只有一种"勾选框"外观（用户口径：所有勾选框都是胶囊按钮）。两种 `kind` 的区别只在
+ * 契约语义，不在长相——宿主不再为它维护第二套外观。
+ * 契约不变：`data.value` 是布尔，点击回传 `value_change`。
+ */
 const checkbox: ControlComponent = ({ node, theme, data, ctx }) => (
-  <input
-    type="checkbox"
-    className="hp-control-checkbox"
+  <SwitchToggle
     checked={data?.value === undefined ? false : booleanOf(data.value, false)}
-    onChange={(e) => ctx.emit(node.id, "value_change", { value: e.target.checked })}
-    style={{ accentColor: COLORS[theme].accent }}
+    theme={theme}
+    onChange={(next) => ctx.emit(node.id, "value_change", { value: next })}
   />
 );
 

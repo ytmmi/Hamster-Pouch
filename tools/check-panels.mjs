@@ -474,11 +474,13 @@ const catalogSrc = readFileSync(
 );
 
 check(
-  "「扩展」菜单不再是占位：渲染面板目录并带启用开关",
+  "「扩展」菜单不再是占位：渲染面板目录并带启用开关（胶囊）",
   /pluginPanelCatalog\(/.test(menuBarSrc) &&
     /panelCatalog\.map\(/.test(menuBarSrc) &&
     /togglePluginEnabled/.test(menuBarSrc) &&
-    /type="checkbox"/.test(menuBarSrc),
+    // 启用开关是宿主统一的胶囊按钮（`shared/SwitchToggle.tsx`），不再是原生复选框。
+    /<SwitchToggle/.test(menuBarSrc) &&
+    !/type="checkbox"/.test(menuBarSrc),
 );
 check(
   "未启用 → 灰显且不可点击（按钮 disabled），由右侧开关负责启用",

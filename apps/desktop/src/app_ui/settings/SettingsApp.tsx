@@ -326,14 +326,16 @@ function SettingRow({
             onChange={(next) => onWrite(decl, next)}
           />
         );
-      // `checkbox` = 表单式布尔值，保持原生复选框（两种 `kind` **不再同形**）。
+      // `checkbox` = 表单式布尔值：**渲染形态与 `switch` 相同**（都走胶囊开关），
+      // 区别只在契约语义（`checkbox` 不是"立即生效的开关"，但宿主不给它第二套外观）。
       case "checkbox":
         return (
-          <input
-            type="checkbox"
-            disabled={locked}
+          <SwitchToggle
             checked={value === true}
-            onChange={(e) => onWrite(decl, e.target.checked)}
+            theme={theme}
+            label={title}
+            disabled={locked}
+            onChange={(next) => onWrite(decl, next)}
           />
         );
       case "numberInput":

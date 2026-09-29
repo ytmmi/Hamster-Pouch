@@ -39,6 +39,7 @@ import {
   traceBlueprint,
 } from "../shared/blueprintRuntime";
 import { analyzeUnlinked } from "../shared/blueprintLint";
+import { SwitchToggle } from "../shared/SwitchToggle";
 import { useApp } from "../core/AppContext";
 import { BlueprintCanvas } from "./BlueprintCanvas";
 import { BlueprintLayerBar } from "./BlueprintLayerBar";
@@ -668,14 +669,16 @@ export function BlueprintPanel(): JSX.Element {
                 {app.t("blueprint.create")}
               </button>
             </div>
-            <label className="bp-check" title={app.t("blueprint.structureHint")}>
-              <input
-                type="checkbox"
+            {/* 容器用 `<span>`：`<label>` 不得包住可交互元素，胶囊开关自带无障碍名。 */}
+            <span className="bp-check" title={app.t("blueprint.structureHint")}>
+              <SwitchToggle
                 checked={withStructure}
-                onChange={(e) => setWithStructure(e.target.checked)}
+                theme={app.theme}
+                label={app.t("blueprint.withStructure")}
+                onChange={setWithStructure}
               />
               {app.t("blueprint.withStructure")}
-            </label>
+            </span>
             {items.map((it) => (
               <div
                 key={it.id}

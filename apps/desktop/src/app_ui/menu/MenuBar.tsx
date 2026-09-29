@@ -10,6 +10,7 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
+import { SwitchToggle } from "../shared/SwitchToggle";
 import { useApp } from "../core/AppContext";
 import { syncBlueprintFromLayout } from "../shared/blueprintSync";
 import {
@@ -591,7 +592,9 @@ export function MenuBar({
                     {/* 插件语言资源通道未落地 → 这里直接显示标题键，不做 i18n 查询 */}
                     <span className="dim"> · {item.titleKey}</span>
                   </button>
-                  <label
+                  {/* 容器用 `<span>` 而不是 `<label>`：`<label>` 不得包住其它可交互元素，
+                      胶囊开关本身就是按钮（无障碍名由 `label` 属性给）。 */}
+                  <span
                     className="ext-toggle"
                     title={
                       item.enabled
@@ -599,14 +602,15 @@ export function MenuBar({
                         : `${t("menubar.extensionsNeedsEnable")} — ${t("menubar.extensionsEnableHint")}`
                     }
                   >
-                    <input
-                      type="checkbox"
+                    <span>{t("plugin.enable")}</span>
+                    <SwitchToggle
                       checked={item.enabled}
+                      theme={theme}
+                      label={`${t("plugin.enable")} ${item.pluginName}`}
                       disabled={extBusy || !repoId}
                       onChange={() => void togglePluginEnabled(item)}
                     />
-                    <span>{t("plugin.enable")}</span>
-                  </label>
+                  </span>
                 </div>
               );
             })}

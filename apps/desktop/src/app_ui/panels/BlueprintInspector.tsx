@@ -12,6 +12,8 @@
 
 import { useEffect, useState } from "react";
 
+import { SwitchToggle } from "../shared/SwitchToggle";
+import { useApp } from "../core/AppContext";
 import {
   BLUEPRINT_ACTION_OPS,
   BLUEPRINT_MEDIA_TYPES,
@@ -141,6 +143,8 @@ function panelIdOptions(
 }): JSX.Element {
   // 面板注册表（React 订阅版）：必须在任何提前返回之前调用（hooks 规则）。
   const panels = useAllPanels();
+  /** 当前主题：胶囊开关（布尔字段）按 token 表取色。 */
+  const { theme } = useApp();
   if (!node) {
     return (
       <div className="bp-inspector">
@@ -287,10 +291,11 @@ function panelIdOptions(
       {node.type === "overlay" &&
         row(
           t("blueprint.visible"),
-          <input
-            type="checkbox"
+          <SwitchToggle
             checked={node.visible ?? false}
-            onChange={(e) => onPatch({ visible: e.target.checked })}
+            theme={theme}
+            label={t("blueprint.visible")}
+            onChange={(next) => onPatch({ visible: next })}
           />,
         )}
       {node.type === "overlay" &&
@@ -407,10 +412,11 @@ function panelIdOptions(
       {node.type === "overlay" &&
         row(
           t("blueprint.hideLabel"),
-          <input
-            type="checkbox"
+          <SwitchToggle
             checked={node.hide_label ?? false}
-            onChange={(e) => onPatch({ hide_label: e.target.checked })}
+            theme={theme}
+            label={t("blueprint.hideLabel")}
+            onChange={(next) => onPatch({ hide_label: next })}
           />,
         )}
       {node.type === "overlay" && (
