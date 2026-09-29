@@ -52,11 +52,16 @@ const fail = (m) => {
   failed = true;
 };
 
-// docs/ 按 .gitignore 属**本地规划资料、不入库**，因此新克隆的仓库里没有这份文档。
-// 此时明确"跳过"而不是抛异常，避免 `pnpm check:status` 在无 docs 的检出上崩栈。
+// 本账（`implementation-status.md`）属**私人开发部分**：按 `.gitignore` 的「文档」段不入库
+// （它含"本机索引库实测"这类私有证据，且引用的 `roadmap/` 行号在本机之外无意义）。
+// 因此新克隆的仓库里没有这份文档——此时明确"跳过"而不是抛异常，避免崩栈。
+//
+// 注意与另外三条门禁的分工：`check-panels` / `check-settings` / `check-commands` 读取的是
+// **必要文档**（`docs/spec/**`），那些**已入库**，所以它们在新克隆里必须能跑（不再有"缺 docs
+// 就崩"的情况）；只有本门禁守护的这本账是私人的。
 if (!existsSync(DOC)) {
   console.log(
-    `[check-status] 跳过：${DOC} 不存在（docs/ 属本地资料，未入库）。` +
+    `[check-status] 跳过：${DOC} 不存在（本账属私人开发部分，未入库）。` +
       `本门禁只在持有本地 docs/ 的工作副本上有意义。`,
   );
   process.exit(0);

@@ -3,8 +3,33 @@ node_modules/
 target/
 dist/
 
-# 文档（本地规划资料，不入库）
-docs/
+# === 文档：必要部分入库，私人开发部分不入库（2026-09 用户裁决） ===
+#
+# **为什么必要文档必须入库**：`check-panels` / `check-settings` / `check-commands` 会
+# **无条件读取**它们各自的规范（`docs/spec/panel-standard.md`、`settings-standard.md`、
+# `commands-events.md`）——docs/ 全不入库时，新克隆里这三条门禁**直接崩**。RFC 与几份
+# 架构入口文档同理由：它们是代码注释与规范互相引用的对象。
+#
+# **私人开发部分不入库（不推送）**：缺陷登记（`docs/issues/`）、会话提示词与个人排期
+# （`docs/roadmap/`）、本机对账账本（`docs/architecture/implementation-status.md`，含
+# "本机索引库实测"这类私有证据）、漂移对账账（`command-event-drift` / `schema-drift`）
+# 与随手草稿。它们在本机留一份**存档备份**：`archive/`（见 `archive/README.md`）。
+#
+# 语法说明：`docs/*` 先忽略该层全部条目，再用 `!` 逐个放行；被放行的目录会让 Git
+# 继续下探（因此 `docs/spec/**` 等整目录自动入库）。`docs/architecture/` 需要
+# "放行目录 → 忽略其内容 → 逐个放行文件"三步，顺序不能反（后写的规则生效）。
+docs/*
+!docs/spec/
+!docs/rfc/
+!docs/architecture/
+!docs/图片管理.md
+docs/architecture/*
+!docs/architecture/overview.md
+!docs/architecture/decision-checklist.md
+!docs/architecture/file-structure.md
+
+# 私人开发资料的**本地存档备份**：备份不是发布物（内容含本机证据与会话排期），不入库。
+archive/
 
 # 本地工具生成物（代码图索引、AI 会话续接状态）
 .codegraph/

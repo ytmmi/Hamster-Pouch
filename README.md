@@ -41,7 +41,8 @@
 | `plugins/` | 插件：`system/`（palette、python-core）、`examples/` |
 | `external-cli/` | 外部 CLI：ffmpeg 随仓库分发；mpv 需自行下载（见下） |
 | `tools/` | 门禁与数据管线脚本（`check-*.mjs`、`tagdict/` 等） |
-| `docs/` | 本地规划资料（RFC / spec / roadmap / issues，**不入库**，见 `.gitignore`） |
+| `docs/` | 文档：**必要部分入库**（`spec/`、`rfc/`、`architecture/` 的入口三件、`图片管理.md`）；**私人开发部分不入库**（`issues/`、`roadmap/`、本机对账账本与漂移账），见 `.gitignore` 的「文档」段 |
+| `archive/` | **私人开发资料的本地存档备份**（不入库）：`docs/` 里不推送的那部分按日期快照 + `MANIFEST.txt`（sha256 可校验），见 `archive/README.md` |
 
 Rust crates：
 
@@ -157,8 +158,22 @@ set HP_MPV_BIN=D:\path\to\mpv.exe
 
 ## 文档与规范
 
-`docs/` 为本地规划资料，按 `.gitignore` **不入库**，包括：
+`docs/` **按必要/私人拆分**（2026-09 用户裁决，规则见 `.gitignore` 的「文档」段）：
+
+**入库（必要文档）**——`check-panels` / `check-settings` / `check-commands` 会**无条件读取**各自的规范，
+因此不入库会让新克隆里的门禁直接崩：
 
 - `docs/spec/` —— 各域规范（含 `shared-types.md`，与 `crates/hp-dto` 对应的跨层类型事实源）
-- `docs/rfc/`、`docs/architecture/` —— 决策记录与架构口径
-- `docs/roadmap/`、`docs/issues/` —— 路线图与缺陷登记（登记规范见 `docs/issues/README.md`）
+- `docs/rfc/` —— 已确认决策记录
+- `docs/architecture/` 的 `overview.md` / `decision-checklist.md` / `file-structure.md` —— 架构入口、决策清单、文件地图
+- `docs/图片管理.md` —— 产品定位简述
+
+**不入库（私人开发部分，不推送）**——在本机 `archive/` 留一份**可校验的存档备份**：
+
+- `docs/issues/` —— 缺陷登记（登记规范见 `docs/issues/README.md`）
+- `docs/roadmap/` —— 会话提示词与个人排期（含 `session-kickoff*.md`）
+- `docs/architecture/implementation-status.md` —— 本机对账账本（含"本机索引库实测"这类私有证据）
+- `docs/architecture/command-event-drift.md` / `schema-drift.md` —— 漂移对账账
+
+> 入库的 `docs/spec/**` 里仍会引用 `docs/issues/00xx`（如面板标准第 8 节引用 0015/0016）：
+> 这些引用指向仓库外的文件，记录的是"为什么这样设计"，标识号本身仍有信息量，故保留。
