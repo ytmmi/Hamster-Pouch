@@ -58,7 +58,8 @@ export const PANEL_DEFS: PanelDef[] = [
   { id: "sources", titleKey: "panel.sources", render: () => <SourcePanel /> },
   { id: "albums", titleKey: "panel.albums", render: () => <AlbumPanel /> },
   { id: "media", titleKey: "panel.media", render: () => <MediaPreviewPanel /> },
-  { id: "viewer", titleKey: "panel.viewer", render: () => <ViewerPanel /> },
+  // 查看器持有面板设置（`viewer.infoBarEnabled`），需要激活状态才凑齐四条热加载触发源。
+  { id: "viewer", titleKey: "panel.viewer", render: (ctx) => <ViewerPanel api={ctx.api} /> },
   { id: "imageviewer", titleKey: "panel.imageviewer", render: (ctx) => <ImageViewerPanel api={ctx.api} /> },
   { id: "metadata", titleKey: "panel.metadata", render: () => <MetadataPanel /> },
   { id: "tags", titleKey: "panel.tags", render: () => <TagRatingPanel /> },

@@ -301,6 +301,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
 
   "viewer.previewFailed": "預覽失敗：{err}",
   "viewer.unavailable": "預覽不可用",
+  "viewer.settings.infoBarEnabled": "顯示基礎資訊列",
 
   // 圖像檢視器
   "imageviewer.loadFailed": "讀取圖像失敗：{err}",

@@ -11,7 +11,9 @@
  * 5. 「全部设置」的大类/二级列表**只列出声明了 `settings` 的面板**，且分组与
  *    `category` 一致（无设置项的面板不显示，见 `docs/spec/settings-standard.md` 第 4.1 节）；
  * 6. **命名空间与插件缺失容错**：插件面板项必须是 `plugin.<plugin_id>.<local_id>`；
- *    未注册的 `panel_id` 既不报硬错误也不被丢弃（允许保存、原样保留）。
+ *    未注册的 `panel_id` 既不报硬错误也不被丢弃（允许保存、原样保留）；
+ * 7. **面板设置的闭环**：声明 ↔ 归一化 ↔ 面板消费 ↔ 热加载四条触发源（查看器顶部
+ *    基础信息栏的 `infoBarEnabled` 是这套闭环的第一个布尔设置）。
  *
  * 用法：pnpm check:panels
  */
@@ -47,6 +49,14 @@ const rustPanels = readFileSync(join(ROOT, "crates/hp-core/src/panel_types.rs"),
 // （写在断言之后会踩 `const` 的 TDZ 陷阱：脚本是顺序执行的，不是函数体。）
 const viewerSettingsSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/useViewerSettings.ts"),
+  "utf8",
+);
+const panelSettingSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/panelSetting.ts"),
+  "utf8",
+);
+const viewerPanelSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/ViewerPanel.tsx"),
   "utf8",
 );
 const settingsAppSrc = readFileSync(
@@ -255,6 +265,56 @@ check(
   "「全部设置」写入/恢复后广播本地变更（同窗口即时生效，不等 IPC 往返）",
   /publishSettingChanged\(key\)/.test(settingsAppSrc) &&
     (settingsAppSrc.match(/publishSettingChanged\(key\)/g) ?? []).length >= 2,
+);
+
+// ==================== 查看器（`panel.viewer`）的顶部基础信息栏设置 ====================
+//
+// 防的是"设置加了但没人用"。一段面板设置要成立，四段必须都在：
+// **声明**（注册表）↔ **归一化**（非法取值回落缺省）↔ **面板消费**（真的条件渲染）↔
+// **热加载**（四条独立触发源）。缺任何一段的表现都一样：改了设置没反应。
+
+const viewerSpec = config.panelSpec("viewer");
+const viewerInfoBarDecl = viewerSpec?.settings?.find((s) => s.key === "infoBarEnabled");
+check(
+  "查看器声明了「显示基础信息栏」设置（switch，缺省显示 = 零视觉变化）",
+  (viewerSpec?.settings ?? []).length === 1 &&
+    viewerInfoBarDecl?.kind === "switch" &&
+    viewerInfoBarDecl?.title_key === "viewer.settings.infoBarEnabled" &&
+    viewerInfoBarDecl?.default === true,
+  `decls=${(viewerSpec?.settings ?? []).map((s) => s.key).join(",") || "（无）"} ` +
+    `default=${viewerInfoBarDecl?.default}`,
+);
+check(
+  "面板设置值按声明归一化：非法取值回落缺省（失败关闭）、缺省可解析、未注册面板为 undefined",
+  config.normalizePanelSettingValue("viewer", "infoBarEnabled", false) === false &&
+    config.normalizePanelSettingValue("viewer", "infoBarEnabled", "false") === false &&
+    config.normalizePanelSettingValue("viewer", "infoBarEnabled", "yes") === true &&
+    config.normalizePanelSettingValue("viewer", "infoBarEnabled", 1) === true &&
+    config.normalizePanelSettingValue("viewer", "infoBarEnabled", null) === true &&
+    config.normalizePanelSettingValue("imageviewer", "filmstripSize", "bad") === 76 &&
+    config.normalizePanelSettingValue("imageviewer", "zoomAnchor", "middle") === "pointer" &&
+    config.normalizePanelSettingValue("imageviewer", "zoomAnchor", "center") === "center" &&
+    config.normalizePanelSettingValue("ghost", "infoBarEnabled", true) === undefined,
+);
+check(
+  "面板设置热加载走多条独立触发源（共享钩子：本地广播 + 后端事件 + 焦点 + 面板激活）",
+  /subscribeSettingChanged\(/.test(panelSettingSrc) &&
+    /listen\("setting\.changed"/.test(panelSettingSrc) &&
+    /window\.addEventListener\("focus"/.test(panelSettingSrc) &&
+    /onDidActiveChange/.test(panelSettingSrc) &&
+    /onDidVisibilityChange/.test(panelSettingSrc),
+);
+check(
+  "查看器面板真的按该设置条件渲染顶部基础信息栏",
+  /usePanelSwitch\(VIEWER_PANEL_ID, "infoBarEnabled"/.test(viewerPanelSrc) &&
+    /showInfoBar &&/.test(viewerPanelSrc) &&
+    /className="viewer-info"/.test(viewerPanelSrc),
+);
+check(
+  "viewer 面板拿到 dockview 面板 API（第 4 条触发源「面板激活」才可达）",
+  /\{ id: "viewer", titleKey: "panel\.viewer", render: \(ctx\) => <ViewerPanel api=\{ctx\.api\} \/> \}/.test(
+    registrySource,
+  ),
 );
 
 // ============================== 3. 文档一致性 ==============================

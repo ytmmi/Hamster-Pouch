@@ -108,6 +108,16 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &[],
         requires_capability: None,
     },
+    // 查看器（`panel.viewer.*`）：顶部基础信息栏是否显示。
+    SettingDeclFact {
+        id: "infoBarEnabled",
+        owner_kind: "panel",
+        owner_id: Some("viewer"),
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
     // 图像查看器（`panel.imageviewer.*`）：导航器 / 胶片栏的启用与位置、滚轮缩放中心。
     SettingDeclFact {
         id: "navigatorEnabled",

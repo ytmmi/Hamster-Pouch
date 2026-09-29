@@ -301,6 +301,7 @@ export const en: Record<keyof DictZhCN, string> = {
 
   "viewer.previewFailed": "Preview failed: {err}",
   "viewer.unavailable": "Preview unavailable",
+  "viewer.settings.infoBarEnabled": "Show the info bar",
 
   "imageviewer.loadFailed": "Failed to read image: {err}",
   "imageviewer.unavailable": "Image unavailable",

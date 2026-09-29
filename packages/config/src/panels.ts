@@ -189,7 +189,24 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
   { id: "sources", titleKey: "panel.sources", category: "source", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "albums", titleKey: "panel.albums", category: "source", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "media", titleKey: "panel.media", category: "media", hasClass: true, blueprintNode: "control", origin: SYSTEM_ORIGIN },
-  { id: "viewer", titleKey: "panel.viewer", category: "media", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
+  {
+    id: "viewer",
+    titleKey: "panel.viewer",
+    category: "media",
+    hasClass: false,
+    blueprintNode: "control",
+    origin: SYSTEM_ORIGIN,
+    // 面板设置（第 5.3 节）：顶部**基础信息栏**（`relative_path` + 媒体类型 · 体积）是否显示。
+    // 缺省 `true` = 与既有观感完全一致（零行为变化）；关掉即只留预览舞台。
+    settings: [
+      {
+        key: "infoBarEnabled",
+        kind: "switch",
+        title_key: "viewer.settings.infoBarEnabled",
+        default: true,
+      },
+    ],
+  },
   {
     id: "imageviewer",
     titleKey: "panel.imageviewer",
@@ -381,6 +398,54 @@ export function resolvePanelReadOnly(spec: PanelSpec): boolean {
  */
 export function panelSettingStorageKey(panelId: string, key: string): string {
   return `panel.${panelId}.${key}`;
+}
+
+/**
+ * 面板设置值的**归一化**：把 `app_settings` 里的原始值按声明转成标量。
+ *
+ * 口径与 `panels/imageviewer/viewerPlacement.ts` 的归一化一致，但**以声明为唯一权威**：
+ * 取值不是该 `kind` 要的类型、`select` 不在候选内、`switch` 收到非布尔字符串
+ * （如 `"yes"`）一律回落声明缺省（失败关闭）；声明缺项 / 缺省本身不合法则返回
+ * `undefined`，由调用方决定兜底。
+ *
+ * 放在注册表旁边而不是各面板里：`kind` 与 `default` 只有这一份权威（第 5.3 节），
+ * 面板不该再写第二份解析规则（两处默认值就是漂移源）。
+ */
+export function normalizePanelSettingValue(
+  panelId: string,
+  key: string,
+  raw: unknown,
+): PanelSettingValue | undefined {
+  const decl = panelSpec(panelId)?.settings?.find((setting) => setting.key === key);
+  if (!decl) return undefined;
+  const fallback = decl.default;
+  const fallbackNumber = typeof fallback === "number" && Number.isFinite(fallback) ? fallback : undefined;
+  const fallbackString = typeof fallback === "string" ? fallback : undefined;
+  const options = decl.options ?? [];
+  switch (decl.kind) {
+    case "switch":
+    case "checkbox":
+      if (typeof raw === "boolean") return raw;
+      if (raw === "true" || raw === "false") return raw === "true";
+      return typeof fallback === "boolean" ? fallback : undefined;
+    case "numberInput":
+    case "slider": {
+      const num = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : Number.NaN;
+      if (Number.isFinite(num)) return num;
+      return fallbackNumber;
+    }
+    case "select":
+      if (typeof raw === "string" && options.some((option) => option.value === raw)) return raw;
+      // 缺省不在候选内 = 声明本身有问题：不静默采用，交回 `undefined`。
+      return fallbackString !== undefined && options.some((option) => option.value === fallbackString)
+        ? fallbackString
+        : undefined;
+    case "textInput":
+      if (typeof raw === "string") return raw;
+      return fallbackString;
+    default:
+      return undefined;
+  }
 }
 
 /**

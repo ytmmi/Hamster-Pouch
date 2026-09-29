@@ -314,6 +314,7 @@ export const zhCN = {
   // 查看器
   "viewer.previewFailed": "预览失败：{err}",
   "viewer.unavailable": "预览不可用",
+  "viewer.settings.infoBarEnabled": "显示基础信息栏",
 
   // 图像查看器
   "imageviewer.loadFailed": "读取图像失败：{err}",
