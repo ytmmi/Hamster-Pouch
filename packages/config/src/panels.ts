@@ -282,7 +282,29 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
   { id: "metadata", titleKey: "panel.metadata", category: "info", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "tags", titleKey: "panel.tags", category: "info", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "tagtable", titleKey: "panel.tagtable", category: "info", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
-  { id: "color", titleKey: "panel.color", category: "media", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
+  {
+    id: "color",
+    titleKey: "panel.color",
+    category: "media",
+    hasClass: false,
+    blueprintNode: "control",
+    origin: SYSTEM_ORIGIN,
+    // 面板设置（第 5.3 节）：色值显示格式——十六进制 `#ffffff` / 十进制 RGB `255, 255, 255`。
+    // 缺省十六进制（与调色板的存储口径同形，零认知成本）。取值域与
+    // `panels/colorValue.ts` 的 `COLOR_VALUE_FORMATS` 逐项对齐（`pnpm check:panels` 断言）。
+    settings: [
+      {
+        key: "valueFormat",
+        kind: "select",
+        title_key: "color.settings.valueFormat",
+        default: "hex",
+        options: [
+          { value: "hex", title_key: "color.settings.valueFormat.hex" },
+          { value: "decimal", title_key: "color.settings.valueFormat.decimal" },
+        ],
+      },
+    ],
+  },
   { id: "player", titleKey: "panel.player", category: "media", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN, settings: [{ key: "autoPauseOnTabSwitch", kind: "switch", title_key: "player.settings.autoPauseOnTabSwitch", default: true }] },
   { id: "tasks", titleKey: "panel.tasks", category: "system", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "plugins", titleKey: "panel.plugins", category: "system", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },

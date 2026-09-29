@@ -65,7 +65,8 @@ export const PANEL_DEFS: PanelDef[] = [
   { id: "metadata", titleKey: "panel.metadata", render: (ctx) => <MetadataPanel api={ctx.api} /> },
   { id: "tags", titleKey: "panel.tags", render: () => <TagRatingPanel /> },
   { id: "tagtable", titleKey: "panel.tagtable", render: () => <TagTablePanel /> },
-  { id: "color", titleKey: "panel.color", render: () => <ColorPanel /> },
+  // 色彩参考持有面板设置（`color.valueFormat`），同样需要激活状态才凑齐四条热加载触发源。
+  { id: "color", titleKey: "panel.color", render: (ctx) => <ColorPanel api={ctx.api} /> },
   // 媒体播放器持有**原生**渲染子窗口（libmpv，D14），必须知道激活状态才能显隐。
   { id: "player", titleKey: "panel.player", render: (ctx) => <MediaPlayerPanel api={ctx.api} /> },
   { id: "tasks", titleKey: "panel.tasks", render: () => <TaskPanel /> },

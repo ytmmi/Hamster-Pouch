@@ -40,6 +40,7 @@ import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { AppContext, type AppContextValue } from "./AppContext";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { ColorPaletteWatch } from "./colorPaletteWatch";
 import { TaskOverlay } from "./TaskOverlay";
 import { bindTaskActions, startTaskEvents } from "./taskStore";
 import { requestPlayerPlay } from "./playerPlayStore";
@@ -852,6 +853,8 @@ export function AppUiApp(): JSX.Element {
             {panelDefs.length}
           </span>
         </div>
+        {/* 选中图片即按需提取调色板（D18）：与色彩参考面板是否打开/激活无关 */}
+        <ColorPaletteWatch />
         {/* 长任务进度浮窗 + 危险操作确认弹窗：界面居中，盖在布局/面板之上 */}
         <TaskOverlay />
         <ConfirmDialog />

@@ -289,17 +289,15 @@ export const zhCN = {
   "player.settings.autoPauseOnTabSwitch": "切换标签时自动暂停",
 
   // 色彩参考
-  "color.paletteExtracted": "调色板已提取（{count} 色）",
-  "color.extractStarted": "调色板提取已启动",
-  "color.extractFailed": "提取失败：{err}",
-  "color.lockedToast": "色值已锁定",
-  "color.lockFailed": "锁定失败：{err}",
   "color.imageOnly": "色彩参考仅支持图片",
-  "color.extract": "提取调色板",
-  "color.locked": "已锁定",
-  "color.auto": "自动",
   "color.empty": "无调色板",
-  "color.lockManual": "锁定该色值",
+  "color.extractFailed": "调色板提取失败",
+  "color.copy": "复制色值",
+  "color.copied": "已复制 {value}",
+  "color.copyFailed": "复制失败：{err}",
+  "color.settings.valueFormat": "色值格式",
+  "color.settings.valueFormat.hex": "十六进制（#ffffff）",
+  "color.settings.valueFormat.decimal": "十进制 RGB（255, 255, 255）",
 
   // 元数据
   "metadata.readFailed": "读取元数据失败：{err}",

@@ -13,12 +13,14 @@
  * 6. **命名空间与插件缺失容错**：插件面板项必须是 `plugin.<plugin_id>.<local_id>`；
  *    未注册的 `panel_id` 既不报硬错误也不被丢弃（允许保存、原样保留）；
  * 7. **面板设置的闭环**：声明 ↔ 归一化 ↔ 面板消费 ↔ 热加载四条触发源（查看器顶部
- *    基础信息栏的 `infoBarEnabled` 是这套闭环的第一个布尔设置）。
+ *    基础信息栏的 `infoBarEnabled` 是这套闭环的第一个布尔设置；色彩参考的
+ *    `valueFormat` 另有"声明候选 ↔ 面板纯函数取值域"与"显示/复制同一份文本"两条断言），
+ *    外加「点击图像即按需提取调色板」这条**装配层**行为（面板里没有提取按钮）。
  *
  * 用法：pnpm check:panels
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -319,6 +321,156 @@ check(
   /\{ id: "viewer", titleKey: "panel\.viewer", render: \(ctx\) => <ViewerPanel api=\{ctx\.api\} \/> \}/.test(
     registrySource,
   ),
+);
+
+// ==================== 色彩参考（`panel.color`）的色值格式设置 + 按需提取 ====================
+//
+// 与查看器同一套闭环：**声明**（注册表）↔ **取值域**（声明候选 ↔ 面板纯函数逐项一致）↔
+// **归一化**（非法取值回落缺省）↔ **面板消费**（真的按设置格式化 + 复制同一份文本）。
+// 另外断言「点击图像即按需提取调色板」这条**应用级**行为确实挂在装配层（而不是面板里——
+// 面板是后台标签时并未挂载，挂在那里就不会"点击即提取"），以及同一文件的并发去重。
+
+const colorPanelSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/ColorPanel.tsx"),
+  "utf8",
+);
+const colorPaletteWatchSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/core/colorPaletteWatch.tsx"),
+  "utf8",
+);
+const colorPaletteSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/colorPalette.ts"),
+  "utf8",
+);
+const appUiAppSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/core/AppUiApp.tsx"),
+  "utf8",
+);
+const colorValue = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/colorValue.ts")).href
+);
+
+const colorSpec = config.panelSpec("color");
+const colorFormatDecl = colorSpec?.settings?.find((s) => s.key === "valueFormat");
+check(
+  "色彩参考声明了「色值格式」设置（select，缺省十六进制 = 与存储口径同形）",
+  (colorSpec?.settings ?? []).length === 1 &&
+    colorFormatDecl?.kind === "select" &&
+    colorFormatDecl?.title_key === "color.settings.valueFormat" &&
+    colorFormatDecl?.default === "hex",
+  `decls=${(colorSpec?.settings ?? []).map((s) => s.key).join(",") || "（无）"} default=${colorFormatDecl?.default}`,
+);
+check(
+  "色值格式的 select 候选 ↔ 面板纯函数 `colorValue.ts` 的取值域逐项一致（缺省同源）",
+  eqList(optionValues("color", "valueFormat"), [...colorValue.COLOR_VALUE_FORMATS]) &&
+    colorValue.DEFAULT_COLOR_VALUE_FORMAT === colorFormatDecl?.default,
+  `decl=${optionValues("color", "valueFormat").join(",")} ` +
+    `panel=${[...colorValue.COLOR_VALUE_FORMATS].join(",")}`,
+);
+check(
+  "色值格式按声明归一化：非法取值回落十六进制、未注册面板返回 undefined",
+  config.normalizePanelSettingValue("color", "valueFormat", "decimal") === "decimal" &&
+    config.normalizePanelSettingValue("color", "valueFormat", "rgb") === "hex" &&
+    config.normalizePanelSettingValue("color", "valueFormat", null) === "hex" &&
+    colorValue.resolveColorValueFormat("bogus") === "hex" &&
+    config.normalizePanelSettingValue("ghost", "valueFormat", "hex") === undefined,
+);
+check(
+  "色值格式化纯函数：十六进制 `#ffffff` ↔ 十进制 `255, 255, 255`（含 3 位缩写与非法输入原样返回）",
+  colorValue.formatColorValue("#ffffff", "hex") === "#ffffff" &&
+    colorValue.formatColorValue("#ff0000", "decimal") === "255, 0, 0" &&
+    colorValue.formatColorValue("#ABC", "hex") === "#aabbcc" &&
+    colorValue.formatColorValue("  #0a0B0c  ", "hex") === "#0a0b0c" &&
+    colorValue.formatColorValue("nope", "hex") === "nope" &&
+    colorValue.formatColorValue("nope", "decimal") === "nope",
+);
+check(
+  "色彩参考面板消费该设置：同一份文本既显示又复制，且面板**只保留调色板**",
+  /usePanelSettingValue\(COLOR_PANEL_ID, "valueFormat"/.test(colorPanelSrc) &&
+    /formatColorValue\(selected, format\)/.test(colorPanelSrc) &&
+    /navigator\.clipboard\.writeText\(text\)/.test(colorPanelSrc) &&
+    /className="palette"/.test(colorPanelSrc) &&
+    // 手动锁定/提取按钮与原生取色器都已移除（面板里只剩调色板 + 色值行）。
+    !/lockManual|type="color"|colorSet\(/.test(colorPanelSrc),
+);
+check(
+  "color 面板拿到 dockview 面板 API（第 4 条触发源「面板激活」才可达）",
+  /\{ id: "color", titleKey: "panel\.color", render: \(ctx\) => <ColorPanel api=\{ctx\.api\} \/> \}/.test(
+    registrySource,
+  ),
+);
+check(
+  "复制图标是项目内资产（`assets/copy.svg`）且用 mask 上色（图标随主题前景色）",
+  existsSync(join(ROOT, "apps/desktop/src/app_ui/assets/copy.svg")) &&
+    /from "\.\.\/assets\/copy\.svg"/.test(colorPanelSrc) &&
+    /maskImage/.test(colorPanelSrc) &&
+    /\.color-copy-icon\s*\{/.test(stylesSource) &&
+    /\.color-copy-icon[\s\S]{0,200}mask-size: contain/.test(stylesSource),
+);
+check(
+  "点击图像即按需提取调色板：监视器挂在装配层，缺失才请求提取且**只保留最新一次**（短延迟 + 单飞）",
+  /<ColorPaletteWatch \/>/.test(appUiAppSrc) &&
+    /requestPaletteExtraction\(/.test(colorPaletteWatchSrc) &&
+    /media_type === "image"/.test(colorPaletteWatchSrc) &&
+    /colorExtract\(/.test(colorPaletteSrc) &&
+    // 节流 + 去重都在共享入口里（否则快速连续选中会把全应用唯一的仓库锁排满）。
+    /PALETTE_REQUEST_DELAY_MS/.test(colorPaletteSrc) &&
+    /pending = \{ repoId, fileId \};/.test(colorPaletteSrc) &&
+    /if \(draining\) return;/.test(colorPaletteSrc) &&
+    // 面板装载时再自检一次（覆盖上次提取失败/刚重启），与监视器共用同一个入口。
+    /requestPaletteExtraction\(repoId, fileId\)/.test(colorPanelSrc),
+);
+
+// 调色板本身：规模（8 色）、缓存格式版本（旧缓存自愈）与面板内的排布。
+const paletteRsSrc = readFileSync(join(ROOT, "crates/hp-media/src/palette.rs"), "utf8");
+const colorCommandSrc = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/color.rs"),
+  "utf8",
+);
+const paletteJson = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/paletteJson.ts")).href
+);
+const rustPaletteSize = Number(
+  (paletteRsSrc.match(/DEFAULT_PALETTE_SIZE:\s*usize\s*=\s*(\d+)/) || [])[1],
+);
+const rustPaletteVersion = Number(
+  (paletteRsSrc.match(/PALETTE_FORMAT_VERSION:\s*u32\s*=\s*(\d+)/) || [])[1],
+);
+check(
+  "调色板默认取 **8 色**（用户 2026-09-29 指定；此前 6）",
+  rustPaletteSize === 8,
+  `DEFAULT_PALETTE_SIZE=${rustPaletteSize}`,
+);
+check(
+  "调色板缓存的格式版本 TS ↔ Rust 相等，且提取命令真的把 `version` 写进 `color_json`",
+  rustPaletteVersion > 0 &&
+    rustPaletteVersion === paletteJson.PALETTE_FORMAT_VERSION &&
+    /PALETTE_FORMAT_VERSION/.test(colorCommandSrc) &&
+    /"version"/.test(colorCommandSrc),
+  `rust=${rustPaletteVersion} ts=${paletteJson.PALETTE_FORMAT_VERSION}`,
+);
+check(
+  "旧版本/无版本的缓存按「未提取」处理（自动重算）；**手动锁定**的色值不受版本影响",
+  paletteJson.parsePaletteJson('{"colors":["#112233"],"locked":false}').length === 0 &&
+    paletteJson.parsePaletteJson(
+      `{"version":${paletteJson.PALETTE_FORMAT_VERSION},"colors":["#112233"],"locked":false}`,
+    ).length === 1 &&
+    paletteJson.parsePaletteJson('{"colors":["#112233"],"locked":true}').length === 1 &&
+    paletteJson.parsePaletteJson(null).length === 0 &&
+    paletteJson.parsePaletteJson("not json").length === 0,
+);
+check(
+  "色块随面板宽度伸展且**不是正方形**（flex 撑满一行、只给高度、不给固定宽度）",
+  /\.swatch\s*\{[^}]*flex:\s*1 1 /.test(stylesSource) &&
+    /\.swatch\s*\{[^}]*height:\s*18px/.test(stylesSource) &&
+    !/\.swatch\s*\{[^}]*[\s;{]width:/.test(stylesSource),
+);
+check(
+  "调色板不吃剩余高度（色值行紧跟其下方）、留出选中框空间且**不再裁掉蓝框**",
+  /\.palette\s*\{[^}]*flex:\s*none/.test(stylesSource) &&
+    /\.palette\s*\{[^}]*margin-top:/.test(stylesSource) &&
+    /\.palette\s*\{[^}]*padding:/.test(stylesSource) &&
+    !/\.palette\s*\{[^}]*overflow:/.test(stylesSource),
 );
 
 // ============ 元数据面板：宿主格式设置 ↔ 面板实现（体积 / 日期 / 类型自适应）============

@@ -4,7 +4,7 @@
 //! `{ ok, data?, error? }`；`color.extract` 是异步命令，用 [`ApiAsync`]。
 
 use hp_core::{HpError, HpResult, MediaType};
-use hp_media::extract_palette;
+use hp_media::{extract_palette, PALETTE_FORMAT_VERSION};
 use serde::Serialize;
 use tauri::{Emitter, State};
 
@@ -109,8 +109,15 @@ fn run_color_extract(state: &AppState, file_id: &str) -> HpResult<hp_media::Pale
     }
     let path = resolve_file_path(db, &file)?;
     let palette = extract_palette(&path, 0)?;
-    let colors_json = serde_json::to_string(&palette.colors).unwrap_or_else(|_| "[]".to_string());
-    let color_json = format!(r#"{{"colors":{colors_json},"locked":false}}"#);
+    // `version` 是**缓存自愈**的开关：`PALETTE_FORMAT_VERSION` 变化后，前端会把旧缓存当作
+    // "未提取"并自动重算（色板规模 6 → 8 就是一次这样的变化）。落库时**保留 `locked:false`**
+    // 语义不变——手动锁定的色值由 `color.set` 写入且 `locked:true`，本命令不覆盖它的判定权。
+    let color_json = serde_json::json!({
+        "version": PALETTE_FORMAT_VERSION,
+        "colors": palette.colors.clone(),
+        "locked": false,
+    })
+    .to_string();
     db.upsert_color_ref(file_id, &color_json)?;
     Ok(palette)
 }

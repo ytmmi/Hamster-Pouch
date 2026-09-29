@@ -216,6 +216,16 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &["pointer", "center"],
         requires_capability: None,
     },
+    // 色彩参考（`panel.color.*`）：色值显示格式（十六进制 / 十进制 RGB）。
+    SettingDeclFact {
+        id: "valueFormat",
+        owner_kind: "panel",
+        owner_id: Some("color"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["hex", "decimal"],
+        requires_capability: None,
+    },
 ];
 
 /// 按**落库键**查宿主/面板声明（插件项走 manifest 反查，不在此列）。

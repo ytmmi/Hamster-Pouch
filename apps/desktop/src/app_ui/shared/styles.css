@@ -979,17 +979,86 @@ button.danger {
   background: var(--progress);
 }
 
-.palette {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+/* ===== 色彩参考面板 ===== */
+
+.color-panel {
+  /* 色值行**紧跟调色板下方**（调色板不吃剩余高度），因此这里用小间距 */
+  gap: 4px;
 }
 
+/*
+ * 调色板：宽度跟随面板宽度，高度由内容决定（**不**吃剩余高度 ⇒ 色值行贴在它下面，
+ * 而不是被顶到面板底部）；上边距 + 内边距一起把选中框（outline 2px + offset 1px）的位置留出来。
+ *
+ * **刻意不设 `overflow`**：选中框画在色块盒子外面，容器一旦是 `overflow: auto`，
+ * 第一行色块的蓝框就会被裁掉半截（此前的缺陷）。
+ */
+.palette {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 3px;
+  flex: none;
+}
+
+/*
+ * 色块：8 个平分面板宽度（`flex: 1 1 22px`），**不是正方形**——只给高度、不给宽度；
+ * 面板窄到放不下时按 `min-width` 折行。
+ */
 .swatch {
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
+  flex: 1 1 22px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 3px;
   border: 1px solid var(--border);
+}
+
+.swatch.selected {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 选中色值的显示行：色值文本 + 右侧复制按钮；左右内边距与调色板对齐（跟随调色板） */
+.color-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 3px;
+  min-height: 22px;
+}
+
+.color-value-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.color-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  flex: none;
+}
+
+/* 复制图标取项目内资产（`assets/copy.svg`）：用 mask 上色，因此随主题前景色走 */
+.color-copy-icon {
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
 
 .task-line {

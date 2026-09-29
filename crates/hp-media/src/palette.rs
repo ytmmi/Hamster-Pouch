@@ -8,8 +8,19 @@ use std::path::Path;
 
 use hp_core::{HpError, HpResult};
 
-/// 默认提取色板数量。
-pub const DEFAULT_PALETTE_SIZE: usize = 6;
+/// 默认提取色板数量（**8 色**，用户 2026-09-29 指定；此前为 6）。
+///
+/// 改这个数、或改量化/排序算法，**必须同时递增 [`PALETTE_FORMAT_VERSION`]**：
+/// 前端按版本号判断缓存是否过期，否则已缓存过的图片会永远显示旧结果
+/// （色彩参考面板里没有手动重提按钮，缓存自愈是唯一路径）。
+pub const DEFAULT_PALETTE_SIZE: usize = 8;
+
+/// 调色板缓存（`color_refs.color_json`）的**格式版本**。
+///
+/// 前端 `apps/desktop/src/app_ui/shared/paletteJson.ts` 的 `PALETTE_FORMAT_VERSION`
+/// 必须与此相等（`pnpm check:panels` 断言）；版本不匹配的缓存按「未提取」处理并自动重算。
+/// 版本历史：1（隐式，无 `version` 字段，色板 6 色）→ 2（色板 8 色 + 显式 `version`）。
+pub const PALETTE_FORMAT_VERSION: u32 = 2;
 
 /// 调色板提取结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
