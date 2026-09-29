@@ -583,6 +583,7 @@ dependencies = [
  "hp-store",
  "image",
  "notify",
+ "serde_json",
  "tempfile",
  "time",
  "walkdir",

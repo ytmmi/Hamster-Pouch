@@ -4,10 +4,14 @@
  * - 调色板：点击色块选中，色值在**下方**呈现；
  * - 色值格式由面板设置 `valueFormat` 决定（十六进制 `#ffffff` / 十进制 RGB `255, 255, 255`），
  *   右侧复制按钮把**同一份文本**写进剪贴板（显示什么就复制什么，不另立一套格式化）；
- * - 调色板在**点击图像**那一刻由装配层的监视器按需提取
- *   （`core/colorPaletteWatch.tsx` → `shared/colorPalette.ts`）；本面板装载时再自检一次，
- *   覆盖"上次提取失败 / 应用刚重启"的情形。面板内因此**没有**提取/锁定按钮（手动锁定色值
- *   的决定见 `docs/architecture/decision-checklist.md` 的 D81）。
+ * - **本面板只读缓存，不发起提取**（用户口径 2026-09）：调色板是**全面分析文件**的副产品
+ *   ——源扫描 / 源全量重扫 / 右键「重新分析该文件」在 `hp_scanner` 里顺带写入
+ *   （`Scanner::write_palette`）。因此面板里既没有提取按钮，也没有"点击图像即提取"的监视器；
+ *   缺调色板时给出**怎么拿到它**的提示（`color.empty`），而不是让用户以为面板坏了。
+ *   面板内也没有锁定按钮（手动锁定色值的决定见 `docs/architecture/decision-checklist.md` D81）。
+ *
+ * 刷新通路：重新分析后媒体预览面板会 `app.refresh()`（`refreshKey` → 本面板重读），
+ * 长时间的全量重扫则在**本面板回到前台时**补读一次（第 4 条触发源的同一处 dockview API）。
  *
  * 设置的读取与热加载走 `shared/settingValue.ts`（四条独立触发源），本文件只消费结果。
  */
@@ -18,7 +22,6 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import copyIconUrl from "../assets/copy.svg";
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
-import { requestPaletteExtraction } from "../shared/colorPalette";
 import { parsePaletteJson } from "../shared/paletteJson";
 import { useApp } from "../core/AppContext";
 import type { PanelRenderCtx } from "../core/panelRegistry";
@@ -72,12 +75,8 @@ export function ColorPanel({ api: panelApi }: ColorPanelProps = {}): JSX.Element
       return;
     }
     try {
-      const palette = parsePaletteJson(await api.colorGet({ repoId, fileId }));
-      setColors(palette);
-      // 装载自检：仍然没有调色板就再请求一次（点击时的提取可能失败，或发生在上次运行期间）。
-      if (palette.length === 0) {
-        requestPaletteExtraction(repoId, fileId);
-      }
+      // **只读**缓存：本面板不再发起提取（提取是全面分析的副产品）。
+      setColors(parsePaletteJson(await api.colorGet({ repoId, fileId })));
     } catch {
       setColors([]);
     }
@@ -87,12 +86,31 @@ export function ColorPanel({ api: panelApi }: ColorPanelProps = {}): JSX.Element
     void load();
   }, [load, app.refreshKey]);
 
+  /**
+   * 面板回到前台时补读一次：源级**全量重扫**是长任务，期间选中项不变，
+   * 靠 `refreshKey` 未必会走到本面板；切回来看时应当是新的调色板。
+   */
+  useEffect(() => {
+    if (!panelApi) return;
+    const sync = () => {
+      if (panelApi.isVisible && panelApi.isActive) void load();
+    };
+    const disposables = [panelApi.onDidActiveChange(sync), panelApi.onDidVisibilityChange(sync)];
+    return () => {
+      for (const disposable of disposables) disposable.dispose();
+    };
+  }, [panelApi, load]);
+
   // 色块集合变化（换文件 / 重新提取）时丢弃已失效的选中色。
   useEffect(() => {
     setSelected((current) => (current && colors.includes(current) ? current : null));
   }, [colors]);
 
   // 后台提取完成：只接受**当前文件**的结果。
+  //
+  // `color.extract` 自 2026-09 起**已无界面调用方**（调色板由全面分析顺带写入），
+  // 但命令与事件仍在契约里：任何其它入口（插件、将来的按钮）触发提取后，
+  // 本面板照样能即时刷新——所以这条监听保留。
   useEffect(() => {
     let dispose: UnlistenFn | undefined;
     let cancelled = false;

@@ -20,6 +20,13 @@ export interface ScanProgressPayload {
   phase: string;
   /** 正在处理的条目（相对路径或目录）；代表该文件正在被哈希/抽帧。 */
   current?: string | null;
+  /**
+   * 该任务是否支持暂停/恢复。
+   *
+   * 整源扫描为 `true`；**单文件「重新分析」为 `false`**（一个文件的哈希/抽帧/调色板
+   * 一口气做完，没有暂停点）——浮窗据此**不显示**暂停按钮，免得留一个按不动的键。
+   */
+  pausable: boolean;
 }
 
 /** scan.completed 事件 */

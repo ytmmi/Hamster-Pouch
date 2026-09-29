@@ -19,7 +19,10 @@ mod thumbnail;
 
 pub use cache::ThumbnailCache;
 pub use exif::{extract_exif, ImageExif};
-pub use palette::{extract_palette, Palette, DEFAULT_PALETTE_SIZE, PALETTE_FORMAT_VERSION};
+pub use palette::{
+    encode_palette_json, extract_palette, palette_is_locked, Palette, DEFAULT_PALETTE_SIZE,
+    PALETTE_FORMAT_VERSION,
+};
 pub use player::{MediaProcess, DEFAULT_PIPE_PATH};
 pub use probe::{probe, MediaProbe};
 pub use thumbnail::{extract_thumbnail, generate_image_thumbnail, IMAGE_THUMB_MAX_DIM};

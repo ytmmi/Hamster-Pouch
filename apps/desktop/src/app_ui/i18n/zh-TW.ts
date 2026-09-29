@@ -247,7 +247,6 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "media.renamed": "已重新命名",
   "media.pathCopied": "已複製路徑",
   "media.pathCopyFailed": "複製路徑失敗：{err}",
-  "media.reanalyzed": "已重新分析",
   "media.reanalyzeFailed": "重新分析失敗：{err}",
   "media.waveUnavailable": "波形不可用",
   "media.noPath": "無路徑",
@@ -297,7 +296,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "player.settings.autoPauseOnTabSwitch": "切換標籤時自動暫停",
 
   "color.imageOnly": "色彩參考僅支援圖片",
-  "color.empty": "無調色盤",
+  "color.empty": "無調色盤（右鍵「重新分析該檔案」或全量重掃來源即可擷取）",
   "color.extractFailed": "調色盤擷取失敗",
   "color.copy": "複製色值",
   "color.copied": "已複製 {value}",

@@ -9,7 +9,7 @@ use hp_core::{
     FileId, FileIndexRow, HpError, HpResult, MediaType, Source, ThumbStatus, VerifyStatus,
 };
 use hp_hash::{dhash_file, hash_file, ContentHash, PerceptualHash};
-use hp_media::ThumbnailCache;
+use hp_media::{encode_palette_json, extract_palette, palette_is_locked, ThumbnailCache};
 use hp_store::RepoDb;
 use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
@@ -314,32 +314,42 @@ impl Scanner {
         Ok(outcome)
     }
 
-    /// 重新分析单个文件（按相对路径）：重算哈希 / 缩略图 / 媒体信息并更新索引。
+    /// 重新分析单个文件（按相对路径）：重算哈希 / 缩略图 / 媒体信息 / **调色板**并更新索引。
     ///
     /// 已存在的文件保留原 id（走变更重建路径），不存在则新建索引行。
+    ///
+    /// `cancel` 是**开工前**的中断点（`Some` 时生效，与源扫描"每个文件之间检查"同款口径）：
+    /// 命中即**什么都不做**并返回 `cancelled: true`——单文件分析一旦开始哈希/抽帧就不可中断，
+    /// 因此这里不假装能中途停下（详见 `run_reanalyze` 的说明）。
     pub fn rescan_file(
         &self,
         db: &mut RepoDb,
         source: &Source,
         relative_path: &str,
         options: &ScanOptions,
-    ) -> HpResult<()> {
+        cancel: Option<&AtomicBool>,
+    ) -> HpResult<ScanOutcome> {
+        let mut outcome = ScanOutcome::default();
+        if self.is_cancelled(cancel) {
+            outcome.cancelled = true;
+            return Ok(outcome);
+        }
         let root = Path::new(&source.local_path);
         let path = root.join(relative_path);
         let media_type = detect_media_type(&path)
             .ok_or_else(|| HpError::NotFound(format!("不支持的媒体类型: {relative_path}")))?;
         let (size, mtime) = file_stat(&path)
             .ok_or_else(|| HpError::NotFound(format!("无法读取文件: {relative_path}")))?;
-        let mut outcome = ScanOutcome::default();
         match db.get_file_by_path(source.id.as_str(), relative_path)? {
             Some(row) => self.index_existing(
                 db, source, &path, relative_path, media_type, size, &mtime, &row, options,
                 &mut outcome,
-            ),
+            )?,
             None => self.index_new(
                 db, source, &path, relative_path, media_type, size, &mtime, options, &mut outcome,
-            ),
+            )?,
         }
+        Ok(outcome)
     }
 
     /// 索引全新文件（含移动/重命名识别）。
@@ -365,8 +375,9 @@ impl Scanner {
                     }
                 };
                 let perceptual = dhash_file(path).ok();
+                let id = FileId::generate();
                 let row = self.build_row(
-                    FileId::generate(),
+                    id.clone(),
                     source,
                     relative_path,
                     media_type,
@@ -379,6 +390,9 @@ impl Scanner {
                     None,
                 );
                 self.upsert_or_move(db, &row)?;
+                // 调色板是**全面分析的副产品**（与哈希/缩略图/媒体信息同批），
+                // 因此不需要第三个触发入口：源扫描（含"全量重扫"）与「重新分析该文件」都走这里。
+                self.write_palette(db, id.as_str(), path);
                 outcome.indexed += 1;
             }
             MediaType::Video => {
@@ -428,6 +442,30 @@ impl Scanner {
         Ok(())
     }
 
+    /// 顺带提取并写入**调色板**（仅图片，D18）。
+    ///
+    /// 用户口径（2026-09）：调色板**不再由界面点击触发**，而是"**全面分析文件**"的副产品
+    /// ——源扫描 / 源全量重扫 / 「重新分析该文件」都会走到 `index_new` / `index_existing`，
+    /// 这里就是那条统一的下游。
+    ///
+    /// 两条边界（都是"不许越权"的性质）：
+    ///
+    /// 1. **失败不影响索引**：调色板不是身份或检索数据，解码失败就当没有
+    ///    （与同一函数里的 `dhash_file(path).ok()` 同口径）；面板会显示"重新分析可提取"的提示，
+    ///    而不是让整次扫描失败。
+    /// 2. **不覆盖手动锁定**：`color.set` 写入的 `locked:true` 是用户的判定权，重扫不得抹掉它。
+    fn write_palette(&self, db: &mut RepoDb, file_id: &str, path: &Path) {
+        if let Ok(Some(existing)) = db.get_color_ref(file_id) {
+            if palette_is_locked(&existing.color_json) {
+                return;
+            }
+        }
+        let Ok(palette) = extract_palette(path, 0) else {
+            return;
+        };
+        let _ = db.upsert_color_ref(file_id, &encode_palette_json(&palette.colors));
+    }
+
     /// 索引已存在但发生变化的文件（同名替换/内容变更，保留原 id）。
     #[allow(clippy::too_many_arguments)]
     fn index_existing(
@@ -472,6 +510,9 @@ impl Scanner {
                     None,
                 );
                 db.upsert_file(&row)?;
+                // 同 `index_new`：调色板顺带提取（`options.full` 时每个文件都会走到这里，
+                // 因此"源全量重扫"会把全部图片的调色板重算一遍）。
+                self.write_palette(db, existing.id.as_str(), path);
                 outcome.changed += 1;
             }
             MediaType::Video => {

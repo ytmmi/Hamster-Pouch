@@ -15,3 +15,5 @@ time = { version = "0.3", features = ["formatting"] }
 [dev-dependencies]
 tempfile = "3"
 image = "0.25"
+# 测试要解析 `color_refs.color_json`（形状是跨端契约：`version` / `colors` / `locked`）。
+serde_json = "1"

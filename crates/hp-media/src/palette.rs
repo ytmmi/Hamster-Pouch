@@ -29,6 +29,33 @@ pub struct Palette {
     pub colors: Vec<String>,
 }
 
+/// 调色板缓存的 JSON 形态（`color_refs.color_json` 的**自动**结果）。
+///
+/// **只有这一处拼这个串**：写入方是"全面分析"（源扫描 / `file.reanalyze`）与按需提取命令
+/// （`color.extract`）；前端的 `shared/paletteJson.ts` 是同一口径的读取方
+/// （`version` + `colors` + `locked`）。少写一个字段，前端就会把这条缓存当"未提取"并反复重算
+/// —— `PALETTE_FORMAT_VERSION` 的相等由 `pnpm check:panels` 断言，字段形状由 Rust 单测断言。
+pub fn encode_palette_json(colors: &[String]) -> String {
+    serde_json::json!({
+        "version": PALETTE_FORMAT_VERSION,
+        "colors": colors,
+        "locked": false,
+    })
+    .to_string()
+}
+
+/// 缓存是否被**手动锁定**（`locked: true`）。
+///
+/// 解析不出时返回 `false`（按未锁定处理）：坏数据不该让"重新分析"整批失败，
+/// 前端 `parsePaletteJson` 对坏值也按"未提取"处理——两边都不猜。
+/// 用途是**写入前的一道闸**：手动锁定的色值是用户的判定权，重扫不得覆盖它。
+pub fn palette_is_locked(color_json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(color_json)
+        .ok()
+        .and_then(|value| value.get("locked").and_then(|locked| locked.as_bool()))
+        .unwrap_or(false)
+}
+
 /// 提取图片主色调；`max_colors` 为 0 时使用 [`DEFAULT_PALETTE_SIZE`]。
 pub fn extract_palette(path: &Path, max_colors: usize) -> HpResult<Palette> {
     let max_colors = if max_colors == 0 {
@@ -102,6 +129,29 @@ mod tests {
         assert_eq!(palette.colors.len(), 1);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 缓存 JSON 的形状是**跨端契约**（前端 `parsePaletteJson` 按这三个字段读）：
+    /// `version` 必须在里面，否则前端会把每条自动缓存当作"未提取"反复重算。
+    #[test]
+    fn palette_json_carries_version_and_is_not_locked() {
+        let json = encode_palette_json(&["#ff0000".to_string(), "#00ff00".to_string()]);
+        let value: serde_json::Value = serde_json::from_str(&json).expect("缓存 JSON 解析失败");
+        assert_eq!(value["version"], PALETTE_FORMAT_VERSION);
+        assert_eq!(value["locked"], false);
+        assert_eq!(value["colors"][0], "#ff0000");
+        assert!(!palette_is_locked(&json));
+    }
+
+    #[test]
+    fn palette_is_locked_reads_the_flag_and_tolerates_bad_json() {
+        assert!(palette_is_locked(r#"{"version":2,"colors":[],"locked":true}"#));
+        assert!(!palette_is_locked(r#"{"version":2,"colors":[],"locked":false}"#));
+        // 缺字段 / 坏 JSON / 类型不对：一律按"未锁定"处理（重扫不该被坏数据卡住）。
+        assert!(!palette_is_locked(r#"{"version":2,"colors":[]}"#));
+        assert!(!palette_is_locked("not json"));
+        assert!(!palette_is_locked(r#"{"locked":"true"}"#));
+        assert!(!palette_is_locked(""));
     }
 
     fn nanos() -> String {

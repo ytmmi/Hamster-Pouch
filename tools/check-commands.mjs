@@ -169,6 +169,11 @@ check(
 );
 
 // D77：事件 DTO 一律 `rename_all = "camelCase"`（与前端 `events.ts` 的驼峰声明同源）。
+//
+// **DTO 按"桥接层"查找，不按单个文件**：事件 DTO 可以跨命令模块复用（例如 `file.rs` 的
+// 单文件分析复用 `source.rs` 的 `scan.progress|completed|error` 三个 DTO —— "同款浮窗"就是
+// 靠复用同一条事件实现的）。只要该结构体在桥接层里定义且带 camelCase 属性即通过。
+const bridgeAllSrc = bridgeFiles.map((f) => f.src).join("\n");
 const snakeEventFields = [];
 const missingEventAttr = [];
 for (const { file, src } of bridgeFiles) {
@@ -177,12 +182,12 @@ for (const { file, src } of bridgeFiles) {
   while ((m = emitRe.exec(src)) !== null) {
     const [, eventName, dto] = m;
     // 该 DTO 的结构体定义必须带 camelCase 属性（属性在 struct 行上方）。
-    const structIdx = src.search(new RegExp(`struct\\s+${dto}\\b`));
+    const structIdx = bridgeAllSrc.search(new RegExp(`struct\\s+${dto}\\b`));
     if (structIdx < 0) {
       missingEventAttr.push(`${eventName} → 找不到 ${dto}`);
       continue;
     }
-    const head = src.slice(Math.max(0, structIdx - 200), structIdx);
+    const head = bridgeAllSrc.slice(Math.max(0, structIdx - 200), structIdx);
     if (!/rename_all\s*=\s*"camelCase"/.test(head)) {
       missingEventAttr.push(`${eventName}（${dto} @ ${file}）`);
     }
@@ -203,6 +208,82 @@ check(
   "D77：前端事件类型同样声明为驼峰（无蛇形字段）",
   snakeDecls.length === 0,
   snakeDecls.length ? `蛇形字段: ${[...new Set(snakeDecls)].join(", ")}` : "",
+);
+
+// ==================== 单文件分析 = 与源扫描同款的后台任务（2026-09） ====================
+//
+// 用户口径："右键分析文件，分析时要和源全量时同款弹窗。" 实现方式就是**复用同一族事件**：
+// 前端浮窗（`core/taskStore.ts`）只认事件、不认命令，因此这里断言的是"事件族与任务语义一致"，
+// 而不是"又写了一个弹窗组件"。
+
+const fileBridgeSrc = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"),
+  "utf8",
+);
+const tasksSrc = readFileSync(join(ROOT, "apps/desktop/src-tauri/src/tasks.rs"), "utf8");
+const scannerSrc = readFileSync(join(ROOT, "crates/hp-scanner/src/scanner.rs"), "utf8");
+const taskStoreSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/core/taskStore.ts"),
+  "utf8",
+);
+const mediaPanelSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/MediaPreviewPanel.tsx"),
+  "utf8",
+);
+const fileApiSrc = readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/api/file.ts"), "utf8");
+
+check(
+  "file.reanalyze 是**后台任务**：登记 TaskKind::Analyze + 独立连接 + 必定发终止事件",
+  /pub\(crate\) async fn file_reanalyze\(/.test(fileBridgeSrc) &&
+    /ApiAsync<String>/.test(fileBridgeSrc) &&
+    /tasks\s*\.start\(&task_id, TaskKind::Analyze\)/.test(fileBridgeSrc) &&
+    // 独立仓库库连接：不持有 open_repo 锁（分析大视频时界面别的命令不排队）。
+    /RepoDb::open\(repo_path\)/.test(fileBridgeSrc) &&
+    // panic 也要收敛成终止事件，否则浮窗永远停在原地。
+    /catch_unwind\(std::panic::AssertUnwindSafe/.test(fileBridgeSrc) &&
+    /st\.tasks\.finish\(&emit_task_id\);/.test(fileBridgeSrc),
+);
+check(
+  "分析任务复用 scan.* 事件族（= 与源全量同款浮窗），且进度帧标 `pausable: false`",
+  /app\.emit\(\s*"scan\.progress"/.test(fileBridgeSrc) &&
+    /app_handle\.emit\(\s*"scan\.completed"/.test(fileBridgeSrc) &&
+    /app_handle\.emit\(\s*"scan\.error"/.test(fileBridgeSrc) &&
+    // 单文件分析没有暂停点：不能发出"可暂停"的信号，否则浮窗会留一个按不动的暂停键。
+    /pausable: false,/.test(fileBridgeSrc) &&
+    // 总数未知 → 不定进度条（单文件没有"百分比"可言）。
+    /processed: 0,\s*\n\s*total: 0,/.test(fileBridgeSrc) &&
+    // 整源扫描才是可暂停的那个。
+    /pausable: true,/.test(readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/source.rs"), "utf8")),
+);
+check(
+  "暂停能力由**事件载荷**决定，不是前端写死（`pausable` 必须在 DTO 与 store 两侧对上）",
+  /pausable: bool,/.test(
+    readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/source.rs"), "utf8"),
+  ) &&
+    /pausable: boolean;/.test(eventsTs) &&
+    /pausable: p\.pausable,/.test(taskStoreSrc) &&
+    // 浮窗只在可暂停时渲染暂停/恢复按钮。
+    /task\.cancellable && task\.pausable/.test(
+      readFileSync(join(ROOT, "apps/desktop/src/app_ui/core/TaskOverlay.tsx"), "utf8"),
+    ),
+);
+check(
+  "分析任务有取消（`task.cancel` 命中即受理）但**明确报不可暂停**",
+  /TaskKind::Analyze => "analyze"/.test(tasksSrc) &&
+    /!TaskKind::Analyze\.is_pausable\(\)/.test(tasksSrc) &&
+    // 取消只在开工前生效：不能假装能中途停下（与源扫描"每文件之间检查"同款）。
+    /if self\.is_cancelled\(cancel\) \{\s*\n\s*outcome\.cancelled = true;\s*\n\s*return Ok\(outcome\);/.test(
+      scannerSrc,
+    ),
+);
+check(
+  "前端调用方不重复弹状态/刷新（任务结束由 scan.completed 统一收口）",
+  /export function fileReanalyze\(args: FileReanalyzeArgs\): Promise<string>/.test(fileApiSrc) &&
+    // 反向：面板不得再自己 toast "已重新分析" 或立刻 refresh（否则与浮窗收尾对撞）。
+    !/media\.reanalyzed/.test(mediaPanelSrc) &&
+    !/app\.refresh\(\);\s*\n\s*\} catch \(e\) \{\s*\n\s*app\.status\(app\.t\("media\.reanalyzeFailed"/.test(
+      mediaPanelSrc,
+    ),
 );
 
 const passed = results.filter((r) => r.ok).length;

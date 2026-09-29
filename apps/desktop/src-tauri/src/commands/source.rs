@@ -51,37 +51,45 @@ pub(crate) struct SourceTreeNode {
     children: Vec<SourceTreeNode>,
 }
 
+/// `scan.progress` 的载荷。
+///
+/// 扫描与**单文件重新分析**共用这一条事件（"分析时和源全量同款浮窗"就是靠复用同一族事件
+/// 达成的：前端 `taskStore` 只认事件、不认命令）。两者的差别只有两处，因此必须写在载荷里
+/// 而不是靠前端猜：`total`（扫描是文件总数，单文件分析是 0 = 总数未知 → 不定进度条）
+/// 与 `pausable`（分析没有暂停点 → 浮窗**不显示**暂停按钮，免得留一个按不动的键）。
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct ScanProgressEvent {
-    task_id: String,
-    source_id: String,
-    processed: u64,
-    total: u64,
-    phase: String,
+pub(crate) struct ScanProgressEvent {
+    pub(crate) task_id: String,
+    pub(crate) source_id: String,
+    pub(crate) processed: u64,
+    pub(crate) total: u64,
+    pub(crate) phase: String,
     /// 正在处理的条目（相对路径或目录）；遍历阶段为当前目录。
-    current: Option<String>,
+    pub(crate) current: Option<String>,
+    /// 该任务是否支持暂停/恢复（只有整源扫描支持；单文件分析为 `false`）。
+    pub(crate) pausable: bool,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct ScanCompletedEvent {
-    task_id: String,
-    source_id: String,
-    indexed: u64,
-    changed: u64,
-    missing: u64,
-    skipped: u64,
+pub(crate) struct ScanCompletedEvent {
+    pub(crate) task_id: String,
+    pub(crate) source_id: String,
+    pub(crate) indexed: u64,
+    pub(crate) changed: u64,
+    pub(crate) missing: u64,
+    pub(crate) skipped: u64,
     /// 是否被用户取消（取消不是错误，统计为已完成部分）。
-    cancelled: bool,
+    pub(crate) cancelled: bool,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct ScanErrorEvent {
-    task_id: String,
-    source_id: String,
-    error: String,
+pub(crate) struct ScanErrorEvent {
+    pub(crate) task_id: String,
+    pub(crate) source_id: String,
+    pub(crate) error: String,
 }
 
 /// 卸载进度：`phase` 见 `hp_store::PurgePhase`；`total == 0` = 总数未知（界面按不定进度显示）。
@@ -659,6 +667,8 @@ fn run_scan(
                 total: p.total,
                 phase: phase.to_string(),
                 current: p.current.clone(),
+                // 整源扫描是**唯一**支持暂停/恢复的长任务（下一个文件处理前生效）。
+                pausable: true,
             },
         );
     };

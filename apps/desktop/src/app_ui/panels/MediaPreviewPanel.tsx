@@ -42,6 +42,7 @@ import { panelSettingStorageKey, resolveSizeUnit, SETTING_KEYS } from "@hamster-
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { formatByteSize } from "../shared/format";
+import { usePanelForeground } from "../shared/panelForeground";
 import {
   useHostSettingValue,
   usePanelSettingValue,
@@ -118,6 +119,20 @@ function joinPath(base: string, rel: string): string {
   return base.endsWith(sep) ? `${base}${normalized}` : `${base}${sep}${normalized}`;
 }
 
+/**
+ * 把"每帧都会换身份"的回调收敛为**恒定引用**，好让 `ThumbCell` 的 `memo` 真正生效。
+ *
+ * 为什么需要它：`app` 上下文对象在**每次选中变化**时都会换身份，于是依赖 `app` 的
+ * `useCallback` 也全部换身份——300 个单元的 props 逐个"变了"，`memo` 形同虚设。
+ * 这里把最新实现放进 ref、对外只暴露一个恒定引用；单元只在 `selected` 真的变化时重渲。
+ * 语义与直接传原函数**完全一致**（调用时读的是最新实现，不存在闭包过期）。
+ */
+function useStableCallback<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+  const ref = useRef(fn);
+  ref.current = fn;
+  return useCallback((...args: A) => ref.current(...args), []);
+}
+
 /** 右键上下文菜单位置与目标文件。 */
 interface ContextMenuState {
   x: number;
@@ -157,6 +172,19 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
   const defaultSortDir = usePanelSettingValue(MEDIA_PANEL_ID, "sortDir", panelApi);
   // 开关型面板设置（缩略图下是否显示文件名）：读法与查看器的信息栏开关同款。
   const showFileName = usePanelSwitch(MEDIA_PANEL_ID, "showFileName", { api: panelApi });
+  /**
+   * **后台标签冻结**：面板内容被同组别的标签盖住时不渲染条目容器（下面三个分支都带这个条件）。
+   *
+   * 判据只看 `isVisible`（= 本面板是所在组的**激活标签**）；**不能**加 `isActive`
+   * ——那表示"本组也是当前聚焦的组"，用户点媒体源/相册时它会变 false，于是"点源不刷新、
+   * 非得点一下媒体预览才显示"（实测缺陷，详见 `shared/panelForeground.ts` 的说明）。
+   *
+   * dockview 会把被盖住的标签组件留在 DOM 里（本面板还被设成 `renderer: "always"`，
+   * 为的是切换 tab 不丢滚动位置），于是它会继续参与每一次选中变更的渲染、继续为离屏单元
+   * 请求缩略图与解码波形——都是用户看不到的纯浪费。冻结后这部分成本只剩工具栏那一行；
+   * 切回该标签时重新渲染（缩略图/波形都有共享缓存），滚动位置由模块级变量恢复。
+   */
+  const foreground = usePanelForeground(panelApi);
   /**
    * 体积单位制是**宿主设置**（全部设置 → 界面 → 其他设置 → 体积单位），元数据面板已在用；
    * 列表视图这里只**消费**同一份口径（`formatByteSize` + `resolveSizeUnit`），
@@ -281,7 +309,8 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [viewMode, view, app.repoId, files.length > 0]);
+    // `foreground`：后台冻结时容器不存在，切回前台后要重新挂监听并恢复滚动位置。
+  }, [viewMode, view, foreground, app.repoId, files.length > 0]);
 
   // 列表模式：恢复并跟踪滚动位置
   useEffect(() => {
@@ -293,7 +322,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [viewMode, app.repoId, files.length > 0]);
+  }, [viewMode, foreground, app.repoId, files.length > 0]);
 
   const sourceMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -322,6 +351,8 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
   /**
    * 瀑布流列数（按容器宽度与**图片尺寸**算，`ResizeObserver` 跟随面板尺寸变化）。
    * 只在瀑布流视图下测量：其余视图不需要 JS 参与布局。
+   * `foreground` 入依赖：后台冻结时容器不在 DOM 里、观察器也没跑，切回来要重新量一次
+   * （否则隐藏期间面板被调整过尺寸，列数会是旧的）。
    */
   const [masonryColumns, setMasonryColumns] = useState(1);
   useEffect(() => {
@@ -334,7 +365,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [view, viewMode, imageSize, app.repoId, items.length > 0]);
+  }, [view, viewMode, foreground, imageSize, app.repoId, items.length > 0]);
 
   /**
    * 图片尺寸以 **CSS 变量**下发（`--mp-image-size`），三种视图各自消费：
@@ -464,7 +495,6 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
     },
     [app],
   );
-
   const selectedCount = useMemo(
     () => items.reduce((n, it) => (app.selectedIds.has(it.file.id) ? n + 1 : n), 0),
     [items, app.selectedIds],
@@ -592,7 +622,14 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
     }
   }, [menu, app]);
 
-  /** 重新分析单个文件（重算哈希 / 缩略图 / 媒体信息）。 */
+  /**
+   * 重新分析单个文件（重算哈希 / 缩略图 / 媒体信息 / 调色板）。
+   *
+   * 这是**后台任务**（用户口径：与「源全量」同款浮窗）：这里只负责发起，
+   * 进度浮窗与取消按钮、以及结束后的状态文案与刷新都由 `scan.*` 事件驱动
+   * （`core/taskStore.ts`）。因此调用方**不**自己弹 "已重新分析"、也不自己 `refresh()`——
+   * 否则会出现"浮窗还没收起、状态栏先说完成了"这类两条真相对撞。
+   */
   const reanalyze = useCallback(async () => {
     if (!menu || !app.repoId) return;
     setMenu(null);
@@ -601,9 +638,8 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
         repoId: app.repoId,
         fileId: menu.file.id,
       });
-      app.status(app.t("media.reanalyzed"), "ok");
-      app.refresh();
     } catch (e) {
+      // 任务登记失败（如已有长任务在跑）才在这里报错；任务本身的失败由 scan.error 上报。
       app.status(app.t("media.reanalyzeFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   }, [menu, app]);
@@ -638,6 +674,15 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
     [app],
   );
 
+  /**
+   * 传给缩略图单元的四个回调：全部收敛为**恒定引用**，`ThumbCell` 的 `memo` 才有意义
+   * （见 `useStableCallback` 的说明——`app` 每次都换身份，直接传等于没有 memo）。
+   */
+  const cellSelect = useStableCallback(handleSelect);
+  const cellDoubleClick = useStableCallback(handleDoubleClick);
+  const cellDragStart = useStableCallback(handleDragStart);
+  const cellContextMenu = useStableCallback(handleContextMenu);
+
   const renderCell = useCallback(
     (file: FileItem, url: string) => (
       <ThumbCell
@@ -647,10 +692,10 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
         url={url}
         selected={app.selectedIds.has(file.id)}
         showName={showFileName}
-        onSelect={handleSelect}
-        onDoubleClick={() => handleDoubleClick(file)}
-        onDragStart={handleDragStart}
-        onContextMenu={handleContextMenu}
+        onSelect={cellSelect}
+        onDoubleClick={cellDoubleClick}
+        onDragStart={cellDragStart}
+        onContextMenu={cellContextMenu}
         t={app.t}
       />
     ),
@@ -659,10 +704,10 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
       app.selectedIds,
       app.t,
       showFileName,
-      handleSelect,
-      handleDoubleClick,
-      handleDragStart,
-      handleContextMenu,
+      cellSelect,
+      cellDoubleClick,
+      cellDragStart,
+      cellContextMenu,
     ],
   );
 
@@ -767,7 +812,8 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
 
       {!repoId && <span className="placeholder">{app.t("common.pleaseOpenRepo")}</span>}
 
-      {repoId && viewMode === "thumb" && view === "masonry" && (
+      {/* 三个条目容器都在**前台**才渲染（后台标签冻结，见 `foreground` 的说明）。 */}
+      {repoId && foreground && viewMode === "thumb" && view === "masonry" && (
         <div
           className="mp-masonry"
           ref={gridRef}
@@ -788,7 +834,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
         </div>
       )}
 
-      {repoId && viewMode === "thumb" && view !== "masonry" && (
+      {repoId && foreground && viewMode === "thumb" && view !== "masonry" && (
         <div
           className={`mp-grid ${mediaViewClass(view)}`}
           ref={gridRef}
@@ -805,7 +851,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
         </div>
       )}
 
-      {repoId && viewMode === "name" && (
+      {repoId && foreground && viewMode === "name" && (
         <div
           className="mp-list"
           ref={listRef}

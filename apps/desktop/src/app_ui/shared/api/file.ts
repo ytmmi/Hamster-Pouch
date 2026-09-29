@@ -79,9 +79,16 @@ export function fileTrash(args: FileTrashArgs): Promise<number> {
   }).then(unwrapApi);
 }
 
-/** 重新分析单个文件（重算哈希 / 缩略图 / 媒体信息） */
-export function fileReanalyze(args: FileReanalyzeArgs): Promise<FileItem> {
-  return invoke<ApiResponse<FileItem>>("file_reanalyze", {
+/**
+ * 重新分析单个文件（重算哈希 / 缩略图 / 媒体信息 / **调色板**）。
+ *
+ * **后台任务**（与 `sourceScan` 同款）：立即返回 `taskId`，进度浮窗、取消按钮、完成后的
+ * 状态与刷新全部由 `scan.progress` / `scan.completed` / `scan.error` 事件驱动
+ * （`core/taskStore.ts` 只认事件、不认命令）。因此调用方**不要**再自己弹状态或刷新 ——
+ * 任务结束时 `scan.completed` 的处理器会 `refresh()`。
+ */
+export function fileReanalyze(args: FileReanalyzeArgs): Promise<string> {
+  return invoke<ApiResponse<string>>("file_reanalyze", {
     repoId: args.repoId,
     fileId: args.fileId,
   }).then(unwrapApi);

@@ -8,13 +8,16 @@
 use hp_core::{HpError, HpResult, MediaType};
 use hp_media::extract_exif;
 use hp_scanner::ScanOptions;
+use hp_store::RepoDb;
 use serde::Serialize;
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::commands::shared::{
     api_async, api_from_hp, file_to_item, lock_repo, open_repo, open_repo_mut, resolve_file_path,
     AlbumFileItem, ApiAsync, ApiResponse,
 };
+use crate::commands::source::{ScanCompletedEvent, ScanErrorEvent, ScanProgressEvent};
+use crate::tasks::{TaskControl, TaskKind};
 use crate::AppState;
 
 /// 后台线程按需生成缩略图（缓存未命中时才调用；不阻塞 IPC 线程）。
@@ -319,41 +322,165 @@ pub(crate) fn file_trash(
     api_from_hp(outcome)
 }
 
-/// file.reanalyze：重新分析单个文件（重算哈希 / 缩略图 / 媒体信息）并更新索引。
+/// file.reanalyze：重新分析单个文件（重算哈希 / 缩略图 / 媒体信息 / **调色板**）并更新索引。
+///
+/// **与源扫描同款的后台任务**（用户口径 2026-09："右键分析文件，分析时要和源全量时同款弹窗"）：
+/// 命令**立即返回 `taskId`**，进度浮窗、取消按钮、完成后的状态与刷新全部复用 `scan.*` 事件族
+/// ——前端 `core/taskStore.ts` 只认事件、不认命令，因此"同款浮窗"就是"发同一族事件"。
+///
+/// 三处与整源扫描一致的约束（都抄自 `source_scan`，理由相同）：
+/// - **独立仓库库连接**（`RepoDb::open`）：不持有 `open_repo` 锁，分析大视频时界面别的命令
+///   不会排队（旧实现是同步命令 + 主连接，界面会卡住且没有任何进度）；
+/// - **单任务闸门**：已有长任务在跑时明确报错，而不是堆叠并行写；
+/// - **必定发一条终止事件**（completed / error，含 panic 收敛），否则前端浮窗永远停在原地。
 #[tauri::command]
-pub(crate) fn file_reanalyze(
+pub(crate) async fn file_reanalyze(
     repo_id: String,
     file_id: String,
-    state: State<AppState>,
-) -> ApiResponse<AlbumFileItem> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<AlbumFileItem> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
-        let file = db
-            .get_file(&file_id)?
-            .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
-        let source = db
-            .get_source(file.source_id.as_str())?
-            .ok_or_else(|| HpError::NotFound("媒体源不存在".into()))?;
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> ApiAsync<String> {
+    let outcome = (|| -> HpResult<String> {
+        let _ = repo_id;
+        let task_id = uuid::Uuid::new_v4().to_string();
+        // 登记在启动线程**之前**：任务一被外部看见就已可定位（缺陷 0003 的口径）。
+        let control = state
+            .tasks
+            .start(&task_id, TaskKind::Analyze)
+            .ok_or_else(|| {
+                HpError::AlreadyExists("已有任务正在进行中，请等待其结束或先取消。".into())
+            })?;
 
-        let options = ScanOptions {
-            full: true,
-            ffmpeg_bin: state.ffmpeg_bin.as_ref().clone(),
-            ffprobe_bin: state.ffprobe_bin.as_ref().clone(),
-            thumbnail_cache: Some((*state.thumb_cache).clone()),
-            ..ScanOptions::default()
+        let repo_path: std::path::PathBuf = match state.current_repo_path.lock() {
+            Ok(guard) => match guard.clone() {
+                Some(p) => p,
+                None => {
+                    state.tasks.finish(&task_id);
+                    return Err(HpError::NotFound("未打开仓库".into()));
+                }
+            },
+            Err(_) => {
+                state.tasks.finish(&task_id);
+                return Err(HpError::Store("仓库锁中毒".into()));
+            }
         };
-        state
-            .scanner
-            .rescan_file(db, &source, &file.relative_path, &options)?;
 
-        let updated = db
-            .get_file(&file_id)?
-            .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
-        Ok(file_to_item(updated))
+        let st = state.inner().clone();
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let emit_task_id = control.task_id().to_string();
+            // panic 也要收敛成一次事件，避免前端浮窗永久停留。
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_reanalyze(&st, &app_handle, &control, &file_id, &repo_path)
+            }));
+            match result {
+                Ok(Ok((source_id, outcome))) => {
+                    let _ = app_handle.emit(
+                        "scan.completed",
+                        ScanCompletedEvent {
+                            task_id: emit_task_id.clone(),
+                            source_id,
+                            indexed: outcome.indexed,
+                            changed: outcome.changed,
+                            missing: outcome.missing,
+                            skipped: outcome.skipped,
+                            cancelled: outcome.cancelled,
+                        },
+                    );
+                }
+                Ok(Err((source_id, error))) => {
+                    let _ = app_handle.emit(
+                        "scan.error",
+                        ScanErrorEvent {
+                            task_id: emit_task_id.clone(),
+                            source_id,
+                            error: error.to_string(),
+                        },
+                    );
+                }
+                Err(_) => {
+                    let _ = app_handle.emit(
+                        "scan.error",
+                        ScanErrorEvent {
+                            task_id: emit_task_id.clone(),
+                            source_id: String::new(),
+                            error: "分析线程异常终止".into(),
+                        },
+                    );
+                }
+            }
+            st.tasks.finish(&emit_task_id);
+        });
+
+        Ok(task_id)
     })();
-    api_from_hp(outcome)
+    api_async(api_from_hp(outcome))
+}
+
+/// 在后台线程执行单文件分析（独立连接，不占用主连接锁）。
+///
+/// **进度**只发一帧：`total = 0`（总数未知 → 浮窗按不定进度显示）+ `pausable = false`
+/// （分析没有暂停点）。这一帧的作用是让浮窗**立刻出现**并显示正在分析的文件名，
+/// 随后由 `scan.completed` 收起。
+///
+/// **取消的边界**：`cancel` 只在开工前被检查（`Scanner::rescan_file` 的入口），
+/// 一旦开始哈希/抽帧/提调色板就不可中断——与源扫描"每个文件之间检查"是同一口径，
+/// 不假装能中途停下。因此"开工后到达的取消"仍会把该文件的产物落库，事件按
+/// `cancelled: true` 上报（取消 = 已停止继续做，不是"什么都没做"）。
+fn run_reanalyze(
+    state: &AppState,
+    app: &tauri::AppHandle,
+    control: &TaskControl,
+    file_id: &str,
+    repo_path: &std::path::Path,
+) -> Result<(String, hp_scanner::ScanOutcome), (String, HpError)> {
+    let mut db = match RepoDb::open(repo_path) {
+        Ok(db) => db,
+        Err(e) => return Err((String::new(), e)),
+    };
+    let file = match db.get_file(file_id) {
+        Ok(Some(file)) => file,
+        Ok(None) => {
+            return Err((String::new(), HpError::NotFound(format!("文件不存在: {file_id}"))))
+        }
+        Err(e) => return Err((String::new(), e)),
+    };
+    // 从这里起错误都带上 source_id：终止事件需要它（浮窗/状态按源归位）。
+    let source_id = file.source_id.to_string();
+    let source = match db.get_source(file.source_id.as_str()) {
+        Ok(Some(source)) => source,
+        Ok(None) => return Err((source_id, HpError::NotFound("媒体源不存在".into()))),
+        Err(e) => return Err((source_id, e)),
+    };
+
+    let _ = app.emit(
+        "scan.progress",
+        ScanProgressEvent {
+            task_id: control.task_id().to_string(),
+            source_id: source_id.clone(),
+            processed: 0,
+            total: 0,
+            phase: "indexing".into(),
+            current: Some(file.relative_path.clone()),
+            pausable: false,
+        },
+    );
+
+    let options = ScanOptions {
+        full: true,
+        ffmpeg_bin: state.ffmpeg_bin.as_ref().clone(),
+        ffprobe_bin: state.ffprobe_bin.as_ref().clone(),
+        thumbnail_cache: Some((*state.thumb_cache).clone()),
+        ..ScanOptions::default()
+    };
+    let cancel = control.cancel_flag();
+    match state
+        .scanner
+        .rescan_file(&mut db, &source, &file.relative_path, &options, Some(&cancel))
+    {
+        Ok(outcome) => Ok((source_id, outcome)),
+        Err(e) => Err((source_id, e)),
+    }
 }
 
 /// file.reverify：重新校验单个文件（重算内容哈希与状态），返回校验状态。
@@ -383,7 +510,7 @@ pub(crate) fn file_reverify(
         };
         state
             .scanner
-            .rescan_file(db, &source, &file.relative_path, &options)?;
+            .rescan_file(db, &source, &file.relative_path, &options, None)?;
 
         let updated = db
             .get_file(&file_id)?

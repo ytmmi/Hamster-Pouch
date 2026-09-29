@@ -40,7 +40,6 @@ import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { AppContext, type AppContextValue } from "./AppContext";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { ColorPaletteWatch } from "./colorPaletteWatch";
 import { TaskOverlay } from "./TaskOverlay";
 import { bindTaskActions, startTaskEvents } from "./taskStore";
 import { requestPlayerPlay } from "./playerPlayStore";
@@ -853,8 +852,9 @@ export function AppUiApp(): JSX.Element {
             {panelDefs.length}
           </span>
         </div>
-        {/* 选中图片即按需提取调色板（D18）：与色彩参考面板是否打开/激活无关 */}
-        <ColorPaletteWatch />
+        {/* 调色板**不再**由「选中图像」触发提取（用户口径 2026-09）：它是**全面分析文件**
+            的副产品——源扫描 / 源全量重扫 / 「重新分析该文件」在 `hp_scanner` 里顺带写入
+            （`Scanner::write_palette`）。因此这里没有选中监视器，色彩参考面板只读缓存。 */}
         {/* 长任务进度浮窗 + 危险操作确认弹窗：界面居中，盖在布局/面板之上 */}
         <TaskOverlay />
         <ConfirmDialog />

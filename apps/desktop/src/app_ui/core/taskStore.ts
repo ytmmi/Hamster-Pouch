@@ -97,8 +97,9 @@ export function startTaskEvents(): () => void {
         total: p.total,
         current: p.current ?? null,
         cancellable: true,
-        // 扫描是唯一支持暂停/恢复的长任务
-        pausable: true,
+        // 暂停能力由**事件载荷**给出，不在前端写死：整源扫描可暂停/恢复，
+        // 单文件「重新分析」没有暂停点（`pausable: false` → 浮窗不显示该按钮）。
+        pausable: p.pausable,
         updatedAt: now(),
       });
     }),

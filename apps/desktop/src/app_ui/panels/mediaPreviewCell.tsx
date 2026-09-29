@@ -18,7 +18,7 @@
  * 另外两个视图不设相关规则，因此同一个变量在那里是惰性的。
  */
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import { resolveThumbUrl } from "../shared/thumbUrl";
@@ -70,8 +70,15 @@ function AudioWaveform({ url, t }: { url: string; t: Translate }): JSX.Element {
   return <canvas ref={ref} className="mp-wave" />;
 }
 
-/** 缩略图单元。 */
-export function ThumbCell({
+/**
+ * 缩略图单元。
+ *
+ * **用 `memo` 包住**：一屏可能有 300 个单元，而"选中项变化"是最高频的交互——不 memo 的话
+ * 每点一下就重渲 300 个组件。要让 memo 真正生效，**父级传下来的 props 必须稳定**：
+ * 面板侧把回调收敛为恒定引用（`useStableCallback`），`file` 来自稳定的 memo 列表，
+ * 于是选中变化只重渲 `selected` 真的变了的那一两格。
+ */
+export const ThumbCell = memo(function ThumbCell({
   file,
   repoId,
   url,
@@ -90,7 +97,8 @@ export function ThumbCell({
   /** 是否显示缩略图下的文件名（面板设置 `showFileName`；关掉就只剩图，行更干净）。 */
   showName: boolean;
   onSelect: (file: FileItem, mods: { shift: boolean; ctrl: boolean }) => void;
-  onDoubleClick: () => void;
+  /** 双击：**以文件为参数**（由单元内部传回），这样父级可以传一个恒定引用的回调。 */
+  onDoubleClick: (file: FileItem) => void;
   /** 拖拽起始：父级负责写入 dataTransfer 载荷并按需更新选中集。 */
   onDragStart: (file: FileItem, e: DragEvent) => void;
   /** 右键菜单：父级负责定位、选中和渲染菜单。 */
@@ -152,7 +160,7 @@ export function ThumbCell({
       onClick={(e) =>
         onSelect(file, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })
       }
-      onDoubleClick={onDoubleClick}
+      onDoubleClick={() => onDoubleClick(file)}
       onDragStart={(e) => onDragStart(file, e)}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -193,4 +201,4 @@ export function ThumbCell({
       {showName && <span className="mp-name">{fileName(file.relative_path)}</span>}
     </button>
   );
-}
+});

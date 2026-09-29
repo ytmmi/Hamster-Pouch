@@ -327,23 +327,25 @@ check(
 //
 // 与查看器同一套闭环：**声明**（注册表）↔ **取值域**（声明候选 ↔ 面板纯函数逐项一致）↔
 // **归一化**（非法取值回落缺省）↔ **面板消费**（真的按设置格式化 + 复制同一份文本）。
-// 另外断言「点击图像即按需提取调色板」这条**应用级**行为确实挂在装配层（而不是面板里——
-// 面板是后台标签时并未挂载，挂在那里就不会"点击即提取"），以及同一文件的并发去重。
+//
+// **调色板提取的归属（用户口径 2026-09）**：面板**只读缓存**，提取不再是界面行为——
+// 它是"**全面分析文件**"（源扫描 / 源全量重扫 / 右键「重新分析该文件」）的副产品，
+// 落在 `hp_scanner::Scanner::write_palette`（两个 `MediaType::Image` 分支共用）。
+// 因此这一段的断言从"点击即提取的装配层行为"改成"分析路径顺带提取 + 面板只读"。
 
 const colorPanelSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/ColorPanel.tsx"),
   "utf8",
 );
-const colorPaletteWatchSrc = readFileSync(
-  join(ROOT, "apps/desktop/src/app_ui/core/colorPaletteWatch.tsx"),
-  "utf8",
-);
-const colorPaletteSrc = readFileSync(
-  join(ROOT, "apps/desktop/src/app_ui/shared/colorPalette.ts"),
-  "utf8",
-);
+const colorPaletteWatchPath = join(ROOT, "apps/desktop/src/app_ui/core/colorPaletteWatch.tsx");
+const colorPalettePath = join(ROOT, "apps/desktop/src/app_ui/shared/colorPalette.ts");
 const appUiAppSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/core/AppUiApp.tsx"),
+  "utf8",
+);
+const scannerPaletteSrc = readFileSync(join(ROOT, "crates/hp-scanner/src/scanner.rs"), "utf8");
+const colorCommandSrc = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/color.rs"),
   "utf8",
 );
 const colorValue = await import(
@@ -408,25 +410,47 @@ check(
     /\.color-copy-icon[\s\S]{0,200}mask-size: contain/.test(stylesSource),
 );
 check(
-  "点击图像即按需提取调色板：监视器挂在装配层，缺失才请求提取且**只保留最新一次**（短延迟 + 单飞）",
-  /<ColorPaletteWatch \/>/.test(appUiAppSrc) &&
-    /requestPaletteExtraction\(/.test(colorPaletteWatchSrc) &&
-    /media_type === "image"/.test(colorPaletteWatchSrc) &&
-    /colorExtract\(/.test(colorPaletteSrc) &&
-    // 节流 + 去重都在共享入口里（否则快速连续选中会把全应用唯一的仓库锁排满）。
-    /PALETTE_REQUEST_DELAY_MS/.test(colorPaletteSrc) &&
-    /pending = \{ repoId, fileId \};/.test(colorPaletteSrc) &&
-    /if \(draining\) return;/.test(colorPaletteSrc) &&
-    // 面板装载时再自检一次（覆盖上次提取失败/刚重启），与监视器共用同一个入口。
-    /requestPaletteExtraction\(repoId, fileId\)/.test(colorPanelSrc),
+  "调色板**不再由界面触发提取**：点击即提取的装配层监视器与请求入口都已移除，面板只读缓存",
+  // 三个"曾经的入口"都不该回来：监视器文件、请求模块、装配层挂载点。
+  !existsSync(colorPaletteWatchPath) &&
+    !existsSync(colorPalettePath) &&
+    !/<ColorPaletteWatch/.test(appUiAppSrc) &&
+    !/requestPaletteExtraction/.test(colorPanelSrc) &&
+    // 面板只读：一次 `color.get` + 纯函数解析；**不是**提取命令。
+    /parsePaletteJson\(await api\.colorGet\(\{ repoId, fileId \}\)\)/.test(colorPanelSrc) &&
+    !/colorExtract/.test(colorPanelSrc) &&
+    // 缺调色板时给"怎么拿到它"的提示（而不是让用户以为面板坏了）。
+    /app\.t\("color\.empty"\)/.test(colorPanelSrc),
+);
+check(
+  "提取绑定在**全面分析**上：扫描/重新分析都顺带写调色板，且**不覆盖手动锁定**的色值",
+  // 落点：两个图片分支共用同一个私有方法（`index_new` 与 `index_existing` 各调用一次）。
+  /fn write_palette\(&self, db: &mut RepoDb, file_id: &str, path: &Path\)/.test(scannerPaletteSrc) &&
+    (scannerPaletteSrc.match(/self\.write_palette\(db, /g) ?? []).length >= 2 &&
+    // JSON 形态只有一份实现（`version` 是缓存自愈的开关，不能少写）。
+    /encode_palette_json\(&palette\.colors\)/.test(scannerPaletteSrc) &&
+    // 写入前的一道闸：`locked:true` 是用户的判定权，重扫不得抹掉。
+    /if palette_is_locked\(&existing\.color_json\) \{\s*\n\s*return;/.test(scannerPaletteSrc) &&
+    // 两条触发链路：`file.reanalyze` → `scanner.rescan_file`；源全量 → `options.full` 强制重算。
+    // （`file.reanalyze` 自 2026-09 起是**后台任务**：带上任务的取消标志，见 `check:commands`
+    //  的"单文件分析 = 与源扫描同款的后台任务"那组断言。）
+    /\.scanner\s*\n?\s*\.rescan_file\(&mut db, &source, &file\.relative_path, &options, Some\(&cancel\)\)/.test(
+      readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"), "utf8"),
+    ) &&
+    /let changed = options\.full \|\| row\.size != size \|\| row\.mtime != mtime;/.test(
+      scannerPaletteSrc,
+    ) &&
+    // 按需命令保留（契约不变），但已无界面调用方：UI 只走分析路径。
+    /db\.upsert_color_ref\(file_id, &encode_palette_json\(&palette\.colors\)\)\?;/.test(
+      colorCommandSrc,
+    ) &&
+    !/colorExtract|color_extract\(/.test(appUiAppSrc) &&
+    !/requestPaletteExtraction/.test(appUiAppSrc),
 );
 
 // 调色板本身：规模（8 色）、缓存格式版本（旧缓存自愈）与面板内的排布。
+// （`colorCommandSrc` 在本节开头已经读过：上面的"提取绑定在全面分析上"用它断言写入路径。）
 const paletteRsSrc = readFileSync(join(ROOT, "crates/hp-media/src/palette.rs"), "utf8");
-const colorCommandSrc = readFileSync(
-  join(ROOT, "apps/desktop/src-tauri/src/commands/color.rs"),
-  "utf8",
-);
 const paletteJson = await import(
   pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/paletteJson.ts")).href
 );
@@ -442,11 +466,18 @@ check(
   `DEFAULT_PALETTE_SIZE=${rustPaletteSize}`,
 );
 check(
-  "调色板缓存的格式版本 TS ↔ Rust 相等，且提取命令真的把 `version` 写进 `color_json`",
+  "调色板缓存的格式版本 TS ↔ Rust 相等，且**唯一编解码处**真的把 `version` 写进 `color_json`",
   rustPaletteVersion > 0 &&
     rustPaletteVersion === paletteJson.PALETTE_FORMAT_VERSION &&
-    /PALETTE_FORMAT_VERSION/.test(colorCommandSrc) &&
-    /"version"/.test(colorCommandSrc),
+    // JSON 形态只有一处实现（`hp_media::encode_palette_json`）：两个写入方（分析路径与
+    // 按需命令）都必须走它——谁自己拼串就可能漏写 `version`，前端会把缓存当"未提取"反复重算。
+    /pub fn encode_palette_json\(colors: &\[String\]\) -> String \{[\s\S]{0,200}?"version": PALETTE_FORMAT_VERSION/.test(
+      paletteRsSrc,
+    ) &&
+    /encode_palette_json/.test(scannerPaletteSrc) &&
+    /encode_palette_json/.test(colorCommandSrc) &&
+    // 反向：谁都不许再手写一份 `color_json`（旧的命令实现就是手拼的）。
+    !/"version": PALETTE_FORMAT_VERSION,\s*\n\s*"colors"/.test(colorCommandSrc),
   `rust=${rustPaletteVersion} ts=${paletteJson.PALETTE_FORMAT_VERSION}`,
 );
 check(
@@ -495,6 +526,11 @@ const mediaCellSrc = readFileSync(
 );
 const mediaDropdownSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewDropdown.tsx"),
+  "utf8",
+);
+// 后台冻结的判据（共享钩子）：面板不可见时不该继续干活。
+const panelForegroundSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/panelForeground.ts"),
   "utf8",
 );
 const mediaView = await import(
@@ -717,8 +753,50 @@ const contextMenuForDropdownSrc = readFileSync(
   "utf8",
 );
 check(
-  "两个下拉复用 portal 的 `ContextMenu`，且「点外部关闭」**同时排除按钮与弹出层**",
-  // 弹出层由 `ContextMenu` portal 到 `document.body`：它的 DOM **不在按钮里**，
+  "媒体预览在**后台标签时冻结**：三个条目容器都要求 `foreground`，滚动/列数测量在前台变化后重跑",
+  /import \{ usePanelForeground \} from "\.\.\/shared\/panelForeground";/.test(mediaPanelSrc) &&
+    /const foreground = usePanelForeground\(panelApi\);/.test(mediaPanelSrc) &&
+    (mediaPanelSrc.match(/repoId && foreground && viewMode ===/g) ?? []).length === 3 &&
+    // 冻结时容器不在 DOM 里：滚动恢复与瀑布流测量必须跟着前台变化重跑一次。
+    /\}, \[viewMode, view, foreground, app\.repoId, files\.length > 0\]\);/.test(mediaPanelSrc) &&
+    /\}, \[view, viewMode, foreground, imageSize, app\.repoId, items\.length > 0\]\);/.test(
+      mediaPanelSrc,
+    ),
+);
+check(
+  "冻结判据只用 `isVisible`（不得掺 `isActive`：那会让「点别的面板就冻住」复发），且失败方向选「先渲染」",
+  // `isActive` 表示"本组也是当前聚焦组"：用户点媒体源/相册时它会变 false，
+  // 而本面板仍在显示——用 `isVisible && isActive` 当判据就会出现"点源不刷新、点一下才显示"。
+  /const sync = \(\) => setForeground\(Boolean\(panelApi\.isVisible\)\);/.test(
+    panelForegroundSrc,
+  ) &&
+    !/isVisible\s*&&\s*panelApi\.isActive/.test(panelForegroundSrc) &&
+    !/onDidActiveChange/.test(panelForegroundSrc) &&
+    /panelApi\.onDidVisibilityChange\(sync\)/.test(panelForegroundSrc) &&
+    // 首帧乐观 + 无 API 不冻结：判断"不在显示"而误会让面板空白，宁可多渲染一次。
+    /const \[foreground, setForeground\] = useState\(true\);/.test(panelForegroundSrc) &&
+    /if \(!panelApi\) return;/.test(panelForegroundSrc),
+);
+// `renderCell` 的实现块：`ThumbCell` 的 props 必须全是稳定引用（列表视图的行走另一条路径，
+// 那几行不是 memo 的受益者，不在此约束内）。
+const renderCellSrc = (
+  mediaPanelSrc.match(/const renderCell = useCallback\([\s\S]*?\n  \);/) || [""]
+)[0];
+check(
+  "缩略图单元 `memo` 的前提被钉住：回调恒定引用 + 双击以文件为参数（不再逐格新建闭包）",
+  /export const ThumbCell = memo\(function ThumbCell\(/.test(mediaCellSrc) &&
+    /onDoubleClick: \(file: FileItem\) => void;/.test(mediaCellSrc) &&
+    /onDoubleClick=\{\(\) => onDoubleClick\(file\)\}/.test(mediaCellSrc) &&
+    /function useStableCallback<A extends unknown\[\], R>/.test(mediaPanelSrc) &&
+    /const cellSelect = useStableCallback\(handleSelect\);/.test(mediaPanelSrc) &&
+    /onSelect=\{cellSelect\}/.test(renderCellSrc) &&
+    /onDoubleClick=\{cellDoubleClick\}/.test(renderCellSrc) &&
+    // 反向：`ThumbCell` 的 props 里不许再出现逐格新建的箭头函数（那会让 memo 完全失效）。
+    !/=\(\) =>/.test(renderCellSrc) &&
+    !/onDoubleClick=\{\(\) =>/.test(renderCellSrc),
+);
+check(
+  "两个下拉复用 portal 的 `ContextMenu`，且「点外部关闭」**同时排除按钮与弹出层**",  // 弹出层由 `ContextMenu` portal 到 `document.body`：它的 DOM **不在按钮里**，
   // 只排除按钮的话，按在选项上的 mousedown 会先关掉下拉、卸载弹出层，
   // 选项的 click 永远不会发生（"下拉能开、选什么都没反应"）。
   /<ContextMenu x=\{anchor\.x\} y=\{anchor\.y\}>/.test(mediaDropdownSrc) &&

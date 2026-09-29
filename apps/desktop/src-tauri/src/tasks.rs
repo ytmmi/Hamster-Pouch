@@ -17,10 +17,13 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-/// 长任务种类。能力不同：**只有扫描支持暂停/恢复**（完全卸载的清理循环没有暂停点）。
+/// 长任务种类。能力不同：**只有扫描支持暂停/恢复**（完全卸载的清理循环与单文件分析都没有暂停点）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskKind {
     Scan,
+    /// 单文件「重新分析」（`file.reanalyze`）：与扫描同源（`Scanner::rescan_file`）、有进度浮窗与取消，
+    /// 但**没有暂停点**（一个文件的哈希/抽帧/调色板是一口气做完的）。
+    Analyze,
     Unmount,
 }
 
@@ -29,6 +32,7 @@ impl TaskKind {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             TaskKind::Scan => "scan",
+            TaskKind::Analyze => "analyze",
             TaskKind::Unmount => "unmount",
         }
     }
@@ -310,8 +314,35 @@ mod tests {
     #[test]
     fn kind_strings_are_stable() {
         assert_eq!(TaskKind::Scan.as_str(), "scan");
+        assert_eq!(TaskKind::Analyze.as_str(), "analyze");
         assert_eq!(TaskKind::Unmount.as_str(), "unmount");
         assert!(TaskKind::Scan.is_pausable());
+        // 单文件分析没有暂停点（一口气做完），只有扫描可暂停。
+        assert!(!TaskKind::Analyze.is_pausable());
         assert!(!TaskKind::Unmount.is_pausable());
+    }
+
+    /// 单文件分析也有取消（`task.cancel` 命中即受理），只是不可暂停。
+    #[test]
+    fn analyze_task_supports_cancel_but_not_pause() {
+        let registry = TaskRegistry::new();
+        let task = registry
+            .start("analyze-1", TaskKind::Analyze)
+            .expect("应能登记");
+
+        assert_eq!(
+            registry.request_pause("analyze-1"),
+            RequestOutcome::Unsupported {
+                kind: TaskKind::Analyze
+            },
+            "分析任务必须明确报 Unsupported，而不是假装可暂停"
+        );
+        assert_eq!(
+            registry.request_cancel("analyze-1"),
+            RequestOutcome::Accepted {
+                kind: TaskKind::Analyze
+            }
+        );
+        assert!(task.is_cancelled());
     }
 }

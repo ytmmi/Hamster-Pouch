@@ -4,7 +4,7 @@
 //! `{ ok, data?, error? }`；`color.extract` 是异步命令，用 [`ApiAsync`]。
 
 use hp_core::{HpError, HpResult, MediaType};
-use hp_media::{extract_palette, PALETTE_FORMAT_VERSION};
+use hp_media::{encode_palette_json, extract_palette};
 use serde::Serialize;
 use tauri::{Emitter, State};
 
@@ -109,15 +109,14 @@ fn run_color_extract(state: &AppState, file_id: &str) -> HpResult<hp_media::Pale
     }
     let path = resolve_file_path(db, &file)?;
     let palette = extract_palette(&path, 0)?;
-    // `version` 是**缓存自愈**的开关：`PALETTE_FORMAT_VERSION` 变化后，前端会把旧缓存当作
-    // "未提取"并自动重算（色板规模 6 → 8 就是一次这样的变化）。落库时**保留 `locked:false`**
-    // 语义不变——手动锁定的色值由 `color.set` 写入且 `locked:true`，本命令不覆盖它的判定权。
-    let color_json = serde_json::json!({
-        "version": PALETTE_FORMAT_VERSION,
-        "colors": palette.colors.clone(),
-        "locked": false,
-    })
-    .to_string();
-    db.upsert_color_ref(file_id, &color_json)?;
+    // JSON 形态只有一份实现（`hp_media::encode_palette_json`）：`version` 必须写进去
+    // ——它是**缓存自愈**的开关，`PALETTE_FORMAT_VERSION` 变化后前端会把旧缓存当作
+    // "未提取"并自动重算（色板规模 6 → 8 就是一次这样的变化）。`locked:false` 的语义不变：
+    // 手动锁定的色值由 `color.set` 写入且 `locked:true`，本命令不覆盖它的判定权。
+    //
+    // **注意**：本命令（`color.extract`）自 2026-09 起**已无界面调用方**——调色板改由
+    // "全面分析"（源扫描 / 源全量重扫 / `file.reanalyze`）顺带提取，见
+    // `hp_scanner::Scanner::write_palette`。命令与契约保留（能力仍在，插件/将来的入口可用）。
+    db.upsert_color_ref(file_id, &encode_palette_json(&palette.colors))?;
     Ok(palette)
 }

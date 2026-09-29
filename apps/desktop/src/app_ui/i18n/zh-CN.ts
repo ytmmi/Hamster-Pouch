@@ -256,7 +256,6 @@ export const zhCN = {
   "media.renamed": "已重命名",
   "media.pathCopied": "已复制路径",
   "media.pathCopyFailed": "复制路径失败：{err}",
-  "media.reanalyzed": "已重新分析",
   "media.reanalyzeFailed": "重新分析失败：{err}",
   "media.waveUnavailable": "波形不可用",
   "media.noPath": "无路径",
@@ -308,7 +307,7 @@ export const zhCN = {
 
   // 色彩参考
   "color.imageOnly": "色彩参考仅支持图片",
-  "color.empty": "无调色板",
+  "color.empty": "无调色板（右键「重新分析该文件」或全量重扫源即可提取）",
   "color.extractFailed": "调色板提取失败",
   "color.copy": "复制色值",
   "color.copied": "已复制 {value}",

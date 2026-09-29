@@ -247,7 +247,6 @@ export const en: Record<keyof DictZhCN, string> = {
   "media.renamed": "Renamed",
   "media.pathCopied": "Path copied",
   "media.pathCopyFailed": "Failed to copy path: {err}",
-  "media.reanalyzed": "Re-analyzed",
   "media.reanalyzeFailed": "Failed to re-analyze: {err}",
   "media.waveUnavailable": "Waveform unavailable",
   "media.noPath": "No path",
@@ -297,7 +296,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "player.settings.autoPauseOnTabSwitch": "Pause video when switching tabs",
 
   "color.imageOnly": "Color reference supports images only",
-  "color.empty": "No palette",
+  "color.empty": "No palette (right-click \"Re-analyze this file\", or rescan the source in full)",
   "color.extractFailed": "Palette extraction failed",
   "color.copy": "Copy color value",
   "color.copied": "Copied {value}",
