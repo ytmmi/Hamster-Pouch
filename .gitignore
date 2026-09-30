@@ -72,8 +72,11 @@ ehthumbs.db
 logs/
 
 # === tag 词库数据管线 ===
-# 下载的对照表缓存（ffdkj 每日更新，约 38MB）与生成的词库产物不提交 git
-tools/tagdict/data/
+# 下载的对照表缓存（ffdkj 每日更新，约 38MB）与生成的词库产物不提交 git。
+# 注意：data/ 下还有**手写种子**（lib2_relations.json / lib2_games.json），
+# 它们是源文件、必须入库；因此只忽略两个下载来的大表，不忽略整个 data/。
+tools/tagdict/data/danbooru_tags.sqlite
+tools/tagdict/data/pixiv_tags.sqlite
 tools/tagdict/output/
 
 # === 外部 CLI：体积过大，不入库，自行下载 ===

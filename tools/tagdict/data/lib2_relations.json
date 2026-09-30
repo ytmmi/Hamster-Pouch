@@ -1,0 +1,55 @@
+{
+  "_note": "库 2 关系映射的人工内置种子（RFC 0008 / D34）。用户给出的 VOCALOID 与风格示例树。kind 是消歧提示：同名概念可能存在于多个 kind（如 VOCALOID 同时是 work/character/general），关系必须挂到指定 kind 的概念上。aliases 为人工补充的别名（如 平涂/薄涂）。节点若在管线产物中不存在，则由构建脚本以 source=manual 新建概念。",
+  "_schema": "taglib-lib2-seed/v1",
+  "tree": [
+    {
+      "name": "VOCALOID",
+      "kind": "work",
+      "children": [
+        {
+          "name": "初音未来",
+          "kind": "character",
+          "children": [
+            { "name": "雪未来", "kind": "character" },
+            { "name": "樱未来", "kind": "character" },
+            { "name": "fufu", "kind": "character" }
+          ]
+        },
+        { "name": "镜音铃", "kind": "character" },
+        { "name": "镜音连", "kind": "character" },
+        { "name": "巡音流歌", "kind": "character" }
+      ]
+    },
+    {
+      "name": "风格",
+      "kind": "general",
+      "children": [
+        {
+          "name": "二次元",
+          "kind": "general",
+          "children": [
+            {
+              "name": "技法",
+              "kind": "general",
+              "children": [
+                { "name": "赛璐珞", "kind": "general" },
+                { "name": "平涂", "kind": "general", "aliases": ["薄涂"] },
+                { "name": "厚涂", "kind": "general" },
+                { "name": "伪厚涂", "kind": "general", "aliases": ["半厚涂"] }
+              ]
+            },
+            {
+              "name": "视觉",
+              "kind": "general",
+              "children": [
+                { "name": "Q版", "kind": "general" },
+                { "name": "写实", "kind": "general" },
+                { "name": "线条", "kind": "general" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

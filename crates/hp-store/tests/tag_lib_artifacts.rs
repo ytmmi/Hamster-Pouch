@@ -47,6 +47,12 @@ fn split_libs() -> Vec<PathBuf> {
     v
 }
 
+/// 游戏关系包（`build_game_relations.py` 产物）。
+fn games_lib() -> Option<PathBuf> {
+    let p = repo_root().join("tools/tagdict/output/tag_lib_games.sqlite");
+    p.is_file().then_some(p)
+}
+
 /// 内置基底库能被只读打开，且用户示例六种写法命中同一 work 概念（D37）。
 #[test]
 fn base_lib_opens_and_resolves_user_example() {
@@ -257,6 +263,95 @@ fn merge_index_scale_is_sane() {
     assert!(
         dup > 1_000,
         "归并索引应捕获上千条 ID 不同的重复概念，实际 {dup}（口径可能变化，请核对管线）"
+    );
+}
+
+/// **关系映射库-游戏**：游戏 → 角色的层级关系可读，且多语言按算法匹配。
+///
+/// 用户要求：① 关系库只展示关系、不区分作品；② 一个角色可有多个作品
+/// （多父级 DAG，D34）；③ 只实现一个语言，软件内用算法匹配多语言。
+#[test]
+fn games_extension_relations_and_multilingual_match() {
+    let Some(path) = games_lib() else {
+        eprintln!("跳过：未找到 tag_lib_games.sqlite（先运行 build_game_relations.py）");
+        return;
+    };
+    let mut set = TagLibSet::new();
+    set.add(TagLibDb::open_readonly(&path, LibLayer::Extension).expect("只读打开游戏关系包"));
+
+    // ---- 关系树可读：游戏是上级，角色是下级 ----
+    let nodes = set.relation_nodes().expect("构建参考树");
+    assert!(!nodes.is_empty(), "游戏关系包应含关系树");
+
+    // 找一个游戏节点（有子级的 work）
+    let game = nodes
+        .iter()
+        .find(|n| n.kind == hp_core::TagKind::Work && !n.children.is_empty())
+        .expect("应有带角色的游戏节点");
+    assert!(
+        game.children.len() > 10,
+        "游戏 {} 应有多个角色，实际 {}",
+        game.display_name,
+        game.children.len()
+    );
+
+    // ---- 多语言算法匹配：同一角色的 zh / en 名命中同一 tag ----
+    // 「甘雨」是原神角色，en 标准名为 `Ganyu`
+    let zh = set.find("甘雨", 10).expect("查询 zh");
+    let en = set.find("Ganyu", 10).expect("查询 en");
+    assert!(!zh.is_empty(), "「甘雨」应有命中");
+    assert!(!en.is_empty(), "「Ganyu」应有命中");
+    assert_eq!(
+        zh[0].concept.id, en[0].concept.id,
+        "同一角色的 zh/en 名应命中同一 tag（软件内算法匹配多语言）"
+    );
+
+    // ---- 关系库只展示关系、不区分作品：多父级角色应能挂多个游戏 ----
+    // 统计被挂到 >=2 个游戏下的角色（多作品角色，D34 多父级 DAG）
+    let mut parent_count: std::collections::HashMap<String, usize> = Default::default();
+    for n in &nodes {
+        for c in &n.children {
+            *parent_count.entry(c.clone()).or_default() += 1;
+        }
+    }
+    let multi = parent_count.values().filter(|&&v| v >= 2).count();
+    assert!(
+        multi > 0,
+        "应存在多作品角色（一个角色挂多个游戏父级）；实测口径约 82 个"
+    );
+
+    // ---- 角色名不带括号后缀（作品归属由关系边表达）----
+    for n in nodes.iter().filter(|n| n.kind == hp_core::TagKind::Character).take(50) {
+        assert!(
+            !n.display_name.contains('（') && !n.display_name.contains('('),
+            "角色展示名不应带括号后缀，实际 {}",
+            n.display_name
+        );
+    }
+
+    // ---- 日常简称别名（用户场景）----
+    // 「爱丽丝」是两个不同角色的简称：绝区零的「爱丽丝·泰姆菲尔德」与
+    // 蔚蓝档案的「天童爱丽丝」。简称必须**同时命中两者**（歧义由 AND 筛选解决）。
+    let alice = set.find("爱丽丝", 50).expect("查询简称");
+    let alice_ids: Vec<&str> = alice.iter().map(|d| d.concept.id.as_str()).collect();
+    assert!(
+        alice_ids.len() >= 2,
+        "「爱丽丝」应命中多个角色（简称歧义），实际 {}",
+        alice_ids.len()
+    );
+
+    // 两个具体角色都应被命中，且各自带自己的作品关系
+    let mut found_games: Vec<String> = Vec::new();
+    for d in &alice {
+        let (_, children) = set.relations_of(&d.concept.id).unwrap();
+        let (parents, _) = set.relations_of(&d.concept.id).unwrap();
+        if children.is_empty() && !parents.is_empty() {
+            found_games.push(d.concept.id.clone());
+        }
+    }
+    assert!(
+        !found_games.is_empty(),
+        "简称命中的角色应带作品关系边（游戏为父级）"
     );
 }
 

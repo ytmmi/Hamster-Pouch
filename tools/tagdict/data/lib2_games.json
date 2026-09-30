@@ -1,0 +1,70 @@
+{
+  "_note": "关系映射库-游戏（RFC 0008 库 2）的人工种子。只声明**游戏（原作）概念**与用于匹配角色的**后缀别名**；角色由构建脚本按多信号匹配后自动挂到游戏之下。用户要求：可以只实现一个语言，软件内用算法匹配多语言——因此这里只写中文游戏名 + 匹配信号，多语言由 tag_name 已有的 zh/ja/en 标准名承担。",
+  "_schema": "taglib-lib2-games/v1",
+  "_match_signals": [
+    "1. danbooru 来源写法的 _(后缀) 约定：如 `ganyu_(genshin_impact)` → 原神",
+    "2. 中文括号后缀：如 `甘雨（原神）` → 原神",
+    "3. tag_character.work_tag_id 已有的启发式归属（构建期按无歧义规则写入）"
+  ],
+  "_character_aliases_note": "角色日常简称（无法自动推断的显式声明）。简称天然有歧义——「爱丽丝」同时指绝区零的「爱丽丝·泰姆菲尔德」与蔚蓝档案的「天童爱丽丝」，因此简称登记为 alias（可被多个概念共享），不占用每语言唯一的 standard。搜简称会命中多个角色，靠 AND 按作品筛选收窄。键=角色中文标准名，值=该角色的简称列表。",
+  "character_aliases": {
+    "爱丽丝·泰姆菲尔德": ["爱丽丝"],
+    "天童爱丽丝": ["爱丽丝"]
+  },
+  "games": [
+    {
+      "name": "原神",
+      "kind": "work",
+      "suffixes": ["genshin_impact", "genshin impact", "原神"],
+      "medium": "game"
+    },
+    {
+      "name": "碧蓝航线",
+      "kind": "work",
+      "suffixes": ["azur_lane", "azur lane", "アズールレーン", "碧蓝航线", "碧藍航線"],
+      "medium": "game"
+    },
+    {
+      "name": "碧蓝档案",
+      "kind": "work",
+      "suffixes": ["blue_archive", "blue archive", "ブルーアーカイブ", "ブルアカ", "蔚蓝档案", "碧蓝档案", "碧藍檔案", "蔚藍檔案"],
+      "medium": "game"
+    },
+    {
+      "name": "明日方舟",
+      "kind": "work",
+      "suffixes": ["arknights", "アークナイツ", "明日方舟"],
+      "medium": "game"
+    },
+    {
+      "name": "异环",
+      "kind": "work",
+      "suffixes": ["异环", "異環", "ananta"],
+      "medium": "game"
+    },
+    {
+      "name": "鸣潮",
+      "kind": "work",
+      "suffixes": ["wuthering_waves", "wuthering waves", "鳴潮", "鸣潮", "wuwa"],
+      "medium": "game"
+    },
+    {
+      "name": "绝区零",
+      "kind": "work",
+      "suffixes": ["zenless_zone_zero", "zenless zone zero", "ゼンレスゾーンゼロ", "ゼンゼロ", "绝区零", "絕區零"],
+      "medium": "game"
+    },
+    {
+      "name": "崩坏3",
+      "kind": "work",
+      "suffixes": ["honkai_impact", "honkai impact 3", "honkai impact 3rd", "崩壊3rd", "崩坏3", "崩坏3rd", "崩坏三"],
+      "medium": "game"
+    },
+    {
+      "name": "崩坏：星穹铁道",
+      "kind": "work",
+      "suffixes": ["honkai:_star_rail", "honkai_star_rail", "honkai: star rail", "崩壊:スターレイル", "崩坏星穹铁道", "崩坏:星穹铁道", "星穹铁道", "スタレ", "崩スタ"],
+      "medium": "game"
+    }
+  ]
+}
