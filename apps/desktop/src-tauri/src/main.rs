@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use hp_ai::AiTaggingService;
 use hp_media::{MediaProcess, ThumbnailCache};
+use hp_plugin_host::SupervisionRegistry;
 use hp_scanner::Scanner;
 use hp_store::{GlobalDb, RepoDb};
 use tauri::Manager;
@@ -52,6 +53,8 @@ pub(crate) struct AppState {
     pub(crate) plugin_root: Arc<PathBuf>,
     /// 面板控件 schema 缓存，键 `(plugin_id, panel_id, plugin_version)`（D61）。
     pub(crate) panel_schema_cache: Arc<Mutex<hp_plugin_host::PanelSchemaCache>>,
+    /// external-process 进程监督注册表（重启退避 + 不健康标记，D40）。
+    pub(crate) supervision: Arc<Mutex<SupervisionRegistry>>,
     /// AI 打标任务队列（内存，D6/D17）。
     pub(crate) ai: Arc<Mutex<AiTaggingService>>,
 }
