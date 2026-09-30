@@ -21,7 +21,7 @@ import { pathToFileURL } from "node:url";
 const ROOT = "E:/Hamster Pouch";
 const REPO = "repo-check";
 const defaultDb =
-  "C:/Users/wxlxt/AppData/Roaming/dev.hamsterpouch.desktop/repos/00c37ce8-8464-4808-8c51-c9af38e86516.sqlite3";
+  "E:/Hamster Pouch/apps/desktop/src-tauri/target/release/data/user/repos/00c37ce8-8464-4808-8c51-c9af38e86516.sqlite3";
 const sourceDb = process.argv[2] ?? defaultDb;
 
 const { loadActiveBlueprint } = await import(

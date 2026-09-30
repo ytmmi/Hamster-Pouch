@@ -21,8 +21,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 const DEFAULT_DB = join(
-  process.env.APPDATA ?? "",
-  "dev.hamsterpouch.desktop",
+  "E:/Hamster Pouch/apps/desktop/src-tauri/target/release/data/system",
   "hamster-pouch-global.sqlite3",
 );
 const dbPath = process.argv[2] ?? DEFAULT_DB;
