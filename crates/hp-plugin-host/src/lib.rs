@@ -6,6 +6,7 @@ mod channel;
 mod host;
 mod install;
 mod manifest;
+mod supervision;
 mod trust;
 
 pub use channel::{
@@ -19,4 +20,7 @@ pub use host::{
 };
 pub use install::{InstallSource, InstalledPackage, PluginInstaller};
 pub use manifest::{discover_packages, parse_manifest, read_package, PluginPackage, MANIFEST_FILE};
+pub use supervision::{
+    ProcessSupervisor, SupervisionRegistry, SupervisionStatus, MAX_CONSECUTIVE_FAILURES,
+};
 pub use trust::{can_elevate, effective_trust, HostSourceKind};
