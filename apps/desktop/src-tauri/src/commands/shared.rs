@@ -109,7 +109,7 @@ pub(crate) fn api_async<T>(response: ApiResponse<T>) -> ApiAsync<T> {
 /// 全部数据集中在这里，按三类区分（2026-09 用户裁定）：
 /// - **系统数据库**：`data\system\`——全局配置库（`hamster-pouch-global.sqlite3`）与内置
 ///   tag 库（RFC 0008 四库，内置基底 `data\system\tag_lib_base.sqlite3`，
-///   完整词库为按需安装的 `plugins-dist/taglib-*` 扩展包）；
+///   完整词库为按需安装的 `plugins-dist/tagdict-*` / `tagrel-*` 扩展包，D36.5）；
 ///   应用自身数据，随版本/可重建。
 /// - **用户数据库**：`data\user\repos\`——每仓库一个库，用户 tag / 评分 / 相册等，需备份。
 /// - **插件扩展**：`data\plugins\`——插件包安装目录；插件自持的扩展数据库落在各自
@@ -202,13 +202,16 @@ pub(crate) fn build_tag_lib_set(plugin_root: &std::path::Path) -> Option<hp_stor
 /// 两类都是**同构四库 schema**，装配方式完全相同——都进聚合层，查询层不区分
 /// 数据来自哪一类。分类只用于**命名与展示**（让用户看得出装了什么）。
 ///
-/// **装配来源是插件的真实安装目录** `<plugin_root>/<plugin_id>/<version>/`
-/// （`data/plugins/…`，由 `plugin.installLocal` 安装到那里）。此前这里读的是
-/// `<exe>/plugins-dist/`——那是**分发目录**，不是安装目录，导致「装完启用后
-/// 数据根本没被加载」（界面看不出任何变化）。现在同时兼容两者：
-///   1. 安装目录（权威）：`<plugin_root>/<plugin_id>/<version>/data/tag_lib.sqlite`
-///   2. 分发目录（回退）：`<exe>/plugins-dist/<name>/data/tag_lib.sqlite`
-/// 同一 plugin_id 只装配一次（安装目录优先）。
+/// **装配来源只有一个：插件的真实安装目录** `<plugin_root>/<plugin_id>/<version>/`
+/// （`data/plugins/…`，由 `plugin.installLocal` 安装到那里）。
+///
+/// **分发目录 `<exe>/plugins-dist/` 不是装配来源**——它只是「可供安装的包」的存放处
+/// （用户在插件面板里选中它来安装）。曾经把它当回退装配来源，导致**未安装的扩展也被
+/// 装进词库**：开发包会把三个扩展包一并放进 `plugins-dist/`，于是哪怕一个扩展都没装，
+/// 状态行也报「4 层 / 304575 个 tag」，且比插件面板实际列出的扩展数多——用户可见的
+/// 自相矛盾。按 D36「完整词库不随应用分发、按需安装」，**没安装就不该有数据**。
+///
+/// 同一 plugin_id 只装配一次（多版本目录取最新，见下）。
 ///
 /// 以**只读**方式逐个打开并加入聚合层。单个包损坏/缺失数据文件时**跳过该包**并继续
 /// （不因一个坏包让整个词库不可用）。返回成功装配的扩展包数量。
@@ -267,43 +270,12 @@ pub(crate) fn attach_tag_lib_extensions(
         }
     }
 
-    // ---- 来源 2（回退）：分发目录 <exe>/plugins-dist/<name>/ ----
-    if let Ok(root) = tag_lib_extension_root() {
-        if let Ok(entries) = std::fs::read_dir(&root) {
-            let mut dirs: Vec<PathBuf> = entries
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| p.is_dir())
-                .collect();
-            dirs.sort();
-            for dir in dirs {
-                let name = dir
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or_default();
-                if !(name.starts_with("tagdict-") || name.starts_with("tagrel-")) {
-                    continue;
-                }
-                // 安装目录已装配过同一插件则跳过（安装目录权威）。
-                // 比对用的是**插件 id**（见上方 `seen` 的说明），不是目录名。
-                if let Some(pid) = manifest_plugin_id(&dir) {
-                    if seen.contains(&pid) {
-                        continue;
-                    }
-                }
-                if let Some(db_path) = find_tag_lib_data(&dir) {
-                    if attach_one(set, &db_path) {
-                        attached += 1;
-                        // 同样登记插件 id：分发目录里若有两个目录自称同一插件，
-                        // 第二个不应再装配（与安装目录侧同一口径）。
-                        if let Some(pid) = manifest_plugin_id(&dir) {
-                            seen.insert(pid);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // 注意：**没有**「分发目录 `<exe>/plugins-dist/`」这个装配来源。
+    //
+    // 曾经有过（作为回退），但它是错的：`plugins-dist/` 只是**可供安装的包**的存放处，
+    // 把它当装配来源会让**未安装**的扩展也进词库。开发包会把三个扩展包都放进
+    // `plugins-dist/`，于是"一个都没装"也报 4 层 / 304575，且与插件面板实际列出的
+    // 扩展数矛盾（用户实际反馈）。按 D36「按需安装」，没安装就不该有数据。
 
     attached
 }
@@ -375,24 +347,6 @@ fn attach_one(set: &mut hp_store::TagLibSet, db_path: &std::path::Path) -> bool 
             false
         }
     }
-}
-
-/// tag 词典扩展包的存放根目录（`<exe 同目录>\plugins-dist\`）。
-///
-/// 与开发期仓库根的 `plugins-dist/` 同名：开发包把它放在 exe 同级，
-/// 因此这里只需在 exe 目录下找；找不到时回退向上查找（`tauri dev` 场景）。
-fn tag_lib_extension_root() -> Result<PathBuf, String> {
-    if let Ok(dir) = app_data_root() {
-        if let Some(exe_dir) = dir.parent() {
-            let candidate = exe_dir.join("plugins-dist");
-            if candidate.is_dir() {
-                return Ok(candidate);
-            }
-        }
-    }
-    // 开发期：从 exe 目录向上找仓库根的 plugins-dist/
-    find_upwards_matching("plugins-dist", |p| p.is_dir())
-        .ok_or_else(|| "未找到 plugins-dist 目录".to_string())
 }
 
 /// 用户数据库：默认仓库库目录（`<exe 同目录>\data\user\repos\`）。
@@ -678,7 +632,7 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("hp-taglib-vers-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         // 用一个**仓库 `plugins-dist/` 里不存在**的插件 id，让本用例只考察
-        // "安装目录的版本循环"，不被回退来源的同名包干扰。
+        // "安装目录的版本循环"，不与真实扩展包互相干扰。
         let pid = "dev.hamsterpouch.extension.tagdict.versionprobe";
         let pdir = tmp.join(pid);
         for v in ["0.1.0", "0.2.0"] {
@@ -692,13 +646,6 @@ mod tests {
             .unwrap();
         }
 
-        // 基线：安装目录为空时，回退来源（仓库内 `plugins-dist/`）贡献的层数。
-        let empty = std::env::temp_dir().join(format!("hp-taglib-empty-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&empty);
-        std::fs::create_dir_all(&empty).unwrap();
-        let mut baseline = hp_store::TagLibSet::new();
-        let base_n = attach_tag_lib_extensions(&mut baseline, &empty);
-
         let mut set = hp_store::TagLibSet::new();
         let n = attach_tag_lib_extensions(&mut set, &tmp);
 
@@ -706,136 +653,58 @@ mod tests {
         assert!(chosen.is_file(), "应选中字典序最后的版本目录");
 
         let _ = std::fs::remove_dir_all(&tmp);
-        let _ = std::fs::remove_dir_all(&empty);
-        assert_eq!(
-            n,
-            base_n + 1,
-            "两个版本目录只应多装配 1 层，实际 {n}（基线 {base_n}）"
-        );
-        assert_eq!(set.len(), baseline.len() + 1);
+        // 安装目录里只有这一个插件（两个版本目录），因此恰好装配 1 层。
+        assert_eq!(n, 1, "两个版本目录只应装配 1 层，实际 {n}");
+        assert_eq!(set.len(), 1, "聚合层只应有 1 层，实际 {}", set.len());
     }
 
-    /// **跨来源去重**：同一扩展**既装在安装目录、又在分发目录**时只装配一次。
+    /// **分发目录不是装配来源**：`plugins-dist/` 里放了包，但一个都没**安装**时，
+    /// 聚合层**不得**多出任何一层。
     ///
-    /// 回归背景（D36.6 / commit 24716b6）：去重键曾用**目录名**，而安装目录名是
-    /// 插件 id（`dev.hamsterpouch.extension.tagdict.pixiv`）、分发目录名是包名
-    /// （`tagdict-pixiv`）——两者不同，于是同一个扩展被装配两次，用户看到 7 层
-    /// （1 基底 + 3 安装 + 3 分发）而不是 4 层。判据必须是 manifest 里的插件 id。
+    /// 回归背景（用户实际反馈）：开发包会把三个扩展包一并放进 `plugins-dist/`，
+    /// 而装配层曾把该目录当回退来源 → **未安装的扩展也进词库**，状态行报
+    /// 「4 层 / 304575 个 tag」，比插件面板实际列出的扩展数还多（自相矛盾）。
+    /// 按 D36「按需安装」，没安装就不该有数据。
     #[test]
-    fn same_extension_in_both_sources_is_attached_once() {
-        let Some(base) = find_upwards("tools/tagdict/output/tag_lib_base.sqlite3") else {
-            eprintln!("跳过：未找到词基库产物");
-            return;
-        };
+    fn distribution_dir_is_not_an_assembly_source() {
         let Some(dist) = find_upwards_dir("plugins-dist") else {
             eprintln!("跳过：未找到 plugins-dist/");
             return;
         };
-        let pkg = dist.join("tagdict-pixiv");
-        if !pkg.join("data").join("tag_lib.sqlite").is_file() {
-            eprintln!("跳过：plugins-dist/tagdict-pixiv 缺数据文件");
-            return;
-        }
-        let real_id = manifest_plugin_id(&pkg).expect("分发包应有 plugin.manifest");
+        // 仓库内确实有可供安装的包（否则本用例没有意义）。
+        assert!(
+            dist.join("tagdict-pixiv").join("data").join("tag_lib.sqlite").is_file(),
+            "前提：plugins-dist/ 下应有包（先运行 package_extensions.py）"
+        );
 
-        // 安装目录：用**插件 id** 作目录名、包内容照抄分发包（同 id、同数据）。
-        let tmp = std::env::temp_dir().join(format!("hp-taglib-dup-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let vdir = tmp.join(&real_id).join("0.1.0");
-        std::fs::create_dir_all(vdir.join("data")).unwrap();
-        std::fs::copy(&base, vdir.join("data").join("tag_lib.sqlite")).unwrap();
-        std::fs::copy(
-            pkg.join("plugin.manifest"),
-            vdir.join("plugin.manifest"),
-        )
-        .unwrap();
-
-        let mut set = hp_store::TagLibSet::new();
-        let n = attach_tag_lib_extensions(&mut set, &tmp);
-        let _ = std::fs::remove_dir_all(&tmp);
-
-        // 基线：安装目录为空时，只由分发目录贡献（3 个包）。
-        let empty = std::env::temp_dir().join(format!("hp-taglib-dup-empty-{}", std::process::id()));
+        // 安装目录为空 = 一个扩展都没装。
+        let empty = std::env::temp_dir().join(format!("hp-taglib-none-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&empty);
         std::fs::create_dir_all(&empty).unwrap();
-        let mut baseline = hp_store::TagLibSet::new();
-        let base_n = attach_tag_lib_extensions(&mut baseline, &empty);
-        let _ = std::fs::remove_dir_all(&empty);
-        assert!(base_n >= 1, "分发目录应至少装配一个包，实际 {base_n}");
-
-        // 安装目录里那个包与分发目录里的 `tagdict-pixiv` 同 id → 不应额外多出一层。
-        assert_eq!(
-            n, base_n,
-            "同一扩展在两个来源各出现一次时只应装配一次（{real_id}），实际 {n}（基线 {base_n}）"
-        );
-    }
-
-    /// **端到端（真实安装器 + 真实产物）**：走用户实际点击的路径——
-    /// `PluginInstaller` 把三个扩展包安装到 `<plugin_root>/<id>/<version>/`，
-    /// 再让装配层从**安装目录**读取 → 4 层且扩展 tag 可查。
-    ///
-    /// 这是对 P0 步骤①（插件面板安装 3 个扩展）的直接覆盖：此前的缺陷是装配读的是
-    /// **分发目录**而非安装目录，导致"装完启用后数据根本没被加载"。
-    #[test]
-    fn installed_extensions_are_attached_from_the_install_directory() {
-        let Some(base_path) = find_upwards("tools/tagdict/output/tag_lib_base.sqlite3") else {
-            eprintln!("跳过：未找到词库基底产物");
-            return;
-        };
-        let Some(dist) = find_upwards_dir("plugins-dist") else {
-            eprintln!("跳过：未找到 plugins-dist/");
-            return;
-        };
-        let exts = ["tagdict-pixiv", "tagdict-danbooru", "tagrel-games"];
-        if !exts
-            .iter()
-            .all(|n| dist.join(n).join("data").join("tag_lib.sqlite").is_file())
-        {
-            eprintln!("跳过：plugins-dist/ 下缺少扩展包数据文件");
-            return;
-        }
-
-        let tmp = std::env::temp_dir().join(format!("hp-taglib-e2e-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let installer = hp_plugin_host::PluginInstaller::new(tmp.clone());
-
-        // 用户点击「安装」：逐包安装到 <root>/<plugin_id>/<version>/。
-        for name in exts {
-            installer
-                .install(&hp_plugin_host::InstallSource::LocalPath(dist.join(name)))
-                .unwrap_or_else(|e| panic!("安装 {name} 失败: {e}"));
-        }
-
-        // 装配层从**安装目录**读取（不是分发目录）。
         let mut set = hp_store::TagLibSet::new();
-        set.add(
-            hp_store::TagLibDb::open_readonly(&base_path, hp_core::LibLayer::Base)
-                .expect("只读打开基底库"),
-        );
-        let attached = attach_tag_lib_extensions(&mut set, &tmp);
-        let _ = std::fs::remove_dir_all(&tmp);
+        let n = attach_tag_lib_extensions(&mut set, &empty);
+        let _ = std::fs::remove_dir_all(&empty);
 
-        assert_eq!(attached, 3, "安装目录里三个扩展都应被装配，实际 {attached}");
-        assert_eq!(set.len(), 4, "层数应为 4，实际 {}", set.len());
-
-        set.refresh_merge().expect("构建归并索引");
-        let hits = set.find("Sciamano240", 10).expect("查询扩展专属 tag");
-        assert!(
-            hits.iter().any(|d| d.concept.kind == hp_core::TagKind::Artist),
-            "安装后扩展数据应立即可查（装配读对目录）"
-        );
+        assert_eq!(n, 0, "未安装任何扩展时不应装配出扩展层，实际 {n}");
+        assert_eq!(set.len(), 0, "聚合层应为空，实际 {}", set.len());
     }
 
-    /// **P0 运行时验收（用真实产物）**：内置基底 + 三个已装配扩展包 → 4 层，
-    /// 且**扩展里的 tag 立即可被查到**（不只是层数对）。
+    /// **P0 运行时验收 / 端到端（真实安装器 + 真实产物）**：走用户实际点击的路径——
+    /// `PluginInstaller` 把三个扩展包安装到 `<plugin_root>/<id>/<version>/`，
+    /// 再让装配层从**安装目录**读取 → 聚合层为 4 层，且**扩展里的 tag 立即可被查到**
+    /// （不只是层数对）。
     ///
-    /// 回归背景（用户实际反馈过两次）：
+    /// 回归背景（用户实际反馈过三次）：
     /// - 装配读错目录（读分发目录而非安装目录）→ 装完启用后数据根本不生效；
-    /// - 跨来源去重键口径不一致 → 同一扩展被装配两次，层数虚高成 7。
+    /// - 跨来源去重键口径不一致 → 同一扩展被装配两次，层数虚高成 7；
+    /// - **分发目录被当装配来源** → 未安装的扩展也进词库，状态行比插件面板多算。
     ///
     /// 因此本用例同时断言「层数恰为 4」与「只在扩展包里的概念可命中」——
     /// 前者防层数虚高/漏装，后者防"层数对但数据没进去"。
-    /// 产物缺失时跳过（CI 无 `plugins-dist/` 与词库产物）。
+    ///
+    /// 注意：这里**必须真的安装**，而不是把 `plugins-dist/` 当装配来源——后者正是
+    /// 被修掉的缺陷（其"未安装就不该有数据"由 `distribution_dir_is_not_an_assembly_source`
+    /// 单独覆盖）。产物缺失时跳过（CI 无 `plugins-dist/` 与词库产物）。
     #[test]
     fn base_plus_three_extensions_attach_as_four_queryable_layers() {
         let Some(base_path) = find_upwards("tools/tagdict/output/tag_lib_base.sqlite3") else {
@@ -856,19 +725,25 @@ mod tests {
             return;
         }
 
+        // **必须真的安装**（而不是把 plugins-dist 当装配来源）——那正是被修掉的缺陷。
+        let tmp = std::env::temp_dir().join(format!("hp-taglib-p0-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let installer = hp_plugin_host::PluginInstaller::new(tmp.clone());
+        for name in exts {
+            installer
+                .install(&hp_plugin_host::InstallSource::LocalPath(dist.join(name)))
+                .unwrap_or_else(|e| panic!("安装 {name} 失败: {e}"));
+        }
+
         let mut set = hp_store::TagLibSet::new();
         set.add(
             hp_store::TagLibDb::open_readonly(&base_path, hp_core::LibLayer::Base)
                 .expect("只读打开基底库"),
         );
-        // 安装目录留空：让装配走**分发目录回退**，与开发包的实际布局一致。
-        let empty = std::env::temp_dir().join(format!("hp-taglib-p0-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&empty);
-        std::fs::create_dir_all(&empty).unwrap();
-        let attached = attach_tag_lib_extensions(&mut set, &empty);
-        let _ = std::fs::remove_dir_all(&empty);
+        let attached = attach_tag_lib_extensions(&mut set, &tmp);
+        let _ = std::fs::remove_dir_all(&tmp);
 
-        assert_eq!(attached, 3, "应装配三个扩展包，实际 {attached}");
+        assert_eq!(attached, 3, "应装配三个已安装扩展包，实际 {attached}");
         assert_eq!(set.len(), 4, "层数应为 1 基底 + 3 扩展 = 4，实际 {}", set.len());
 
         set.refresh_merge().expect("构建归并索引");
