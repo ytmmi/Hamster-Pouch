@@ -7,7 +7,7 @@
 use std::fmt;
 
 /// 词库语言：主中文，辅日语/英语（RFC 0006）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum DictLang {
     /// 中文（主）。
     Zh,
@@ -43,7 +43,7 @@ impl fmt::Display for DictLang {
 }
 
 /// 词条来源（RFC 0006 数据源分级）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum DictSource {
     /// pixiv 生态 tag（ffdkj pixiv 对照表）。
     Pixiv,
@@ -79,7 +79,7 @@ impl fmt::Display for DictSource {
 }
 
 /// 词条分类（归一化，对齐二次元 booru 生态；RFC 0006 第 3 节）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum DictCategory {
     /// 通用视觉概念（姿势、服装、场景、发色、表情、画风、物体）。
     General,
@@ -204,7 +204,7 @@ pub struct TagDictLookup {
 }
 
 /// 词库建议项：打标输入建议 / 检索展开用（轻量视图，不携带完整映射）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TagDictSuggestion {
     /// 词条 ID。
     pub id: String,

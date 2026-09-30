@@ -15,3 +15,4 @@ pub(crate) mod repo;
 pub(crate) mod shared;
 pub(crate) mod source;
 pub(crate) mod tag;
+pub(crate) mod tagdict;
