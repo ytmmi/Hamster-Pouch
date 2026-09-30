@@ -217,6 +217,10 @@ pub(crate) fn attach_tag_lib_extensions(
     plugin_root: &std::path::Path,
 ) -> usize {
     let mut attached = 0usize;
+    // 去重键用**插件 id**（取自 `plugin.manifest`），不能用目录名：
+    // 安装目录名是插件 id（`dev.hamsterpouch.extension.tagdict.pixiv`），
+    // 而分发目录名是包名（`tagdict-pixiv`）——两者不同，按目录名去重会漏判，
+    // 同一扩展被装配两次（161MB 的库被打开两遍，层数也虚高）。
     let mut seen: std::collections::HashSet<String> = Default::default();
 
     // ---- 来源 1（权威）：插件安装目录 <plugin_root>/<plugin_id>/<version>/ ----
@@ -228,12 +232,12 @@ pub(crate) fn attach_tag_lib_extensions(
             .collect();
         plugin_dirs.sort();
         for pdir in plugin_dirs {
-            let plugin_id = pdir
+            let dir_name = pdir
                 .file_name()
                 .and_then(|s| s.to_str())
                 .unwrap_or_default()
                 .to_string();
-            if !is_tag_extension_id(&plugin_id) {
+            if !is_tag_extension_id(&dir_name) {
                 continue;
             }
             // 一个插件可能有多个版本目录，取字典序最后一个（版本号升序的近似）
@@ -250,7 +254,7 @@ pub(crate) fn attach_tag_lib_extensions(
                 if let Some(db_path) = find_tag_lib_data(&vdir) {
                     if attach_one(set, &db_path) {
                         attached += 1;
-                        seen.insert(plugin_id.clone());
+                        seen.insert(manifest_plugin_id(&vdir).unwrap_or(dir_name.clone()));
                     }
                 }
             }
@@ -274,9 +278,12 @@ pub(crate) fn attach_tag_lib_extensions(
                 if !(name.starts_with("tagdict-") || name.starts_with("tagrel-")) {
                     continue;
                 }
-                // 安装目录已装配过同名扩展则跳过（安装目录权威）
-                if seen.contains(name) {
-                    continue;
+                // 安装目录已装配过同一插件则跳过（安装目录权威）。
+                // 比对用的是**插件 id**（见上方 `seen` 的说明），不是目录名。
+                if let Some(pid) = manifest_plugin_id(&dir) {
+                    if seen.contains(&pid) {
+                        continue;
+                    }
                 }
                 if let Some(db_path) = find_tag_lib_data(&dir) {
                     if attach_one(set, &db_path) {
@@ -288,6 +295,17 @@ pub(crate) fn attach_tag_lib_extensions(
     }
 
     attached
+}
+
+/// 读取包目录 `plugin.manifest` 里的插件 id。
+///
+/// 用于**跨来源去重**：安装目录名是插件 id，分发目录名是包名，两者不同；
+/// 只有 manifest 里的 id 才是同一插件的稳定身份。读不到时返回 `None`
+/// （调用方按"无法判定"处理，不因此丢弃整个包）。
+fn manifest_plugin_id(dir: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("plugin.manifest")).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value.get("id")?.as_str().map(str::to_string)
 }
 
 /// 插件 id 是否属于 tag 扩展两类之一（`tagdict.*` / `tagrel.*`）。
