@@ -2,7 +2,7 @@
 
 状态：**已实施（构建完成）**。已确认方向：四个 tag 库统一为「**库 1 概念总库 + 库 2/3/4 功能补充层**」结构，库 1 的实体锚点由「原始生态 tag」改为「**概念**」。**tag 库不再作为应用内置数据交付**：应用只内置轻量基底，完整词库（含全量 artist）改为**按需安装的扩展包**，以减小应用体积。库数据在逻辑上仍是**应用级共享**的只读参考数据（不随仓库隔离）。**扩展包按生态来源细分为多个包**（见 D36.2）；承载沿用代码已实现的 `static-data` 运行形态（见 D36.1 结案）。
 
-> **实施记录（本次构建）**：权威 DDL 落在 `crates/hp-store/migrations/dict_lib/0001_init.sql`；管线为 `tools/tagdict/build_tag_lib.py`（概念化全量）、`build_base_lib.py`（基底裁剪 + 库 2 种子）、`package_extensions.py`（细分打包）；验证为 `verify_tag_lib.py`（全绿）。Rust 侧新增 `hp-core/src/tag_lib.rs`（四库领域类型）与 `hp-store/src/dict/tag_lib_db.rs`（单库句柄 + 三层聚合查询层）。详见下文「实施结果」。
+> **实施记录（本次构建）**：权威 DDL 落在 `crates/hp-store/migrations/dict_lib/0001_init.sql`；管线为 `tools/tagdict/build_tag_lib.py`（概念化全量）、`build_base_lib.py`（基底裁剪 + 库 2 种子）、`package_extensions.py`（细分打包）；验证为 `verify_tag_lib.py`（全绿）。Rust 侧新增 `hp-core/src/tag_lib.rs`（四库领域类型）与 `hp-store/src/dict/`（`tag_lib_db.rs` 单库句柄 + `tag_lib_write.rs` 用户库写入 + `tag_lib_set.rs` 三层聚合查询层 + `tag_lib_merge.rs` 重复概念归并；2026-09 按 1200 行规则从单个 `tag_lib_db.rs` 拆开）。详见下文「实施结果」。
 
 ## 背景
 
@@ -98,7 +98,7 @@ VOCALOID                          艺术家：人名（人类创作）/ 绘画�
 
 - **状态：已结案。** 本条原为「延后到构建时再讨论」，其**重新打开条件已触发**（tag 库进入构建实施），现按当时约定在构建时一并定案。
 - **定案内容**：扩展包**沿用代码中已实现的 `static-data` 运行形态**承载，不新增 `data-pack` 档位。理由：
-  - `RuntimeKind::StaticData`（`"static-data"`）**已实现**（`hp-core/src/plugin.rs`、`hp-plugin-host/src/manifest.rs` 的「StaticData 形态不需要 entry」、`host.rs` 的 `entry_path = None`），且此前的扩展包已在用；
+  - `RuntimeKind::StaticData`（`"static-data"`）**已实现**（`hp-core/src/plugin_types.rs` 的取值域、`hp-core/src/plugin_validate.rs` 的「`entry` 非空不适用于 StaticData」、`hp-plugin-host/src/manifest.rs` 的「StaticData 形态不需要 entry」、`host.rs` 的 `entry_path = None`），且此前的扩展包已在用；
   - 若按原候选新建 `data-pack`，会与已实现的 `static-data` 语义重复，需先废弃既有路径，成本高于收益。
   - 原候选中的 `contributions=["taglib"]`、能力 `taglib.read`/`taglib.write` **未采用**：宿主负责读取词库数据、插件不直连数据库（RFC 0004 边界），因此扩展包**不声明能力、不声明贡献点**（`capabilities: []`、`contributions: []`）。
 - **仍需保证的约束（已落实）**：数据包**不执行代码**（无 `entry`）；**宿主负责读取词库数据**；完整词库**不随应用分发**（`plugins-dist/` 按需安装，D36）。
@@ -424,7 +424,7 @@ D36.1 的**重新打开条件已触发并结案**（承载方式定案为 `stati
   1. **`entry` 校验对 `static-data` 也生效**：解析层（`hp-plugin-host` 的 `parse_manifest`）对 StaticData 显式把 `entry` 置为空串（「StaticData 形态不需要 entry」），而 `hp-core` 的 `validate_structure` **无条件**要求 `entry` 非空 → 所有纯数据包在校验阶段被拒。**修复**：`entry` 非空校验跳过 `StaticData`（其它形态仍强制）。
   2. **宿主硬编码数据文件名**：`attach_tag_lib_extensions` 只找 `data/tag_lib.sqlite`，而关系包当时叫 `tag_lib_games.sqlite` → 静默装配不上。**修复**：打包统一为 `tag_lib.sqlite`；宿主兼容回退（固定名不存在时接受目录内**唯一**的 `tag_lib*.sqlite`；多个则跳过并提示，不猜），且只装配 `tagdict-*` / `tagrel-*` 目录。
 - **签名**（用户要求）：三个扩展包均已 Ed25519 签名。注意 `install` 路径对**无签名包是降级而非报错**，所以必须有测试显式断言签名有效——已加 `crates/hp-plugin-signing/tests/verify_dist_packages.rs`（用 Rust 侧权威验签器逐一验证真实产物）。
-- **回归测试**：`crates/hp-core/src/plugin.rs` 的 `static_data_package_validates_without_entry`（单测）+ `crates/hp-plugin-host/tests/tag_extension_install.rs`（用真实产物走完整安装路径）。
+- **回归测试**：`crates/hp-core/src/plugin_tests.rs` 的 `static_data_package_validates_without_entry`（单测，由 `plugin.rs` 的 `mod tests` 以 `include!` 挂载）+ `crates/hp-plugin-host/tests/tag_extension_install.rs`（用真实产物走完整安装路径）。
 
 ### D36.7 装配层「层数虚高」的两个剩余根因与修复（2026-09-30 运行时验证发现）
 

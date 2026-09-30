@@ -8,12 +8,13 @@
 
 | 关注点 | 权威实现 |
 | --- | --- |
-| 领域模型与运行形态/信任/能力校验 | `crates/hp-core/src/plugin.rs` |
+| 领域模型与运行形态/信任/能力取值域 | `crates/hp-core/src/plugin_types.rs`（信任 / 来源 / 运行形态 / 能力 / 宿主 API 版本） |
+| 清单结构与校验 | `crates/hp-core/src/plugin.rs`（`PluginManifest` 结构）+ `crates/hp-core/src/plugin_validate.rs`（结构 / 贡献点完备性 / 取值域 / 声明校验）+ `crates/hp-core/src/plugin_row.rs`（存储行） |
 | manifest 解析与包发现 | `crates/hp-plugin-host/src/manifest.rs` |
 | 来源判定与信任推导 | `crates/hp-plugin-host/src/trust.rs`（RFC 0009：现仍读 manifest 自称，**待改**） |
 | 安装（本地路径 / git / 归档包） | `crates/hp-plugin-host/src/install.rs` |
 | 注册表与按仓库状态 | `crates/hp-store/src/global/plugin_repo.rs`、`plugin_repo_state` |
-| 桥接命令与事件 | `apps/desktop/src-tauri/src/commands/plugin.rs`（另有 `plugin_catalog.rs` 的「扩展」目录通道与 `plugin_panel_data.rs` 的面板取数通道） |
+| 桥接命令与事件 | `apps/desktop/src-tauri/src/commands/plugin.rs`（安装 / 发现 / 版本）· `plugin_lifecycle.rs`（启用 / 禁用 / 状态 / 加载）· `plugin_contributions.rs`（注册视图）· `plugin_control_channel.rs`（schema 与业务级校验）· `plugin_control_event.rs`（事件回传）；另有 `plugin_catalog.rs` 的「扩展」目录通道与 `plugin_panel_data.rs` 的面板取数通道 |
 | 控件 schema（面板**内部** UI） | `docs/spec/control-standard.md`（控件通道）；`contributions` 见第 4 节 |
 | **面板注册表**（插件可注册） | `docs/spec/panel-standard.md`（RFC 0010 决策 4） |
 | **蓝图节点类型注册表**（插件可注册） | `docs/spec/blueprint-node-standard.md` 第 2.3 节（RFC 0010 决策 5/6） |
@@ -257,7 +258,7 @@ LocalPath   -> local-dev（永不提升）
 - ~~控件 schema 运行时通道（控件标准第 2 节）尚未接线~~ → **`external-process` 通道已于 2026-09 落地**（`crates/hp-plugin-host/src/channel.rs`、命令 `plugin.panelSchema` / `plugin.validateControl`；`wasm` 与 `dynamic-library` 两条通道仍待各自运行形态）。本文的 `contributions` / `data_queries` / `events` 形态为**契约先行**——manifest 侧已全部解析校验，但 `data_queries` 的**取数通道**与 `events` 的**回传命令**仍未实现。
 - **RFC 0010 缺口（2026-09 更新：原列的 4 条已全部落地）**：
   - ~~面板注册表仍是常量清单（`PANEL_IDS`），没有插件注册路径；插件面板不进 `PANEL_DEFS` / `DOCK_COMPONENTS`~~ → **已落地**：`packages/config/src/panels.ts`（`BUILTIN_PANEL_SPECS` / `registerPluginPanels` / `panelSpec`）+ `apps/desktop/src/app_ui/core/panelRegistry.tsx`（`allPanelDefs` / `useDockComponents`），并由 `pluginRegistryHost.ts` 在启用/禁用时登记与注销。
-  - ~~蓝图节点类型仍是封闭枚举（`NodeType` 10 值），没有 `blueprintNode` 贡献点解析与查表校验；"未知 `type` 分流"（硬错误 vs 未接通软告警）未实现~~ → **已落地**：`NodeType::Other(String)` + `crates/hp-core/src/blueprint_registry.rs` + `manifest.rs` 的 `blueprintNode` 解析（含键白名单）+ 校验/软告警分流。
+  - ~~蓝图节点类型仍是封闭枚举（`NodeType` 10 值），没有 `blueprintNode` 贡献点解析与查表校验；"未知 `type` 分流"（硬错误 vs 未接通软告警）未实现~~ → **已落地**：`NodeType::Other(String)` + `crates/hp-core/src/blueprint_registry.rs`（注册表）/ `blueprint_node_decl.rs`（声明）/ `blueprint_node_decl_validate.rs`（校验与端口推导）+ `manifest.rs` 的 `blueprintNode` 解析（含键白名单）+ 校验/软告警分流。
   - ~~「全部设置」系统界面、设置注册表与 `settingsSection` 贡献点均未实现；现有三项设置尚无统一界面~~ → **已落地**：`apps/desktop/src/app_ui/settings/`（`SettingsApp` + `settingsRegistry`）、`packages/config/src/settings.ts` 的设置注册表、顶部「更多设置」入口，三项设置已迁入。
   - ~~三张注册表的一致性门禁（`check:panels` / `check:settings`、`check:blueprint-nodes` 的扩展断言）未接入~~ → **已落地**：`pnpm check:panels`（23 项）、`check:settings`（43 项）、`check:blueprint-nodes` 42 → **55 项**。
 - **RFC 0010 之后的口径（D76–D80）—— 已全部落地（2026-09）**：D76 统一响应包装 `{ ok, data?, error? }` 与结构化 `HpError{code}`（契约侧 **113 条全部「已包装」、0 条「裸返回」**，`pnpm check:commands` 双向守护）；D77 事件载荷统一驼峰（10 个事件 DTO + 前端全部监听点同批改）；D78 `file.query` 键集游标分页；D79 补 `api/tag.ts` 的六条关系命令封装。另注：D80 已把 `setting.registry` / `setting.search` / `panel.registry` / `panel.settings` **改判为前端函数**，不再作为命令。

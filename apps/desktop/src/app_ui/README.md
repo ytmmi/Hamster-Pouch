@@ -6,7 +6,7 @@
 
 ## 结构
 
-- `core/`：应用装配（`AppUiApp`）、上下文（`AppContext`）、面板注册表（`panelRegistry`）、单面板宿主（`SinglePanelHost`）。
+- `core/`：应用装配根（`AppUiApp`）、上下文（`AppContext`）、面板注册表（`panelRegistry`）、单面板宿主（`SinglePanelHost`），以及外壳的分工模块：蓝图执行器与宿主接线（`blueprintExecutor` / `useBlueprintRuntimeWiring`）、浮层宿主（`overlayHost`）、面板脱窗（`panelDetach`）、插件注册表重建（`usePluginRegistrations`）、界面偏好（`useShellSettings`）、任务浮窗接线（`useTaskWiring`）、工作区启动与默认布局（`workspaceBootstrap` / `defaultWorkspaceLayout`）。
 - `menu/`：顶部功能条与右键菜单。
 - `shared/`：`api/`（按域拆分的命令封装）、`types/`（按域类型）、`styles.css`、波形工具。
 - `panels/`：各功能面板（仓库 / 媒体源 / 相册 / 媒体预览 / 查看器 / 元数据 / 标签评分 / 色彩参考 / 媒体播放器 / 任务 / 插件 / AI 打标）。

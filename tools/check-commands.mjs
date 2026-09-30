@@ -230,6 +230,22 @@ const mediaPanelSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/MediaPreviewPanel.tsx"),
   "utf8",
 );
+// 媒体预览面板家族（2026-09 第四轮拆分：工具条 / 会话 / 动作 / 菜单 / 选区各自成文件）。
+// **反向断言读整个家族**——拆分不得成为逃离断言的后门（与 `check-panels` 同口径）。
+const mediaPanelFamilySrc = [
+  "apps/desktop/src/app_ui/panels/MediaPreviewPanel.tsx",
+  "apps/desktop/src/app_ui/panels/mediaPreviewData.ts",
+  "apps/desktop/src/app_ui/panels/mediaPreviewSession.ts",
+  "apps/desktop/src/app_ui/panels/mediaPreviewToolbar.tsx",
+  "apps/desktop/src/app_ui/panels/mediaPreviewActions.ts",
+  "apps/desktop/src/app_ui/panels/mediaPreviewMenu.tsx",
+  "apps/desktop/src/app_ui/panels/mediaPreviewSelection.ts",
+  "apps/desktop/src/app_ui/panels/mediaPreviewCell.tsx",
+  "apps/desktop/src/app_ui/panels/mediaPreviewDropdown.tsx",
+  "apps/desktop/src/app_ui/panels/mediaPreviewView.ts",
+]
+  .map((p) => readFileSync(join(ROOT, p), "utf8"))
+  .join("\n");
 const fileApiSrc = readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/api/file.ts"), "utf8");
 
 check(
@@ -279,10 +295,10 @@ check(
 check(
   "前端调用方不重复弹状态/刷新（任务结束由 scan.completed 统一收口）",
   /export function fileReanalyze\(args: FileReanalyzeArgs\): Promise<string>/.test(fileApiSrc) &&
-    // 反向：面板不得再自己 toast "已重新分析" 或立刻 refresh（否则与浮窗收尾对撞）。
-    !/media\.reanalyzed/.test(mediaPanelSrc) &&
+    // 反向：面板（整个面板家族）不得再自己 toast "已重新分析" 或立刻 refresh（否则与浮窗收尾对撞）。
+    !/media\.reanalyzed/.test(mediaPanelFamilySrc) &&
     !/app\.refresh\(\);\s*\n\s*\} catch \(e\) \{\s*\n\s*app\.status\(app\.t\("media\.reanalyzeFailed"/.test(
-      mediaPanelSrc,
+      mediaPanelFamilySrc,
     ),
 );
 

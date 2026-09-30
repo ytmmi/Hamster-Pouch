@@ -225,7 +225,7 @@
 > **落地状态（2026-09）**：`external-process` 通道**已落地**，权威实现在
 > `crates/hp-plugin-host/src/channel.rs`（请求名常量 `PANEL_SCHEMA_REQUEST`、超时
 > `SCHEMA_QUERY_TIMEOUT` = 2s、上限 `SCHEMA_MAX_BYTES` = 256 KiB、缓存
-> `PanelSchemaCache`）。桥接命令是 `plugin.panelSchema`（`apps/desktop/src-tauri/src/commands/plugin.rs`），
+> `PanelSchemaCache`）。桥接命令是 `plugin.panelSchema`（`apps/desktop/src-tauri/src/commands/plugin_control_channel.rs`），
 > 失败时发射 `plugin.error`。两条**已定口径的实现取舍**：
 >
 > 1. **一次一问一答**：每次查询起一个子进程，读到第一行非空输出后立即收尾（杀掉并回收），
@@ -361,7 +361,7 @@
 >
 > 1. **命令形态**：本节的回传链写的是字面命令名 `plugin.{pluginId}.{eventId}`，它要求
 >    **动态注册**，而 Tauri 命令是**静态注册**的。落地时拆成两段——「前端 → 宿主」用一条
->    **通用**宿主命令 `plugin.controlEvent`（`apps/desktop/src-tauri/src/commands/plugin.rs:945`），
+>    **通用**宿主命令 `plugin.controlEvent`（`apps/desktop/src-tauri/src/commands/plugin_control_event.rs:73`），
 >    「宿主 → 插件」仍发**本节的字面方法名**（`crates/hp-plugin-host/src/channel.rs:52`）。
 >    **插件侧看到的协议与本节一致**，偏差只落在宿主命令这一层，且已登记进
 >    `docs/spec/commands-events.md` §3.11。
@@ -402,7 +402,7 @@
 
 **业务级（Rust `control_validate`，`plugin.validateControl` 命令返回 `{ errors, warnings }`）**：
 
-> **落地状态（2026-09）**：命令**已实现**——`apps/desktop/src-tauri/src/commands/plugin.rs` 的
+> **落地状态（2026-09）**：命令**已实现**——`apps/desktop/src-tauri/src/commands/plugin_control_channel.rs` 的
 > `plugin_validate_control`，直接复用 `crates/hp-core/src/control.rs` 的
 > `ControlSchema::validate`（**不另写一份口径**）；面板归属与声明表由
 > `hp_plugin_host::PluginHost::find_panel_owner` 反查注册表得到（不靠 `panel_id` 字符串切分）。

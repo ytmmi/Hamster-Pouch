@@ -1,849 +1,152 @@
 /**
- * 蓝图面板 — 节点式编辑器（画布式拖拽连线，仿 ComfyUI，RFC 0007 决策 7 / D31）。
+ * 蓝图面板 — 节点式编辑器入口（画布式拖拽连线，仿 ComfyUI，RFC 0007 决策 7 / D31）。
  *
- * 组成：
- * - 顶部：蓝图列表（新建/删除/设为默认/从模板创建）+ 名称 + 保存；
- * - 主区：节点画布（`BlueprintCanvas`，拖拽摆放/端口连线/平移缩放）
- *   + 右侧属性检查器（`BlueprintInspector`）+ 画布槽位（`blueprintSlots`）；
- * - JSON 视图（辅助核对与批量编辑）。
+ * 本文件只做装配，不实现状态与命令：编辑器状态（`useBlueprintEditorState`）、
+ * 蓝图文档命令（`useBlueprintDocuments`）、层工具接线（`useBlueprintLayerTools`）、
+ * 图编辑动作（`useBlueprintGraphEdits`）、未接通派生（`useBlueprintUnlinked`）。
+ *
+ * 装配出的界面：
+ * - 顶部：蓝图列表（`BlueprintDocList`）+ 名称/保存工具条（`BlueprintToolbar`）；
+ * - 主区：层工具条（`BlueprintLayerBar`，同一时刻只渲染当前层）+ 节点添加面板
+ *   （`BlueprintPalette`）+ 节点画布（`BlueprintCanvas`）+ 右侧属性检查器（`NodeInspector`）；
+ * - JSON 视图（`BlueprintJsonView`，辅助核对与批量编辑）。
+ *
  * 保存前调用 `blueprint.validate` 服务端校验，失败不落库；保存后热更新到布局
  * （`blueprintRuntime` 重载生效蓝图并对账 dockview 布局）。
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
-import {
-  DEFAULT_BLUEPRINT,
-  type BlueprintEdge,
-  type BlueprintGraph,
-  type BlueprintNode,
-  type BlueprintNodeType,
-  effectiveLayers,
-  forUserSave,
-  interfaceOfLayer,
-  makeEmptyBlueprint,
-  normalizeLayersForSave,
-} from "@hamster-pouch/config";
-import type {
-  BlueprintItem,
-  BlueprintTemplateItem,
-} from "@hamster-pouch/shared-types";
-
-import * as api from "../shared/api";
-import { errorTextOf } from "../shared/api/response";
-import {
-  currentLayerKey,
-  notifyBlueprintChangedLocally,
-  setCurrentLayerKey,
-  switchLayer,
-  traceBlueprint,
-} from "../shared/blueprintRuntime";
-import { analyzeUnlinked } from "../shared/blueprintLint";
-import { SwitchToggle } from "../shared/SwitchToggle";
 import { useApp } from "../core/AppContext";
 import { BlueprintCanvas } from "./BlueprintCanvas";
+import { BlueprintDocList } from "./BlueprintDocList";
+import { BlueprintJsonView } from "./BlueprintJsonView";
 import { BlueprintLayerBar } from "./BlueprintLayerBar";
-import { removeLayer, softRemove } from "./blueprintDelete";
-import { nodeTypeLabel } from "./blueprintLabels";
+import { BlueprintPalette } from "./BlueprintPalette";
+import { BlueprintToolbar } from "./BlueprintToolbar";
 import { NodeInspector } from "./BlueprintInspector";
-import {
-  addLayer,
-  ensureInterface,
-  moveLayer,
-  renameLayer,
-  setHomeLayer,
-} from "./blueprintLayers";
-import { appendNode, parentHintFor } from "./blueprintNodeFactory";
-import { arrangeTree } from "./blueprintArrange";
-import {
-  readStructure,
-  snapshotFromDockview,
-  structureBlueprint,
-} from "./blueprintStructure";
-import {
-  canvasCenter,
-  freeSlotPosition,
-  normalizePositions,
-} from "./blueprintSlots";
+import { useBlueprintDocuments } from "./useBlueprintDocuments";
+import { useBlueprintEditorState } from "./useBlueprintEditorState";
+import { useBlueprintGraphEdits } from "./useBlueprintGraphEdits";
+import { useBlueprintLayerTools } from "./useBlueprintLayerTools";
+import { useBlueprintUnlinked } from "./useBlueprintUnlinked";
 
 export function BlueprintPanel(): JSX.Element {
   const app = useApp();
-  const [items, setItems] = useState<BlueprintItem[]>([]);
-  const [templates, setTemplates] = useState<BlueprintTemplateItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [doc, setDoc] = useState<BlueprintGraph>(() => makeEmptyBlueprint());
-  const [jsonText, setJsonText] = useState<string>(() =>
-    JSON.stringify(makeEmptyBlueprint(), null, 2),
-  );
-  const [name, setName] = useState("");
-  const [newName, setNewName] = useState("");
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"canvas" | "json">("canvas");
-  const [errors, setErrors] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  /** 画布渲染视口中心（世界坐标）：新增节点落点用。 */
-  const [viewCenter, setViewCenter] = useState<{ x: number; y: number } | null>(null);
-  /** 新建蓝图时是否带上当前布局的结构骨架（界面→布局块→标签组→面板控件）。 */
-  const [withStructure, setWithStructure] = useState(true);
-  /**
-   * 编辑器当前层（D51：画布同一时刻只渲染一个层）。
-   * 与运行时"当前层"（D54，按仓库持久化）同步：切层时一并套用该层布局。
-   */
-  const [layerKey, setLayerKey] = useState<string | null>(null);
-
-  const repoId = app.repoId;
-
-  /** 有效层清单（含单层兜底）。 */
-  const layers = useMemo(() => effectiveLayers(doc), [doc]);
-  /** 无根层（层内界面节点被软删除 → 未接通软告警，D55）。 */
-  const rootlessLayers = useMemo(() => {
-    const set = new Set<string>();
-    for (const layer of layers) {
-      if (!interfaceOfLayer(doc, layer.key)) {
-        set.add(layer.key);
-      }
-    }
-    return set;
-  }, [doc, layers]);
-
-  const load = useCallback(async () => {
-    if (!repoId) {
-      setItems([]);
-      setTemplates([]);
-      setSelectedId(null);
-      return;
-    }
-    try {
-      const [list, tpls] = await Promise.all([
-        api.blueprintList({ repoId }),
-        api.blueprintTemplateList().catch(() => [] as BlueprintTemplateItem[]),
-      ]);
-      setItems(list);
-      setTemplates(tpls);
-    } catch (e) {
-      app.status(app.t("blueprint.loadFailed", { err: errorTextOf(app.t, e) }), "error");
-    }
-  }, [repoId, app]);
-
-  useEffect(() => {
-    void load();
-  }, [load, app.refreshKey]);
-
-  /** 选中并装载蓝图文档；节点缺失 position 时按级联布局补齐。 */
-  const select = useCallback(
-    async (id: string) => {
-      if (!repoId) {
-        return;
-      }
-      try {
-        const raw = await api.blueprintGet({ repoId, blueprintId: id });
-        if (!raw) {
-          return;
-        }
-        const parsed = JSON.parse(raw) as BlueprintGraph;
-        // 缺 position 的节点按网格槽位补齐（互不重叠），并静默落库一次，
-        // 保证"保存后热更新到布局"与"画布可读"对旧文档同样成立。
-        const normalized = normalizePositions(parsed);
-        if (normalized !== parsed) {
-          // 自动补齐坐标属于**装载期归一化**，不是用户编辑：必须保留内置默认标记
-          // （`default_version`），否则"打开一次编辑器"就会把库存默认蓝图变成用户图、
-          // 从而永久失去自动升级（RFC 0007：只有用户保存才移除该标记）。
-          void api
-            .blueprintSave({
-              repoId,
-              blueprintId: id,
-              name: items.find((i) => i.id === id)?.name,
-              blueprintJson: JSON.stringify(normalizeLayersForSave(normalized)),
-            })
-            .catch(() => undefined);
-        }
-        setDoc(normalized);
-        setJsonText(JSON.stringify(normalized, null, 2));
-        setSelectedId(id);
-        setName(items.find((i) => i.id === id)?.name ?? "");
-        setSelectedKey(null);
-        setErrors([]);
-        // 当前层（D54）：优先沿用运行时记录；失效则取该蓝图的第一个层。
-        const available = effectiveLayers(normalized);
-        const wanted = currentLayerKey();
-        const nextLayer =
-          wanted && available.some((l) => l.key === wanted)
-            ? wanted
-            : available[0]?.key ?? null;
-        setLayerKey(nextLayer);
-        setCurrentLayerKey(nextLayer);
-      } catch (e) {
-        app.status(app.t("blueprint.loadFailed", { err: errorTextOf(app.t, e) }), "error");
-      }
-    },
-    [repoId, items, app],
-  );
-
-  /** 统一变更文档并同步 JSON 文本。 */
-  const mutate = useCallback((next: BlueprintGraph) => {
-    setDoc(next);
-    setJsonText(JSON.stringify(next, null, 2));
-  }, []);
-
-  /**
-   * 在**当前渲染画布的中心**附近新增节点（避开已占用槽位，节点不堆叠）。
-   * key 与引用从上级推导（选中节点的类型决定用谁当上级，见 `blueprintNodeFactory`）。
-   */
-  const addNode = useCallback(
-    (type: BlueprintNodeType) => {
-      // 「界面」= 一个页面 = 一个层（D51）：不在当前层里再塞第二个界面节点
-      // （那是硬错误"每层至多一个界面"）。
-      // - 当前层**还没有**界面节点（无根层，D55）→ 为它补出根（修复未接通）；
-      // - 当前层已有根 → 新增一个层（新页面，自动带出界面根节点）。
-      if (type === "interface") {
-        const current = layerKey ?? effectiveLayers(doc)[0].key;
-        if (!interfaceOfLayer(doc, current)) {
-          mutate(ensureInterface(doc, current, viewCenter ?? undefined));
-          app.status(app.t("blueprint.layer.rootRepaired"), "ok");
-          return;
-        }
-        addNewLayer();
-        return;
-      }
-      // 视口中心（世界坐标）由画布上报；未上报前退回已有节点附近。
-      const center = viewCenter ?? canvasCenter(doc.nodes);
-      const position = freeSlotPosition(doc.nodes, center);
-      const { doc: next, node } = appendNode(
-        doc,
-        type,
-        position,
-        parentHintFor(type, selectedKey, doc),
-        // D51：新增节点归属**当前层**。
-        layerKey,
-      );
-      mutate(next);
-      setSelectedKey(node.key);
-      app.status(
-        app.t("blueprint.nodeAdded", { x: position.x, y: position.y }),
-        "ok",
-      );
-    },
-    // addNewLayer 定义在下方（函数声明顺序无关，闭包内引用即可）。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doc, mutate, selectedKey, viewCenter, app, layerKey],
-  );
-
-  // ============================== 层操作（D51/D54/D55/D60） ==============================
-
-  /** 切换当前层：编辑器随之换画布；运行时同步套用该层布局（D53/D54）。 */
-  const switchToLayer = useCallback(
-    (key: string) => {
-      setLayerKey(key);
-      setSelectedKey(null);
-      setCurrentLayerKey(key);
-      if (!repoId) {
-        return;
-      }
-      void switchLayer(repoId, key, app.getDockview()).then(() => {
-        app.status(app.t("layer.switched"), "info");
-      });
-    },
-    [repoId, app],
-  );
-
-  /** 新增层：自动建出该层的界面节点（否则是无根层）。 */
-  const addNewLayer = useCallback(() => {
-    const { doc: next, layer } = addLayer(doc, undefined, viewCenter ?? undefined);
-    mutate(next);
-    setLayerKey(layer.key);
-    setCurrentLayerKey(layer.key);
-    app.status(app.t("blueprint.layer.add"), "ok");
-  }, [doc, mutate, viewCenter, app]);
-
-  const renameCurrentLayer = useCallback(
-    (key: string, name: string) => {
-      mutate(renameLayer(doc, key, name));
-    },
-    [doc, mutate],
-  );
-
-  /** 删除层（D55：直接删除，不是软删除；禁止删最后一层）。 */
-  const removeCurrentLayer = useCallback(
-    (key: string) => {
-      const result = removeLayer(doc, key);
-      if (result.rejected === "last-layer") {
-        app.status(app.t("blueprint.layer.removeLast"), "error");
-        return;
-      }
-      if (result.rejected) {
-        return;
-      }
-      const remaining = effectiveLayers(result.doc);
-      const removedName =
-        effectiveLayers(doc).find((l) => l.key === key)?.name ?? key;
-      mutate(result.doc);
-      const next = remaining[0]?.key ?? null;
-      setLayerKey(next);
-      setCurrentLayerKey(next);
-      setSelectedKey(null);
-      app.status(app.t("blueprint.layer.removed", { name: removedName }), "ok");
-    },
-    [doc, mutate, app],
-  );
-
-  const moveCurrentLayer = useCallback(
-    (key: string, delta: number) => {
-      mutate(moveLayer(doc, key, delta));
-    },
-    [doc, mutate],
-  );
-
-  /**
-   * 设为主界面（D67）：该层成为进入仓库时默认显示的界面。
-   *
-   * 同时把"当前层"也切过去并记忆（`blueprint.currentLayer`），避免"设了主界面却还停在
-   * 另一页"的割裂感；下次进入该仓库若没有更近的当前层记录，就会落在主界面。
-   */
-  const setCurrentLayerAsHome = useCallback(
-    (key: string) => {
-      mutate(setHomeLayer(doc, key));
-      setCurrentLayerKey(key);
-      const name = effectiveLayers(doc).find((l) => l.key === key)?.name ?? key;
-      app.status(app.t("blueprint.layer.homeSet", { name }), "ok");
-    },
-    [doc, mutate, app],
-  );
-
-  const updateNode = useCallback(
-    (key: string, patch: Partial<BlueprintNode>) => {
-      mutate({
-        ...doc,
-        nodes: doc.nodes.map((n) => (n.key === key ? { ...n, ...patch } : n)),
-      });
-    },
-    [doc, mutate],
-  );
-
-  /**
-   * 删除节点（**软删除**）：只删这个节点和挂在它身上的边；**关联节点保留**，
-   * 因引用丢失无法工作的部分由画布灰显"未接通"（`softRemove` / `blueprintLint`）。
-   */
-  const removeNode = useCallback(
-    (key: string) => {
-      const { doc: next, removed, unlinked } = softRemove(doc, key);
-      if (removed.length === 0) {
-        return;
-      }
-      mutate(next);
-      setSelectedKey(null);
-      if (unlinked.length > 0) {
-        app.status(app.t("blueprint.softRemoved", { count: unlinked.length }), "info");
-      }
-    },
-    [doc, mutate, app],
-  );
-
-  /** 删除一条边（画布刀痕删除用）。 */
-  const removeEdgeAt = useCallback(
-    (index: number) => {
-      const edge = doc.edges[index];
-      if (!edge) {
-        return;
-      }
-      mutate({ ...doc, edges: doc.edges.filter((_, i) => i !== index) });
-      app.status(app.t("blueprint.edgeRemoved", { kind: edge.kind }), "info");
-    },
-    [doc, mutate, app],
-  );
-
-  /**
-   * 连线后自动把**子节点的引用字段**落好（用户不手填 key）：
-   * 控件→类 写 `class.control`、类→对象 写 `object.class`、对象/类→操作 写 `event.target`、
-   * 组↔控件 写 `memberOf` 语义（组 contains 成员）、控件→类→对象的 `contains` 已是结构本身。
-   */
-  const onConnect = useCallback(
-    (edge: { from: string; to: string; kind: BlueprintEdge["kind"] }) => {
-      const child = doc.nodes.find((n) => n.key === edge.to);
-      const parent = doc.nodes.find((n) => n.key === edge.from);
-      if (!child || !parent) {
-        return;
-      }
-      const patch: Partial<BlueprintNode> = {};
-      if (child.type === "class" && parent.type === "control" && child.control !== parent.key) {
-        patch.control = parent.key;
-      } else if (child.type === "object" && parent.type === "class" && child.class !== parent.key) {
-        patch.class = parent.key;
-      } else if (
-        child.type === "event" &&
-        (parent.type === "object" || parent.type === "class" || parent.type === "control") &&
-        child.target !== parent.key
-      ) {
-        patch.target = parent.key;
-      } else if (child.type === "action" && child.target === undefined) {
-        const target = doc.nodes.find(
-          (n) => n.key === edge.from && (n.type === "control" || n.type === "group"),
-        );
-        if (target) {
-          patch.target = target.key;
-        }
-      }
-      if (Object.keys(patch).length > 0) {
-        mutate({
-          ...doc,
-          nodes: doc.nodes.map((n) => (n.key === child.key ? { ...n, ...patch } : n)),
-        });
-      }
-    },
-    [doc, mutate],
-  );
-
-  /** 校验并保存整文档（显式保存）。 */
-  const save = useCallback(async () => {
-    if (!repoId || !selectedId) {
-      return;
-    }
-    setBusy(true);
-    try {
-      // 保存前归一化分层（D51/D58）：把兜底单层实体化进 `layers` 并给节点补 `layer`，
-      // 否则后端会以"文档已分层但节点缺 layer"拒绝保存。
-      const prepared = normalizeLayersForSave(doc);
-      const result = await api.blueprintValidate({
-        repoId,
-        blueprintJson: JSON.stringify(prepared),
-      });
-      if (result.errors.length > 0) {
-        setErrors(result.errors);
-        app.status(
-          app.t("blueprint.invalidNotSaved", { err: result.errors.join("；") }),
-          "error",
-        );
-        return;
-      }
-      // 服务端软告警（未接通）：不阻塞保存，但要让使用者知道哪些节点不生效。
-      if (result.warnings?.length) {
-        app.status(
-          app.t("blueprint.serverWarnings", { count: result.warnings.length }),
-          "info",
-        );
-      }
-      await api.blueprintSave({
-        repoId,
-        blueprintId: selectedId,
-        name: name.trim() || undefined,
-        // 用户保存 = 不再是内置默认：去掉 default_version，停止自动升级覆盖。
-        blueprintJson: JSON.stringify(forUserSave(prepared)),
-      });
-      mutate(prepared);
-      setErrors([]);
-      app.status(app.t("blueprint.saved"), "ok");
-      // 热更新：广播"已保存"（本窗口 + 跨窗口令牌），任何窗口都会重载并把语义
-      // 对账到当前布局——无需手动重开面板或重启应用。
-      notifyBlueprintChangedLocally({ id: selectedId, graph: prepared });
-      app.refresh();
-      void load();
-    } catch (e) {
-      app.status(app.t("blueprint.saveFailed", { err: errorTextOf(app.t, e) }), "error");
-    } finally {
-      setBusy(false);
-    }
-  }, [repoId, selectedId, doc, name, app, load, mutate]);
-
-  /**
-   * 新建蓝图：默认带上**当前布局的结构骨架**（布局块 → 标签组 → 控件），
-   * 用户只需在此基础上补规则；也可取消勾选从空图起步。
-   */
-  const create = useCallback(async () => {
-    if (!repoId) {
-      return;
-    }
-    const n = newName.trim() || app.t("blueprint.defaultName");
-    setBusy(true);
-    try {
-      // 结构快照：优先用主窗口发布的跨窗口共享布局结构（本面板可能开在独立窗口，
-      // 那里没有 dockview）；拿不到再退回本窗口的 dockview。
-      const dockview = app.getDockview();
-      const snapshot = dockview
-        ? snapshotFromDockview(dockview)
-        : readStructure();
-      const skeleton =
-        withStructure && snapshot && snapshot.regions.length > 0
-          ? structureBlueprint(snapshot)
-          : null;
-      traceBlueprint(
-        `[structure] 新建蓝图 withStructure=${withStructure} dockview=${!!dockview} 快照区域=${snapshot?.regions.length ?? 0} 结构节点=${skeleton?.nodes.length ?? 0}`,
-      );
-      const item = await api.blueprintCreate({
-        repoId,
-        name: n,
-        blueprintJson: skeleton
-          ? JSON.stringify(forUserSave(skeleton))
-          : undefined,
-      });
-      app.status(
-        skeleton
-          ? app.t("blueprint.createdWithStructure", {
-              name: n,
-              count: skeleton.nodes.length,
-            })
-          : app.t("blueprint.created", { name: n }),
-        "ok",
-      );
-      await load();
-      await select(item.id);
-      setName(n);
-      setNewName("");
-    } catch (e) {
-      app.status(app.t("blueprint.createFailed", { err: errorTextOf(app.t, e) }), "error");
-    } finally {
-      setBusy(false);
-    }
-  }, [repoId, newName, app, load, select, withStructure]);
-
-  const createFromTemplate = useCallback(
-    async (tplId: string) => {
-      if (!repoId) {
-        return;
-      }
-      setBusy(true);
-      try {
-        const item = await api.blueprintTemplateInstall({
-          repoId,
-          templateId: tplId,
-        });
-        notifyBlueprintChangedLocally();
-        await load();
-        await select(item.id);
-      } catch (e) {
-        app.status(
-          app.t("blueprint.templateInstallFailed", { err: errorTextOf(app.t, e) }),
-          "error",
-        );
-      } finally {
-        setBusy(false);
-      }
-    },
-    [repoId, load, select, app],
-  );
-
-  const remove = useCallback(async () => {
-    if (!repoId || !selectedId) {
-      return;
-    }
-    if (!window.confirm(app.t("blueprint.deleteConfirm"))) {
-      return;
-    }
-    try {
-      await api.blueprintDelete({ repoId, blueprintId: selectedId });
-      setSelectedId(null);
-      setSelectedKey(null);
-      setDoc(makeEmptyBlueprint());
-      setJsonText(JSON.stringify(makeEmptyBlueprint(), null, 2));
-      setName("");
-      app.status(app.t("blueprint.deleted"), "ok");
-      notifyBlueprintChangedLocally();
-      await load();
-      app.refresh();
-    } catch (e) {
-      app.status(app.t("blueprint.deleteFailed", { err: errorTextOf(app.t, e) }), "error");
-    }
-  }, [repoId, selectedId, app, load]);
-
-  /**
-   * 设为默认蓝图。**必须显式传入目标 id**：点击"★"时 `selectedId` 还是上一个选中项
-   * （`select` 是异步的），读 state 会把默认蓝图设到错误的蓝图行上。
-   */
-  const setDefault = useCallback(
-    async (blueprintId: string) => {
-      if (!repoId) {
-        return;
-      }
-      try {
-        await api.blueprintSetDefault({ repoId, blueprintId });
-        app.status(app.t("blueprint.defaultSet"), "ok");
-        // 默认蓝图变更 = 运行时生效蓝图变更 → 立即热更新。
-        notifyBlueprintChangedLocally();
-        await load();
-      } catch (e) {
-        app.status(app.t("blueprint.defaultFailed", { err: errorTextOf(app.t, e) }), "error");
-      }
-    },
-    [repoId, app, load],
-  );
-
-  /**
-   * 恢复内置默认蓝图：把**当前选中蓝图的内容**替换为随应用分发的内置默认图。
-   * 用于两种情况：用户改坏了图想回到出厂结构；或内置默认升级后想拿回新版结构
-   * （用户编辑过的默认蓝图带不上 `default_version`，引擎不会自动覆盖，需显式恢复）。
-   */
-  const restoreBuiltin = useCallback(async () => {
-    if (!repoId || !selectedId) {
-      return;
-    }
-    if (!window.confirm(app.t("blueprint.restoreConfirm"))) {
-      return;
-    }
-    setBusy(true);
-    try {
-      const next = JSON.parse(JSON.stringify(DEFAULT_BLUEPRINT)) as BlueprintGraph;
-      await api.blueprintSave({
-        repoId,
-        blueprintId: selectedId,
-        name: name.trim() || undefined,
-        blueprintJson: JSON.stringify(next),
-      });
-      mutate(next);
-      setErrors([]);
-      app.status(app.t("blueprint.restored"), "ok");
-      notifyBlueprintChangedLocally({ id: selectedId, graph: next });
-      await load();
-    } catch (e) {
-      app.status(app.t("blueprint.restoreFailed", { err: errorTextOf(app.t, e) }), "error");
-    } finally {
-      setBusy(false);
-    }
-  }, [repoId, selectedId, name, app, mutate, load]);
-
-  const syncFromJson = useCallback(() => {
-    try {
-      const parsed = JSON.parse(jsonText) as BlueprintGraph;
-      setDoc(normalizePositions(parsed));
-      setErrors([]);
-    } catch (e) {
-      setErrors([String(e)]);
-    }
-  }, [jsonText]);
-
-  /** 静默持久化整文档（节点位置拖拽结束/一键整理后自动保存，不打扰用户）。 */
-  const persistDoc = useCallback(
-    (next: BlueprintGraph) => {
-      if (!repoId || !selectedId) {
-        return;
-      }
-      void api
-        .blueprintSave({
-          repoId,
-          blueprintId: selectedId,
-          name: name.trim() || undefined,
-          // 位置静默保存同样归一化分层，避免"文档已分层但节点缺 layer"被后端拒绝。
-          blueprintJson: JSON.stringify(forUserSave(normalizeLayersForSave(next))),
-        })
-        .catch(() => undefined);
-    },
-    [repoId, selectedId, name],
-  );
-
-  /** 一键整理：以选中节点为根树状展开（纯算法在 `blueprintArrange`），随后静默落库。 */
-  const onArrange = useCallback(() => {
-    const root = selectedKey ?? doc.nodes[0]?.key;
-    if (!root) {
-      return;
-    }
-    const next = arrangeTree(doc, root);
-    mutate(next);
-    persistDoc(next);
-  }, [selectedKey, doc, mutate, persistDoc]);
+  const state = useBlueprintEditorState();
+  const docs = useBlueprintDocuments(state);
+  const layerTools = useBlueprintLayerTools(state);
+  const edits = useBlueprintGraphEdits({
+    state,
+    addNewLayer: layerTools.addNewLayer,
+    persistDoc: docs.persistDoc,
+  });
+  /** 未接通节点（派生）：画布灰显 + 顶部提示，不落库。 */
+  const unlinkedKeys = useBlueprintUnlinked(state.doc);
 
   const selectedNode = useMemo(
-    () => doc.nodes.find((n) => n.key === selectedKey) ?? null,
-    [doc.nodes, selectedKey],
-  );
-
-  /** 未接通节点（派生）：画布灰显 + 顶部提示，不落库。 */
-  const unlinked = useMemo(() => analyzeUnlinked(doc), [doc]);
-  const unlinkedKeys = useMemo(
-    () => new Set(Object.keys(unlinked)),
-    [unlinked],
+    () => state.doc.nodes.find((n) => n.key === state.selectedKey) ?? null,
+    [state.doc.nodes, state.selectedKey],
   );
 
   return (
     <div className="panel bp-panel">
-      {!repoId && (
+      {!app.repoId && (
         <span className="placeholder">{app.t("blueprint.selectRepo")}</span>
       )}
-      {repoId && (
+      {app.repoId && (
         <>
           {/* 蓝图列表 + 新建/模板 */}
-          <div className="bp-list">
-            <div className="row">
-              <input
-                value={newName}
-                placeholder={app.t("blueprint.namePlaceholder")}
-                onChange={(e) => setNewName(e.target.value)}
-              />
-              <button disabled={busy} onClick={() => void create()}>
-                {app.t("blueprint.create")}
-              </button>
-            </div>
-            {/* 容器用 `<span>`：`<label>` 不得包住可交互元素，胶囊开关自带无障碍名。 */}
-            <span className="bp-check" title={app.t("blueprint.structureHint")}>
-              <SwitchToggle
-                checked={withStructure}
-                theme={app.theme}
-                label={app.t("blueprint.withStructure")}
-                onChange={setWithStructure}
-              />
-              {app.t("blueprint.withStructure")}
-            </span>
-            {items.map((it) => (
-              <div
-                key={it.id}
-                className={`bp-item ${it.id === selectedId ? "selected" : ""}`}
-              >
-                <button className="bp-item-main" onClick={() => void select(it.id)}>
-                  {it.name}
-                  {it.is_default && <span className="dim"> ★</span>}
-                </button>
-                <button
-                  className="bp-item-action"
-                  disabled={it.is_default}
-                  onClick={() => void select(it.id).then(() => setDefault(it.id))}
-                  title={app.t("blueprint.setDefault")}
-                >
-                  ★
-                </button>
-              </div>
-            ))}
-            {items.length === 0 && (
-              <span className="placeholder">{app.t("blueprint.none")}</span>
-            )}
-            {templates.length > 0 && (
-              <div className="row">
-                <select
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      void createFromTemplate(e.target.value);
-                    }
-                  }}
-                >
-                  <option value="">{app.t("blueprint.fromTemplate")}</option>
-                  {templates.map((tpl) => (
-                    <option key={tpl.id} value={tpl.id}>
-                      {tpl.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
+          <BlueprintDocList
+            items={docs.items}
+            templates={docs.templates}
+            selectedId={state.selectedId}
+            newName={state.newName}
+            withStructure={state.withStructure}
+            busy={state.busy}
+            onNewNameChange={state.setNewName}
+            onCreate={docs.create}
+            onSelect={docs.select}
+            onSetDefault={docs.setDefault}
+            onCreateFromTemplate={docs.createFromTemplate}
+            onWithStructureChange={state.setWithStructure}
+            theme={app.theme}
+            t={app.t}
+          />
 
-          {!selectedId ? (
+          {!state.selectedId ? (
             <span className="placeholder">{app.t("blueprint.noSelection")}</span>
           ) : (
             <>
               {/* 名称 + 保存/删除/一键整理 + 视图切换 */}
-              <div className="row bp-toolbar">
-                <input
-                  value={name}
-                  placeholder={app.t("blueprint.namePlaceholder")}
-                  onChange={(e) => setName(e.target.value)}
-                />
-                <button disabled={busy} onClick={() => void save()}>
-                  {app.t("common.confirm")}
-                </button>
-                <button
-                  title={app.t("blueprint.arrangeHint")}
-                  onClick={onArrange}
-                >
-                  {app.t("blueprint.arrange")}
-                </button>
-                <button
-                  title={app.t("blueprint.restoreHint")}
-                  disabled={busy}
-                  onClick={() => void restoreBuiltin()}
-                >
-                  {app.t("blueprint.restore")}
-                </button>
-                <button className="danger" onClick={() => void remove()}>
-                  {app.t("blueprint.removeNode")}
-                </button>
-                <button
-                  onClick={() => setViewMode(viewMode === "canvas" ? "json" : "canvas")}
-                >
-                  {viewMode === "canvas"
-                    ? app.t("blueprint.jsonView")
-                    : app.t("blueprint.formView")}
-                </button>
-              </div>
+              <BlueprintToolbar
+                name={state.name}
+                busy={state.busy}
+                viewMode={state.viewMode}
+                onNameChange={state.setName}
+                onSave={docs.save}
+                onArrange={edits.onArrange}
+                onRestore={docs.restoreBuiltin}
+                onRemove={docs.remove}
+                onToggleView={() =>
+                  state.setViewMode(state.viewMode === "canvas" ? "json" : "canvas")
+                }
+                t={app.t}
+              />
 
-              {viewMode === "json" ? (
-                <div className="panel-stack">
-                  <textarea
-                    className="bp-json"
-                    spellCheck={false}
-                    value={jsonText}
-                    onChange={(e) => setJsonText(e.target.value)}
-                  />
-                  <div className="row">
-                    <button onClick={syncFromJson}>
-                      {app.t("blueprint.syncFromJson")}
-                    </button>
-                  </div>
-                </div>
+              {state.viewMode === "json" ? (
+                <BlueprintJsonView
+                  jsonText={state.jsonText}
+                  onTextChange={state.setJsonText}
+                  onSync={state.syncFromJson}
+                  t={app.t}
+                />
               ) : (
                 <>
                   {/* 层工具条（D51）：画布同一时刻只显示一个层 */}
                   <BlueprintLayerBar
-                    layers={layers}
-                    current={layerKey}
-                    rootless={rootlessLayers}
-                    onSwitch={switchToLayer}
-                    onAdd={addNewLayer}
-                    onRename={renameCurrentLayer}
-                    onRemove={removeCurrentLayer}
-                    onMove={moveCurrentLayer}
-                    onSetHome={setCurrentLayerAsHome}
+                    layers={layerTools.layers}
+                    current={state.layerKey}
+                    rootless={layerTools.rootlessLayers}
+                    onSwitch={layerTools.switchToLayer}
+                    onAdd={layerTools.addNewLayer}
+                    onRename={layerTools.renameCurrentLayer}
+                    onRemove={layerTools.removeCurrentLayer}
+                    onMove={layerTools.moveCurrentLayer}
+                    onSetHome={layerTools.setCurrentLayerAsHome}
                     t={app.t}
                   />
 
                   {/* 节点添加面板 */}
-                  <div className="bp-palette">
-                    {(
-                      [
-                        "interface",
-                        "layout_block",
-                        "overlay",
-                        "control",
-                        "class",
-                        "object",
-                        "group",
-                        "event",
-                        "condition",
-                        "action",
-                      ] as BlueprintNodeType[]
-                    ).map((type) => (
-                      <button
-                        key={type}
-                        className="bp-palette-btn"
-                        onClick={() => addNode(type)}
-                      >
-                        {nodeTypeLabel(type, app.t)}
-                      </button>
-                    ))}
-                  </div>
+                  <BlueprintPalette onAdd={edits.addNode} t={app.t} />
 
                   {/* 画布 + 检查器 */}
                   <div className="bp-main">
                     <BlueprintCanvas
-                      doc={doc}
-                      onChange={mutate}
-                      onPersist={persistDoc}
-                      onRemoveNode={removeNode}
-                      onRemoveEdge={removeEdgeAt}
-                      onConnect={onConnect}
-                      onViewCenterChange={setViewCenter}
-                      selectedKey={selectedKey}
-                      onSelect={setSelectedKey}
+                      doc={state.doc}
+                      onChange={state.mutate}
+                      onPersist={docs.persistDoc}
+                      onRemoveNode={edits.removeNode}
+                      onRemoveEdge={edits.removeEdgeAt}
+                      onConnect={edits.onConnect}
+                      onViewCenterChange={state.setViewCenter}
+                      selectedKey={state.selectedKey}
+                      onSelect={state.setSelectedKey}
                       unlinked={unlinkedKeys}
-                      layerKey={layerKey}
+                      layerKey={state.layerKey}
                       t={app.t}
                     />
                     <NodeInspector
                       node={selectedNode}
-                      doc={doc}
+                      doc={state.doc}
                       onPatch={(patch) => {
-                        if (selectedKey) {
-                          updateNode(selectedKey, patch);
+                        if (state.selectedKey) {
+                          edits.updateNode(state.selectedKey, patch);
                         }
                       }}
                       onRemove={() => {
-                        if (selectedKey) {
-                          removeNode(selectedKey);
+                        if (state.selectedKey) {
+                          edits.removeNode(state.selectedKey);
                         }
                       }}
                       t={app.t}
@@ -858,9 +161,9 @@ export function BlueprintPanel(): JSX.Element {
                   {app.t("blueprint.unlinkedHint", { count: unlinkedKeys.size })}
                 </span>
               )}
-              {errors.length > 0 && (
+              {state.errors.length > 0 && (
                 <ul className="bp-errors">
-                  {errors.map((e, i) => (
+                  {state.errors.map((e, i) => (
                     <li key={i}>{e}</li>
                   ))}
                 </ul>

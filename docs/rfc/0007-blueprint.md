@@ -504,7 +504,7 @@ CREATE TABLE blueprint_templates (
 | 前端运行时 | `apps/desktop/src/app_ui/shared/blueprintLint.ts` | 从图结构派生「未接通」节点（不落库，供画布灰显） |
 | 前端运行时 | `apps/desktop/src/app_ui/shared/blueprintSync.ts` | 保存布局时把当前 dockview 结构**增量同步进蓝图**（补 `control`/`group` 节点与 `contains` 边；D59：需广播 `blueprint.changed`） |
 | 前端运行时 | `apps/desktop/src/app_ui/core/blueprintEngine.ts` | 求值引擎：解析层校验入口（`parse`）、事件匹配（**只匹配当前层**）→ fires/guards 链求值 → 输出 dockview 操作序列；浮层显隐与初始显隐对账 |
-| 前端编辑器 | `apps/desktop/src/app_ui/panels/BlueprintPanel.tsx` | 编辑器主面板：蓝图列表/新建（含结构骨架）/保存/删除/设为默认/恢复内置默认/JSON 视图/层工具接线 |
+| 前端编辑器 | `apps/desktop/src/app_ui/panels/BlueprintPanel.tsx`（装配）+ `BlueprintDocList.tsx` / `BlueprintToolbar.tsx` / `BlueprintJsonView.tsx` / `BlueprintPalette.tsx` + `useBlueprint*.ts` | 编辑器主面板：蓝图列表/新建（含结构骨架）/保存/删除/设为默认/恢复内置默认/JSON 视图/层工具接线（2026-09 按 1200 行规则分文件，主面板只留装配） |
 | 前端编辑器 | `apps/desktop/src/app_ui/panels/BlueprintCanvas.tsx` | 节点画布：拖拽摆放、端口连线、平移缩放（中键）、右键直线刀痕删除、未接通灰显（**只渲染当前层**） |
 | 前端编辑器 | `apps/desktop/src/app_ui/panels/BlueprintInspector.tsx` | 节点属性面板（只暴露必填字段 + 只读自动引用；引用候选按**同层**过滤，`navigate` 例外） |
 | 前端编辑器 | `apps/desktop/src/app_ui/panels/blueprintLabels.ts` | 节点的**本地化显示层**：`nodeDisplayName` / `nodeSummary` / `resolveControlTitle` / 各字段标签；画布与属性面板共用（属性面板不再从同级组件 import 文案函数） |

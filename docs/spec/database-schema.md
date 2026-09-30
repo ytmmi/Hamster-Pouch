@@ -372,7 +372,7 @@ CREATE INDEX idx_ops_history_repo ON ops_history(repo_id);
 
 > ⚠️ **本节已被 RFC 0008 / D33 / D36 / D37 取代，仅作历史对照**。**新实现以 `docs/rfc/0008-tag-libraries.md` 与 `crates/hp-store/migrations/dict_lib/0001_init.sql` 为准**，本节结构不得据以实现。
 >
-> **已实施的替代结构**（RFC 0008，构建完成）：实体锚点改为「概念」（D33）；交付改为「内置轻量基底 + 按需安装的细分扩展包 + 用户数据层」（D36/D36.2）；schema 落在 `migrations/dict_lib/0001_init.sql`，表为 `tag` / `tag_source` / `tag_name` / `tag_work` / `tag_character` / `tag_artist` / `tag_relation` / `lib_meta`；Rust 侧为 `hp-core/src/tag_lib.rs` + `hp-store/src/dict/tag_lib_db.rs`（`TagLibDb` 单库句柄 / `TagLibSet` 三层聚合查询层）。旧 `dict/0001_init.sql` 与 `TagDictDb` **保留作对照与回退**。
+> **已实施的替代结构**（RFC 0008，构建完成）：实体锚点改为「概念」（D33）；交付改为「内置轻量基底 + 按需安装的细分扩展包 + 用户数据层」（D36/D36.2）；schema 落在 `migrations/dict_lib/0001_init.sql`，表为 `tag` / `tag_source` / `tag_name` / `tag_work` / `tag_character` / `tag_artist` / `tag_relation` / `lib_meta`；Rust 侧为 `hp-core/src/tag_lib.rs` + `hp-store/src/dict/` 四文件（`tag_lib_db.rs` `TagLibDb` 单库句柄与只读查询 / `tag_lib_write.rs` 用户库写入 / `tag_lib_set.rs` `TagLibSet` 三层聚合查询层 / `tag_lib_merge.rs` 多包重复概念归并）。旧 `dict/0001_init.sql` 与 `TagDictDb` **保留作对照与回退**。
 
 ```sql
 -- 词库是应用级共享的多语言词表（主中文、辅日/英），独立于全局配置库与仓库库。

@@ -3,6 +3,9 @@
 //! 从 `commands/plugin.rs` 拆出：该文件已接近 1200 行的文件规则上限
 //! （`tools/check-line-count.mjs`），而取数通道是与 schema 通道**并列**的一块独立职责
 //! ——请求名、请求参数、fail-closed 校验与结果解析都自成一体，拆开后两边都更好读。
+//!
+//! 与 schema 通道共用的地基（归属校验 / 受监督调用 / `plugin.error`）在
+//! `plugin_control_channel.rs`。
 
 use hp_core::{HpError, HpResult, RuntimeKind, CONTROL_API_VERSION};
 use hp_plugin_host::{
@@ -12,7 +15,7 @@ use hp_plugin_host::{
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::commands::plugin::{emit_plugin_error, panel_owner_enabled, supervised_call};
+use crate::commands::plugin_control_channel::{emit_plugin_error, panel_owner_enabled, supervised_call};
 use crate::commands::shared::{api_from_hp, ensure_global, ApiResponse};
 use crate::AppState;
 

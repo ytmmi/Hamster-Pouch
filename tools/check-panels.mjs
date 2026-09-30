@@ -528,6 +528,27 @@ const mediaDropdownSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewDropdown.tsx"),
   "utf8",
 );
+// 媒体预览面板家族（2026-09 第四轮按 1200 行规则再拆）：主面板 / 取值域 / 会话状态 /
+// 工具条 / 文件动作 / 右键菜单 / 选区 / 单元 / 下拉。**断言跟着代码走**：
+// 凡「面板真的消费 / 真的渲染」这类断言读**整个家族**；反向断言同样读整个家族——
+// 拆分不得成为逃离断言的后门（同上一条的既有口径）。
+const MEDIA_FAMILY_FILES = [
+  "apps/desktop/src/app_ui/panels/MediaPreviewPanel.tsx",
+  "apps/desktop/src/app_ui/panels/mediaPreviewData.ts",
+  "apps/desktop/src/app_ui/panels/mediaPreviewSession.ts",
+  "apps/desktop/src/app_ui/panels/mediaPreviewToolbar.tsx",
+  "apps/desktop/src/app_ui/panels/mediaPreviewActions.ts",
+  "apps/desktop/src/app_ui/panels/mediaPreviewMenu.tsx",
+  "apps/desktop/src/app_ui/panels/mediaPreviewSelection.ts",
+  "apps/desktop/src/app_ui/panels/mediaPreviewCell.tsx",
+  "apps/desktop/src/app_ui/panels/mediaPreviewDropdown.tsx",
+  "apps/desktop/src/app_ui/panels/mediaPreviewView.ts",
+];
+const mediaFamilySrc = MEDIA_FAMILY_FILES.map((p) => readFileSync(join(ROOT, p), "utf8")).join("\n");
+const mediaToolbarSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewToolbar.tsx"),
+  "utf8",
+);
 // 后台冻结的判据（共享钩子）：面板不可见时不该继续干活。
 const panelForegroundSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/shared/panelForeground.ts"),
@@ -613,11 +634,11 @@ check(
 check(
   "「显示文件名」开关被面板真的消费（关掉只影响缩略图视图的标签，列表视图文件名照旧）",
   mediaSpec?.settings?.find((s) => s.key === "showFileName")?.default === true &&
-    /usePanelSwitch\(MEDIA_PANEL_ID, "showFileName", \{ api: panelApi \}\)/.test(mediaPanelSrc) &&
-    /showName=\{showFileName\}/.test(mediaPanelSrc) &&
+    /usePanelSwitch\(MEDIA_PANEL_ID, "showFileName", \{ api: panelApi \}\)/.test(mediaFamilySrc) &&
+    /showName=\{showFileName\}/.test(mediaFamilySrc) &&
     // 单元按开关条件渲染标签；列表视图的文件名是条目本体，不受开关影响。
     /\{showName && <span className="mp-name">/.test(mediaCellSrc) &&
-    /<span className="mp-row-name">\{file\.relative_path\}<\/span>/.test(mediaPanelSrc),
+    /<span className="mp-row-name">\{file\.relative_path\}<\/span>/.test(mediaFamilySrc),
 );
 check(
   "列表视图的体积走**宿主设置** `ui.sizeUnit`（与元数据面板同一份格式化），不另立同名面板设置",
@@ -686,66 +707,70 @@ check(
 );
 check(
   "媒体预览面板真的消费四项设置（缺省读取 + 排序 + 三种视图 + 图片尺寸下发与列数）",
-  /usePanelSettingValue\(MEDIA_PANEL_ID, "view", panelApi\)/.test(mediaPanelSrc) &&
-    /usePanelSettingValue\(MEDIA_PANEL_ID, "imageSize", panelApi\)/.test(mediaPanelSrc) &&
-    /usePanelSettingValue\(MEDIA_PANEL_ID, "sortKey", panelApi\)/.test(mediaPanelSrc) &&
-    /usePanelSettingValue\(MEDIA_PANEL_ID, "sortDir", panelApi\)/.test(mediaPanelSrc) &&
-    /sortFiles\(files, sortKey, sortDir\)/.test(mediaPanelSrc) &&
-    /mediaViewClass\(view\)/.test(mediaPanelSrc) &&
-    /distributeColumns\(items, masonryColumns\)/.test(mediaPanelSrc) &&
+  /usePanelSettingValue\(MEDIA_PANEL_ID, "view", panelApi\)/.test(mediaFamilySrc) &&
+    /usePanelSettingValue\(MEDIA_PANEL_ID, "imageSize", panelApi\)/.test(mediaFamilySrc) &&
+    /usePanelSettingValue\(MEDIA_PANEL_ID, "sortKey", panelApi\)/.test(mediaFamilySrc) &&
+    /usePanelSettingValue\(MEDIA_PANEL_ID, "sortDir", panelApi\)/.test(mediaFamilySrc) &&
+    /sortFiles\(files, sortKey, sortDir\)/.test(mediaFamilySrc) &&
+    /mediaViewClass\(view\)/.test(mediaFamilySrc) &&
+    /distributeColumns\(items, masonryColumns\)/.test(mediaFamilySrc) &&
     // 图片尺寸经 CSS 变量下发（一种设置、三种排布同一口径）。
-    /"--mp-image-size": `\$\{imageSize\}px`/.test(mediaPanelSrc) &&
-    /style=\{containerStyle\}/.test(mediaPanelSrc) &&
-    /masonryColumnCount\(el\.clientWidth, imageSize, MASONRY_GAP\)/.test(mediaPanelSrc) &&
-    /new ResizeObserver\(measure\)/.test(mediaPanelSrc),
+    /"--mp-image-size": `\$\{imageSize\}px`/.test(mediaFamilySrc) &&
+    /style=\{containerStyle\}/.test(mediaFamilySrc) &&
+    /masonryColumnCount\(el\.clientWidth, imageSize, MASONRY_GAP\)/.test(mediaFamilySrc) &&
+    /new ResizeObserver\(measure\)/.test(mediaFamilySrc),
 );
 check(
   "图片尺寸滑条在「视图」**左边**，取值域来自纯函数常量，列表模式下置灰",
   // 工具条顺序：滑条块在 `<ToolbarDropdown labelKey="media.settings.view"` 之前。
-  /className="mp-size"[\s\S]*?<ToolbarDropdown\s+labelKey="media\.settings\.view"/.test(mediaPanelSrc) &&
-    /min=\{MEDIA_IMAGE_SIZE_MIN\}/.test(mediaPanelSrc) &&
-    /max=\{MEDIA_IMAGE_SIZE_MAX\}/.test(mediaPanelSrc) &&
-    /value=\{imageSize\}/.test(mediaPanelSrc) &&
-    /onChange=\{\(e\) => chooseImageSize\(Number\(e\.target\.value\)\)\}/.test(mediaPanelSrc) &&
+  // （2026-09 第四轮拆分：工具条整块渲染落在 `mediaPreviewToolbar.tsx`。）
+  /className="mp-size"[\s\S]*?<ToolbarDropdown\s+labelKey="media\.settings\.view"/.test(mediaToolbarSrc) &&
+    /min=\{MEDIA_IMAGE_SIZE_MIN\}/.test(mediaToolbarSrc) &&
+    /max=\{MEDIA_IMAGE_SIZE_MAX\}/.test(mediaToolbarSrc) &&
+    /value=\{imageSize\}/.test(mediaToolbarSrc) &&
+    /onChange=\{\(e\) => onChooseImageSize\(Number\(e\.target\.value\)\)\}/.test(mediaToolbarSrc) &&
     // 与视图下拉同一处置：只在「预览图」模式下有效。
-    /disabled=\{viewMode !== "thumb"\}/.test(mediaPanelSrc) &&
-    /const clamped = clampImageSize\(next\);/.test(mediaPanelSrc),
+    /disabled=\{viewMode !== "thumb"\}/.test(mediaToolbarSrc) &&
+    // 夹紧与「本会话记住」在会话状态模块（`chooseImageSize`），工具条只转发。
+    /const clamped = clampImageSize\(next\);/.test(mediaFamilySrc),
 );
 check(
   "面板内的改动只做**本会话**覆盖，且「全部设置」显式改动时放弃覆盖（否则＝改了设置没反应）",
-  /let sessionView: MediaViewMode \| null = null;/.test(mediaPanelSrc) &&
-    /let sessionImageSize: number \| null = null;/.test(mediaPanelSrc) &&
-    /sessionView = next;/.test(mediaPanelSrc) &&
-    /sessionImageSize = clamped;/.test(mediaPanelSrc) &&
-    /sessionSortKey = next;/.test(mediaPanelSrc) &&
-    /sessionSortDir = next;/.test(mediaPanelSrc) &&
-    /subscribeSettingChanged\(\(key\) => \{/.test(mediaPanelSrc) &&
-    /key === VIEW_STORAGE_KEY/.test(mediaPanelSrc) &&
-    /key === IMAGE_SIZE_STORAGE_KEY/.test(mediaPanelSrc) &&
-    /key === SORT_KEY_STORAGE_KEY/.test(mediaPanelSrc) &&
-    /key === SORT_DIR_STORAGE_KEY/.test(mediaPanelSrc) &&
-    (mediaPanelSrc.match(/= null;\n\s+set\w+Override\(null\);/g) ?? []).length === 4,
+  /let sessionView: MediaViewMode \| null = null;/.test(mediaFamilySrc) &&
+    /let sessionImageSize: number \| null = null;/.test(mediaFamilySrc) &&
+    /sessionView = next;/.test(mediaFamilySrc) &&
+    /sessionImageSize = clamped;/.test(mediaFamilySrc) &&
+    /sessionSortKey = next;/.test(mediaFamilySrc) &&
+    /sessionSortDir = next;/.test(mediaFamilySrc) &&
+    /subscribeSettingChanged\(\(key\) => \{/.test(mediaFamilySrc) &&
+    /key === VIEW_STORAGE_KEY/.test(mediaFamilySrc) &&
+    /key === IMAGE_SIZE_STORAGE_KEY/.test(mediaFamilySrc) &&
+    /key === SORT_KEY_STORAGE_KEY/.test(mediaFamilySrc) &&
+    /key === SORT_DIR_STORAGE_KEY/.test(mediaFamilySrc) &&
+    (mediaFamilySrc.match(/= null;\n\s+set\w+Override\(null\);/g) ?? []).length === 4,
 );
 check(
   "排序下拉 =「名称 / 时间 / 大小 / 类型」+ **一条横线** +「正序 / 倒序」（两组都由取值域派生）",
   // 取值域本身的顺序就是界面顺序（注册表候选与之逐项一致，见上面的 `eqList`）。
   eqList([...mediaView.MEDIA_SORT_KEYS], ["name", "time", "size", "type"]) &&
     eqList([...mediaView.SORT_DIRECTIONS], ["asc", "desc"]) &&
-    /MEDIA_SORT_KEYS\.map\(/.test(mediaPanelSrc) &&
-    /SORT_DIRECTIONS\.map\(/.test(mediaPanelSrc) &&
+    /MEDIA_SORT_KEYS\.map\(/.test(mediaToolbarSrc) &&
+    /SORT_DIRECTIONS\.map\(/.test(mediaToolbarSrc) &&
     // 横线挂在**方向组第一项**之前（`index === 0`），不会跑到最上面或错位。
-    /ruleBefore: index === 0/.test(mediaPanelSrc) &&
+    /ruleBefore: index === 0/.test(mediaToolbarSrc) &&
     /\{option\.ruleBefore && <div className="menu-sep" \/>\}/.test(mediaDropdownSrc),
   `sortKeys=${[...mediaView.MEDIA_SORT_KEYS].join(",")} directions=${[...mediaView.SORT_DIRECTIONS].join(",")}`,
 );
 check(
   "「视图」下拉只在「预览图」模式下有效（列表模式下置灰并给出原因）",
-  /disabled=\{viewMode !== "thumb"\}/.test(mediaPanelSrc) &&
-    /disabledHint=\{app\.t\("media\.viewOnlyInThumb"\)\}/.test(mediaPanelSrc) &&
+  /disabled=\{viewMode !== "thumb"\}/.test(mediaToolbarSrc) &&
+    /disabledHint=\{t\("media\.viewOnlyInThumb"\)\}/.test(mediaToolbarSrc) &&
     // 下拉组件本身必须接住 `disabled`（否则"置灰"只是面板一厢情愿）。
     /disabled=\{disabled\}/.test(mediaDropdownSrc) &&
+    // 工具条只接面板传下来的 `t`（同一份 i18n 函数，不是工具条自建一份文案）。
+    /<MediaPreviewToolbar[\s\S]{0,900}?t=\{app\.t\}/.test(mediaPanelSrc) &&
     /import \{ ToolbarDropdown, type DropdownOption \} from "\.\/mediaPreviewDropdown";/.test(
-      mediaPanelSrc,
+      mediaToolbarSrc,
     ),
 );
 const contextMenuForDropdownSrc = readFileSync(

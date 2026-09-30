@@ -346,21 +346,33 @@ const bridgeSrc = readFileSync(
   join(ROOT, "apps/desktop/src-tauri/src/commands/plugin.rs"),
   "utf8",
 );
+// schema 通道与业务级校验 2026-09 从 `commands/plugin.rs` 拆到
+// `commands/plugin_control_channel.rs`（plugin.rs 触到 1200 行文件规则上限）——
+// 断言跟着代码走，不看它原来在哪（与 `plugin_panel_data.rs` 同口径，见本节末）。
+const controlChannelSrc = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/plugin_control_channel.rs"),
+  "utf8",
+);
+// 控件事件回传链同理：`commands/plugin_control_event.rs`。
+const controlEventSrc = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/plugin_control_event.rs"),
+  "utf8",
+);
 const mainSrc = readFileSync(join(ROOT, "apps/desktop/src-tauri/src/main.rs"), "utf8");
 check(
   "plugin.panelSchema / plugin.validateControl 已实现并注册（D61/D62）",
-  /pub\(crate\) fn plugin_panel_schema/.test(bridgeSrc) &&
-    /pub\(crate\) fn plugin_validate_control/.test(bridgeSrc) &&
-    /commands::plugin::plugin_panel_schema/.test(mainSrc) &&
-    /commands::plugin::plugin_validate_control/.test(mainSrc),
+  /pub\(crate\) fn plugin_panel_schema/.test(controlChannelSrc) &&
+    /pub\(crate\) fn plugin_validate_control/.test(controlChannelSrc) &&
+    /commands::plugin_control_channel::plugin_panel_schema/.test(mainSrc) &&
+    /commands::plugin_control_channel::plugin_validate_control/.test(mainSrc),
 );
 check(
   "业务级校验复用 hp-core 的 ControlSchema::validate（不另写一份口径）",
-  /ControlSchema::from_json/.test(bridgeSrc) && /\.validate\(&ctx\)/.test(bridgeSrc),
+  /ControlSchema::from_json/.test(controlChannelSrc) && /\.validate\(&ctx\)/.test(controlChannelSrc),
 );
 check(
   "失败降级为错误态 + plugin.error（不阻塞其它面板）",
-  /fn emit_plugin_error/.test(bridgeSrc) && /"plugin\.error"/.test(bridgeSrc),
+  /fn emit_plugin_error/.test(controlChannelSrc) && /"plugin\.error"/.test(controlChannelSrc),
 );
 
 const hostSrc = readFileSync(
@@ -389,9 +401,9 @@ check(
 // 新命令走 D76 统一响应包装（新增命令一律按新口径）。
 check(
   "新增的两条控件命令走 D76 响应包装 { ok, data?, error? }",
-  /ApiResponse<PanelSchemaItem>/.test(bridgeSrc) &&
-    /ApiResponse<ControlValidateResult>/.test(bridgeSrc) &&
-    /api_from_hp\(/.test(bridgeSrc),
+  /ApiResponse<PanelSchemaItem>/.test(controlChannelSrc) &&
+    /ApiResponse<ControlValidateResult>/.test(controlChannelSrc) &&
+    /api_from_hp\(/.test(controlChannelSrc),
 );
 check(
   "HpError 有 D76 的闭集错误码（前端按 code 走 i18n，不直显 message）",
@@ -458,10 +470,10 @@ check(
 );
 check(
   "plugin.controlEvent 已实现并注册，且事件 id 必须在 manifest 声明过（fail-closed）",
-  /pub\(crate\) fn plugin_control_event/.test(bridgeSrc) &&
-    /commands::plugin::plugin_control_event/.test(mainSrc) &&
-    /ControlEvent::from_str/.test(bridgeSrc) &&
-    /declared_events[\s\S]{0,160}?any\(/.test(bridgeSrc),
+  /pub\(crate\) fn plugin_control_event/.test(controlEventSrc) &&
+    /commands::plugin_control_event::plugin_control_event/.test(mainSrc) &&
+    /ControlEvent::from_str/.test(controlEventSrc) &&
+    /declared_events[\s\S]{0,160}?any\(/.test(controlEventSrc),
 );
 check(
   "前端接线：emit 不再是空实现，回传前解析事件 id，未声明即忽略",

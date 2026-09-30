@@ -60,6 +60,10 @@ crates/hp-store/src/
     blueprint_template_repo.rs  # 应用级共享的蓝图模板
   dict/               # tag 词库（独立 SQLite 文件，应用级共享，RFC 0006）
     dict_db.rs        # 连接 / 迁移 / 多语言查询（TagDictDb）
+    tag_lib_db.rs     # 四库**单库句柄**：打开 / 元信息 / 只读查询 / 行映射（TagLibDb）
+    tag_lib_write.rs  # 四库**用户库写入**：概念（名称·来源·库 3 字段）与库 2 关系
+    tag_lib_set.rs    # 四库**聚合查询层**：用户库 > 扩展包 > 内置基底的统一视图（TagLibSet）
+    tag_lib_merge.rs  # 多扩展包之间的**重复概念归并**（MergeIndex，D36.3）
   migrations/         # 迁移 SQL（forward-only，发布后禁止修改；权威文本在这些文件里）
     repo/             # 仓库库：0001_init … 0007_album_member_file_index.sql（当前版本 = 7）
     global/           # 全局配置库：0001_init … 0004_layout_layers.sql（当前版本 = 4）
@@ -75,10 +79,15 @@ crates/hp-store/src/
     repo.rs  source.rs  album.rs
     tag.rs   rating.rs  color.rs  file.rs
     media.rs layout.rs
-    plugin.rs ai.rs fsops.rs
+    plugin.rs           # 插件包：列出 / 发现 / 安装（本地与随包）/ 版本与回滚
+    plugin_lifecycle.rs # 插件按仓库启用 / 禁用 / 状态 / 加载（含 plugin.changed|loaded 发射点）
+    plugin_contributions.rs # 三张注册表的插件注册视图（plugin.contributions）
+    plugin_control_channel.rs # 控件通道地基（归属校验 / 受监督调用 / plugin.error）+ panelSchema / validateControl
+    plugin_control_event.rs   # 控件事件回传链（plugin.controlEvent，控件标准第 6 节 / D63）
     plugin_catalog.rs   # 「扩展」菜单的目录通道（plugin.panelCatalog：面板 + 无面板的数据扩展）
     plugin_panel_data.rs # 面板 bind 的受控取数通道（plugin.panelData）
     blueprint.rs        # 蓝图命令桥接（含 blueprint.changed 广播）
+    ai.rs fsops.rs      # AI 打标桥接 / 文件操作桥接
 
 apps/desktop/src/app_ui/
   core/               # 应用装配 / 上下文 / 面板注册表 / 单面板宿主 / 蓝图求值引擎
@@ -116,10 +125,30 @@ apps/desktop/src/app_ui/
     ViewerPanel.tsx   # 查看器（大图/视频/音频预览；**顶部基础信息栏**由面板设置 infoBarEnabled 控制）
     MetadataPanel.tsx # 元数据面板（索引字段 + EXIF/ffprobe 摘要；消费宿主设置 ui.sizeUnit/dateFormat/dateShowTime）
     metadataInfo.ts   # 元数据面板的**纯解析**（ffprobe 原始 JSON、EXIF 摘要 → 尺寸/时长/编码/码率/帧率）
-    BlueprintPanel.tsx      # 蓝图编辑器主面板（含当前层状态）
+    MediaPreviewPanel.tsx   # 媒体预览主面板（列表行渲染 + 三种视图容器 + 图片尺寸 CSS 变量）
+    mediaPreviewData.ts     # 面板取数（查询 + 排序后的条目流）
+    mediaPreviewSession.ts  # 面板设置读取与本会话覆盖（四条设置的缺省/覆盖口径）
+    mediaPreviewToolbar.tsx # 顶部工具条（模式/类型/计数/尺寸滑条/视图与排序下拉）
+    mediaPreviewActions.ts  # 文件操作动作（删除/重命名/复制路径/重新分析）
+    mediaPreviewMenu.tsx    # 右键菜单（动作开关与渲染）
+    mediaPreviewSelection.ts # 选中集与 `selection_change` 上报（令牌防过期 + 运行期 context）
+    mediaPreviewCell.tsx    # 缩略图单元 + 宽高比测量（既有）
+    mediaPreviewDropdown.tsx # 工具条下拉（既有）
+    mediaPreviewView.ts     # 取值域与纯函数（既有）
+    BlueprintPanel.tsx      # 蓝图编辑器主面板（**入口装配**：状态 + 文档命令 + 层工具 + 图编辑动作；
+                            #   界面拼给下面四个区块组件；含当前层状态）
+    BlueprintDocList.tsx    # 蓝图文档列表（新建/带结构创建开关/选中/设为默认/模板下拉）
+    BlueprintToolbar.tsx    # 编辑器工具条（名称/保存/一键整理/恢复内置默认/删除/视图切换）
+    BlueprintPalette.tsx    # 节点添加面板（可从调色板新增的节点类型）
+    BlueprintJsonView.tsx   # JSON 文本视图（直接改 JSON + 解析回文档）
     BlueprintCanvas.tsx     # 节点画布（拖拽/连线/平移缩放/右键直线刀痕；**只渲染当前层**）
     BlueprintInspector.tsx  # 节点属性面板（浮层 visible/height/size/anchor/offset/shadow/radius/hide_label）
     BlueprintLayerBar.tsx   # 层工具条（切换/新增/重命名/删除/排序 + 无根层标记）
+    useBlueprintEditorState.ts # 编辑器界面状态（文档 / JSON 文本 / 选中项 / 视图模式 / 提示）
+    useBlueprintDocuments.ts   # 蓝图文档的后端命令（列表 / 装载 / 保存 / 新建 / 删除 / 设为默认 / 恢复 / 静默保存）
+    useBlueprintLayerTools.ts  # 层工具接线（切层 / 新增 / 重命名 / 排序 / 删除 / 设为主界面 + 无根层派生）
+    useBlueprintGraphEdits.ts  # 图编辑动作接线（新增节点 / 改字段 / 软删除 / 删边 / 连线落引用 / 一键整理）
+    useBlueprintUnlinked.ts    # 未接通节点的面板侧派生（画布灰显与顶部提示用的 key 集合）
     blueprintNodeFactory.ts # 新节点工厂（key/引用由上级推导、**兜底引用只在本层内找**）
     blueprintPorts.ts       # 端口与边类型契约（**由 `packages/config` 的节点定义表投影**而来）
     blueprintLabels.ts      # 节点本地化显示层（显示名/摘要/字段标签；画布与属性面板共用）
@@ -148,7 +177,7 @@ apps/desktop/src/test_ui/
 > **行数契约的适用范围**：`check-line-count` 目前只扫 `src` 目录，因此 `crates/**/tests/` 下的集成测试与
 > `tools/**` 的开发期脚本**不在门禁内**；它们仍受"单文件单一职责"约束，但不按 1200 行硬拦。
 > 单文件接近/超过 1000 行时**必须**检查是否该拆，且**不得**靠 `include!`/内部 `mod` 把职责藏起来绕过拆分。
-> 已有两次这种检查，结论不同、都写在文件头里：
+> 已有四轮这种检查，结论都写在文件头里：
 > - `crates/hp-core/src/blueprint.rs`（曾 996 行：图文档 + 枚举 + 节点结构 + 校验 + 软告警 + 存储行）→ **拆**成
 >   `blueprint.rs` / `blueprint_types.rs` / `blueprint_node.rs` / `blueprint_row.rs` / `blueprint_validate.rs` /
 >   `blueprint_warnings.rs`（各自一句话职责，互相不重叠）；
@@ -157,6 +186,32 @@ apps/desktop/src/test_ui/
 >   `mod tests` 外壳（12 行），测试项按"视图/结构类"与"校验/规则类"分到
 >   `blueprint_tests_structure.rs`（~620 行）与 `blueprint_tests_rules.rs`（~460 行），
 >   用 `include!` 展开进同一个测试模块——**拆的是文件，不是模块**，私有项照旧可测。
+> - 2026-09 第四轮（**按"900 行左右"逐个体检**，结论：七个文件都拆）：见下节「本轮拆分记录」。
+
+## 本轮拆分记录（2026-09 第四轮）
+
+触发口径：**所有 900 行左右（≥870 行）的 `src` 代码文件**逐个体检并按职责拆分。
+`tools/check-line-count.mjs` 只扫 `src`，因此 `tools/check-panels.mjs`（1435 行）与
+`tools/blueprint-node-check.mjs`（1048 行）**本轮不动**（门禁脚本自身没有测试保护）。
+
+| 拆分前（行数） | 拆分后（各自一句话职责） |
+| --- | --- |
+| `crates/hp-store/src/dict/tag_lib_db.rs`（1167） | `tag_lib_db.rs` 四库单库句柄（打开 / 元信息 / 只读查询 / 行映射）· `tag_lib_write.rs` 用户库写入（概念与关系）· `tag_lib_set.rs` 跨层聚合查询层 · `tag_lib_db_tests.rs` 四库测试清单（`include!`） |
+| `apps/desktop/src-tauri/src/commands/plugin.rs`（1153） | `plugin.rs` 插件包安装·发现·版本回滚 · `plugin_lifecycle.rs` 按仓库启用·禁用·状态·加载 · `plugin_contributions.rs` 三张注册表的插件注册视图 · `plugin_control_channel.rs` 控件通道地基与 schema/业务级校验命令 · `plugin_control_event.rs` 控件事件回传链 |
+| `crates/hp-core/src/plugin.rs`（1053） | `plugin.rs` 清单结构与只读访问器 · `plugin_types.rs` 取值域（信任/来源/运行形态/能力/宿主 API 版本）· `plugin_validate.rs` 清单校验 · `plugin_row.rs` 存储行 · `plugin_tests.rs` 测试清单（`include!`） |
+| `apps/desktop/src/app_ui/panels/MediaPreviewPanel.tsx`（965） | `MediaPreviewPanel.tsx` 主面板（列表行渲染 + 三种视图容器 + 尺寸 CSS 变量）· `mediaPreviewData.ts` 取数 · `mediaPreviewSession.ts` 设置读取与本会话覆盖 · `mediaPreviewToolbar.tsx` 顶部工具条 · `mediaPreviewActions.ts` 文件操作动作 · `mediaPreviewMenu.tsx` 右键菜单 · `mediaPreviewSelection.ts` 选中集与 `selection_change` 上报（既有：`mediaPreviewCell.tsx` / `mediaPreviewDropdown.tsx` / `mediaPreviewView.ts`） |
+| `crates/hp-core/src/blueprint_registry.rs`（870） | `blueprint_registry.rs` 注册表与查询视图 · `blueprint_node_decl.rs` 节点声明取值域与结构 · `blueprint_node_decl_validate.rs` 声明校验与端口推导 · `blueprint_builtin_nodes.rs` 宿主内置 10 种定义表 |
+| `apps/desktop/src/app_ui/panels/BlueprintPanel.tsx`（874） | `BlueprintPanel.tsx` 编辑器装配 · `BlueprintDocList.tsx` 文档列表 · `BlueprintToolbar.tsx` 工具条 · `BlueprintJsonView.tsx` JSON 视图 · `BlueprintPalette.tsx` 节点添加面板 · `useBlueprintEditorState.ts` 界面状态 · `useBlueprintDocuments.ts` 文档命令 · `useBlueprintLayerTools.ts` 层工具接线 · `useBlueprintGraphEdits.ts` 图编辑接线 · `useBlueprintUnlinked.ts` 未接通派生 |
+| `apps/desktop/src/app_ui/core/AppUiApp.tsx`（872） | `AppUiApp.tsx` 外壳根组件 · `blueprintExecutor.ts` 蓝图动作执行器 · `useBlueprintRuntimeWiring.ts` 引擎生命周期接线 · `overlayHost.ts` 浮层宿主 · `panelDetach.ts` 面板脱窗 · `usePluginRegistrations.ts` 插件注册表重建 · `useShellSettings.ts` 界面偏好 · `useTaskWiring.ts` 任务浮窗接线 · `workspaceBootstrap.ts` 启动装载 · `defaultWorkspaceLayout.ts` 默认首屏布局 |
+
+约定（本轮确立，后续拆分照此办理）：
+
+- **域内再导出保持历史路径可用**：`hp_core::plugin::Capability`、`crate::blueprint_registry::NodeRole`
+  这类历史路径由域入口 `pub use` 兜住，拆分对调用方**透明**；调用方无需跟着改 import。
+- **测试文件用 `include!` 挂进原模块的 `mod tests`**（`plugin_tests.rs` / `tag_lib_db_tests.rs`）：
+  拆的是文件不是模块，私有项照旧可测。
+- **门禁跟着代码走**：`tools/control-check.mjs` 等按路径读取源码的断言，必须与被拆模块同批改指针
+  （断言内容不变，只改它读哪个文件），否则门禁会因为"文件里找不到符号"而误报。
 
 ## 顶层目录草案
 
@@ -174,10 +229,17 @@ HamsterPouch/
                               #   blueprint_node.rs 结构 / blueprint_row.rs 存储行 /
                               #   blueprint_validate.rs 硬错误 / blueprint_warnings.rs 软告警 /
                               #   blueprint_migrate.rs 版本迁移 / blueprint_tests.rs 测试夹具）
+                              # （蓝图**节点类型注册表**域：blueprint_registry.rs 注册表与查询视图 /
+                              #   blueprint_node_decl.rs 节点声明取值域与结构 /
+                              #   blueprint_node_decl_validate.rs 声明校验与端口推导 /
+                              #   blueprint_builtin_nodes.rs 宿主内置 10 种定义表）
                               # （控件域：control_types.rs 取值域与**类型注册表** / control.rs schema 结构·解析·校验）
                               # （面板域：面板**分类**与**声明参数**取值域（`category` / `has_class` /
                               #   `blueprint_node` / `mount`，RFC 0010 决策 4，随面板注册表实现落地））
-                              # （插件域：plugin.rs 清单与信任·运行形态 / plugin_contribution.rs 贡献点取值域）
+                              # （插件域：plugin.rs 清单结构与只读访问器 / plugin_types.rs 取值域
+                              #   （信任等级·来源·运行形态·能力·宿主 API 版本）/ plugin_validate.rs 清单校验
+                              #   （结构 / 贡献点完备性 / 取值域 / 声明）/ plugin_row.rs 存储行 /
+                              #   plugin_tests.rs 测试夹具 / plugin_contribution.rs 贡献点取值域）
     hp-store/                 # SQLite 访问、迁移、事务；内部按 repo/ 与 global/ 分层
     hp-scanner/               # 媒体源扫描、变更检测、索引任务
     hp-hash/                  # 内容哈希、感知哈希、哈希算法版本记录
