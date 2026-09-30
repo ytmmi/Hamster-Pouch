@@ -1010,15 +1010,6 @@ pub(crate) fn plugin_control_event(
             return Err(HpError::Plugin(format!("插件入口不存在: {}", entry.display())));
         }
 
-        let method = control_event_method(&owner.plugin_id, &event_id);
-        let params = ControlEventParams {
-            panel_id: &panel_id,
-            control_id: &control_id,
-            event: parsed.as_str(),
-            value: value.as_ref(),
-            target: target.as_deref(),
-        };
-
         // 交付期间**不持任何锁**：这里可能阻塞到超时（D61 默认 2s）。
         let pid_sup = owner.plugin_id.clone();
         let pid_for_closure = owner.plugin_id.clone();
@@ -1045,13 +1036,14 @@ pub(crate) fn plugin_control_event(
             ).map(|_| String::new())
         })?;
 
+        let ack_method = control_event_method(&owner.plugin_id, &event_id);
         Ok(ControlEventAck {
             panel_id,
             plugin_id: owner.plugin_id,
             control_id,
             event,
             event_id,
-            method,
+            method: ack_method,
         })
     })();
     api_from_hp(outcome)

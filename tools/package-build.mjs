@@ -61,12 +61,14 @@ const BASE_DICT = join(ROOT, "tools", "tagdict", "output", "tag_dict_base.sqlite
 
 /** 复制内置基底词库到 data/system/ 下（如果来源文件存在）。 */
 async function copyBaseDict(targetDataRoot) {
-  if (await stat(BASE_DICT).catch(() => null)?.isFile()) {
-    const dest = join(targetDataRoot, "system", "tag_dict_base.sqlite3");
-    await mkdir(join(targetDataRoot, "system"), { recursive: true });
-    await cp(BASE_DICT, dest);
-    return true;
-  }
+  try {
+    if ((await stat(BASE_DICT)).isFile()) {
+      const dest = join(targetDataRoot, "system", "tag_dict_base.sqlite3");
+      await mkdir(join(targetDataRoot, "system"), { recursive: true });
+      await cp(BASE_DICT, dest);
+      return true;
+    }
+  } catch { /* 文件不存在时不复制 */ }
   return false;
 }
 
@@ -108,8 +110,7 @@ const pluginsDist = join(ROOT, "plugins-dist");
 let pluginsDistHasData = false;
 try {
   pluginsDistHasData = (await stat(pluginsDist)).isDirectory();
-} catch { /* 目录不存在时不附加 */ }
-if (pluginsDistHasData) {
+} catch { /* 目录不存在时不附加 */ }if (pluginsDistHasData) {
   for (const dirEntry of await readdir(pluginsDist, { withFileTypes: true })) {
     if (dirEntry.isDirectory() && !dirEntry.name.startsWith(".")) {
       const src = join(pluginsDist, dirEntry.name);
@@ -120,8 +121,18 @@ if (pluginsDistHasData) {
 }
 
 // 附带内置基底词库到 data/system/ 下
-if (await copyBaseDict(devDir)) {
+if (await copyBaseDict(join(devDir, "data"))) {
   console.log(`[package-build]   附加: data\\system\\tag_dict_base.sqlite3（内置基底词库）`);
+}
+
+// 同步系统插件签名文件（编译缓存可能不是最新）
+const paletteSigSrc = join(ROOT, "plugins", "system", "palette", "SHA256SUMS");
+const paletteSigSigSrc = join(ROOT, "plugins", "system", "palette", "SHA256SUMS.sig");
+const paletteSigDst = join(DATA, "plugins", "palette");
+if (await stat(paletteSigSrc).catch(() => null)) {
+  await mkdir(paletteSigDst, { recursive: true });
+  await cp(paletteSigSrc, join(paletteSigDst, "SHA256SUMS"));
+  await cp(paletteSigSigSrc, join(paletteSigDst, "SHA256SUMS.sig"));
 }
 console.log(`[package-build] 开发包: ${devDir}`);
 console.log(`[package-build]   内容: exe + data\\（用户数据） 共 ${fmtMB(devSize)}`);
