@@ -32,31 +32,36 @@ HERE = Path(__file__).parent
 # HERE = <repo>/tools/tagdict -> parents[0]=tools, parents[1]=<repo>
 ROOT = HERE.resolve().parents[1]
 
-# 细分 -> (目录名, 插件 id 后缀, 显示名, 说明, 数据文件名)
-# 数据文件名默认为 tag_lib.sqlite；库 2 关系包用各自的名字，便于识别内容。
+# 扩展包按**类型**分两类命名（用户要求：关系扩展与词典扩展要能一眼区分）：
+#   - **词典扩展** `tagdict-*`：词库内容（概念 / 多语言名称 / 分类 / 别名），按生态来源细分
+#   - **关系扩展** `tagrel-*`：库 2 关系映射（概念之间的层级/关联边）
+# 目录名与插件 id 都带类型前缀，显示名也写明类型。
+#
+# 每项：目录名, 插件 id 后缀, 显示名, 说明, 数据文件名
+# 数据文件名统一为 `tag_lib.sqlite`（宿主按固定名装配，不再因包而异——见 shared.rs）。
 SLICES = {
     "pixiv": (
-        "taglib-pixiv",
-        "taglib.pixiv",
-        "pixiv tag 四库（日语生态）",
+        "tagdict-pixiv",
+        "tagdict.pixiv",
+        "tagdict · pixiv 词典（日语生态）",
         "pixiv 生态的 tag 概念、多语言名称、分类与别名。以日文写法为主，含中文译名与英文名。",
         "tag_lib.sqlite",
     ),
     "danbooru": (
-        "taglib-danbooru",
-        "taglib.danbooru",
-        "danbooru tag 四库（英语生态，含 artist 全量）",
+        "tagdict-danbooru",
+        "tagdict.danbooru",
+        "tagdict · danbooru 词典（英语生态，含 artist 全量）",
         "danbooru 生态的 tag 概念、多语言名称、分类与别名。含 artist 全量（15 万余条，按 D35 不做热度过滤）。",
         "tag_lib.sqlite",
     ),
     # 库 2 关系映射：游戏 → 角色（RFC 0008 库 2 / D34）
     "games": (
-        "taglib-games",
-        "taglib.games",
-        "游戏角色关系（库 2 关系映射）",
+        "tagrel-games",
+        "tagrel.games",
+        "tagrel · 游戏角色关系（库 2 关系映射）",
         "9 款游戏（原神 / 碧蓝航线 / 碧蓝档案 / 明日方舟 / 异环 / 鸣潮 / 绝区零 / 崩坏3 / 崩坏：星穹铁道）\
 与其角色的层级关系。角色名不带括号后缀，作品归属由关系边表达；多语言由 tag_name 承担，软件内按语言算法匹配。",
-        "tag_lib_games.sqlite",
+        "tag_lib.sqlite",
     ),
 }
 
@@ -101,19 +106,33 @@ def build_manifest(slice_key: str, meta: dict, version: str) -> dict:
 def build_readme(slice_key: str, meta: dict) -> str:
     _dir, _id, name, desc, _file = SLICES[slice_key]
     c = meta["counts"]
-    is_games = slice_key == "games"
+    is_rel = _dir.startswith("tagrel-")
+    kind_line = (
+        "**扩展类型：关系扩展（`tagrel-*`）**——库 2 关系映射，承载概念之间的层级/关联边。"
+        if is_rel
+        else "**扩展类型：词典扩展（`tagdict-*`）**——词库内容，承载概念、多语言名称、分类与别名。"
+    )
     rel_note = (
-        "本包**只含库 2 关系映射**（游戏 → 角色）：库 1 概念 + 库 4 多语言名称 + "
-        "库 3 原作/角色字段，以及连接二者的 `tag_relation` 层级边。"
-        if is_games
-        else "本包不含关系；库 2 关系在内置基底库与关系包（如 `taglib-games`）。"
+        "本包是**关系扩展**：库 1 概念 + 库 4 多语言名称 + 库 3 原作/角色字段，"
+        "以及连接二者的 `tag_relation` 层级边。"
+        if is_rel
+        else "本包是**词典扩展**：提供概念与名称；库 2 关系由关系扩展（`tagrel-*`）提供。"
     )
     return f"""# {name}
 
 {desc}
 
-本包是 **tag 四库扩展包**（RFC 0008 / D36 第二层），按细分内容命名。
+{kind_line}
+
+本包是 **tag 四库扩展包**（RFC 0008 / D36 第二层），按扩展类型与细分内容命名。
 `runtime.kind = static-data`：**纯数据，不执行任何代码**，由宿主负责读取。
+
+## 命名约定
+
+| 前缀 | 类型 | 内容 |
+| --- | --- | --- |
+| `tagdict-*` | **词典扩展** | 概念、多语言名称、分类、别名（按生态来源细分） |
+| `tagrel-*` | **关系扩展** | 库 2 关系映射（概念之间的层级/关联边） |
 
 ## 结构（RFC 0008 四库，同构 schema）
 

@@ -1,0 +1,36 @@
+fix(taglib): 扩展包装不上（entry 校验 + 文件名硬编码）+ 按类型分类命名
+
+一、修复「扩展全部装不上」（用户反馈，两处根因）
+1. entry 校验对 static-data 也生效：解析层对 StaticData 显式把 entry 置为空串
+   （「StaticData 形态不需要 entry」），而 hp-core 的 validate_structure 无条件
+   要求 entry 非空 → **所有纯数据扩展包在校验阶段被拒**。
+   修复：entry 非空校验跳过 StaticData；其它形态仍强制（不放宽规则）。
+2. 宿主硬编码数据文件名 data/tag_lib.sqlite，而关系包当时叫
+   tag_lib_games.sqlite → 静默装不上。
+   修复：打包统一为 tag_lib.sqlite；宿主兼容回退（固定名不存在时接受目录内
+   **唯一**的 tag_lib*.sqlite；多个则跳过并提示，不猜）；且只装配
+   tagdict-* / tagrel-* 目录。
+
+二、按类型分类命名（用户要求：关系扩展与词典扩展要能区分）
+原先三个包都叫 taglib-*，看不出区别。现按类型命名：
+- 词典扩展 tagdict-*：tagdict-pixiv / tagdict-danbooru
+- 关系扩展 tagrel-*：tagrel-games
+目录名、插件 id（…extension.tagdict.* / …tagrel.*）、显示名（tagdict · pixiv 词典）
+三处都带类型前缀。装配方式不变（两类都是同构四库 schema，一律进聚合层），
+分类只用于命名与展示。README 增补命名约定表与扩展类型说明。
+
+三、签名（用户要求）
+三个扩展包均已 Ed25519 签名并**真实验签通过**（用 Rust 侧权威验签器逐一验证）。
+注意 install 路径对无签名包是**降级而非报错**，因此加了显式断言签名有效的测试。
+
+四、回归测试（防止再次回归）
+- hp-core: static_data_package_validates_without_entry（单测，含反向断言：
+  非 StaticData 仍要求 entry 非空）
+- hp-plugin-host/tests/tag_extension_install.rs：用真实产物走完整安装路径
+  （解析 → 校验 → 验签 → 复制版本目录），并断言纯数据包无 entry/能力/贡献点
+- hp-plugin-signing/tests/verify_dist_packages.rs：用权威验签器验证三个包
+
+文档：RFC 0008 新增 D36.5（分类命名）、D36.6（装不上根因与修复）；
+决策清单同步；旧包名引用全部更新。
+
+验证：359 测试通过、9 项门禁全绿。

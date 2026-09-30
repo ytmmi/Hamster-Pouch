@@ -334,7 +334,12 @@ impl PluginManifest {
         if self.version.trim().is_empty() {
             return Err(HpError::InvalidArgument("插件版本不能为空".into()));
         }
-        if self.entry.trim().is_empty() {
+        // `entry` 非空校验**不适用于 StaticData**（纯数据包）。
+        // 解析层（`hp-plugin-host` 的 `parse_manifest`）对 StaticData 显式把 entry
+        // 置为空串（「StaticData 形态不需要 entry」），若这里仍要求非空，则**所有
+        // 纯数据扩展包都会在校验阶段被拒**——这正是 tag 词典/关系扩展「装不上」的
+        // 根因。纯数据包由宿主直接读取数据文件，没有可执行入口。
+        if self.runtime_kind != RuntimeKind::StaticData && self.entry.trim().is_empty() {
             return Err(HpError::InvalidArgument("插件入口不能为空".into()));
         }
         if self.api_version == 0 {
@@ -725,9 +730,34 @@ mod tests {
         }
     }
 
+    /// **纯数据扩展包（`static-data`）必须能通过校验**。
+    ///
+    /// 回归测试：解析层对 StaticData 把 `entry` 置为空串，而 `validate_structure`
+    /// 曾无条件要求 `entry` 非空 → 所有 tag 词典/关系扩展都在校验阶段被拒
+    /// （「装不上」）。纯数据包没有可执行入口，`entry` 空是**正确形态**。
     #[test]
-    fn trust_level_roundtrip_and_dynamic_library_rule() {
-        for v in [
+    fn static_data_package_validates_without_entry() {
+        let mut m = manifest();
+        m.runtime_kind = RuntimeKind::StaticData;
+        m.entry = String::new(); // 解析层对 StaticData 就是这么置的
+        m.capabilities = vec![];
+        m.contributions = vec![];
+        m.data_queries = vec![];
+        m.events = vec![];
+        m.validate()
+            .expect("纯数据扩展包应通过校验（entry 允许为空）");
+
+        // 其它形态仍必须要求 entry 非空（不能把规则整体放宽）
+        let mut exe = manifest();
+        exe.entry = String::new();
+        assert!(
+            exe.validate().is_err(),
+            "非 StaticData 形态仍必须要求 entry 非空"
+        );
+    }
+
+    #[test]
+    fn trust_level_roundtrip_and_dynamic_library_rule() {        for v in [
             TrustLevel::System,
             TrustLevel::Trusted,
             TrustLevel::Community,

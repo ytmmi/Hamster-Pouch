@@ -108,8 +108,8 @@ VOCALOID                          艺术家：人名（人类创作）/ 绘画�
 
 - **已确认**：扩展包**可以是多个，对应多个细分**；细分维度取**生态来源**（pixiv / danbooru），而非 kind。
 - **命名**：包名必须**具体、简洁、按细分内容取名**，不用「字典」这类泛称。实际交付：
-  - `plugins-dist/taglib-pixiv`（id `dev.hamsterpouch.extension.taglib.pixiv`）——pixiv 生态，135,679 概念；
-  - `plugins-dist/taglib-danbooru`（id `dev.hamsterpouch.extension.taglib.danbooru`）——danbooru 生态（含 artist 全量），190,808 概念。
+  - `plugins-dist/tagdict-pixiv`（id `dev.hamsterpouch.extension.tagdict.pixiv`）——pixiv 生态，135,679 概念；
+  - `plugins-dist/tagdict-danbooru`（id `dev.hamsterpouch.extension.tagdict.danbooru`）——danbooru 生态（含 artist 全量），190,808 概念。
 - **跨包重叠是刻意行为**：两源都有的概念（实测 18,961 个）在两个包中各出现一次。聚合层本就允许同一概念多层出现，覆盖优先级按 D36「用户库 > 扩展包 > 内置基底」。
 - **依赖闭包（实现要求）**：角色的 `tag_character.work_tag_id` 可能指向**另一来源包**里的原作概念。若不一并纳入，本包该列即悬空外键（实测 pixiv 包 2,291 条 / danbooru 包 1,060 条）。因此打包时按 `work_tag_id` 拉入**依赖原作概念**（实测 pixiv +379 / danbooru +303），并在 `tag.extra_json` 标 `dependency=true`、在 `lib_meta.dependency_concepts` 记数。
 
@@ -121,7 +121,7 @@ VOCALOID                          艺术家：人名（人类创作）/ 绘画�
 
 ### D36.3 多扩展包之间的重复概念归并（构建时新增）
 
-- **场景**：用户安装了多个 tag 词典扩展包（`taglib-pixiv` + `taglib-danbooru` + 第三方包），同一 tag 概念会在多个包里各出现一次，查询时**同一概念显示成多条**。
+- **场景**：用户安装了多个 tag 词典扩展包（`tagdict-pixiv` + `tagdict-danbooru` + 第三方包），同一 tag 概念会在多个包里各出现一次，查询时**同一概念显示成多条**。
 - **两层去重**（缺一不可）：
   1. **按 `tag_id` 去重**（已有）：`tag_id` 由 `sha1(kind + 中文归一)` **确定性派生**，所以同一次构建切出的细分包，重叠概念天然同 ID。实测 pixiv/danbooru 两包按 `(kind, 中文标准名)` 重叠 **19,675** 个概念，其中 **19,624** 个 ID 完全相同，这一层就能覆盖。
   2. **按概念身份归并**（本次新增）：**不同构建版本或第三方包**的 `tag_id` 会不同（数据源更新导致中文标准名变化，或第三方用别的 ID 方案）。此时仅按 ID 去重不够，必须按**概念身份**归并。
@@ -256,8 +256,8 @@ CREATE TABLE lib_meta (
 | 层 | 文件 | 概念 | 名称 | 体积 |
 | --- | --- | --- | --- | --- |
 | 内置基底库（DB-1） | `data/system/tag_lib_base.sqlite3` | 8,110 | 40,282 | **12.07 MB** |
-| 扩展包 · pixiv（DB-2a） | `plugins-dist/taglib-pixiv/data/tag_lib.sqlite` | 135,679 | 405,035 | **128.7 MB** |
-| 扩展包 · danbooru（DB-2b） | `plugins-dist/taglib-danbooru/data/tag_lib.sqlite` | 190,808 | 548,027 | **161.6 MB** |
+| 扩展包 · pixiv（DB-2a） | `plugins-dist/tagdict-pixiv/data/tag_lib.sqlite` | 135,679 | 405,035 | **128.7 MB** |
+| 扩展包 · danbooru（DB-2b） | `plugins-dist/tagdict-danbooru/data/tag_lib.sqlite` | 190,808 | 548,027 | **161.6 MB** |
 | 用户库（DB-3） | `data/user/tag_lib_user.sqlite3` | 运行时创建 | — | — |
 | 全量（构建中间产物） | `tools/tagdict/output/tag_lib.sqlite` | 306,844 | 844,280 | 268.3 MB |
 
@@ -301,7 +301,7 @@ CREATE TABLE lib_meta (
 ### 数据包形态（实际）
 
 ```text
-taglib-pixiv/            # 或 taglib-danbooru/
+tagdict-pixiv/           # 或 tagdict-danbooru/
   plugin.manifest        # runtime.kind = "static-data"；无 entry、无能力、无贡献点
   data/tag_lib.sqlite    # 四库数据（D33-D37 的 schema）
   README.md              # 数据来源与许可（ffdkj MIT）
@@ -387,7 +387,7 @@ D36.1 的**重新打开条件已触发并结案**（承载方式定案为 `stati
 
 ### D36.4 关系映射库-游戏扩展（库 2，已实施）
 
-- **内容**：9 款游戏（原神 / 碧蓝航线 / 碧蓝档案 / 明日方舟 / 异环 / 鸣潮 / 绝区零 / 崩坏3 / 崩坏：星穹铁道）与其角色的层级关系。交付为 `plugins-dist/taglib-games`（2,966 概念 / 3,024 关系 / 6.0MB，已签名）。
+- **内容**：9 款游戏（原神 / 碧蓝航线 / 碧蓝档案 / 明日方舟 / 异环 / 鸣潮 / 绝区零 / 崩坏3 / 崩坏：星穹铁道）与其角色的层级关系。交付为 `plugins-dist/tagrel-games`（2,966 概念 / 3,024 关系 / 6.0MB，已签名）。
 - **只实现一个语言，软件内算法匹配多语言**（用户要求）：种子 `tools/tagdict/data/lib2_games.json` **只写中文游戏名 + 匹配后缀**；日/英标准名与别名随概念一并携带，运行时按语言查 `tag_name` 即可（如 `甘雨` / `Ganyu` 命中同一 `tag_id`）。
 - **角色名不带括号后缀**（用户要求）：角色节点用纯名（`甘雨`，不是 `甘雨（原神）`），**作品归属由 `tag_relation` 的关系边表达**（`原神 --hierarchy--> 甘雨`）。带括号的完整写法作为**别名**保留。
 - **一个角色可有多个作品**（用户要求）：关系库**只展示关系、不区分作品**——一个角色节点可挂多个游戏父级（**D34 多父级 DAG**）。筛选时由调用方**按作品限定（AND）**收窄。实测多作品角色如 `卡提希娅`（鸣潮/碧蓝航线/崩坏：星穹铁道）、`椿`（鸣潮/蔚蓝档案）。
@@ -401,6 +401,29 @@ D36.1 的**重新打开条件已触发并结案**（承载方式定案为 `stati
   2. **括号后缀**——来自别名（如 `甘雨（原神）`）（实测 1,560）
   3. **既有 `tag_character.work_tag_id`** 启发式归属（实测 65）
 - **扩展性**：新增游戏只需在 `lib2_games.json` 的 `games` 数组加一项（中文名 + 后缀），重跑脚本即可。
+
+### D36.5 扩展包按类型分类命名（词典 / 关系）
+
+- **问题**：原先三个扩展包都叫 `taglib-*`，**看不出区别**（用户反馈）。词典扩展承载「词库内容」，关系扩展承载「库 2 关系边」，二者语义不同。
+- **命名约定**（已确认）：
+
+| 前缀 | 类型 | 内容 | 现有包 |
+| --- | --- | --- | --- |
+| `tagdict-*` | **词典扩展** | 概念、多语言名称、分类、别名（按生态来源细分） | `tagdict-pixiv` / `tagdict-danbooru` |
+| `tagrel-*` | **关系扩展** | 库 2 关系映射（概念之间的层级/关联边） | `tagrel-games` |
+
+- 目录名、插件 id（`dev.hamsterpouch.extension.tagdict.*` / `…tagrel.*`）与显示名（`tagdict · pixiv 词典（日语生态）`）**三处都带类型前缀**，任一处都能看出类型。
+- **装配方式不变**：两类都是**同构四库 schema**，宿主一律进聚合层，查询层不区分数据来自哪一类。分类只用于**命名与展示**。
+- **数据文件名统一为 `data/tag_lib.sqlite`**：宿主按固定名装配，不再因包而异（历史上关系包用 `tag_lib_games.sqlite`，导致宿主按固定名**静默装不上**——见 D36.6）。
+
+### D36.6 纯数据扩展包「装不上」的根因与修复
+
+- **现象**：`plugins-dist/` 下的扩展包**全部装不上**（用户反馈）。
+- **根因（两处，均已修）**：
+  1. **`entry` 校验对 `static-data` 也生效**：解析层（`hp-plugin-host` 的 `parse_manifest`）对 StaticData 显式把 `entry` 置为空串（「StaticData 形态不需要 entry」），而 `hp-core` 的 `validate_structure` **无条件**要求 `entry` 非空 → 所有纯数据包在校验阶段被拒。**修复**：`entry` 非空校验跳过 `StaticData`（其它形态仍强制）。
+  2. **宿主硬编码数据文件名**：`attach_tag_lib_extensions` 只找 `data/tag_lib.sqlite`，而关系包当时叫 `tag_lib_games.sqlite` → 静默装配不上。**修复**：打包统一为 `tag_lib.sqlite`；宿主兼容回退（固定名不存在时接受目录内**唯一**的 `tag_lib*.sqlite`；多个则跳过并提示，不猜），且只装配 `tagdict-*` / `tagrel-*` 目录。
+- **签名**（用户要求）：三个扩展包均已 Ed25519 签名。注意 `install` 路径对**无签名包是降级而非报错**，所以必须有测试显式断言签名有效——已加 `crates/hp-plugin-signing/tests/verify_dist_packages.rs`（用 Rust 侧权威验签器逐一验证真实产物）。
+- **回归测试**：`crates/hp-core/src/plugin.rs` 的 `static_data_package_validates_without_entry`（单测）+ `crates/hp-plugin-host/tests/tag_extension_install.rs`（用真实产物走完整安装路径）。
 
 ## 待实现的界面展示（用户要求，2026-09 登记）
 

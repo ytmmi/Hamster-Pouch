@@ -167,9 +167,15 @@ pub(crate) fn tag_lib_base_path() -> Result<PathBuf, String> {
     Ok(dir.join("tag_lib_base.sqlite3"))
 }
 
-/// 装配 `plugins-dist/` 下已安装的 tag 词典扩展包（RFC 0008 / D36 第二层）。
+/// 装配 `plugins-dist/` 下已安装的 tag 扩展包（RFC 0008 / D36 第二层）。
 ///
-/// 每个扩展包是一个目录，内含 `data/tag_lib.sqlite`（四库同构 schema）。
+/// 扩展包分两类（按目录名前缀区分，见 RFC 0008 D36.5）：
+/// - **词典扩展** `tagdict-*`：词库内容（概念 / 多语言名称 / 分类 / 别名）
+/// - **关系扩展** `tagrel-*`：库 2 关系映射（概念之间的层级/关联边）
+///
+/// 两类都是**同构四库 schema**，装配方式完全相同——都进聚合层，查询层不区分
+/// 数据来自哪一类。分类只用于**命名与展示**（让用户看得出装了什么）。
+///
 /// 以**只读**方式逐个打开并加入聚合层；顺序为目录名的字典序，即同层内的优先级。
 /// 单个包损坏/缺失数据文件时**跳过该包**并继续（不因一个坏包让整个词库不可用）。
 ///
@@ -191,10 +197,50 @@ pub(crate) fn attach_tag_lib_extensions(set: &mut hp_store::TagLibSet) -> usize 
 
     let mut attached = 0usize;
     for dir in dirs {
-        let db_path = dir.join("data").join("tag_lib.sqlite");
-        if !db_path.is_file() {
+        // 只装配已知的两类扩展目录；其它目录（如 README、旧命名残留）跳过。
+        let name = dir
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        if !(name.starts_with("tagdict-") || name.starts_with("tagrel-")) {
             continue;
         }
+
+        // 数据文件名固定为 `tag_lib.sqlite`（打包脚本统一，避免宿主按包猜名）。
+        // 兼容早期命名：若固定名不存在，退而接受目录内唯一的 `tag_lib*.sqlite`
+        // ——历史上关系包曾用 `tag_lib_games.sqlite`，按固定名会**静默装不上**。
+        let data_dir = dir.join("data");
+        let mut db_path = data_dir.join("tag_lib.sqlite");
+        if !db_path.is_file() {
+            if let Ok(rd) = std::fs::read_dir(&data_dir) {
+                let mut found: Vec<PathBuf> = rd
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| {
+                        p.file_name()
+                            .and_then(|s| s.to_str())
+                            .is_some_and(|s| s.starts_with("tag_lib") && s.ends_with(".sqlite"))
+                    })
+                    .collect();
+                found.sort();
+                match found.len() {
+                    1 => db_path = found.remove(0),
+                    // 0 个：不是数据包；>1 个：无法判断，跳过并提示（不猜）
+                    n => {
+                        if n > 1 {
+                            eprintln!(
+                                "[taglib] 跳过扩展包 {}：data/ 下有多个 tag_lib*.sqlite，无法判断用哪个",
+                                dir.display()
+                            );
+                        }
+                        continue;
+                    }
+                }
+            } else {
+                continue;
+            }
+        }
+
         match hp_store::TagLibDb::open_readonly(&db_path, hp_core::LibLayer::Extension) {
             Ok(db) => {
                 set.add(db);
