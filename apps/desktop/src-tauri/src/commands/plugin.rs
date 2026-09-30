@@ -7,9 +7,9 @@ use hp_core::{
     HpResult, PluginRegistryRow, RuntimeKind, CONTROL_API_VERSION,
 };
 use hp_plugin_host::{
-    control_event_method, discover_packages, ExternalProcessQuery, InstallSource, PanelOwner,
-    PanelSchemaKey, PanelSchemaParams, PluginHost, PluginInstaller, SupervisionStatus, MANIFEST_FILE,
-    SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT,
+    control_event_method, discover_packages, parse_manifest, ExternalProcessQuery, InstallSource,
+    PanelOwner, PanelSchemaKey, PanelSchemaParams, PluginHost, PluginInstaller, SupervisionStatus,
+    MANIFEST_FILE, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT,
 };
 use serde::Serialize;
 use tauri::{Emitter, State};

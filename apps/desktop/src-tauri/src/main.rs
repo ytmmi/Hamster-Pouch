@@ -14,7 +14,7 @@ use hp_ai::AiTaggingService;
 use hp_media::{MediaProcess, ThumbnailCache};
 use hp_plugin_host::SupervisionRegistry;
 use hp_scanner::Scanner;
-use hp_store::{GlobalDb, RepoDb, TagLibDb, TagLibSet};
+use hp_store::{GlobalDb, RepoDb, TagLibSet};
 use tauri::Manager;
 
 use commands::shared::external_bin;
