@@ -161,100 +161,191 @@ pub(crate) fn global_db_path() -> Result<PathBuf, String> {
 ///
 /// 由 `tools/tagdict/build_base_lib.py` 生成（RFC 0008 / D36 第一层，约 12MB），
 /// 随发布包/开发包分发。**完整词库不随应用分发**，按需安装 `plugins-dist/` 下的
-/// 细分扩展包（`taglib-pixiv` / `taglib-danbooru`）。
+/// 细分扩展包（`tagdict-pixiv` / `tagdict-danbooru` / `tagrel-games`）。
 pub(crate) fn tag_lib_base_path() -> Result<PathBuf, String> {
     let dir = app_data_root()?.join("system");
     Ok(dir.join("tag_lib_base.sqlite3"))
 }
 
-/// 装配 `plugins-dist/` 下已安装的 tag 扩展包（RFC 0008 / D36 第二层）。
+/// 构建 tag 库聚合集：内置基底库（D36 第一层）+ 已安装扩展包（第二层），
+/// 并建立**重复概念归并索引**（D36.3）。
 ///
-/// 扩展包分两类（按目录名前缀区分，见 RFC 0008 D36.5）：
+/// 启动时调用一次；**插件安装/启用/禁用后必须重新调用**并替换 `AppState.tag_lib`，
+/// 否则扩展数据不会生效（用户会看到「装完启用后界面毫无变化」）。
+///
+/// 返回 `None` = 无内置基底库（首次运行尚未分发）或打开失败——调用方应保持原状。
+pub(crate) fn build_tag_lib_set(plugin_root: &std::path::Path) -> Option<hp_store::TagLibSet> {
+    let path = tag_lib_base_path().ok()?;
+    if !path.is_file() {
+        return None;
+    }
+    let db = hp_store::TagLibDb::open_readonly(&path, hp_core::LibLayer::Base).ok()?;
+    let mut set = hp_store::TagLibSet::new();
+    set.add(db);
+    // 扩展包：tag 数据是**应用级共享参考数据**（D34/D36），因此装配**全部已安装**的
+    // 扩展，不按仓库启用状态过滤——这与「启用是仓库级」的插件语义冲突，属 D36.1
+    // 登记的未结案项；此处按 RFC 已有的「应用级共享」结论落地。
+    let _ext = attach_tag_lib_extensions(&mut set, plugin_root);
+    // 归并索引失败不应阻塞：查询仍可用（退化为仅按 tag_id 去重）
+    if let Err(e) = set.refresh_merge() {
+        eprintln!("[taglib] 构建重复概念归并索引失败（查询仍可用）: {e}");
+    }
+    Some(set)
+}
+
+/// 装配已安装的 tag 扩展包（RFC 0008 / D36 第二层）。
+///
+/// 扩展包分两类（按插件 id 前缀区分，见 RFC 0008 D36.5）：
 /// - **词典扩展** `tagdict-*`：词库内容（概念 / 多语言名称 / 分类 / 别名）
 /// - **关系扩展** `tagrel-*`：库 2 关系映射（概念之间的层级/关联边）
 ///
 /// 两类都是**同构四库 schema**，装配方式完全相同——都进聚合层，查询层不区分
 /// 数据来自哪一类。分类只用于**命名与展示**（让用户看得出装了什么）。
 ///
-/// 以**只读**方式逐个打开并加入聚合层；顺序为目录名的字典序，即同层内的优先级。
-/// 单个包损坏/缺失数据文件时**跳过该包**并继续（不因一个坏包让整个词库不可用）。
+/// **装配来源是插件的真实安装目录** `<plugin_root>/<plugin_id>/<version>/`
+/// （`data/plugins/…`，由 `plugin.installLocal` 安装到那里）。此前这里读的是
+/// `<exe>/plugins-dist/`——那是**分发目录**，不是安装目录，导致「装完启用后
+/// 数据根本没被加载」（界面看不出任何变化）。现在同时兼容两者：
+///   1. 安装目录（权威）：`<plugin_root>/<plugin_id>/<version>/data/tag_lib.sqlite`
+///   2. 分发目录（回退）：`<exe>/plugins-dist/<name>/data/tag_lib.sqlite`
+/// 同一 plugin_id 只装配一次（安装目录优先）。
 ///
-/// 返回成功装配的扩展包数量。
-pub(crate) fn attach_tag_lib_extensions(set: &mut hp_store::TagLibSet) -> usize {
-    let Ok(root) = tag_lib_extension_root() else {
-        return 0;
-    };
-    let Ok(entries) = std::fs::read_dir(&root) else {
-        return 0;
-    };
-
-    let mut dirs: Vec<PathBuf> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_dir())
-        .collect();
-    dirs.sort();
-
+/// 以**只读**方式逐个打开并加入聚合层。单个包损坏/缺失数据文件时**跳过该包**并继续
+/// （不因一个坏包让整个词库不可用）。返回成功装配的扩展包数量。
+pub(crate) fn attach_tag_lib_extensions(
+    set: &mut hp_store::TagLibSet,
+    plugin_root: &std::path::Path,
+) -> usize {
     let mut attached = 0usize;
-    for dir in dirs {
-        // 只装配已知的两类扩展目录；其它目录（如 README、旧命名残留）跳过。
-        let name = dir
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default();
-        if !(name.starts_with("tagdict-") || name.starts_with("tagrel-")) {
-            continue;
-        }
+    let mut seen: std::collections::HashSet<String> = Default::default();
 
-        // 数据文件名固定为 `tag_lib.sqlite`（打包脚本统一，避免宿主按包猜名）。
-        // 兼容早期命名：若固定名不存在，退而接受目录内唯一的 `tag_lib*.sqlite`
-        // ——历史上关系包曾用 `tag_lib_games.sqlite`，按固定名会**静默装不上**。
-        let data_dir = dir.join("data");
-        let mut db_path = data_dir.join("tag_lib.sqlite");
-        if !db_path.is_file() {
-            if let Ok(rd) = std::fs::read_dir(&data_dir) {
-                let mut found: Vec<PathBuf> = rd
-                    .flatten()
-                    .map(|e| e.path())
-                    .filter(|p| {
-                        p.file_name()
-                            .and_then(|s| s.to_str())
-                            .is_some_and(|s| s.starts_with("tag_lib") && s.ends_with(".sqlite"))
-                    })
-                    .collect();
-                found.sort();
-                match found.len() {
-                    1 => db_path = found.remove(0),
-                    // 0 个：不是数据包；>1 个：无法判断，跳过并提示（不猜）
-                    n => {
-                        if n > 1 {
-                            eprintln!(
-                                "[taglib] 跳过扩展包 {}：data/ 下有多个 tag_lib*.sqlite，无法判断用哪个",
-                                dir.display()
-                            );
-                        }
-                        continue;
-                    }
-                }
-            } else {
+    // ---- 来源 1（权威）：插件安装目录 <plugin_root>/<plugin_id>/<version>/ ----
+    if let Ok(entries) = std::fs::read_dir(plugin_root) {
+        let mut plugin_dirs: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
+        plugin_dirs.sort();
+        for pdir in plugin_dirs {
+            let plugin_id = pdir
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default()
+                .to_string();
+            if !is_tag_extension_id(&plugin_id) {
                 continue;
             }
-        }
-
-        match hp_store::TagLibDb::open_readonly(&db_path, hp_core::LibLayer::Extension) {
-            Ok(db) => {
-                set.add(db);
-                attached += 1;
-            }
-            Err(e) => {
-                eprintln!(
-                    "[taglib] 跳过扩展包 {}（打开失败）: {e}",
-                    dir.display()
-                );
+            // 一个插件可能有多个版本目录，取字典序最后一个（版本号升序的近似）
+            let Ok(vers) = std::fs::read_dir(&pdir) else {
+                continue;
+            };
+            let mut vdirs: Vec<PathBuf> = vers
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect();
+            vdirs.sort();
+            for vdir in vdirs {
+                if let Some(db_path) = find_tag_lib_data(&vdir) {
+                    if attach_one(set, &db_path) {
+                        attached += 1;
+                        seen.insert(plugin_id.clone());
+                    }
+                }
             }
         }
     }
+
+    // ---- 来源 2（回退）：分发目录 <exe>/plugins-dist/<name>/ ----
+    if let Ok(root) = tag_lib_extension_root() {
+        if let Ok(entries) = std::fs::read_dir(&root) {
+            let mut dirs: Vec<PathBuf> = entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect();
+            dirs.sort();
+            for dir in dirs {
+                let name = dir
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default();
+                if !(name.starts_with("tagdict-") || name.starts_with("tagrel-")) {
+                    continue;
+                }
+                // 安装目录已装配过同名扩展则跳过（安装目录权威）
+                if seen.contains(name) {
+                    continue;
+                }
+                if let Some(db_path) = find_tag_lib_data(&dir) {
+                    if attach_one(set, &db_path) {
+                        attached += 1;
+                    }
+                }
+            }
+        }
+    }
+
     attached
+}
+
+/// 插件 id 是否属于 tag 扩展两类之一（`tagdict.*` / `tagrel.*`）。
+fn is_tag_extension_id(plugin_id: &str) -> bool {
+    let local = plugin_id.rsplit('.').next().unwrap_or(plugin_id);
+    // 插件 id 形如 `dev.hamsterpouch.extension.tagdict.pixiv`；
+    // 取完整 id 里是否含类型段，避免只比对末段（末段是 pixiv/danbooru/games）。
+    plugin_id.contains(".tagdict.") || plugin_id.contains(".tagrel.")
+        || local == "tagdict"
+        || local == "tagrel"
+}
+
+/// 在包目录里定位四库数据文件：固定名 `data/tag_lib.sqlite`；
+/// 不存在时回退接受 `data/` 下**唯一**的 `tag_lib*.sqlite`（历史命名兼容）。
+fn find_tag_lib_data(dir: &std::path::Path) -> Option<PathBuf> {
+    let data_dir = dir.join("data");
+    let fixed = data_dir.join("tag_lib.sqlite");
+    if fixed.is_file() {
+        return Some(fixed);
+    }
+    let rd = std::fs::read_dir(&data_dir).ok()?;
+    let mut found: Vec<PathBuf> = rd
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.starts_with("tag_lib") && s.ends_with(".sqlite"))
+        })
+        .collect();
+    found.sort();
+    match found.len() {
+        1 => Some(found.remove(0)),
+        // 0 个：不是数据包；>1 个：无法判断，跳过并提示（不猜）
+        n => {
+            if n > 1 {
+                eprintln!(
+                    "[taglib] 跳过 {}：data/ 下有多个 tag_lib*.sqlite，无法判断用哪个",
+                    dir.display()
+                );
+            }
+            None
+        }
+    }
+}
+
+/// 打开并加入聚合层；成功返回 true。
+fn attach_one(set: &mut hp_store::TagLibSet, db_path: &std::path::Path) -> bool {
+    match hp_store::TagLibDb::open_readonly(db_path, hp_core::LibLayer::Extension) {
+        Ok(db) => {
+            set.add(db);
+            true
+        }
+        Err(e) => {
+            eprintln!("[taglib] 跳过扩展包 {}（打开失败）: {e}", db_path.display());
+            false
+        }
+    }
 }
 
 /// tag 词典扩展包的存放根目录（`<exe 同目录>\plugins-dist\`）。

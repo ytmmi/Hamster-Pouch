@@ -50,6 +50,12 @@ pub(crate) struct PluginItem {
     source_ref: Option<String>,
     runtime_kind: String,
     installed_at: String,
+    /// 插件**声明**的能力列表（`plugin.manifest` 的 `capabilities`）。
+    ///
+    /// 前端启用插件时只能请求这里的子集——`enable_for_repo` 会拒绝未声明的能力。
+    /// 纯数据扩展包（`static-data`）声明为空，因此启用时**不应请求任何能力**
+    /// （此前前端硬编码 `["repo.read"]`，导致这类包启用报「请求内容不合法」）。
+    capabilities: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -141,6 +147,11 @@ pub(crate) struct PanelCatalogItem {
 }
 
 fn row_to_item(r: PluginRegistryRow) -> PluginItem {
+    // 声明能力从注册表里的 manifest_json 解析（安装时原样存入，是权威清单）。
+    // 解析失败不致命：退回空列表（前端将不请求任何能力，等价于只读启用）。
+    let capabilities = parse_manifest(&r.manifest_json)
+        .map(|m| m.capabilities.iter().map(|c| c.as_str().to_string()).collect())
+        .unwrap_or_default();
     PluginItem {
         id: r.id.as_str().to_string(),
         name: r.name,
@@ -150,6 +161,7 @@ fn row_to_item(r: PluginRegistryRow) -> PluginItem {
         source_ref: r.source_ref,
         runtime_kind: r.runtime_kind.as_str().to_string(),
         installed_at: r.installed_at,
+        capabilities,
     }
 }
 
@@ -232,6 +244,9 @@ pub(crate) fn plugin_install_local(
         let mut guard = lock_global(&state)?;
         let g = global_mut(&mut guard)?;
         PluginHost.register(g, &row)?;
+        drop(guard);
+        // tag 扩展装完即重装配（数据是应用级共享，不依赖仓库启用状态）
+        crate::commands::tagdict::reload(&state);
         Ok(row_to_item(row))
     })();
     api_from_hp(outcome)
@@ -434,6 +449,7 @@ pub(crate) fn plugin_enable(
             PluginHost.enable_for_repo(g, &plugin_id, &repo_id, &requested)?
         };
         emit_plugin_changed(&app, &repo_id);
+        crate::commands::tagdict::reload(&state);
         Ok(state_to_item(st))
     })();
     api_from_hp(outcome)
@@ -455,6 +471,7 @@ pub(crate) fn plugin_disable(
             PluginHost.disable_for_repo(g, &plugin_id, &repo_id)?;
         }
         emit_plugin_changed(&app, &repo_id);
+        crate::commands::tagdict::reload(&state);
         Ok(())
     })();
     api_from_hp(outcome)

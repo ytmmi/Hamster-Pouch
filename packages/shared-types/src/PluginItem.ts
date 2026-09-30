@@ -3,4 +3,11 @@
 /**
  * plugin.list 返回元素。
  */
-export type PluginItem = { id: string, name: string, version: string, trust_level: string, source_kind: string, source_ref: string | null, runtime_kind: string, installed_at: string, };
+export type PluginItem = { id: string, name: string, version: string, trust_level: string, source_kind: string, source_ref: string | null, runtime_kind: string, installed_at: string, 
+/**
+ * 插件**声明**的能力（`plugin.manifest` 的 `capabilities`）。
+ *
+ * 前端启用时只能请求这里的子集。纯数据扩展包（`static-data`）为空，
+ * 启用时不应请求任何能力。
+ */
+capabilities: Array<string>, };

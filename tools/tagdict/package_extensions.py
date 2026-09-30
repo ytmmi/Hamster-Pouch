@@ -8,8 +8,12 @@
   README.md                 - 数据来源与许可（RFC 0008 要求）
   CHANGELOG                 - 版本与计数
 
-命名原则（用户要求）：**具体、简洁，按细分内容取名**，不用"字典"这类泛称。
-  按生态来源切分 -> taglib-pixiv / taglib-danbooru
+命名原则（用户要求）：**按扩展类型分类 + 按细分内容取名**，不用"字典"这类泛称。
+  - 词典扩展 `tagdict-*`：按生态来源切分 -> tagdict-pixiv / tagdict-danbooru
+  - 关系扩展 `tagrel-*`：库 2 关系映射 -> tagrel-games
+
+数据文件名统一为 `data/tag_lib.sqlite`：宿主按固定名装配，不因包而异
+（历史上关系包用 `tag_lib_games.sqlite`，导致宿主按固定名静默装不上）。
 
 注意：不在此处生成 SHA256SUMS / SHA256SUMS.sig——签名走 tools/sign-plugin.mjs
 （需要 Ed25519 私钥，属发布流程）。

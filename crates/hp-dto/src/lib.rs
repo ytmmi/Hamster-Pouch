@@ -79,6 +79,11 @@ pub struct PluginItem {
     pub source_ref: Option<String>,
     pub runtime_kind: String,
     pub installed_at: String,
+    /// 插件**声明**的能力（`plugin.manifest` 的 `capabilities`）。
+    ///
+    /// 前端启用时只能请求这里的子集。纯数据扩展包（`static-data`）为空，
+    /// 启用时不应请求任何能力。
+    pub capabilities: Vec<String>,
 }
 
 /// plugin.discover 返回元素。

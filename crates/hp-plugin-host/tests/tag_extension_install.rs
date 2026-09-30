@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 
-use hp_plugin_host::{InstallSource, PluginInstaller};
+use hp_plugin_host::{InstallSource, PluginHost, PluginInstaller};
 
 /// 仓库根（`CARGO_MANIFEST_DIR` = crates/hp-plugin-host）。
 fn repo_root() -> PathBuf {
@@ -132,4 +132,67 @@ fn tag_extension_packages_install_with_signature() {
         });
     }
     println!("已安装 {} 个 tag 扩展包", dirs.len());
+}
+
+/// **启用**纯数据扩展包必须成功（回归测试）。
+///
+/// 曾经的缺陷：前端启用时硬编码请求 `["repo.read"]`，而纯数据扩展包声明**零能力**，
+/// `enable_for_repo` 拒绝未声明的能力 → 界面报「请求内容不合法」。
+/// 正确做法是**只请求插件自己声明过的能力**（此处即空集）。
+///
+/// 本测试直接走宿主 API，断言空能力请求能启用成功、且请求未声明能力会被拒。
+#[test]
+fn static_data_extension_can_be_enabled_without_capabilities() {
+    let dirs = tag_extension_dirs();
+    if dirs.is_empty() {
+        eprintln!("跳过：未找到 tag 扩展包");
+        return;
+    }
+
+    let tmp = tempfile::tempdir().expect("临时目录");
+    let mut db = hp_store::GlobalDb::open(tmp.path().join("global.sqlite3")).expect("全局库");
+    let installer = PluginInstaller::new(tmp.path().join("plugins"));
+
+    for dir in &dirs {
+        let pkg = hp_plugin_host::read_package(dir).expect("读包");
+        // 纯数据包声明零能力——这正是前端应请求空集的原因
+        assert!(
+            pkg.manifest.capabilities.is_empty(),
+            "{} 纯数据包不应声明能力",
+            dir.display()
+        );
+
+        let row = installer
+            .install_registry_row(
+                &InstallSource::LocalPath(dir.clone()),
+                "2026-01-01T00:00:00Z",
+            )
+            .expect("登记注册表");
+        db.upsert_plugin(&row).expect("写注册表");
+
+        // ① 空能力请求：必须成功（前端修复后的行为）
+        let state = PluginHost
+            .enable_for_repo(&mut db, row.id.as_str(), "repo-1", &[])
+            .unwrap_or_else(|e| panic!("{} 空能力启用失败: {e}", dir.display()));
+        assert!(state.enabled);
+
+        // ② 加载也必须成功（启用后）
+        PluginHost
+            .load(&db, row.id.as_str(), "repo-1")
+            .unwrap_or_else(|e| panic!("{} 加载失败: {e}", dir.display()));
+
+        // ③ 请求未声明的能力：必须被拒（安全口径不能放宽）
+        let err = PluginHost.enable_for_repo(
+            &mut db,
+            row.id.as_str(),
+            "repo-1",
+            &[hp_core::Capability::RepoRead],
+        );
+        assert!(
+            err.is_err(),
+            "{} 请求未声明能力应被拒（旧前端的缺陷行为）",
+            dir.display()
+        );
+    }
+    println!("已验证 {} 个纯数据扩展包可空能力启用", dirs.len());
 }

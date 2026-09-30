@@ -105,7 +105,8 @@ if (dataStat?.isDirectory()) {
   }
 }
 
-// 附带已签名但**不随发布**的插件包（plugins-dist/taglib-* 等细分扩展）
+// 附带已签名但**不随发布**的插件包（plugins-dist/ 下的 tagdict-* 词典扩展
+// 与 tagrel-* 关系扩展，见 RFC 0008 D36.5）
 const pluginsDist = join(ROOT, "plugins-dist");
 let pluginsDistHasData = false;
 try {

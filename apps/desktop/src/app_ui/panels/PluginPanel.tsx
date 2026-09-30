@@ -17,6 +17,7 @@ export function PluginPanel(): JSX.Element {
   const app = useApp();
   const [plugins, setPlugins] = useState<PluginItem[]>([]);
   const [states, setStates] = useState<Record<string, PluginStateItem | null>>({});
+  const [taglib, setTaglib] = useState<api.TagLibStatus | null>(null);
   const [path, setPath] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -33,6 +34,9 @@ export function PluginPanel(): JSX.Element {
       } else {
         setStates({});
       }
+      // 词库装配状态：让「装了几个扩展、共多少个 tag、合并了多少重复」在界面可见。
+      // 扩展是纯数据包、不贡献面板，若不在这里显示，装了之后界面上毫无迹象。
+      setTaglib(await api.taglibStatus());
     } catch (e) {
       app.status(errorTextOf(app.t, e), "error");
     }
@@ -125,7 +129,10 @@ export function PluginPanel(): JSX.Element {
         if (enabled) {
           await api.pluginDisable(app.repoId, plugin.id);
         } else {
-          await api.pluginEnable(app.repoId, plugin.id, ["repo.read"]);
+          // 只请求插件**自己声明过**的能力：`enable_for_repo` 会拒绝未声明的能力。
+          // 纯数据扩展包（static-data）声明为空，因此启用时不请求任何能力——
+          // 此前硬编码 `["repo.read"]` 会让这类包报「请求内容不合法」。
+          await api.pluginEnable(app.repoId, plugin.id, plugin.capabilities ?? []);
         }
         await load();
       } catch (e) {
@@ -194,6 +201,17 @@ export function PluginPanel(): JSX.Element {
         >
           {app.t("plugin.installBundled")}
         </button>
+      </div>
+      <div className="row">
+        <span className="dim">
+          {taglib?.loaded
+            ? app.t("plugin.taglibSummary", {
+                concepts: taglib.conceptCount,
+                layers: taglib.layers,
+                duplicates: taglib.duplicateCount,
+              })
+            : app.t("plugin.taglibEmpty")}
+        </span>
       </div>
       <div className="list">
         {plugins.map((p) => {

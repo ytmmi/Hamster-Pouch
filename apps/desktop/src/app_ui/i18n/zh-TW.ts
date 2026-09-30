@@ -138,6 +138,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "plugin.disable": "停用",
   "plugin.load": "載入",
   "plugin.grants": "能力授權",
+  "plugin.taglibSummary": "詞庫：{concepts} 個 tag（{layers} 層，合併重複 {duplicates} 條）",
+  "plugin.taglibEmpty": "詞庫未裝配（缺內建基底庫）",
 
   // 標籤分組（D21：人工 / 自動獨立）
   "tag.manual": "人工標籤",

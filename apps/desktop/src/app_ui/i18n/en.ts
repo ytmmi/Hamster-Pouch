@@ -138,6 +138,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "plugin.disable": "Disable",
   "plugin.load": "Load",
   "plugin.grants": "Grants",
+  "plugin.taglibSummary": "Dictionary: {concepts} tags ({layers} layers, {duplicates} duplicates merged)",
+  "plugin.taglibEmpty": "Dictionary not assembled (base library missing)",
 
   // Tag groups (D21: manual / auto independent)
   "tag.manual": "Manual tags",

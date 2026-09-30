@@ -142,6 +142,8 @@ export const zhCN = {
   "plugin.disable": "禁用",
   "plugin.load": "加载",
   "plugin.grants": "能力授权",
+  "plugin.taglibSummary": "词库：{concepts} 个 tag（{layers} 层，合并重复 {duplicates} 条）",
+  "plugin.taglibEmpty": "词库未装配（缺内置基底库）",
 
   // 标签分组（D21：人工 / 自动独立）
   "tag.manual": "人工标签",

@@ -123,33 +123,20 @@ fn main() {
                     }
                 }
             });
-            // 装配 tag 库：内置基底库（RFC 0008 / D36 第一层）+ 已安装的扩展包。
+            // 装配 tag 库：内置基底库（RFC 0008 / D36 第一层）+ 已安装扩展包
+            // （`data/plugins/<id>/<version>/`），并建立**重复概念归并索引**。
             // 以**只读**方式打开：数据包是只读资产，宿主只读不写。
-            // 装配完成后构建**重复概念归并索引**：多个扩展包含同一概念时会归并为一条
-            // （不同构建版本/第三方包的 `tag_id` 可能不同，仅按 ID 去重不够）。
-            if let Ok(path) = commands::shared::tag_lib_base_path() {
-                if path.is_file() {
-                    if let Ok(db) = TagLibDb::open_readonly(&path, hp_core::LibLayer::Base) {
-                        let mut set = TagLibSet::new();
-                        set.add(db);
-                        // 扩展包（plugins-dist/taglib-*）：按 D36 装配在基底之上
-                        let ext_count = commands::shared::attach_tag_lib_extensions(&mut set);
-                        // 归并索引失败不应阻塞启动：查询仍可用（退化为仅按 tag_id 去重）
-                        if let Err(e) = set.refresh_merge() {
-                            eprintln!("[taglib] 构建重复概念归并索引失败（查询仍可用）: {e}");
-                        }
-                        if let Ok((merged, dup)) = set
-                            .duplicate_stats()
-                            .ok_or(hp_core::HpError::Store("归并索引未构建".into()))
-                        {
-                            eprintln!(
-                                "[taglib] 装配完成：扩展包 {ext_count} 个，\
-                                 归并后概念 {merged} 条（合并重复 {dup} 条）"
-                            );
-                        }
-                        if let Ok(mut guard) = app.state::<AppState>().tag_lib.lock() {
-                            *guard = Some(set);
-                        }
+            {
+                let plugin_root = app.state::<AppState>().plugin_root.as_ref().clone();
+                if let Some(set) = commands::shared::build_tag_lib_set(&plugin_root) {
+                    if let Some((merged, dup)) = set.duplicate_stats() {
+                        eprintln!(
+                            "[taglib] 装配完成：{} 层，归并后概念 {merged} 条（合并重复 {dup} 条）",
+                            set.len()
+                        );
+                    }
+                    if let Ok(mut guard) = app.state::<AppState>().tag_lib.lock() {
+                        *guard = Some(set);
                     }
                 }
             }
@@ -281,6 +268,7 @@ fn main() {
             commands::blueprint::blueprint_template_install,
             commands::shared::debug_log,
             commands::tagdict::tag_dict_suggest,
+            commands::tagdict::taglib_status,
         ])
         .run(tauri::generate_context!())
         .expect("仓鼠颊启动失败");
