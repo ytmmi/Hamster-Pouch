@@ -12,14 +12,14 @@ use hp_plugin_host::{
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::commands::plugin::{emit_plugin_error, panel_owner_enabled};
+use crate::commands::plugin::{emit_plugin_error, panel_owner_enabled, supervised_call};
 use crate::commands::shared::{api_from_hp, ensure_global, ApiResponse};
 use crate::AppState;
 
 // ===== 控件受控取数通道（`docs/spec/control-standard.md` 第 5 节 / 第 4 轮）=====
 
 /// `plugin.panelData` 的一条 `bind` 入参（前端按已解析的 schema 收集后传入）。
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub(crate) struct PanelDataBind {
     /// `panel` / `selection`（控件标准第 5 节第一版开放的两种）。
     kind: String,
@@ -73,6 +73,7 @@ fn parse_panel_data_results(text: &str) -> HpResult<serde_json::Map<String, serd
 /// （rows/object/scalar）的匹配——`PanelOwner` 目前只带查询**名**，不带 `returns`，
 /// 扩它属于另一处改动；留待需要时一并做。
 fn fetch_panel_data(
+    state: &AppState,
     owner: &PanelOwner,
     panel_id: &str,
     selected_file_id: Option<&str>,
@@ -130,11 +131,16 @@ fn fetch_panel_data(
     );
 
     // 查询期间**不持任何锁**：这里可能阻塞到超时（与 schema 通道同口径 2s）。
-    let text = ExternalProcessQuery::for_entry(entry).query_panel_data(
-        &request,
-        QUERY_TIMEOUT,
-        QUERY_MAX_BYTES,
-    )?;
+    let plugin_id = owner.plugin_id.clone();
+    let entry_clone = entry.clone();
+    let request_clone = request.clone();
+    let text = supervised_call(state, plugin_id, move || {
+        ExternalProcessQuery::for_entry(entry_clone).query_panel_data(
+            &request_clone,
+            QUERY_TIMEOUT,
+            QUERY_MAX_BYTES,
+        )
+    })?;
     let results = parse_panel_data_results(&text)?;
     let missing = specs
         .iter()
@@ -166,7 +172,7 @@ pub(crate) fn plugin_panel_data(
     let outcome = (|| -> HpResult<PanelDataItem> {
         ensure_global(&state, &app)?;
         let owner = panel_owner_enabled(&state, &repo_id, &panel_id)?;
-        let result = fetch_panel_data(&owner, &panel_id, selected_file_id.as_deref(), &binds);
+        let result = fetch_panel_data(&state, &owner, &panel_id, selected_file_id.as_deref(), &binds);
         if let Err(e) = &result {
             emit_plugin_error(&app, &repo_id, &owner.plugin_id, &e.to_string());
         }
@@ -217,17 +223,45 @@ mod tests {
         assert!(parse_panel_data_results("not json").is_err(), "非 JSON 应被拒绝");
     }
 
+    /// 测试用的空 AppState（监督为空不干预，插件未注册监督器时跳过检查）。
+    fn test_state() -> AppState {
+        use std::sync::{Arc, Mutex};
+        use hp_media::ThumbnailCache;
+        use hp_ai::AiTaggingService;
+        use hp_plugin_host::SupervisionRegistry;
+        use hp_scanner::Scanner;
+        use crate::tasks::TaskRegistry;
+        AppState {
+            global_db: Arc::new(Mutex::new(None)),
+            open_repo: Arc::new(Mutex::new(None)),
+            current_repo_id: Arc::new(Mutex::new(None)),
+            current_repo_path: Arc::new(Mutex::new(None)),
+            tasks: Arc::new(TaskRegistry::new()),
+            scanner: Arc::new(Scanner::new()),
+            ffmpeg_bin: Arc::new(None),
+            ffprobe_bin: Arc::new(None),
+            thumb_cache: Arc::new(ThumbnailCache::new(std::path::PathBuf::from("Z:/none"))),
+            media: Arc::new(Mutex::new(None)),
+            media_embed: Arc::new(Mutex::new(None)),
+            plugin_root: Arc::new(std::path::PathBuf::from("Z:/none")),
+            panel_schema_cache: Arc::new(Mutex::new(hp_plugin_host::PanelSchemaCache::new())),
+            supervision: Arc::new(Mutex::new(SupervisionRegistry::new())),
+            ai: Arc::new(Mutex::new(AiTaggingService::new())),
+        }
+    }
+
     /// 未在 manifest `data_queries` 里声明的查询名 = **硬错误**（控件标准第 5 节）。
     #[test]
     fn undeclared_bind_name_is_a_hard_error() {
         let owner = owner_with_queries(&["colors"]);
-        let err = fetch_panel_data(&owner, "p.panel", None, &[bind("panel", "ghost")])
+        let s = test_state();
+        let err = fetch_panel_data(&s, &owner, "p.panel", None, &[bind("panel", "ghost")])
             .expect_err("未声明的查询名应失败");
         assert!(matches!(err, HpError::InvalidArgument(_)), "应为参数类错误: {err:?}");
         assert!(err.to_string().contains("ghost"), "应指出是哪个名字: {err}");
 
         // 声明过的名字通过校验，随后才因**入口不存在**失败（证明失败点在校验之后）。
-        let err = fetch_panel_data(&owner, "p.panel", None, &[bind("panel", "colors")])
+        let err = fetch_panel_data(&s, &owner, "p.panel", None, &[bind("panel", "colors")])
             .expect_err("入口不存在应失败");
         assert!(err.to_string().contains("入口不存在"), "应是入口问题: {err}");
     }
@@ -236,7 +270,8 @@ mod tests {
     #[test]
     fn bind_kind_is_a_closed_set() {
         let owner = owner_with_queries(&["colors"]);
-        let err = fetch_panel_data(&owner, "p.panel", None, &[bind("repo", "colors")])
+        let s = test_state();
+        let err = fetch_panel_data(&s, &owner, "p.panel", None, &[bind("repo", "colors")])
             .expect_err("repo 类第一版不应开放");
         assert!(matches!(err, HpError::InvalidArgument(_)));
         assert!(err.to_string().contains("bind.kind 非法"), "应指出 kind 问题: {err}");
@@ -246,7 +281,8 @@ mod tests {
     #[test]
     fn empty_binds_never_spawn_a_process() {
         let owner = owner_with_queries(&["colors"]);
-        let item = fetch_panel_data(&owner, "p.panel", None, &[])
+        let s = test_state();
+        let item = fetch_panel_data(&s, &owner, "p.panel", None, &[])
             .expect("无 bind 不该因为入口缺失而失败——它根本不该起进程");
         assert!(item.results.is_empty());
         assert!(item.missing.is_empty());

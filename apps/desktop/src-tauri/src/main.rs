@@ -94,6 +94,7 @@ fn make_state() -> AppState {
         media_embed: Arc::new(Mutex::new(None)),
         plugin_root: Arc::new(plugin_root),
         panel_schema_cache: Arc::new(Mutex::new(hp_plugin_host::PanelSchemaCache::new())),
+        supervision: Arc::new(Mutex::new(SupervisionRegistry::new())),
         ai: Arc::new(Mutex::new(AiTaggingService::new())),
     }
 }

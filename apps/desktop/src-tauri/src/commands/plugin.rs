@@ -8,7 +8,7 @@ use hp_core::{
 };
 use hp_plugin_host::{
     control_event_method, discover_packages, ExternalProcessQuery, InstallSource, PanelOwner,
-    PanelSchemaKey, PanelSchemaParams, PluginHost, PluginInstaller, MANIFEST_FILE,
+    PanelSchemaKey, PanelSchemaParams, PluginHost, PluginInstaller, SupervisionStatus, MANIFEST_FILE,
     SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT,
 };
 use serde::Serialize;
@@ -707,6 +707,66 @@ pub(crate) fn panel_owner_enabled(
     Ok(owner)
 }
 
+/// 执行一次受监督的插件外部进程查询。
+///
+/// 1. 检查监督状态（退避中 / 不健康 → 拒绝）
+/// 2. 执行查询（不持任何锁）
+/// 3. 记录 success / failure
+pub(crate) fn supervised_call(
+    state: &AppState,
+    plugin_id: String,
+    run: impl FnOnce() -> HpResult<String>,
+) -> HpResult<String> {
+    // 步骤 1：监督检查
+    {
+        let mut guard = state
+            .supervision
+            .lock()
+            .map_err(|_| HpError::Store("监督注册表锁中毒".into()))?;
+        // 自动注册监督器（首次调用某插件时）
+        if guard.get_mut(&plugin_id).is_none() {
+            guard.register(&plugin_id);
+        }
+        let sup = guard.get_mut(&plugin_id);
+        if let Some(s) = sup {
+            match s.status() {
+                SupervisionStatus::Unhealthy { .. } => {
+                    return Err(HpError::Plugin(format!(
+                        "插件 {plugin_id} 已被标记为不健康（连续失败），请重新启用后重试"
+                    )));
+                }
+                _ => {
+                    if let Err(remaining) = s.on_call_start() {
+                        return Err(HpError::Plugin(format!(
+                            "插件 {plugin_id} 退避中，还需等待 {}ms 才能重试",
+                            remaining.as_millis()
+                        )));
+                    }
+                }
+            }
+        } // 未注册监督器的插件（非 external-process）不检查
+    }
+
+    // 步骤 2：执行查询
+    let result = run();
+
+    // 步骤 3：记录结果
+    {
+        let mut guard = state
+            .supervision
+            .lock()
+            .map_err(|_| HpError::Store("监督注册表锁中毒".into()))?;
+        if let Some(s) = guard.get_mut(&plugin_id) {
+            match &result {
+                Ok(_) => s.on_success(),
+                Err(_) => { s.on_failure(); }
+            }
+        }
+    }
+
+    result
+}
+
 /// 取（或查询并缓存）面板 schema。
 fn fetch_panel_schema(
     state: &AppState,
@@ -746,11 +806,16 @@ fn fetch_panel_schema(
     }
 
     // 查询期间**不持任何锁**：这里可能阻塞到超时（D61 默认 2s）。
-    let schema_json = ExternalProcessQuery::for_entry(entry).query(
-        &PanelSchemaParams::new(panel_id, CONTROL_API_VERSION),
-        SCHEMA_QUERY_TIMEOUT,
-        SCHEMA_MAX_BYTES,
-    )?;
+    let plugin_id_for_run = owner.plugin_id.clone();
+    let entry_clone = entry.clone();
+    let panel_id_clone = panel_id.to_string();
+    let schema_json = supervised_call(state, plugin_id_for_run, move || {
+        ExternalProcessQuery::for_entry(entry_clone).query(
+            &PanelSchemaParams::new(&panel_id_clone, CONTROL_API_VERSION),
+            SCHEMA_QUERY_TIMEOUT,
+            SCHEMA_MAX_BYTES,
+        )
+    })?;
 
     // 只缓存成功结果：失败必须能在下次重开面板时重试。
     if let Ok(mut cache) = state.panel_schema_cache.lock() {
@@ -943,12 +1008,30 @@ pub(crate) fn plugin_control_event(
         };
 
         // 交付期间**不持任何锁**：这里可能阻塞到超时（D61 默认 2s）。
-        ExternalProcessQuery::for_entry(entry).call(
-            &method,
-            &params,
-            SCHEMA_QUERY_TIMEOUT,
-            SCHEMA_MAX_BYTES,
-        )?;
+        let pid_sup = owner.plugin_id.clone();
+        let pid_for_closure = owner.plugin_id.clone();
+        let entry_clone = entry.clone();
+        let panel_id_clone = panel_id.clone();
+        let control_id_clone = control_id.clone();
+        let event_str = parsed.as_str().to_string();
+        let value_clone = value.clone();
+        let target_clone = target.clone();
+        let event_id_clone = event_id.clone();
+        supervised_call(&state, pid_sup, move || {
+            let params = ControlEventParams {
+                panel_id: &panel_id_clone,
+                control_id: &control_id_clone,
+                event: &event_str,
+                value: value_clone.as_ref(),
+                target: target_clone.as_deref(),
+            };
+            ExternalProcessQuery::for_entry(entry_clone).call(
+                &control_event_method(&pid_for_closure, &event_id_clone),
+                &params,
+                SCHEMA_QUERY_TIMEOUT,
+                SCHEMA_MAX_BYTES,
+            ).map(|_| String::new())
+        })?;
 
         Ok(ControlEventAck {
             panel_id,
