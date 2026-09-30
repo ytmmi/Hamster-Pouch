@@ -1,7 +1,6 @@
 //! tag 词库命令：内置基底库（Top 5000，`data/system/tag_dict_base.sqlite3`）的查询。
 
 use hp_core::HpResult;
-use hp_store::TagDictDb;
 use tauri::State;
 
 use crate::commands::shared::{api_from_hp, ApiResponse};

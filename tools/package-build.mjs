@@ -165,11 +165,31 @@ if (dataStat?.isDirectory()) {
         .map((s) => s.trim())
         .filter(Boolean)
     : [];
+  // 如果全局库无注册记录（全新编译），改用文件系统扫描 plugins/system/*/
+  if (systemPlugins.length === 0) {
+    const sysPluginRoot = join(ROOT, "plugins", "system");
+    try {
+      for (const entry of await readdir(sysPluginRoot, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          systemPlugins.push(entry.name);
+        }
+      }
+    } catch { /* 目录不存在则跳过 */ }
+  }
   if (systemPlugins.length > 0) {
     for (const pid of systemPlugins) {
-      const src = join(DATA, "plugins", pid);
-      if (await stat(src).catch(() => null)) {
-        await cp(src, join(relPlugins, pid), { recursive: true });
+      // 从仓库根 plugins/system/<pid>/ 复制（比 DATA 更可靠——编译缓存可能缺失）
+      let sysSrcExists = false;
+      try { sysSrcExists = (await stat(join(ROOT, "plugins", "system", pid))).isDirectory(); } catch {}
+      if (sysSrcExists) {
+        await cp(join(ROOT, "plugins", "system", pid), join(relPlugins, pid), { recursive: true });
+      } else {
+        // 兜底：从编译缓存 DATA/plugins/<pid>/ 复制
+        let dataSrcExists = false;
+        try { dataSrcExists = (await stat(join(DATA, "plugins", pid))).isDirectory(); } catch {}
+        if (dataSrcExists) {
+          await cp(join(DATA, "plugins", pid), join(relPlugins, pid), { recursive: true });
+        }
       }
     }
   }
