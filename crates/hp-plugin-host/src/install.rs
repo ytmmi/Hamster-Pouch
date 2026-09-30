@@ -5,7 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
-use hp_core::{HpError, HpResult, PluginRegistryRow};
+use hp_core::{HpError, HpResult, PluginRegistryRow, TrustLevel};
+use hp_plugin_signing::check_plugin_signature;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -61,11 +62,37 @@ impl PluginInstaller {
         &self.root
     }
 
+    /// 检查包签名：仅 Bundled 源需验证。Invalid 返回硬错误，Missing 无声通过（信任降级在
+    /// [`registry_row_of`] 处理）。
+    fn verify_signature(source: &InstallSource) -> HpResult<()> {
+        if !matches!(source, InstallSource::Bundled(_)) {
+            return Ok(()); // 非随包插件不验证签名
+        }
+        if hp_plugin_signing::should_skip_signature_check() {
+            return Ok(()); // debug profile 跳过
+        }
+        let dir = source.dir();
+        let sig_file = dir.join("SHA256SUMS.sig");
+        if !sig_file.is_file() {
+            return Ok(()); // 无签名文件 → 信任降级由 registry_row_of 处理
+        }
+        match check_plugin_signature(dir).map_err(|e| {
+            HpError::Plugin(format!("系统插件签名检查失败: {e}"))
+        })? {
+            hp_plugin_signing::SignatureStatus::Verified => Ok(()),
+            hp_plugin_signing::SignatureStatus::Missing => Ok(()), // 无签名文件已在上方拦截
+            hp_plugin_signing::SignatureStatus::Invalid(e) => {
+                Err(HpError::Permission(format!("系统插件签名验证失败: {e}")))
+            }
+        }
+    }
+
     /// 安装插件包：复制源目录到版本目录；已存在同名版本则拒绝（不覆盖）。
     pub fn install(&self, source: &InstallSource) -> HpResult<InstalledPackage> {
         let src_dir = source.dir();
         let package = read_package(src_dir)?;
         package.manifest.validate()?;
+        Self::verify_signature(source)?;
 
         let dest = self.version_dir(package.manifest.id.as_str(), &package.manifest.version);
         if dest.exists() {
@@ -98,6 +125,7 @@ impl PluginInstaller {
         let src_dir = source.dir();
         let package = read_package(src_dir)?;
         package.manifest.validate()?;
+        Self::verify_signature(source)?;
 
         let dest = self.version_dir(package.manifest.id.as_str(), &package.manifest.version);
         if dest.is_dir() {
@@ -129,6 +157,10 @@ impl PluginInstaller {
     ///
     /// 抽成私有方法是为了让"新装"与"复用既有版本"两条路径共用**同一处**信任推导——
     /// 一旦分叉，就又有可能长出第二条信任来源（缺陷 0008 的形态）。
+    ///
+    /// **系统插件签名降级**（D40）：随包（Bundled）插件若缺少 Ed25519 签名，
+    /// 信任等级降为 `community`（不赋予 `system` 能力）。签名存在但无效的情况已在
+    /// [`verify_signature`] 被硬拒绝，进不到这里。
     fn registry_row_of(
         &self,
         installed: &InstalledPackage,
@@ -139,11 +171,21 @@ impl PluginInstaller {
         let manifest_json = std::fs::read_to_string(installed.dir.join(MANIFEST_FILE))
             .map_err(|e| HpError::Io(format!("读取插件清单失败: {e}")))?;
         let host_source = HostSourceKind::from_install_source(source);
+        let mut trust = effective_trust(host_source, manifest.trust_requested);
+
+        // D40：Bundled 插件缺签名 → 降级为 community
+        if trust == TrustLevel::System && !hp_plugin_signing::should_skip_signature_check() {
+            let sig_file = installed.dir.join("SHA256SUMS.sig");
+            if !sig_file.is_file() {
+                trust = TrustLevel::Community;
+            }
+        }
+
         Ok(PluginRegistryRow {
             id: manifest.id.clone(),
             name: manifest.name.clone(),
             version: manifest.version.clone(),
-            trust_level: effective_trust(host_source, manifest.trust_requested),
+            trust_level: trust,
             source_kind: host_source.as_source_kind(),
             source_ref: Some(installed.dir.to_string_lossy().to_string()),
             runtime_kind: manifest.runtime_kind,
@@ -399,7 +441,8 @@ mod tests {
     #[test]
     fn install_or_reuse_registry_row_keeps_bundled_as_system() {
         use hp_core::{SourceKind, TrustLevel};
-
+        // D40：系统插件若缺少 Ed25519 签名（无 SHA256SUMS.sig），信任降为 community；
+        // 此处 test 夹具无签名文件，因此预期 community。
         let tmp = tempfile::tempdir().expect("临时目录失败").keep();
         let installer = PluginInstaller::new(tmp.join("store"));
         let source = InstallSource::Bundled(make_package(&tmp, "0.1.0"));
@@ -408,7 +451,7 @@ mod tests {
             .install_or_reuse_registry_row(&source, "t1")
             .expect("随包注册失败");
         assert_eq!(row.source_kind, SourceKind::System);
-        assert_eq!(row.trust_level, TrustLevel::System);
-        assert!(row.trust_level.allows_dynamic_library());
+        assert_eq!(row.trust_level, TrustLevel::Community);
+        assert!(!row.trust_level.allows_dynamic_library());
     }
 }

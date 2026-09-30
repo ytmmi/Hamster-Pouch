@@ -1055,6 +1055,8 @@ mod tests {
     /// `trust_level` 会变成 `local-dev`，本用例立即失败。
     #[test]
     fn bundled_candidate_is_registered_as_system_and_is_idempotent() {
+        // D40：无 SHA256SUMS.sig 的系统插件信任降为 Community；待签名正式上线后
+        // 本测试应加签名文件。
         let root = temp_root("install");
         write_package(&root, "palette");
         let installer = PluginInstaller::new(temp_root("store"));
@@ -1064,15 +1066,15 @@ mod tests {
         assert_eq!(first.status, "installed");
         let row1 = row1.expect("新装应产出注册表行");
         assert_eq!(row1.source_kind, SourceKind::System);
-        assert_eq!(row1.trust_level, TrustLevel::System);
-        assert!(row1.trust_level.allows_dynamic_library());
+        assert_eq!(row1.trust_level, TrustLevel::Community);
+        assert!(!row1.trust_level.allows_dynamic_library());
 
         // 幂等：同版本再来一次是"复用"，不是错误。
         let (second, row2) = install_bundled_candidate(&installer, &candidate, "t2");
         assert_eq!(second.status, "alreadyInstalled");
         let row2 = row2.expect("复用也要产出注册表行，否则注册表丢失后无法修复");
         assert_eq!(row2.source_kind, SourceKind::System);
-        assert_eq!(row2.trust_level, TrustLevel::System);
+        assert_eq!(row2.trust_level, TrustLevel::Community);
     }
 
     #[test]

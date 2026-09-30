@@ -1,0 +1,13 @@
+[package]
+name = "hp-plugin-signing"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ed25519-dalek = { version = "2", features = ["digest"] }
+sha2 = "0.10"
+hex = "0.4"
+hp-core = { path = "../hp-core" }
+
+[dev-dependencies]
+tempfile = "3"

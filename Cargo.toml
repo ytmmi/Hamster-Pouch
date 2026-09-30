@@ -10,6 +10,7 @@ members = [
   "crates/hp-ai",
   "crates/hp-media",
   "crates/hp-dto",
+  "crates/hp-plugin-signing",
 ]
 resolver = "2"
 
