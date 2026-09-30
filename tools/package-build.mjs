@@ -89,6 +89,18 @@ if (dataStat?.isDirectory()) {
     }
   }
 }
+
+// 附带已签名但**不随发布**的插件包（plugins-dist/tag-dict 等扩展插件）
+const pluginsDist = join(ROOT, "plugins-dist");
+if (await stat(pluginsDist).catch(() => null)?.isDirectory()) {
+  for (const dirEntry of await readdir(pluginsDist, { withFileTypes: true })) {
+    if (dirEntry.isDirectory() && !dirEntry.name.startsWith(".")) {
+      const src = join(pluginsDist, dirEntry.name);
+      await cp(src, join(devDir, "plugins-dist", dirEntry.name), { recursive: true });
+    }
+  }
+  console.log(`[package-build]   附加: plugins-dist/（已签名扩展插件，不含用户数据）`);
+}
 console.log(`[package-build] 开发包: ${devDir}`);
 console.log(`[package-build]   内容: exe + data\\（用户数据） 共 ${fmtMB(devSize)}`);
 

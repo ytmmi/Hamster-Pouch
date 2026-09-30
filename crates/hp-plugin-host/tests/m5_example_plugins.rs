@@ -145,7 +145,7 @@ fn local_path_install_cannot_self_declare_system_trust() {
 fn bundled_system_plugin_gets_system_trust_from_host_decision() {
     // 随包分发的内置插件（`plugins/system/*`）由**宿主**判定为 system——
     // 与 manifest 是否自称无关（palette 清单根本没写 source）。
-    // D40：当前 palette 无 SHA256SUMS.sig，trust 降为 Community。
+    // D40+：palette 已有 Ed25519 签名，信任等级为 System。
     let root = temp_root("bundled");
     let installer = PluginInstaller::new(root.join("store"));
     let row = installer
@@ -155,7 +155,7 @@ fn bundled_system_plugin_gets_system_trust_from_host_decision() {
         )
         .expect("随包安装失败");
 
-    assert_eq!(row.trust_level, TrustLevel::Community);
+    assert_eq!(row.trust_level, TrustLevel::System);
     assert_eq!(row.source_kind, SourceKind::System);
-    assert!(!row.trust_level.allows_dynamic_library());
+    assert!(row.trust_level.allows_dynamic_library());
 }

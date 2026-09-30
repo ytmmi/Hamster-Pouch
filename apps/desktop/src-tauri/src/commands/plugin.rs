@@ -1138,8 +1138,7 @@ mod tests {
     /// `trust_level` 会变成 `local-dev`，本用例立即失败。
     #[test]
     fn bundled_candidate_is_registered_as_system_and_is_idempotent() {
-        // D40：无 SHA256SUMS.sig 的系统插件信任降为 Community；待签名正式上线后
-        // 本测试应加签名文件。
+        // D40+：随包插件有签名文件时信任为 System；测试夹具无签名文件 → Community。
         let root = temp_root("install");
         write_package(&root, "palette");
         let installer = PluginInstaller::new(temp_root("store"));

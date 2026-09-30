@@ -25,7 +25,7 @@ use sha2::{Digest, Sha256};
 ///
 /// 首次签名工具版本上线时生成对应密钥对；公钥编译进本 crate。
 const BUILTIN_PUBKEY_HEX: &str =
-    "bd4e13f9a1b2c3d4e5f67890abcdef01234567890abcdef01234567890abcdef01";
+    "bc4534b0e1f150063bf773b4c94c93128ebf8f0343847c20c06a6294bd8c8ea2";
 
 /// 解析后的内置验证公钥（惰性求值）。
 fn builtin_verifying_key() -> HpResult<VerifyingKey> {

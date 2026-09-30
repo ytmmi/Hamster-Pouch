@@ -62,12 +62,10 @@ impl PluginInstaller {
         &self.root
     }
 
-    /// 检查包签名：仅 Bundled 源需验证。Invalid 返回硬错误，Missing 无声通过（信任降级在
-    /// [`registry_row_of`] 处理）。
+    /// 检查包签名：对所有安装来源都验证签名（Invalid 返回硬错误，Missing 无声通过）。
+    /// 非 Bundled 源无签名按宿主判定来源；有签名的非 Bundled 源可在
+    /// [`registry_row_of`] 中获得 manifest 请求的信任等级。
     fn verify_signature(source: &InstallSource) -> HpResult<()> {
-        if !matches!(source, InstallSource::Bundled(_)) {
-            return Ok(()); // 非随包插件不验证签名
-        }
         if hp_plugin_signing::should_skip_signature_check() {
             return Ok(()); // debug profile 跳过
         }
@@ -77,12 +75,12 @@ impl PluginInstaller {
             return Ok(()); // 无签名文件 → 信任降级由 registry_row_of 处理
         }
         match check_plugin_signature(dir).map_err(|e| {
-            HpError::Plugin(format!("系统插件签名检查失败: {e}"))
+            HpError::Plugin(format!("插件签名检查失败: {e}"))
         })? {
             hp_plugin_signing::SignatureStatus::Verified => Ok(()),
-            hp_plugin_signing::SignatureStatus::Missing => Ok(()), // 无签名文件已在上方拦截
+            hp_plugin_signing::SignatureStatus::Missing => Ok(()),
             hp_plugin_signing::SignatureStatus::Invalid(e) => {
-                Err(HpError::Permission(format!("系统插件签名验证失败: {e}")))
+                Err(HpError::Permission(format!("插件 Ed25519 签名无效: {e}")))
             }
         }
     }
@@ -158,6 +156,10 @@ impl PluginInstaller {
     /// 抽成私有方法是为了让"新装"与"复用既有版本"两条路径共用**同一处**信任推导——
     /// 一旦分叉，就又有可能长出第二条信任来源（缺陷 0008 的形态）。
     ///
+    /// **签名信任升级**（D40+）：有有效 Ed25519 签名的插件（签名来自内置公钥），
+    /// 可获 manifest 请求的 `trust.requested` 等级（包括 `system`），不论安装来源。
+    /// 无签名或签名无效的插件按宿主判定的来源推算信任。
+    ///
     /// **系统插件签名降级**（D40）：随包（Bundled）插件若缺少 Ed25519 签名，
     /// 信任等级降为 `community`（不赋予 `system` 能力）。签名存在但无效的情况已在
     /// [`verify_signature`] 被硬拒绝，进不到这里。
@@ -171,10 +173,31 @@ impl PluginInstaller {
         let manifest_json = std::fs::read_to_string(installed.dir.join(MANIFEST_FILE))
             .map_err(|e| HpError::Io(format!("读取插件清单失败: {e}")))?;
         let host_source = HostSourceKind::from_install_source(source);
-        let mut trust = effective_trust(host_source, manifest.trust_requested);
 
-        // D40：Bundled 插件缺签名 → 降级为 community
-        if trust == TrustLevel::System && !hp_plugin_signing::should_skip_signature_check() {
+        // D40+：签名信任升级——有有效签名的插件按 manifest 请求授予信任
+        let mut trust = if hp_plugin_signing::should_skip_signature_check() {
+            effective_trust(host_source, manifest.trust_requested)
+        } else {
+            let sig_file = installed.dir.join("SHA256SUMS.sig");
+            if sig_file.is_file()
+                && matches!(
+                    check_plugin_signature(installed.dir.as_path())
+                        .unwrap_or(hp_plugin_signing::SignatureStatus::Invalid("".into())),
+                    hp_plugin_signing::SignatureStatus::Verified
+                )
+            {
+                // 签名有效 → 按 manifest 请求授予信任
+                manifest.trust_requested
+            } else {
+                effective_trust(host_source, manifest.trust_requested)
+            }
+        };
+
+        // D40：Bundled 源无签名 → 降级为 community（不让无签名的 system 插件通过）
+        if trust == TrustLevel::System
+            && matches!(source, InstallSource::Bundled(_))
+            && !hp_plugin_signing::should_skip_signature_check()
+        {
             let sig_file = installed.dir.join("SHA256SUMS.sig");
             if !sig_file.is_file() {
                 trust = TrustLevel::Community;

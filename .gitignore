@@ -88,3 +88,6 @@ external-cli/mpv/
 # 而且构建机与目标机的 ABI 未必一致。构建办法见 plugins/examples/control-demo/README.md。
 # 只忽略 bin/ 下的 .exe：同目录的 README.md 等说明文档仍入库（见 plugins/examples/hello/bin/）。
 plugins/**/bin/*.exe
+
+# 插件签名私钥（只提交公钥，私钥保持本机）
+tools/signing/signing-key.pem
