@@ -361,7 +361,7 @@
 >
 > 1. **命令形态**：本节的回传链写的是字面命令名 `plugin.{pluginId}.{eventId}`，它要求
 >    **动态注册**，而 Tauri 命令是**静态注册**的。落地时拆成两段——「前端 → 宿主」用一条
->    **通用**宿主命令 `plugin.controlEvent`（`apps/desktop/src-tauri/src/commands/plugin.rs:845`），
+>    **通用**宿主命令 `plugin.controlEvent`（`apps/desktop/src-tauri/src/commands/plugin.rs:945`），
 >    「宿主 → 插件」仍发**本节的字面方法名**（`crates/hp-plugin-host/src/channel.rs:52`）。
 >    **插件侧看到的协议与本节一致**，偏差只落在宿主命令这一层，且已登记进
 >    `docs/spec/commands-events.md` §3.11。

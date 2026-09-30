@@ -76,6 +76,8 @@ crates/hp-store/src/
     tag.rs   rating.rs  color.rs  file.rs
     media.rs layout.rs
     plugin.rs ai.rs fsops.rs
+    plugin_catalog.rs   # 「扩展」菜单的目录通道（plugin.panelCatalog：面板 + 无面板的数据扩展）
+    plugin_panel_data.rs # 面板 bind 的受控取数通道（plugin.panelData）
     blueprint.rs        # 蓝图命令桥接（含 blueprint.changed 广播）
 
 apps/desktop/src/app_ui/
