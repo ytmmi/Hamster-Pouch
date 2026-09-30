@@ -94,6 +94,11 @@ tools/signing/signing-key.pem
 tools/signing/pubkey-base64.txt
 tools/signing/pubkey.der
 
-# 预分发扩展插件的数据库文件（大文件，只入库 manifest + 签名，不入库数据本身）
+# === 预分发扩展插件：单独分发，整体不入库 ===
+# plugins-dist/ 下的 tag 库扩展包是**单独分发**的扩展插件（体积 128–162MB，
+# 见 RFC 0008 / D36），不进主仓库：主仓库只保留**生产这些包的代码**
+# （tools/tagdict/*.py 与 crates/hp-store/migrations/dict_lib/）。
+# 包本身按需构建/安装；data/ 与 bin/ 已在下方单独列出（历史规则，保留以免遗漏）。
+plugins-dist/
 plugins-dist/*/data/
 plugins-dist/*/bin/

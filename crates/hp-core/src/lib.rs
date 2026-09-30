@@ -27,6 +27,7 @@ pub mod setting_types;
 pub mod source;
 pub mod tag;
 pub mod tag_dict;
+pub mod tag_lib;
 
 pub use ai::{
     should_overwrite_user_tag, AiProviderConfig, AiProviderConfigId, AiTagCandidate, AiTagUndo,
@@ -97,4 +98,8 @@ pub use tag::{FileAutoTag, FileTag, Tag, TagId, TagRelation, TagRelationKind, Ta
 pub use tag_dict::{
     DictCategory, DictLang, DictSource, TagDictAlias, TagDictEntry, TagDictLookup,
     TagDictSuggestion, TagDictTranslation, TranslationKind,
+};
+pub use tag_lib::{
+    ArtistKind, LibLayer, LibRelation, LibRelationKind, LibTagSource, TagArtist, TagCharacter,
+    TagConcept, TagConceptDetail, TagKind, TagName, TagNameKind, TagRelationNode, TagWork,
 };

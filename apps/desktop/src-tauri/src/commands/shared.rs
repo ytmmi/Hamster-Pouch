@@ -108,7 +108,8 @@ pub(crate) fn api_async<T>(response: ApiResponse<T>) -> ApiAsync<T> {
 ///
 /// 全部数据集中在这里，按三类区分（2026-09 用户裁定）：
 /// - **系统数据库**：`data\system\`——全局配置库（`hamster-pouch-global.sqlite3`）与内置
-///   tag 词库（RFC 0006，约定路径 `data\system\tag_dict.sqlite3`，运行时尚未接线）；
+///   tag 库（RFC 0008 四库，内置基底 `data\system\tag_lib_base.sqlite3`，
+///   完整词库为按需安装的 `plugins-dist/taglib-*` 扩展包）；
 ///   应用自身数据，随版本/可重建。
 /// - **用户数据库**：`data\user\repos\`——每仓库一个库，用户 tag / 评分 / 相册等，需备份。
 /// - **插件扩展**：`data\plugins\`——插件包安装目录；插件自持的扩展数据库落在各自
@@ -156,13 +157,14 @@ pub(crate) fn global_db_path() -> Result<PathBuf, String> {
     Ok(dir.join("hamster-pouch-global.sqlite3"))
 }
 
-/// 内置 tag 基底词库文件路径（`<exe 同目录>\data\system\` 下）。
+/// 内置 tag 基底库文件路径（`<exe 同目录>\data\system\` 下）。
 ///
-/// 由裁剪脚本 `tools/tagdict/build_base_dict.py` 生成（Top 5000，约 2MB），
-/// 随发布包/开发包分发。完整扩展词库见 `plugins-dist/tag-dict/`。
-pub(crate) fn tag_dict_base_path() -> Result<PathBuf, String> {
+/// 由 `tools/tagdict/build_base_lib.py` 生成（RFC 0008 / D36 第一层，约 12MB），
+/// 随发布包/开发包分发。**完整词库不随应用分发**，按需安装 `plugins-dist/` 下的
+/// 细分扩展包（`taglib-pixiv` / `taglib-danbooru`）。
+pub(crate) fn tag_lib_base_path() -> Result<PathBuf, String> {
     let dir = app_data_root()?.join("system");
-    Ok(dir.join("tag_dict_base.sqlite3"))
+    Ok(dir.join("tag_lib_base.sqlite3"))
 }
 
 /// 用户数据库：默认仓库库目录（`<exe 同目录>\data\user\repos\`）。

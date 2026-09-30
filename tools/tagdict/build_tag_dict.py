@@ -2,6 +2,12 @@
 # -*- coding: utf-8 -*-
 """构建内置 tag 词库（RFC 0006 数据管线）。
 
+> ⚠️ **已被取代（RFC 0008 / D33-D37）**：本脚本产出的是 **RFC 0006 旧 schema**
+> （`tag_dict_entries` 以原始生态 tag 为锚、中文可重复、artist 整体排除），
+> 仅供旧 `TagDictDb` 回退路径使用。**当前实现请用 `build_tag_lib.py`**
+> （四库 schema、概念为锚、纳入 artist 全量、三语对等）。
+> 保留本脚本只为 RFC 0008「`tag_dict.sqlite` 保留作对照与回退」这条约定。
+
 输入（ffdkj 每日更新对照表，MIT 许可）：
   data/danbooru_tags.sqlite  - tags(name, category, cn_name, post_count)，328K+ 条
   data/pixiv_tags.sqlite     - pixiv_tags(name, cn_name, en_name, posts, categories)，169K+ 条

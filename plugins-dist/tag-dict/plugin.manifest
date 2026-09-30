@@ -1,1 +1,0 @@
-{"id": "dev.hamsterpouch.extension.tagdict", "name": "扩展词库（含 artist 152,097 条）", "version": "0.1.0", "min_host_version": 1, "api_version": 1, "runtime": {"kind": "static-data"}, "capabilities": ["repo.read"], "contributions": [], "data_queries": [], "events": [], "trust": {"requested": "system"}}

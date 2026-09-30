@@ -57,13 +57,13 @@ async function dirSize(p) {
 
 const fmtMB = (b) => `${(b / 1024 / 1024).toFixed(2)} MB`;
 
-const BASE_DICT = join(ROOT, "tools", "tagdict", "output", "tag_dict_base.sqlite3");
+const BASE_DICT = join(ROOT, "tools", "tagdict", "output", "tag_lib_base.sqlite3");
 
 /** 复制内置基底词库到 data/system/ 下（如果来源文件存在）。 */
 async function copyBaseDict(targetDataRoot) {
   try {
     if ((await stat(BASE_DICT)).isFile()) {
-      const dest = join(targetDataRoot, "system", "tag_dict_base.sqlite3");
+      const dest = join(targetDataRoot, "system", "tag_lib_base.sqlite3");
       await mkdir(join(targetDataRoot, "system"), { recursive: true });
       await cp(BASE_DICT, dest);
       return true;
@@ -105,7 +105,7 @@ if (dataStat?.isDirectory()) {
   }
 }
 
-// 附带已签名但**不随发布**的插件包（plugins-dist/tag-dict 等扩展插件）
+// 附带已签名但**不随发布**的插件包（plugins-dist/taglib-* 等细分扩展）
 const pluginsDist = join(ROOT, "plugins-dist");
 let pluginsDistHasData = false;
 try {
@@ -122,8 +122,11 @@ try {
 
 // 附带内置基底词库到 data/system/ 下
 if (await copyBaseDict(join(devDir, "data"))) {
-  console.log(`[package-build]   附加: data\\system\\tag_dict_base.sqlite3（内置基底词库）`);
+  console.log(`[package-build]   附加: data\\system\\tag_lib_base.sqlite3（内置基底词库）`);
 }
+// 清掉已退役的旧基底库：RFC 0008 起由 tag_lib_base.sqlite3 取代。
+// 它可能来自旧的 DATA 暂存缓存；留着会被误当成有效词库（旧 schema）。
+await rm(join(devDir, "data", "system", "tag_dict_base.sqlite3"), { force: true });
 
 // 同步系统插件签名文件（编译缓存可能不是最新）
 const paletteSigSrc = join(ROOT, "plugins", "system", "palette", "SHA256SUMS");
@@ -205,6 +208,15 @@ if (dataStat?.isDirectory()) {
       `UPDATE plugin_registry SET source_ref = replace(source_ref, '${DATA}', '${relData}') WHERE trust_level='system'; ` +
       "DELETE FROM plugin_registry WHERE trust_level <> 'system';";
     execFileSync("sqlite3", [relGdb, sql], { stdio: "ignore" });
+  }
+
+  // 发布包也必须带内置基底库：上面是从 DATA 暂存目录整体复制的，而 DATA 里可能是
+  // 旧编译缓存（甚至只有已退役的 tag_dict_base.sqlite3）。这里**显式**再复制一次，
+  // 保证发布包与开发包的内置基底库同源同版本；并清掉已退役的旧基底库
+  // （RFC 0008 起由 tag_lib_base.sqlite3 取代，留着会让运行时读到旧 schema）。
+  await rm(join(relDir, "data", "system", "tag_dict_base.sqlite3"), { force: true });
+  if (await copyBaseDict(join(relDir, "data"))) {
+    console.log(`[package-build]   发布包附加: data\\system\\tag_lib_base.sqlite3（内置基底词库）`);
   }
 }
 console.log(

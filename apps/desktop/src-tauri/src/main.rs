@@ -14,7 +14,7 @@ use hp_ai::AiTaggingService;
 use hp_media::{MediaProcess, ThumbnailCache};
 use hp_plugin_host::SupervisionRegistry;
 use hp_scanner::Scanner;
-use hp_store::{GlobalDb, RepoDb, TagDictDb};
+use hp_store::{GlobalDb, RepoDb, TagLibDb, TagLibSet};
 use tauri::Manager;
 
 use commands::shared::external_bin;
@@ -57,8 +57,8 @@ pub(crate) struct AppState {
     pub(crate) supervision: Arc<Mutex<SupervisionRegistry>>,
     /// AI 打标任务队列（内存，D6/D17）。
     pub(crate) ai: Arc<Mutex<AiTaggingService>>,
-    /// 内置 tag 基底词库（data/system/tag_dict_base.sqlite3，延迟加载）。
-    pub(crate) tag_dict: Arc<Mutex<Option<TagDictDb>>>,
+    /// 内置 tag 基底库（RFC 0008 四库，`data/system/tag_lib_base.sqlite3`，延迟加载）。
+    pub(crate) tag_lib: Arc<Mutex<Option<TagLibSet>>>,
 }
 
 /// 解析应用数据子目录（`thumbnails` / `plugins`）：`<exe 同目录>\data\<name>`。
@@ -98,7 +98,7 @@ fn make_state() -> AppState {
         panel_schema_cache: Arc::new(Mutex::new(hp_plugin_host::PanelSchemaCache::new())),
         supervision: Arc::new(Mutex::new(SupervisionRegistry::new())),
         ai: Arc::new(Mutex::new(AiTaggingService::new())),
-        tag_dict: Arc::new(Mutex::new(None)),
+        tag_lib: Arc::new(Mutex::new(None)),
     }
 }
 
@@ -123,11 +123,19 @@ fn main() {
                     }
                 }
             });
-            // 尝试打开内置 tag 基底词库，失败时无声跳过（首次运行无基底库时也不阻塞）。
-            if let Ok(path) = commands::shared::tag_dict_base_path() {
-                if let Ok(db) = TagDictDb::open(&path) {
-                    if let Ok(mut guard) = app.state::<AppState>().tag_dict.lock() {
-                        *guard = Some(db);
+            // 尝试装配内置 tag 基底库（RFC 0008 / D36 第一层），失败时无声跳过
+            // （首次运行无基底库时也不阻塞）。以**只读**方式打开：数据包是只读资产。
+            // 扩展包（plugins-dist/taglib-*）由后续装配通道接入，此处只装基底。
+            if let Ok(path) = commands::shared::tag_lib_base_path() {
+                if path.is_file() {
+                    if let Ok(db) =
+                        TagLibDb::open_readonly(&path, hp_core::LibLayer::Base)
+                    {
+                        let mut set = TagLibSet::new();
+                        set.add(db);
+                        if let Ok(mut guard) = app.state::<AppState>().tag_lib.lock() {
+                            *guard = Some(set);
+                        }
                     }
                 }
             }

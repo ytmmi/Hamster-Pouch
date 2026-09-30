@@ -370,7 +370,9 @@ CREATE INDEX idx_ops_history_repo ON ops_history(repo_id);
 
 ### 4.8 tag 词库库（独立 SQLite 文件，RFC 0006）
 
-> ⚠️ **本节已被 RFC 0008 / D33 / D36 / D37 取代**，仅作历史对照：实体锚点改为「概念」、交付改为「内置轻量基底 + 按需安装扩展包 + 用户数据层」、库文件改为 `tag_lib.sqlite`（`migrations/dict_lib/`）。**新实现以 `docs/rfc/0008-tag-libraries.md` 为准**，本节结构不得据以实现。
+> ⚠️ **本节已被 RFC 0008 / D33 / D36 / D37 取代，仅作历史对照**。**新实现以 `docs/rfc/0008-tag-libraries.md` 与 `crates/hp-store/migrations/dict_lib/0001_init.sql` 为准**，本节结构不得据以实现。
+>
+> **已实施的替代结构**（RFC 0008，构建完成）：实体锚点改为「概念」（D33）；交付改为「内置轻量基底 + 按需安装的细分扩展包 + 用户数据层」（D36/D36.2）；schema 落在 `migrations/dict_lib/0001_init.sql`，表为 `tag` / `tag_source` / `tag_name` / `tag_work` / `tag_character` / `tag_artist` / `tag_relation` / `lib_meta`；Rust 侧为 `hp-core/src/tag_lib.rs` + `hp-store/src/dict/tag_lib_db.rs`（`TagLibDb` 单库句柄 / `TagLibSet` 三层聚合查询层）。旧 `dict/0001_init.sql` 与 `TagDictDb` **保留作对照与回退**。
 
 ```sql
 -- 词库是应用级共享的多语言词表（主中文、辅日/英），独立于全局配置库与仓库库。
@@ -451,7 +453,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blueprints_default
   - **当前词库版本 = 1**（`dict_db.rs:19`）；`dict_meta`（`dict/0001:6-9`）是数据元信息 K/V，**不是** schema 版本。
 - **`repo_meta.schema_version` 是**镜像键**，每次打开仓库库都按权威值回写**（2026-09 修复缺陷 0006）：`repo_db.rs:86`-`89`（`sync_schema_version_meta`）在 `repo_db.rs:78`-`79`（`open_inner` 汇总点，`migrate::apply` 与蓝图文档迁移之后）执行，**新建与打开两条路径共用这一处**，因此升级过的库不再与 `user_version` 分叉。回写**不能**下沉到 `migrate::apply`（`migrate.rs:10`）：那个执行器由仓库库/全局库/词库共用，且全局库与词库**没有** `repo_meta`。**版本判断一律以 `PRAGMA user_version` 为准**，不要读镜像键（该键仍无读取方）。
 - 每个仓库库打开时都会 `busy_timeout = 5s`：**扫描与完全卸载各用一条独立连接**（不占用主连接锁，避免长任务把界面命令堵住），双连接在 WAL 下并存需要这个等待窗口。
-- 每次启动比对并顺序应用未执行的迁移；迁移脚本存放在 `crates/hp-store/migrations/`（当前分 `repo/`、`global/`、`dict/` **三个**目录，共 12 个 `.sql`），按 `0001_xxx.sql` 编号。**`dict_lib/` 属 RFC 0008 的规划、尚未创建**（见 `docs/rfc/0008-tag-libraries.md:93`）——不要往不存在的目录加迁移。
+- 每次启动比对并顺序应用未执行的迁移；迁移脚本存放在 `crates/hp-store/migrations/`（当前分 `repo/`、`global/`、`dict/`、**`dict_lib/`** 四个目录），按 `0001_xxx.sql` 编号。
+  - `dict/` 是 RFC 0006 旧词库（保留作对照与回退，forward-only）。
+  - **`dict_lib/0001_init.sql` 是 RFC 0008 四库的权威 DDL**（已实施），同时被数据管线（`tools/tagdict/*.py` 读取该文件作为唯一 schema 源）与 Rust 侧（`TagLibDb::open` 的迁移）使用。**改动四库 schema 必须追加新迁移文件，不要改 0001**。
 - 每个迁移在事务中执行；失败则回滚并阻止打开仓库，提示备份/导出策略。
 - 不允许修改已发布的迁移文件；新增需求一律追加新迁移。
 - **JSON 内结构的演进不走 SQL 迁移**：如蓝图文档 schema v1→v2（D52）必须先改 `validate` 的版本闸门、再做 Rust 侧一次性回填（遍历 `blueprints` / `blueprint_templates`，迁移后回写 `blueprint_json` 并同步 `schema_version` 列）。

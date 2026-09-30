@@ -6,7 +6,7 @@ mod migrate;
 mod repo;
 mod util;
 
-pub use dict::TagDictDb;
+pub use dict::{TagDictDb, TagLibDb, TagLibSet};
 pub use global::{GlobalDb, PanelLayoutRow, RepoRow};
 pub use repo::{
     build_source_tree, build_tag_tree, AlbumSourceMembers, FileQueryCursor, FileQueryFilter,
