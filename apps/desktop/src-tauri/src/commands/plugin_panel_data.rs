@@ -105,6 +105,17 @@ fn fetch_panel_data(
         });
     }
 
+    // StaticData 形态无可执行入口，直接返回空结果
+    if owner.runtime_kind == RuntimeKind::StaticData {
+        return Ok(PanelDataItem {
+            panel_id: panel_id.to_string(),
+            plugin_id: owner.plugin_id.clone(),
+            plugin_version: owner.plugin_version.clone(),
+            results: serde_json::Map::new(),
+            missing: Vec::new(),
+        });
+    }
+
     // 三种运行形态共用同一请求名；本轮先落地 `external-process`（与 schema 通道同口径）。
     if owner.runtime_kind != RuntimeKind::ExternalProcess {
         return Err(HpError::Plugin(format!(

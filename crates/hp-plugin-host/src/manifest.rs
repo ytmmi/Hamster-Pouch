@@ -37,7 +37,13 @@ pub fn parse_manifest(json: &str) -> HpResult<PluginManifest> {
     let id = required_str(&v, "id")?;
     let name = required_str(&v, "name")?;
     let version = required_str(&v, "version")?;
-    let entry = required_str(&v, "entry")?;
+    let runtime_kind = parse_runtime_kind(&v)?;
+    // StaticData 形态不需要 entry（纯数据插件）
+    let entry = if runtime_kind != RuntimeKind::StaticData {
+        required_str(&v, "entry")?
+    } else {
+        String::new()
+    };
     let min_host_version = v
         .get("min_host_version")
         .and_then(Value::as_u64)

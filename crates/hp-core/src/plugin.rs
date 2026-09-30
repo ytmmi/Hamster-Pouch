@@ -127,6 +127,8 @@ pub enum RuntimeKind {
     DynamicLibrary,
     /// WASM：首期支持，资源限额 + 纯数据输出。
     Wasm,
+    /// 静态数据：有签名但无可执行入口的仅数据插件（D40+，tag 词库等）。
+    StaticData,
 }
 
 impl RuntimeKind {
@@ -135,6 +137,7 @@ impl RuntimeKind {
             RuntimeKind::ExternalProcess => "external-process",
             RuntimeKind::DynamicLibrary => "dynamic-library",
             RuntimeKind::Wasm => "wasm",
+            RuntimeKind::StaticData => "static-data",
         }
     }
 
@@ -143,6 +146,7 @@ impl RuntimeKind {
             "external-process" => Some(RuntimeKind::ExternalProcess),
             "dynamic-library" => Some(RuntimeKind::DynamicLibrary),
             "wasm" => Some(RuntimeKind::Wasm),
+            "static-data" => Some(RuntimeKind::StaticData),
             _ => None,
         }
     }
@@ -752,6 +756,7 @@ mod tests {
             RuntimeKind::ExternalProcess,
             RuntimeKind::DynamicLibrary,
             RuntimeKind::Wasm,
+            RuntimeKind::StaticData,
         ] {
             assert_eq!(RuntimeKind::from_str(v.as_str()), Some(v));
         }

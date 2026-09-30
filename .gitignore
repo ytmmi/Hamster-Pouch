@@ -91,6 +91,8 @@ plugins/**/bin/*.exe
 
 # 插件签名私钥（只提交公钥，私钥保持本机）
 tools/signing/signing-key.pem
+tools/signing/pubkey-base64.txt
+tools/signing/pubkey.der
 
 # 预分发扩展插件的数据库文件（大文件，只入库 manifest + 签名，不入库数据本身）
 plugins-dist/*/data/

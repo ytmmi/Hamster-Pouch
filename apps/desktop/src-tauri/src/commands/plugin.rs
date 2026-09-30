@@ -791,6 +791,18 @@ fn fetch_panel_schema(
         }
     }
 
+    // StaticData 形态无可执行入口，不需起进程
+    if owner.runtime_kind == RuntimeKind::StaticData {
+        return Ok(PanelSchemaItem {
+            panel_id: panel_id.to_string(),
+            plugin_id: owner.plugin_id.clone(),
+            plugin_version: owner.plugin_version.clone(),
+            api_version: CONTROL_API_VERSION,
+            schema_json: "[]".to_string(),
+            cached: false,
+        });
+    }
+
     // 三种运行形态共用同一请求名；本轮先落地 `external-process`（示例与系统插件的形态）。
     if owner.runtime_kind != RuntimeKind::ExternalProcess {
         return Err(HpError::Plugin(format!(

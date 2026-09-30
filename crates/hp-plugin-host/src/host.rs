@@ -200,10 +200,14 @@ impl PluginHost {
             if !declared {
                 continue;
             }
+            // StaticData 插件的 entry_path 为空（无可执行入口）
             let version_dir = row.source_ref.as_ref().map(std::path::PathBuf::from);
-            let entry_path = version_dir
-                .as_ref()
-                .map(|dir| dir.join(&manifest.entry));
+            let entry_path = match manifest.runtime_kind {
+                RuntimeKind::StaticData => None,
+                _ => version_dir
+                    .as_ref()
+                    .map(|dir| dir.join(&manifest.entry)),
+            };
             return Ok(Some(PanelOwner {
                 plugin_id: manifest.id.as_str().to_string(),
                 plugin_version: manifest.version.clone(),

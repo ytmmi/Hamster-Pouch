@@ -156,6 +156,15 @@ pub(crate) fn global_db_path() -> Result<PathBuf, String> {
     Ok(dir.join("hamster-pouch-global.sqlite3"))
 }
 
+/// 内置 tag 基底词库文件路径（`<exe 同目录>\data\system\` 下）。
+///
+/// 由裁剪脚本 `tools/tagdict/build_base_dict.py` 生成（Top 5000，约 2MB），
+/// 随发布包/开发包分发。完整扩展词库见 `plugins-dist/tag-dict/`。
+pub(crate) fn tag_dict_base_path() -> Result<PathBuf, String> {
+    let dir = app_data_root()?.join("system");
+    Ok(dir.join("tag_dict_base.sqlite3"))
+}
+
 /// 用户数据库：默认仓库库目录（`<exe 同目录>\data\user\repos\`）。
 pub(crate) fn default_repo_dir() -> Result<PathBuf, String> {
     let dir = app_data_root()?.join("user").join("repos");

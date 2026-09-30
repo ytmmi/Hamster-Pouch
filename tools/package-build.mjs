@@ -57,6 +57,19 @@ async function dirSize(p) {
 
 const fmtMB = (b) => `${(b / 1024 / 1024).toFixed(2)} MB`;
 
+const BASE_DICT = join(ROOT, "tools", "tagdict", "output", "tag_dict_base.sqlite3");
+
+/** 复制内置基底词库到 data/system/ 下（如果来源文件存在）。 */
+async function copyBaseDict(targetDataRoot) {
+  if (await stat(BASE_DICT).catch(() => null)?.isFile()) {
+    const dest = join(targetDataRoot, "system", "tag_dict_base.sqlite3");
+    await mkdir(join(targetDataRoot, "system"), { recursive: true });
+    await cp(BASE_DICT, dest);
+    return true;
+  }
+  return false;
+}
+
 // 前置检查：必须有编译产物
 if (!(await stat(EXE).catch(() => null))?.isFile()) {
   console.error(`[package-build] 未找到编译产物: ${EXE}\n  请先运行 pnpm app:build`);
@@ -92,7 +105,11 @@ if (dataStat?.isDirectory()) {
 
 // 附带已签名但**不随发布**的插件包（plugins-dist/tag-dict 等扩展插件）
 const pluginsDist = join(ROOT, "plugins-dist");
-if (await stat(pluginsDist).catch(() => null)?.isDirectory()) {
+let pluginsDistHasData = false;
+try {
+  pluginsDistHasData = (await stat(pluginsDist)).isDirectory();
+} catch { /* 目录不存在时不附加 */ }
+if (pluginsDistHasData) {
   for (const dirEntry of await readdir(pluginsDist, { withFileTypes: true })) {
     if (dirEntry.isDirectory() && !dirEntry.name.startsWith(".")) {
       const src = join(pluginsDist, dirEntry.name);
@@ -100,6 +117,11 @@ if (await stat(pluginsDist).catch(() => null)?.isDirectory()) {
     }
   }
   console.log(`[package-build]   附加: plugins-dist/（已签名扩展插件，不含用户数据）`);
+}
+
+// 附带内置基底词库到 data/system/ 下
+if (await copyBaseDict(devDir)) {
+  console.log(`[package-build]   附加: data\\system\\tag_dict_base.sqlite3（内置基底词库）`);
 }
 console.log(`[package-build] 开发包: ${devDir}`);
 console.log(`[package-build]   内容: exe + data\\（用户数据） 共 ${fmtMB(devSize)}`);
