@@ -27,6 +27,26 @@ fn full_lib() -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
+/// 细分扩展包（`--split-by-source` 产物）。
+fn split_libs() -> Vec<PathBuf> {
+    let dir = repo_root().join("tools/tagdict/output/split");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut v: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension().is_some_and(|x| x == "sqlite")
+                && p.file_stem()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|s| s.starts_with("tag_lib_"))
+        })
+        .collect();
+    v.sort();
+    v
+}
+
 /// 内置基底库能被只读打开，且用户示例六种写法命中同一 work 概念（D37）。
 #[test]
 fn base_lib_opens_and_resolves_user_example() {
@@ -122,3 +142,121 @@ fn full_lib_opens_with_expected_scale() {
     assert!(detail.work.is_some(), "该概念应带库 3 原作字段");
     assert_eq!(detail.sources.len(), 11, "该概念的生态来源应有 11 条");
 }
+
+/// **重复合并机制**（多扩展包场景）：装配 pixiv + danbooru 两个细分扩展包后，
+/// 重叠概念必须归并为一条，而不是各显示一条。
+///
+/// 这是本机制的核心验收：两个包各自独立构建，同一概念（如「蔚蓝档案」）在两个包中
+/// 各有一份；未启用归并时会命中两条，启用后应只剩一条且名称/来源为并集。
+#[test]
+fn merge_dedupes_concepts_across_real_extension_packages() {
+    let libs = split_libs();
+    if libs.len() < 2 {
+        eprintln!("跳过：需要 >=2 个细分包（先运行 build_tag_lib.py --split-by-source）");
+        return;
+    }
+
+    // 装配全部细分包（按 D36：扩展包同层，装配顺序即优先级）
+    let mut set = TagLibSet::new();
+    for p in &libs {
+        set.add(TagLibDb::open_readonly(p, LibLayer::Extension).expect("只读打开细分包"));
+    }
+
+    // ---- 归并前：同一概念在两个包中各命中一次（证明重复真实存在）----
+    let before = set.find("蔚蓝档案", 50).unwrap();
+    let before_ids: Vec<&str> = before.iter().map(|d| d.concept.id.as_str()).collect();
+
+    // ---- 启用归并 ----
+    let (merged_count, dup_count) = {
+        let idx = set.refresh_merge().expect("构建归并索引");
+        (idx.merged_count(), idx.duplicate_count())
+    };
+    assert!(
+        dup_count > 0,
+        "两个细分包之间应存在重复概念，实际重复数 = {dup_count}"
+    );
+    println!("归并索引：{merged_count} 个概念身份，识别重复 {dup_count} 条");
+
+    // ---- 归并后：同一概念只剩一条 ----
+    let after = set.find("蔚蓝档案", 50).unwrap();
+    let after_ids: Vec<&str> = after.iter().map(|d| d.concept.id.as_str()).collect();
+
+    // work 类锚点必须唯一（之前它在两包中各出现一次）
+    let work_hits: Vec<&str> = after
+        .iter()
+        .filter(|d| d.concept.kind == hp_core::TagKind::Work)
+        .map(|d| d.concept.id.as_str())
+        .collect();
+    assert_eq!(
+        work_hits.len(),
+        1,
+        "「蔚蓝档案」的 work 概念归并后应唯一；归并前 {before_ids:?}，归并后 {after_ids:?}"
+    );
+
+    // 归并后条数不应多于归并前（去重只减不增）
+    assert!(
+        after.len() <= before.len(),
+        "归并后命中数应 <= 归并前（{} -> {}）",
+        before.len(),
+        after.len()
+    );
+
+    // 归并后的代表概念应聚合了两个包的来源
+    let ba = after
+        .iter()
+        .find(|d| d.concept.kind == hp_core::TagKind::Work)
+        .expect("应命中 work 概念");
+    let src_names: std::collections::HashSet<&str> =
+        ba.sources.iter().map(|s| s.source.as_str()).collect();
+    assert!(
+        src_names.contains("pixiv") && src_names.contains("danbooru"),
+        "归并后应同时保留两包的来源，实际 {src_names:?}"
+    );
+}
+
+/// 归并索引的规模自检：全量装配两个包后，重复数与概念总数应符合实测口径。
+#[test]
+fn merge_index_scale_is_sane() {
+    let libs = split_libs();
+    if libs.len() < 2 {
+        eprintln!("跳过：需要 >=2 个细分包");
+        return;
+    }
+    let mut set = TagLibSet::new();
+    for p in &libs {
+        set.add(TagLibDb::open_readonly(p, LibLayer::Extension).unwrap());
+    }
+    let (merged, dup) = {
+        let idx = set.refresh_merge().unwrap();
+        (idx.merged_count(), idx.duplicate_count())
+    };
+
+    // 各包概念 ID 的**去重并集**（同 ID 出现在多个包里只算一次）
+    let mut distinct: std::collections::HashSet<String> = Default::default();
+    for p in &libs {
+        let db = TagLibDb::open_readonly(p, LibLayer::Extension).unwrap();
+        for id in db.all_concept_ids().unwrap() {
+            distinct.insert(id);
+        }
+    }
+
+    // 恒等关系：每个 ID 要么是代表（merged），要么是被并入的别名（dup）
+    assert_eq!(
+        merged + dup,
+        distinct.len(),
+        "归并后概念数 + 重复数 应等于各包概念 ID 的去重并集"
+    );
+    assert!(merged > 0, "归并后概念数应 > 0");
+
+    // 重复量级说明（实测口径，2026-09）：
+    //   两包按 (kind, 中文标准名) 重叠 19,675 个概念，但其中 19,624 个因为
+    //   `tag_id = sha1(kind + 中文归一)` 是**确定性派生**而 ID 完全相同，已被
+    //   纯 `tag_id` 去重覆盖；只有约 51 个（跨源中文名不同但归一后相同等）ID 不同。
+    //   归并索引额外捕获的是：**ID 不同但概念身份相同**的那些，加上 ja/en 标准名
+    //   对齐带来的合并。实测总数约 2.3k，因此阈值取 1,000 而非 10,000。
+    assert!(
+        dup > 1_000,
+        "归并索引应捕获上千条 ID 不同的重复概念，实际 {dup}（口径可能变化，请核对管线）"
+    );
+}
+

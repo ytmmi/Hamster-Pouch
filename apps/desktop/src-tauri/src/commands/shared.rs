@@ -167,6 +167,68 @@ pub(crate) fn tag_lib_base_path() -> Result<PathBuf, String> {
     Ok(dir.join("tag_lib_base.sqlite3"))
 }
 
+/// 装配 `plugins-dist/` 下已安装的 tag 词典扩展包（RFC 0008 / D36 第二层）。
+///
+/// 每个扩展包是一个目录，内含 `data/tag_lib.sqlite`（四库同构 schema）。
+/// 以**只读**方式逐个打开并加入聚合层；顺序为目录名的字典序，即同层内的优先级。
+/// 单个包损坏/缺失数据文件时**跳过该包**并继续（不因一个坏包让整个词库不可用）。
+///
+/// 返回成功装配的扩展包数量。
+pub(crate) fn attach_tag_lib_extensions(set: &mut hp_store::TagLibSet) -> usize {
+    let Ok(root) = tag_lib_extension_root() else {
+        return 0;
+    };
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return 0;
+    };
+
+    let mut dirs: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    dirs.sort();
+
+    let mut attached = 0usize;
+    for dir in dirs {
+        let db_path = dir.join("data").join("tag_lib.sqlite");
+        if !db_path.is_file() {
+            continue;
+        }
+        match hp_store::TagLibDb::open_readonly(&db_path, hp_core::LibLayer::Extension) {
+            Ok(db) => {
+                set.add(db);
+                attached += 1;
+            }
+            Err(e) => {
+                eprintln!(
+                    "[taglib] 跳过扩展包 {}（打开失败）: {e}",
+                    dir.display()
+                );
+            }
+        }
+    }
+    attached
+}
+
+/// tag 词典扩展包的存放根目录（`<exe 同目录>\plugins-dist\`）。
+///
+/// 与开发期仓库根的 `plugins-dist/` 同名：开发包把它放在 exe 同级，
+/// 因此这里只需在 exe 目录下找；找不到时回退向上查找（`tauri dev` 场景）。
+fn tag_lib_extension_root() -> Result<PathBuf, String> {
+    if let Ok(dir) = app_data_root() {
+        if let Some(exe_dir) = dir.parent() {
+            let candidate = exe_dir.join("plugins-dist");
+            if candidate.is_dir() {
+                return Ok(candidate);
+            }
+        }
+    }
+    // 开发期：从 exe 目录向上找仓库根的 plugins-dist/
+    find_upwards_matching("plugins-dist", |p| p.is_dir())
+        .ok_or_else(|| "未找到 plugins-dist 目录".to_string())
+}
+
 /// 用户数据库：默认仓库库目录（`<exe 同目录>\data\user\repos\`）。
 pub(crate) fn default_repo_dir() -> Result<PathBuf, String> {
     let dir = app_data_root()?.join("user").join("repos");

@@ -19,6 +19,8 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use crate::migrate;
 use crate::util::{require_nonempty, store_err};
 
+use super::tag_lib_merge::MergeIndex;
+
 /// 四库迁移脚本（按版本升序）。
 const TAGLIB_MIGRATIONS: &[&str] = &[include_str!("../../migrations/dict_lib/0001_init.sql")];
 
@@ -343,6 +345,124 @@ impl TagLibDb {
         Ok(rows)
     }
 
+    /// 全部概念 ID（去重归并时按概念身份建索引用）。
+    pub fn all_concept_ids(&self) -> HpResult<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM tag")
+            .map_err(|e| store_err("准备概念 ID 查询", e))?;
+        let rows = stmt
+            .query_map([], |row| row.get(0))
+            .map_err(|e| store_err("执行概念 ID 查询", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析概念 ID 行", e))?;
+        Ok(rows)
+    }
+
+    /// 全部名称行（去重归并时按名称建索引用）。
+    pub fn all_names(&self) -> HpResult<Vec<TagName>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT tag_id, lang, value, kind FROM tag_name")
+            .map_err(|e| store_err("准备全量名称查询", e))?;
+        let rows = stmt
+            .query_map([], row_to_name)
+            .map_err(|e| store_err("执行全量名称查询", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析全量名称行", e))?;
+        Ok(rows)
+    }
+
+    /// 全部来源行（去重归并时按生态写法建索引用）。
+    pub fn all_sources(&self) -> HpResult<Vec<LibTagSource>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT tag_id, source, source_key, popularity FROM tag_source")
+            .map_err(|e| store_err("准备全量来源查询", e))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(LibTagSource {
+                    tag_id: row.get(0)?,
+                    source: row.get(1)?,
+                    source_key: row.get(2)?,
+                    popularity: row.get(3)?,
+                })
+            })
+            .map_err(|e| store_err("执行全量来源查询", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析全量来源行", e))?;
+        Ok(rows)
+    }
+
+    /// 批量读取全部概念行（**归并索引构建用**）。
+    ///
+    /// 逐概念调用 [`TagLibDb::concept`] 会为每个概念跑 4 条子查询（30 万概念 ⇒ 上百万次
+    /// 查询，实测耗时约 150s）。归并只需「id / kind / popularity」三列，故单独提供
+    /// 一次全表扫描，把索引构建降到秒级。
+    pub fn all_concepts_brief(&self) -> HpResult<Vec<TagConcept>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, kind, nsfw, popularity, extra_json FROM tag")
+            .map_err(|e| store_err("准备全量概念查询", e))?;
+        let rows = stmt
+            .query_map([], row_to_concept)
+            .map_err(|e| store_err("执行全量概念查询", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析全量概念行", e))?;
+        Ok(rows)
+    }
+
+    /// 批量读取「概念 ID → 该概念的 (语言, 值, 名称种类) 列表」。
+    ///
+    /// 一次全表扫描 + 内存分组，供归并索引按身份匹配，避免逐概念查库。
+    pub fn all_names_grouped(&self) -> HpResult<std::collections::HashMap<String, Vec<TagName>>> {
+        let mut grouped: std::collections::HashMap<String, Vec<TagName>> = Default::default();
+        for n in self.all_names()? {
+            grouped.entry(n.tag_id.clone()).or_default().push(n);
+        }
+        Ok(grouped)
+    }
+
+    /// 用户库写入：UPSERT 一条库 2 关系（仅用户库可写）。
+    ///
+    /// `hierarchy` 时 `from` 是 `to` 的上级。`id` 为空时按两端派生稳定 ID。
+    pub fn upsert_relation(
+        &mut self,
+        from_tag_id: &str,
+        to_tag_id: &str,
+        relation_kind: LibRelationKind,
+    ) -> HpResult<()> {
+        if self.layer != LibLayer::User {
+            return Err(HpError::Permission(
+                "tag 数据包为只读，用户自定义关系请写入用户库".into(),
+            ));
+        }
+        require_nonempty(from_tag_id, "关系起点 tag ID")?;
+        require_nonempty(to_tag_id, "关系终点 tag ID")?;
+        if from_tag_id == to_tag_id {
+            return Err(HpError::InvalidArgument("库 2 关系不允许自环".into()));
+        }
+        let id = format!(
+            "rel-{}",
+            crate::util::uuid().replace('-', "")[..16].to_string()
+        );
+        self.conn
+            .execute(
+                "INSERT OR IGNORE INTO tag_relation
+                   (id, from_tag_id, to_tag_id, relation_kind, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    id,
+                    from_tag_id,
+                    to_tag_id,
+                    relation_kind.as_str(),
+                    crate::util::now_iso()
+                ],
+            )
+            .map_err(|e| store_err("写入库 2 关系", e))?;
+        Ok(())
+    }
+
     /// 用户库写入：UPSERT 一个概念及其名称、来源与库 3 专属字段（事务）。
     ///
     /// 仅用户库可写；对只读层调用返回错误（数据包是只读资产）。
@@ -485,20 +605,65 @@ fn escape_like(s: &str) -> String {
 ///
 /// 覆盖优先级 **用户库 > 扩展包 > 内置基底**：同名概念在多层出现时，取优先级最高者的
 /// 概念行；名称与来源做**并集**（多语言映射是互补信息，不应因分层而丢失）。
+///
+/// 装配多个扩展包时，同一概念可能以**不同 `tag_id`** 出现在不同包里（不同构建版本
+/// 或第三方包）。[`TagLibSet::refresh_merge`] 按**概念身份**（`kind` + 标准名）建立
+/// 归并索引，此后查询自动把重复概念合成一条（见 [`super::MergeIndex`]）。
 pub struct TagLibSet {
     /// 按优先级从低到高排列（后写入者覆盖前者）。
     layers: Vec<TagLibDb>,
+    /// 重复概念归并索引；`None` = 尚未构建（此时退化为仅按 `tag_id` 去重）。
+    merge: Option<MergeIndex>,
 }
 
 impl TagLibSet {
     /// 以空集合构造（随后用 [`TagLibSet::add`] 装配各层）。
     pub fn new() -> Self {
-        Self { layers: Vec::new() }
+        Self {
+            layers: Vec::new(),
+            merge: None,
+        }
     }
 
     /// 装配一层。调用方按 D36 顺序传入：基底 → 扩展包 → 用户库。
+    ///
+    /// 装配会**失效**已有的归并索引（层变了，索引必须重建）。
     pub fn add(&mut self, db: TagLibDb) {
         self.layers.push(db);
+        self.merge = None;
+    }
+
+    /// 构建/重建**重复概念归并索引**。
+    ///
+    /// 装配完全部扩展包后调用一次；代价是扫描各层的概念与名称，之后查询走索引。
+    /// 未调用时查询仍可用，但只按 `tag_id` 去重（同 ID 概念不会重复显示，
+    /// 不同 ID 的同名概念会各显示一条）。
+    pub fn refresh_merge(&mut self) -> HpResult<&MergeIndex> {
+        let index = MergeIndex::build(&self.layers)?;
+        self.merge = Some(index);
+        Ok(self.merge.as_ref().expect("刚刚写入"))
+    }
+
+    /// 归并索引（未构建时为 `None`）。
+    pub fn merge_index(&self) -> Option<&MergeIndex> {
+        self.merge.as_ref()
+    }
+
+    /// 重复概念统计：`(归并后概念数, 因归并减少的重复数)`。
+    ///
+    /// 未构建索引时返回 `None`。
+    pub fn duplicate_stats(&self) -> Option<(usize, usize)> {
+        self.merge
+            .as_ref()
+            .map(|m| (m.merged_count(), m.duplicate_count()))
+    }
+
+    /// 把任意 ID 规范化到归并后的代表 ID（无索引时返回自身）。
+    pub fn canonical_id<'a>(&'a self, id: &'a str) -> &'a str {
+        self.merge
+            .as_ref()
+            .map(|m| m.representative_of(id))
+            .unwrap_or(id)
     }
 
     /// 已装配的层数。
@@ -529,28 +694,28 @@ impl TagLibSet {
         Ok(out)
     }
 
-    /// 任意语言命中：跨层合并，按热度降序、概念 ID 去重。
+    /// 任意语言命中：跨层合并，按热度降序、概念**身份**去重。
     ///
-    /// 覆盖优先级只作用于**同一概念 ID**（用户库可覆盖数据包里的同名概念），
-    /// 不同概念按热度排序返回。
+    /// 已构建归并索引时，同一概念在多个包里的不同 ID 会合成一条（取代表 ID）；
+    /// 未构建时退化为仅按 `tag_id` 去重。
     pub fn find(&self, value: &str, limit: u32) -> HpResult<Vec<TagConceptDetail>> {
         require_nonempty(value, "查询词")?;
         let limit = limit.clamp(1, 500) as usize;
 
-        // 高优先级层先写，低优先级只补缺（同 ID 不覆盖）
-        let mut seen: Vec<(String, usize)> = Vec::new();
-        let mut index = std::collections::HashMap::new();
-        for (prio, db) in self.layers.iter().enumerate().rev() {
+        // 高优先级层先写，低优先级只补缺（同代表 ID 不覆盖）
+        let mut seen: Vec<String> = Vec::new();
+        let mut index = std::collections::HashSet::new();
+        for db in self.layers.iter().rev() {
             for id in db.find_by_name(value, limit as u32 * 4)? {
-                if let std::collections::hash_map::Entry::Vacant(e) = index.entry(id.clone()) {
-                    e.insert(seen.len());
-                    seen.push((id, prio));
+                let canonical = self.canonical_id(&id).to_string();
+                if index.insert(canonical.clone()) {
+                    seen.push(canonical);
                 }
             }
         }
 
         let mut out = Vec::new();
-        for (id, _prio) in seen {
+        for id in seen {
             if let Some(detail) = self.merged_concept(&id)? {
                 out.push(detail);
                 if out.len() >= limit {
@@ -568,6 +733,8 @@ impl TagLibSet {
     }
 
     /// 打标输入建议：跨层前缀命中，合并去重后按热度降序。
+    ///
+    /// 与 [`TagLibSet::find`] 同样走概念身份归并。
     pub fn suggest(&self, prefix: &str, limit: u32) -> HpResult<Vec<TagConceptDetail>> {
         require_nonempty(prefix, "查询前缀")?;
         let limit = limit.clamp(1, 100) as usize;
@@ -576,8 +743,9 @@ impl TagLibSet {
         let mut ids = Vec::new();
         for db in self.layers.iter().rev() {
             for id in db.suggest_by_prefix(prefix, limit as u32 * 4)? {
-                if index.insert(id.clone()) {
-                    ids.push(id);
+                let canonical = self.canonical_id(&id).to_string();
+                if index.insert(canonical.clone()) {
+                    ids.push(canonical);
                 }
             }
         }
@@ -599,7 +767,19 @@ impl TagLibSet {
     }
 
     /// 取单个概念：概念行取最高优先级层，名称与来源取各层并集。
+    ///
+    /// 已构建归并索引时，传入别名 ID 也会解析到代表概念，并把别名 ID 的名称、
+    /// 来源、库 3 字段一并并入（见 [`super::MergeIndex::merge`]）。
     pub fn merged_concept(&self, tag_id: &str) -> HpResult<Option<TagConceptDetail>> {
+        if let Some(index) = &self.merge {
+            let merged = index.merge(&self.layers, tag_id)?;
+            return Ok(merged.map(|m| m.detail));
+        }
+        self.merged_concept_by_id(tag_id)
+    }
+
+    /// 不经过归并索引的单概念查询（仅按 `tag_id` 合并各层）。
+    fn merged_concept_by_id(&self, tag_id: &str) -> HpResult<Option<TagConceptDetail>> {
         // 概念行：从最高优先级层起找第一个命中
         let mut base: Option<TagConceptDetail> = None;
         for db in self.layers.iter().rev() {
@@ -639,17 +819,22 @@ impl TagLibSet {
     }
 
     /// 库 2：某概念的父/子级并集（内置基底通常提供关系）。
+    ///
+    /// 已构建归并索引时，入参与返回值都规范化到代表 ID（避免同概念因 ID 不同而断链）。
     pub fn relations_of(&self, tag_id: &str) -> HpResult<(Vec<String>, Vec<String>)> {
+        let tag_id = self.canonical_id(tag_id).to_string();
         let mut parents = Vec::new();
         let mut children = Vec::new();
         for db in self.layers.iter().rev() {
-            for p in db.parents_of(tag_id)? {
-                if !parents.contains(&p) {
+            for p in db.parents_of(&tag_id)? {
+                let p = self.canonical_id(&p).to_string();
+                if p != tag_id && !parents.contains(&p) {
                     parents.push(p);
                 }
             }
-            for c in db.children_of(tag_id)? {
-                if !children.contains(&c) {
+            for c in db.children_of(&tag_id)? {
+                let c = self.canonical_id(&c).to_string();
+                if c != tag_id && !children.contains(&c) {
                     children.push(c);
                 }
             }
@@ -658,6 +843,9 @@ impl TagLibSet {
     }
 
     /// 库 2：构建参考树节点（多父级 DAG，规则同 tag 表控件 D34）。
+    ///
+    /// 已构建归并索引时，多个包各自贡献的同一层级边会重写为代表 ID 并去重
+    /// （见 [`super::MergeIndex::merge_relation_nodes`]）。
     pub fn relation_nodes(&self) -> HpResult<Vec<TagRelationNode>> {
         let mut order: Vec<String> = Vec::new();
         let mut parents: std::collections::HashMap<String, Vec<String>> = Default::default();
@@ -688,12 +876,13 @@ impl TagLibSet {
 
         let mut out = Vec::with_capacity(order.len());
         for id in order {
-            let display_name = self
-                .merged_concept(&id)?
-                .map(|d| display_name_of(&d))
+            let detail = self.merged_concept(&id)?;
+            let display_name = detail
+                .as_ref()
+                .map(display_name_of)
                 .unwrap_or_else(|| id.clone());
-            let kind = self
-                .merged_concept(&id)?
+            let kind = detail
+                .as_ref()
                 .map(|d| d.concept.kind)
                 .unwrap_or(TagKind::Unknown);
             out.push(TagRelationNode {
@@ -703,6 +892,11 @@ impl TagLibSet {
                 parents: parents.remove(&id).unwrap_or_default(),
                 children: children.remove(&id).unwrap_or_default(),
             });
+        }
+
+        // 归并：多个包各自贡献的同一层级边重写为代表 ID 并去重
+        if let Some(index) = &self.merge {
+            return Ok(index.merge_relation_nodes(out));
         }
         Ok(out)
     }
