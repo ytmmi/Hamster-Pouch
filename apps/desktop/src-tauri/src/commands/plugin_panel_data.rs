@@ -258,6 +258,8 @@ mod tests {
             panel_schema_cache: Arc::new(Mutex::new(hp_plugin_host::PanelSchemaCache::new())),
             supervision: Arc::new(Mutex::new(SupervisionRegistry::new())),
             ai: Arc::new(Mutex::new(AiTaggingService::new())),
+            // tag 库聚合集：本模块的用例不涉及词库查询，空集即可。
+            tag_lib: Arc::new(Mutex::new(None)),
         }
     }
 

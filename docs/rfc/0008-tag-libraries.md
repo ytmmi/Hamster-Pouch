@@ -134,6 +134,7 @@ VOCALOID                          艺术家：人名（人类创作）/ 绘画�
 - **作用域**：归并只作用于**查询视图**，不改动任何数据包文件（数据包是只读资产，D36）。
 - **实现**：`crates/hp-store/src/dict/tag_lib_merge.rs`（`MergeIndex` / `ConceptKey` / `MergedConcept`）；`TagLibSet::refresh_merge()` 在装配完全部扩展包后构建一次，之后 `find` / `suggest` / `merged_concept` / `relations_of` / `relation_nodes` 自动走归并。
 - **实测（pixiv + danbooru 两包）**：归并后 **304,572** 个概念身份，识别并合并 **2,272** 条 ID 不同的重复概念（另有 19,624 条由 `tag_id` 去重覆盖）。装配与建索引耗时约 **5 秒**（一次全表扫描/层，不逐概念查库）。
+  - **四层全装（基底 + pixiv + danbooru + tagrel-games）实测 304,575**：差值 3 来自基底库独有的 `manual` 种子概念（扩展包中不存在），非口径变化。
 - **性能要求（实现约束）**：索引构建**必须**每层一次全表扫描（`all_concepts_brief` + `all_names_grouped`）。逐概念调用 `concept()` 会为每个概念跑 4 条子查询，30 万概念实测耗时 **149 秒**（优化后 4.9 秒）。
 
 ## 数据模型草案
@@ -425,18 +426,69 @@ D36.1 的**重新打开条件已触发并结案**（承载方式定案为 `stati
 - **签名**（用户要求）：三个扩展包均已 Ed25519 签名。注意 `install` 路径对**无签名包是降级而非报错**，所以必须有测试显式断言签名有效——已加 `crates/hp-plugin-signing/tests/verify_dist_packages.rs`（用 Rust 侧权威验签器逐一验证真实产物）。
 - **回归测试**：`crates/hp-core/src/plugin.rs` 的 `static_data_package_validates_without_entry`（单测）+ `crates/hp-plugin-host/tests/tag_extension_install.rs`（用真实产物走完整安装路径）。
 
-## 待实现的界面展示（用户要求，2026-09 登记）
+### D36.7 装配层「层数虚高」的两个剩余根因与修复（2026-09-30 运行时验证发现）
 
-以下两项**已确认要在界面上展示**，但当前只有后端数据，界面尚未实现。登记在此以免遗漏。
+> 前一轮已修「跨来源去重用目录名」（改用 manifest 的插件 id）。本轮**实际运行开发包**验证
+> 「`layers` 必须为 4」时，又发现**两条独立**的层数虚高路径。二者都不是"去重键口径"问题，
+> 因此上一轮的修复覆盖不到。
 
-| 项 | 数据来源 | 待做 |
+1. **同一插件的多个版本目录被全部装配**：安装目录的装配循环对 `versions/` 下**每个**版本目录各装配一次。
+   该处注释写的是「取字典序最后一个（版本号升序的近似）」，**代码却循环了全部**——注释与实现相反。
+   触发条件是**升级插件**：`PluginInstaller` 按 D2 保留旧版本目录以便回滚，于是装过两个版本后
+   同一扩展被装配两次。**实测**（`dev-20260930-211431`，每插件两个版本目录）：**10 层**。
+   **修复**：从最新版本往前找，取第一个真正带数据文件的版本目录，只装配它。
+   回归测试 `only_newest_version_of_a_plugin_is_attached`。
+2. **分发目录侧未登记去重键**：来源 2（`<exe>/plugins-dist/`）装配成功后**没有**把插件 id 写进 `seen`，
+   因此分发目录内若有**两个目录自称同一插件**，第二个仍会再装配一次。**修复**：与安装目录侧同口径登记。
+   回归测试 `same_extension_in_both_sources_is_attached_once`。
+
+- **实测对照（同一份开发包，扩展同时存在于安装目录与分发目录）**：
+
+  | 构建 | 安装目录版本数 | 层数 |
+  | --- | --- | --- |
+  | `dev-20260930-211431`（含前一轮修复） | 1 | **7** |
+  | `dev-20260930-211431` | 2 | **10** |
+  | `dev-20260930-213320`（本修复） | 1 或 2 | **4** ✅ |
+
+- **为什么上一轮没发现**：只做了编译与门禁验证，**没有真正运行应用**；且 `cargo test --workspace`
+  **完全不编译 `apps/desktop/src-tauri`**（该 crate 自带 `[workspace]`），装配逻辑因此零测试覆盖。
+- **附带修复**：`apps/desktop/src-tauri` 的**单元测试目标此前根本无法编译**——
+  `commands/plugin_panel_data.rs` 的 `test_state()` 漏了 tag 库引入的新字段 `AppState.tag_lib`
+  （`E0063`）。加测试时才发现；现已补齐，该 crate 现有 **27 个单测**可通过
+  （`cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`）。
+- **新增回归测试**（`apps/desktop/src-tauri/src/commands/shared.rs`，均用**真实产物**）：
+  - `base_plus_three_extensions_attach_as_four_queryable_layers` —— 层数恰为 4，**且扩展里的 tag 立即可查**
+    （防"层数对但数据没进去"）；
+  - `installed_extensions_are_attached_from_the_install_directory` —— 走真实 `PluginInstaller`
+    安装到 `<plugin_root>/<id>/<version>/` 后从**安装目录**装配（防"读错目录"回归）；
+  - `same_extension_in_both_sources_is_attached_once` —— 两来源同名只装配一次；
+  - `only_newest_version_of_a_plugin_is_attached` —— 多版本目录只装配一个。
+- **一处已知局限（不阻塞，登记备查）**：「取最新版本」是**目录名字典序**的近似，而词库装配
+  **不读注册表**、因此不知道 `plugin.rollback` 切回了哪个版本。若用户回滚到旧版本，词库仍装配
+  最新目录那份数据。这属于 D36.1「启用语义未结案」的同类问题（词库装配与应用级/仓库级状态
+  尚未打通），需要时与「应用级启用入口」一并解决；当前数据包内容随版本差异极小，实际影响可忽略。
+
+## 界面展示（用户要求，2026-09 登记）——**已实施并运行时验证**
+
+| 项 | 数据来源 | 落地 |
 | --- | --- | --- |
-| **合并了多少条重复** | `TagLibSet::duplicate_stats() -> Option<(usize, usize)>`（归并后概念数, 重复数）；也可从 `MergeIndex::duplicate_count()` 取 | ① 新增 `taglib.status` 命令（走统一响应包装 D76）暴露装配状态：各层来源与版本、概念总数、归并后概念数、**合并重复数**、各扩展包启用情况；② 词库管理面板/「全部设置 → 插件」分节展示该状态（面板形态待定，若经插件系统承载则走受控 schema 渲染） |
-| **共多少个 tag** | `TagLibDb::count()`（单层）/ `TagLibSet` 归并后的 `MergeIndex::merged_count()`（跨层去重后）；`lib_meta.counts` 记有各层明细 | 同上命令一并暴露；需**同时显示**「各层原始概念数」与「归并后概念数」，否则用户无法判断去重效果 |
+| **合并了多少条重复** | `TagLibSet::duplicate_stats() -> Option<(usize, usize)>`（归并后概念数, 重复数） | `taglib.status` 命令（走统一响应包装 D76）暴露装配状态：`loaded` / `layers` / `conceptCount` / `duplicateCount`；插件面板顶部状态行展示（`PluginPanel.tsx`，i18n 键 `plugin.taglibSummary` 三语齐备） |
+| **共多少个 tag** | `MergeIndex::merged_count()`（跨层去重后）；`lib_meta.counts` 记有各层明细 | 同上命令一并暴露；状态行**同时显示**「归并后概念数」与「合并重复数」 |
 
-**当前状态**：运行时装配完成后只 `eprintln!` 输出（开发期终端可见；打包后 `windows_subsystem = "windows"` 无控制台，**界面看不到**）。因此在实现上述命令与面板之前，用户无法在界面获知这两个数字。
+**界面文案**（`zh-CN`）：`词库：{concepts} 个 tag（{layers} 层，合并重复 {duplicates} 条）`；
+未装配基底库时为 `词库未装配（缺内置基底库）`（`plugin.taglibEmpty`）。
+
+**运行时实测（2026-09-30，开发包 `dev-20260930-213320`）**：装配 3 个扩展后状态行为
+`词库：304575 个 tag（4 层，合并重复 2272 条）`。
+
+> **概念数口径**：RFC D36.3 记录的 **304,572** 是 **pixiv + danbooru 两包**的归并结果
+> （`306,844` 个 ID 去重并集 − `2,272`）。实际运行时还装配了 `tagrel-games`，而基底库另有
+> **3 个**扩展包中不存在的 `manual` 种子概念（`樱未来` / `fufu` / `赛璐珞`，见
+> 「管线改造」第 6 条），故四层全装的正确值是 **304,575**。两个数字都对，区别只在装配了几个包。
 
 > 这两项属于**集成工作**，不阻塞四库数据与归并机制本身（二者均已实现并有测试覆盖）。
+> `tag_dict.suggest` 命令已实现且已注册，但**前端暂无调用方**——`TagInput` 的候选建议
+> （RFC 0008 T6 集成点）尚未接线，属未完成的集成项，不是缺陷。
 
 ## 实现期开放点（非架构决策）
 
