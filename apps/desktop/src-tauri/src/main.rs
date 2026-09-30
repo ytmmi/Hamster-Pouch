@@ -7,7 +7,7 @@
 // （缺这个属性时进程挂在控制台上，父 shell 一结束就被一起收走，表现为"启动后又消失"）。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use hp_ai::AiTaggingService;
@@ -56,89 +56,26 @@ pub(crate) struct AppState {
     pub(crate) ai: Arc<Mutex<AiTaggingService>>,
 }
 
-/// 应用数据目录的落位决策（纯函数，便于单测）。
+/// 解析应用数据子目录（`thumbnails` / `plugins`）：`<exe 同目录>\data\<name>`。
 ///
-/// **为什么不能留在 `app_data_dir()`**：Windows 上它是 **Roaming**（`%APPDATA%`）。把
-/// 缩略图缓存与**已安装插件**放 Roaming 有两个真实问题——① 域/漫游配置环境里 Roaming
-/// 会**随登录同步**，几十 MB 的缓存被搬来搬去；② Roaming 有配额限制，超了会写失败。
-/// 二者都属于"本机数据"，应落 `app_local_data_dir()`（`%LOCALAPPDATA%`）。
-#[derive(Debug, PartialEq, Eq)]
-enum DirDecision {
-    /// 用 Local：新目录已有内容（已迁过），或两边都没有（首次启动，新建）。
-    UseLocal,
-    /// 旧目录有内容、新目录为空 → 迁过去再用 Local。
-    Migrate,
+/// **为什么落在 exe 同目录**（2026-09 用户裁定）：全局库、仓库库、缩略图缓存、插件
+/// 安装目录全部集中在应用文件夹内的 `data\` 下——以一个文件夹为单位整体复制/备份/排除，
+/// 结构与正常运行一致。数据库按三类区分（系统 `data\system\` / 用户 `data\user\repos\` /
+/// 插件 `data\plugins\`，见 `commands/shared.rs` 的 `app_data_root`）。
+/// **不再使用** `%APPDATA%`（Roaming：域/漫游环境会随登录同步，对 WAL SQLite 有损坏
+/// 风险，见 `docs/issues/0012`）与 `%LOCALAPPDATA%`；旧位置数据由用户验证后手动处理，
+/// 本实现**不写自动迁移**。
+fn resolve_data_dir(name: &str) -> PathBuf {
+    commands::shared::app_data_root()
+        .map(|root| root.join(name))
+        .unwrap_or_else(|_| PathBuf::from(name))
 }
 
-/// 决策：**新目录优先**；只有"新目录不存在且旧目录存在"才迁移。
-///
-/// 这条顺序是有意的——迁移只能发生一次，之后一律认新目录，否则每次启动都会重新判断。
-fn decide_dir(local_exists: bool, legacy_exists: bool) -> DirDecision {
-    if local_exists || !legacy_exists {
-        DirDecision::UseLocal
-    } else {
-        DirDecision::Migrate
-    }
-}
-
-/// 递归复制目录（`rename` 失败时的兜底：跨卷时 rename 会失败）。
-fn copy_dir_recursive(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
-        let target = to.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir_recursive(&entry.path(), &target)?;
-        } else {
-            std::fs::copy(entry.path(), target)?;
-        }
-    }
-    Ok(())
-}
-
-/// 把旧目录迁到新位置：优先 `rename`（同卷时原子且零拷贝），失败再递归复制。
-///
-/// **不删旧目录**：复制路径下原数据原样保留（`rename` 路径下旧路径自然消失）。
-/// 宁可多占一份空间，也不做"先删后写"——那会在中途失败时直接丢数据。
-fn migrate_dir(legacy: &Path, local: &Path) -> std::io::Result<()> {
-    if let Some(parent) = local.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    if std::fs::rename(legacy, local).is_ok() {
-        return Ok(());
-    }
-    copy_dir_recursive(legacy, local)
-}
-
-/// 解析应用数据子目录（`thumbnails` / `plugins`），必要时从 Roaming **一次性迁移**到 Local。
-///
-/// **迁移必须无损**：搬迁失败时**回退用旧目录**——宁可不迁，也不能让用户找不到自己
-/// 已安装的插件（这比省下 Roaming 配额重要得多）。
-fn resolve_data_dir(app: &tauri::AppHandle, name: &str) -> PathBuf {
-    let local = app.path().app_local_data_dir().ok().map(|d| d.join(name));
-    let legacy = app.path().app_data_dir().ok().map(|d| d.join(name));
-
-    match (local, legacy) {
-        (Some(local), Some(legacy)) => match decide_dir(local.exists(), legacy.exists()) {
-            DirDecision::UseLocal => local,
-            DirDecision::Migrate => match migrate_dir(&legacy, &local) {
-                Ok(()) => local,
-                Err(e) => {
-                    eprintln!("[hamster-pouch] 应用数据目录迁移失败，继续使用旧目录: {e}");
-                    legacy
-                }
-            },
-        },
-        (Some(local), None) => local,
-        (None, Some(legacy)) => legacy,
-        (None, None) => PathBuf::from(name),
-    }
-}
-
-fn make_state(app: &tauri::AppHandle) -> AppState {
-    // 缩略图缓存与插件安装目录属**本机数据**，落 Local（并从旧的 Roaming 位置一次性迁移）。
-    let thumb_root = resolve_data_dir(app, "thumbnails");
-    let plugin_root = resolve_data_dir(app, "plugins");
+fn make_state() -> AppState {
+    // 缩略图缓存与插件安装目录与数据库同根：`<exe 同目录>\data\`（便携布局）。
+    let thumb_root = resolve_data_dir("thumbnails");
+    let plugin_root = resolve_data_dir("plugins");
+    let _ = std::fs::create_dir_all(&thumb_root);
     let _ = std::fs::create_dir_all(&plugin_root);
     AppState {
         global_db: Arc::new(Mutex::new(None)),
@@ -163,7 +100,7 @@ fn main() {
         // 原生系统对话框：媒体源「选取文件夹」入口（权限见 capabilities/default.json 的 dialog:allow-open）。
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let state = make_state(app.handle());
+            let state = make_state();
             app.manage(state);
             // 初始隐藏主窗口，避免 WebView 加载期间白屏；前端首屏就绪后主动 show。
             if let Some(win) = app.get_webview_window("main") {
@@ -309,63 +246,4 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("仓鼠颊启动失败");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 落位决策：**新目录优先**，只有"新缺失 + 旧存在"才迁移。
-    #[test]
-    fn dir_decision_prefers_local_and_migrates_only_once() {
-        // 两边都在（已迁过 / 用户两处都有）→ 认新目录，不再动旧目录。
-        assert_eq!(decide_dir(true, true), DirDecision::UseLocal);
-        // 新缺失 + 旧存在 → 这一次迁移。
-        assert_eq!(decide_dir(false, true), DirDecision::Migrate);
-        // 首次启动（两边都没有）→ 用新目录新建。
-        assert_eq!(decide_dir(false, false), DirDecision::UseLocal);
-        // 新存在 + 旧缺失 → 常态。
-        assert_eq!(decide_dir(true, false), DirDecision::UseLocal);
-    }
-
-    /// 递归复制必须**保内容**（含嵌套子目录）。
-    #[test]
-    fn copy_dir_recursive_keeps_nested_content() {
-        let root = std::env::temp_dir().join(format!("hp-dirmig-{}", uuid::Uuid::new_v4()));
-        let from = root.join("legacy");
-        let to = root.join("local");
-        std::fs::create_dir_all(from.join("pkg").join("bin")).expect("建夹具失败");
-        std::fs::write(from.join("top.txt"), b"top").expect("写夹具失败");
-        std::fs::write(from.join("pkg").join("bin").join("p.exe"), b"exe").expect("写夹具失败");
-
-        copy_dir_recursive(&from, &to).expect("复制应成功");
-
-        assert_eq!(std::fs::read(to.join("top.txt")).expect("读回失败"), b"top");
-        assert_eq!(
-            std::fs::read(to.join("pkg").join("bin").join("p.exe")).expect("读回失败"),
-            b"exe"
-        );
-        // 源目录仍在（迁移不做"先删后写"）。
-        assert!(from.join("top.txt").is_file());
-
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// `rename` 路径：旧目录搬走后，新位置有内容、旧位置消失。
-    #[test]
-    fn migrate_dir_moves_the_directory() {
-        let root = std::env::temp_dir().join(format!("hp-dirmig2-{}", uuid::Uuid::new_v4()));
-        let legacy = root.join("legacy").join("plugins");
-        let local = root.join("local").join("plugins");
-        std::fs::create_dir_all(legacy.join("demo")).expect("建夹具失败");
-        std::fs::write(legacy.join("demo").join("plugin.manifest"), b"{}").expect("写夹具失败");
-
-        migrate_dir(&legacy, &local).expect("迁移应成功");
-
-        assert!(local.join("demo").join("plugin.manifest").is_file(), "新位置应有内容");
-        // 同卷 rename 成功时旧路径应已消失（不残留一份"已迁移"的旧数据）。
-        assert!(!legacy.exists(), "同卷迁移后旧目录不应残留");
-
-        let _ = std::fs::remove_dir_all(&root);
-    }
 }

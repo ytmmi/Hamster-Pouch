@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use hp_core::{FileIndexRow, HpError, HpResult};
 use hp_store::{GlobalDb, RepoDb};
 use serde::Serialize;
-use tauri::Manager;
 
 use crate::AppState;
 
@@ -105,7 +104,28 @@ pub(crate) fn api_async<T>(response: ApiResponse<T>) -> ApiAsync<T> {
     Ok(response)
 }
 
-/// 开发期诊断日志：追加一行到应用数据目录 `debug.log`。
+/// 应用数据根目录（便携布局）：可执行文件同目录下的 `data` 子文件夹。
+///
+/// 全部数据集中在这里，按三类区分（2026-09 用户裁定）：
+/// - **系统数据库**：`data\system\`——全局配置库（`hamster-pouch-global.sqlite3`）与内置
+///   tag 词库（RFC 0006，约定路径 `data\system\tag_dict.sqlite3`，运行时尚未接线）；
+///   应用自身数据，随版本/可重建。
+/// - **用户数据库**：`data\user\repos\`——每仓库一个库，用户 tag / 评分 / 相册等，需备份。
+/// - **插件扩展**：`data\plugins\`——插件包安装目录；插件自持的扩展数据库落在各自
+///   `<plugin_id>\` 包目录内，不入全局库/仓库库。
+/// - 缓存与日志：`data\thumbnails\`（可重建）、`data\debug.log`。
+///
+/// **不使用** `%APPDATA%`（Roaming：域/漫游环境会随登录同步，对 WAL SQLite 有损坏风险，
+/// 见 `docs/issues/0012`）与 `%LOCALAPPDATA%`；旧位置数据由用户验证后手动处理。
+pub(crate) fn app_data_root() -> Result<PathBuf, String> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .ok_or_else(|| "无法确定可执行文件目录".to_string())?;
+    Ok(exe_dir.join("data"))
+}
+
+/// 开发期诊断日志：追加一行到 `<exe 同目录>\data\debug.log`。
 ///
 /// 用途：在**打包运行**（无 devtools）时定位前端链路问题；文件位置固定、可直接查看，
 /// 不属于业务数据。仅诊断场景由前端调用。
@@ -113,13 +133,10 @@ pub(crate) fn api_async<T>(response: ApiResponse<T>) -> ApiAsync<T> {
 /// **D76**：本命令是**新增/新增式**诊断通道，按新口径返回 `{ ok, data?, error? }`
 /// （`data` 为 `null`）。它不属于业务命令，不进 `commands-events.md` §3 的业务表。
 #[tauri::command]
-pub(crate) fn debug_log(message: String, app: tauri::AppHandle) -> ApiResponse<()> {
+pub(crate) fn debug_log(message: String) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
         use std::io::Write;
-        let dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|e| HpError::Io(format!("获取应用数据目录失败: {e}")))?;
+        let dir = app_data_root().map_err(HpError::Io)?;
         std::fs::create_dir_all(&dir)
             .map_err(|e| HpError::Io(format!("创建应用数据目录失败: {e}")))?;
         let mut file = std::fs::OpenOptions::new()
@@ -132,23 +149,16 @@ pub(crate) fn debug_log(message: String, app: tauri::AppHandle) -> ApiResponse<(
     api_from_hp(outcome)
 }
 
-/// 全局配置库文件路径（应用数据目录下）。
-pub(crate) fn global_db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建应用数据目录失败: {e}"))?;
+/// 系统数据库：全局配置库文件路径（`<exe 同目录>\data\system\` 下）。
+pub(crate) fn global_db_path() -> Result<PathBuf, String> {
+    let dir = app_data_root()?.join("system");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建系统数据库目录失败: {e}"))?;
     Ok(dir.join("hamster-pouch-global.sqlite3"))
 }
 
-/// 默认仓库库目录（应用数据目录下 `repos/`）。
-pub(crate) fn default_repo_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("获取应用数据目录失败: {e}"))?
-        .join("repos");
+/// 用户数据库：默认仓库库目录（`<exe 同目录>\data\user\repos\`）。
+pub(crate) fn default_repo_dir() -> Result<PathBuf, String> {
+    let dir = app_data_root()?.join("user").join("repos");
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建仓库目录失败: {e}"))?;
     Ok(dir)
 }
@@ -231,13 +241,13 @@ pub(crate) fn external_bin(name: &str) -> Option<PathBuf> {
 }
 
 /// 懒加载全局配置库。
-pub(crate) fn ensure_global(state: &AppState, app: &tauri::AppHandle) -> HpResult<()> {
+pub(crate) fn ensure_global(state: &AppState, _app: &tauri::AppHandle) -> HpResult<()> {
     let mut guard = state
         .global_db
         .lock()
         .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
     if guard.is_none() {
-        let path = global_db_path(app).map_err(HpError::Io)?;
+        let path = global_db_path().map_err(HpError::Io)?;
         *guard = Some(GlobalDb::open(&path)?);
     }
     Ok(())

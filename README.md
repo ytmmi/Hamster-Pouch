@@ -103,6 +103,49 @@ cargo test
 > `crates/` 里，只热更新前端会出现一种假象——**界面已经有新设置项，写进去却被后端按
 > "未知设置键"拒掉**（开关弹回去、下拉改不动），看起来像前端 bug，其实是后端二进制还是旧的。
 
+## 构建清理与用户数据
+
+编译产物与最终产物**不入库、可随时整删**；每次编译按文件夹打包（开发包带用户数据、发布包不带），发布产物不含用户数据。
+
+| 命令 | 作用 | 说明 |
+| --- | --- | --- |
+| `pnpm app:build` | 编译 + **自动打包**（每次编译新建一个开发包） | `tauri build --no-bundle` 成功后再执行 `tools/package-build.mjs`：`target\release\dev\dev-<YYYYMMDD-HHMMSS>\`（exe + `data\` 用户数据，命名按时间排序可辨先后）+ `target\release\release\`（exe + `data\system\` 系统数据库 + `data\plugins\` **系统插件**（含其自带数据库），**不含用户数据**） |
+| `pnpm app:package` | 只打包不编译 | 用现有编译产物重新生成开发包/发布包 |
+| `pnpm clean` | 按「文件夹为单位」删除编译中间产物与最终产物 | 删除 `target/`、`apps/desktop/src-tauri/target/`（编译中间文件、最终 exe、`dev\` 开发包、`release\` 发布包）、`apps/desktop/dist/`、`apps/desktop/src-tauri/gen/`；**活动数据** `src-tauri/target/<profile>/data\` **整棵保留**；不触碰 `node_modules`、`external-cli/`、`tools/tagdict/` |
+| `pnpm data:sync` | 快照开发期用户数据（测试数据库） | 把活动 `data\` 整体复制到 `backups/appdata/<时间戳>/`（git 已忽略），每次编译后执行即可保留测试数据 |
+| `pnpm data:restore` | 恢复最近一次用户数据快照 | 从 `backups/appdata/` 最新快照复制回活动 `data\`；恢复前请退出应用（WAL 库） |
+
+打包结构（都在 `apps\desktop\src-tauri\target\release\` 下）：
+
+```text
+release\
+├── dev\dev-<YYYYMMDD-HHMMSS>\   开发包：hamster-pouch-desktop.exe + data\（含用户数据）
+│                                 每次编译新建一个，命名按时间排序
+└── release\                     发布包：hamster-pouch-desktop.exe
+                                  + data\system\   系统数据库（全局配置库随发布）
+                                  + data\plugins\  系统插件（trust_level=system，含其自带数据库）
+                                  **不含用户数据**：user\repos\、非系统插件、thumbnails\、
+                                  debug.log 均不带；发布全局库仓库注册表/按仓库授权已清空、
+                                  非系统插件注册已删除
+```
+
+`data\` 按三类区分（2026-09 用户裁定）：
+
+| 类别 | 位置 | 内容 |
+| --- | --- | --- |
+| **系统数据库** | `data\system\` | 全局配置库 `hamster-pouch-global.sqlite3`；内置 tag 词库（RFC 0006，约定路径 `tag_dict.sqlite3`，运行时尚未接线） |
+| **用户数据库** | `data\user\repos\` | 每仓库一个库（tag / 评分 / 相册等，需备份） |
+| **插件扩展** | `data\plugins\` | 插件包目录；插件自持的扩展数据库落在各自 `<plugin_id>\` 包目录内，不入全局库/仓库库。**系统插件**（`trust_level=system`，含其自带数据库）随发布包分发；用户安装的插件及其数据库属用户数据，不进入发布包 |
+| 缓存/日志 | `data\thumbnails\`、`data\debug.log` | 可重建 |
+
+约定：
+
+- **开发期**：每次编译自动生成开发包（exe + 当时的 `data\` 快照）；在某个开发包内测试产生的数据变化，需 `pnpm data:restore` 收回活动 `data\` 才会进入下一次打包。
+- **发布**：发布包 = exe + `data\system\`（系统数据库随发布）+ `data\plugins\`（系统插件含其数据库），**不含任何用户数据**（仓库库、非系统插件、缓存、日志都不带，发布全局库的仓库注册表与按仓库授权已清空、非系统插件注册已删除）；全新机器首次运行后按需自建仓库库。
+- `pnpm clean` 只删构建产物与打包产物，活动 `data\` 原样保留；旧包内的数据副本由 `backups\appdata\` 快照兜底。
+- **不再使用 `%APPDATA%` / `%LOCALAPPDATA%`**（Roaming 有 WAL 库随登录同步的损坏风险，见 `docs/issues/0012`）；旧位置数据已验证并删除。
+- **tag 词库现状（2026-09 拍板：现在不做，延后）**：完整词库产物（`tools/tagdict/output/tag_dict.sqlite`，81.6MB / 222,632 词条）**未进系统数据库、运行时未接线**；按 RFC 0008 D36，完整词库应拆为「内置基底库（随发布，数 MB 内）+ 扩展词库包（插件形式，按需安装，约 150–250MB）」，承载机制待插件系统定案（D36.1）。届时词库数据落 `data\system\` 与扩展包目录。
+
 ## 外部依赖：mpv（需自行下载）
 
 > **⚠️ 只有休眠的 libmpv 路径需要 mpv —— 日常使用不需要。**

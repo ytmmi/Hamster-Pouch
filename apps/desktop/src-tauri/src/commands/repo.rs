@@ -260,7 +260,7 @@ pub(crate) fn repo_create(
         let repo_path = match db_path {
             Some(p) => PathBuf::from(p),
             None => {
-                let dir = default_repo_dir(&app).map_err(HpError::Io)?;
+                let dir = default_repo_dir().map_err(HpError::Io)?;
                 dir.join(format!("{}.sqlite3", RepoId::generate()))
             }
         };
