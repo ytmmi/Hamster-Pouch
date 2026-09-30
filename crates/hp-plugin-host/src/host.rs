@@ -325,7 +325,7 @@ impl PluginHost {
         Ok(out)
     }
 
-    /// **已安装**插件声明的面板目录（含**未启用**的），供界面把"还要启用"这件事显示出来。
+    /// **已安装**插件的「扩展」目录（含**未启用**的），供界面把"还要启用"这件事显示出来。
     ///
     /// 与 [`PluginHost::repo_contributions`] 的区别只有一条：**不按启用状态过滤**，
     /// 而是把 `enabled` 原样报出来。注册表仍只登记已启用的（那是安全口径），
@@ -333,12 +333,22 @@ impl PluginHost {
     ///
     /// 为什么需要它：装完插件后面板菜单里**什么都不出现**，界面又没有任何提示，
     /// 用户只能得出"装了没反应"的结论——`hello` / `control-demo` 都踩过这条。
+    ///
+    /// **没有面板贡献点的插件也占一行**（`panel = None`）：纯数据扩展包
+    /// （`static-data`，RFC 0008 D36.1）按定义声明 `contributions: []`，若只按面板过滤，
+    /// 用户装了 128–162MB 的词典扩展后「扩展」菜单里**同样"什么都不出现"**——
+    /// 与上面那条是同一个缺陷。这类包**没有启用语义**（装完即生效），
+    /// 故 `stateless = true`，界面**不得**给它启用/禁用开关（RFC 0008 D36.9）。
+    ///
+    /// **排序**：带面板的在前（按 plugin_id / panel id），**无面板的整组排在最后**
+    /// ——界面据此把"数据扩展"放在菜单底部，不必自己再排。
     pub fn panel_catalog(
         &self,
         db: &GlobalDb,
         repo_id: &str,
     ) -> HpResult<Vec<PanelCatalogEntry>> {
-        let mut out = Vec::new();
+        let mut with_panel = Vec::new();
+        let mut without_panel = Vec::new();
         for row in db.list_plugins()? {
             let enabled = db
                 .get_plugin_repo_state(row.id.as_str(), repo_id)?
@@ -351,30 +361,59 @@ impl PluginHost {
             if !HostApiVersion::current().is_compatible(manifest.min_host_version) {
                 continue;
             }
-            for contribution in &manifest.contributions {
-                if contribution.kind != ContributionKind::Panel {
-                    continue;
-                }
-                let panel = contribution.panel_decl(Some(manifest.id.as_str()));
-                out.push(PanelCatalogEntry {
+            let runtime_kind = row.runtime_kind.as_str().to_string();
+            // 纯数据包不执行代码、不声明能力与贡献点 → 没有可"启用"的东西
+            // （`plugin.installLocal` 里"装完即重装配"的注释也是这个口径）。
+            let stateless = row.runtime_kind == RuntimeKind::StaticData;
+            let panels: Vec<PanelDecl> = manifest
+                .contributions
+                .iter()
+                .filter(|c| c.kind == ContributionKind::Panel)
+                .map(|c| c.panel_decl(Some(manifest.id.as_str())))
+                .collect();
+            if panels.is_empty() {
+                without_panel.push(PanelCatalogEntry {
                     plugin_id: manifest.id.as_str().to_string(),
                     plugin_name: manifest.name.clone(),
                     trust_level: row.trust_level.as_str().to_string(),
-                    panel_id: panel.id.clone(),
-                    title_key: panel.title_key.clone().unwrap_or_default(),
+                    runtime_kind,
+                    panel: None,
                     enabled,
+                    stateless,
+                });
+                continue;
+            }
+            for panel in panels {
+                with_panel.push(PanelCatalogEntry {
+                    plugin_id: manifest.id.as_str().to_string(),
+                    plugin_name: manifest.name.clone(),
+                    trust_level: row.trust_level.as_str().to_string(),
+                    runtime_kind: runtime_kind.clone(),
+                    panel: Some(PanelCatalogPanel {
+                        id: panel.id.clone(),
+                        title_key: panel.title_key.clone().unwrap_or_default(),
+                    }),
+                    enabled,
+                    stateless,
                 });
             }
         }
-        out.sort_by(|a, b| {
-            (a.plugin_id.as_str(), a.panel_id.as_str())
-                .cmp(&(b.plugin_id.as_str(), b.panel_id.as_str()))
+        with_panel.sort_by(|a, b| {
+            (a.plugin_id.as_str(), a.panel.as_ref().map(|p| p.id.as_str()))
+                .cmp(&(b.plugin_id.as_str(), b.panel.as_ref().map(|p| p.id.as_str())))
         });
-        Ok(out)
+        without_panel.sort_by(|a, b| a.plugin_id.as_str().cmp(b.plugin_id.as_str()));
+        // 带面板的在前，**无面板的数据扩展整组在最后**。
+        with_panel.extend(without_panel);
+        Ok(with_panel)
     }
 }
 
-/// 面板目录项（[`PluginHost::panel_catalog`] 的元素）。
+/// 「扩展」目录项（[`PluginHost::panel_catalog`] 的元素）。
+///
+/// 一个插件可能产出**多行**：每个 `panel` 贡献点一行。**没有面板贡献点的插件也占一行**
+/// （`panel = None`）——纯数据扩展包（RFC 0008 D36.1）就是这样，
+/// 它在「扩展」菜单里必须可见，否则用户只能得出"装了没反应"。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PanelCatalogEntry {
     pub plugin_id: String,
@@ -382,11 +421,23 @@ pub struct PanelCatalogEntry {
     pub plugin_name: String,
     /// 信任等级（诊断与界面提示用）。
     pub trust_level: String,
-    pub panel_id: String,
-    /// 面板标题的 i18n 键（插件语言资源通道未落地时界面会原样显示键名）。
-    pub title_key: String,
+    /// 运行时形态（`static-data` / `external-process` / …），界面用作类型标记。
+    pub runtime_kind: String,
+    /// 面板声明；**`None` = 该插件不贡献面板**（数据扩展），界面不提供"打开"。
+    pub panel: Option<PanelCatalogPanel>,
     /// **该仓库**是否已启用（未启用 → 界面灰显 + 提供启用开关）。
     pub enabled: bool,
+    /// **无启用语义**：纯数据包（`static-data`）装完即生效，宿主不据启用状态做任何事，
+    /// 界面因此**不得**给它启用/禁用开关（RFC 0008 D36.9）。
+    pub stateless: bool,
+}
+
+/// 「扩展」目录项里的面板声明（[`PanelCatalogEntry::panel`]）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PanelCatalogPanel {
+    pub id: String,
+    /// 面板标题的 i18n 键（插件语言资源通道未落地时界面会原样显示键名）。
+    pub title_key: String,
 }
 
 /// manifest 声明的**全部**设置项（`panel.settings` 与 `settingsSection.settings` 两处）。

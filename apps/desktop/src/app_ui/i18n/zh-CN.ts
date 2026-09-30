@@ -142,6 +142,9 @@ export const zhCN = {
   "plugin.disable": "禁用",
   "plugin.load": "加载",
   "plugin.grants": "能力授权",
+  // 纯数据扩展包（D36.1）**无启用语义**：词库数据装完即生效。
+  "plugin.statelessState": "安装即启用（无独立状态）",
+  "plugin.statelessHint": "安装即启用",
   "plugin.taglibSummary": "词库：{concepts} 个 tag（{layers} 层，合并重复 {duplicates} 条）",
   "plugin.taglibEmpty": "词库未装配（缺内置基底库）",
 

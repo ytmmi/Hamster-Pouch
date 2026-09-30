@@ -196,3 +196,86 @@ fn static_data_extension_can_be_enabled_without_capabilities() {
     }
     println!("已验证 {} 个纯数据扩展包可空能力启用", dirs.len());
 }
+
+/// **真实数据扩展包出现在「扩展」目录里，排在带面板的插件之后，且无启用语义**
+/// （RFC 0008 D36.9）。
+///
+/// 用户反馈：装了 `tagdict-*` / `tagrel-*` 后「扩展」菜单里**什么都不出现**——因为目录
+/// 只发 `kind = panel` 的贡献点，而数据包按 D36.1 声明 `contributions: []`，
+/// **结构上不可能命中**。本测试用**真实产物**走一遍：装一个真实词典扩展 +
+/// 一个带面板的示例插件，断言两者都在目录里、数据扩展在**最后**并被标成 `stateless`
+/// （界面据此**不画**启用开关——词库装配只看安装目录、不读启用状态，画了就是空操作）。
+#[test]
+fn real_tag_extension_is_catalogued_last_without_enable_state() {
+    let Some(ext_dir) = tag_extension_dirs().into_iter().next() else {
+        eprintln!("跳过：未找到 tag 扩展包（先运行 tools/tagdict/package_extensions.py）");
+        return;
+    };
+
+    let tmp = tempfile::tempdir().expect("临时目录");
+    let mut db = hp_store::GlobalDb::open(tmp.path().join("global.sqlite3")).expect("全局库");
+    let installer = PluginInstaller::new(tmp.path().join("plugins"));
+
+    // 带面板的插件（小体积）作为"面板在前"的对照。
+    let hello_src = repo_root().join("plugins/examples/hello");
+    assert!(
+        hello_src.is_dir(),
+        "夹具路径存在性（repo_root 解析错时不许静默通过）"
+    );
+    let hello = installer
+        .install_registry_row(&InstallSource::LocalPath(hello_src), "2026-01-01T00:00:00Z")
+        .expect("安装 hello 示例失败");
+    PluginHost.register(&mut db, &hello).expect("注册 hello 失败");
+
+    // 只装**一个**真实包即可证明"真实数据包会被目录列出"：每个包要复制 128–162MB，
+    // 多包排序由 `m9_panel_catalog.rs` 的合成夹具覆盖，不必在这里重复付磁盘代价。
+    let ext = installer
+        .install_registry_row(
+            &InstallSource::LocalPath(ext_dir.clone()),
+            "2026-01-01T00:00:00Z",
+        )
+        .unwrap_or_else(|e| panic!("安装 {} 失败: {e}", ext_dir.display()));
+    PluginHost.register(&mut db, &ext).expect("注册 tag 扩展包失败");
+
+    let catalog = PluginHost.panel_catalog(&db, "repo-1").expect("取扩展目录失败");
+    assert_eq!(
+        catalog.len(),
+        2,
+        "带面板的 1 行 + 数据扩展 1 行: {catalog:#?}"
+    );
+
+    // 带面板的在前。
+    assert_eq!(catalog[0].plugin_id, "dev.hamsterpouch.example.hello");
+    assert!(catalog[0].panel.is_some(), "hello 应带面板");
+    assert!(!catalog[0].stateless, "有代码的插件有启用语义");
+
+    // 真实数据扩展在最后，且**没有启用语义**。
+    assert_eq!(catalog[1].plugin_id, ext.id.as_str());
+    assert!(
+        catalog[1].panel.is_none(),
+        "纯数据扩展不贡献面板: {:#?}",
+        catalog[1]
+    );
+    assert!(
+        catalog[1].stateless,
+        "纯数据扩展无启用语义（界面据此不画启用开关）: {:#?}",
+        catalog[1]
+    );
+    assert_eq!(catalog[1].runtime_kind, "static-data");
+
+    // **签名权限的实际效果**（用户问过）：有效签名把这批包从"本地路径 → local-dev"
+    // 提升为 manifest 请求的 `community`（`install.rs` 的 `registry_row_of`：签名有效 →
+    // 按 manifest 请求授予信任）。它们仍**不是** `system`——数据包不执行代码，
+    // 「是否提升为 system」在 RFC 0008「延后事项登记」里仍是开放项。
+    // 反过来说：**删掉 SHA256SUMS.sig 就会掉回 local-dev**，这是签名唯一的实际作用。
+    assert_eq!(
+        ext.trust_level.as_str(),
+        "community",
+        "有效签名 → 按 manifest 请求授予 community（无签名则退回 local-dev）"
+    );
+    assert_eq!(
+        ext.source_kind.as_str(),
+        "local-path",
+        "来源由宿主按安装方式判定，manifest 自称不参与"
+    );
+}

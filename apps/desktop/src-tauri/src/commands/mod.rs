@@ -9,6 +9,7 @@ pub(crate) mod fsops;
 pub(crate) mod layout;
 pub(crate) mod media;
 pub(crate) mod plugin;
+pub(crate) mod plugin_catalog;
 pub(crate) mod plugin_panel_data;
 pub(crate) mod rating;
 pub(crate) mod repo;

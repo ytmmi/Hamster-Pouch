@@ -1349,6 +1349,10 @@ const catalogSrc = readFileSync(
   join(ROOT, "crates/hp-plugin-host/src/host.rs"),
   "utf8",
 );
+const catalogBridgeSrc = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/plugin_catalog.rs"),
+  "utf8",
+);
 
 check(
   "「扩展」菜单不再是占位：渲染面板目录并带启用开关（胶囊）",
@@ -1379,9 +1383,48 @@ check(
   "面板目录是独立命令（不污染只含已启用的 plugin.contributions 注册表口径）",
   /export function pluginPanelCatalog/.test(apiPluginSrc) &&
     /"plugin_panel_catalog"/.test(apiPluginSrc) &&
-    /pub\(crate\) fn plugin_panel_catalog/.test(
-      readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/plugin.rs"), "utf8"),
-    ),
+    /pub\(crate\) fn plugin_panel_catalog/.test(catalogBridgeSrc),
+);
+// 目录命令 2026-09 从 `commands/plugin.rs` 拆到 `commands/plugin_catalog.rs`
+// （前者越过 1200 行上限），因此上面读的是新文件；这里再守一道"不能又搬回去
+// 把 plugin.rs 顶爆"的线。
+check(
+  "目录命令仍在独立文件里（`commands/plugin.rs` 不得再越过 1200 行）",
+  readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/plugin.rs"), "utf8")
+    .split("\n").length <= 1200,
+);
+
+// ==================== 纯数据扩展（tagdict-* / tagrel-*）：无状态、只列不控 ====================
+//
+// 防的是 D36.9 那个缺陷：数据包按 D36.1 声明 `contributions: []`，而目录只发
+// `kind = panel` 的贡献点 → 装了 128–162MB 的词典扩展后「扩展」菜单里照样
+// **什么都不出现**（与 `hello` / `control-demo` 是同一个缺陷）。同时防"再给它画一个
+// 点了没用的启用开关"——词库装配只看安装目录、不读启用状态。
+const pluginPanelSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/PluginPanel.tsx"),
+  "utf8",
+);
+
+check(
+  "宿主把**无面板的插件也发一行**，并标出「无启用语义」（D36.9）",
+  /panel: Option<PanelCatalogPanel>/.test(catalogSrc) &&
+    /pub stateless: bool/.test(catalogSrc) &&
+    // 带面板的在前、无面板的整组在最后（界面据此放到菜单最底下）。
+    /with_panel\.extend\(without_panel\)/.test(catalogSrc) &&
+    // 判据是运行时形态，不是"名字像扩展包"。
+    /row\.runtime_kind == RuntimeKind::StaticData/.test(catalogSrc),
+);
+check(
+  "「扩展」菜单把数据扩展**列在最底下**，且**不给启用按钮**",
+  /const dataPackRows = panelCatalog\.filter\(\(i\) => i\.panel === null\)/.test(menuBarSrc) &&
+    /dataPackRows\.map\(/.test(menuBarSrc) &&
+    // 数据扩展那一组的渲染里不得出现开关（否则就是一个点了没用的控件）。
+    !/dataPackRows[\s\S]{0,600}?<SwitchToggle/.test(menuBarSrc),
+);
+check(
+  "插件面板对数据包**不再画启用/禁用按钮**（那是空操作），只显示状态",
+  /const stateless = p\.runtime_kind === "static-data"/.test(pluginPanelSrc) &&
+    /plugin\.statelessState/.test(pluginPanelSrc),
 );
 
 // ============================== 汇总 ==============================

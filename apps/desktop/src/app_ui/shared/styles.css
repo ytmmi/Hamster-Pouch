@@ -168,6 +168,16 @@ body {
   color: var(--fg-dim);
 }
 
+/* 不可点击的目录行：纯数据扩展（装完即生效，没有可执行的动作，故不给启用按钮）。 */
+.menu-item.static {
+  cursor: default;
+  color: var(--fg-dim);
+}
+
+.menu-item.static:hover {
+  background: transparent;
+}
+
 .menu-item.has-sub {
   display: flex;
   justify-content: space-between;

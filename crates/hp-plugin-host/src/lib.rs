@@ -16,7 +16,8 @@ pub use channel::{
     QUERY_TIMEOUT, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT,
 };
 pub use host::{
-    LoadOutcome, PanelCatalogEntry, PanelOwner, PluginHost, RepoContribution, SettingsSectionDecl,
+    LoadOutcome, PanelCatalogEntry, PanelCatalogPanel, PanelOwner, PluginHost, RepoContribution,
+    SettingsSectionDecl,
 };
 pub use install::{InstallSource, InstalledPackage, PluginInstaller};
 pub use manifest::{discover_packages, parse_manifest, read_package, PluginPackage, MANIFEST_FILE};

@@ -138,6 +138,10 @@ export const en: Record<keyof DictZhCN, string> = {
   "plugin.disable": "Disable",
   "plugin.load": "Load",
   "plugin.grants": "Grants",
+  // Pure data extension packs (D36.1) have **no enable state**: the dictionary data is
+  // live as soon as the pack is installed.
+  "plugin.statelessState": "Active once installed (no separate state)",
+  "plugin.statelessHint": "active once installed",
   "plugin.taglibSummary": "Dictionary: {concepts} tags ({layers} layers, {duplicates} duplicates merged)",
   "plugin.taglibEmpty": "Dictionary not assembled (base library missing)",
 

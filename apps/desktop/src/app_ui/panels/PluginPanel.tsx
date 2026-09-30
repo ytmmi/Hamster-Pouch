@@ -217,6 +217,13 @@ export function PluginPanel(): JSX.Element {
         {plugins.map((p) => {
           const state = states[p.id];
           const enabled = state?.enabled ?? false;
+          /**
+           * 纯数据扩展包（`static-data`，RFC 0008 D36.1）**没有启用语义**：词库装配只看
+           * 安装目录、不读启用状态（`atomic` 口径见 `commands/shared.rs`），所以对它的
+           * 「启用/禁用」是**空操作**。用户裁定「安装即启用」（D36.9），这里因此只显示
+           * 状态、不给按钮——留着一个点了没用的开关，正是此前"装了没反应"那类抱怨的来源。
+           */
+          const stateless = p.runtime_kind === "static-data";
           return (
             <div key={p.id} className="row plugin-row">
               <span className="plugin-name">
@@ -228,14 +235,18 @@ export function PluginPanel(): JSX.Element {
               <span className="dim mono">
                 {app.t("plugin.grants")}: {state?.grants.join(", ") ?? "—"}
               </span>
-              <span className="row-actions">
-                <button onClick={() => void toggle(p, enabled)}>
-                  {enabled ? app.t("plugin.disable") : app.t("plugin.enable")}
-                </button>
-                <button disabled={!enabled} onClick={() => void loadPlugin(p)}>
-                  {app.t("plugin.load")}
-                </button>
-              </span>
+              {stateless ? (
+                <span className="dim mono">{app.t("plugin.statelessState")}</span>
+              ) : (
+                <span className="row-actions">
+                  <button onClick={() => void toggle(p, enabled)}>
+                    {enabled ? app.t("plugin.disable") : app.t("plugin.enable")}
+                  </button>
+                  <button disabled={!enabled} onClick={() => void loadPlugin(p)}>
+                    {app.t("plugin.load")}
+                  </button>
+                </span>
+              )}
             </div>
           );
         })}

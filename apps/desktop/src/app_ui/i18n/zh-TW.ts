@@ -138,6 +138,9 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "plugin.disable": "停用",
   "plugin.load": "載入",
   "plugin.grants": "能力授權",
+  // 純資料擴充套件（D36.1）**無啟用語意**：詞庫資料裝完即生效。
+  "plugin.statelessState": "安裝即啟用（無獨立狀態）",
+  "plugin.statelessHint": "安裝即啟用",
   "plugin.taglibSummary": "詞庫：{concepts} 個 tag（{layers} 層，合併重複 {duplicates} 條）",
   "plugin.taglibEmpty": "詞庫未裝配（缺內建基底庫）",
 

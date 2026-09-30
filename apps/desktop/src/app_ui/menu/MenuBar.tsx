@@ -110,6 +110,15 @@ export function MenuBar({
     },
     [repoId, app, loadCatalog],
   );
+
+  /**
+   * 「扩展」菜单里**无状态**的纯数据扩展（`panel === null`，RFC 0008 D36.9）。
+   *
+   * 这类包（`tagdict-*` / `tagrel-*`）按 D36.1 声明 `contributions: []`，不贡献面板；
+   * 词库数据是**安装即生效**的（宿主装配只看安装目录，不看启用状态），因此这里
+   * **只列出来、不给启用按钮**——给它开关等于骗用户。后端已把它们排在最后。
+   */
+  const dataPackRows = panelCatalog.filter((i) => i.panel === null);
   const [savingLayout, setSavingLayout] = useState(false);
   const [layoutName, setLayoutName] = useState("");
   const [layoutMenu, setLayoutMenu] = useState<{ x: number; y: number; name: string } | null>(
@@ -577,20 +586,23 @@ export function MenuBar({
               <span className="menu-item dim">{t("menubar.extensionsHint")}</span>
             )}
             {panelCatalog.map((item) => {
-              const inLayout = Boolean(apiRef.current?.getPanel(item.panelId));
+              const panel = item.panel;
+              // 无面板 = 纯数据扩展，由下面的分组渲染（排在最后、无开关）。
+              if (!panel) return null;
+              const inLayout = Boolean(apiRef.current?.getPanel(panel.id));
               return (
-                <div key={item.panelId} className="menu-item-row">
+                <div key={panel.id} className="menu-item-row">
                   <button
                     className={`menu-item grow${item.enabled ? "" : " dim"}`}
                     // 未启用 → 打不开（面板还没登记进注册表），按钮置灰、由右侧开关负责启用。
                     disabled={!item.enabled}
-                    title={item.enabled ? item.panelId : t("menubar.extensionsNeedsEnable")}
-                    onClick={() => togglePanel(item.panelId)}
+                    title={item.enabled ? panel.id : t("menubar.extensionsNeedsEnable")}
+                    onClick={() => togglePanel(panel.id)}
                   >
                     {inLayout ? "✓ " : "　"}
                     {item.pluginName}
                     {/* 插件语言资源通道未落地 → 这里直接显示标题键，不做 i18n 查询 */}
-                    <span className="dim"> · {item.titleKey}</span>
+                    <span className="dim"> · {panel.titleKey}</span>
                   </button>
                   {/* 容器用 `<span>` 而不是 `<label>`：`<label>` 不得包住其它可交互元素，
                       胶囊开关本身就是按钮（无障碍名由 `label` 属性给）。 */}
@@ -614,6 +626,17 @@ export function MenuBar({
                 </div>
               );
             })}
+            {/* 纯数据扩展（tagdict-* / tagrel-*）：**列在最后、无启用按钮**
+                ——词库数据装完即生效，没有可"启用"的状态（RFC 0008 D36.9）。 */}
+            {dataPackRows.length > 0 && <div className="menu-sep" />}
+            {dataPackRows.map((item) => (
+              <div key={item.pluginId} className="menu-item-row">
+                <span className="menu-item grow static" title={item.pluginId}>
+                  　{item.pluginName}
+                  <span className="dim"> · {t("plugin.statelessHint")}</span>
+                </span>
+              </div>
+            ))}
           </div>
         )}
       </div>

@@ -119,25 +119,46 @@ export function pluginContributions(repoId: string): Promise<PluginContributions
   return invoke<ApiResponse<PluginContributions>>("plugin_contributions", { repoId }).then(unwrapApi);
 }
 
-/** 「扩展」菜单的一行：**已安装**插件的面板（含未启用）。 */
+/** 「扩展」菜单一行的面板声明（`panel` 字段）。 */
+export interface PluginPanelCatalogPanel {
+  id: string;
+  /** 面板标题的 i18n 键（插件语言资源未落地时界面会原样显示键名）。 */
+  titleKey: string;
+}
+
+/**
+ * 「扩展」菜单的一行：**已安装**插件贡献的面板**或**纯数据扩展（均含未启用）。
+ *
+ * 两种行由 `panel` 区分：
+ * - `panel !== null` —— 面板行，界面可"打开"并给启用开关；
+ * - `panel === null` —— 该插件**不贡献面板**（纯数据扩展包，RFC 0008 D36.1），
+ *   界面只列出来、**不提供打开**；且 `stateless === true`，**也不得有启用开关**
+ *   （数据扩展无状态、装完即生效，D36.9）。
+ */
 export interface PluginPanelCatalogItem {
   pluginId: string;
   /** 插件显示名（`manifest.name`）。 */
   pluginName: string;
   trustLevel: string;
-  panelId: string;
-  /** 面板标题的 i18n 键（插件语言资源未落地时界面会原样显示键名）。 */
-  titleKey: string;
-  /** **该仓库**是否已启用；`false` → 界面灰显并提供启用开关。 */
+  /** 运行时形态（`static-data` / `external-process` / …），界面用作类型标记。 */
+  runtimeKind: string;
+  /** 面板声明；`null` = 该插件不贡献面板（纯数据扩展）。 */
+  panel: PluginPanelCatalogPanel | null;
+  /** **该仓库**是否已启用；`stateless` 的行上该字段无意义。 */
   enabled: boolean;
+  /** 无启用语义（纯数据包装完即生效）→ 界面**不得**画启用/禁用开关。 */
+  stateless: boolean;
 }
 
 /**
- * 「扩展」菜单的面板目录（**含未启用**的插件面板）。
+ * 「扩展」菜单的目录（**含未启用**的插件面板与纯数据扩展）。
  *
  * 与 [`pluginContributions`] 是**两条不同口径**，不要合并：那个只报已启用的（注册表用，
  * 启用即授权能力，属安全口径）；本命令报全部已安装的并附带 `enabled`，
  * 让"装了但没启用"在界面上可见——此前装完插件后面板菜单里毫无迹象。
+ *
+ * **后端已排好序**：带面板的在前，无面板的数据扩展整组在最后。界面直接按序渲染即可
+ * （把数据扩展放在菜单底部是用户要求）。
  */
 export function pluginPanelCatalog(repoId: string): Promise<PluginPanelCatalogItem[]> {
   return invoke<ApiResponse<PluginPanelCatalogItem[]>>("plugin_panel_catalog", { repoId }).then(
