@@ -1325,32 +1325,51 @@ button.danger {
  * 自适应：**逐行两端对齐**（"justified"排布）——行内各格**等高**，高度由该行反推，
  * 不同行高度不必相同，每行左右边缘都顶到面板两边。
  *
- * 怎么做到的（纯 CSS，不需要 JS 算行）：
+ * **第 6 轮改为"JS 断行 + 行内 CSS 分配宽度"**（缺陷 0018 §3.1 路线 2）：
+ * 原先断行由 `flex-wrap` 在**一个**容器里完成，于是虚拟化无从下手（JS 不测量就不知道
+ * CSS 会断在哪）。现在由 `adaptiveRowLayout` 把条目切成行，每行是一个独立的 flex 行
+ * 容器——断行与虚拟化同源，**行内的宽度分配仍然由 CSS 按宽高比完成**，观感一字不改。
+ *
+ * 行内怎么配平（与原先完全一致）：
  * 1. 每个格子的 `flex-basis = 宽高比 × 目标行高`、`flex-grow = 宽高比`。`<img>` 解码后
  *    量到的宽高比由面板以 `--mp-cell-ratio` 下发；
- * 2. `flex-wrap` 用**基准宽度**断行（所以断行结果等价于"按目标行高铺满一行"）；
- * 3. 断好行后，剩余空间按 `flex-grow`（=宽高比）分给该行各格 → 行宽正好等于容器宽
+ * 2. 行内剩余空间按 `flex-grow`（=宽高比）分给该行各格 → 行宽正好等于容器宽
  *    （**左右两边对齐**），而每格的宽度仍与宽高比成正比 → 由 `aspect-ratio` 推出的
  *    缩略图高度 **行内一致**、行与行之间不同。
  *
  * 因此这里**不能**有会破坏"宽度 ∝ 宽高比"的东西：内边距与边框都去掉了（它们会在
  * 宽度上各加一个常数，导致 高度 = (宽 - 常数)/宽高比 逐格不同、行底参差）；
  * 选中态改用 `outline`（不占布局）。
+ *
+ * `flex-wrap` 保留 `nowrap`：行已经由 JS 切好，**再让 CSS 换行就会与 JS 的行边界
+ * 不一致**（表现为行错位/留白）。这是本视图虚拟化的关键不变量。
  */
 .mp-grid.mp-view-adaptive {
-  display: flex;
-  flex-wrap: wrap;
-  /* 行内宽度不等；行被撑满时它不起作用，只有被 `max-width` 截住的行靠它居中。 */
-  justify-content: center;
-  align-content: flex-start;
+  /* 容器只负责滚动与总高度占位；行由 `.mp-virtual-adaptive` 承载。 */
+  display: block;
   /*
    * 行高上限 = 目标尺寸 × 该系数。
    *
    * 这是"尽量两端对齐"的**例外**：某行只剩极少的图时（尤其最后一行只有一张竖图），
    * 撑满一行会把这张图放大到上千像素高。到上限就停手、把余量居中留白，
-   * 而不是把图放大到荒唐的尺寸。
+   * 而不是把图放大到荒唐的尺寸。JS 的 `adaptiveRowLayout` 用同一系数封顶。
    */
   --mp-row-max-factor: 2;
+}
+
+/* 自适应的一行：flex 行容器，行内按宽高比分配宽度（两端对齐）。 */
+.mp-virtual-row.mp-virtual-adaptive {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  /* **nowrap**：行边界由 JS 决定，CSS 再换行就会与 JS 不一致（见上面说明）。 */
+  flex-wrap: nowrap;
+  /* 行内宽度不等；被封顶的稀疏行靠它居中（与原先一致）。 */
+  justify-content: center;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .mp-grid.mp-view-adaptive .mp-cell {

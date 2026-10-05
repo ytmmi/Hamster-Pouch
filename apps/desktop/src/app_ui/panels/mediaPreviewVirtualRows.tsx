@@ -135,6 +135,55 @@ export function useMeasuredRowVirtualizer(
 }
 
 /**
+ * 按**逐行不同**的行高虚拟化 `rowCount` 行。
+ *
+ * 用于自适应视图：行高由"该行宽高比之和"决定（行内等高、行间不等），因此
+ * `estimateSize` 是**行号的函数**而不是常量。
+ *
+ * 与 `useFixedRowVirtualizer` 一样**不测量**：行高完全由面板的纯函数算出，
+ * 因此内容总高度是确定值，滚动条不会随滚动变化。
+ *
+ * `rowHeights` 变化（宽高比解码后重算）时必须 `measure()`——否则窗口仍按旧行高算。
+ */
+export function useVariableRowVirtualizer(
+  scrollRef: React.RefObject<HTMLElement | null>,
+  rowHeights: readonly number[],
+  containerVersion: number,
+  /** 行间距（px）：**只有这里加**，行盒高度里不含它（否则间距翻倍）。 */
+  gap = 0,
+): VirtualRows {
+  const heightsRef = useRef(rowHeights);
+  heightsRef.current = rowHeights;
+
+  const virtualizer = useVirtualizer({
+    count: rowHeights.length,
+    getScrollElement: () => scrollRef.current,
+    // 读 ref 而不是闭包里的 `rowHeights`：库会把 estimateSize 缓存进 measurementsCache，
+    // 用 ref 保证 `measure()` 之后拿到的是**最新**高度。
+    estimateSize: (index) => heightsRef.current[index] ?? 0,
+    overscan: MEDIA_PREVIEW_OVERSCAN,
+    gap,
+  });
+
+  // 行高数组换了（宽高比解码 / 图片尺寸变化 / 列宽变化）就要重新算窗口。
+  useEffect(() => {
+    virtualizer.measure();
+  }, [virtualizer, rowHeights, containerVersion, gap]);
+
+  const items = virtualizer.getVirtualItems();
+  const rows: VirtualRow[] = items.map((item) => ({
+    index: item.index,
+    start: item.start,
+    size: item.size,
+  }));
+
+  return {
+    rows,
+    totalSize: virtualizer.getTotalSize(),
+  };
+}
+
+/**
  * 滚动容器的 **callback ref + 版本号**。
  *
  * 面板的三个容器是**条件渲染**的（`viewMode` / `view` / `foreground`），挂载顺序与

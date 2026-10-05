@@ -74,6 +74,25 @@ export function listRowHeight(lineHeight = 16): number {
 /** 平铺视图的**行间距**（与 `.mp-grid` 的 `gap: 8px` 一致）。 */
 export const MEDIA_TILE_ROW_GAP = 8;
 
+/**
+ * 自适应视图的**行内格间距 / 行间距**（与 `.mp-grid.mp-view-adaptive` 的 `gap: 8px` 一致）。
+ *
+ * 注意自适应视图的 `.mp-cell` 去掉了内边距与边框（宽度必须严格正比于宽高比，
+ * 见样式表的推导），因此这里没有"内边距"要额外扣。
+ */
+export const MEDIA_ADAPTIVE_GAP = 8;
+
+/** 自适应视图的行高上限系数（与样式表 `--mp-row-max-factor` 一致）。 */
+export const MEDIA_ADAPTIVE_ROW_MAX_FACTOR = 2;
+
+/**
+ * 文件名行的**实际行高**（px）——`font-size: 11px` 的 `.mp-name` 在默认字体度量下的
+ * 行盒高度（**实测值**，不是猜的 16px）。
+ *
+ * 与 `masonryCellHeight` 共用同一口径：两处都按 12 算，改字体时一起改。
+ */
+export const MEDIA_NAME_LINE_HEIGHT = 12;
+
 /** 文件名列表的**行间距**（与 `.mp-list` 的 `gap: 2px` 一致）。 */
 export const MEDIA_LIST_ROW_GAP = 2;
 
@@ -221,7 +240,126 @@ export function masonryVisibleRange(
 }
 
 /**
- * 自适应视图**单个单元**的占位高度（px）——给 `contain-intrinsic-size` 用。
+ * 自适应视图：**由 JS 计算行**（"逐行两端对齐"的断行与行高）。
+ *
+ * ## 为什么必须由 JS 算（缺陷 0018 §3.1 的核心难点）
+ *
+ * 自适应原先靠 CSS `flex-wrap` 断行、行内按宽高比配平。虚拟化必须**先**知道行边界，
+ * 才能只渲染窗口内的行；而"CSS 会断在哪"JS 不测量就无从得知。因此这里把断行算法
+ * 用 JS 复现，**同时**保留行内由 CSS 分配宽度（`flex-grow` / `flex-basis` 按宽高比）——
+ * 于是两端对齐的观感一字不改，只有"谁和谁在同一行"由 JS 决定。
+ *
+ * ## 断行规则与 CSS `flex-wrap` 一致
+ *
+ * `flex-wrap` 用**基准尺寸**（`flex-basis`，被 `max-width` 夹住后）判断能否放进当前行：
+ * 逐个累加，放不下就在它之前断行。这里用同一套贪心。
+ *
+ * ## 行高（与 CSS 分配结果等价）
+ *
+ * 行内每格 `flex-basis = 宽高比 × 目标尺寸`、`flex-grow = 宽高比`，两者都正比于宽高比，
+ * 于是行内剩余空间按宽高比分配后：
+ *
+ * ```text
+ * 最终宽度_i = 宽高比_i × (容器宽 − 行内间距) / Σ宽高比
+ * 缩略图高   = 最终宽度_i / 宽高比_i = (容器宽 − 行内间距) / Σ宽高比   ← 行内各格等高
+ * ```
+ *
+ * 这就是"行内等高、行间不等"的来源。稀疏行（尤其最后一行只有一张竖图）会把这行
+ * 放大到荒唐的高度，因此 `max-width` 用 `--mp-row-max-factor` 封顶：封顶时
+ * 缩略图高 = 目标尺寸 × 系数，该行不再铺满、由 `justify-content: center` 居中。
+ * 因为封顶量正比于宽高比，**要么全行都被封顶、要么都不被封顶**，所以行高取两者较小值。
+ *
+ * @param ratios 每格的宽高比（宽 / 高）。未解码的用 `DEFAULT_CELL_RATIO` 占位，
+ *   解码后由调用方以新数组重算（`ratioCache` 的版本号进依赖）。
+ * @param containerWidth 行内可用宽度（**已扣除**滚动条与容器内边距）
+ * @param targetHeight 目标行高（面板的"图片尺寸"滑条在自适应视图下就是它）
+ * @param gap 行内格间距（与样式表 `.mp-view-adaptive` 的 `gap` 一致）
+ * @param rowMaxFactor 行高上限系数（与 `--mp-row-max-factor` 一致）
+ * @param nameBlock 每格除缩略图外的高度（文件名行 + gap；不显示文件名时为 0）
+ */
+export function adaptiveRowLayout(
+  ratios: readonly number[],
+  containerWidth: number,
+  targetHeight: number,
+  gap: number,
+  rowMaxFactor: number,
+  nameBlock = 0,
+): { rows: number[][]; rowHeights: number[]; offsets: number[]; total: number } {
+  const width = Number.isFinite(containerWidth) ? containerWidth : 0;
+  const target = Math.max(1, Number.isFinite(targetHeight) ? targetHeight : 1);
+  const spacing = Math.max(0, Number.isFinite(gap) ? gap : 0);
+  const factor = Math.max(1, Number.isFinite(rowMaxFactor) ? rowMaxFactor : 1);
+  const extra = Math.max(0, Number.isFinite(nameBlock) ? nameBlock : 0);
+
+  const rows: number[][] = [];
+  const rowHeights: number[] = [];
+  const offsets: number[] = [];
+  let total = 0;
+
+  let current: number[] = [];
+  let baseSum = 0; // Σ(宽高比 × 目标行高)，即该行基准宽度之和
+  let ratioSum = 0;
+
+  const flush = () => {
+    if (current.length === 0) return;
+    // 行内各格等高：(容器宽 − 间距) / Σ宽高比；再被行高上限截住。
+    const available = Math.max(1, width - spacing * (current.length - 1));
+    const thumbHeight = Math.min(available / ratioSum, target * factor);
+    const height = Math.round(thumbHeight + extra);
+    rows.push(current);
+    offsets.push(total);
+    rowHeights.push(height);
+    total += height + spacing;
+    current = [];
+    baseSum = 0;
+    ratioSum = 0;
+  };
+
+  for (let i = 0; i < ratios.length; i++) {
+    const raw = ratios[i];
+    const ratio = Number.isFinite(raw) && raw > 0 ? raw : 1;
+    const base = ratio * target;
+    // 放不下就在它之前断行；空行时不判断（单个格子超宽也要自成一行，与 CSS 一致）。
+    if (current.length > 0 && baseSum + spacing + base > width) {
+      flush();
+    }
+    current.push(i);
+    baseSum += base + (current.length > 1 ? spacing : 0);
+    ratioSum += ratio;
+  }
+  flush();
+
+  return { rows, rowHeights, offsets, total: Math.max(0, total - spacing) };
+}
+
+/**
+ * 自适应视图**某一格**在行内应占的宽度（px）——与 CSS 的 flex 分配结果一致。
+ *
+ * 用途：**测量探针与门禁**核对"JS 算的行高 == 浏览器实际布局"。
+ * 面板本身不消费它（宽度仍交给 CSS 分配），因此它必须与 CSS 严格同源；
+ * 不同源就会让探针失去意义（量的是自己而不是浏览器）。
+ *
+ * 封顶时该格宽度 = 宽高比 × 目标行高 × 系数（`max-width` 的效果）。
+ */
+export function adaptiveCellWidth(
+  ratio: number,
+  rowRatioSum: number,
+  rowCount: number,
+  containerWidth: number,
+  targetHeight: number,
+  gap: number,
+  rowMaxFactor: number,
+): number {
+  const safe = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+  const sum = Number.isFinite(rowRatioSum) && rowRatioSum > 0 ? rowRatioSum : 1;
+  const available = Math.max(1, containerWidth - Math.max(0, gap) * Math.max(0, rowCount - 1));
+  const natural = safe * (available / sum);
+  const capped = safe * Math.max(1, targetHeight) * Math.max(1, rowMaxFactor);
+  return Math.min(natural, capped);
+}
+
+/**
+ * 自适应视图**某一格**的占位高度（px）——给 `contain-intrinsic-size` 用。
  *
  * 自适应视图的行内宽度按宽高比分配，单元**实际**高度 = 该行最终行高（各行不同），
  * 单看一个单元是算不出来的。但行高被 `--mp-row-max-factor: 2` 封顶，且"铺满一行"时

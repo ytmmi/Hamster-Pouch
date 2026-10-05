@@ -1379,9 +1379,16 @@ check(
     /\.mp-dd\s*\{/.test(stylesSource),
 );
 check(
-  "自适应 = **逐行两端对齐**：断行用基准宽度、行内按宽高比分配剩余空间（`flex-grow`/`flex-basis` 同为宽高比）",
-  /\.mp-grid\.mp-view-adaptive\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/.test(stylesSource) &&
-    /\.mp-grid\.mp-view-adaptive\s*\{[^}]*--mp-row-max-factor:\s*2/.test(stylesSource) &&
+  "自适应 = **逐行两端对齐**：断行改由 JS（第 6 轮），行内仍按宽高比分配剩余空间（`flex-grow`/`flex-basis` 同为宽高比）",
+  // 第 6 轮（缺陷 0018 §3.1 路线 2）：断行从 CSS `flex-wrap` 移到 JS（`adaptiveRowLayout`），
+  // 否则虚拟化无从下手（JS 不测量就不知道 CSS 会断在哪）。**行内宽度分配仍是 CSS**，
+  // 因此"两端对齐"的观感一字不改——这一点由 n=60 的 A/B 实测证明：
+  // 旧实现 contentHeight = 1684，新实现同样 1684（逐行一致）。
+  /\.mp-grid\.mp-view-adaptive\s*\{[^}]*--mp-row-max-factor:\s*2/.test(stylesSource) &&
+    // 行容器是 flex 行，且**不得**再 `flex-wrap: wrap`：行边界由 JS 决定，
+    // CSS 再换行就会与 JS 不一致（表现为行错位/留白）。
+    /\.mp-virtual-row\.mp-virtual-adaptive\s*\{[^}]*display:\s*flex/.test(stylesSource) &&
+    /\.mp-virtual-row\.mp-virtual-adaptive\s*\{[^}]*flex-wrap:\s*nowrap/.test(stylesSource) &&
     // 两端对齐的两行：grow 与 basis 都必须取宽高比，缺一就退化成"等高不齐边"。
     /\.mp-view-adaptive \.mp-cell\s*\{[^}]*flex-grow:\s*var\(--mp-cell-ratio/.test(stylesSource) &&
     /\.mp-view-adaptive \.mp-cell\s*\{[^}]*flex-basis:\s*calc\(var\(--mp-cell-ratio/.test(
@@ -1396,7 +1403,7 @@ check(
     /\.mp-view-adaptive \.mp-thumb\s*\{[^}]*aspect-ratio:\s*var\(--mp-cell-ratio/.test(
       stylesSource,
     ) &&
-    // 稀疏行不把单张图放大到上千像素：到行高上限即停手。
+    // 稀疏行不把单张图放大到上千像素：到行高上限即停手（JS 的 `adaptiveRowLayout` 用同一系数）。
     /\.mp-view-adaptive \.mp-cell\s*\{[^}]*max-width:\s*calc\([\s\S]{0,160}?--mp-row-max-factor/.test(
       stylesSource,
     ) &&
@@ -1405,6 +1412,91 @@ check(
     // 行高由宽高比推出 → 跳过渲染的占位高度必须**接近真实**（不能靠关掉跳过渲染回避）。
     !/\.mp-view-adaptive \.mp-cell\s*\{[^}]*content-visibility:\s*visible/.test(stylesSource),
 );
+check(
+  "自适应**断行与行高**由 JS 算（`adaptiveRowLayout`），且与 CSS 的配平同源",
+  // 缺陷 0018 §3.1 路线 2：断行必须由 JS 算，虚拟化才可能；行内宽度仍交给 CSS。
+  // 这里断言的是**纯函数行为**（门禁直接跑真函数），不是源码正则。
+  (() => {
+    const gap = 8;
+    const target = 160;
+    const factor = 2;
+    // 10 张 1:1 的图、容器宽 808：每格基准宽 160 + 间距 8，
+    // 5 格需要 5×160 + 4×8 = 832 > 808 → **每行只能放 4 格**（与 CSS flex-wrap 同判据）。
+    const ratios = Array.from({ length: 10 }, () => 1);
+    const layout = virtual.adaptiveRowLayout(ratios, 808, target, gap, factor);
+    if (layout.rows.length !== 3) return false;
+    if (layout.rows[0].length !== 4 || layout.rows[1].length !== 4) return false;
+    if (layout.rows[2].length !== 2) return false;
+    // 保序、不丢项、不重复。
+    if (JSON.stringify(layout.rows.flat()) !== JSON.stringify([...Array(10).keys()])) return false;
+    // 行内各格等高：(容器宽 − 行内间距) / Σ宽高比 = (808 − 24) / 4 = 196 → 行高 196。
+    if (layout.rowHeights[0] !== 196 || layout.rowHeights[1] !== 196) return false;
+    // 末行只有 2 格：撑满会是 (808−8)/2 = 400 > 160×2 = 320 → **封顶到 320**。
+    if (layout.rowHeights[2] !== 320) return false;
+    // 偏移单调、总高 = Σ行高 + 行间距。
+    if (layout.offsets[0] !== 0 || layout.offsets[1] !== 196 + gap) return false;
+    if (layout.total !== 196 + gap + 196 + gap + 320) return false;
+    return true;
+  })(),
+  `行高=${virtual.adaptiveRowLayout(Array(10).fill(1), 808, 160, 8, 2).rowHeights.join(",")} 各行列数=${virtual
+    .adaptiveRowLayout(Array(10).fill(1), 808, 160, 8, 2)
+    .rows.map((r) => r.length)
+    .join(",")}`,
+);
+
+check(
+  "自适应行高**封顶**：稀疏行不被放大到荒唐高度（与 `--mp-row-max-factor` 同源）",
+  (() => {
+    // 一行只有 1 张 1:1 的图、容器宽 1578：撑满会是 1578px 高，必须封顶到 160×2 = 320。
+    const layout = virtual.adaptiveRowLayout([1], 1578, 160, 8, 2);
+    if (layout.rows.length !== 1) return false;
+    if (layout.rowHeights[0] !== 320) return false;
+    // 封顶后该格宽 = 1 × 160 × 2 = 320（`adaptiveCellWidth` 与之一致）。
+    const width = virtual.adaptiveCellWidth(1, 1, 1, 1578, 160, 8, 2);
+    return width === 320;
+  })(),
+);
+
+check(
+  "自适应断行的**退化输入**：空输入、非法宽高比、零宽容器都不崩",
+  (() => {
+    const empty = virtual.adaptiveRowLayout([], 800, 160, 8, 2);
+    if (empty.rows.length !== 0 || empty.total !== 0) return false;
+    // 0 / 负数 / NaN 一律按 1:1 处理（否则 flex 计算会得到 NaN，整行作废）。
+    const bad = virtual.adaptiveRowLayout([0, -2, Number.NaN], 800, 160, 8, 2);
+    if (bad.rows.flat().length !== 3) return false;
+    if (!bad.rowHeights.every((h) => Number.isFinite(h) && h > 0)) return false;
+    // 容器宽 0（首帧尚未测量）不得产出 NaN/负高度。
+    const zero = virtual.adaptiveRowLayout([1, 1], 0, 160, 8, 2);
+    if (!zero.rowHeights.every((h) => Number.isFinite(h) && h > 0)) return false;
+    return true;
+  })(),
+);
+
+check(
+  "自适应**按行虚拟化**：只渲染窗口内的行（DOM 单元数与条目总数脱钩）",
+  /adaptiveRowLayout\(/.test(mediaPanelSrc) &&
+    /useVariableRowVirtualizer\(/.test(mediaPanelSrc) &&
+    /adaptiveVirtual\.rows\.map\(/.test(mediaPanelSrc) &&
+    // 必须**按窗口切片**渲染，不得退回 `items.map` 全量铺开。
+    /\(adaptive\.rows\[row\.index\] \?\? \[\]\)\.map\(/.test(mediaPanelSrc) &&
+    !/items\.map\(\(\{ file, url \}\) => renderCell/.test(mediaPanelSrc) &&
+    // 内容总高度由虚拟化给出（行高逐行不同，但完全由纯函数算，不测量）。
+    /className="mp-virtual" style=\{\{ height: adaptiveVirtual\.totalSize \}\}/.test(mediaPanelSrc) &&
+    // 宽高比与容器宽度都必须进依赖：解码后断行会变，容器宽度变了要重新断行。
+    /\[items, gridWidth, imageSize, showFileName, view, viewMode, ratioVersion\]/.test(
+      mediaPanelSrc,
+    ),
+);
+
+check(
+  "自适应行高的**变量行高虚拟化**按行号取高度（不是常量）",
+  // 行内等高、行间不等——用常量 estimateSize 会让内容总高与滚动条长度全错。
+  // `.tsx` 不能被 Node 直接加载（JSX 不是可剥离语法），故读**家族源码**。
+  /export function useVariableRowVirtualizer\(/.test(mediaFamilySrc) &&
+    /estimateSize: \(index\) => heightsRef\.current\[index\] \?\? 0/.test(mediaFamilySrc),
+);
+
 check(
   "宽高比是自适应配平的输入：纯函数带兜底（0 / 负数 / NaN 不得进入 flex 计算）并**量后缓存**",
   mediaView.imageRatio(1600, 900) === 1600 / 900 &&
@@ -1431,7 +1523,8 @@ check(
 check(
   "三种视图都**居中对齐**（图片宽度定死时余量左右均分，不许堆在右边留一条空白）；自适应被行高上限截住的行同理",
   /\.mp-grid\.mp-view-tile\s*\{[^}]*justify-content:\s*center/.test(stylesSource) &&
-    /\.mp-grid\.mp-view-adaptive\s*\{[^}]*justify-content:\s*center/.test(stylesSource) &&
+    // 自适应：断行改由 JS 后，居中落在**行容器**上（每一行各自居中；见第 6 轮的路线 2）。
+    /\.mp-virtual-row\.mp-virtual-adaptive\s*\{[^}]*justify-content:\s*center/.test(stylesSource) &&
     /\.mp-masonry\s*\{[^}]*justify-content:\s*center/.test(stylesSource),
 );
 

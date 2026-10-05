@@ -344,6 +344,7 @@ async function main() {
       let maxGap = -Infinity;
       let maxHeightDelta = 0;
       let maxPending = 0;
+      let adaptiveMaxHeightDelta = 0, adaptiveMaxWidthGap = 0, adaptiveCentered = 0, adaptiveOverlaps = 0, adaptiveRows = 0, adaptiveWorst = null, adaptiveWorstRow = null;
       let worstCell = null;
       for (let i = 0; i <= 20; i++) {
         p.scrollToFraction(i / 20);
@@ -360,6 +361,13 @@ async function main() {
         // 高度猜错不会体现在偏移上（绝对定位），只会改变**相邻单元的视觉间距**
         // ——预期恰好是 MEDIA_MASONRY_GAP（8px）。必须单独量。
         const h = p.cellHeightFidelity();
+        const af = p.adaptiveRowFidelity();
+        if (af.maxHeightDelta > adaptiveMaxHeightDelta) { adaptiveMaxHeightDelta = af.maxHeightDelta; adaptiveWorst = af.worst; }
+        adaptiveMaxWidthGap = Math.max(adaptiveMaxWidthGap, af.maxRowWidthGap);
+        if (af.worstRow) adaptiveWorstRow = af.worstRow;
+        adaptiveCentered = af.centeredRows;
+        adaptiveOverlaps = af.overlaps;
+        adaptiveRows = af.rows;
         if (h.minGap !== null && h.minGap < minGap) minGap = h.minGap;
         if (h.maxGap !== null && h.maxGap > maxGap) maxGap = h.maxGap;
         if (h.maxHeightDelta > maxHeightDelta) maxHeightDelta = h.maxHeightDelta;
@@ -421,6 +429,13 @@ async function main() {
         heightStart,
         heightEnd: p.contentHeight(),
         heightMaxDrift,
+        adaptiveRows,
+        adaptiveMaxHeightDelta,
+        adaptiveMaxWidthGap,
+        adaptiveCentered,
+        adaptiveOverlaps,
+        adaptiveWorst,
+        adaptiveWorstRow,
         diag,
       };
     })()`);

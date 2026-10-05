@@ -1,0 +1,109 @@
+{
+  "config": {
+    "n": 50000,
+    "page": 500,
+    "delay": 0,
+    "view": "adaptive",
+    "mode": "thumb",
+    "scenario": "scroll",
+    "imageSize": 160
+  },
+  "firstPaint": {
+    "cells": 85,
+    "rows": 10,
+    "domNodes": 375,
+    "layoutMs": 9,
+    "contentHeight": 1067092,
+    "paging": {
+      "requests": 100,
+      "delivered": 50000,
+      "total": 50000,
+      "drained": true
+    },
+    "statuses": []
+  },
+  "drained": {
+    "ms": 12,
+    "paging": {
+      "requests": 100,
+      "delivered": 50000,
+      "total": 50000,
+      "drained": true
+    }
+  },
+  "scroll": {
+    "totalMs": 1345.8999999985099,
+    "frames": 43,
+    "p50": 28.5,
+    "p95": 49.899999998509884,
+    "max": 74.10000000149012,
+    "longFrames": 2,
+    "cellsDuringScroll": 73,
+    "domNodesDuringScroll": 326,
+    "maxOffsetDelta": 0,
+    "worstOffset": null,
+    "maxColumnDelta": 0,
+    "minGap": null,
+    "maxGap": null,
+    "maxHeightDelta": 0,
+    "maxPending": 0,
+    "worstCell": null,
+    "stableMinGap": null,
+    "stableMaxGap": null,
+    "stableMaxOffsetDelta": 0,
+    "stableDecodedPairs": 0,
+    "stableMaxHeightDelta": 0,
+    "stableWorst": null,
+    "heightStart": 1067092,
+    "heightEnd": 1067104,
+    "heightMaxDrift": 0,
+    "adaptiveRows": 9,
+    "adaptiveMaxHeightDelta": 0.05,
+    "adaptiveMaxWidthGap": 1258,
+    "adaptiveCentered": 1,
+    "adaptiveOverlaps": 0,
+    "adaptiveWorst": {
+      "cells": 8,
+      "minH": 178.4,
+      "maxH": 178.4
+    },
+    "adaptiveWorstRow": {
+      "cells": 1,
+      "gap": 1258,
+      "rowW": 1578,
+      "contentW": 320,
+      "widths": [
+        320
+      ],
+      "ratios": [
+        "1"
+      ]
+    },
+    "diag": []
+  },
+  "errors": [],
+  "afterDrain": {
+    "cells": 85,
+    "rows": 10,
+    "domNodes": 375,
+    "layoutMs": 9.699999995529652,
+    "contentHeight": 1067092,
+    "masonryTotal": {
+      "columns": 0,
+      "slots": 0,
+      "imgs": 42,
+      "imgsDecoded": 42,
+      "maxDeclared": 0,
+      "maxActual": 0,
+      "scrollHeight": 1067092,
+      "declaredTotal": 0,
+      "actualTotal": 0
+    },
+    "paging": {
+      "requests": 100,
+      "delivered": 50000,
+      "total": 50000,
+      "drained": true
+    }
+  }
+}

@@ -92,15 +92,17 @@ interface PerfApi {
     pending: number;
     worst: unknown;
   };
-  /** 盒模型总账：下发的列高 vs 实际列高（要求全部渲染且全部解码时才能判定）。 */
-  masonryTotalCheck(): unknown;
-  /** 逐槽位诊断（预测高度 vs 实际高度 + 图片解码状态）。 */
-  cellDiagnostics(): unknown[];
-  /** 瀑布流每列：面板下发的高度 vs 列内已渲染内容的下界。 */
-  columnFidelity(): { declared: number; renderedBottom: number; delta: number }[];
-  /** 面板可见区域的 DOM 节点总数。 */
-  domNodes(): number;
-}
+  /** 自适应行保真度：JS 预测行高 vs 实际、行是否两端对齐、行间是否重叠。 */
+  adaptiveRowFidelity(): {
+    rows: number;
+    maxHeightDelta: number;
+    maxRowWidthGap: number;
+    centeredRows: number;
+    overlaps: number;
+    worst: unknown;
+    worstRow: unknown;
+  };
+};
 
 declare global {
   interface Window {
@@ -112,6 +114,84 @@ const host = () => document.getElementById("perf-host");
 
 function findScroller(): HTMLElement | null {
   return host()?.querySelector<HTMLElement>(".mp-grid, .mp-masonry, .mp-list") ?? null;
+}
+
+/**
+ * **自适应行保真度**：JS 预测的行高 vs 浏览器实际排出的行高，以及行是否两端对齐。
+ *
+ * 这是路线 2（JS 断行 + 行内 CSS 分配宽度）的**正确性判据**：
+ * - `maxHeightDelta`：行内各单元的高度差。**行内等高**是"两端对齐"的核心不变量，
+ *   不等说明"行高公式"与"CSS 的 flex 分配结果"不同源（会表现为行底参差/裁切）；
+ * - `maxRowWidthGap`：每行内容宽度到行容器宽度的余量。两端对齐时应 ≈ 0
+ *   （被封顶的稀疏行除外，那行由 `justify-content: center` 居中）；
+ * - `overlaps`：相邻行是否重叠（行高算错就会重叠）。
+ */
+function adaptiveRowFidelity() {
+  const scroller = findScroller();
+  const empty = {
+    rows: 0,
+    maxHeightDelta: 0,
+    maxRowWidthGap: 0,
+    centeredRows: 0,
+    overlaps: 0,
+    worst: null as unknown,
+  };
+  if (!scroller) return empty;
+  const rowEls = Array.from(scroller.querySelectorAll<HTMLElement>(".mp-virtual-adaptive"));
+  let maxHeightDelta = 0;
+  let maxRowWidthGap = 0;
+  let centeredRows = 0;
+  let overlaps = 0;
+  let worst: unknown = null;
+  let prevBottom: number | null = null;
+  let worstRow: unknown = null;
+  for (const row of rowEls) {
+    const cells = Array.from(row.querySelectorAll<HTMLElement>(".mp-cell"));
+    if (cells.length === 0) continue;
+    const rowRect = row.getBoundingClientRect();
+    // 行内各单元等高是"两端对齐"的核心不变量。
+    const heights = cells.map((c) => c.getBoundingClientRect().height);
+    const maxH = Math.max(...heights);
+    const minH = Math.min(...heights);
+    const delta = maxH - minH;
+    if (delta > maxHeightDelta) {
+      maxHeightDelta = delta;
+      worst = { cells: cells.length, minH: Number(minH.toFixed(1)), maxH: Number(maxH.toFixed(1)) };
+    }
+    // 行的内容宽度（首格左边到末格右边）vs 行容器宽度。
+    const firstLeft = cells[0].getBoundingClientRect().left;
+    const lastRight = cells[cells.length - 1].getBoundingClientRect().right;
+    const gap = rowRect.width - (lastRight - firstLeft);
+    if (gap > maxRowWidthGap) {
+      maxRowWidthGap = gap;
+      worstRow = {
+        cells: cells.length,
+        gap: Number(gap.toFixed(1)),
+        rowW: Number(rowRect.width.toFixed(1)),
+        contentW: Number((lastRight - firstLeft).toFixed(1)),
+        widths: cells.map((c) => Number(c.getBoundingClientRect().width.toFixed(1))),
+        ratios: cells.map((c) => c.style.getPropertyValue("--mp-cell-ratio")),
+      };
+    }
+    // 明显没铺满（被封顶的稀疏行）→ 应由 CSS 居中：左右余量近似相等。
+    if (gap > 8) {
+      const leftPad = firstLeft - rowRect.left;
+      const rightPad = rowRect.right - lastRight;
+      if (Math.abs(leftPad - rightPad) <= 2) centeredRows += 1;
+    }
+    // 行间不得重叠。
+    if (prevBottom !== null && rowRect.top < prevBottom - 0.5) overlaps += 1;
+    prevBottom = rowRect.bottom;
+  }
+  return {
+    rows: rowEls.length,
+    maxHeightDelta: Number(maxHeightDelta.toFixed(2)),
+    maxRowWidthGap: Number(maxRowWidthGap.toFixed(2)),
+    centeredRows,
+    overlaps,
+    worst,
+    worstRow,
+  };
 }
 
 window.__perf = {
@@ -127,6 +207,7 @@ window.__perf = {
     };
   },
   statuses: handle.statuses,
+  adaptiveRowFidelity,
   setView(view) {
     writePanelSetting("view", view);
   },

@@ -64,12 +64,16 @@ import { MediaPreviewToolbar, type MediaPreviewMode } from "./mediaPreviewToolba
 import { AUDIO_CARD_RATIO, DEFAULT_CELL_RATIO, MASONRY_GAP, distributeColumns, masonryColumnCount, mediaViewClass } from "./mediaPreviewView";
 import {
   adaptiveCellIntrinsicHeight,
+  adaptiveRowLayout,
   chunkRows,
   listRowHeight,
   masonryCellHeight,
   masonryColumnLayout,
   masonryVisibleRange,
+  MEDIA_ADAPTIVE_GAP,
+  MEDIA_ADAPTIVE_ROW_MAX_FACTOR,
   MEDIA_LIST_ROW_GAP,
+  MEDIA_NAME_LINE_HEIGHT,
   MEDIA_TILE_ROW_GAP,
   tileRowHeight,
 } from "./mediaPreviewVirtual";
@@ -78,6 +82,7 @@ import {
   useFixedRowVirtualizer,
   useMeasuredRowVirtualizer,
   useScrollWindow,
+  useVariableRowVirtualizer,
 } from "./mediaPreviewVirtualRows";
 
 /**
@@ -362,6 +367,46 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
   );
 
   /**
+   * **自适应视图的行布局**（缺陷 0018 P1-A 第 6 轮，路线 2）。
+   *
+   * 断行与行高都由 JS 算（`adaptiveRowLayout`），但**行内宽度仍交给 CSS 分配**
+   * （`.mp-cell` 的 `flex-grow` / `flex-basis` 按宽高比）——于是"逐行两端对齐"的观感
+   * 一字不改，只是"谁和谁在同一行"由 JS 决定，虚拟化才有可能。
+   *
+   * `ratioVersion` 在依赖里：宽高比解码后断行结果与行高都会变（见 `setRatioCache`）。
+   * `gridWidth` 在依赖里：容器宽度变了要重新断行。
+   */
+  const adaptive = useMemo(() => {
+    void ratioVersion; // 解码到新宽高比即重新断行（见上面说明）
+    if (view !== "adaptive" || viewMode !== "thumb") {
+      return { rows: [] as number[][], rowHeights: [] as number[], ratios: [] as number[] };
+    }
+    const ratios = items.map((item) =>
+      item.file.media_type === "audio"
+        ? AUDIO_CARD_RATIO
+        : (ratioCache.get(item.file.id) ?? DEFAULT_CELL_RATIO),
+    );
+    const layout = adaptiveRowLayout(
+      ratios,
+      gridWidth,
+      imageSize,
+      MEDIA_ADAPTIVE_GAP,
+      MEDIA_ADAPTIVE_ROW_MAX_FACTOR,
+      // 每格除缩略图外的高度：文件名行 + 它与缩略图之间的 gap（不显示则为 0）。
+      showFileName ? 4 + MEDIA_NAME_LINE_HEIGHT : 0,
+    );
+    return { rows: layout.rows, rowHeights: layout.rowHeights, ratios };
+  }, [items, gridWidth, imageSize, showFileName, view, viewMode, ratioVersion]);
+
+  /** 自适应视图按**行高数组**虚拟化（行高逐行不同，但完全由纯函数给出，不测量）。 */
+  const adaptiveVirtual = useVariableRowVirtualizer(
+    gridRef,
+    view === "adaptive" && viewMode === "thumb" ? adaptive.rowHeights : [],
+    gridVersion,
+    MEDIA_ADAPTIVE_GAP,
+  );
+
+  /**
    * **列表视图的虚拟化**（缺陷 0018 P1-A）。
    *
    * 行高不猜死：`useMeasuredRowVirtualizer` 渲染后用 `measureRef` 量回真实高度，
@@ -612,10 +657,27 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
               ))}
             </div>
           ) : (
-            /* 自适应：行高随图片宽高比变化，**断行由 CSS flex-wrap 决定**，
-               JS 无法在不测量每张图的情况下复现——见 `mediaPreviewVirtual.ts` 的说明。
-               因此这里仍渲染全部条目，靠 `.mp-cell` 的 `content-visibility` 跳过离屏渲染。 */
-            items.map(({ file, url }) => renderCell(file, url))
+            /* 自适应：**按行虚拟化**（缺陷 0018 P1-A 第 6 轮，路线 2）。
+               断行与行高由 JS 算（`adaptiveRowLayout`），行内宽度仍交给 CSS
+               （`.mp-cell` 的 `flex-grow` / `flex-basis` 按宽高比）——于是"逐行两端对齐"
+               的观感一字不改，只是"谁和谁在同一行"由 JS 决定，虚拟化才有可能。
+
+               行容器是 **flex 行**：行内各格等高（行高由 JS 下发），每行左右都顶到面板
+               两边（被封顶的稀疏行由 `justify-content: center` 居中）。 */
+            <div className="mp-virtual" style={{ height: adaptiveVirtual.totalSize }}>
+              {adaptiveVirtual.rows.map((row) => (
+                <div
+                  key={row.index}
+                  className="mp-virtual-row mp-virtual-adaptive"
+                  style={{ transform: `translateY(${row.start}px)`, height: row.size }}
+                >
+                  {(adaptive.rows[row.index] ?? []).map((itemIndex) => {
+                    const item = items[itemIndex];
+                    return item ? renderCell(item.file, item.url) : null;
+                  })}
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
