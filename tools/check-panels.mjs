@@ -952,6 +952,78 @@ check(
 );
 
 check(
+  "瀑布流单元高度的**盒模型与样式表一致**（实测反推：28 + (列宽−12)/宽高比）",
+  // 原先按"内边距 4+4、边框 1+1、缩略图 (列宽−10)/比例、文件名 16px"估算，
+  // 实测**全错**：按列虚拟化（绝对定位）之后，高度猜错不再表现为错位、而是
+  // **相邻单元重叠**——实测 minGap = −18px（应为 8px）。
+  // 真实盒模型（列宽 160、border-box）：
+  //   thumbW = 160 − 8(内边距) − 2(单元边框) = 150
+  //   imgW   = 150 − 2(缩略图边框) = 148
+  //   单元高 = 10 + (148/比例 + 2) + 4 + 12(文件名实际行高) = 28 + 148/比例
+  // 该式对 5 个实测样本的误差 ≤ 0.05px。
+  (() => {
+    const at = (col, ratio) => virtual.masonryCellHeight(col, ratio, true);
+    // 列宽 160、比例 1 → 28 + 148 = 176（实测 176.0）。
+    if (at(160, 1) !== 176) return false;
+    // 比例 1.78 → 28 + 83.1 = 111（实测 111.1）。
+    if (Math.abs(at(160, 1.78) - 111) > 1) return false;
+    // 比例 0.562 → 28 + 263.3 = 291（实测 291.4）。
+    if (Math.abs(at(160, 0.562) - 291) > 1) return false;
+    // 无文件名时只少 16px（4 gap + 12 行高）。
+    if (virtual.masonryCellHeight(160, 1, false) !== 160) return false;
+    return true;
+  })(),
+  `方=${virtual.masonryCellHeight(160, 1, true)} 宽=${virtual.masonryCellHeight(160, 1.78, true)} 竖=${virtual.masonryCellHeight(160, 0.562, true)} 无名=${virtual.masonryCellHeight(160, 1, false)}`,
+);
+
+check(
+  "瀑布流**按列虚拟化**：只渲染窗口内的条目，列高由面板下发",
+  // 与平铺/列表同一条不变量：DOM 单元数与条目总数脱钩。
+  /masonryColumnLayout\(columns,/.test(mediaPanelSrc) &&
+    /masonryVisibleRange\(/.test(mediaPanelSrc) &&
+    /useScrollWindow\(gridRef, gridVersion\)/.test(mediaPanelSrc) &&
+    // 列内必须**按窗口切片**渲染，不得 `column.map` 全量铺开。
+    // （只断言"没有 column.map(({file,url})…"会被 `column.map((item, i)…` 绕过——
+    //   实测：把 slice 退回全量 map，那条断言照样全绿。这里直接钉住切片本身。）
+    /column\.slice\(start, range\.end\)\.map\(/.test(mediaPanelSrc) &&
+    !/column\.map\(/.test(mediaPanelSrc) &&
+    // 列高必须由面板给出：虚拟化后列内只有几十个单元，不给高度容器总高会塌掉。
+    /style=\{\{ height: masonry\.columnHeights\[index\] \?\? 0 \}\}/.test(mediaPanelSrc) &&
+    // 槽位用绝对定位 + 面板算出的偏移（不参与列内布局，避免累积误差）。
+    /className="mp-masonry-slot"/.test(mediaPanelSrc) &&
+    /transform: `translateY\(\$\{offsets\[at\] \?\? 0\}px\)`/.test(mediaPanelSrc),
+);
+
+check(
+  "瀑布流的**宽高比异步到达**必须触发重算：ratioCache 有版本号 + 面板订阅",
+  // 宽高比是 `<img>` 解码后才知道的，而行高由它推出。不重算的话列偏移停在
+  // DEFAULT_CELL_RATIO 的估计上，与单元实际高度错位（这是本视图最容易踩的坑）。
+  /export function getRatioCacheVersion\(\)/.test(mediaCellSrc) &&
+    /export function subscribeRatioChange\(/.test(mediaCellSrc) &&
+    /export function setRatioCache\(/.test(mediaCellSrc) &&
+    // 写入口只有一处：`ratioCache.set` 不得再被直接调用（否则绕过版本号）。
+    (mediaCellSrc.match(/ratioCache\.set\(/g) ?? []).length === 1 &&
+    // 通知必须**合并**：一次滚动会解码几十张，5 万张的库会解码上万张，
+    // 每次写入都通知就是上万次 O(条目数) 的布局重算。
+    /queueMicrotask\(/.test(mediaCellSrc) &&
+    /if \(ratioNotifyScheduled\) return;/.test(mediaCellSrc) &&
+    /subscribeRatioChange\(\(\) => setRatioVersion\(getRatioCacheVersion\(\)\)\)/.test(
+      mediaPanelSrc,
+    ) &&
+    // 版本号进布局依赖数组。
+    /\[columns, imageSize, showFileName, view, viewMode, ratioVersion\]/.test(mediaPanelSrc),
+);
+
+check(
+  "瀑布流列内间距**只在面板算的偏移里**加一次（列内不得再有 flex gap）",
+  // 面板的 `masonryColumnLayout` 已经把 gap 加进偏移；列内再叠一层 flex gap
+  // 会让偏移与实际位置差一个 gap（错位）。
+  /\.mp-masonry-slot\s*\{[^}]*position:\s*absolute/.test(stylesSource) &&
+    /\.mp-masonry-slot\s*\{[^}]*display:\s*flex/.test(stylesSource) &&
+    !/\.mp-masonry-col\s*\{[^}]*gap:/.test(stylesSource),
+);
+
+check(
   "瀑布流单元高度按**宽高比**算（列宽 ÷ 宽高比），且退化输入有兜底",
   (() => {
     const square = virtual.masonryCellHeight(160, 1, false);
@@ -1347,11 +1419,13 @@ check(
     // （重挂载不再重排一遍）；音频没有宽高比，用固定卡片比例，免得在自适应里成一张方块。
     /"--mp-cell-ratio": String\(ratio\)/.test(mediaCellSrc) &&
     /const next = imageRatio\(naturalWidth, naturalHeight, ratio\);/.test(mediaCellSrc) &&
-    /ratioCache\.set\(file\.id, next\);/.test(mediaCellSrc) &&
+    // 写入口是 `setRatioCache`（**不是**直接 `ratioCache.set`）：它同时推进版本号，
+    // 让面板重算瀑布流/自适应的行高——见上面那条"宽高比异步到达"的断言。
+    /setRatioCache\(file\.id, next\);/.test(mediaCellSrc) &&
     /export const ratioCache = new Map<string, number>\(\);/.test(mediaCellSrc) &&
     /file\.media_type === "audio"\s*\?\s*AUDIO_CARD_RATIO/.test(mediaCellSrc) &&
     // 面板必须真的用它渲染条目（不是留着两条渲染路径）。
-    /import \{ ThumbCell, ratioCache \} from "\.\/mediaPreviewCell";/.test(mediaPanelSrc) &&
+    /import \{ ThumbCell, getRatioCacheVersion, ratioCache, subscribeRatioChange \} from "\.\/mediaPreviewCell";/.test(mediaPanelSrc) &&
     /<ThumbCell/.test(mediaPanelSrc),
 );
 check(

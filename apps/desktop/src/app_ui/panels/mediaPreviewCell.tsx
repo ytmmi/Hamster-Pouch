@@ -42,6 +42,62 @@ import { masonryCellHeight } from "./mediaPreviewVirtual";
  */
 export const ratioCache = new Map<string, number>();
 
+/**
+ * `ratioCache` 的**版本号**：每写入一个新量到的宽高比就自增。
+ *
+ * 为什么需要它：**瀑布流/自适应的行高由宽高比推出**，而宽高比是**异步**到来的
+ * （`<img>` 解码后）。按列/按行虚拟化必须先知道"每项多高"才能算窗口，因此面板要把
+ * 这个版本号放进 `useMemo` 依赖——量到新宽高比就重算布局。
+ *
+ * 没有它的话：首次渲染全部按 `DEFAULT_CELL_RATIO` 估高，之后解码完虽然单元自己
+ * `setRatio` 重渲了，但**列偏移/行偏移**仍停在旧值 → 单元与占位层错位。
+ *
+ * 用**计数器**而不是"订阅回调"：订阅要管注册/退订与内存泄漏，而面板本来就要重渲
+ * （它是唯一消费方），一个数字足够，且能被门禁按行为断言。
+ */
+let ratioCacheVersion = 0;
+
+/** 当前版本号（面板放进依赖数组用）。 */
+export function getRatioCacheVersion(): number {
+  return ratioCacheVersion;
+}
+
+/**
+ * 宽高比变化的订阅者（面板注册一个，用来重算行/列偏移）。
+ *
+ * **为什么必须合并通知**：一次滚动会同时解码几十张图，5 万张的库在整个浏览过程中
+ * 会解码上万张。若每次写入都通知，面板就要重算上万次布局（每次都是 O(条目数)），
+ * 把虚拟化省下的成本又花回去。因此**同一帧内的多次写入只通知一次**。
+ */
+const ratioListeners = new Set<() => void>();
+let ratioNotifyScheduled = false;
+
+function scheduleRatioNotify(): void {
+  if (ratioNotifyScheduled) return;
+  ratioNotifyScheduled = true;
+  // 用微任务而不是 rAF：布局重算本身不依赖绘制时机，越早合并完越好；
+  // 且 rAF 在后台标签会暂停，导致面板切回前台时布局仍是旧的。
+  queueMicrotask(() => {
+    ratioNotifyScheduled = false;
+    for (const listener of [...ratioListeners]) listener();
+  });
+}
+
+/** 订阅宽高比变化；返回退订函数。 */
+export function subscribeRatioChange(listener: () => void): () => void {
+  ratioListeners.add(listener);
+  return () => ratioListeners.delete(listener);
+}
+
+/** 写入一个量到的宽高比并推进版本号（**唯一**的写入口）。 */
+export function setRatioCache(fileId: string, ratio: number): void {
+  // 同值不写：解码同一张图多次（虚拟化来回滚）不该推进版本号。
+  if (ratioCache.get(fileId) === ratio) return;
+  ratioCache.set(fileId, ratio);
+  ratioCacheVersion += 1;
+  scheduleRatioNotify();
+}
+
 /** 音频波形画布。 */
 function AudioWaveform({ url, t }: { url: string; t: Translate }): JSX.Element {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -247,11 +303,12 @@ export const ThumbCell = memo(function ThumbCell({
               alt={file.relative_path}
               loading="lazy"
               onLoad={(e) => {
-                // 解码后量一次真实宽高比：自适应视图据此把这一行重新配平。
+                // 解码后量一次真实宽高比：自适应/瀑布流据此重新配平（并推进版本号，
+                // 让面板重算行/列偏移——见 `setRatioCache` 的说明）。
                 const { naturalWidth, naturalHeight } = e.currentTarget;
                 const next = imageRatio(naturalWidth, naturalHeight, ratio);
                 if (next !== ratio) {
-                  ratioCache.set(file.id, next);
+                  setRatioCache(file.id, next);
                   setRatio(next);
                 }
               }}

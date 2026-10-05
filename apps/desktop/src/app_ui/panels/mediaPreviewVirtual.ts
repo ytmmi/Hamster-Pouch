@@ -77,6 +77,9 @@ export const MEDIA_TILE_ROW_GAP = 8;
 /** 文件名列表的**行间距**（与 `.mp-list` 的 `gap: 2px` 一致）。 */
 export const MEDIA_LIST_ROW_GAP = 2;
 
+/** 瀑布流的**列间距 / 单元间距**（与 `.mp-masonry` / `.mp-masonry-col` 的 `gap: 8px` 一致）。 */
+export const MEDIA_MASONRY_GAP = 8;
+
 /**
  * 瀑布流**单个单元**的高度（px），**不含单元间距**。
  *
@@ -86,20 +89,135 @@ export const MEDIA_LIST_ROW_GAP = 2;
  * 因此单元高度 = 上下内边距/边框 + 缩略图高 +（可选）文件名行。
  * `ratio` 来自宽高比缓存（`mediaPreviewCell.tsx` 的 `ratioCache`）——
  * 索引里没有图片尺寸，只有 `<img>` 解码后才量得到，量之前用 `DEFAULT_CELL_RATIO` 占位。
+ *
+ * ## 盒模型是**实测反推**的，不是按 CSS 猜的
+ *
+ * 这个函数原先按"内边距 4+4、边框 1+1、缩略图高 = (列宽−10)/宽高比、文件名 16px"
+ * 估算。按列虚拟化上线后，**绝对定位**让偏移精确落在预测值上，于是"高度猜错"不再
+ * 表现为错位、而是表现为**相邻单元重叠/留白**——实测抓到了：间距应为 8px，
+ * 实际 minGap = **−18px**（重叠）、maxGap = **148px**。
+ *
+ * 用真实渲染反推（列宽 160、`box-sizing: border-box`）：
+ *
+ * ```text
+ * thumbW = 列宽 − 8(内边距) − 2(单元边框) = 150
+ * imgW   = thumbW − 2(缩略图边框)         = 148
+ * imgH   = imgW / 宽高比
+ * thumbH = imgH + 2(缩略图边框)
+ * 单元高 = 8(内边距) + 2(单元边框) + thumbH + 4(gap) + 文件名行高
+ * ```
+ *
+ * 而**文件名实际行高是 12px**（`font-size: 11px` 的行盒），不是猜的 16px。
+ * 合并后：`单元高 = 28 + (列宽 − 12) / 宽高比`（有文件名时）。
+ * 该式对实测样本的误差 ≤ 0.05px（见 `mediaPreviewVirtual` 的门禁断言与
+ * `apps/desktop/perf` 的 `minGap` / `maxGap` 探针）。
+ *
+ * **`nameLineHeight` 缺省 12**：这是 `.mp-name`（`font-size: 11px`、`white-space: nowrap`）
+ * 在默认字体度量下的行盒高度，实测值；传错会让每个单元累积误差。
  */
 export function masonryCellHeight(
   columnWidth: number,
   ratio: number,
   showName: boolean,
-  nameLineHeight = 16,
+  nameLineHeight = 12,
 ): number {
   const column = Math.max(1, columnWidth);
-  const inner = Math.max(1, column - 10);
+  // 列宽减去：单元左右内边距 4+4、单元左右边框 1+1、缩略图左右边框 1+1 = 12。
+  const inner = Math.max(1, column - 12);
   const safeRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
-  const thumb = inner / safeRatio;
+  // 缩略图高 = 图片高 + 缩略图上下边框 2；再加单元上下内边距 8 与边框 2。
+  const thumb = inner / safeRatio + 2;
   const vertical = 4 + 4 + 2;
   const nameBlock = showName ? 4 + nameLineHeight : 0;
   return Math.round(vertical + thumb + nameBlock);
+}
+
+/**
+ * 瀑布流：**按列累计**每项的偏移与每列的内容总高。
+ *
+ * `distributeColumns` 已把条目分到各列（按序号 `i % columns`，与高度无关——这样
+ * 阅读顺序与排序结果一致、同一次排序的布局稳定）。这里给每列累计出"每一项距列顶的
+ * 偏移"以及每列的**内容总高**（末项不留间距，否则容器底部会多出一条空档）。
+ *
+ * 瀑布流的"列"是**明确的**（固定列宽），不像自适应要复现 CSS 断行，因此按列虚拟化
+ * 只需要这个纯函数 + 一个窗口判定，不必测量。
+ *
+ * **高度会随解码变化**：`ratioCache` 在 `<img>` 解码后写入真实宽高比，未解码时是
+ * `DEFAULT_CELL_RATIO`。调用方（面板）把 `ratioCache` 的**版本号**放进依赖，
+ * 量到新宽高比就重算一次——这与既有行为一致（`mediaPreviewCell` 量到即 `setRatio`）。
+ */
+export function masonryColumnLayout<T>(
+  columns: readonly (readonly T[])[],
+  heightOf: (item: T) => number,
+  gap = MEDIA_MASONRY_GAP,
+): { offsets: number[][]; heights: number[][]; columnHeights: number[] } {
+  const offsets: number[][] = [];
+  const heights: number[][] = [];
+  const columnHeights: number[] = [];
+  for (const column of columns) {
+    const columnOffsets: number[] = [];
+    const columnHeightsList: number[] = [];
+    let cursor = 0;
+    for (const item of column) {
+      const height = Math.max(1, Math.round(heightOf(item)));
+      columnOffsets.push(cursor);
+      columnHeightsList.push(height);
+      cursor += height + gap;
+    }
+    offsets.push(columnOffsets);
+    heights.push(columnHeightsList);
+    // 最后一项后面不留间距。
+    columnHeights.push(Math.max(0, cursor - gap));
+  }
+  return { offsets, heights, columnHeights };
+}
+
+/**
+ * 瀑布流**某一列**在当前滚动窗口内要渲染的条目区间（`[start, end)`，end 开区间）。
+ *
+ * 按列虚拟化的核心：列内是**线性偏移**（`offsets` 单调递增），因此用二分找出
+ * 第一条"底边越过窗口顶"的项，再向后走到"顶边越过窗口底"为止。
+ *
+ * @param offsets 该列每项距列顶的偏移（单调不减）
+ * @param heights 该列每项的高度（与 `offsets` 等长）
+ * @param scrollTop 滚动容器的当前滚动位置
+ * @param viewportHeight 滚动容器的可视高度
+ * @param overscan 窗口上下各多渲染的像素（滚动时不会出现"滚到才渲染"的白边）
+ *
+ * 返回的区间**一定在 `[0, offsets.length]` 内**：越界的输入退化成空区间或整列，
+ * 不抛错（虚拟化算错时宁可多渲染，也不要让面板崩掉）。
+ */
+export function masonryVisibleRange(
+  offsets: readonly number[],
+  heights: readonly number[],
+  scrollTop: number,
+  viewportHeight: number,
+  overscan = 0,
+): { start: number; end: number } {
+  const count = Math.min(offsets.length, heights.length);
+  if (count === 0) return { start: 0, end: 0 };
+
+  const top = (Number.isFinite(scrollTop) ? scrollTop : 0) - Math.max(0, overscan);
+  const bottom =
+    (Number.isFinite(scrollTop) ? scrollTop : 0) +
+    Math.max(0, Number.isFinite(viewportHeight) ? viewportHeight : 0) +
+    Math.max(0, overscan);
+
+  // 二分：第一条「底边 > top」的项（前面那些整条都在窗口上方）。
+  let lo = 0;
+  let hi = count;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (offsets[mid] + heights[mid] > top) hi = mid;
+    else lo = mid + 1;
+  }
+  const start = lo;
+
+  // 从 start 起第一条「顶边 >= bottom」的项（它和它之后的都在窗口下方）。
+  let end = start;
+  while (end < count && offsets[end] < bottom) end += 1;
+
+  return { start, end };
 }
 
 /**

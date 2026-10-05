@@ -1459,13 +1459,40 @@ button.danger {
 
 /* 固定列宽 = 图片尺寸。
    这里**不再**用 `flex: 1 1 0` 等分：那会让列宽随面板宽度漂移，与平铺的固定单元格对不上
-   ——正是用户反馈的"两者相差过大"。 */
+   ——正是用户反馈的"两者相差过大"。
+   高度由面板按"该列累计高度"直接下发（按列虚拟化：列内只渲染窗口内的条目，
+   列高必须由 JS 给出，否则容器总高会塌成"只渲染的那几条"）。 */
 .mp-masonry-col {
   flex: 0 0 var(--mp-image-size, 160px);
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  /* 列内**不再**用 `gap`：单元位置由面板算出的偏移决定（`translateY`），
+     再叠一层 flex 间距会让偏移与实际位置差一个 gap。间距已含在 `masonryCellHeight` 里。 */
+  position: relative;
+}
+
+/* 按列虚拟化后的单元槽位：绝对定位 + `translateY(面板算出的偏移)`。
+   绝对定位意味着它**不参与**列内的布局计算，因此单元的实际高度不会反过来
+   改变我们算出的偏移（避免"越滚越偏"）。
+
+   **必须是 flex 列容器**：`.mp-cell` 是 `<button>`，默认按内容收缩宽度——原实现靠
+   `.mp-masonry-col` 的 `display:flex`（`align-items: stretch`）把单元撑满列宽，
+   换成普通块级槽位后单元会缩到图片的自然宽度（实测 160px 的列里缩成 102px），
+   于是"列宽 ÷ 宽高比"的预测高度与实际渲染**不再一致**（实测相邻单元重叠 18px）。
+   这里显式恢复"撑满列宽"这条不变量。 */
+.mp-masonry-slot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 槽位内的单元撑满列宽（与上面同一条不变量的显式表达）。 */
+.mp-masonry-slot .mp-cell {
+  width: 100%;
 }
 
 /* 缩略图按**自身宽高比**铺满列宽：行高随图变化，这正是"瀑布流"与整齐网格的区别。 */

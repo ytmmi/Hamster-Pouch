@@ -1,0 +1,197 @@
+{
+  "config": {
+    "n": 2000,
+    "page": 2000,
+    "delay": 0,
+    "view": "masonry",
+    "mode": "thumb",
+    "scenario": "scroll",
+    "imageSize": 160
+  },
+  "firstPaint": {
+    "cells": 70,
+    "rows": 0,
+    "domNodes": 383,
+    "layoutMs": 0.7999999970197678,
+    "contentHeight": 41037,
+    "paging": {
+      "requests": 1,
+      "delivered": 2000,
+      "total": 2000,
+      "drained": true
+    },
+    "statuses": []
+  },
+  "drained": {
+    "ms": 7,
+    "paging": {
+      "requests": 1,
+      "delivered": 2000,
+      "total": 2000,
+      "drained": true
+    }
+  },
+  "scroll": {
+    "totalMs": 766.1000000014901,
+    "frames": 43,
+    "p50": 17.600000001490116,
+    "p95": 31.30000000447035,
+    "max": 41.79999999701977,
+    "longFrames": 0,
+    "cellsDuringScroll": 63,
+    "domNodesDuringScroll": 348,
+    "maxOffsetDelta": 0,
+    "worstOffset": null,
+    "maxColumnDelta": 0,
+    "minGap": 7.56,
+    "maxGap": 8.34,
+    "maxHeightDelta": 0.44,
+    "maxPending": 104,
+    "worstCell": {
+      "i": 3,
+      "slotH": 291,
+      "cellH": 291.4,
+      "natural": "100x178"
+    },
+    "stableMinGap": null,
+    "stableMaxGap": null,
+    "stableMaxOffsetDelta": 0,
+    "stableDecodedPairs": 0,
+    "stableMaxHeightDelta": 0,
+    "stableWorst": null,
+    "heightStart": 41037,
+    "heightEnd": 41153,
+    "heightMaxDrift": 0,
+    "diag": [
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": null
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      }
+    ]
+  },
+  "errors": [],
+  "afterDrain": {
+    "cells": 70,
+    "rows": 0,
+    "domNodes": 383,
+    "layoutMs": 0.4000000059604645,
+    "contentHeight": 41037,
+    "masonryTotal": {
+      "columns": 9,
+      "slots": 70,
+      "imgs": 54,
+      "imgsDecoded": 54,
+      "maxDeclared": 41037,
+      "maxActual": 41037,
+      "scrollHeight": 41037,
+      "declaredTotal": 368435,
+      "actualTotal": 368435
+    },
+    "paging": {
+      "requests": 1,
+      "delivered": 2000,
+      "total": 2000,
+      "drained": true
+    }
+  }
+}

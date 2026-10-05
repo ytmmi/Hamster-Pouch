@@ -1,0 +1,197 @@
+{
+  "config": {
+    "n": 50000,
+    "page": 500,
+    "delay": 0,
+    "view": "masonry",
+    "mode": "thumb",
+    "scenario": "scroll",
+    "imageSize": 160
+  },
+  "firstPaint": {
+    "cells": 70,
+    "rows": 0,
+    "domNodes": 383,
+    "layoutMs": 0.3999999985098839,
+    "contentHeight": 1022448,
+    "paging": {
+      "requests": 100,
+      "delivered": 50000,
+      "total": 50000,
+      "drained": true
+    },
+    "statuses": []
+  },
+  "drained": {
+    "ms": 7,
+    "paging": {
+      "requests": 100,
+      "delivered": 50000,
+      "total": 50000,
+      "drained": true
+    }
+  },
+  "scroll": {
+    "totalMs": 690.8999999985099,
+    "frames": 43,
+    "p50": 17.200000002980232,
+    "p95": 22.600000001490116,
+    "max": 23.600000001490116,
+    "longFrames": 0,
+    "cellsDuringScroll": 57,
+    "domNodesDuringScroll": 318,
+    "maxOffsetDelta": 0,
+    "worstOffset": null,
+    "maxColumnDelta": 0,
+    "minGap": 7.56,
+    "maxGap": 8.34,
+    "maxHeightDelta": 0.44,
+    "maxPending": 104,
+    "worstCell": {
+      "i": 3,
+      "slotH": 291,
+      "cellH": 291.4,
+      "natural": "100x178"
+    },
+    "stableMinGap": null,
+    "stableMaxGap": null,
+    "stableMaxOffsetDelta": 0,
+    "stableDecodedPairs": 0,
+    "stableMaxHeightDelta": 0,
+    "stableWorst": null,
+    "heightStart": 1022448,
+    "heightEnd": 1022609,
+    "heightMaxDrift": 0,
+    "diag": [
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": null
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      },
+      {
+        "ratio": null,
+        "colW": 160,
+        "slotW": 160,
+        "slotH": 176,
+        "cellH": 176,
+        "thumbW": 150,
+        "thumbH": 14,
+        "imgW": null,
+        "imgH": null,
+        "nameH": 12,
+        "gap": 8
+      }
+    ]
+  },
+  "errors": [],
+  "afterDrain": {
+    "cells": 70,
+    "rows": 0,
+    "domNodes": 383,
+    "layoutMs": 1.1000000014901161,
+    "contentHeight": 1022448,
+    "masonryTotal": {
+      "columns": 9,
+      "slots": 70,
+      "imgs": 54,
+      "imgsDecoded": 54,
+      "maxDeclared": 1022450,
+      "maxActual": 1022448,
+      "scrollHeight": 1022448,
+      "declaredTotal": 9200430,
+      "actualTotal": 9200435
+    },
+    "paging": {
+      "requests": 100,
+      "delivered": 50000,
+      "total": 50000,
+      "drained": true
+    }
+  }
+}

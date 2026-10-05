@@ -156,3 +156,61 @@ export function useContainerRef(): {
   });
   return { ref, elementRef, version };
 }
+
+/** 滚动容器的当前窗口（`useScrollWindow` 的返回值）。 */
+export interface ScrollWindow {
+  /** 当前滚动位置（px）。 */
+  scrollTop: number;
+  /** 可视高度（px）。 */
+  viewportHeight: number;
+}
+
+/**
+ * 跟踪滚动容器的**滚动位置与可视高度**——瀑布流"按列虚拟化"的输入。
+ *
+ * 为什么不用 `useVirtualizer`：它虚拟化的是**一维**列表（一个偏移函数），而瀑布流是
+ * **N 列各自独立**的线性偏移（列宽固定、列内按序堆叠），一次滚动事件要同时更新 N 个
+ * 区间。这里的量本身很小（几个数），直接用滚动 + 尺寸观察更简单、也更好断言。
+ *
+ * **rAF 节流**：滚动事件可能每帧触发多次；合并到一帧只重渲一次，避免把"省下来的 DOM
+ * 成本"又花在 React 重渲上。值真的没变时**不 setState**（否则滚动时每帧都重渲）。
+ */
+export function useScrollWindow(
+  scrollRef: React.RefObject<HTMLElement | null>,
+  /** 容器挂载/切换的信号（`useContainerRef().version`）。 */
+  containerVersion: number,
+): ScrollWindow {
+  const [window, setWindow] = useState<ScrollWindow>({ scrollTop: 0, viewportHeight: 0 });
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    let frame = 0;
+    const read = () => {
+      frame = 0;
+      const next = { scrollTop: el.scrollTop, viewportHeight: el.clientHeight };
+      setWindow((prev) =>
+        prev.scrollTop === next.scrollTop && prev.viewportHeight === next.viewportHeight
+          ? prev // 同一个对象 → React 跳过重渲
+          : next,
+      );
+    };
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(read);
+    };
+
+    read(); // 首帧立刻量一次（容器刚挂载时 scrollTop 可能非 0——滚动位置已恢复）
+    el.addEventListener("scroll", schedule, { passive: true });
+    const observer = new ResizeObserver(schedule);
+    observer.observe(el);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      el.removeEventListener("scroll", schedule);
+      observer.disconnect();
+    };
+  }, [scrollRef, containerVersion]);
+
+  return window;
+}

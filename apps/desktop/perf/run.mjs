@@ -309,6 +309,7 @@ async function main() {
       domNodes: p.domNodes(),
       layoutMs: p.layoutCost(),
       contentHeight: p.contentHeight(),
+      masonryTotal: p.masonryTotalCheck(),
       paging: p.paging,
     };
   })()`);
@@ -331,14 +332,66 @@ async function main() {
       requestAnimationFrame(tick);
       const t0 = performance.now();
       // 从顶滚到底：20 步，每步等两帧，模拟真实滚动。
+      let maxOffsetDelta = 0;
+      let worstOffset = null;
+      let maxColumnDelta = 0;
+      // 内容高度漂移：宽高比是**边滚边解码**的，估算高度随之修正 → 滚动条长度会变。
+      // 这是"估计占位"方案的固有代价，必须量出来（而不是声称不存在）。
+      const heightStart = p.contentHeight();
+      let heightMaxDrift = 0;
+      let diag = null;
+      let minGap = Infinity;
+      let maxGap = -Infinity;
+      let maxHeightDelta = 0;
+      let maxPending = 0;
+      let worstCell = null;
       for (let i = 0; i <= 20; i++) {
         p.scrollToFraction(i / 20);
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        // **滚到每一处都核对偏移**：虚拟化的错位只在滚动中出现。
+        const f = p.offsetFidelity();
+        if (f.maxDelta > maxOffsetDelta) {
+          maxOffsetDelta = f.maxDelta;
+          worstOffset = f.worst;
+        }
+        for (const c of p.columnFidelity()) {
+          if (c.delta > maxColumnDelta) maxColumnDelta = c.delta;
+        }
+        // 高度猜错不会体现在偏移上（绝对定位），只会改变**相邻单元的视觉间距**
+        // ——预期恰好是 MEDIA_MASONRY_GAP（8px）。必须单独量。
+        const h = p.cellHeightFidelity();
+        if (h.minGap !== null && h.minGap < minGap) minGap = h.minGap;
+        if (h.maxGap !== null && h.maxGap > maxGap) maxGap = h.maxGap;
+        if (h.maxHeightDelta > maxHeightDelta) maxHeightDelta = h.maxHeightDelta;
+        maxPending = Math.max(maxPending, h.pending);
+        if (h.worst) worstCell = h.worst;
+        heightMaxDrift = Math.max(heightMaxDrift, Math.abs(p.contentHeight() - heightStart));
+        if (i === 10) diag = p.cellDiagnostics();
       }
       const totalMs = performance.now() - t0;
       running = false;
       const sorted = frames.slice().sort((a, b) => a - b);
       const pct = (q) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] : 0;
+
+      // **稳定态**复测：宽高比是边滚边解码的，解码写入与面板重算偏移之间有一个极短的
+      // 窗口（单元已经变高、偏移还是旧的）。第一轮的极值会把这种**瞬态**也算进去。
+      // 等解码静默后再扫一遍，才回答"稳态下到底有没有错位"。
+      await new Promise((r) => setTimeout(r, 2500));
+      let stableMinGap = Infinity, stableMaxGap = -Infinity, stableMaxOffset = 0;
+      let stableWorst = null, stableDecodedPairs = 0, stableMaxHeightDelta = 0;
+      for (let i = 0; i <= 20; i++) {
+        p.scrollToFraction(i / 20);
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const f = p.offsetFidelity();
+        if (f.maxDelta > stableMaxOffset) stableMaxOffset = f.maxDelta;
+        const h = p.cellHeightFidelity();
+        if (h.minGap !== null && h.minGap < stableMinGap) stableMinGap = h.minGap;
+        if (h.maxGap !== null && h.maxGap > stableMaxGap) stableMaxGap = h.maxGap;
+        stableDecodedPairs = h.decodedPairs;
+        stableMaxHeightDelta = Math.max(stableMaxHeightDelta, h.maxHeightDelta);
+        if (h.worst) stableWorst = h.worst;
+      }
+
       return {
         totalMs,
         frames: frames.length,
@@ -348,6 +401,27 @@ async function main() {
         longFrames: frames.filter((f) => f > 50).length,
         cellsDuringScroll: p.cellCount(),
         domNodesDuringScroll: p.domNodes(),
+        // 虚拟化正确性：预测偏移与实际布局的最大偏差（px），以及列高的最大偏差。
+        maxOffsetDelta,
+        worstOffset,
+        maxColumnDelta,
+        minGap: Number.isFinite(minGap) ? minGap : null,
+        maxGap: Number.isFinite(maxGap) ? maxGap : null,
+        maxHeightDelta,
+        maxPending,
+        worstCell,
+        // 稳定态（等解码静默后复扫）：这才是"布局是否正确"的判据；
+        // 上面那对极值含"边滚边解码"的瞬态。
+        stableMinGap: Number.isFinite(stableMinGap) ? stableMinGap : null,
+        stableMaxGap: Number.isFinite(stableMaxGap) ? stableMaxGap : null,
+        stableMaxOffsetDelta: stableMaxOffset,
+        stableDecodedPairs,
+        stableMaxHeightDelta,
+        stableWorst,
+        heightStart,
+        heightEnd: p.contentHeight(),
+        heightMaxDrift,
+        diag,
       };
     })()`);
   }

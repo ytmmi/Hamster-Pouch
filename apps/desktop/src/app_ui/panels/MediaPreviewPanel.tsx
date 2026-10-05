@@ -53,7 +53,7 @@ import { useHostSettingValue } from "../shared/settingValue";
 import { useApp } from "../core/AppContext";
 import type { PanelRenderCtx } from "../core/panelRegistry";
 import type { FileItem } from "../shared/types";
-import { ThumbCell, ratioCache } from "./mediaPreviewCell";
+import { ThumbCell, getRatioCacheVersion, ratioCache, subscribeRatioChange } from "./mediaPreviewCell";
 import { useMediaFileActions } from "./mediaPreviewActions";
 import { useMediaPreviewData, type MediaTypeFilter } from "./mediaPreviewData";
 import { MediaContextMenu, useMediaContextMenu } from "./mediaPreviewMenu";
@@ -61,12 +61,14 @@ import { useMediaSelection } from "./mediaPreviewSelection";
 import { createScrollSlot, onScrollEvent, planScrollApply } from "./mediaPreviewScroll";
 import { useMediaViewState } from "./mediaPreviewSession";
 import { MediaPreviewToolbar, type MediaPreviewMode } from "./mediaPreviewToolbar";
-import { DEFAULT_CELL_RATIO, MASONRY_GAP, distributeColumns, masonryColumnCount, mediaViewClass } from "./mediaPreviewView";
+import { AUDIO_CARD_RATIO, DEFAULT_CELL_RATIO, MASONRY_GAP, distributeColumns, masonryColumnCount, mediaViewClass } from "./mediaPreviewView";
 import {
   adaptiveCellIntrinsicHeight,
   chunkRows,
   listRowHeight,
   masonryCellHeight,
+  masonryColumnLayout,
+  masonryVisibleRange,
   MEDIA_LIST_ROW_GAP,
   MEDIA_TILE_ROW_GAP,
   tileRowHeight,
@@ -75,6 +77,7 @@ import {
   useContainerRef,
   useFixedRowVirtualizer,
   useMeasuredRowVirtualizer,
+  useScrollWindow,
 } from "./mediaPreviewVirtualRows";
 
 /**
@@ -242,6 +245,23 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
    */
   const [masonryColumns, setMasonryColumns] = useState(1);
   const [gridWidth, setGridWidth] = useState(0);
+  /**
+   * `ratioCache` 的版本号——**宽高比是异步量到的**，而瀑布流/自适应的行高由它推出。
+   *
+   * 面板把它读进 state 再放进 `useMemo` 依赖：量到新宽高比就重算行/列偏移。
+   * 读法见下面的 `useEffect`（只在尺寸变化或重新挂载时同步一次）。
+   */
+  const [ratioVersion, setRatioVersion] = useState(getRatioCacheVersion);
+
+  /**
+   * 订阅宽高比变化：**量到新比例就重算行/列偏移**。
+   *
+   * 通知已在写入侧按帧合并（见 `setRatioCache`），这里只做一次 setState。
+   * 用函数式更新读最新值，避免闭包读到旧版本号。
+   */
+  useEffect(() => {
+    return subscribeRatioChange(() => setRatioVersion(getRatioCacheVersion()));
+  }, []);
   useEffect(() => {
     if (viewMode !== "thumb") return;
     const el = gridRef.current;
@@ -277,6 +297,68 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
   const columns = useMemo(
     () => distributeColumns(items, masonryColumns),
     [items, masonryColumns],
+  );
+
+  /**
+   * **瀑布流的按列虚拟化**（缺陷 0018 P1-A 第 6 轮）。
+   *
+   * 瀑布流的"列"是**明确的**（固定列宽 `flex: 0 0 var(--mp-image-size)`），列内按序
+   * 线性堆叠，因此每项的偏移可以由纯函数直接算出（`masonryColumnLayout`），
+   * 不像自适应要复现 CSS 的 `flex-wrap` 断行。
+   *
+   * `ratioVersion` 在依赖里：宽高比是**异步**量到的（`<img>` 解码后写入 `ratioCache`），
+   * 而行高由它推出——不重算的话列偏移会停在 `DEFAULT_CELL_RATIO` 的估计上，与单元实际
+   * 高度错位。这是本视图虚拟化最容易踩的坑。
+   */
+  const masonry = useMemo(() => {
+    void ratioVersion; // 量到新宽高比即重算（见上面说明）
+    if (view !== "masonry" || viewMode !== "thumb") {
+      return {
+        offsets: [] as number[][],
+        heights: [] as number[][],
+        columnHeights: [] as number[],
+        total: 0,
+      };
+    }
+    const layout = masonryColumnLayout(columns, (item) =>
+      masonryCellHeight(
+        imageSize,
+        item.file.media_type === "audio"
+          ? AUDIO_CARD_RATIO
+          : (ratioCache.get(item.file.id) ?? DEFAULT_CELL_RATIO),
+        showFileName,
+      ),
+    );
+    return {
+      offsets: layout.offsets,
+      heights: layout.heights,
+      columnHeights: layout.columnHeights,
+    };
+  }, [columns, imageSize, showFileName, view, viewMode, ratioVersion]);
+
+  /**
+   * 瀑布流容器的滚动窗口（按列虚拟化的输入）。
+   *
+   * 与平铺/列表不同，这里不用 `useVirtualizer`：瀑布流是 **N 列各自独立**的一维偏移，
+   * 一次滚动要同时更新 N 个区间，直接跟踪 `scrollTop` / `clientHeight` 更简单。
+   */
+  const masonryWindow = useScrollWindow(gridRef, gridVersion);
+
+  /** 每列当前要渲染的条目区间（`[start, end)`）。 */
+  const masonryRanges = useMemo(
+    () =>
+      masonry.offsets.map((offsets, index) =>
+        masonryVisibleRange(
+          offsets,
+          masonry.heights[index] ?? [],
+          masonryWindow.scrollTop,
+          masonryWindow.viewportHeight,
+          // overscan 用"一屏高度的比例"而不是固定像素：单元高度随图片尺寸变化，
+          // 固定像素在小尺寸下会多渲染好几屏。
+          Math.max(200, masonryWindow.viewportHeight / 2),
+        ),
+      ),
+    [masonry, masonryWindow],
   );
 
   /**
@@ -460,11 +542,46 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
           {items.length === 0 ? (
             <span className="placeholder">{app.t("media.noFiles")}</span>
           ) : (
-            columns.map((column, index) => (
-              <div className="mp-masonry-col" key={index}>
-                {column.map(({ file, url }) => renderCell(file, url))}
-              </div>
-            ))
+            /* 瀑布流：**按列虚拟化**（缺陷 0018 P1-A 第 6 轮）。
+               列宽固定 → 列内是线性偏移 → 每列只渲染滚动窗口内的条目。
+               每列的高度由面板按累计值直接给出（`height`），于是容器总高 = 最高列，
+               滚动条长度稳定；单元用 `position: absolute` + `translateY(偏移)` 定位，
+               因此**不参与**列内的布局计算（不会与"我们算出的偏移"互相影响）。 */
+            columns.map((column, index) => {
+              const range = masonryRanges[index] ?? { start: 0, end: 0 };
+              const offsets = masonry.offsets[index] ?? [];
+              const start = range.start;
+              return (
+                <div
+                  className="mp-masonry-col"
+                  key={index}
+                  style={{ height: masonry.columnHeights[index] ?? 0 }}
+                >
+                  {column.slice(start, range.end).map((item, i) => {
+                    const at = start + i;
+                    // 槽位**同时**拿到预测偏移与预测高度：位置与尺寸都由面板给出，
+                    // 于是"图片还没解码"期间单元也精确占住它该占的那一块。
+                    //
+                    // 为什么必须给高度：宽高比是解码后才知道的，未解码时单元内容很矮
+                    // （占位符），而下一个槽位已经按预测值定位——两者之间会出现一个
+                    // 很大的空洞（实测瞬时 maxGap 达 259px），解码后又被填上，表现为
+                    // 快速滚动时的**跳动**。给出高度后这一段窗口不再可见。
+                    return (
+                      <div
+                        key={item.file.id}
+                        className="mp-masonry-slot"
+                        style={{
+                          transform: `translateY(${offsets[at] ?? 0}px)`,
+                          height: masonry.heights[index]?.[at] ?? undefined,
+                        }}
+                      >
+                        {renderCell(item.file, item.url)}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })
           )}
         </div>
       )}
