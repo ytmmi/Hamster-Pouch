@@ -191,6 +191,15 @@ CREATE INDEX idx_files_media_type ON files(media_type);
 
 视频全量元数据（音轨/字幕/章节等）**已定为列** `media_info_json`（迁移 `repo/0002_media_info.sql:4` 以 `ALTER TABLE` 追加，故位于 `files` 列尾，见上表）；**不得另建表**。
 
+> **已知缺口（2026-10，缺陷 0018 P1-A 实测确认）**：`files` 表**没有图片的宽/高列**，
+> 因此图片宽高比只能等 `<img>` 解码后量（`panels/mediaPreviewCell.tsx` 的 `ratioCache`）。
+> 后果（**已量化的固有代价，不是缺陷**）：媒体预览的**自适应/瀑布流**两个变高视图在
+> 未渲染的条目上只能用 `DEFAULT_CELL_RATIO`（1:1）占位，于是**滚动条长度是估计值**、
+> 随浏览逐步收敛（实测漂移 ≤ 10px / 102 万 px 内容高）。
+> 若要精确，需要在扫描时把尺寸落库——`crates/hp-scanner/src/scan_compute.rs` 的
+> `image_pixel_cost` **已经读了图片头部尺寸**（只用于并行配额），**只差落库**。
+> 这属独立改造（含迁移与版本口径），**未做**。
+
 ### 4.4 tag 实体与关联 `tags` / `file_tags` / `file_auto_tags`
 
 ```sql
