@@ -201,6 +201,7 @@ fn main() {
             commands::file::file_query,
             commands::file::file_path,
             commands::file::thumb_get,
+            commands::file::preview_get,
             commands::file::file_rename,
             commands::file::file_trash,
             commands::file::file_reanalyze,

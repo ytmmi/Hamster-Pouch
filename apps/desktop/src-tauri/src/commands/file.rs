@@ -249,6 +249,77 @@ pub(crate) async fn thumb_get(
     api_async(api_from_hp(outcome))
 }
 
+/// preview.get：按需生成并返回**有界预览**绝对路径（长边 ≤
+/// [`hp_media::PREVIEW_MAX_DIM`] 的 JPEG，缓存于缩略图缓存 `<hash>.preview.jpg`）。
+///
+/// 用途：Chromium 无法原生解码的图片（HEIC/HEIF，缺陷 0019）的查看器取图；
+/// 仅图片，其余媒体类型 / 无内容哈希 / 生成失败返回 `None`（前端降级为不可用）。
+#[tauri::command]
+pub(crate) async fn preview_get(
+    repo_id: String,
+    file_id: String,
+    state: State<'_, AppState>,
+) -> ApiAsync<Option<String>> {
+    let _ = repo_id;
+
+    let outcome = async {
+        // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard。
+        let (src_path, content_hash, media_type, cache, ffmpeg) = {
+            let guard = lock_repo(&state)?;
+            let db = open_repo(&guard)?;
+            let file = db
+                .get_file(&file_id)?
+                .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
+            let src_path = resolve_file_path(db, &file)?;
+            (
+                src_path,
+                file.content_hash,
+                file.media_type,
+                (*state.thumb_cache).clone(),
+                (*state.ffmpeg_bin).clone(),
+            )
+        };
+
+        if media_type != MediaType::Image {
+            return Ok(None);
+        }
+        let Some(hash) = content_hash else {
+            return Ok(None);
+        };
+
+        let preview_path = cache.path_for_preview(&hash);
+        if preview_path.exists() {
+            return Ok(Some(preview_path.to_string_lossy().to_string()));
+        }
+
+        // 缓存未命中：后台线程按需生成（复用缩略图生成器，只是换有界尺寸）。
+        let gen_out = preview_path.clone();
+        let generated = tauri::async_runtime::spawn_blocking(move || {
+            if cache.ensure_dir_for(&hash).is_err() {
+                return false;
+            }
+            hp_media::generate_image_thumbnail(
+                &src_path,
+                &gen_out,
+                hp_media::PREVIEW_MAX_DIM,
+                ffmpeg.as_deref(),
+                std::time::Duration::from_secs(30),
+            )
+            .is_ok()
+        })
+        .await
+        .unwrap_or(false);
+
+        if generated && preview_path.exists() {
+            Ok(Some(preview_path.to_string_lossy().to_string()))
+        } else {
+            Ok(None)
+        }
+    }
+    .await;
+    api_async(api_from_hp(outcome))
+}
+
 /// file.rename：重命名文件（磁盘重命名 + 更新索引相对路径）。
 #[tauri::command]
 pub(crate) fn file_rename(

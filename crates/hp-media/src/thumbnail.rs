@@ -84,6 +84,12 @@ pub fn extract_thumbnail(
 /// 图片缩略图长边上限（像素）。缩略图只缩小不放大，足够覆盖网格单元。
 pub const IMAGE_THUMB_MAX_DIM: u32 = 320;
 
+/// **有界预览**长边上限（像素，`preview.get` 命令）：供 Chromium 无法原生解码的
+/// 图片（HEIC/HEIF，缺陷 0019）查看器使用。2048 对"屏幕内完整查看 + 合理放大"
+/// 足够；比全分辨率解码省一个量级的解码与重采样成本（`docs/issues/0018` 实测
+/// 大图成本主要在重采样，9000² 全解码 + dHash 813 ms vs 有界解码 2.07 s 含两次分析）。
+pub const PREVIEW_MAX_DIM: u32 = 2048;
+
 /// 生成图片缩略图：应用 EXIF 方向后等比缩放到长边不超过 `max_dim`，写入 `output_jpg`。
 ///
 /// 解码优先走进程内 `image` crate（jpg/png 等既有格式输出与旧实现**逐位相同**）；

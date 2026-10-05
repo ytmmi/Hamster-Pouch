@@ -80,6 +80,12 @@ export interface ThumbGetArgs {
   fileId: string;
 }
 
+/** preview_get 命令参数（有界预览，供 Chromium 无法解码的 HEIC/HEIF 查看，缺陷 0019） */
+export interface PreviewGetArgs {
+  repoId: string;
+  fileId: string;
+}
+
 /** file_rename 命令参数 */
 export interface FileRenameArgs {
   repoId: string;

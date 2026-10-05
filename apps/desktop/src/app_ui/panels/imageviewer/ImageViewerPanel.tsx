@@ -35,6 +35,7 @@ import * as api from "../../shared/api";
 import { errorTextOf } from "../../shared/api/response";
 import { useApp } from "../../core/AppContext";
 import type { PanelRenderCtx } from "../../core/panelRegistry";
+import { needsPreview, resolvePreviewUrl } from "../../shared/previewUrl";
 import { useHostSettingValue } from "../../shared/settingValue";
 import { ViewerFilmstrip } from "./ViewerFilmstrip";
 import { ViewerInfoBar } from "./ViewerInfoBar";
@@ -113,7 +114,9 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
     );
   }, []);
 
-  // 选中项变化 → 解析绝对路径；旧请求用令牌丢弃（快速切换不会串图）。
+  // 选中项变化 → 解析图像源：Chromium 可解的格式加载**原图**（全分辨率）；
+  // HEIC/HEIF 走后端**有界预览**（`preview.get`，缺陷 0019）。旧请求用令牌丢弃
+  // （快速切换不会串图）。
   useEffect(() => {
     setUrl(null);
     setFailed(false);
@@ -123,8 +126,18 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
     void (async () => {
       const ctx = appRef.current;
       try {
-        const path = await api.filePath({ repoId, fileId: file.id });
-        if (!cancelled) setUrl(convertFileSrc(path));
+        const path = needsPreview(file.relative_path)
+          ? await api.previewGet({ repoId, fileId: file.id })
+          : await api.filePath({ repoId, fileId: file.id });
+        if (!cancelled) {
+          if (path) {
+            setUrl(convertFileSrc(path));
+          } else {
+            // 预览不可用（生成失败等）：按"不可用"占位，不再二次请求。
+            setFailed(true);
+            ctx.status(ctx.t("imageviewer.unavailable"), "error");
+          }
+        }
       } catch (e) {
         if (!cancelled) {
           setFailed(true);
@@ -282,6 +295,21 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
           onWheelZoom={handleWheelZoom}
           onNatural={setNatural}
           onFailed={() => {
+            // 原图加载失败：若当前不是预览（Chromium 意外不支持的格式等），
+            // 回退到有界预览**一次**；预览也失败或已是预览 → 不可用。
+            if (url && !needsPreview(file?.relative_path ?? "")) {
+              setUrl(null); // 先停掉坏图，占位期间请求预览
+              void resolvePreviewUrl(repoId ?? "", file?.id ?? "").then((previewUrl) => {
+                if (previewUrl) {
+                  setFailed(false);
+                  setUrl(previewUrl);
+                } else {
+                  setFailed(true);
+                  app.status(app.t("imageviewer.unavailable"), "error");
+                }
+              });
+              return;
+            }
             setFailed(true);
             setUrl(null);
             app.status(app.t("imageviewer.unavailable"), "error");

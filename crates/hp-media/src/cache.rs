@@ -33,6 +33,19 @@ impl ThumbnailCache {
             .join(format!("{content_hash}.jpg"))
     }
 
+    /// 某内容哈希对应的**有界预览**路径（与缩略图同分片、同名不同后缀，
+    /// 互不冲突；见 `preview.get` 命令与 `docs/issues/0019`）。
+    pub fn path_for_preview(&self, content_hash: &str) -> PathBuf {
+        let prefix = if content_hash.len() >= 2 {
+            &content_hash[..2]
+        } else {
+            "xx"
+        };
+        self.root
+            .join(prefix)
+            .join(format!("{content_hash}.preview.jpg"))
+    }
+
     /// 确保缓存根目录存在。
     pub fn ensure_dir(&self) -> HpResult<()> {
         std::fs::create_dir_all(&self.root)
@@ -59,6 +72,18 @@ mod tests {
         let cache = ThumbnailCache::new("C:/tmp/thumbs");
         let p = cache.path_for("abcdef0123456789");
         assert_eq!(p, PathBuf::from("C:/tmp/thumbs/ab/abcdef0123456789.jpg"));
+    }
+
+    #[test]
+    fn preview_path_shares_shard_but_has_own_name() {
+        let cache = ThumbnailCache::new("C:/tmp/thumbs");
+        let thumb = cache.path_for("abcdef0123456789");
+        let preview = cache.path_for_preview("abcdef0123456789");
+        assert_eq!(
+            preview,
+            PathBuf::from("C:/tmp/thumbs/ab/abcdef0123456789.preview.jpg")
+        );
+        assert_ne!(thumb, preview, "预览与缩略图不得共用同一缓存文件");
     }
 
     #[test]

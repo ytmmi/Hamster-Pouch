@@ -27,4 +27,6 @@ pub use palette::{
 };
 pub use player::{MediaProcess, DEFAULT_PIPE_PATH};
 pub use probe::{probe, MediaProbe};
-pub use thumbnail::{extract_thumbnail, generate_image_thumbnail, IMAGE_THUMB_MAX_DIM};
+pub use thumbnail::{
+    extract_thumbnail, generate_image_thumbnail, IMAGE_THUMB_MAX_DIM, PREVIEW_MAX_DIM,
+};

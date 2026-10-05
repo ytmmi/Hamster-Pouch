@@ -18,6 +18,7 @@ import type {
   FileReanalyzeArgs,
   FileRenameArgs,
   FileTrashArgs,
+  PreviewGetArgs,
   ThumbGetArgs,
 } from "../types";
 import { unwrapApi, type ApiResponse } from "./response";
@@ -57,6 +58,19 @@ export function fileQuery(args: FileQueryArgs): Promise<FileQueryPage> {
 /** 获取文件缩略图绝对路径（后端按需生成并缓存；null=不可用） */
 export function thumbGet(args: ThumbGetArgs): Promise<string | null> {
   return invoke<ApiResponse<string | null>>("thumb_get", {
+    repoId: args.repoId,
+    fileId: args.fileId,
+  }).then(unwrapApi);
+}
+
+/**
+ * 获取文件**有界预览**绝对路径（后端按需生成并缓存；null=不可用）。
+ *
+ * 长边 ≤ 2048 的 JPEG；供 Chromium 无法原生解码的图片（HEIC/HEIF）查看器使用，
+ * 见 `shared/previewUrl.ts` 的调用策略。
+ */
+export function previewGet(args: PreviewGetArgs): Promise<string | null> {
+  return invoke<ApiResponse<string | null>>("preview_get", {
     repoId: args.repoId,
     fileId: args.fileId,
   }).then(unwrapApi);
