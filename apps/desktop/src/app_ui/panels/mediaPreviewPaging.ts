@@ -61,23 +61,6 @@ export const MEDIA_PREVIEW_PAGE_LIMIT = 500;
  */
 export const MEDIA_PREVIEW_MAX_PAGES = 2000;
 
-/**
- * 按 `id` 去重（保序：保留首次出现的那个）。
- *
- * 用 `Set` 而不是"逐项扫已累计数组"：5 万张时后者是 O(n²)（12.5 亿次比较），
- * 会把"翻页"变成比渲染更贵的事。
- */
-export function dedupeById<T extends MediaPreviewPageItem>(items: readonly T[]): T[] {
-  const seen = new Set<string>();
-  const out: T[] = [];
-  for (const item of items) {
-    if (seen.has(item.id)) continue;
-    seen.add(item.id);
-    out.push(item);
-  }
-  return out;
-}
-
 /** 翻页回调与取消判据。 */
 export interface DrainPagesOptions<T extends MediaPreviewPageItem> {
   /**

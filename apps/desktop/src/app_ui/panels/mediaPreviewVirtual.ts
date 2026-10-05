@@ -2,14 +2,14 @@
  * 媒体预览面板：**虚拟化的行模型**（纯逻辑，无框架依赖）。
  *
  * 从 `MediaPreviewPanel.tsx` 拆出来（单文件 1200 行硬上限，`pnpm check:line-count`）：
- * 条目容器要把"数万个条目"变成"视口内几十个 DOM 单元"，就必须先把条目**切成行**
- * （或按列累计高度），这件事本身与 React 无关，因此单独放这里——
+ * 条目容器要把"数万个条目"变成"视口内几十个 DOM 单元"，就必须先把条目**切成行**，
+ * 这件事本身与 React 无关，因此单独放这里——
  * `pnpm check:panels` 可以**直接 import** 并按行为断言。
  *
  * ## 为什么是"行"而不是"条目"
  *
- * - **平铺**（`.mp-grid.mp-view-tile`）：CSS 网格 `repeat(auto-fill, …)` 一行放
- *   `floor((宽 + 间距) / (单元格宽 + 间距))` 个，行高由单元格宽度决定（**定高**）；
+ * - **平铺**（`.mp-grid.mp-view-tile`）：一行 `--mp-tile-columns` 个单元，行高由
+ *   单元格宽度决定（**定高**）；
  * - **文件名列表**（`.mp-list`）：一行一条，行高由文字度量决定（**定高**）；
  * - **自适应 / 瀑布流**：行高随图片宽高比变化（**变高**），见后续阶段。
  *
@@ -71,50 +71,11 @@ export function listRowHeight(lineHeight = 16): number {
   return Math.round(3 + 3 + 2 + lineHeight);
 }
 
-/**
- * 瀑布流：按列累计高度。
- *
- * `distributeColumns` 已把条目分到各列（按序号 `i % columns`，与高度无关——这样
- * 阅读顺序与排序结果一致、同一次排序的布局稳定）。这里给每列累计出"每一项距列顶
- * 的偏移"，以及每列的**内容总高**（末项不留间距，否则容器底部会多出一条空档）。
- *
- * 用途：瀑布流的"按列虚拟化"与内容高度都以此为准。**本阶段未接入渲染**——
- * 该视图当前仍全量渲染、靠 `content-visibility` 跳过离屏，见文件头的说明。
- */
-export function masonryColumnLayout<T>(
-  columns: readonly (readonly T[])[],
-  heightOf: (item: T) => number,
-  gap = MEDIA_MASONRY_GAP,
-): { offsets: number[][]; heights: number[][]; columnHeights: number[] } {
-  const offsets: number[][] = [];
-  const heights: number[][] = [];
-  const columnHeights: number[] = [];
-  for (const column of columns) {
-    const columnOffsets: number[] = [];
-    const columnHeightsList: number[] = [];
-    let cursor = 0;
-    for (const item of column) {
-      const height = Math.max(1, Math.round(heightOf(item)));
-      columnOffsets.push(cursor);
-      columnHeightsList.push(height);
-      cursor += height + gap;
-    }
-    offsets.push(columnOffsets);
-    heights.push(columnHeightsList);
-    // 最后一项后面不留间距。
-    columnHeights.push(Math.max(0, cursor - gap));
-  }
-  return { offsets, heights, columnHeights };
-}
-
 /** 平铺视图的**行间距**（与 `.mp-grid` 的 `gap: 8px` 一致）。 */
 export const MEDIA_TILE_ROW_GAP = 8;
 
 /** 文件名列表的**行间距**（与 `.mp-list` 的 `gap: 2px` 一致）。 */
 export const MEDIA_LIST_ROW_GAP = 2;
-
-/** 瀑布流的**列间距 / 单元间距**（与 `.mp-masonry` 的 `gap: 8px` 一致）。 */
-export const MEDIA_MASONRY_GAP = 8;
 
 /**
  * 瀑布流**单个单元**的高度（px），**不含单元间距**。

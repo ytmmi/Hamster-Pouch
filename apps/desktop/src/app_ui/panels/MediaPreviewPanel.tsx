@@ -58,6 +58,7 @@ import { useMediaFileActions } from "./mediaPreviewActions";
 import { useMediaPreviewData, type MediaTypeFilter } from "./mediaPreviewData";
 import { MediaContextMenu, useMediaContextMenu } from "./mediaPreviewMenu";
 import { useMediaSelection } from "./mediaPreviewSelection";
+import { createScrollSlot, onScrollEvent, planScrollApply } from "./mediaPreviewScroll";
 import { useMediaViewState } from "./mediaPreviewSession";
 import { MediaPreviewToolbar, type MediaPreviewMode } from "./mediaPreviewToolbar";
 import { DEFAULT_CELL_RATIO, MASONRY_GAP, distributeColumns, masonryColumnCount, mediaViewClass } from "./mediaPreviewView";
@@ -80,9 +81,13 @@ import {
  * 跨挂载保存滚动位置：面板被 dockview 卸载重建时也能恢复浏览进度。
  *
  * 与 `mediaPreviewSession.ts` 的视图/排序**本会话覆盖**同一口径（模块级变量，不落库）。
+ *
+ * 存的是 [`ScrollSlot`] 而不是一个裸数字：全库**后台翻页**之后，"恢复的时机"与
+ * "内容的长度"不再同步，需要额外记住"这个目标现在还到不了、内容变长后要再试"。
+ * 判定逻辑全在 `mediaPreviewScroll.ts`（纯函数、门禁直接断言）。
  */
-let savedThumbScroll = 0;
-let savedNameScroll = 0;
+const thumbScroll = createScrollSlot();
+const nameScroll = createScrollSlot();
 
 /**
  * 把"每帧都会换身份"的回调收敛为**恒定引用**，好让 `ThumbCell` 的 `memo` 真正生效。
@@ -142,8 +147,9 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
   } = useMediaViewState(panelApi);
 
   // 面板**已加载**的文件与排序 / 解析后的条目（取数在 `mediaPreviewData.ts`）。
-  // `loading`：全库可翻之后取数是"首屏第一页 + 后台继续翻完"，翻页期间计数如实提示。
-  const { files, items, loading } = useMediaPreviewData(typeFilter, sortKey, sortDir);
+  // `loading`：全库可翻之后取数是"首屏第一页 + 后台继续翻完"，翻页期间计数如实提示；
+  // 滚动位置恢复也要用它——翻完之后内容不再变长，恢复该收敛而不是永远挂着。
+  const { items, loading } = useMediaPreviewData(typeFilter, sortKey, sortDir);
 
   /**
    * **后台标签冻结**：面板内容被同组别的标签盖住时不渲染条目容器（下面三个分支都带这个条件）。
@@ -188,26 +194,40 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
     if (viewMode !== "thumb") return;
     const el = gridRef.current;
     if (!el) return;
-    el.scrollTop = savedThumbScroll;
+    el.scrollTop = planScrollApply(
+      thumbScroll,
+      el.scrollHeight,
+      el.clientHeight,
+      !loading,
+    );
     const onScroll = () => {
-      savedThumbScroll = el.scrollTop;
+      onScrollEvent(thumbScroll, el.scrollTop, el.scrollHeight, el.clientHeight);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
     // `foreground`：后台冻结时容器不存在，切回前台后要重新挂监听并恢复滚动位置。
-  }, [viewMode, view, foreground, app.repoId, files.length > 0]);
+    //
+    // `items.length` / `loading`：**后台翻页**下内容会一轮轮变长（缺陷 0018 P1-A）。
+    // 只依赖"从无到有"这个布尔时，第一页到手就恢复一次、被夹住，之后内容再长也不再重试
+    // → 深位置永远恢复不回去。带上这两个值，每翻到新内容就重试一次。
+  }, [viewMode, view, foreground, app.repoId, items.length, loading]);
 
   // 列表模式：恢复并跟踪滚动位置
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    el.scrollTop = savedNameScroll;
+    el.scrollTop = planScrollApply(
+      nameScroll,
+      el.scrollHeight,
+      el.clientHeight,
+      !loading,
+    );
     const onScroll = () => {
-      savedNameScroll = el.scrollTop;
+      onScrollEvent(nameScroll, el.scrollTop, el.scrollHeight, el.clientHeight);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [viewMode, foreground, app.repoId, files.length > 0]);
+  }, [viewMode, foreground, app.repoId, items.length, loading]);
 
   /**
    * 网格容器的**宽度与列数**（`ResizeObserver` 跟随面板尺寸变化）。

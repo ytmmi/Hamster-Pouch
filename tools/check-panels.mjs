@@ -556,6 +556,7 @@ const MEDIA_FAMILY_FILES = [
   "apps/desktop/src/app_ui/panels/mediaPreviewPaging.ts",
   "apps/desktop/src/app_ui/panels/mediaPreviewVirtual.ts",
   "apps/desktop/src/app_ui/panels/mediaPreviewVirtualRows.tsx",
+  "apps/desktop/src/app_ui/panels/mediaPreviewScroll.ts",
   "apps/desktop/src/app_ui/panels/mediaPreviewSession.ts",
   "apps/desktop/src/app_ui/panels/mediaPreviewToolbar.tsx",
   "apps/desktop/src/app_ui/panels/mediaPreviewActions.ts",
@@ -743,19 +744,116 @@ check(
     JSON.stringify(virtual.chunkRows([1, 2], -5)) === JSON.stringify([[1], [2]]),
 );
 
+// ---- 缺陷 0018 P1-A 回归：**滚动位置恢复 vs 后台翻页**（`mediaPreviewScroll.ts`）----
+//
+// P1-A 把取数从"一次取回有界一页"改成"后台翻页翻完全库"之后，恢复滚动的**时机**
+// 与内容的**长度**不再同步：第一页到手时内容只有 500 行高，深位置会被浏览器夹住。
+// 更隐蔽的是，这次"夹住"会触发 `scroll` 事件，监听器把夹住的中间值当成新目标记下来
+// → 原始目标永久丢失，后面内容变长也恢复不回去。
+//
+// 这些是**行为断言**（直接跑真函数、按真实时序模拟"翻页→再翻页→用户滚动"），
+// 不是源码正则：正则守不住"目标被中间值覆盖"这类时序缺陷。
+const scroll = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewScroll.ts")).href
+);
+
+{
+  // 模拟：5 万张、每行 100px 行高，用户在 3 万行处（target = 3000000）离开。
+  // 第一页 500 项到手 → 内容 50000px、视口 800px → 最多滚到 49200，目标到不了。
+  const slot = scroll.createScrollSlot();
+  slot.target = 3_000_000;
+  const firstApply = scroll.planScrollApply(slot, 50_000, 800, false);
+  const pendingAfterFirst = slot.pending;
+
+  // 浏览器把 scrollTop 夹到上限，并因此触发一次 scroll 事件。
+  scroll.onScrollEvent(slot, 49_200, 50_000, 800);
+  const targetAfterClamp = slot.target;
+
+  // 后台翻完（内容 5,000,000px）后再恢复一次。
+  const finalApply = scroll.planScrollApply(slot, 5_000_000, 800, true);
+
+  check(
+    "后台翻页下的滚动恢复：被夹住的中间值**不得**覆盖真实目标，翻完后再恢复到位",
+    // 第一页时确实到不了（这正是回归的触发条件）。
+    firstApply === 3_000_000 &&
+      pendingAfterFirst === 3_000_000 &&
+      // 关键：夹住所触发的那次 scroll 事件**没有**把目标改成 49200。
+      targetAfterClamp === 3_000_000 &&
+      // 内容变长后一次到位，且不再欠恢复。
+      finalApply === 3_000_000 &&
+      slot.pending === null,
+    `首次=${firstApply} 夹住后target=${targetAfterClamp} 最终=${finalApply} pending=${slot.pending}`,
+  );
+}
+
 check(
-  "瀑布流按列累计：偏移单调、末项不留间距、空列得 0（按列虚拟化的输入口径）",
+  "滚动恢复的退化输入：目标 0 / 非法值不欠恢复；**容器未布局**时必须挂住而不是抹掉目标",
+  // 目标 0：没有要恢复的位置。
+  scroll.needsScrollRestore(0, 50_000, 800) === false &&
+    // NaN / 负数按 0 处理。
+    scroll.needsScrollRestore(Number.NaN, 50_000, 800) === false &&
+    scroll.needsScrollRestore(-5, 50_000, 800) === false &&
+    // 正例：内容装得下就不欠恢复；装不下就欠。
+    scroll.needsScrollRestore(1_000, 50_000, 800) === false &&
+    scroll.needsScrollRestore(60_000, 50_000, 800) === true &&
+    // **首帧**（scrollHeight = 0）是"还没量出来"，不是"内容只有 0 高"：
+    // 必须挂住 pending，否则那次赋值触发的 scroll 事件会把目标抹成 0。
+    scroll.needsScrollRestore(1_000, 0, 0) === true &&
+    (() => {
+      const slot = scroll.createScrollSlot();
+      slot.target = 1_000;
+      // 首帧：loading 还是 false（取数 effect 尚未把它置真），也不能收敛成 0。
+      const applied = scroll.planScrollApply(slot, 0, 0, true);
+      return applied === 1_000 && slot.pending === 1_000 && slot.target === 1_000;
+    })(),
+);
+
+check(
+  "翻页已结束而目标仍到不了时：就地收敛到可滚上限并**解除** pending",
+  // 否则 pending 会永久挂着，用户之后的所有滚动都记不进 target（新的"恢复不了"）。
   (() => {
-    const cols = [[1, 2], [3], []];
-    const heights = { 1: 100, 2: 50, 3: 30 };
-    const layout = virtual.masonryColumnLayout(cols, (i) => heights[i], 8);
-    return (
-      JSON.stringify(layout.offsets) === JSON.stringify([[0, 108], [0], []]) &&
-      JSON.stringify(layout.heights) === JSON.stringify([[100, 50], [30], []]) &&
-      // 末项后面不留间距：100 + 8 + 50 = 158。
-      JSON.stringify(layout.columnHeights) === JSON.stringify([158, 30, 0])
-    );
+    const slot = scroll.createScrollSlot();
+    slot.target = 3_000_000;
+    const applied = scroll.planScrollApply(slot, 50_000, 800, true);
+    // 条目被删到只剩 500 项：收敛到上限 49200，并解除 pending。
+    return applied === 49_200 && slot.pending === null && slot.target === 49_200;
   })(),
+);
+
+check(
+  "用户主动滚动（不欠恢复时）必须正常记录，否则浏览进度会丢",
+  (() => {
+    const slot = scroll.createScrollSlot();
+    // 已到位、无 pending：用户滚到 1200 就该记住 1200。
+    scroll.onScrollEvent(slot, 1_200, 50_000, 800);
+    const normal = slot.target === 1_200 && slot.pending === null;
+
+    // 还欠恢复、但内容已经装得下 → 这一跳就是恢复落地，按目标收口并解除。
+    const slot2 = scroll.createScrollSlot();
+    slot2.target = 3_000_000;
+    slot2.pending = 3_000_000;
+    scroll.onScrollEvent(slot2, 3_000_000, 5_000_000, 800);
+    const landed = slot2.target === 3_000_000 && slot2.pending === null;
+
+    return normal && landed;
+  })(),
+);
+
+check(
+  "面板真的接了这套恢复逻辑：存的是 slot 而不是裸数字，依赖数组含内容长度与 loading",
+  // 缺陷 0018 回归的**接线**断言：纯函数对了但面板没接，等于没修。
+  /const thumbScroll = createScrollSlot\(\);/.test(mediaPanelSrc) &&
+    /const nameScroll = createScrollSlot\(\);/.test(mediaPanelSrc) &&
+    // **两个**容器都必须走 planScrollApply——只要求"文件里出现过"会让"改了一个、
+    // 漏了另一个"照样通过（实测：只回退平铺那个，断言仍全绿）。
+    (mediaPanelSrc.match(/el\.scrollTop = planScrollApply\(/g) ?? []).length === 2 &&
+    (mediaPanelSrc.match(/onScrollEvent\(/g) ?? []).length === 2 &&
+    // 不得再退回"直接赋保存值"的写法（那正是被夹住的来源）。
+    !/el\.scrollTop = thumbScroll\.target/.test(mediaPanelSrc) &&
+    !/el\.scrollTop = nameScroll\.target/.test(mediaPanelSrc) &&
+    // 依赖数组必须含内容长度与 loading：否则内容变长后不再重试，深位置恢复不回去。
+    /\}, \[viewMode, view, foreground, app\.repoId, items\.length, loading\]\);/.test(mediaPanelSrc) &&
+    /\}, \[viewMode, foreground, app\.repoId, items\.length, loading\]\);/.test(mediaPanelSrc),
 );
 
 {
@@ -1114,7 +1212,12 @@ check(
     /const foreground = usePanelForeground\(panelApi\);/.test(mediaPanelSrc) &&
     (mediaPanelSrc.match(/repoId && foreground && viewMode ===/g) ?? []).length === 3 &&
     // 冻结时容器不在 DOM 里：滚动恢复与瀑布流测量必须跟着前台变化重跑一次。
-    /\}, \[viewMode, view, foreground, app\.repoId, files\.length > 0\]\);/.test(mediaPanelSrc) &&
+    // （滚动恢复的依赖数组另外还要含 `items.length` / `loading`——后台翻页下内容会
+    //  一轮轮变长，只依赖"从无到有"的布尔会让深位置永远恢复不回去，见 `mediaPreviewScroll.ts`。）
+    /\}, \[viewMode, view, foreground, app\.repoId, items\.length, loading\]\);/.test(
+      mediaPanelSrc,
+    ) &&
+    /\}, \[viewMode, foreground, app\.repoId, items\.length, loading\]\);/.test(mediaPanelSrc) &&
     /\}, \[view, viewMode, foreground, imageSize, app\.repoId, items\.length > 0\]\);/.test(
       mediaPanelSrc,
     ),
