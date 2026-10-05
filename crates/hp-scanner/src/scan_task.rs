@@ -7,6 +7,8 @@
 //! **结果与旧实现逐位相同**：本模块只搬运"先算什么、后写什么"，算法本身一个字没改
 //! ——感知哈希仍走 `hp_hash::dhash_image`，调色板仍走 `hp_media::extract_palette_from_image`
 //! （与 `extract_palette` 是同一段代码），抽帧仍走 `hp_media::extract_thumbnail`。
+//! AVIF/HEIC 家族的 ffmpeg 兜底解码只影响**此前从未解码成功**的格式（`docs/issues/0018`
+//! §7 P1-D），既有格式的派生结果不受影响。
 
 use std::path::{Path, PathBuf};
 
@@ -79,7 +81,12 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
             // 解码一次，同时得出感知哈希与调色板（旧实现解码两次）。
             // 解码失败**不影响索引**：与旧实现 `dhash_file(path).ok()` +
             // `extract_palette(..).ok()` 的容错口径一致。
-            let (perceptual, palette) = match analyze_image(&prepared.path, prepared.want_palette) {
+            let (perceptual, palette) = match analyze_image(
+                &prepared.path,
+                prepared.want_palette,
+                options.ffmpeg_bin.as_deref(),
+                options.video_timeout,
+            ) {
                 Ok(derived) => (derived.perceptual, derived.palette),
                 Err(_) => (None, None),
             };

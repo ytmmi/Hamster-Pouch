@@ -108,7 +108,12 @@ fn run_color_extract(state: &AppState, file_id: &str) -> HpResult<hp_media::Pale
         return Err(HpError::InvalidArgument("色彩参考仅支持图片".into()));
     }
     let path = resolve_file_path(db, &file)?;
-    let palette = extract_palette(&path, 0)?;
+    let palette = extract_palette(
+        &path,
+        0,
+        state.ffmpeg_bin.as_deref(),
+        std::time::Duration::from_secs(30),
+    )?;
     // JSON 形态只有一份实现（`hp_media::encode_palette_json`）：`version` 必须写进去
     // ——它是**缓存自愈**的开关，`PALETTE_FORMAT_VERSION` 变化后前端会把旧缓存当作
     // "未提取"并自动重算（色板规模 6 → 8 就是一次这样的变化）。`locked:false` 的语义不变：

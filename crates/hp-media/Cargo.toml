@@ -6,6 +6,9 @@ edition.workspace = true
 [dependencies]
 hp-core = { path = "../hp-core" }
 serde_json = "1"
+# 注意：不启用 `avif-native`（dav1d）——dav1d-sys 需要系统 dav1d（pkg-config）或
+# git+meson+ninja 内部构建，违反 D20「依赖与构建链本地化」；AVIF/HEIC 解码统一走
+# 捆绑 ffmpeg 的有界兜底（`src/decode.rs`，捆绑构建自带 libdav1d，asm 优化）。
 image = "0.25"
 kamadak-exif = "0.5"
 

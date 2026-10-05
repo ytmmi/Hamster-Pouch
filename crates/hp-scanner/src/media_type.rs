@@ -10,7 +10,7 @@ fn ext_to_media_type(ext: &str) -> Option<MediaType> {
     match ext.to_ascii_lowercase().as_str() {
         // 图片
         "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "tiff" | "tif" | "avif" | "heic"
-        | "ico" | "svg" => Some(MediaType::Image),
+        | "heif" | "ico" | "svg" => Some(MediaType::Image),
         // 视频
         "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "m4v" | "mpg" | "mpeg" | "ts"
         | "3gp" => Some(MediaType::Video),

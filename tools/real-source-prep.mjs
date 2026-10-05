@@ -36,7 +36,11 @@ for (const raw of process.argv.slice(2)) {
 }
 const LIMIT = Number(args.get("limit") ?? 5000);
 
-/** 可解码的图片扩展名（与 `media_type.rs` 的判定一致，但排除 avif/heic/heif）。 */
+/**
+ * 可解码的图片扩展名（与 `media_type.rs` 的判定一致，但排除 avif/heic/heif——
+ * 应用侧 2026-10 起经捆绑 ffmpeg 有界解码可解这些格式（缺陷 0019），但本夹具
+ * 只做布局验证，语料保持 jpg/png 足矣；解码成本验证另属 `docs/issues/0018`）。
+ */
 const IMAGE_EXT = /\.(jpe?g|png|gif|bmp|webp|tiff?)$/i;
 
 /**

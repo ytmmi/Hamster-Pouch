@@ -33,9 +33,14 @@ fn generate_thumbnail(
         return false;
     }
     match media_type {
-        MediaType::Image => {
-            hp_media::generate_image_thumbnail(&src_path, &out, hp_media::IMAGE_THUMB_MAX_DIM).is_ok()
-        }
+        MediaType::Image => hp_media::generate_image_thumbnail(
+            &src_path,
+            &out,
+            hp_media::IMAGE_THUMB_MAX_DIM,
+            ffmpeg.as_deref(),
+            std::time::Duration::from_secs(30),
+        )
+        .is_ok(),
         MediaType::Video => match ffmpeg {
             Some(bin) => hp_media::extract_thumbnail(
                 &src_path,

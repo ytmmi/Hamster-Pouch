@@ -10,6 +10,7 @@
 //! 属 M2 能力，**仍在生产使用**，不受本休眠影响。
 
 mod cache;
+mod decode;
 mod exif;
 mod palette;
 mod player;
@@ -18,6 +19,7 @@ mod process;
 mod thumbnail;
 
 pub use cache::ThumbnailCache;
+pub use decode::decode_image_fallback;
 pub use exif::{extract_exif, ImageExif};
 pub use palette::{
     encode_palette_json, extract_palette, extract_palette_from_image, palette_is_locked, Palette,

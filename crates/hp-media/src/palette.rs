@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 
 use hp_core::{HpError, HpResult};
 
@@ -56,14 +57,26 @@ pub fn palette_is_locked(color_json: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// 调色板解码的**有界尺寸**（仅 ffmpeg 兜底路径用）：调色板只需 64×64 重采样，
+/// 有界解码到长边 256 后重采样，避免为一张 9000² 的 AVIF/HEIC 做全分辨率解码 +
+/// Triangle 重采样（`docs/issues/0018` 实测重采样是主要成本）。按文件确定性，
+/// 同一文件每次扫描结果一致。
+const FFMPEG_DECODE_BOUND: u32 = 256;
+
 /// 提取图片主色调；`max_colors` 为 0 时使用 [`DEFAULT_PALETTE_SIZE`]。
 ///
 /// 这是"自带解码"的入口；**扫描路径不该用它**——那里已经为感知哈希解码过一次，
 /// 应当复用同一张已解码图像走 [`extract_palette_from_image`]（大图重采样是主要成本，
-/// 见 `docs/issues/0018`）。
-pub fn extract_palette(path: &Path, max_colors: usize) -> HpResult<Palette> {
-    let img =
-        image::open(path).map_err(|e| HpError::Io(format!("读取图片失败: {e}")))?;
+/// 见 `docs/issues/0018`）。AVIF/HEIC 家族进程内解码失败时回退捆绑 ffmpeg 有界解码
+/// （`src/decode.rs`）；既有格式的输出与旧实现逐位相同。
+pub fn extract_palette(
+    path: &Path,
+    max_colors: usize,
+    ffmpeg_bin: Option<&Path>,
+    timeout: Duration,
+) -> HpResult<Palette> {
+    let img = crate::decode::decode_image_fallback(path, ffmpeg_bin, FFMPEG_DECODE_BOUND, timeout)
+        .map_err(|e| HpError::Io(format!("读取图片失败: {e}")))?;
     Ok(extract_palette_from_image(&img, max_colors))
 }
 
@@ -124,7 +137,8 @@ mod tests {
         let path = dir.join("red.png");
         write_solid(&path, [255, 0, 0]);
 
-        let palette = extract_palette(&path, 3).expect("提取调色板失败");
+        let palette = extract_palette(&path, 3, None, Duration::from_secs(30))
+            .expect("提取调色板失败");
         assert!(!palette.colors.is_empty());
         assert_eq!(palette.colors[0], "#ff0000");
 
@@ -138,7 +152,8 @@ mod tests {
         let path = dir.join("blue.png");
         write_solid(&path, [0, 0, 255]);
 
-        let palette = extract_palette(&path, 1).expect("提取调色板失败");
+        let palette = extract_palette(&path, 1, None, Duration::from_secs(30))
+            .expect("提取调色板失败");
         assert_eq!(palette.colors.len(), 1);
 
         let _ = std::fs::remove_dir_all(&dir);
