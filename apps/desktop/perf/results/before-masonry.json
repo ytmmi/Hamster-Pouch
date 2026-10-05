@@ -1,0 +1,58 @@
+{
+  "config": {
+    "n": 50000,
+    "page": 500,
+    "delay": 0,
+    "view": "masonry",
+    "mode": "thumb",
+    "scenario": "scroll",
+    "imageSize": 160
+  },
+  "firstPaint": {
+    "cells": 50000,
+    "rows": 0,
+    "domNodes": 200033,
+    "layoutMs": 0.3999999985098839,
+    "contentHeight": 1094680,
+    "paging": {
+      "requests": 100,
+      "delivered": 50000,
+      "total": 50000,
+      "drained": true
+    },
+    "statuses": []
+  },
+  "drained": {
+    "ms": 601,
+    "paging": {
+      "requests": 100,
+      "delivered": 50000,
+      "total": 50000,
+      "drained": true
+    }
+  },
+  "scroll": {
+    "totalMs": 37029.5,
+    "frames": 42,
+    "p50": 849.8999999985099,
+    "p95": 1271.5,
+    "max": 1748.1999999955297,
+    "longFrames": 42,
+    "cellsDuringScroll": 50000,
+    "domNodesDuringScroll": 200033
+  },
+  "errors": [],
+  "afterDrain": {
+    "cells": 50000,
+    "rows": 0,
+    "domNodes": 200033,
+    "layoutMs": 0.5,
+    "contentHeight": 1095627,
+    "paging": {
+      "requests": 100,
+      "delivered": 50000,
+      "total": 50000,
+      "drained": true
+    }
+  }
+}
