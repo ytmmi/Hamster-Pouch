@@ -731,34 +731,19 @@ check(
     JSON.stringify(virtual.chunkRows([1, 2], -5)) === JSON.stringify([[1], [2]]),
 );
 
-{
-  const r = virtual.visibleRowRange(0, 300, 100, 1000, 4);
-  const mid = virtual.visibleRowRange(5000, 300, 100, 1000, 4);
-  const tail = virtual.visibleRowRange(999999, 300, 100, 1000, 4);
-  check(
-    "虚拟窗口按「行号 × 行高」算出且两侧各留 overscan；首/中/尾都不越界",
-    r.start === 0 && r.end === 8 && // 4 行可见 + 1 行进位 + 4 行 overscan（顶部无负行）
-      mid.start === 46 &&
-      mid.end === 58 &&
-      tail.start === 995 &&
-      tail.end === 1000,
-    `首=${JSON.stringify(r)} 中=${JSON.stringify(mid)} 尾=${JSON.stringify(tail)}`,
-  );
-}
 check(
-  "`scrollTop` 超出内容高度时夹到末行（否则重挂载恢复旧滚动位置会得到空窗口 → 面板一片空白）",
-  // 面板会在重挂载时恢复上一次的 `scrollTop`，而切换来源/筛选后列表可能短得多。
+  "瀑布流按列累计：偏移单调、末项不留间距、空列得 0（按列虚拟化的输入口径）",
   (() => {
-    const over = virtual.visibleRowRange(999999, 300, 100, 10, 4);
-    return over.start <= 9 && over.end === 10 && over.end > over.start;
+    const cols = [[1, 2], [3], []];
+    const heights = { 1: 100, 2: 50, 3: 30 };
+    const layout = virtual.masonryColumnLayout(cols, (i) => heights[i], 8);
+    return (
+      JSON.stringify(layout.offsets) === JSON.stringify([[0, 108], [0], []]) &&
+      JSON.stringify(layout.heights) === JSON.stringify([[100, 50], [30], []]) &&
+      // 末项后面不留间距：100 + 8 + 50 = 158。
+      JSON.stringify(layout.columnHeights) === JSON.stringify([158, 30, 0])
+    );
   })(),
-  JSON.stringify(virtual.visibleRowRange(999999, 300, 100, 10, 4)),
-);
-check(
-  "虚拟窗口的退化输入：无行 / 行高为 0 时返回空区间（不返回负数或越界区间）",
-  JSON.stringify(virtual.visibleRowRange(0, 300, 100, 0)) === JSON.stringify({ start: 0, end: 0 }) &&
-    JSON.stringify(virtual.visibleRowRange(0, 300, 0, 10)) === JSON.stringify({ start: 0, end: 0 }) &&
-    virtual.visibleRowRange(-50, 300, 100, 10, 0).start === 0,
 );
 
 {

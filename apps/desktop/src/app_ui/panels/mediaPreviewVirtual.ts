@@ -76,10 +76,10 @@ export function listRowHeight(lineHeight = 16): number {
  *
  * `distributeColumns` 已把条目分到各列（按序号 `i % columns`，与高度无关——这样
  * 阅读顺序与排序结果一致、同一次排序的布局稳定）。这里给每列累计出"每一项距列顶
- * 的偏移"，供按列虚拟化使用。
+ * 的偏移"，以及每列的**内容总高**（末项不留间距，否则容器底部会多出一条空档）。
  *
- * `heightOf(index)` 由调用方给出（它知道宽高比缓存与列宽）；返回的 `offsets` 与
- * `heights` 与入参等长，`columnHeight` 是含间距的总高。
+ * 用途：瀑布流的"按列虚拟化"与内容高度都以此为准。**本阶段未接入渲染**——
+ * 该视图当前仍全量渲染、靠 `content-visibility` 跳过离屏，见文件头的说明。
  */
 export function masonryColumnLayout<T>(
   columns: readonly (readonly T[])[],
@@ -101,15 +101,10 @@ export function masonryColumnLayout<T>(
     }
     offsets.push(columnOffsets);
     heights.push(columnHeightsList);
-    // 最后一项后面不留间距（否则容器底部会多出一条空档）。
+    // 最后一项后面不留间距。
     columnHeights.push(Math.max(0, cursor - gap));
   }
   return { offsets, heights, columnHeights };
-}
-
-/** 取数组中第 `index` 项，越界返回 `undefined`（虚拟窗口的边界容错）。 */
-export function at<T>(list: readonly T[], index: number): T | undefined {
-  return index >= 0 && index < list.length ? list[index] : undefined;
 }
 
 /** 平铺视图的**行间距**（与 `.mp-grid` 的 `gap: 8px` 一致）。 */
@@ -165,35 +160,3 @@ export function adaptiveCellIntrinsicHeight(
   return Math.round(base + (showName ? 4 + nameLineHeight : 0));
 }
 
-/**
- * 行窗口：把"滚到哪了"换算成要渲染的行区间。
- *
- * 返回 `[start, end)`（半开区间），并**两侧各留 `overscan` 行**——滚动时下一行已经
- * 在 DOM 里，不会出现"滚到才渲染"的白边。
- *
- * 这是 [`@tanstack/react-virtual`] 的 `useVirtualizer` 的**输入口径**（`count` / 行高 /
- * `overscan` 由它消费），保留为纯函数是为了让门禁能直接断言边界——尤其下面这一条：
- *
- * **`scrollTop` 超出内容高度时必须夹到末行**，不能顺着算出 `start > rowCount`：
- * 面板会在重挂载时恢复上一次的 `scrollTop`（`savedThumbScroll` / `savedNameScroll`），
- * 而来源或筛选变化后列表可能短得多——不夹的话窗口落在内容之外，**整个面板一片空白**，
- * 用户会以为"这个来源没有文件"。
- *
- * 退化输入（无行 / 行高非正）返回空区间，不返回负数或越界区间。
- */
-export function visibleRowRange(
-  scrollTop: number,
-  viewportHeight: number,
-  rowHeight: number,
-  rowCount: number,
-  overscan = 4,
-): { start: number; end: number } {
-  if (rowCount <= 0 || rowHeight <= 0) return { start: 0, end: 0 };
-  const first = Math.floor(Math.max(0, scrollTop) / rowHeight);
-  // 夹到 [0, rowCount - 1]：见上面"scrollTop 超出内容高度"的说明。
-  const clampedFirst = Math.min(Math.max(0, first), rowCount - 1);
-  const visible = Math.ceil(Math.max(0, viewportHeight) / rowHeight) + 1;
-  const start = Math.max(0, clampedFirst - Math.max(0, overscan));
-  const end = Math.min(rowCount, clampedFirst + visible + Math.max(0, overscan));
-  return { start, end: Math.max(start, end) };
-}
