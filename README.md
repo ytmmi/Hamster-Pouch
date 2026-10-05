@@ -64,6 +64,18 @@ Rust crates：
 - Windows 10/11（含 WebView2 运行时）
 - Rust 工具链（edition 2021）
 - Node.js + pnpm
+- **vcpkg + libheif**（`hp-media` 的 `libheif` 特性**默认开启**：HEIC/HEIF/AVIF 进程内解码
+  需 libheif-sys 在 Windows/MSVC 下经 vcpkg 找到 libheif。安装（2026-10-06 用户裁定，
+  D20 例外，实测约 14 分钟）：
+  ```powershell
+  git clone --depth 1 https://github.com/microsoft/vcpkg D:\vcpkg
+  D:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+  $env:VCPKG_ROOT = "D:\vcpkg"   # 建议写入用户环境变量
+  vcpkg install "libheif[aom]:x64-windows-static-md"
+  ```
+  无 vcpkg 的环境可用 `--no-default-features` 构建 hp-media，退回捆绑 ffmpeg 兜底
+  （功能不受影响，仅解码多一次子进程）。注意：libheif 端口的默认特性含 **x265
+  （GPL-2.0 编码器，静态链入）**，发布许可需自行裁定；解码用不到它。
 - 外部 CLI：
   - `external-cli/ffmpeg/` —— 随仓库分发，无需额外下载
   - **mpv —— 需自行下载**（见「外部依赖」）

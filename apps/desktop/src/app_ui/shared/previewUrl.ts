@@ -1,7 +1,7 @@
 /**
- * 有界预览 URL 解析（图像查看器 / 查看器面板**共用**，缺陷 0019）。
+ * 全分辨率预览 URL 解析（图像查看器 / 查看器面板**共用**，缺陷 0019）。
  *
- * 后端 `preview.get` 按需生成并缓存**有界预览**（长边 ≤ 2048 的 JPEG）；
+ * 后端 `preview.get` 按需生成并缓存**全分辨率 JPEG**（原始尺寸、质量 90，不缩放）；
  * 前端只负责把返回的绝对路径转成 `convertFileSrc` 可用的 asset URL。这里与
  * `thumbUrl.ts` 同款做两件事，两者都是"每张图只做一次"：
  * 1. **结果缓存**（`fileId → url | null`）：面板重建或来回切换时不重复请求；
@@ -10,8 +10,8 @@
  * ## 什么时候用预览而不是原图（`needsPreview`）
  *
  * WebView2（Chromium）原生可解 AVIF / JPEG / PNG / WebP / GIF / BMP，查看器直接
- * 加载**原图**（`file.path` + `convertFileSrc`，全分辨率）；HEIC/HEIF 无法原生解码，
- * 必须走后端有界预览。判断只看扩展名（`heic` / `heif`），大小写不敏感。
+ * 加载**原图**（`file.path` + `convertFileSrc`，零转码）；HEIC/HEIF 无法原生解码，
+ * 必须走后端预览。判断只看扩展名（`heic` / `heif`），大小写不敏感。
  *
  * 缓存是**进程级模块级**的：文件内容变更后旧预览仍会命中，直到重新分析
  * （`file.reanalyze`）刷新后端缓存——与媒体预览面板既有行为一致。
@@ -37,7 +37,7 @@ const previewUrlCache = new Map<string, string | null>();
 const previewPromiseCache = new Map<string, Promise<string | null>>();
 
 /**
- * 解析文件**有界预览** URL。
+ * 解析文件**全分辨率预览** URL。
  *
  * 返回 `null` 表示后端没有可用预览（不是异常）：调用方按"不可用"占位渲染。
  * 网络/命令失败同样降级为 `null`，不向界面抛错（预览不是关键路径）。

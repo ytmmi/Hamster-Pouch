@@ -84,11 +84,79 @@ pub fn extract_thumbnail(
 /// 图片缩略图长边上限（像素）。缩略图只缩小不放大，足够覆盖网格单元。
 pub const IMAGE_THUMB_MAX_DIM: u32 = 320;
 
-/// **有界预览**长边上限（像素，`preview.get` 命令）：供 Chromium 无法原生解码的
-/// 图片（HEIC/HEIF，缺陷 0019）查看器使用。2048 对"屏幕内完整查看 + 合理放大"
-/// 足够；比全分辨率解码省一个量级的解码与重采样成本（`docs/issues/0018` 实测
-/// 大图成本主要在重采样，9000² 全解码 + dHash 813 ms vs 有界解码 2.07 s 含两次分析）。
-pub const PREVIEW_MAX_DIM: u32 = 2048;
+/// 生成**全分辨率** JPEG 预览（`preview.get` 命令，供 Chromium 无法原生解码的
+/// HEIC/HEIF 查看器使用，缺陷 0019）。
+///
+/// - 有 ffmpeg：**ffmpeg 直出 JPEG**（`-q:v 2`，单趟解码 + 编码，libjpeg 级质量 ≈90；
+///   无中间像素往返，102 MP 也只需数秒）——查看器要能 100% 检视细节；
+/// - 无 ffmpeg（测试夹具等）：进程内解码（仅可解格式）→ JPEG 质量 90。
+///
+/// **不缩放**：用户 2026-10-06 裁定（不要 2048 有界预览），预览尺寸 = 原始分辨率。
+/// 代价是首次生成耗时与缓存体积按原始分辨率走，之后缓存命中即显示。
+pub fn generate_image_preview(
+    src: &Path,
+    output_jpg: &Path,
+    ffmpeg_bin: Option<&Path>,
+    timeout: Duration,
+) -> HpResult<()> {
+    if let Some(bin) = ffmpeg_bin {
+        return generate_preview_via_ffmpeg(src, output_jpg, bin, timeout);
+    }
+    generate_preview_via_image(src, output_jpg, timeout)
+}
+
+/// ffmpeg 直出 JPEG：一条管线（解码 → mjpeg 编码），无中间像素往返。
+fn generate_preview_via_ffmpeg(
+    src: &Path,
+    output_jpg: &Path,
+    ffmpeg_bin: &Path,
+    timeout: Duration,
+) -> HpResult<()> {
+    // 先写到临时文件，成功后原子改名（见模块文档）。
+    let temp = temp_sibling(output_jpg);
+    let mut cmd = Command::new(ffmpeg_bin);
+    cmd.args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
+        .arg(src)
+        .args(["-frames:v", "1", "-q:v", "2"])
+        .arg(&temp);
+    let output = match run_with_timeout(&mut cmd, timeout) {
+        Ok(o) => o,
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp);
+            return Err(e);
+        }
+    };
+    if !output.status.success() {
+        let _ = std::fs::remove_file(&temp);
+        return Err(HpError::Io(format!(
+            "ffmpeg 生成预览失败: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    commit(&temp, output_jpg)
+}
+
+/// 进程内解码 → JPEG 质量 90（仅 ffmpeg 缺失时的兜底；`u32::MAX` = 不缩放）。
+fn generate_preview_via_image(
+    src: &Path,
+    output_jpg: &Path,
+    timeout: Duration,
+) -> HpResult<()> {
+    let img = decode_thumbnail_src(src, None, u32::MAX, timeout)?;
+    // 原子落盘（见模块文档）：与缩略图同款，并发安全。
+    let temp = temp_sibling(output_jpg);
+    let result = (|| -> image::ImageResult<()> {
+        let file = std::fs::File::create(&temp)?;
+        let mut writer = std::io::BufWriter::new(file);
+        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, 90);
+        img.to_rgb8().write_with_encoder(encoder)
+    })();
+    if let Err(e) = result {
+        let _ = std::fs::remove_file(&temp);
+        return Err(HpError::Io(format!("写入预览失败: {e}")));
+    }
+    commit(&temp, output_jpg)
+}
 
 /// 生成图片缩略图：应用 EXIF 方向后等比缩放到长边不超过 `max_dim`，写入 `output_jpg`。
 ///
@@ -133,6 +201,22 @@ fn decode_thumbnail_src(
     timeout: Duration,
 ) -> HpResult<image::DynamicImage> {
     use image::{DynamicImage, ImageDecoder, ImageReader};
+
+    // 首次进入即注册 libheif hooks（幂等）：heic/heif/avif 可进程内解码，
+    // 失败才落 ffmpeg 兜底（见 `decode` 模块文档）。
+    crate::decode::ensure_libheif_hooks();
+    // **尺寸分流**（有界请求 + AVIF/HEIC 超大图 + 有 ffmpeg）：直接 ffmpeg 有界，
+    // 跳过进程内全分辨率解码（实测大图快 3.4×，见 `decode::LIBHEIF_FULL_RES_MAX_MP`）。
+    if max_dim < u32::MAX && crate::decode::is_avif_family(src) {
+        if let Some(bin) = ffmpeg_bin {
+            if crate::decode::is_huge_avif_family(src) {
+                return crate::decode::decode_image_with_ffmpeg(src, bin, max_dim, timeout)
+                    .map_err(|fe| {
+                        HpError::Io(format!("解码图片失败: 超大图走 ffmpeg 有界失败: {fe}"))
+                    });
+            }
+        }
+    }
 
     let reader = ImageReader::open(src)
         .map_err(|e| HpError::Io(format!("打开图片失败: {e}")))?

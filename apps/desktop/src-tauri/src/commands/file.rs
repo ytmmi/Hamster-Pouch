@@ -249,10 +249,11 @@ pub(crate) async fn thumb_get(
     api_async(api_from_hp(outcome))
 }
 
-/// preview.get：按需生成并返回**有界预览**绝对路径（长边 ≤
-/// [`hp_media::PREVIEW_MAX_DIM`] 的 JPEG，缓存于缩略图缓存 `<hash>.preview.jpg`）。
+/// preview.get：按需生成并返回**全分辨率**预览绝对路径（原始尺寸 JPEG、质量 90，
+/// 缓存于缩略图缓存 `<hash>.preview.jpg`）。
 ///
 /// 用途：Chromium 无法原生解码的图片（HEIC/HEIF，缺陷 0019）的查看器取图；
+/// 不缩放——查看器要能 100% 检视细节（用户 2026-10-06 裁定：不要 2048 有界预览）。
 /// 仅图片，其余媒体类型 / 无内容哈希 / 生成失败返回 `None`（前端降级为不可用）。
 #[tauri::command]
 pub(crate) async fn preview_get(
@@ -292,18 +293,17 @@ pub(crate) async fn preview_get(
             return Ok(Some(preview_path.to_string_lossy().to_string()));
         }
 
-        // 缓存未命中：后台线程按需生成（复用缩略图生成器，只是换有界尺寸）。
+        // 缓存未命中：后台线程按需生成（全分辨率解码，不缩放）。
         let gen_out = preview_path.clone();
         let generated = tauri::async_runtime::spawn_blocking(move || {
             if cache.ensure_dir_for(&hash).is_err() {
                 return false;
             }
-            hp_media::generate_image_thumbnail(
+            hp_media::generate_image_preview(
                 &src_path,
                 &gen_out,
-                hp_media::PREVIEW_MAX_DIM,
                 ffmpeg.as_deref(),
-                std::time::Duration::from_secs(30),
+                std::time::Duration::from_secs(60),
             )
             .is_ok()
         })

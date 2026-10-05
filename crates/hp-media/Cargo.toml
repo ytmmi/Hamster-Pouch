@@ -3,14 +3,23 @@ name = "hp-media"
 version.workspace = true
 edition.workspace = true
 
+# `libheif`（默认开）：HEIC/HEIF/AVIF **进程内解码**（libde265/aom），注册进
+# `image` crate 的 hooks 后 `image::open` 直接可解。代价：libheif-sys 在 Windows 上
+# 要求 **vcpkg 安装的 libheif**（`VCPKG_ROOT`，用户 2026-10-06 裁定安装，D20 例外）；
+# 无该环境的构建可 `--no-default-features` 关闭，退到捆绑 ffmpeg 兜底。
+[features]
+default = ["libheif"]
+libheif = ["dep:libheif-rs"]
+
 [dependencies]
 hp-core = { path = "../hp-core" }
 serde_json = "1"
-# 注意：不启用 `avif-native`（dav1d）——dav1d-sys 需要系统 dav1d（pkg-config）或
-# git+meson+ninja 内部构建，违反 D20「依赖与构建链本地化」；AVIF/HEIC 解码统一走
-# 捆绑 ffmpeg 的有界兜底（`src/decode.rs`，捆绑构建自带 libdav1d，asm 优化）。
+# 注意：不启用 `image` 的 `avif-native`（dav1d）——dav1d-sys 需要系统 dav1d（pkg-config）或
+# git+meson+ninja 内部构建，违反 D20「依赖与构建链本地化」；AVIF/HEIC 解码经 `libheif`
+# 特性进程内完成（libde265/aom），捆绑 ffmpeg 仍是兜底与全分辨率预览的编码路径。
 image = "0.25"
 kamadak-exif = "0.5"
+libheif-rs = { version = "3", features = ["image"], optional = true }
 
 # 仅 Windows：mpv 的 IPC 命名管道**只有一个句柄**可用，且**同步句柄上的阻塞读会挡住写**
 # （实测：第二次 open 直接 ERROR_PIPE_BUSY；同句柄读线程阻塞时写不出去）。

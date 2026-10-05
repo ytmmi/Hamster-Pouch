@@ -28,10 +28,12 @@ pub struct ImageDerivations {
 /// 读图片**头部**取像素尺寸（不解码整张图），用于并行阶段的配额估算。
 ///
 /// 读不到就返回最小配额 1：尺寸只影响限流，不影响正确性——最坏情况是并发略高，
-/// 不会因此让扫描失败。AVIF/HEIC 家族在 `image` crate 里没有头部读取器，恒返回 1；
-/// 但它们的解码路径是**有界**的（`hp_media::decode`，输出 ≤ 256px），内存占用与像素
-/// 无关，配额 1（高并发）反而是安全的。
+/// 不会因此让扫描失败。`libheif` 特性下先确保 hooks 已注册：`ImageReader` 对
+/// heic/heif/avif 也能只读头部（libheif 的容器解析，不整帧解码），因此这三类文件
+/// 的配额是**真实尺寸**——它们现在进程内全分辨率解码，配额必须按像素加权，
+/// 否则 102 MP 大图并发会把内存打爆（与 jpg 的既有模型一致）。
 pub fn image_pixel_cost(path: &Path) -> u64 {
+    hp_media::ensure_libheif_hooks();
     let Ok(reader) = image::ImageReader::open(path) else {
         return 1;
     };
