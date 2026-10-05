@@ -344,6 +344,12 @@ const appUiAppSrc = readFileSync(
   "utf8",
 );
 const scannerPaletteSrc = readFileSync(join(ROOT, "crates/hp-scanner/src/scanner.rs"), "utf8");
+// 2026-10（缺陷 0018）：调色板的**计算**落在并行阶段的新模块里（`scan_compute.rs`），
+// 而"要不要算"与"落库"仍在 `scanner.rs`。门禁读这两个文件。
+const scannerComputeSrc = readFileSync(
+  join(ROOT, "crates/hp-scanner/src/scan_compute.rs"),
+  "utf8",
+);
 const colorCommandSrc = readFileSync(
   join(ROOT, "apps/desktop/src-tauri/src/commands/color.rs"),
   "utf8",
@@ -424,23 +430,35 @@ check(
 );
 check(
   "提取绑定在**全面分析**上：扫描/重新分析都顺带写调色板，且**不覆盖手动锁定**的色值",
-  // 落点：两个图片分支共用同一个私有方法（`index_new` 与 `index_existing` 各调用一次）。
-  /fn write_palette\(&self, db: &mut RepoDb, file_id: &str, path: &Path\)/.test(scannerPaletteSrc) &&
-    (scannerPaletteSrc.match(/self\.write_palette\(db, /g) ?? []).length >= 2 &&
-    // JSON 形态只有一份实现（`version` 是缓存自愈的开关，不能少写）。
-    /encode_palette_json\(&palette\.colors\)/.test(scannerPaletteSrc) &&
-    // 写入前的一道闸：`locked:true` 是用户的判定权，重扫不得抹掉。
-    /if palette_is_locked\(&existing\.color_json\) \{\s*\n\s*return;/.test(scannerPaletteSrc) &&
-    // 两条触发链路：`file.reanalyze` → `scanner.rescan_file`；源全量 → `options.full` 强制重算。
+  // 2026-10（缺陷 0018）：扫描改为"串行准备 → 并行计算 → 串行写库"三段式，
+  // 调色板的"要不要算"在**准备阶段**定（`want_palette`）、颜色值在**并行阶段**算出
+  // （`scan_compute::analyze_image`）、落库在**写库阶段**（`write_one`）。
+  // 断言内容不变，只改它读哪些文件——这正是 file-structure.md 第「门禁跟着代码走」条的办理方式。
+  //
+  // ① 并行阶段只解码**一次**，调色板与感知哈希共用同一张图（旧实现各解码一次）。
+  /extract_palette_from_image\(&img, 0\)/.test(scannerComputeSrc) &&
+    // ② 落库唯一入口：写库阶段的 `write_one` 走唯一 JSON 实现。
+    /encode_palette_json\(colors\)/.test(scannerPaletteSrc) &&
+    // ③ 手动锁定的色值在**准备阶段**就被排除（`want_palette` 为假 → 并行阶段不算它）。
+    //    `locked:true` 是用户的判定权，重扫不得抹掉——旧实现是在写入前 return，
+    //    现在提前到"决定要不要算"，语义相同且省下一次全尺寸重采样。
+    /fn palette_is_locked\(&self, db: &RepoDb, existing: Option<&FileIndexRow>\) -> HpResult<bool>/.test(
+      scannerPaletteSrc,
+    ) &&
+    /Some\(existing_color\) if palette_is_locked\(&existing_color\.color_json\)/.test(
+      scannerPaletteSrc,
+    ) &&
+    // ④ 两条触发链路都设 `want_palette`：源扫描的准备阶段 + 单文件重新分析。
+    (scannerPaletteSrc.match(/want_palette,?\s*$/gm) ?? []).length >= 2 &&
+    // ⑤ 两条触发链路：`file.reanalyze` → `scanner.rescan_file`；源全量 → `options.full` 强制重算。
     // （`file.reanalyze` 自 2026-09 起是**后台任务**：带上任务的取消标志，见 `check:commands`
     //  的"单文件分析 = 与源扫描同款的后台任务"那组断言。）
     /\.scanner\s*\n?\s*\.rescan_file\(&mut db, &source, &file\.relative_path, &options, Some\(&cancel\)\)/.test(
       readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"), "utf8"),
     ) &&
-    /let changed = options\.full \|\| row\.size != size \|\| row\.mtime != mtime;/.test(
-      scannerPaletteSrc,
-    ) &&
-    // 按需命令保留（契约不变），但已无界面调用方：UI 只走分析路径。
+    // `options.full` 仍然强制重算（"源全量重扫"会把全部图片的调色板刷新一遍）。
+    /options\.full \|\| row\.size != size \|\| row\.mtime != mtime/.test(scannerPaletteSrc) &&
+    // ⑥ 按需命令保留（契约不变），但已无界面调用方：UI 只走分析路径。
     /db\.upsert_color_ref\(file_id, &encode_palette_json\(&palette\.colors\)\)\?;/.test(
       colorCommandSrc,
     ) &&

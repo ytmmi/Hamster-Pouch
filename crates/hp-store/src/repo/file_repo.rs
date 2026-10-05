@@ -89,10 +89,16 @@ const FILE_COLUMNS: &str = "id, source_id, relative_path, media_type, \
      size, mtime, scan_time, verify_status, thumb_status, missing_status, media_info_json";
 
 /// 带 `f.` 前缀的列清单（JOIN 查询用）。
-const FILE_COLUMNS_F: &str = "f.id, f.source_id, f.relative_path, f.media_type, \
+///
+/// `pub(crate)`：同 crate 的相册分页查询复用同一套列，保证"文件行长什么样"只有一处定义。
+pub(crate) const FILE_COLUMNS_F: &str = "f.id, f.source_id, f.relative_path, f.media_type, \
      f.content_hash, f.content_hash_algo, f.content_hash_algo_version, \
      f.perceptual_hash, f.perceptual_hash_algo, f.perceptual_hash_algo_version, \
      f.size, f.mtime, f.scan_time, f.verify_status, f.thumb_status, f.missing_status, f.media_info_json";
+
+/// [`FILE_COLUMNS_F`] 的列数。JOIN 查询若要在末尾追加列（如相册的 `added_at`），
+/// 用它算出追加列的下标，避免把数字写死在两处。
+pub(crate) const FILE_COLUMN_COUNT: usize = 17;
 
 impl RepoDb {
     /// 插入或更新文件索引行（按 `source_id + relative_path` 唯一索引冲突时更新，保留原 id）。
@@ -411,7 +417,11 @@ fn escape_like(s: &str) -> String {
     out
 }
 
-fn row_to_file(row: &Row) -> rusqlite::Result<FileIndexRow> {
+/// 文件行映射：`FILE_COLUMNS_F` 的列顺序 → [`FileIndexRow`]。
+///
+/// `pub(crate)`：相册分页查询在同一 SELECT 末尾追加 `added_at`，
+/// 复用这里的 0..17 列映射，保证两处对"文件行长什么样"的理解不会漂移。
+pub(crate) fn row_to_file(row: &Row) -> rusqlite::Result<FileIndexRow> {
     let id: String = row.get(0)?;
     let source_id: String = row.get(1)?;
     let relative_path: String = row.get(2)?;

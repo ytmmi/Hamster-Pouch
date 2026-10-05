@@ -10,8 +10,9 @@
  * 两点**有意选择**（不是遗漏）：
  * - 序列只取 `media_type = image`：本面板是**图像**查看器，夹带视频/音频会让
  *   上一张/下一张跳到无法显示的文件上；过滤是**保序子序列**，"顺序与相册/源一致"仍成立。
- * - 分页读到 `VIEWER_MAX_FILES` 为止：`file.query` 单页上限 1000（后端 `FILE_QUERY_MAX_LIMIT`），
- *   相册成员无分页。命中上限时 `truncated = true`，信息栏如实标注，**不假装是全部**。
+ * - 分页读到 `VIEWER_MAX_FILES` 为止：`file.query` 与 `album.members` 单页上限都是 1000，
+ *   两者都按**游标分页**取（缺陷 0018 后相册也有游标了）。命中上限时 `truncated = true`，
+ *   信息栏如实标注，**不假装是全部**。
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -82,12 +83,28 @@ export async function loadViewerFiles(
   scope: ViewerScope,
 ): Promise<{ files: FileItem[]; truncated: boolean }> {
   if (scope.albumId) {
-    const members = await api.albumMembers({ repoId: scope.repoId, albumId: scope.albumId });
-    const files = imagesOnly(members);
-    // 相册成员无分页：超过上限是真实截断，必须如实标注。
-    return files.length > VIEWER_MAX_FILES
-      ? { files: files.slice(0, VIEWER_MAX_FILES), truncated: true }
-      : { files, truncated: false };
+    // 相册成员改为**游标分页**（缺陷 0018）：旧实现一次性取回全部成员，
+    // 大相册会把全部行读进内存。这里翻页取到 `VIEWER_MAX_FILES` 为止，
+    // 超过上限即如实标注 `truncated`（不假装是全部）。
+    const files: FileItem[] = [];
+    let cursor: string | null = null;
+    let truncated = false;
+    do {
+      const page = await api.albumMembers({
+        repoId: scope.repoId,
+        albumId: scope.albumId,
+        cursor,
+        limit: VIEWER_PAGE_LIMIT,
+      });
+      // 只保留图像（保序子序列）：本面板是图像查看器。
+      files.push(...imagesOnly(page.items));
+      cursor = page.nextCursor;
+      if (files.length >= VIEWER_MAX_FILES) {
+        truncated = cursor !== null || files.length > VIEWER_MAX_FILES;
+        break;
+      }
+    } while (cursor);
+    return { files: files.slice(0, VIEWER_MAX_FILES), truncated };
   }
 
   const files: FileItem[] = [];

@@ -247,19 +247,63 @@ pub(crate) fn album_list(repo_id: String, state: State<AppState>) -> ApiResponse
     api_from_hp(outcome)
 }
 
-/// album.members：列出相册可见成员（按有效媒体属性过滤）。
+/// `album.members` 的返回体：本页 + 下一页游标（`null` = 已到末页）。
+///
+/// 与 `file.query` 的 `FileQueryPage` **同形**（D78 先例）：界面按同一套"回传 nextCursor"
+/// 的写法消费两种分页，不必记两套规则。
+#[derive(Serialize)]
+pub(crate) struct AlbumMembersPage {
+    items: Vec<AlbumFileItem>,
+    next_cursor: Option<String>,
+}
+
+/// album.members：**游标分页**列出相册可见成员（按有效媒体属性过滤）。
+///
+/// **为什么要分页**（`docs/issues/0018`）：旧实现一次性返回全部成员，而
+/// `list_album_members` 没有上限——5 万成员的相册会把全部行读进内存，
+/// 前端还会为每个成员建一个 `IntersectionObserver`（`mediaPreviewCell.tsx`）。
+///
+/// - 请求 `{ repoId, albumId, cursor?, limit? }`：`limit` 只是**页大小**（默认 500，上限 1000）；
+/// - 响应 `{ items, nextCursor }`：把 `nextCursor` 原样回传即可续页，`null` = 末页；
+/// - **排序键**：`(added_at, file_id)` 升序（`added_at` 可能同值，必须带 `file_id` 才是全序）；
+/// - 游标是**键集游标**：翻页途中相册增删成员不会漏项/重复；
+/// - 媒体属性过滤（D10）与离线源排除与旧实现**语义一致**，只是下推到了 SQL。
 #[tauri::command]
 pub(crate) fn album_members(
     repo_id: String,
     album_id: String,
+    cursor: Option<String>,
+    limit: Option<i64>,
     state: State<AppState>,
-) -> ApiResponse<Vec<AlbumFileItem>> {
+) -> ApiResponse<AlbumMembersPage> {
     let _ = repo_id;
-    let outcome = (|| -> HpResult<Vec<AlbumFileItem>> {
+    let outcome = (|| -> HpResult<AlbumMembersPage> {
+        let parsed_cursor = match cursor.as_deref().map(str::trim) {
+            None | Some("") => None,
+            Some(raw) => Some(hp_store::AlbumMemberCursor::decode(raw)?),
+        };
         let guard = lock_repo(&state)?;
         let db = open_repo(&guard)?;
-        let files = AlbumService::visible_members(db, &album_id)?;
-        Ok(files.into_iter().map(file_to_item).collect())
+        // 有效媒体属性（含嵌套继承）→ 展开成三个布尔标志，交给 SQL 过滤。
+        let media_type = AlbumService::effective_media_type(db, &album_id)?;
+        let (want_image, want_video, want_audio) = match media_type {
+            AlbumMediaType::Multimedia => (true, true, true),
+            AlbumMediaType::Image => (true, false, false),
+            AlbumMediaType::Video => (false, true, false),
+            AlbumMediaType::Audio => (false, false, true),
+        };
+        let (rows, next) = db.query_album_members_page(
+            &album_id,
+            want_image,
+            want_video,
+            want_audio,
+            parsed_cursor.as_ref(),
+            limit.unwrap_or(500),
+        )?;
+        Ok(AlbumMembersPage {
+            items: rows.into_iter().map(file_to_item).collect(),
+            next_cursor: next.map(|c| c.encode()),
+        })
     })();
     api_from_hp(outcome)
 }

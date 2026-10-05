@@ -5,12 +5,71 @@
 
 use hp_core::{
     AddedBy, Album, AlbumId, AlbumKind, AlbumMediaType, AlbumMember, AlbumSyncRule, AlbumSyncState,
-    FileId, HpError, HpResult, RepoId, SourceId, SyncMode,
+    FileId, FileIndexRow, HpError, HpResult, RepoId, SourceId, SyncMode,
 };
 use rusqlite::{params, OptionalExtension, Row};
 
+use crate::repo::file_repo::{row_to_file, FILE_COLUMNS_F, FILE_COLUMN_COUNT};
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err};
+
+/// `album.members` 单页上限（与 `file.query` 的 `FILE_QUERY_MAX_LIMIT` 同量级）。
+pub const ALBUM_MEMBERS_MAX_LIMIT: i64 = 1000;
+
+/// 相册成员的键集游标：指向排序键 `(added_at, file_id)` 上**最后一个已返回行**。
+///
+/// 对外是**不透明字符串**（[`AlbumMemberCursor::encode`] / [`AlbumMemberCursor::decode`]）：
+/// 契约只承诺"原样回传即可续页"。编码与 `FileQueryCursor` 同款
+/// （先写长度再写值，因此值里出现分隔符也不歧义）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AlbumMemberCursor {
+    pub added_at: String,
+    pub file_id: String,
+}
+
+/// 游标字段分隔符（U+001F，单元分隔符），与 `FileQueryCursor` 同款。
+const CURSOR_SEP: char = '\u{1f}';
+
+impl AlbumMemberCursor {
+    fn is_empty(&self) -> bool {
+        self.added_at.is_empty() && self.file_id.is_empty()
+    }
+
+    /// 编码为可回传的游标字符串。
+    pub fn encode(&self) -> String {
+        format!(
+            "{}{CURSOR_SEP}{}{CURSOR_SEP}{}",
+            self.added_at.len(),
+            self.added_at,
+            self.file_id
+        )
+    }
+
+    /// 解析调用方回传的游标（非法即 `validation`，**不静默从头开始**）。
+    pub fn decode(raw: &str) -> HpResult<Self> {
+        let invalid = || {
+            HpError::InvalidArgument("游标格式非法（应由上次响应的 nextCursor 原样回传）".into())
+        };
+        let Some(sep) = raw.find(CURSOR_SEP) else {
+            return Err(invalid());
+        };
+        let len: usize = raw[..sep].parse().map_err(|_| invalid())?;
+        let rest = &raw[sep + CURSOR_SEP.len_utf8()..];
+        if rest.len() < len {
+            return Err(invalid());
+        }
+        let added_at = rest[..len].to_string();
+        let tail = &rest[len..];
+        let file_id = tail.strip_prefix(CURSOR_SEP).ok_or_else(invalid)?;
+        if added_at.is_empty() || file_id.is_empty() {
+            return Err(invalid());
+        }
+        Ok(Self {
+            added_at,
+            file_id: file_id.to_string(),
+        })
+    }
+}
 
 /// `albums` 表列清单（与迁移 0001 顺序一致）。
 const ALBUM_COLUMNS: &str =
@@ -203,6 +262,10 @@ impl RepoDb {
     }
 
     /// 列出相册全部成员。
+    ///
+    /// **不要用它做界面取数**：它没有上限，5 万成员的相册会一次性读进内存
+    /// （`docs/issues/0018`）。界面走 [`RepoDb::query_album_members_page`]。
+    /// 保留它是因为同步规则求值（`hp-album` 的 `sync`）确实需要全量成员。
     pub fn list_album_members(&self, album_id: &str) -> HpResult<Vec<AlbumMember>> {
         let mut stmt = self
             .conn()
@@ -217,6 +280,96 @@ impl RepoDb {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| store_err("解析相册成员列表", e))?;
         Ok(rows)
+    }
+
+    /// **分页**查询相册可见成员（`docs/issues/0018`）。
+    ///
+    /// 与 `hp-album` 的 `visible_members` 语义一致（媒体属性过滤 + 离线源排除），
+    /// 只是把过滤下推到 SQL、并加上键集游标分页，避免把整本相册读进内存——
+    /// 5 万成员的相册原本会一次性返回全部行。
+    ///
+    /// **排序键取 `(added_at, file_id)`**：`added_at` 可能同值（同一批加入），
+    /// 因此必须带上 `file_id` 才构成全序，否则翻页会漏项或重复
+    /// （与 D78 的 `file.query` 游标同一个理由）。
+    ///
+    /// 媒体类型过滤用**布尔标志**而不是动态 `IN (?,?,?)`：占位符个数固定，
+    /// SQL 是静态串，既好读也不会因为拼串出错（三种类型至多一次全命中）。
+    pub fn query_album_members_page(
+        &self,
+        album_id: &str,
+        want_image: bool,
+        want_video: bool,
+        want_audio: bool,
+        cursor: Option<&AlbumMemberCursor>,
+        limit: i64,
+    ) -> HpResult<(Vec<FileIndexRow>, Option<AlbumMemberCursor>)> {
+        require_nonempty(album_id, "相册 ID")?;
+        let album = self
+            .get_album(album_id)?
+            .ok_or_else(|| HpError::NotFound(format!("相册不存在: {album_id}")))?;
+        let limit = limit.clamp(1, ALBUM_MEMBERS_MAX_LIMIT);
+        let cur = cursor.cloned().unwrap_or_default();
+        let has_cursor = i64::from(!cur.is_empty());
+
+        // 静态 SQL：列清单用 `FILE_COLUMNS_F`，末尾额外带回 `m.added_at` 供游标使用。
+        let sql = format!(
+            "SELECT {FILE_COLUMNS_F}, m.added_at
+             FROM album_member m
+             JOIN files f ON f.id = m.file_id
+             JOIN sources s ON s.id = f.source_id
+             WHERE m.album_id = ?1
+               AND s.repo_id = ?2
+               AND s.mounted = 1
+               AND (   (?3 = 1 AND f.media_type = 'image')
+                    OR (?4 = 1 AND f.media_type = 'video')
+                    OR (?5 = 1 AND f.media_type = 'audio'))
+               AND (?6 = 0
+                    OR m.added_at > ?7
+                    OR (m.added_at = ?7 AND m.file_id > ?8))
+             ORDER BY m.added_at, m.file_id
+             LIMIT ?9"
+        );
+
+        let mut stmt = self
+            .conn()
+            .prepare(&sql)
+            .map_err(|e| store_err("查询相册成员分页", e))?;
+        let mut rows = stmt
+            .query_map(
+                params![
+                    album_id,
+                    album.repo_id.as_str(),
+                    i64::from(want_image),
+                    i64::from(want_video),
+                    i64::from(want_audio),
+                    has_cursor,
+                    cur.added_at,
+                    cur.file_id,
+                    limit + 1
+                ],
+                |row| {
+                    // 文件列占 0..N，`added_at` 是最后一列。
+                    Ok((row_to_file(row)?, row.get::<_, String>(FILE_COLUMN_COUNT)?))
+                },
+            )
+            .map_err(|e| store_err("读取相册成员分页", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析相册成员分页", e))?;
+
+        // 多取一行判断"还有没有下一页"，因此**不会**多返回一行。
+        let has_more = rows.len() as i64 > limit;
+        if has_more {
+            rows.truncate(limit as usize);
+        }
+        let next_cursor = if has_more {
+            rows.last().map(|(file, added_at)| AlbumMemberCursor {
+                added_at: added_at.clone(),
+                file_id: file.id.as_str().to_string(),
+            })
+        } else {
+            None
+        };
+        Ok((rows.into_iter().map(|(f, _)| f).collect(), next_cursor))
     }
 
     /// 查询单个相册成员；不存在返回 `None`。

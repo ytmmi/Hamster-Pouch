@@ -2,6 +2,8 @@
  * M3：虚拟相册类型。
  */
 
+import type { FileItem } from "./file";
+
 /** album_list 返回元素 */
 export interface AlbumItem {
   id: string;
@@ -75,6 +77,21 @@ export interface AlbumListArgs {
 export interface AlbumMembersArgs {
   repoId: string;
   albumId: string;
+  /** 续页游标：把上次响应的 `nextCursor` 原样回传；不传 = 第一页。 */
+  cursor?: string | null;
+  /** 页大小（后端默认 500、上限 1000）。 */
+  limit?: number | null;
+}
+
+/**
+ * `album.members` 的返回体：本页 + 下一页游标（`null` = 已到末页）。
+ *
+ * 与 `file.query` 的 `FileQueryPage` **同形**（D78 先例）：界面按同一套
+ * "回传 nextCursor" 的写法消费两种分页。
+ */
+export interface AlbumMembersPage {
+  items: FileItem[];
+  nextCursor: string | null;
 }
 
 export interface AlbumSyncArgs {

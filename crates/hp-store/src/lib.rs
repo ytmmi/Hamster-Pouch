@@ -9,7 +9,7 @@ mod util;
 pub use dict::{ConceptKey, MergeIndex, MergedConcept, TagDictDb, TagLibDb, TagLibSet};
 pub use global::{GlobalDb, PanelLayoutRow, RepoRow};
 pub use repo::{
-    build_source_tree, build_tag_tree, AlbumSourceMembers, FileQueryCursor, FileQueryFilter,
-    OpsHistoryRow, PurgePhase, PurgeResult, RepoDb, SourceDataCounts, SourceTree, TagTree,
-    TagTreeNode, TreeNode, FILE_QUERY_MAX_LIMIT,
+    build_source_tree, build_tag_tree, AlbumMemberCursor, AlbumSourceMembers, FileQueryCursor,
+    FileQueryFilter, OpsHistoryRow, PurgePhase, PurgeResult, RepoDb, SourceDataCounts, SourceTree,
+    TagTree, TagTreeNode, TreeNode, ALBUM_MEMBERS_MAX_LIMIT, FILE_QUERY_MAX_LIMIT,
 };

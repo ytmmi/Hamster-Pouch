@@ -21,6 +21,49 @@ import { sortFiles, type MediaSortKey, type SortDirection } from "./mediaPreview
 /** 工具条的类型筛选（`all` = 不筛）。 */
 export type MediaTypeFilter = "all" | "image" | "video" | "audio";
 
+/**
+ * 面板**一次取数**的页大小。
+ *
+ * 缺陷 0018 之前这里是写死的 `300`，而且**没有任何续页入口**——第 301 张之后
+ * 永远看不到。现在两种来源都按游标分页取到 `MEDIA_PREVIEW_MAX_ITEMS` 为止。
+ */
+export const MEDIA_PREVIEW_PAGE_LIMIT = 500;
+
+/**
+ * 面板单次装载的**条目上限**。
+ *
+ * 为什么不无限翻页：条目容器目前**没有虚拟化**（三种视图都是 `items.map`），
+ * 每个单元还要各建一个 `IntersectionObserver`（`mediaPreviewCell.tsx`）。
+ * 无上限地翻页只会把"看不到"换成"卡死"。这里给一个有界值，配合后续的
+ * 虚拟化再放宽——当前先保证"能翻到远多于 300 张"，而不是假装能一次装下全库。
+ */
+export const MEDIA_PREVIEW_MAX_ITEMS = 2000;
+
+/**
+ * 相册成员按游标分页取到上限（缺陷 0018）。
+ *
+ * `album.members` 现在与 `file.query` 同形（`items` + `nextCursor`），
+ * 因此这里与源路径共用同一套翻页写法。
+ */
+async function fetchAlbumPage(repoId: string, albumId: string): Promise<FileItem[]> {
+  const out: FileItem[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await api.albumMembers({
+      repoId,
+      albumId,
+      cursor,
+      limit: MEDIA_PREVIEW_PAGE_LIMIT,
+    });
+    out.push(...page.items);
+    cursor = page.nextCursor;
+    if (out.length >= MEDIA_PREVIEW_MAX_ITEMS) {
+      break;
+    }
+  } while (cursor);
+  return out.slice(0, MEDIA_PREVIEW_MAX_ITEMS);
+}
+
 /** 一条可渲染条目：文件本体 + 已解析的绝对路径 URL（无绝对路径时为空串）。 */
 export interface MediaPreviewItem {
   file: FileItem;
@@ -61,7 +104,9 @@ export function useMediaPreviewData(
     try {
       const [page, srcs] = await Promise.all([
         app.albumId
-          ? api.albumMembers({ repoId: app.repoId, albumId: app.albumId })
+          ? // 相册走**游标分页**（缺陷 0018）：取到面板上限为止。
+            // 旧实现一次性取回全部成员，大相册会把全部行读进内存并渲染成 DOM。
+            fetchAlbumPage(app.repoId, app.albumId)
           : api
               .fileQuery({
                 repoId: app.repoId,
@@ -70,7 +115,7 @@ export function useMediaPreviewData(
                   dirPrefix: app.dirPath ?? undefined,
                   mediaType: typeFilter === "all" ? undefined : typeFilter,
                 },
-                limit: 300,
+                limit: MEDIA_PREVIEW_PAGE_LIMIT,
               })
               .then((p) => p.items),
         api.sourceList({ repoId: app.repoId }),

@@ -218,7 +218,21 @@ impl AlbumService {
     }
 
     /// 相册可见成员：按有效媒体属性过滤后的文件索引行（D10）。
+    ///
+    /// **注意**：本函数一次性返回**全部**可见成员（无上限）。界面取数不要用它，
+    /// 走 `RepoDb::query_album_members_page` 的分页版本（`docs/issues/0018`）；
+    /// 保留它是给"确实需要全量"的内部逻辑（如测试与将来的导出）。
     pub fn visible_members(db: &RepoDb, album_id: &str) -> HpResult<Vec<FileIndexRow>> {
         crate::media::visible_members(db, album_id)
+    }
+
+    /// 相册的**有效**媒体属性（显式值优先、空值继承父相册、顶层空值 = `multimedia`，D10）。
+    ///
+    /// 分页取数需要先把属性解析出来，才能把它翻译成 SQL 的媒体类型过滤条件。
+    pub fn effective_media_type(db: &RepoDb, album_id: &str) -> HpResult<AlbumMediaType> {
+        let album = db
+            .get_album(album_id)?
+            .ok_or_else(|| hp_core::HpError::NotFound(format!("相册不存在: {album_id}")))?;
+        crate::media::resolve_media_type(db, &album)
     }
 }

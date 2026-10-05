@@ -17,13 +17,13 @@ import type {
   AlbumListArgs,
   AlbumMemberResult,
   AlbumMembersArgs,
+  AlbumMembersPage,
   AlbumRemoveMemberArgs,
   AlbumRemoveResult,
   AlbumRenameArgs,
   AlbumSetMediaTypeArgs,
   AlbumSetMediaTypeResult,
   AlbumSyncArgs,
-  FileItem,
 } from "../types";
 import { unwrapApi, type ApiResponse } from "./response";
 
@@ -81,11 +81,21 @@ export function albumList(args: AlbumListArgs): Promise<AlbumItem[]> {
   }).then(unwrapApi);
 }
 
-/** 列出相册可见成员 */
-export function albumMembers(args: AlbumMembersArgs): Promise<FileItem[]> {
-  return invoke<ApiResponse<FileItem[]>>("album_members", {
+/**
+ * 列出相册可见成员（**游标分页**，缺陷 0018）。
+ *
+ * 请求 `{ repoId, albumId, cursor?, limit? }`（`limit` 只是页大小）；
+ * 响应 `{ items, nextCursor }`——把 `nextCursor` 原样回传即可续页，`null` 表示末页。
+ * 排序键 `(added_at, file_id)`。
+ *
+ * **必须翻页取完**：旧实现一次性返回全部成员，5 万成员的相册会把全部行读进内存。
+ */
+export function albumMembers(args: AlbumMembersArgs): Promise<AlbumMembersPage> {
+  return invoke<ApiResponse<AlbumMembersPage>>("album_members", {
     repoId: args.repoId,
     albumId: args.albumId,
+    cursor: args.cursor ?? null,
+    limit: args.limit ?? null,
   }).then(unwrapApi);
 }
 
