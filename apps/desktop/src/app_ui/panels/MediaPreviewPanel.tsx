@@ -504,6 +504,13 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
                   <div
                     key={file.id}
                     ref={listVirtual.measureRef}
+                    // `data-index` 是 `measureElement` 的**必需属性**：虚拟化库靠它把
+                    // 被测量的 DOM 节点反查回行号（`indexFromElement` 读的就是这个属性）。
+                    // 少了它 `indexFromElement` 返回 -1、`isIndexInRange(-1)` 为假，
+                    // 测量被**整条跳过**（元素连观察都不会被观察），行高永远是首帧估计值
+                    // ——"测量行高"这个设计就完全失效了。库会在控制台打
+                    // `Missing attribute name 'data-index={index}'`。
+                    data-index={row.index}
                     className="mp-virtual-row mp-virtual-list"
                     style={{ transform: `translateY(${row.start}px)` }}
                   >

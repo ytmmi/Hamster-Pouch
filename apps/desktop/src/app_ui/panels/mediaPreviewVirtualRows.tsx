@@ -41,19 +41,6 @@ export interface VirtualRows {
   rows: VirtualRow[];
   /** 内容总高度（px）——滚动条长度由它决定，必须稳定，否则滚动条抖动。 */
   totalSize: number;
-  /**
-   * 当前窗口的**行号区间** `[start, end)`。
-   *
-   * 缩略图单元用它判断"要不要请求缩略图"，替代逐格 `IntersectionObserver`
-   * （缺陷 0018：5 万个单元各建一个观察器）。
-   */
-  range: { start: number; end: number };
-}
-
-/** 行数组 → 行号区间（空数组得空区间）。 */
-export function rowsRange(rows: readonly VirtualRow[]): { start: number; end: number } {
-  if (rows.length === 0) return { start: 0, end: 0 };
-  return { start: rows[0].index, end: rows[rows.length - 1].index + 1 };
 }
 
 /**
@@ -97,7 +84,6 @@ export function useFixedRowVirtualizer(
   return {
     rows,
     totalSize: virtualizer.getTotalSize(),
-    range: rowsRange(rows),
   };
 }
 
@@ -108,7 +94,10 @@ export function useFixedRowVirtualizer(
  * 渲染后由 `measureElement` 量回真实高度。这样**不必把字体行高猜死**——猜错会让
  * "行号 × 行高"与浏览器实际布局逐渐错位（越滚越偏），而字体度量随语言/缩放变化。
  *
- * 用法：把 `measureRef` 挂到每一行的**外层元素**上。
+ * **用法（缺一不可）**：把 `measureRef` 挂到每一行的**外层元素**上，并给该元素加
+ * `data-index={行号}`。库靠 `data-index` 把 DOM 节点反查回行号；少了它测量会被
+ * **整条跳过**（`indexFromElement` 返回 -1 → `isIndexInRange(-1)` 为假），
+ * 行高永远停在首帧估计值。这是实测确认过的（见缺陷 0018 的记录）。
  */
 export function useMeasuredRowVirtualizer(
   scrollRef: React.RefObject<HTMLElement | null>,
@@ -141,7 +130,6 @@ export function useMeasuredRowVirtualizer(
   return {
     rows,
     totalSize: virtualizer.getTotalSize(),
-    range: rowsRange(rows),
     measureRef: virtualizer.measureElement,
   };
 }

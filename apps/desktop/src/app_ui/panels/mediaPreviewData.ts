@@ -116,14 +116,18 @@ export function useMediaPreviewData(
         // 逐页推进：**首屏第一页到手即渲染**，其余页在后台继续翻。
         // 之所以不是"滚到底再续页"，见 `mediaPreviewPaging.ts` 的说明（前端排序需要全库）。
         //
-        // 进度刷新**必须节流**：每页都 `setFiles` 会让下面那个 O(n log n) 的前端排序
-        // 跟着跑上百遍（5 万张 × `localeCompare`），比翻页本身贵一个数量级。
-        // 首屏立即出图之后，中间过程对用户没有价值，改为每 10 页刷一次。
-        let pageCount = 0;
+        // 进度刷新**必须节流**，而且**只刷新首屏那一次**：每次 `setFiles` 都会让下面那个
+        // O(n log n) 的前端排序重跑一遍（实测：5 万项名称排序约 281 ms，见缺陷 0018 的
+        // 记录）。若每页都刷，5 万张（100 页）期间会累计重排约 100 次、单线程阻塞十余秒；
+        // 即便"每 10 页刷一次"也仍有约 10 次 × 递增的全量重排（合计仍是秒级卡顿）。
+        //
+        // 中间过程对用户没有价值（首屏已经出图、计数另有 `loading` 提示），
+        // 因此只在第一页刷一次，其余等 `drainPages` 返回后一次性落地。
+        let firstPageRendered = false;
         const all = await drainPages<FileItem>(fetchPage, {
           onPage: (_added, accumulated) => {
-            pageCount += 1;
-            if (pageCount !== 1 && pageCount % 10 !== 0) return;
+            if (firstPageRendered) return;
+            firstPageRendered = true;
             if (isCancelled()) return;
             setFiles([...accumulated]);
           },

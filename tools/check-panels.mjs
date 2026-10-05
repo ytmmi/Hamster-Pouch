@@ -708,6 +708,18 @@ check(
     !/\}, \[app, typeFilter\]\)/.test(mediaFamilySrc),
 );
 
+check(
+  "后台翻页的**进度刷新只做首屏一次**（每次 `setFiles` 都会让前端全量排序重跑）",
+  // 实测：5 万项名称排序约 281 ms（`localeCompare`）。若每页刷一次，5 万张（100 页）
+  // 期间累计重排约 100 次、单线程阻塞十余秒；"每 10 页刷一次"仍有约 10 次递增的全量
+  // 重排。中间过程对用户没有价值（首屏已出图、计数另有 `loading` 提示），
+  // 因此只在第一页刷一次。
+  /let firstPageRendered = false;/.test(mediaFamilySrc) &&
+    /if \(firstPageRendered\) return;/.test(mediaFamilySrc) &&
+    // 反向：不得再出现"每 N 页刷一次"那种按页数取模的节流。
+    !/pageCount % \d+ !== 0/.test(mediaFamilySrc),
+);
+
 // ---- 缺陷 0018 P1-A：**虚拟化的行模型**（`mediaPreviewVirtual.ts`）----
 //
 // 容器虚拟化要先把条目切成"行"，行模型错了会直接表现为"丢项/重复/空白行"。
@@ -789,7 +801,16 @@ check(
   "列表视图的行高走**测量**而不是猜死（文字度量随语言/系统缩放变化）",
   /useMeasuredRowVirtualizer\(\s*listRef,/.test(mediaPanelSrc) &&
     /ref=\{listVirtual\.measureRef\}/.test(mediaPanelSrc) &&
-    /listRowHeight\(\)/.test(mediaPanelSrc),
+    /listRowHeight\(\)/.test(mediaPanelSrc) &&
+    // **`data-index` 是测量生效的前提**：库靠它把 DOM 节点反查回行号
+    // （`indexFromElement` 读的就是这个属性）。少了它 → 返回 -1 →
+    // `isIndexInRange(-1)` 为假 → 测量被**整条跳过**，行高永远停在首帧估计值，
+    // 而且只在控制台打一句 warning。这是实测确认过的坑，必须钉住。
+    /data-index=\{row\.index\}/.test(mediaPanelSrc) &&
+    // 挂 `measureRef` 的元素与 `data-index` 必须在**同一个** DOM 节点上：
+    // 库是"对回调传入的那个 node"读属性的，挂错层级同样读不到。
+    // （窗口放宽到 900 字符：两者之间夹着上面那段说明注释。）
+    /ref=\{listVirtual\.measureRef\}[\s\S]{0,900}?data-index=\{row\.index\}/.test(mediaPanelSrc),
 );
 
 check(
