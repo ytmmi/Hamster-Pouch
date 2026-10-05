@@ -11,9 +11,11 @@ hp-media = { path = "../hp-media" }
 walkdir = "2"
 notify = "6"
 time = { version = "0.3", features = ["formatting"] }
+# 扫描期**只解码一次**图片（`scan_compute.rs`）：旧实现让感知哈希与调色板各自
+# `image::open` 一次，大图（9000² = 81 MP）的重采样成本因此翻倍。见 `docs/issues/0018`。
+image = "0.25"
 
 [dev-dependencies]
 tempfile = "3"
-image = "0.25"
 # 测试要解析 `color_refs.color_json`（形状是跨端契约：`version` / `colors` / `locked`）。
 serde_json = "1"

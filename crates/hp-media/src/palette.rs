@@ -57,15 +57,28 @@ pub fn palette_is_locked(color_json: &str) -> bool {
 }
 
 /// 提取图片主色调；`max_colors` 为 0 时使用 [`DEFAULT_PALETTE_SIZE`]。
+///
+/// 这是"自带解码"的入口；**扫描路径不该用它**——那里已经为感知哈希解码过一次，
+/// 应当复用同一张已解码图像走 [`extract_palette_from_image`]（大图重采样是主要成本，
+/// 见 `docs/issues/0018`）。
 pub fn extract_palette(path: &Path, max_colors: usize) -> HpResult<Palette> {
+    let img =
+        image::open(path).map_err(|e| HpError::Io(format!("读取图片失败: {e}")))?;
+    Ok(extract_palette_from_image(&img, max_colors))
+}
+
+/// 从**已解码**图像提取主色调；`max_colors` 为 0 时使用 [`DEFAULT_PALETTE_SIZE`]。
+///
+/// 与 [`extract_palette`] 是**同一份算法**（后者只是先 `image::open` 再委托到这里），
+/// 因此两条路径的结果**逐位相同**——这不是"近似等价"，是同一段代码。
+/// 存在的唯一理由是让调用方（扫描器）把解码复用给感知哈希，避免同一张图解码两次。
+pub fn extract_palette_from_image(img: &image::DynamicImage, max_colors: usize) -> Palette {
     let max_colors = if max_colors == 0 {
         DEFAULT_PALETTE_SIZE
     } else {
         max_colors
     };
 
-    let img =
-        image::open(path).map_err(|e| HpError::Io(format!("读取图片失败: {e}")))?;
     let small = img.resize_exact(64, 64, image::imageops::FilterType::Triangle);
     let rgb = small.to_rgb8();
 
@@ -92,7 +105,7 @@ pub fn extract_palette(path: &Path, max_colors: usize) -> HpResult<Palette> {
         })
         .collect();
 
-    Ok(Palette { colors })
+    Palette { colors }
 }
 
 #[cfg(test)]

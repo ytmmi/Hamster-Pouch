@@ -1,4 +1,10 @@
 //! 媒体源扫描器：遍历、媒体类型判定、哈希、索引、变更检测、移动识别（D11/D12/D16）。
+//!
+//! **执行模型（`docs/issues/0018`）**：索引阶段是"**串行准备 → 有界并行计算 → 串行写库**"
+//! 的三段式。解码 / 哈希 / 抽帧这些只依赖文件本身的工作放在并行段（大图库实测 4–6×），
+//! 数据库写入留在串行段（`RepoDb` 是 `&mut`，本就不该跨线程）。
+//! 内存由 `scan_pool` 的**像素预算**兜底：9000² 一张图解码后约 231 MB，
+//! 不做限流的话 16 个核同时持图会 OOM。
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,13 +14,15 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use hp_core::{
     FileId, FileIndexRow, HpError, HpResult, MediaType, Source, ThumbStatus, VerifyStatus,
 };
-use hp_hash::{dhash_file, hash_file, ContentHash, PerceptualHash};
-use hp_media::{encode_palette_json, extract_palette, palette_is_locked, ThumbnailCache};
+use hp_hash::{ContentHash, PerceptualHash};
+use hp_media::{encode_palette_json, palette_is_locked, ThumbnailCache};
 use hp_store::RepoDb;
 use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
 
 use crate::media_type::detect_media_type;
+use crate::scan_pool;
+use crate::scan_task::{compute, pixel_cost, Computed, Prepared};
 
 /// 遍历阶段的进度上报间隔（节流，避免海量小文件把事件通道打满）。
 const WALK_REPORT_INTERVAL: Duration = Duration::from_millis(200);
@@ -239,27 +247,16 @@ impl Scanner {
 
         let source_id = source.id.as_str();
 
-        // 2. 逐文件处理
-        for (i, path) in entries.iter().enumerate() {
-            if !self.wait_if_paused(extra_cancel)? {
-                outcome.cancelled = true;
-                return Ok(outcome);
-            }
-
+        // 2. **串行准备**：媒体类型判定、stat、查既有行、判定调色板是否要重算。
+        //    这些都是廉价操作（一次索引查询 + 一次 stat），不涉及解码；
+        //    昂贵的解码/哈希/抽帧留到下一阶段的**并行**里做。
+        let mut prepared_list: Vec<Prepared> = Vec::with_capacity(entries.len());
+        for path in entries.iter() {
             let relative = match path.strip_prefix(root) {
                 Ok(r) => r,
                 Err(_) => continue,
             };
             let relative_path = relative.to_string_lossy().replace('\\', "/");
-
-            // 先上报"正在处理哪个文件"：大视频的哈希/抽帧单文件就要数秒，
-            // 只在处理完后上报会让进度条长时间停在同一格，看起来像卡死。
-            on_progress(&ScanProgress {
-                processed: i as u64,
-                total,
-                phase: ScanPhase::Indexing,
-                current: Some(relative_path.clone()),
-            });
 
             let media_type = match detect_media_type(path) {
                 Some(mt) => mt,
@@ -278,19 +275,75 @@ impl Scanner {
             };
 
             let existing = db.get_file_by_path(source_id, &relative_path)?;
-            match existing {
-                None => self.index_new(
-                    db, source, path, &relative_path, media_type, size, &mtime, options, &mut outcome,
-                )?,
-                Some(row) => {
-                    let changed = options.full || row.size != size || row.mtime != mtime;
-                    if changed {
-                        self.index_existing(
-                            db, source, path, &relative_path, media_type, size, &mtime, &row,
-                            options, &mut outcome,
-                        )?;
-                    }
+            // 内容未变且非全量重扫 → 整条跳过（不哈希、不解码）。
+            let unchanged = match &existing {
+                Some(row) => !(options.full || row.size != size || row.mtime != mtime),
+                None => false,
+            };
+            // 调色板：仅图片需要；**手动锁定**的色值是用户的判定权，重扫不得覆盖，
+            // 因此这里就把"要不要算"定下来，省掉并行阶段那次无用的重采样。
+            let want_palette = media_type == MediaType::Image
+                && !unchanged
+                && !self.palette_is_locked(db, existing.as_ref())?;
+
+            prepared_list.push(Prepared {
+                path: path.clone(),
+                relative_path,
+                media_type,
+                size,
+                mtime,
+                unchanged,
+                existing_id: existing.map(|row| row.id.as_str().to_string()),
+                want_palette,
+            });
+        }
+
+        // 3. **并行计算 → 串行写库**，按块流水线推进。
+        //
+        //    为什么要分块而不是"全部算完再全部写"：① 进度必须持续推进，否则界面会在
+        //    大库上长时间停在 0；② 并行结果会同时持有解码后的派生数据，分块把峰值内存
+        //    钉在一个有界的量级上（真正的内存闸门是 `scan_pool` 的像素预算）。
+        //
+        //    **取消语义与旧实现一致**：取消**在文件粒度**上检查（见下面写库循环），
+        //    因此"取消 → 立刻返回"的响应性与旧实现相同；并行计算本身不可中断
+        //    （单张图的解码/抽帧一旦开始就停不下来，旧实现同样如此），
+        //    块大小取"核数"以保证取消的等待上限只有一块的计算时间。
+        let chunk_size = scan_pool::worker_count().max(1);
+        let mut processed: u64 = 0;
+        for chunk in prepared_list.chunks(chunk_size) {
+            if !self.wait_if_paused(extra_cancel)? {
+                outcome.cancelled = true;
+                return Ok(outcome);
+            }
+
+            // 并行计算期间也要让界面知道"在做什么"：大图一块可能就要好几秒，
+            // 只在写库阶段上报会让进度条在计算期间完全静止（看起来像卡死）。
+            if let Some(first) = chunk.first() {
+                on_progress(&ScanProgress {
+                    processed,
+                    total,
+                    phase: ScanPhase::Indexing,
+                    current: Some(first.relative_path.clone()),
+                });
+            }
+
+            let computed =
+                scan_pool::map_bounded(chunk, pixel_cost, |p: &Prepared| compute(p, options));
+
+            for (prep, comp) in chunk.iter().zip(computed.into_iter()) {
+                // **文件粒度**的取消/暂停检查：与旧实现逐文件循环的响应性一致。
+                if !self.wait_if_paused(extra_cancel)? {
+                    outcome.cancelled = true;
+                    return Ok(outcome);
                 }
+                on_progress(&ScanProgress {
+                    processed,
+                    total,
+                    phase: ScanPhase::Indexing,
+                    current: Some(prep.relative_path.clone()),
+                });
+                self.write_one(db, source, prep, comp, &mut outcome)?;
+                processed += 1;
             }
         }
 
@@ -340,269 +393,121 @@ impl Scanner {
             .ok_or_else(|| HpError::NotFound(format!("不支持的媒体类型: {relative_path}")))?;
         let (size, mtime) = file_stat(&path)
             .ok_or_else(|| HpError::NotFound(format!("无法读取文件: {relative_path}")))?;
-        match db.get_file_by_path(source.id.as_str(), relative_path)? {
-            Some(row) => self.index_existing(
-                db, source, &path, relative_path, media_type, size, &mtime, &row, options,
-                &mut outcome,
-            )?,
-            None => self.index_new(
-                db, source, &path, relative_path, media_type, size, &mtime, options, &mut outcome,
-            )?,
-        }
+        let existing = db.get_file_by_path(source.id.as_str(), relative_path)?;
+        // 单文件分析**总是**重算（这正是"重新分析"的语义），因此 `unchanged` 恒为 false。
+        let want_palette = media_type == MediaType::Image
+            && !self.palette_is_locked(db, existing.as_ref())?;
+        let prepared = Prepared {
+            path: path.clone(),
+            relative_path: relative_path.to_string(),
+            media_type,
+            size,
+            mtime,
+            unchanged: false,
+            existing_id: existing.map(|row| row.id.as_str().to_string()),
+            want_palette,
+        };
+        let computed = compute(&prepared, options);
+        self.write_one(db, source, &prepared, computed, &mut outcome)?;
         Ok(outcome)
     }
 
-    /// 索引全新文件（含移动/重命名识别）。
-    #[allow(clippy::too_many_arguments)]
-    fn index_new(
-        &self,
-        db: &mut RepoDb,
-        source: &Source,
-        path: &Path,
-        relative_path: &str,
-        media_type: MediaType,
-        size: i64,
-        mtime: &str,
-        options: &ScanOptions,
-        outcome: &mut ScanOutcome,
-    ) -> HpResult<()> {
-        match media_type {
-            MediaType::Image => {
-                let content = match hash_file(path) {
-                    Ok(c) => c,
-                    Err(_) => {
-                        return self.write_unreadable(db, source, relative_path, media_type, size, mtime);
-                    }
-                };
-                let perceptual = dhash_file(path).ok();
-                let id = FileId::generate();
-                let row = self.build_row(
-                    id.clone(),
-                    source,
-                    relative_path,
-                    media_type,
-                    size,
-                    mtime,
-                    Some(content),
-                    perceptual,
-                    VerifyStatus::Ok,
-                    ThumbStatus::NotGenerated,
-                    None,
-                );
-                self.upsert_or_move(db, &row)?;
-                // 调色板是**全面分析的副产品**（与哈希/缩略图/媒体信息同批），
-                // 因此不需要第三个触发入口：源扫描（含"全量重扫"）与「重新分析该文件」都走这里。
-                self.write_palette(db, id.as_str(), path);
-                outcome.indexed += 1;
-            }
-            MediaType::Video => {
-                let content = match hash_file(path) {
-                    Ok(c) => c,
-                    Err(_) => {
-                        return self.write_unreadable(db, source, relative_path, media_type, size, mtime);
-                    }
-                };
-                let (thumb_status, perceptual, media_info) =
-                    self.process_video(path, &content, options);
-                let row = self.build_row(
-                    FileId::generate(),
-                    source,
-                    relative_path,
-                    media_type,
-                    size,
-                    mtime,
-                    Some(content),
-                    perceptual,
-                    VerifyStatus::Ok,
-                    thumb_status,
-                    media_info,
-                );
-                self.upsert_or_move(db, &row)?;
-                outcome.indexed += 1;
-            }
-            MediaType::Audio => {
-                // 占位行（D11）：无哈希/缩略图
-                let row = self.build_row(
-                    FileId::generate(),
-                    source,
-                    relative_path,
-                    media_type,
-                    size,
-                    mtime,
-                    None,
-                    None,
-                    VerifyStatus::Placeholder,
-                    ThumbStatus::NotGenerated,
-                    None,
-                );
-                db.upsert_file(&row)?;
-                outcome.indexed += 1;
-            }
-        }
-        Ok(())
-    }
-
-    /// 顺带提取并写入**调色板**（仅图片，D18）。
+    /// 某文件当前的调色板是否被**手动锁定**（`locked: true`）。
     ///
-    /// 用户口径（2026-09）：调色板**不再由界面点击触发**，而是"**全面分析文件**"的副产品
-    /// ——源扫描 / 源全量重扫 / 「重新分析该文件」都会走到 `index_new` / `index_existing`，
-    /// 这里就是那条统一的下游。
-    ///
-    /// 两条边界（都是"不许越权"的性质）：
-    ///
-    /// 1. **失败不影响索引**：调色板不是身份或检索数据，解码失败就当没有
-    ///    （与同一函数里的 `dhash_file(path).ok()` 同口径）；面板会显示"重新分析可提取"的提示，
-    ///    而不是让整次扫描失败。
-    /// 2. **不覆盖手动锁定**：`color.set` 写入的 `locked:true` 是用户的判定权，重扫不得抹掉它。
-    fn write_palette(&self, db: &mut RepoDb, file_id: &str, path: &Path) {
-        if let Ok(Some(existing)) = db.get_color_ref(file_id) {
-            if palette_is_locked(&existing.color_json) {
-                return;
-            }
-        }
-        let Ok(palette) = extract_palette(path, 0) else {
-            return;
+    /// 锁定是用户的判定权，重扫不得覆盖；在**准备阶段**就问一次，可以让并行阶段
+    /// 干脆不算它（省下一次全尺寸重采样）。查询失败按"未锁定"处理，与旧实现
+    /// `write_palette` 里 `if let Ok(Some(..))` 的容错口径一致。
+    fn palette_is_locked(&self, db: &RepoDb, existing: Option<&FileIndexRow>) -> HpResult<bool> {
+        let Some(row) = existing else {
+            return Ok(false);
         };
-        let _ = db.upsert_color_ref(file_id, &encode_palette_json(&palette.colors));
+        Ok(matches!(
+            db.get_color_ref(row.id.as_str())?,
+            Some(existing_color) if palette_is_locked(&existing_color.color_json)
+        ))
     }
 
-    /// 索引已存在但发生变化的文件（同名替换/内容变更，保留原 id）。
-    #[allow(clippy::too_many_arguments)]
-    fn index_existing(
+    /// **串行写库**：把并行阶段算好的派生数据落成索引行（+ 调色板）。
+    ///
+    /// 这是原 `index_new` / `index_existing` 的合并版——两者的差别只在"用不用既有 id"
+    /// 与"不可读时更新状态还是写占位行"，其余（建行、upsert、移动识别、写调色板）完全一致。
+    fn write_one(
         &self,
         db: &mut RepoDb,
         source: &Source,
-        path: &Path,
-        relative_path: &str,
-        media_type: MediaType,
-        size: i64,
-        mtime: &str,
-        existing: &FileIndexRow,
-        options: &ScanOptions,
+        prep: &Prepared,
+        comp: Computed,
         outcome: &mut ScanOutcome,
     ) -> HpResult<()> {
-        match media_type {
-            MediaType::Image => {
-                let content = match hash_file(path) {
-                    Ok(c) => c,
-                    Err(_) => {
-                        db.update_file_status(
-                            existing.id.as_str(),
-                            VerifyStatus::Unreadable,
-                            0,
-                        )?;
-                        outcome.changed += 1;
-                        return Ok(());
-                    }
-                };
-                let perceptual = dhash_file(path).ok();
-                let row = self.build_row(
-                    existing.id.clone(),
-                    source,
-                    relative_path,
-                    media_type,
-                    size,
-                    mtime,
-                    Some(content),
-                    perceptual,
-                    VerifyStatus::Ok,
-                    ThumbStatus::NotGenerated,
-                    None,
-                );
-                db.upsert_file(&row)?;
-                // 同 `index_new`：调色板顺带提取（`options.full` 时每个文件都会走到这里，
-                // 因此"源全量重扫"会把全部图片的调色板重算一遍）。
-                self.write_palette(db, existing.id.as_str(), path);
-                outcome.changed += 1;
-            }
-            MediaType::Video => {
-                let content = match hash_file(path) {
-                    Ok(c) => c,
-                    Err(_) => {
-                        db.update_file_status(
-                            existing.id.as_str(),
-                            VerifyStatus::Unreadable,
-                            0,
-                        )?;
-                        outcome.changed += 1;
-                        return Ok(());
-                    }
-                };
-                let (thumb_status, perceptual, media_info) =
-                    self.process_video(path, &content, options);
-                let row = self.build_row(
-                    existing.id.clone(),
-                    source,
-                    relative_path,
-                    media_type,
-                    size,
-                    mtime,
-                    Some(content),
-                    perceptual,
-                    VerifyStatus::Ok,
-                    thumb_status,
-                    media_info,
-                );
-                db.upsert_file(&row)?;
-                outcome.changed += 1;
-            }
-            MediaType::Audio => {
-                let row = self.build_row(
-                    existing.id.clone(),
-                    source,
-                    relative_path,
-                    media_type,
-                    size,
-                    mtime,
-                    None,
-                    None,
-                    VerifyStatus::Placeholder,
-                    ThumbStatus::NotGenerated,
-                    None,
-                );
-                db.upsert_file(&row)?;
-                outcome.changed += 1;
-            }
-        }
-        Ok(())
-    }
+        let is_new = prep.existing_id.is_none();
 
-    /// 视频处理：ffprobe 元数据 + ffmpeg 首帧抽帧 + 首帧感知哈希（D12/D15/D16）。
-    fn process_video(
-        &self,
-        path: &Path,
-        content: &ContentHash,
-        options: &ScanOptions,
-    ) -> (ThumbStatus, Option<PerceptualHash>, Option<String>) {
-        let mut thumb_status = ThumbStatus::NotGenerated;
-        let mut perceptual: Option<PerceptualHash> = None;
-        let mut media_info: Option<String> = None;
-
-        if let Some(ffprobe) = &options.ffprobe_bin {
-            if let Ok(info) = hp_media::probe(path, ffprobe, options.video_timeout) {
-                media_info = Some(info.raw_json);
-            }
+        // 内容未变且非全量重扫：什么都不做（旧实现同样不写库、不计入统计）。
+        if prep.unchanged {
+            return Ok(());
         }
 
-        if let (Some(ffmpeg), Some(cache)) = (&options.ffmpeg_bin, &options.thumbnail_cache) {
-            let thumb_path = cache.path_for(&content.value);
-            if cache.ensure_dir_for(&content.value).is_ok() {
-                match hp_media::extract_thumbnail(
-                    path,
-                    &thumb_path,
-                    ffmpeg,
-                    options.video_timeout,
-                ) {
-                    Ok(()) => {
-                        thumb_status = ThumbStatus::Generated;
-                        perceptual = dhash_file(&thumb_path).ok();
-                    }
-                    Err(_) => thumb_status = ThumbStatus::Failed,
+        if comp.unreadable {
+            // 读不到内容（RFC 0001）：新文件写"不可读"占位行，既有文件只更新状态。
+            match &prep.existing_id {
+                Some(id) => {
+                    db.update_file_status(id, VerifyStatus::Unreadable, 0)?;
+                    outcome.changed += 1;
+                }
+                None => {
+                    self.write_unreadable(
+                        db,
+                        source,
+                        &prep.relative_path,
+                        prep.media_type,
+                        prep.size,
+                        &prep.mtime,
+                    )?;
+                    outcome.indexed += 1;
                 }
             }
+            return Ok(());
         }
 
-        (thumb_status, perceptual, media_info)
+        // 音频是占位行（D11）：有 media_type、无哈希/缩略图。
+        let placeholder = prep.media_type == MediaType::Audio;
+        let verify_status = if placeholder {
+            VerifyStatus::Placeholder
+        } else {
+            VerifyStatus::Ok
+        };
+        let id = match &prep.existing_id {
+            Some(id) => FileId::from_raw(id),
+            None => FileId::generate(),
+        };
+        let row = self.build_row(
+            id.clone(),
+            source,
+            &prep.relative_path,
+            prep.media_type,
+            prep.size,
+            &prep.mtime,
+            comp.content,
+            comp.perceptual,
+            verify_status,
+            comp.thumb_status.unwrap_or(ThumbStatus::NotGenerated),
+            comp.media_info,
+        );
+
+        if is_new {
+            // 新文件：先试"移动/重命名识别"（内容哈希一致且旧路径已消失 → 保留身份）。
+            self.upsert_or_move(db, &row)?;
+            outcome.indexed += 1;
+        } else {
+            db.upsert_file(&row)?;
+            outcome.changed += 1;
+        }
+
+        // 调色板是"全面分析"的副产品（D18）：并行阶段算好，这里只落库。
+        // `want_palette == false`（手动锁定 / 不需要）时 `comp.palette` 为 None，跳过。
+        if let Some(colors) = comp.palette.as_deref() {
+            let _ = db.upsert_color_ref(id.as_str(), &encode_palette_json(colors));
+        }
+        Ok(())
     }
 
     /// 写入无法读取的文件占位（RFC 0001）。
