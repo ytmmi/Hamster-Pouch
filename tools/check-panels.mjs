@@ -553,6 +553,7 @@ const mediaDropdownSrc = readFileSync(
 const MEDIA_FAMILY_FILES = [
   "apps/desktop/src/app_ui/panels/MediaPreviewPanel.tsx",
   "apps/desktop/src/app_ui/panels/mediaPreviewData.ts",
+  "apps/desktop/src/app_ui/panels/mediaPreviewPaging.ts",
   "apps/desktop/src/app_ui/panels/mediaPreviewSession.ts",
   "apps/desktop/src/app_ui/panels/mediaPreviewToolbar.tsx",
   "apps/desktop/src/app_ui/panels/mediaPreviewActions.ts",
@@ -574,6 +575,135 @@ const panelForegroundSrc = readFileSync(
 );
 const mediaView = await import(
   pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewView.ts")).href
+);
+const mediaPaging = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewPaging.ts")).href
+);
+
+// ---- 缺陷 0018 P1-A：**全库游标翻页**的纯逻辑（`mediaPreviewPaging.ts`）----
+//
+// 取数上限从"有界的一页"放开为"整个来源"之后，**循环安全**的来源变了：
+// 旧实现靠 `MEDIA_PREVIEW_MAX_ITEMS` 兜底，现在那个上限正是要取消的东西，
+// 于是只能靠"游标必须严格前进 + 页数上限"保证一个写坏的 `nextCursor` 不会变成死循环。
+// 这些用例是**行为断言**（直接跑真函数），不是源码正则——正则守不住死循环。
+const pageStub = (pages) => {
+  const calls = [];
+  let index = 0;
+  const fetchPage = async (cursor) => {
+    calls.push(cursor);
+    const page = pages[index++];
+    // 取数次数超出预期时抛错而不是挂住：死循环在测试里要**立刻失败**，不是等超时。
+    if (!page) throw new Error(`取数次数超出预期（第 ${index} 次）`);
+    return page;
+  };
+  return { fetchPage, calls };
+};
+const fileAt = (n) => ({ id: `f${n}` });
+
+{
+  const three = pageStub([
+    { items: [fileAt(1), fileAt(2)], nextCursor: "c1" },
+    { items: [fileAt(3)], nextCursor: "c2" },
+    { items: [fileAt(4)], nextCursor: null },
+  ]);
+  const drained = await mediaPaging.drainPages(three.fetchPage);
+  check(
+    "翻页取完**整个来源**：首游标为 `null`，其后一律回传上一页的 `nextCursor`，`null` 即末页",
+    three.calls.length === 3 &&
+      JSON.stringify(three.calls) === JSON.stringify([null, "c1", "c2"]) &&
+      drained.map((f) => f.id).join(",") === "f1,f2,f3,f4",
+    `调用=${JSON.stringify(three.calls)} 条目=${drained.map((f) => f.id).join(",")}`,
+  );
+}
+
+{
+  const single = pageStub([{ items: [fileAt(1)], nextCursor: null }]);
+  const drained = await mediaPaging.drainPages(single.fetchPage);
+  check(
+    "只有一页时不发第二次请求（`nextCursor === null` 即停）",
+    single.calls.length === 1 && drained.length === 1,
+    `调用=${single.calls.length}`,
+  );
+}
+
+{
+  // 后端若把游标写坏（永远回同一个非 null 值），旧式 `while (cursor)` 会永远翻下去。
+  const looped = pageStub([
+    { items: [fileAt(1)], nextCursor: "same" },
+    { items: [fileAt(2)], nextCursor: "same" },
+    { items: [fileAt(3)], nextCursor: "same" },
+  ]);
+  const result = await mediaPaging.drainPages(looped.fetchPage);
+  check(
+    "游标**不前进**（后端写坏）时立即停止，不退化成死循环",
+    looped.calls.length === 2 && result.length === 2,
+    `调用=${looped.calls.length} 条目=${result.length}`,
+  );
+}
+
+{
+  const dup = pageStub([
+    { items: [fileAt(1), fileAt(2)], nextCursor: "c1" },
+    { items: [fileAt(2), fileAt(3)], nextCursor: null },
+  ]);
+  const result = await mediaPaging.drainPages(dup.fetchPage);
+  check(
+    "跨页重复 id 去重且保持首次出现的顺序（库内容在翻页途中变动时不得出现重复单元）",
+    result.map((f) => f.id).join(",") === "f1,f2,f3",
+    `条目=${result.map((f) => f.id).join(",")}`,
+  );
+}
+
+{
+  const pages = pageStub([
+    { items: [fileAt(1)], nextCursor: "c1" },
+    { items: [fileAt(2)], nextCursor: null },
+  ]);
+  let stop = false;
+  const result = await mediaPaging.drainPages(pages.fetchPage, {
+    isCancelled: () => stop,
+    onPage: () => {
+      stop = true;
+    },
+  });
+  check(
+    "翻页途中取消：**不再多发请求**（全库翻页可能上百次往返，卸载/切换来源后必须立刻停）",
+    pages.calls.length === 1 && result.length === 1,
+    `取消后调用=${pages.calls.length}`,
+  );
+}
+
+{
+  const progressive = pageStub([
+    { items: [fileAt(1), fileAt(2)], nextCursor: "c1" },
+    { items: [fileAt(3)], nextCursor: "c2" },
+    { items: [fileAt(4)], nextCursor: null },
+  ]);
+  const seen = [];
+  await mediaPaging.drainPages(progressive.fetchPage, {
+    onPage: (_added, accumulated) => seen.push(accumulated.length),
+  });
+  check(
+    "首屏**第一页到手即回调**（不是等全部翻完才出图），且累计数单调增长",
+    JSON.stringify(seen) === JSON.stringify([2, 3, 4]),
+    `每页累计=${JSON.stringify(seen)}`,
+  );
+}
+
+check(
+  "取数上限已放开为**整个来源**：不再有 `MEDIA_PREVIEW_MAX_ITEMS` 截断，页大小仍是 500",
+  !/MEDIA_PREVIEW_MAX_ITEMS/.test(mediaFamilySrc) &&
+    mediaPaging.MEDIA_PREVIEW_PAGE_LIMIT === 500 &&
+    /drainPages/.test(mediaFamilySrc),
+);
+
+check(
+  "面板取数只依赖「看的是哪个来源」，**不依赖 `app` 整个对象**",
+  // `app` 上下文对象在每次选中变化时都会换身份（`selectedIds` / `selectedFile` 是
+  // `AppUiApp` 那个 `useMemo` 的依赖项）。若取数依赖它，用户每点一下缩略图都会重跑
+  // 整个取数——在"翻完全库"的语义下就是每次点击重发上百次游标请求。
+  /\[repoId, albumId, sourceId, dirPath, typeFilter, refreshKey\]/.test(mediaFamilySrc) &&
+    !/\}, \[app, typeFilter\]\)/.test(mediaFamilySrc),
 );
 const mediaSpec = config.panelSpec("media");
 const mediaSettingKeys = (mediaSpec?.settings ?? []).map((s) => s.key);

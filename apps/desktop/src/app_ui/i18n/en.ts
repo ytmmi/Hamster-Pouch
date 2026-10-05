@@ -266,6 +266,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "media.filter.audio": "Audio",
   "media.selectedCount": "Selected {selected} / {total}",
   "media.itemCount": "{count} items",
+  "media.loadingAll": "Loading {count} items…",
+  "media.loadingAllHint": "Loading every file; size/time sorting covers the whole source only when this finishes",
   "media.noFiles": "No files",
   "media.copyPath": "Copy file path",
   "media.reanalyzeFile": "Re-analyze this file",

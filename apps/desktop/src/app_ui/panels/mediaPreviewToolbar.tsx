@@ -45,6 +45,13 @@ export interface MediaPreviewToolbarProps {
   /** 已选中条目数与当前页条目总数（工具条中部的计数文案）。 */
   selectedCount: number;
   totalCount: number;
+  /**
+   * 是否仍在**后台翻页**（全库可翻之后，取数是"首屏第一页 + 后台继续翻完"）。
+   *
+   * 为真时计数必须如实说明"还只是已取到的部分"——否则用户看到 `500 项` 会以为
+   * 库里只有 500 张，而这正是缺陷 0018 里"只能看到 300 张"的观感来源。
+   */
+  loading: boolean;
   view: MediaViewMode;
   imageSize: number;
   sortKey: MediaSortKey;
@@ -63,6 +70,7 @@ export function MediaPreviewToolbar({
   onTypeFilterChange,
   selectedCount,
   totalCount,
+  loading,
   view,
   imageSize,
   sortKey,
@@ -127,13 +135,15 @@ export function MediaPreviewToolbar({
         <option value="video">{t("media.filter.video")}</option>
         <option value="audio">{t("media.filter.audio")}</option>
       </select>
-      <span className="mp-count">
+      <span className="mp-count" title={loading ? t("media.loadingAllHint") : undefined}>
         {selectedCount > 0
           ? t("media.selectedCount", {
               selected: selectedCount,
               total: totalCount,
             })
-          : t("media.itemCount", { count: totalCount })}
+          : loading
+            ? t("media.loadingAll", { count: totalCount })
+            : t("media.itemCount", { count: totalCount })}
       </span>
       {/* 图片尺寸滑条：位置固定在「视图」**左边**（用户口径），只影响「预览图」模式。 */}
       <span className="mp-size">

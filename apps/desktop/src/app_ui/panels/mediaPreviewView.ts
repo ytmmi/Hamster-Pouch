@@ -129,10 +129,13 @@ export function compareFiles(a: SortableFile, b: SortableFile, key: MediaSortKey
 /**
  * 排序一份文件列表（**纯函数**：返回新数组，不改动入参，也不改查询顺序的来源）。
  *
- * **作用域口径**：排序只作用于面板**已加载**的那一页（`file.query` 的 `limit`，当前 300 项）。
- * 后端的排序键是分页游标的基础（`(relative_path, source_id, id)` 升序，D78），
- * 加排序参数要改命令契约与游标语义，不在本面板的范围内——所以这里是**前端排序**，
- * 不假装是"全库排序"。
+ * **作用域口径**：后端的排序键是分页游标的基础（`(relative_path, source_id, id)` 升序，D78），
+ * 加排序参数要改命令契约与游标语义，不在本面板的范围内——所以这里是**前端排序**。
+ *
+ * 因此"排序代表全库"的前提是**取数已翻完全部页**：面板先把来源按游标翻到末页
+ * （`mediaPreviewPaging.ts`，首屏第一页即渲染、其余页后台继续），再对**全量**排序。
+ * 翻页途中 `files` 只是已取到的部分，此时的顺序只代表这一部分——面板用 `loading` 提示，
+ * 不假装它已经是全库顺序。
  */
 export function sortFiles<T extends SortableFile>(
   files: readonly T[],

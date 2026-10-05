@@ -120,8 +120,9 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
     chooseSort,
   } = useMediaViewState(panelApi);
 
-  // 面板**已加载**的那一页文件与排序 / 解析后的条目（取数在 `mediaPreviewData.ts`）。
-  const { files, items } = useMediaPreviewData(typeFilter, sortKey, sortDir);
+  // 面板**已加载**的文件与排序 / 解析后的条目（取数在 `mediaPreviewData.ts`）。
+  // `loading`：全库可翻之后取数是"首屏第一页 + 后台继续翻完"，翻页期间计数如实提示。
+  const { files, items, loading } = useMediaPreviewData(typeFilter, sortKey, sortDir);
 
   /**
    * **后台标签冻结**：面板内容被同组别的标签盖住时不渲染条目容器（下面三个分支都带这个条件）。
@@ -312,6 +313,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
         onTypeFilterChange={setTypeFilter}
         selectedCount={selectedCount}
         totalCount={items.length}
+        loading={loading}
         view={view}
         imageSize={imageSize}
         sortKey={sortKey}

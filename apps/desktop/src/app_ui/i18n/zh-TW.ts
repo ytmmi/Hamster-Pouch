@@ -265,6 +265,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "media.filter.audio": "音訊",
   "media.selectedCount": "已選 {selected} / {total} 項",
   "media.itemCount": "{count} 項",
+  "media.loadingAll": "載入中 {count} 項…",
+  "media.loadingAllHint": "正在載入全部檔案，完成後按大小/時間排序才代表整個來源",
   "media.noFiles": "無檔案",
   "media.copyPath": "複製檔案路徑",
   "media.reanalyzeFile": "重新分析該檔案",

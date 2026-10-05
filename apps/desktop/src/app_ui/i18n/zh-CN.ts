@@ -274,6 +274,10 @@ export const zhCN = {
   "media.filter.audio": "音频",
   "media.selectedCount": "已选 {selected} / {total} 项",
   "media.itemCount": "{count} 项",
+  // 后台翻页进度：全库可翻之后，取数是"首屏第一页 + 后台继续翻完"，
+  // 翻页期间计数只是已取到的部分，必须如实说明（否则用户会以为库就这么大）。
+  "media.loadingAll": "载入中 {count} 项…",
+  "media.loadingAllHint": "正在载入全部文件，完成后按大小/时间排序才代表整个来源",
   "media.noFiles": "无文件",
   "media.copyPath": "复制文件路径",
   "media.reanalyzeFile": "重新分析该文件",

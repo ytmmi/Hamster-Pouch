@@ -12,6 +12,7 @@
     "@hamster-pouch/config": "workspace:*",
     "@hamster-pouch/shared-types": "workspace:*",
     "@hamster-pouch/ui": "workspace:*",
+    "@tanstack/react-virtual": "3.14.13",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "dockview": "^8.3.1",
