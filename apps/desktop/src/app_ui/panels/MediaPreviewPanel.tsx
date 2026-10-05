@@ -66,6 +66,12 @@ import {
   masonryColumnCount,
   mediaViewClass,
 } from "./mediaPreviewView";
+import { chunkRows, listRowHeight, MEDIA_LIST_ROW_GAP, MEDIA_TILE_ROW_GAP, tileRowHeight } from "./mediaPreviewVirtual";
+import {
+  useContainerRef,
+  useFixedRowVirtualizer,
+  useMeasuredRowVirtualizer,
+} from "./mediaPreviewVirtualRows";
 
 /**
  * 跨挂载保存滚动位置：面板被 dockview 卸载重建时也能恢复浏览进度。
@@ -103,8 +109,20 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
   const app = useApp();
   const [viewMode, setViewMode] = useState<MediaPreviewMode>("thumb");
   const [typeFilter, setTypeFilter] = useState<MediaTypeFilter>("all");
-  const gridRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
+  // 网格容器（平铺 / 自适应 / 瀑布流共用）：虚拟化要拿到**滚动容器元素**，
+  // 且容器是条件渲染的——`useContainerRef` 用 callback ref 把"容器已就绪"变成可依赖信号。
+  const {
+    ref: gridContainerRef,
+    elementRef: gridRef,
+    version: gridVersion,
+  } = useContainerRef();
+  // 列表容器：虚拟化要**测量真实行高**（文字度量随语言/缩放变化，猜死会越滚越偏），
+  // 因此容器与 callback ref 走 `useContainerRef`（挂载/切换后重跑一次测量）。
+  const {
+    ref: listContainerRef,
+    elementRef: listRef,
+    version: listVersion,
+  } = useContainerRef();
 
   // 面板设置的**缺省**视图 / 尺寸 / 排序（`usePanelSettingValue` 已按声明归一化，
   // 非法取值回落缺省）叠加本会话覆盖后的**有效取值**，解析全在 `mediaPreviewSession.ts`；
@@ -189,18 +207,26 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
   }, [viewMode, foreground, app.repoId, files.length > 0]);
 
   /**
-   * 瀑布流列数（按容器宽度与**图片尺寸**算，`ResizeObserver` 跟随面板尺寸变化）。
-   * 只在瀑布流视图下测量：其余视图不需要 JS 参与布局。
+   * 网格容器的**宽度与列数**（`ResizeObserver` 跟随面板尺寸变化）。
+   *
+   * 两个视图都要用：
+   * - 瀑布流：列数（`masonryColumnCount`）；
+   * - 平铺：**切行**用同一套列数公式——虚拟化必须知道"CSS 会排几列"，否则
+   *   按错的列数切行会直接表现为行错位/留白。
+   *
    * `foreground` 入依赖：后台冻结时容器不在 DOM 里、观察器也没跑，切回来要重新量一次
    * （否则隐藏期间面板被调整过尺寸，列数会是旧的）。
    */
   const [masonryColumns, setMasonryColumns] = useState(1);
+  const [gridWidth, setGridWidth] = useState(0);
   useEffect(() => {
-    if (view !== "masonry" || viewMode !== "thumb") return;
+    if (viewMode !== "thumb") return;
     const el = gridRef.current;
     if (!el) return;
-    const measure = () =>
+    const measure = () => {
+      setGridWidth(el.clientWidth);
       setMasonryColumns(masonryColumnCount(el.clientWidth, imageSize, MASONRY_GAP));
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
@@ -211,16 +237,59 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
    * 图片尺寸以 **CSS 变量**下发（`--mp-image-size`），三种视图各自消费：
    * 平铺 = `grid-template-columns`、瀑布流 = 列宽 `flex-basis`、自适应 = 缩略图**行高**。
    * 一处设置、三种排布同一口径，也就不会再出现"瀑布流比平铺宽一大截"。
+   *
+   * `--mp-tile-columns` 是**平铺虚拟化的前提**：列数由面板按同一公式算好下发，
+   * CSS 与"我们按几列切行"必须一致（`repeat(auto-fill, …)` 的话 JS 无从得知列数）。
    */
   const containerStyle = useMemo(
-    () => ({ "--mp-image-size": `${imageSize}px` }) as CSSProperties,
-    [imageSize],
+    () =>
+      ({
+        "--mp-image-size": `${imageSize}px`,
+        "--mp-tile-columns": String(Math.max(1, masonryColumns)),
+      }) as CSSProperties,
+    [imageSize, masonryColumns],
   );
 
   /** 分到各列的条目（保持从左到右的序号顺序；见 `distributeColumns` 的口径说明）。 */
   const columns = useMemo(
     () => distributeColumns(items, masonryColumns),
     [items, masonryColumns],
+  );
+
+  /**
+   * **列表视图的虚拟化**（缺陷 0018 P1-A）。
+   *
+   * 行高不猜死：`useMeasuredRowVirtualizer` 渲染后用 `measureRef` 量回真实高度，
+   * 首帧用 `listRowHeight()` 估计。这样字体度量、语言、系统缩放变化都不会让
+   * "行号 × 行高"与实际布局错位。
+   */
+  const listVirtual = useMeasuredRowVirtualizer(
+    listRef,
+    viewMode === "name" ? items.length : 0,
+    listRowHeight(),
+    listVersion,
+    MEDIA_LIST_ROW_GAP,
+  );
+
+  /**
+   * **平铺视图的虚拟化**：一行 `列数` 个单元，行高是常量（缩略图方形 + 可选文件名），
+   * 因此内容总高度 = `行数 × 行高`，不依赖测量、滚动条不会抖。
+   *
+   * 列数用与 CSS `repeat(var(--mp-tile-columns), …)` 相同的公式（`masonryColumnCount`），
+   * 于是"CSS 排几列"与"我们按几列切行"永远一致——不一致会表现为行错位/留白。
+   */
+  const tilePerRow = masonryColumnCount(gridWidth, imageSize, MASONRY_GAP);
+  const tileRows = useMemo(
+    () => (view === "tile" && viewMode === "thumb" ? chunkRows(items, tilePerRow) : []),
+    [items, tilePerRow, view, viewMode],
+  );
+  const tileRowH = tileRowHeight(imageSize, showFileName);
+  const tileVirtual = useFixedRowVirtualizer(
+    gridRef,
+    view === "tile" && viewMode === "thumb" ? tileRows.length : 0,
+    tileRowH,
+    gridVersion,
+    MEDIA_TILE_ROW_GAP,
   );
 
   const repoId = app.repoId;
@@ -330,7 +399,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
       {repoId && foreground && viewMode === "thumb" && view === "masonry" && (
         <div
           className="mp-masonry"
-          ref={gridRef}
+          ref={gridContainerRef}
           style={containerStyle}
           tabIndex={0}
           onKeyDown={handleContainerKeyDown}
@@ -351,7 +420,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
       {repoId && foreground && viewMode === "thumb" && view !== "masonry" && (
         <div
           className={`mp-grid ${mediaViewClass(view)}`}
-          ref={gridRef}
+          ref={gridContainerRef}
           style={containerStyle}
           tabIndex={0}
           onKeyDown={handleContainerKeyDown}
@@ -359,7 +428,24 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
         >
           {items.length === 0 ? (
             <span className="placeholder">{app.t("media.noFiles")}</span>
+          ) : view === "tile" ? (
+            /* 平铺：按行虚拟化。行高是常量（缩略图方形 + 可选文件名），
+               内容总高度 = 行数 × 行高，不依赖测量，滚动条不会抖。 */
+            <div className="mp-virtual" style={{ height: tileVirtual.totalSize }}>
+              {tileVirtual.rows.map((row) => (
+                <div
+                  key={row.index}
+                  className="mp-virtual-row mp-virtual-grid"
+                  style={{ transform: `translateY(${row.start}px)`, height: row.size }}
+                >
+                  {(tileRows[row.index] ?? []).map(({ file, url }) => renderCell(file, url))}
+                </div>
+              ))}
+            </div>
           ) : (
+            /* 自适应：行高随图片宽高比变化，**断行由 CSS flex-wrap 决定**，
+               JS 无法在不测量每张图的情况下复现——见 `mediaPreviewVirtual.ts` 的说明。
+               因此这里仍渲染全部条目，靠 `.mp-cell` 的 `content-visibility` 跳过离屏渲染。 */
             items.map(({ file, url }) => renderCell(file, url))
           )}
         </div>
@@ -368,41 +454,57 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
       {repoId && foreground && viewMode === "name" && (
         <div
           className="mp-list"
-          ref={listRef}
+          ref={listContainerRef}
           tabIndex={0}
           onKeyDown={handleContainerKeyDown}
         >
-          {items.map(({ file }) => (
-            <button
-              key={file.id}
-              className={`mp-row ${
-                app.selectedIds.has(file.id) ? "selected" : ""
-              }`}
-              draggable
-              onClick={(e) =>
-                handleSelect(file, {
-                  shift: e.shiftKey,
-                  ctrl: e.ctrlKey || e.metaKey,
-                })
-              }
-              onDoubleClick={() => handleDoubleClick(file)}
-              onDragStart={(e) => handleDragStart(file, e)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                handleContextMenu(file, e);
-              }}
-            >
-              <span className={`mp-badge ${file.media_type}`}>
-                {file.media_type}
-              </span>
-              <span className="mp-row-name">{file.relative_path}</span>
-              {/* 体积走**宿主设置**的体积单位（二进制 KiB/MiB/GiB ↔ 十进制 KB/MB/GB），
-                  与元数据面板同一份格式化函数；此前这里直接印裸字节数。 */}
-              <span className="mp-row-size">{formatByteSize(file.size, sizeUnit)}</span>
-            </button>
-          ))}
-          {items.length === 0 && (
+          {items.length === 0 ? (
             <span className="placeholder">{app.t("media.noFiles")}</span>
+          ) : (
+            /* 列表：按行虚拟化。行高由文字度量决定，渲染后**测量**回真实高度
+               （`measureRef`），因此不把字体行高猜死。 */
+            <div className="mp-virtual" style={{ height: listVirtual.totalSize }}>
+              {listVirtual.rows.map((row) => {
+                const item = items[row.index];
+                if (!item) return null;
+                const { file } = item;
+                return (
+                  <div
+                    key={file.id}
+                    ref={listVirtual.measureRef}
+                    className="mp-virtual-row mp-virtual-list"
+                    style={{ transform: `translateY(${row.start}px)` }}
+                  >
+                    <button
+                      className={`mp-row ${
+                        app.selectedIds.has(file.id) ? "selected" : ""
+                      }`}
+                      draggable
+                      onClick={(e) =>
+                        handleSelect(file, {
+                          shift: e.shiftKey,
+                          ctrl: e.ctrlKey || e.metaKey,
+                        })
+                      }
+                      onDoubleClick={() => handleDoubleClick(file)}
+                      onDragStart={(e) => handleDragStart(file, e)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        handleContextMenu(file, e);
+                      }}
+                    >
+                      <span className={`mp-badge ${file.media_type}`}>
+                        {file.media_type}
+                      </span>
+                      <span className="mp-row-name">{file.relative_path}</span>
+                      {/* 体积走**宿主设置**的体积单位（二进制 KiB/MiB/GiB ↔ 十进制 KB/MB/GB），
+                          与元数据面板同一份格式化函数；此前这里直接印裸字节数。 */}
+                      <span className="mp-row-size">{formatByteSize(file.size, sizeUnit)}</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}

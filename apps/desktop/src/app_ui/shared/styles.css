@@ -1194,10 +1194,10 @@ button.danger {
   white-space: nowrap;
 }
 
+/* 列表容器只负责滚动：行间距由虚拟化下发的偏移负责（`.mp-virtual-list` 的 `gap`），
+   容器自己再加 `gap` 只会让"偏移"与"实际位置"错开。 */
 .mp-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: block;
   overflow: auto;
 }
 
@@ -1229,6 +1229,51 @@ button.danger {
   font-size: 11px;
 }
 
+/* --- 虚拟化容器（缺陷 0018 P1-A）---
+
+   条目容器不再直接渲染全部条目，而是"一个撑满内容总高度的占位层 + 只渲染窗口内的行"。
+   行用**绝对定位 + translateY** 放在各自的偏移上：行高可以是常量（平铺）也可以是
+   测量值（列表），两种都不影响容器的高度语义。
+
+   为什么占位层必须是**唯一的子元素**：滚动条长度由它决定。虚拟化库给出的总高度
+   （`行数 × 行高` 或测量累计）不随滚动变化，因此**滚动条不会抖**——这正是
+   `.mp-cell` 的 `content-visibility` 当初被关掉要回避的问题（见下面两个视图的说明）。 */
+
+.mp-virtual {
+  position: relative;
+  width: 100%;
+  /* 容器本身可能是 `display: grid`（`.mp-grid`）：占位层必须**横跨所有列**，
+     否则它只占一个网格单元格的宽度，绝对定位的行会被裁到那一格宽里。 */
+  grid-column: 1 / -1;
+}
+
+/* 平铺：窗口内的行仍是一个网格（列数由 `--mp-tile-columns` 定死）。
+   行与行之间**没有** `row-gap`：行距由虚拟化下发的 `translateY` 偏移负责
+   （偏移 = 行号 ×（行盒高 + `MEDIA_TILE_ROW_GAP`）），两处都加会翻倍。 */
+.mp-virtual-row.mp-virtual-grid {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--mp-tile-columns, 1), var(--mp-image-size, 160px));
+  justify-content: center;
+  column-gap: 8px;
+}
+
+/* 列表：每一行是**定位包裹层**，里面一个 `.mp-row`。
+   行间距由虚拟化的 `gap` 负责（`MEDIA_LIST_ROW_GAP`），包裹层自己不加间距。 */
+.mp-virtual-row.mp-virtual-list {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.mp-virtual-row.mp-virtual-list .mp-row {
+  width: 100%;
+}
+
 .mp-badge {
   font-size: 10px;
   padding: 1px 6px;
@@ -1253,11 +1298,14 @@ button.danger {
    缺省值 160px 与注册表缺省一致（面板未渲染时也不会塌成 0）。 */
 
 /* 平铺：单元格宽度**固定**（列数随面板宽度自适应），缩略图统一方形并裁剪填满。
-   `justify-content: center` 是关键：宽度定死时 `auto-fill` 会在**行尾**留下放不下一格的
-   余量，不居中就是右侧一大条空白（用户反馈"设置了宽度后右边空出白色"）；居中后余量
-   左右均分。 */
+   `justify-content: center` 是关键：宽度定死时会在**行尾**留下放不下一格的余量，
+   不居中就是右侧一大条空白（用户反馈"设置了宽度后右边空出白色"）；居中后余量左右均分。
+
+   `grid-template-columns` 用 `repeat(var(--mp-tile-columns), …)` 而不是
+   `repeat(auto-fill, …)`：**虚拟化必须知道 CSS 会排几列**（列数由面板按同一公式算好
+   并以变量下发），否则"我们按几列切行"与"CSS 排几列"会不一致，表现为行错位/留白。 */
 .mp-grid.mp-view-tile {
-  grid-template-columns: repeat(auto-fill, var(--mp-image-size, 160px));
+  grid-template-columns: repeat(var(--mp-tile-columns, 1), var(--mp-image-size, 160px));
   justify-content: center;
 }
 

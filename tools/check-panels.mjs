@@ -554,6 +554,8 @@ const MEDIA_FAMILY_FILES = [
   "apps/desktop/src/app_ui/panels/MediaPreviewPanel.tsx",
   "apps/desktop/src/app_ui/panels/mediaPreviewData.ts",
   "apps/desktop/src/app_ui/panels/mediaPreviewPaging.ts",
+  "apps/desktop/src/app_ui/panels/mediaPreviewVirtual.ts",
+  "apps/desktop/src/app_ui/panels/mediaPreviewVirtualRows.tsx",
   "apps/desktop/src/app_ui/panels/mediaPreviewSession.ts",
   "apps/desktop/src/app_ui/panels/mediaPreviewToolbar.tsx",
   "apps/desktop/src/app_ui/panels/mediaPreviewActions.ts",
@@ -705,7 +707,128 @@ check(
   /\[repoId, albumId, sourceId, dirPath, typeFilter, refreshKey\]/.test(mediaFamilySrc) &&
     !/\}, \[app, typeFilter\]\)/.test(mediaFamilySrc),
 );
-const mediaSpec = config.panelSpec("media");
+
+// ---- 缺陷 0018 P1-A：**虚拟化的行模型**（`mediaPreviewVirtual.ts`）----
+//
+// 容器虚拟化要先把条目切成"行"，行模型错了会直接表现为"丢项/重复/空白行"。
+// 这些是**行为断言**（直接跑真函数）。
+const virtual = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewVirtual.ts")).href
+);
+
+{
+  const rows = virtual.chunkRows([1, 2, 3, 4, 5, 6, 7], 3);
+  check(
+    "按行切分：保序、不丢项、不重复，最后一行可以不满",
+    JSON.stringify(rows) === JSON.stringify([[1, 2, 3], [4, 5, 6], [7]]),
+    JSON.stringify(rows),
+  );
+}
+check(
+  "按行切分的边界：空列表得空数组，`perRow <= 0` 按 1 处理（否则切出无穷多空行）",
+  virtual.chunkRows([], 3).length === 0 &&
+    JSON.stringify(virtual.chunkRows([1, 2], 0)) === JSON.stringify([[1], [2]]) &&
+    JSON.stringify(virtual.chunkRows([1, 2], -5)) === JSON.stringify([[1], [2]]),
+);
+
+{
+  const r = virtual.visibleRowRange(0, 300, 100, 1000, 4);
+  const mid = virtual.visibleRowRange(5000, 300, 100, 1000, 4);
+  const tail = virtual.visibleRowRange(999999, 300, 100, 1000, 4);
+  check(
+    "虚拟窗口按「行号 × 行高」算出且两侧各留 overscan；首/中/尾都不越界",
+    r.start === 0 && r.end === 8 && // 4 行可见 + 1 行进位 + 4 行 overscan（顶部无负行）
+      mid.start === 46 &&
+      mid.end === 58 &&
+      tail.start === 995 &&
+      tail.end === 1000,
+    `首=${JSON.stringify(r)} 中=${JSON.stringify(mid)} 尾=${JSON.stringify(tail)}`,
+  );
+}
+check(
+  "`scrollTop` 超出内容高度时夹到末行（否则重挂载恢复旧滚动位置会得到空窗口 → 面板一片空白）",
+  // 面板会在重挂载时恢复上一次的 `scrollTop`，而切换来源/筛选后列表可能短得多。
+  (() => {
+    const over = virtual.visibleRowRange(999999, 300, 100, 10, 4);
+    return over.start <= 9 && over.end === 10 && over.end > over.start;
+  })(),
+  JSON.stringify(virtual.visibleRowRange(999999, 300, 100, 10, 4)),
+);
+check(
+  "虚拟窗口的退化输入：无行 / 行高为 0 时返回空区间（不返回负数或越界区间）",
+  JSON.stringify(virtual.visibleRowRange(0, 300, 100, 0)) === JSON.stringify({ start: 0, end: 0 }) &&
+    JSON.stringify(virtual.visibleRowRange(0, 300, 0, 10)) === JSON.stringify({ start: 0, end: 0 }) &&
+    virtual.visibleRowRange(-50, 300, 100, 10, 0).start === 0,
+);
+
+{
+  // 行高必须是**有限正数**：分数高度会让「行号 × 行高」与浏览器实际布局逐渐错位，
+  // 滚到列表深处表现为"越滚越偏"。
+  const tileName = virtual.tileRowHeight(160, true);
+  const tileNoName = virtual.tileRowHeight(160, false);
+  const list = virtual.listRowHeight();
+  check(
+    "行高由纯函数给出且为整数：平铺（缩略图方形 + 可选文件名）与列表",
+    Number.isInteger(tileName) &&
+      Number.isInteger(tileNoName) &&
+      Number.isInteger(list) &&
+      tileName > tileNoName &&
+      tileName > 160 &&
+      list > 0,
+    `平铺(有名)=${tileName} 平铺(无名)=${tileNoName} 列表=${list}`,
+  );
+}
+check(
+  "行高与样式表的口径一致：平铺内边距 4px + 边框 1px（box-sizing: border-box）",
+  /box-sizing:\s*border-box/.test(stylesSource) &&
+    /\.mp-cell\s*\{[^}]*padding:\s*4px/.test(stylesSource) &&
+    /\.mp-cell\s*\{[^}]*border:\s*1px solid transparent/.test(stylesSource) &&
+    /\.mp-grid\.mp-view-tile \.mp-thumb\s*\{[^}]*aspect-ratio:\s*1\s*\/\s*1/.test(stylesSource),
+);
+
+check(
+  "平铺与列表**按行虚拟化**：只渲染窗口内的行，DOM 单元数与条目总数无关",
+  // 缺陷 0018 的核心：容器不再 `items.map`，而是"占位层撑起总高度 + 只渲染窗口行"。
+  /const tileVirtual = useFixedRowVirtualizer\(/.test(mediaPanelSrc) &&
+    /const listVirtual = useMeasuredRowVirtualizer\(/.test(mediaPanelSrc) &&
+    /tileVirtual\.rows\.map\(/.test(mediaPanelSrc) &&
+    /listVirtual\.rows\.map\(/.test(mediaPanelSrc) &&
+    /className="mp-virtual" style=\{\{ height: tileVirtual\.totalSize \}\}/.test(mediaPanelSrc) &&
+    /className="mp-virtual" style=\{\{ height: listVirtual\.totalSize \}\}/.test(mediaPanelSrc) &&
+    // 列表视图**不得**再直接铺全部条目：退回全量渲染必须当场变红。
+    // （平铺/自适应走 `renderCell` 那条路，见下面那条断言；自适应见 `content-visibility` 的说明。）
+    !/\{items\.map\(\(\{ file \}\) => \(/.test(mediaPanelSrc),
+);
+
+check(
+  "列表视图的行高走**测量**而不是猜死（文字度量随语言/系统缩放变化）",
+  /useMeasuredRowVirtualizer\(\s*listRef,/.test(mediaPanelSrc) &&
+    /ref=\{listVirtual\.measureRef\}/.test(mediaPanelSrc) &&
+    /listRowHeight\(\)/.test(mediaPanelSrc),
+);
+
+check(
+  "平铺虚拟化的**列数**与 CSS 同源：面板算好下发 `--mp-tile-columns`，切行用同一个值",
+  // 不一致会表现为"行错位/留白"——CSS 排 4 列而 JS 按 3 列切行时尤其明显。
+  /const tilePerRow = masonryColumnCount\(gridWidth, imageSize, MASONRY_GAP\);/.test(
+    mediaPanelSrc,
+  ) &&
+    /chunkRows\(items, tilePerRow\)/.test(mediaPanelSrc) &&
+    /"--mp-tile-columns": String\(Math\.max\(1, masonryColumns\)\)/.test(mediaPanelSrc) &&
+    /repeat\(var\(--mp-tile-columns/.test(stylesSource),
+);
+
+check(
+  "虚拟化容器的总高度由占位层给出（滚动条长度不随滚动变化，因此不会抖）",
+  /\.mp-virtual\s*\{[^}]*position:\s*relative/.test(stylesSource) &&
+    /\.mp-virtual-row\.mp-virtual-grid\s*\{[^}]*position:\s*absolute/.test(stylesSource) &&
+    /\.mp-virtual-row\.mp-virtual-list\s*\{[^}]*position:\s*absolute/.test(stylesSource) &&
+    // 行间距只在**一处**加：行盒高度里不含 gap（虚拟化下发 gap），CSS 若再加一次会翻倍。
+    /MEDIA_TILE_ROW_GAP/.test(mediaFamilySrc) &&
+    /MEDIA_LIST_ROW_GAP/.test(mediaFamilySrc) &&
+    !/\.mp-virtual-row\.mp-virtual-grid\s*\{[^}]*row-gap/.test(stylesSource) &&
+    !/\.mp-list\s*\{[^}]*gap:\s*2px/.test(stylesSource),
+);const mediaSpec = config.panelSpec("media");
 const mediaSettingKeys = (mediaSpec?.settings ?? []).map((s) => s.key);
 check(
   "媒体预览声明了 5 项面板设置（view / imageSize / showFileName / sortKey / sortDir），都带 i18n 键",
@@ -1000,10 +1123,14 @@ check(
 );
 check(
   "三种视图的样式齐全且**共用一个图片尺寸变量**：平铺（固定列宽）/ 自适应（逐行两端对齐）/ 瀑布流（固定列宽）",
-  // 平铺：固定列宽 = 图片尺寸；自适应：见下面那条专测（行内按宽高比配平）。
-  /\.mp-grid\.mp-view-tile\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, var\(--mp-image-size/.test(
+  // 平铺：固定列宽 = 图片尺寸。列数由**面板下发**（`--mp-tile-columns`）而不是
+  // `auto-fill`——虚拟化必须知道 CSS 会排几列，否则"按几列切行"与 CSS 排布不一致，
+  // 表现为行错位/留白。列数仍用与 `auto-fill` 相同的公式算（`masonryColumnCount`）。
+  /\.mp-grid\.mp-view-tile\s*\{[^}]*grid-template-columns:\s*repeat\(var\(--mp-tile-columns/.test(
     stylesSource,
   ) &&
+    !/\.mp-grid\.mp-view-tile\s*\{[^}]*repeat\(auto-fill/.test(stylesSource) &&
+    /"--mp-tile-columns":\s*String\(Math\.max\(1, masonryColumns\)\)/.test(mediaPanelSrc) &&
     /\.mp-view-tile \.mp-thumb img[\s\S]{0,120}?object-fit:\s*cover/.test(stylesSource) &&
     // 瀑布流：列宽 = 同一个变量（**不再 `flex: 1 1 0` 等分**，那会让列宽随面板漂移）。
     /\.mp-masonry\s*\{[^}]*display:\s*flex/.test(stylesSource) &&
