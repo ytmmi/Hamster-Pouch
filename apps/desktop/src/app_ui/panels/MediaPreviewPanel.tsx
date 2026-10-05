@@ -53,20 +53,23 @@ import { useHostSettingValue } from "../shared/settingValue";
 import { useApp } from "../core/AppContext";
 import type { PanelRenderCtx } from "../core/panelRegistry";
 import type { FileItem } from "../shared/types";
-import { ThumbCell } from "./mediaPreviewCell";
+import { ThumbCell, ratioCache } from "./mediaPreviewCell";
 import { useMediaFileActions } from "./mediaPreviewActions";
 import { useMediaPreviewData, type MediaTypeFilter } from "./mediaPreviewData";
 import { MediaContextMenu, useMediaContextMenu } from "./mediaPreviewMenu";
 import { useMediaSelection } from "./mediaPreviewSelection";
 import { useMediaViewState } from "./mediaPreviewSession";
 import { MediaPreviewToolbar, type MediaPreviewMode } from "./mediaPreviewToolbar";
+import { DEFAULT_CELL_RATIO, MASONRY_GAP, distributeColumns, masonryColumnCount, mediaViewClass } from "./mediaPreviewView";
 import {
-  MASONRY_GAP,
-  distributeColumns,
-  masonryColumnCount,
-  mediaViewClass,
-} from "./mediaPreviewView";
-import { chunkRows, listRowHeight, MEDIA_LIST_ROW_GAP, MEDIA_TILE_ROW_GAP, tileRowHeight } from "./mediaPreviewVirtual";
+  adaptiveCellIntrinsicHeight,
+  chunkRows,
+  listRowHeight,
+  masonryCellHeight,
+  MEDIA_LIST_ROW_GAP,
+  MEDIA_TILE_ROW_GAP,
+  tileRowHeight,
+} from "./mediaPreviewVirtual";
 import {
   useContainerRef,
   useFixedRowVirtualizer,
@@ -295,6 +298,31 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
   const repoId = app.repoId;
 
   /**
+   * 缩略图单元的 **`content-visibility: auto` 占位高度**（px，按文件算）。
+   *
+   * 自适应与瀑布流此前**显式关掉**了跳过渲染，因为样式表里写死的
+   * `contain-intrinsic-size: auto 140px` 与它们"行高由宽高比推出"的真实高度无关，
+   * 离屏单元塌成 140px 会让滚动高度随滚动变化（滚动条抖动、位置漂移）。
+   *
+   * 但根因是**占位值写错**，不是"跳过渲染不可用"：按当前视图算一个接近真实的值即可。
+   * - 自适应：行高被 `--mp-row-max-factor: 2` 封顶、铺满一行时约等于图片尺寸；
+   * - 瀑布流：**逐个文件**算——列宽 ÷ 该文件宽高比（宽高比取自 `ratioCache`，
+   *   量过就精确；没量过按 1:1 占位，量完随 `ratio` 状态一起重算）；
+   * - 平铺/列表：行高本来就固定，返回 `undefined` 沿用样式表缺省。
+   */
+  const cellIntrinsicHeight = useCallback(
+    (file: FileItem): number | undefined => {
+      if (view === "adaptive") return adaptiveCellIntrinsicHeight(imageSize, showFileName);
+      if (view === "masonry") {
+        const ratio = ratioCache.get(file.id) ?? DEFAULT_CELL_RATIO;
+        return masonryCellHeight(imageSize, ratio, showFileName);
+      }
+      return undefined;
+    },
+    [view, imageSize, showFileName],
+  );
+
+  /**
    * 右键菜单：未选中项先单选，已选中则保持多选；
    * 在光标位置打开自定义上下文菜单。
    */
@@ -354,6 +382,8 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
         url={url}
         selected={app.selectedIds.has(file.id)}
         showName={showFileName}
+        intrinsicHeight={cellIntrinsicHeight(file)}
+        nearViewport={view === "tile"}
         onSelect={cellSelect}
         onDoubleClick={cellDoubleClick}
         onDragStart={cellDragStart}
@@ -366,6 +396,8 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
       app.selectedIds,
       app.t,
       showFileName,
+      cellIntrinsicHeight,
+      view,
       cellSelect,
       cellDoubleClick,
       cellDragStart,

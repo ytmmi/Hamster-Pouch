@@ -828,7 +828,61 @@ check(
     /MEDIA_LIST_ROW_GAP/.test(mediaFamilySrc) &&
     !/\.mp-virtual-row\.mp-virtual-grid\s*\{[^}]*row-gap/.test(stylesSource) &&
     !/\.mp-list\s*\{[^}]*gap:\s*2px/.test(stylesSource),
-);const mediaSpec = config.panelSpec("media");
+);
+
+check(
+  "跳过渲染（`content-visibility`）在自适应/瀑布流**打开**，占位高度按视图算得接近真实",
+  // 原先这两个视图靠 `content-visibility: visible` 回避"占位高度写错导致的滚动抖动"。
+  // 根因是占位值错（写死 140px），不是跳过渲染不可用——面板按视图下发接近真实的值。
+  /content-visibility:\s*auto/.test(stylesSource) &&
+    !/\.mp-view-adaptive \.mp-cell\s*\{[^}]*content-visibility:\s*visible/.test(stylesSource) &&
+    !/\.mp-masonry \.mp-cell\s*\{[^}]*content-visibility:\s*visible/.test(stylesSource) &&
+    // 单元真的把面板算出的值下发到块轴占位（内联覆盖样式表的简写块轴分量），
+    // 且带 `auto` 关键字（渲染过就用记下的真实尺寸）。
+    /containIntrinsicBlockSize:\s*`auto \$\{intrinsicHeight\}px`/.test(mediaCellSrc) &&
+    /intrinsicHeight=\{cellIntrinsicHeight\(file\)\}/.test(mediaPanelSrc) &&
+    // 自适应按图片尺寸估；瀑布流按**该文件**的宽高比算。
+    /adaptiveCellIntrinsicHeight\(imageSize, showFileName\)/.test(mediaPanelSrc) &&
+    /masonryCellHeight\(imageSize, ratio, showFileName\)/.test(mediaPanelSrc) &&
+    /ratioCache\.get\(file\.id\) \?\? DEFAULT_CELL_RATIO/.test(mediaPanelSrc),
+);
+
+check(
+  "瀑布流单元高度按**宽高比**算（列宽 ÷ 宽高比），且退化输入有兜底",
+  (() => {
+    const square = virtual.masonryCellHeight(160, 1, false);
+    const wide = virtual.masonryCellHeight(160, 2, false);
+    const tall = virtual.masonryCellHeight(160, 0.5, false);
+    return (
+      Number.isInteger(square) &&
+      // 宽图矮、竖图高（单调性：这是"瀑布流"与整齐网格的区别）。
+      wide < square &&
+      square < tall &&
+      // 退化宽高比（0 / 负数 / NaN）按 1:1 兜底，不得算出 NaN 或负高度。
+      virtual.masonryCellHeight(160, 0, false) === square &&
+      virtual.masonryCellHeight(160, -2, false) === square &&
+      virtual.masonryCellHeight(160, Number.NaN, false) === square
+    );
+  })(),
+  `方=${virtual.masonryCellHeight(160, 1, false)} 宽=${virtual.masonryCellHeight(160, 2, false)} 竖=${virtual.masonryCellHeight(160, 0.5, false)}`,
+);
+
+check(
+  "缩略图的可见性判定：**共享一个** `IntersectionObserver`，且虚拟化视图不再逐格观察",
+  // 缺陷 0018：原实现每个单元各建一个观察器（5 万个单元 = 5 万个观察器）。
+  // 观察器本就是"一个观察者观察多个目标"，收成模块级唯一一个即可。
+  /const visibilityCallbacks = new WeakMap<Element, \(\) => void>\(\);/.test(mediaCellSrc) &&
+    /let sharedObserver: IntersectionObserver \| null = null;/.test(mediaCellSrc) &&
+    /function observeUntilVisible\(/.test(mediaCellSrc) &&
+    // 关键不变量：整个单元模块里 `new IntersectionObserver` **恰好一次**
+    // （逐格新建就会变成 N 次——这正是缺陷 0018 里 5 万个观察器的来源）。
+    (mediaCellSrc.match(/new IntersectionObserver/g) ?? []).length === 1 &&
+    // 虚拟化视图直接判定"在视口内"，连观察都不做。
+    /if \(nearViewport\) \{\s*setVisible\(true\);/.test(mediaCellSrc) &&
+    /nearViewport=\{view === "tile"\}/.test(mediaPanelSrc),
+);
+
+const mediaSpec = config.panelSpec("media");
 const mediaSettingKeys = (mediaSpec?.settings ?? []).map((s) => s.key);
 check(
   "媒体预览声明了 5 项面板设置（view / imageSize / showFileName / sortKey / sortDir），都带 i18n 键",
@@ -1137,8 +1191,9 @@ check(
     /\.mp-masonry-col\s*\{[^}]*flex:\s*0 0 var\(--mp-image-size/.test(stylesSource) &&
     !/\.mp-masonry-col\s*\{[^}]*flex:\s*1 1 0/.test(stylesSource) &&
     /\.mp-masonry \.mp-thumb img[\s\S]{0,160}?height:\s*auto/.test(stylesSource) &&
-    // 行高不等的瀑布流必须关掉跳过渲染，否则滚动高度随滚动变化。
-    /\.mp-masonry \.mp-cell\s*\{[^}]*content-visibility:\s*visible/.test(stylesSource) &&
+    // 行高不等的瀑布流**不得**再靠"关掉跳过渲染"回避滚动抖动：占位高度由面板按宽高比
+    // 逐个文件下发（`contain-intrinsic-block-size`），跳过渲染因此可以打开。
+    !/\.mp-masonry \.mp-cell\s*\{[^}]*content-visibility:\s*visible/.test(stylesSource) &&
     /\.mp-size-range\s*\{/.test(stylesSource) &&
     /\.mp-dd\s*\{/.test(stylesSource),
 );
@@ -1166,8 +1221,8 @@ check(
     ) &&
     // 长文件名不得顶宽单元格（否则"按宽高比配平"失效）。
     /\.mp-view-adaptive \.mp-name\s*\{[^}]*contain:\s*inline-size/.test(stylesSource) &&
-    // 行高由宽高比推出 → 跳过渲染的 140px 提示与真实高度无关，必须关掉。
-    /\.mp-view-adaptive \.mp-cell\s*\{[^}]*content-visibility:\s*visible/.test(stylesSource),
+    // 行高由宽高比推出 → 跳过渲染的占位高度必须**接近真实**（不能靠关掉跳过渲染回避）。
+    !/\.mp-view-adaptive \.mp-cell\s*\{[^}]*content-visibility:\s*visible/.test(stylesSource),
 );
 check(
   "宽高比是自适应配平的输入：纯函数带兜底（0 / 负数 / NaN 不得进入 flex 计算）并**量后缓存**",
@@ -1187,7 +1242,7 @@ check(
     /export const ratioCache = new Map<string, number>\(\);/.test(mediaCellSrc) &&
     /file\.media_type === "audio"\s*\?\s*AUDIO_CARD_RATIO/.test(mediaCellSrc) &&
     // 面板必须真的用它渲染条目（不是留着两条渲染路径）。
-    /import \{ ThumbCell \} from "\.\/mediaPreviewCell";/.test(mediaPanelSrc) &&
+    /import \{ ThumbCell, ratioCache \} from "\.\/mediaPreviewCell";/.test(mediaPanelSrc) &&
     /<ThumbCell/.test(mediaPanelSrc),
 );
 check(

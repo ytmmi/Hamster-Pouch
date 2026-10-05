@@ -18,7 +18,7 @@
  * 另外两个视图不设相关规则，因此同一个变量在那里是惰性的。
  */
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import { resolveThumbUrl } from "../shared/thumbUrl";
@@ -31,6 +31,7 @@ import {
   fileName,
   imageRatio,
 } from "./mediaPreviewView";
+import { masonryCellHeight } from "./mediaPreviewVirtual";
 
 /**
  * 图片宽高比缓存（`fileId → 宽 / 高`）——**自适应**视图的"逐行两端对齐"要用它。
@@ -71,6 +72,45 @@ function AudioWaveform({ url, t }: { url: string; t: Translate }): JSX.Element {
 }
 
 /**
+ * 缩略图单元的**共享可见性观察器**。
+ *
+ * 缺陷 0018：原实现**每个单元各建一个 `IntersectionObserver`**——5 万个单元就是
+ * 5 万个观察器对象，光是创建与注册就足以让面板卡住。
+ *
+ * 观察器本身是"一个观察者观察多个目标"的设计，因此这里收成**模块级唯一一个**：
+ * 所有单元共用它，目标与回调用 `WeakMap` 关联（单元卸载即被回收，不会泄漏）。
+ *
+ * 已经由虚拟化保证"在视口内"的视图（平铺 / 列表）根本不走这条路——
+ * 见 `nearViewport` 参数。
+ */
+const visibilityCallbacks = new WeakMap<Element, () => void>();
+let sharedObserver: IntersectionObserver | null = null;
+
+function observeUntilVisible(el: Element, onVisible: () => void): () => void {
+  if (!sharedObserver) {
+    sharedObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const callback = visibilityCallbacks.get(entry.target);
+          // 只触发一次：回调取走后立即取消观察，观察器不会为已可见单元继续工作。
+          visibilityCallbacks.delete(entry.target);
+          sharedObserver?.unobserve(entry.target);
+          callback?.();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+  }
+  visibilityCallbacks.set(el, onVisible);
+  sharedObserver.observe(el);
+  return () => {
+    visibilityCallbacks.delete(el);
+    sharedObserver?.unobserve(el);
+  };
+}
+
+/**
  * 缩略图单元。
  *
  * **用 `memo` 包住**：一屏可能有 300 个单元，而"选中项变化"是最高频的交互——不 memo 的话
@@ -89,6 +129,8 @@ export const ThumbCell = memo(function ThumbCell({
   onDragStart,
   onContextMenu,
   t,
+  intrinsicHeight,
+  nearViewport,
 }: {
   file: FileItem;
   repoId: string;
@@ -105,6 +147,23 @@ export const ThumbCell = memo(function ThumbCell({
   onContextMenu: (file: FileItem, e: ReactMouseEvent) => void;
   /** 翻译函数（供占位/降级文案使用）。 */
   t: Translate;
+  /**
+   * `content-visibility: auto` 的占位高度（px）——**跳过渲染时**该单元在滚动中占多高。
+   *
+   * 样式表里写死的 `contain-intrinsic-size: auto 140px` 对"行高由宽高比推出"的视图
+   * 是错的（自适应/瀑布流的真实高度与 140 无关），跳过渲染会让滚动高度随滚动变化
+   * ——滚动条抖动、位置漂移。这是那两个视图此前**显式关掉** `content-visibility` 的原因。
+   * 由面板按当前视图算一个**接近真实**的值下发，就可以把跳过渲染打开。
+   */
+  intrinsicHeight?: number;
+  /**
+   * 该单元是否**已经**由虚拟化判定为"在视口内"。
+   *
+   * 平铺与列表视图只渲染窗口内的行，因此这两个视图里的单元**必然**接近视口——
+   * 直接请求缩略图即可，不必再为每一格建观察器、也不必等一次异步测量。
+   * 自适应/瀑布流仍是全量渲染，传 `undefined` 走共享观察器。
+   */
+  nearViewport?: boolean;
 }): JSX.Element {
   const cellRef = useRef<HTMLButtonElement>(null);
   const [visible, setVisible] = useState(false);
@@ -120,24 +179,18 @@ export const ThumbCell = memo(function ThumbCell({
   // undefined=尚未请求；null=请求了但不可用；string=已就绪
   const [thumbUrl, setThumbUrl] = useState<string | null | undefined>(undefined);
 
-  // 进入视口附近后标记可见（仅触发一次，随后断开观察器）
+  // 进入视口附近后标记可见（仅触发一次，随后取消观察）。
+  // `nearViewport` 为真时**跳过观察**：虚拟化已经保证这些单元在视口内，
+  // 再建观察器等一次异步回调只会推迟缩略图请求（多一帧空白）。
   useEffect(() => {
+    if (nearViewport) {
+      setVisible(true);
+      return;
+    }
     const el = cellRef.current;
     if (!el) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setVisible(true);
-            obs.disconnect();
-          }
-        }
-      },
-      { rootMargin: "200px" },
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
+    return observeUntilVisible(el, () => setVisible(true));
+  }, [nearViewport]);
 
   // 可见后请求缩略图（带模块级缓存 + in-flight 去重）
   useEffect(() => {
@@ -155,7 +208,19 @@ export const ThumbCell = memo(function ThumbCell({
     <button
       ref={cellRef}
       className={`mp-cell ${selected ? "selected" : ""}`}
-      style={{ "--mp-cell-ratio": String(ratio) } as CSSProperties}
+      style={
+        {
+          "--mp-cell-ratio": String(ratio),
+          // 跳过渲染时的占位高度：由面板按当前视图给出**接近真实**的值
+          // （自适应 = 图片尺寸、瀑布流 = 按宽高比算出的单元高）。不传就沿用样式表缺省。
+          //
+          // 带 `auto` 关键字：该单元一旦被渲染过，浏览器会记住它的真实尺寸并在再次
+          // 跳过渲染时优先使用——滚动回去时占位高度是**量到的真值**，越滚越准。
+          ...(intrinsicHeight
+            ? { containIntrinsicBlockSize: `auto ${intrinsicHeight}px` }
+            : {}),
+        } as CSSProperties
+      }
       draggable
       onClick={(e) =>
         onSelect(file, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })

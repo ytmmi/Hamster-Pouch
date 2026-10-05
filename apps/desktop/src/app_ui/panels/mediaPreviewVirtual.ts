@@ -71,11 +71,99 @@ export function listRowHeight(lineHeight = 16): number {
   return Math.round(3 + 3 + 2 + lineHeight);
 }
 
+/**
+ * 瀑布流：按列累计高度。
+ *
+ * `distributeColumns` 已把条目分到各列（按序号 `i % columns`，与高度无关——这样
+ * 阅读顺序与排序结果一致、同一次排序的布局稳定）。这里给每列累计出"每一项距列顶
+ * 的偏移"，供按列虚拟化使用。
+ *
+ * `heightOf(index)` 由调用方给出（它知道宽高比缓存与列宽）；返回的 `offsets` 与
+ * `heights` 与入参等长，`columnHeight` 是含间距的总高。
+ */
+export function masonryColumnLayout<T>(
+  columns: readonly (readonly T[])[],
+  heightOf: (item: T) => number,
+  gap = MEDIA_MASONRY_GAP,
+): { offsets: number[][]; heights: number[][]; columnHeights: number[] } {
+  const offsets: number[][] = [];
+  const heights: number[][] = [];
+  const columnHeights: number[] = [];
+  for (const column of columns) {
+    const columnOffsets: number[] = [];
+    const columnHeightsList: number[] = [];
+    let cursor = 0;
+    for (const item of column) {
+      const height = Math.max(1, Math.round(heightOf(item)));
+      columnOffsets.push(cursor);
+      columnHeightsList.push(height);
+      cursor += height + gap;
+    }
+    offsets.push(columnOffsets);
+    heights.push(columnHeightsList);
+    // 最后一项后面不留间距（否则容器底部会多出一条空档）。
+    columnHeights.push(Math.max(0, cursor - gap));
+  }
+  return { offsets, heights, columnHeights };
+}
+
+/** 取数组中第 `index` 项，越界返回 `undefined`（虚拟窗口的边界容错）。 */
+export function at<T>(list: readonly T[], index: number): T | undefined {
+  return index >= 0 && index < list.length ? list[index] : undefined;
+}
+
 /** 平铺视图的**行间距**（与 `.mp-grid` 的 `gap: 8px` 一致）。 */
 export const MEDIA_TILE_ROW_GAP = 8;
 
 /** 文件名列表的**行间距**（与 `.mp-list` 的 `gap: 2px` 一致）。 */
 export const MEDIA_LIST_ROW_GAP = 2;
+
+/** 瀑布流的**列间距 / 单元间距**（与 `.mp-masonry` 的 `gap: 8px` 一致）。 */
+export const MEDIA_MASONRY_GAP = 8;
+
+/**
+ * 瀑布流**单个单元**的高度（px），**不含单元间距**。
+ *
+ * 与平铺的差别只有一处：缩略图高度由**图片自身宽高比**推出（`.mp-masonry .mp-thumb`
+ * 的 `height: auto` + `img` 的 `height: auto`），而不是方形。
+ *
+ * 因此单元高度 = 上下内边距/边框 + 缩略图高 +（可选）文件名行。
+ * `ratio` 来自宽高比缓存（`mediaPreviewCell.tsx` 的 `ratioCache`）——
+ * 索引里没有图片尺寸，只有 `<img>` 解码后才量得到，量之前用 `DEFAULT_CELL_RATIO` 占位。
+ */
+export function masonryCellHeight(
+  columnWidth: number,
+  ratio: number,
+  showName: boolean,
+  nameLineHeight = 16,
+): number {
+  const column = Math.max(1, columnWidth);
+  const inner = Math.max(1, column - 10);
+  const safeRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+  const thumb = inner / safeRatio;
+  const vertical = 4 + 4 + 2;
+  const nameBlock = showName ? 4 + nameLineHeight : 0;
+  return Math.round(vertical + thumb + nameBlock);
+}
+
+/**
+ * 自适应视图**单个单元**的占位高度（px）——给 `contain-intrinsic-size` 用。
+ *
+ * 自适应视图的行内宽度按宽高比分配，单元**实际**高度 = 该行最终行高（各行不同），
+ * 单看一个单元是算不出来的。但行高被 `--mp-row-max-factor: 2` 封顶，且"铺满一行"时
+ * 行高就约等于图片尺寸——所以用图片尺寸作估计，误差远小于原先写死的 140px。
+ *
+ * 这个值只影响**被跳过渲染**的单元（`content-visibility: auto`）在滚动中占多高：
+ * 估计得越准，滚动条越不会抖。真正渲染出来的单元由 CSS 按真实宽高比排版。
+ */
+export function adaptiveCellIntrinsicHeight(
+  imageSize: number,
+  showName: boolean,
+  nameLineHeight = 16,
+): number {
+  const base = Math.max(1, imageSize);
+  return Math.round(base + (showName ? 4 + nameLineHeight : 0));
+}
 
 /**
  * 行窗口：把"滚到哪了"换算成要渲染的行区间。

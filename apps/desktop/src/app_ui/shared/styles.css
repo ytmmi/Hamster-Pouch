@@ -1420,13 +1420,21 @@ button.danger {
 }
 
 /*
- * 关掉跳过渲染：自适应行高由"宽度 ÷ 宽高比"推出，`.mp-cell` 的
- * `contain-intrinsic-size: auto 140px` 与真实高度无关，跳过渲染会让滚动高度在滚动中变化
- * （滚动条抖动、位置漂移）。宁可少一点跳过渲染的收益，也不要滚动抖动。
+ * 自适应：跳过渲染（`content-visibility: auto`）**打开**，但占位高度必须接近真实。
+ *
+ * 原先这里显式关掉跳过渲染，理由是 `.mp-cell` 的 `contain-intrinsic-size: auto 140px`
+ * 与真实行高（由"宽度 ÷ 宽高比"推出）无关，跳过渲染会让滚动高度在滚动中变化
+ * （滚动条抖动、位置漂移）。
+ *
+ * 但根因是**那个 140px 写错了**，不是"跳过渲染本身不可用"：自适应视图的行高被
+ * `--mp-row-max-factor: 2` 封顶、铺满一行时约等于图片尺寸，因此面板按图片尺寸下发
+ * `contain-intrinsic-block-size`（`mediaPreviewVirtual.ts` 的 `adaptiveCellIntrinsicHeight`），
+ * 估计误差远小于 140px。于是跳过渲染可以打开，滚动条也不会抖。
+ *
+ * 这里不再覆写 `content-visibility`——沿用 `.mp-cell` 基础规则的 `auto`；
+ * 块轴占位由面板内联下发（内联的 `contain-intrinsic-block-size` 会覆盖
+ * `contain-intrinsic-size` 简写的块轴分量），未下发时回落基础规则的 140px。
  */
-.mp-grid.mp-view-adaptive .mp-cell {
-  content-visibility: visible;
-}
 
 /* --- 瀑布流 --- */
 
@@ -1475,13 +1483,17 @@ button.danger {
 }
 
 /*
- * 关掉跳过渲染：`.mp-cell` 的 `contain-intrinsic-size: auto 140px` 是给**行高一致**的
- * 网格用的；在行高不等的瀑布流里，离屏单元塌成 140px 会让滚动高度随滚动不断变化
- * （滚动条抖动、滚动位置漂移）。
+ * 瀑布流：跳过渲染（`content-visibility: auto`）**打开**，占位高度由面板按宽高比下发。
+ *
+ * 原先这里显式关掉跳过渲染，理由是 `.mp-cell` 的 `contain-intrinsic-size: auto 140px`
+ * 是给**行高一致**的网格用的；瀑布流行高不等，离屏单元塌成 140px 会让滚动高度随滚动
+ * 不断变化（滚动条抖动、位置漂移）。
+ *
+ * 同样地，根因是**占位高度写错了**：面板按"列宽 ÷ 宽高比 + 内边距"算出该单元的
+ * 真实高度（`mediaPreviewVirtual.ts` 的 `masonryCellHeight`，宽高比取自
+ * `mediaPreviewCell.tsx` 的 `ratioCache`），以 `contain-intrinsic-block-size` 内联下发。
+ * 于是跳过渲染可以打开，滚动高度也不再随滚动变化。
  */
-.mp-masonry .mp-cell {
-  content-visibility: visible;
-}
 
 /* 音频没有宽高比可用（波形图自带尺寸），给个固定高度避免单元塌掉。 */
 .mp-masonry .mp-wave {
