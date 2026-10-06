@@ -145,7 +145,7 @@ apps/desktop/src/app_ui/
     BlueprintToolbar.tsx    # 编辑器工具条（名称/保存/一键整理/恢复内置默认/删除/视图切换）
     BlueprintPalette.tsx    # 节点添加面板（可从调色板新增的节点类型）
     BlueprintJsonView.tsx   # JSON 文本视图（直接改 JSON + 解析回文档）
-    BlueprintCanvas.tsx     # 节点画布（拖拽/连线/平移缩放/右键直线刀痕；**只渲染当前层**；挂右下角小地图）
+    BlueprintCanvas.tsx     # 节点画布（拖拽/连线/平移缩放/右键直线刀痕**批量删除**；**只渲染当前层**；挂右下角小地图）
     BlueprintMinimap.tsx    # 小地图（缩略当前层节点/连线 + 视口指示框；拖动即把视口中心移到该处）
     BlueprintInspector.tsx  # 节点属性面板（浮层 visible/height/size/anchor/offset/shadow/radius/hide_label）
     BlueprintLayerBar.tsx   # 层工具条（切换/新增/重命名/删除/排序 + 无根层标记）
@@ -159,7 +159,7 @@ apps/desktop/src/app_ui/
     blueprintLabels.ts      # 节点本地化显示层（显示名/摘要/字段标签；画布与属性面板共用）
     blueprintNodeColors.ts  # 节点/边配色纯数据（画布与小地图共用同一份色板；未知/插件类型有中性兜底色）
     blueprintLayers.ts      # 层操作纯函数（新增层自带界面根/重命名唯一/排序/补根）
-    blueprintDelete.ts      # 软删除（节点）+ 层硬删除 removeLayer（D55）
+    blueprintDelete.ts      # 软删除（节点）+ 一次划线批量删除 `softRemoveMany`（原子）+ 层硬删除 removeLayer（D55）
     blueprintSlots.ts       # 画布槽位（就近空槽）
     blueprintArrange.ts     # 「一键整理」纯算法（BFS 分层、按列树状展开）
     blueprintGeometry.ts    # 纯几何（视口换算/贝塞尔采样/刀痕命中）

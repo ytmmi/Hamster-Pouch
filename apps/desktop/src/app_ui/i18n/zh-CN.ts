@@ -490,6 +490,8 @@ export const zhCN = {
   "blueprint.restoreFailed": "恢复内置默认失败：{err}",
   "blueprint.softRemoved": "已删除该节点；{count} 个关联节点因引用断开而暂未接通（灰色）",
   "blueprint.edgeRemoved": "已删除连线（{kind}）",
+  "blueprint.bladeRemoved": "划线删除：{nodes} 个节点、{edges} 条连线",
+  "blueprint.bladeRemovedUnlinked": "划线删除：{nodes} 个节点、{edges} 条连线；{count} 个关联节点因引用断开而暂未接通（灰色）",
   "blueprint.unlinkedTag": "未接通",
   "blueprint.unlinkedHint": "有 {count} 个节点暂未接通（灰色，不会生效）：接回引用后即恢复。",
   "blueprint.bladeHint": "右键按住拖过连线/节点 = 删除",

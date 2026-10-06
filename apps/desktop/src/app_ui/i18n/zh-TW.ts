@@ -471,6 +471,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.restoreFailed": "恢復內建預設失敗：{err}",
   "blueprint.softRemoved": "已刪除該節點；{count} 個關聯節點因引用斷開而暫未接通（灰色）",
   "blueprint.edgeRemoved": "已刪除連線（{kind}）",
+  "blueprint.bladeRemoved": "劃線刪除：{nodes} 個節點、{edges} 條連線",
+  "blueprint.bladeRemovedUnlinked": "劃線刪除：{nodes} 個節點、{edges} 條連線；{count} 個關聯節點因引用斷開而暫未接通（灰色）",
   "blueprint.unlinkedTag": "未接通",
   "blueprint.unlinkedHint": "有 {count} 個節點暫未接通（灰色，不會生效）：接回引用後即恢復。",
   "blueprint.bladeHint": "按住右鍵拖過連線/節點 = 刪除",

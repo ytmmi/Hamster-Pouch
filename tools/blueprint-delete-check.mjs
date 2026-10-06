@@ -22,7 +22,7 @@ const defaultDb =
   "E:/Hamster Pouch/apps/desktop/src-tauri/target/release/data/user/repos/00c37ce8-8464-4808-8c51-c9af38e86516.sqlite3";
 const dbPath = process.argv[2] ?? defaultDb;
 
-const { softRemove } = await import(
+const { softRemove, softRemoveMany } = await import(
   pathToFileURL(`${ROOT}/apps/desktop/src/app_ui/panels/blueprintDelete.ts`).href
 );
 const { analyzeUnlinked } = await import(
@@ -138,6 +138,72 @@ const has = (doc, key) => doc.nodes.some((n) => n.key === key);
       `${doc.nodes.length} → ${next.nodes.length}`,
     );
   }
+}
+
+// ---- 6. 一次划线批量删除（`softRemoveMany`）：多处**原子**生效 ----
+// 真实缺陷：画布对每个命中项各调一次 removeEdgeAt/removeNode，而两者都从**同一份旧文档**
+// 派生新文档 → 后一次覆盖前一次，划痕实际"只能删一个"。
+{
+  const base = {
+    schema_version: 2,
+    layers: [{ key: "l_main", name: "主界面" }],
+    nodes: [
+      { key: "ui", type: "interface", layer: "l_main", position: { x: 0, y: 0 } },
+      { key: "c1", type: "control", panel_id: "media", layer: "l_main", position: { x: 0, y: 0 } },
+      { key: "k1", type: "class", control: "c1", media_type: "image", layer: "l_main", position: { x: 0, y: 0 } },
+      { key: "o1", type: "object", class: "k1", scope: "double_clicked", layer: "l_main", position: { x: 0, y: 0 } },
+      { key: "e1", type: "event", trigger: "double_click", layer: "l_main", position: { x: 0, y: 0 } },
+      { key: "a1", type: "action", op: "show", target: "c1", layer: "l_main", position: { x: 0, y: 0 } },
+    ],
+    edges: [
+      { from: "ui", to: "c1", kind: "contains", order: 1 },
+      { from: "c1", to: "k1", kind: "contains", order: 2 },
+      { from: "k1", to: "o1", kind: "contains", order: 3 },
+      { from: "o1", to: "e1", kind: "on", order: 4 },
+      { from: "e1", to: "a1", kind: "fires", order: 5 },
+    ],
+  };
+  const cloned = () => JSON.parse(JSON.stringify(base));
+
+  // 划线命中：2 个节点（o1、e1）+ 1 条边（下标 0 = ui→c1）
+  const batch = softRemoveMany(cloned(), ["o1", "e1"], [0]);
+  check(
+    "批量删除：2 个节点 + 1 条边一次全部生效（6→4 节点，5→1 边）",
+    batch.removed.join(",") === "o1,e1" &&
+      batch.doc.nodes.length === 4 &&
+      batch.doc.edges.length === 1,
+    `removed=[${batch.removed.join(", ")}] nodes=${batch.doc.nodes.length} edges=${batch.doc.edges.length}`,
+  );
+  check(
+    "批量删除：被删节点的关联边一并剔除，其它节点保留（软删除口径不变）",
+    !batch.doc.nodes.some((n) => n.key === "o1" || n.key === "e1") &&
+      batch.doc.nodes.some((n) => n.key === "k1") &&
+      batch.doc.nodes.some((n) => n.key === "a1") &&
+      batch.doc.edges.every((e) => e.from !== "o1" && e.to !== "o1" && e.from !== "e1" && e.to !== "e1") &&
+      batch.doc.edges.some((e) => e.from === "c1" && e.to === "k1"),
+    batch.doc.edges.map((e) => `${e.from}->${e.to}`).join(", "),
+  );
+  // 回归对照：旧写法"各调一次、各自基于同一份旧文档" → 只剩最后一次生效（只删 1 个节点）。
+  const oldWayLast = softRemove(cloned(), "e1");
+  check(
+    "回归对照：逐个从同一份旧文档删除只剩最后一次生效（这正是「只能删一个」的根因）",
+    oldWayLast.doc.nodes.length === 5 && batch.doc.nodes.length === 4,
+    `旧写法=${oldWayLast.doc.nodes.length} 节点，批量=${batch.doc.nodes.length} 节点`,
+  );
+  // 健壮性：重复 key、已删 key、越界边下标都不崩、不做多余删除。
+  const messy = softRemoveMany(cloned(), ["o1", "o1", "nope"], [0, 999]);
+  check(
+    "批量删除：重复 key / 不存在 key / 越界边下标被忽略（结果与去重后一致）",
+    messy.removed.join(",") === "o1" &&
+      messy.doc.nodes.length === 5 &&
+      messy.doc.edges.length === 2,
+    `removed=[${messy.removed.join(", ")}] nodes=${messy.doc.nodes.length} edges=${messy.doc.edges.length}`,
+  );
+  check(
+    "批量删除：被清空引用的节点若随后也被删掉，不再计入「未接通」提示",
+    softRemoveMany(cloned(), ["k1", "o1"], []).unlinked.length === 0,
+    `unlinked=[${softRemoveMany(cloned(), ["k1", "o1"], []).unlinked.join(", ")}]`,
+  );
 }
 
 const failed = results.filter((r) => !r.ok);

@@ -20,7 +20,7 @@ import {
 
 import { useApp } from "../core/AppContext";
 import { arrangeTree } from "./blueprintArrange";
-import { softRemove } from "./blueprintDelete";
+import { softRemove, softRemoveMany } from "./blueprintDelete";
 import { ensureInterface } from "./blueprintLayers";
 import { appendNode, parentHintFor } from "./blueprintNodeFactory";
 import { canvasCenter, freeSlotPosition } from "./blueprintSlots";
@@ -41,6 +41,11 @@ export interface BlueprintGraphEdits {
   updateNode: (key: string, patch: Partial<BlueprintNode>) => void;
   /** 删除节点（**软删除**）：只删这个节点和挂在它身上的边，关联节点保留。 */
   removeNode: (key: string) => void;
+  /**
+   * 一次划线删除**多处**（右键直线刀痕放开时）：节点 key 列表 + 整文档边下标列表，
+   * **原子应用一次**（分多次调用会各自基于同一份旧文档、只剩最后一次生效）。
+   */
+  removeBladeHits: (nodeKeys: string[], edgeIndexes: number[]) => void;
   /** 删除一条边（画布刀痕删除用）。 */
   removeEdgeAt: (index: number) => void;
   /** 连线后自动把子节点的引用字段落好（用户不手填 key）。 */
@@ -129,7 +134,7 @@ export function useBlueprintGraphEdits({
     [doc, mutate, app, setSelectedKey],
   );
 
-  /** 删除一条边（画布刀痕删除用）。 */
+  /** 删除一条边（单条：选中后按 Delete，或点击命中单条时用）。 */
   const removeEdgeAt = useCallback(
     (index: number) => {
       const edge = doc.edges[index];
@@ -140,6 +145,33 @@ export function useBlueprintGraphEdits({
       app.status(app.t("blueprint.edgeRemoved", { kind: edge.kind }), "info");
     },
     [doc, mutate, app],
+  );
+
+  /**
+   * 一次划线删除**多处**：节点与连线**一并**落一次文档（`softRemoveMany`）。
+   *
+   * 早前画布对每个命中项各调一次 `removeNode` / `removeEdgeAt`，而两者都从**同一份旧文档**
+   * 派生新文档 → 只有最后一次生效，划痕实际"只能删一个"。现在合并为一次原子编辑。
+   */
+  const removeBladeHits = useCallback(
+    (nodeKeys: string[], edgeIndexes: number[]) => {
+      const { doc: next, removed, unlinked } = softRemoveMany(doc, nodeKeys, edgeIndexes);
+      if (removed.length === 0 && edgeIndexes.length === 0) {
+        return;
+      }
+      mutate(next);
+      setSelectedKey(null);
+      const params = { nodes: removed.length, edges: edgeIndexes.length };
+      if (unlinked.length > 0) {
+        app.status(
+          app.t("blueprint.bladeRemovedUnlinked", { ...params, count: unlinked.length }),
+          "info",
+        );
+      } else {
+        app.status(app.t("blueprint.bladeRemoved", params), "ok");
+      }
+    },
+    [doc, mutate, app, setSelectedKey],
   );
 
   /**
@@ -194,5 +226,5 @@ export function useBlueprintGraphEdits({
     persistDoc(next);
   }, [selectedKey, doc, mutate, persistDoc]);
 
-  return { addNode, updateNode, removeNode, removeEdgeAt, onConnect, onArrange };
+  return { addNode, updateNode, removeNode, removeBladeHits, removeEdgeAt, onConnect, onArrange };
 }

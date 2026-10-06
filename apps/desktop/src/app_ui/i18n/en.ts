@@ -471,6 +471,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.restoreFailed": "Failed to restore built-in default: {err}",
   "blueprint.softRemoved": "Node deleted; {count} related node(s) are now unlinked (shown gray)",
   "blueprint.edgeRemoved": "Edge deleted ({kind})",
+  "blueprint.bladeRemoved": "Blade deleted {nodes} node(s) and {edges} edge(s)",
+  "blueprint.bladeRemovedUnlinked": "Blade deleted {nodes} node(s) and {edges} edge(s); {count} related node(s) are now unlinked (shown gray)",
   "blueprint.unlinkedTag": "unlinked",
   "blueprint.unlinkedHint": "{count} node(s) are unlinked (gray, not effective): reconnect to restore.",
   "blueprint.bladeHint": "Hold right button and drag over edges/nodes to delete",

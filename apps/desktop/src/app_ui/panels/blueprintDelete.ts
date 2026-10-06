@@ -78,6 +78,59 @@ export function softRemove(doc: BlueprintGraph, rootKey: string): SoftRemoveResu
   };
 }
 
+/** 一次划线的批量删除结果（节点 + 连线）。 */
+export interface BladeRemoveResult {
+  doc: BlueprintGraph;
+  /** 实际被移除的节点 key（按去重后的命中顺序）。 */
+  removed: string[];
+  /** 因引用被清空而变成"未接通"的节点 key（画布灰显），仅供提示用。 */
+  unlinked: string[];
+}
+
+/**
+ * 一次划线（右键直线刀痕）删除**多处**：边按**整文档下标**、节点按 key，**原子应用一次**。
+ *
+ * 为什么必须是一次：画布早前对每个命中项各调一次 `removeEdgeAt` / `removeNode`，而两者都基于
+ * **同一份调用前的 `doc`** 算出新文档 → 后一次把前一次覆盖掉，实际只删掉最后一项——用户看到的是
+ * "划线只能删一个节点/一条连线"。这里改为：边一次过滤、节点在**演进后的文档**上逐个软删除。
+ */
+export function softRemoveMany(
+  doc: BlueprintGraph,
+  nodeKeys: string[],
+  edgeIndexes: number[],
+): BladeRemoveResult {
+  let next = doc;
+  // 边：下标来自划痕命中时的 `doc.edges`，这里一次过滤（重复调用的下标语义会互相错位）。
+  if (edgeIndexes.length > 0) {
+    const drop = new Set(edgeIndexes);
+    next = { ...next, edges: next.edges.filter((_, i) => !drop.has(i)) };
+  }
+  // 节点：逐个软删除，保证"引用清理"与"关联边剔除"在后续节点上相互可见。
+  const removed: string[] = [];
+  const unlinked: string[] = [];
+  const seen = new Set<string>();
+  for (const key of nodeKeys) {
+    if (seen.has(key)) {
+      continue; // 划痕可能重复命中同一节点
+    }
+    seen.add(key);
+    const r = softRemove(next, key);
+    if (r.removed.length === 0) {
+      continue; // 已被前面的删除连带移除
+    }
+    next = r.doc;
+    removed.push(...r.removed);
+    unlinked.push(...r.unlinked);
+  }
+  // 被清空引用的节点若随后也被删掉，就不该再报"未接通"。
+  const removedSet = new Set(removed);
+  return {
+    doc: next,
+    removed,
+    unlinked: [...new Set(unlinked)].filter((k) => !removedSet.has(k)),
+  };
+}
+
 export interface RemoveLayerResult {
   doc: BlueprintGraph;
   /** 实际删除的层 key（最后一层被拒绝时为空）。 */

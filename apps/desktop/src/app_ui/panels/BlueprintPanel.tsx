@@ -127,6 +127,7 @@ export function BlueprintPanel(): JSX.Element {
                       onChange={state.mutate}
                       onPersist={docs.persistDoc}
                       onRemoveNode={edits.removeNode}
+                      onRemoveBlade={edits.removeBladeHits}
                       onRemoveEdge={edits.removeEdgeAt}
                       onConnect={edits.onConnect}
                       onViewCenterChange={state.setViewCenter}

@@ -49,6 +49,11 @@ export interface BlueprintCanvasProps {
   onPersist?: (doc: BlueprintGraph) => void;
   /** 删除节点（Delete/Backspace 键或刀痕划中触发；面板负责软删除）。 */
   onRemoveNode?: (key: string) => void;
+  /**
+   * 一次划线（右键直线刀痕）删除**多处**：节点 key 列表 + 整文档边下标列表。
+   * **必须一次给全**——分多次回调会各自基于同一份旧文档，只剩最后一次生效。
+   */
+  onRemoveBlade?: (nodeKeys: string[], edgeIndexes: number[]) => void;
   /** 删除一条边（刀痕划过连线后放开触发）。 */
   onRemoveEdge?: (index: number) => void;
   /**
@@ -98,6 +103,7 @@ export function BlueprintCanvas({
   onChange,
   onPersist,
   onRemoveNode,
+  onRemoveBlade,
   onRemoveEdge,
   onConnect,
   onViewCenterChange,
@@ -454,18 +460,23 @@ export function BlueprintCanvas({
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    // 刀痕放开：删除划中的边与节点（节点为软删除，关联节点保留并灰显）。
+    // 刀痕放开：删除划中的**全部**边与节点（节点为软删除，关联节点保留并灰显）。
     if (dragRef.current?.kind === "blade") {
       const hits = blade;
       dragRef.current = null;
       setBlade(null);
       if (hits) {
-        // 先删边再删节点：节点删除会移除其关联边，避免索引错位。
-        for (const index of [...hits.edges].sort((a, b) => b - a)) {
-          onRemoveEdge?.(index);
-        }
-        for (const key of hits.nodes) {
-          onRemoveNode?.(key);
+        if (onRemoveBlade) {
+          // 一次给全：面板在**一份文档**上原子应用（分多次回调会只剩最后一次生效）。
+          onRemoveBlade(hits.nodes, hits.edges);
+        } else {
+          // 兜底（未接批量回调时）：先删边再删节点，避免索引在节点删除后错位。
+          for (const index of [...hits.edges].sort((a, b) => b - a)) {
+            onRemoveEdge?.(index);
+          }
+          for (const key of hits.nodes) {
+            onRemoveNode?.(key);
+          }
         }
       }
       return;
