@@ -13,7 +13,7 @@
  *    不用 `scrollIntoView`（后者会连带滚动祖先，可能把整个面板/页面顶走）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { resolveThumbUrl } from "../../shared/thumbUrl";
 import type { FileItem } from "../../shared/types";
@@ -198,23 +198,52 @@ export function ViewerFilmstrip({
     if (nearEnd) setEnd((prev) => Math.min(files.length, prev + FILMSTRIP_STEP));
   }, [files.length, vertical]);
 
-  // 当前项始终可见（容器内手算滚动，不惊动祖先滚动容器）。
-  useEffect(() => {
+  // 当前项在胶片栏中始终居中（容器内手算滚动，不惊动祖先滚动容器）。
+  // 首次打开面板时容器可能还没完成布局（clientHeight=0），这里用 rAF 重试兜底：
+  // 最多等待 10 帧（~167ms，足够容器完成初始化布局）。
+  // 同时用 ResizeObserver 监听容器尺寸变化（切换胶片栏位置/调整面板大小后重新居中）。
+  const centerOnIndex = useCallback(() => {
     const container = containerRef.current;
     if (!container || index < 0 || index >= end) return;
     const cell = container.querySelector<HTMLElement>(`[data-index="${index}"]`);
     if (!cell) return;
-    const cRect = container.getBoundingClientRect();
-    const eRect = cell.getBoundingClientRect();
-    if (vertical) {
-      if (eRect.top < cRect.top) container.scrollTop -= cRect.top - eRect.top;
-      else if (eRect.bottom > cRect.bottom) container.scrollTop += eRect.bottom - cRect.bottom;
-    } else if (eRect.left < cRect.left) {
-      container.scrollLeft -= cRect.left - eRect.left;
-    } else if (eRect.right > cRect.right) {
-      container.scrollLeft += eRect.right - cRect.right;
-    }
+    let retries = 10;
+    const doCenter = () => {
+      const cDim = vertical ? container.clientHeight : container.clientWidth;
+      const cellOff = vertical ? cell.offsetTop : cell.offsetLeft;
+      const cellDim = vertical ? cell.offsetHeight : cell.offsetWidth;
+      // 容器或单元格还没有稳定尺寸 → 下一帧重试
+      if ((cDim <= 0 || cellDim <= 0) && retries > 0) {
+        retries--;
+        requestAnimationFrame(doCenter);
+        return;
+      }
+      if (cDim > 0) {
+        if (vertical) {
+          container.scrollTop = Math.max(0, cellOff + cellDim / 2 - cDim / 2);
+        } else {
+          container.scrollLeft = Math.max(0, cellOff + cellDim / 2 - cDim / 2);
+        }
+      }
+    };
+    requestAnimationFrame(doCenter);
   }, [index, end, vertical]);
+
+  useLayoutEffect(() => {
+    centerOnIndex();
+  }, [centerOnIndex]);
+
+  // 容器尺寸变化（面板初始化后第一次布局完成、面板大小改变、胶片栏切换位置等）
+  // 也重新居中当前项。
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const ro = new ResizeObserver(() => {
+      centerOnIndex();
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [centerOnIndex]);
 
   const visible = useMemo(() => files.slice(0, end), [files, end]);
 
