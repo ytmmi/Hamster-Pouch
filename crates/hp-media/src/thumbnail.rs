@@ -8,12 +8,11 @@
 //! "生成中途崩溃留下损坏缩略图、此后一直被 `exists()` 命中"的问题。
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 use hp_core::{HpError, HpResult};
 
-use crate::process::run_with_timeout;
+use crate::process::{hidden_command, run_with_timeout};
 
 /// 抽帧过滤器：宽度不超过 512、高度按比例，小图不放大。
 const SCALE_FILTER: &str = "scale='min(512,iw)':-2";
@@ -58,7 +57,8 @@ pub fn extract_thumbnail(
 ) -> HpResult<()> {
     // 先写到临时文件，成功后原子改名（见模块文档）。
     let temp = temp_sibling(output_jpg);
-    let mut cmd = Command::new(ffmpeg_bin);
+    // `hidden_command`：GUI 父进程下不新建控制台窗口（源扫描抽帧）。
+    let mut cmd = hidden_command(ffmpeg_bin);
     cmd.args(["-y", "-i"])
         .arg(video_path)
         .args(["-frames:v", "1", "-vf", SCALE_FILTER, "-q:v", "3"])
@@ -114,7 +114,8 @@ fn generate_preview_via_ffmpeg(
 ) -> HpResult<()> {
     // 先写到临时文件，成功后原子改名（见模块文档）。
     let temp = temp_sibling(output_jpg);
-    let mut cmd = Command::new(ffmpeg_bin);
+    // `hidden_command`：GUI 父进程下不新建控制台窗口（首次查看 HEIC/HEIF 的全分辨率预览）。
+    let mut cmd = hidden_command(ffmpeg_bin);
     cmd.args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
         .arg(src)
         .args(["-frames:v", "1", "-q:v", "2"])
@@ -325,7 +326,7 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("创建临时目录失败");
         let src = dir.join("sample.avif");
         let out = dir.join("out.jpg");
-        let status = std::process::Command::new(&ffmpeg)
+        let status = crate::process::hidden_command(&ffmpeg)
             .args(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=800x600", "-frames:v", "1", "-c:v", "libaom-av1", "-crf", "20", "-still-picture", "1"])
             .arg(&src)
             .status()

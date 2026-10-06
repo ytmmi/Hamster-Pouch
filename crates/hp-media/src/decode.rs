@@ -33,12 +33,11 @@
 //! 注册 libheif hooks 只**新增** heic/heif/avif 三种格式的解码能力，不改变既有格式。
 
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 use hp_core::{HpError, HpResult};
 
-use crate::process::run_with_timeout;
+use crate::process::{hidden_command, run_with_timeout};
 
 /// 把 libheif 的 heic/heif/avif 解码 hook 挂进 `image` crate（**一次性、幂等**）。
 ///
@@ -110,7 +109,7 @@ pub(crate) fn decode_image_with_ffmpeg(
     max_dim: u32,
     timeout: Duration,
 ) -> HpResult<image::DynamicImage> {
-    let mut cmd = Command::new(ffmpeg_bin);
+    let mut cmd = hidden_command(ffmpeg_bin);
     cmd.args(["-hide_banner", "-loglevel", "error", "-i"])
         .arg(src);
     if max_dim < u32::MAX {
@@ -210,7 +209,7 @@ mod tests {
 
     /// 用捆绑 ffmpeg 生成一张**纯色** AVIF（libaom-av1，确定性内容便于断言像素）。
     fn make_avif(ffmpeg: &Path, out: &Path) {
-        let status = Command::new(ffmpeg)
+        let status = crate::process::hidden_command(ffmpeg)
             .args(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0x3355aa:s=640x480", "-frames:v", "1", "-c:v", "libaom-av1", "-crf", "20", "-still-picture", "1"])
             .arg(out)
             .status()

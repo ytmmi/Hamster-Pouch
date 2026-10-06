@@ -1,12 +1,11 @@
 //! ffprobe 元数据探测（D15）：全量媒体信息，缓存进文件索引。
 
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 use hp_core::{HpError, HpResult};
 
-use crate::process::run_with_timeout;
+use crate::process::{hidden_command, run_with_timeout};
 
 /// 解析 "num/den" 比率字符串为 f64。
 fn parse_ratio(s: &str) -> Option<f64> {
@@ -37,7 +36,8 @@ pub struct MediaProbe {
 
 /// 探测视频元数据；失败返回 `HpError::Io`（错误降级由调用方决定）。
 pub fn probe(video_path: &Path, ffprobe_bin: &Path, timeout: Duration) -> HpResult<MediaProbe> {
-    let mut cmd = Command::new(ffprobe_bin);
+    // `hidden_command`：GUI 父进程下不新建控制台窗口。
+    let mut cmd = hidden_command(ffprobe_bin);
     cmd.args([
         "-v",
         "error",

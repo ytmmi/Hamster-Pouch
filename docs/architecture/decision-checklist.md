@@ -233,3 +233,12 @@
 | ID | 主题 | 状态 | 已确认决策 |
 | --- | --- | --- | --- |
 | D82 | 调色板改由"全面分析"顺带提取（取消点击即提取） | 已确认（**已实现**） | ①**取消**"点击图像即提取"：装配层监视器 `core/colorPaletteWatch.tsx` 与请求模块 `shared/colorPalette.ts` 一并删除；色彩参考面板**只读缓存**（`color.get` + `parsePaletteJson`），不再有任何界面触发提取。②提取绑定在**全面分析文件**上：源扫描 / **源全量重扫** / 右键「重新分析该文件」都会走到 `hp_scanner` 的 `index_new` / `index_existing`，两处 `MediaType::Image` 分支共用 `Scanner::write_palette` 顺带写入（用户口径："这两个都是全面分析文件，会提取所有要记录的参数和缩略图，调色盘的提取是顺带的"；`ScanOptions.full` 为真时每个文件都重算，故"源全量"会把全部图片的调色板刷新一遍）。③**不覆盖手动锁定**：写入前检查 `locked:true`（`hp_media::palette_is_locked`）——那是用户的判定权，与 D81 ① 保留 `color.set` / `locked` 字段的口径一致。④**失败不影响索引**：解码失败就当没有调色板（与同处的 `dhash_file(path).ok()` 同口径），面板显示 `color.empty` 的提示并写明"右键重新分析该文件 / 全量重扫源"这条路径。⑤缓存 JSON 形态收敛为**唯一实现** `hp_media::encode_palette_json`（`version` / `colors` / `locked`）：分析路径与 `color.extract` 都走它——`version` 是缓存自愈的开关，少写一个字段前端就会把整库缓存当"未提取"反复重算。⑥`color.extract` 命令与 `color.extracted` 事件**保留**（契约不变、能力仍在，插件/将来入口可用），但**已无界面调用方**；面板仍监听该事件，任何其它入口提取后照样即时刷新。⑦**「重新分析该文件」是后台任务**（2026-09 用户要求"分析时要和源全量时同款弹窗"）：`file.reanalyze` 立即返回 `taskId`，进度浮窗、取消按钮、结束后的状态与刷新全部**复用 `scan.*` 事件族**（`taskStore` 只认事件不认命令，所以"同款浮窗"= 发同一族事件，而不是再写一个弹窗）；任务种类为新的 `TaskKind::Analyze`（`task.status.kind` 因此多了 `analyze`），**可取消但没有暂停点**——进度帧带 `pausable: false` → 浮窗不渲染暂停按钮（不留按不动的键），取消除只在开工前生效（与源扫描"每文件之间检查"同款）。分析线程用**独立仓库库连接**，因此分析大视频时界面不再被主连接锁堵住。 |
+
+## 外部子进程不新建控制台窗口（D83，2026-10-06）
+
+> 本节登记 **用户 2026-10-06 直接要求**："源全量扫描或初次查看 avif、heif 等格式图像时，禁止出现 cmd 弹窗"
+> （缺陷记录 `docs/issues/0020`）。
+
+| ID | 主题 | 状态 | 已确认决策 |
+| --- | --- | --- | --- |
+| D83 | 外部子进程一律 `CREATE_NO_WINDOW`（GUI 桌面壳下不得新建控制台窗口） | 已确认（**已实现**） | ①**口径**：桌面壳的发布构建是 GUI 程序（`apps/desktop/src-tauri/src/main.rs` 的 `windows_subsystem = "windows"`，自身**没有控制台**），因此**任何**外部子进程都不得让 Windows 新建控制台窗口——控制台子系统程序（随仓库分发的 `ffmpeg.exe` / `ffprobe.exe`，实测 PE Subsystem=3）在 GUI 父进程下**必须**带 `CREATE_NO_WINDOW`。调试构建（`cargo tauri dev`）自带控制台、子进程复用它，**不复现**，故这类缺陷只在发布形态可见。②**实现**：`hp-media` 统一经 `hp_media::process::hidden_command` 构造子进程（`probe` / `decode` / `thumbnail` / `player` 四处），`run_with_timeout` 内**再兜底置一次**（幂等）——新增 spawn 忘了旗标也不会复发；`hp-plugin-host` 早有的同款 helper（`channel.rs`）继续使用。③**门禁**：`tools/check-hidden-console.mjs`（`pnpm check:hidden-console`）断言"白名单外零裸 `Command::new(`"等 7 项，**回退即红**。④**不改行为**：本口径只约束**进程创建标志**，ffprobe / ffmpeg 的参数与产出、扫描与解码结果一律不变。 |

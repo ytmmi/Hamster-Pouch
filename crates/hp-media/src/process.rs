@@ -1,5 +1,6 @@
-//! 外部进程调用辅助：带超时的子进程执行。
+//! 外部进程调用辅助：带超时的子进程执行 + **不弹控制台窗口**。
 
+use std::ffi::OsStr;
 use std::io::Read;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -8,6 +9,35 @@ use hp_core::{HpError, HpResult};
 
 /// 轮询间隔。
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// 构造一个**不弹控制台窗口**的子进程命令。
+///
+/// 桌面壳是 GUI 程序（`apps/desktop/src-tauri/src/main.rs` 的
+/// `windows_subsystem = "windows"`），自身**没有控制台**；此时启动控制台子系统程序
+/// （随仓库分发的 `ffmpeg.exe` / `ffprobe.exe` 实测 PE Subsystem=3），Windows 会为
+/// **子进程新建一个控制台窗口**——源扫描（ffprobe 探测 / ffmpeg 抽帧）或首次查看
+/// AVIF/HEIC（ffmpeg 有界解码、`preview.get` 全分辨率预览）时就闪出黑色 cmd 窗口。
+///
+/// 因此 hp-media 内的所有外部进程一律经本函数（或 [`run_with_timeout`]，它自带兜底）
+/// 构造，`pub(crate)` 供 `probe` / `decode` / `thumbnail` / `player` 共用。
+pub(crate) fn hidden_command(program: impl AsRef<OsStr>) -> Command {
+    let mut cmd = Command::new(program);
+    hide_console_window(&mut cmd);
+    cmd
+}
+
+/// Windows 上以 `CREATE_NO_WINDOW` 启动子进程，避免为子进程新建控制台窗口；
+/// 其它平台为空操作（无此问题）。
+#[cfg(windows)]
+pub(crate) fn hide_console_window(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    /// `CREATE_NO_WINDOW`：子进程不新建控制台。GUI 父进程 + 控制台子系统子进程的组合下必需。
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+pub(crate) fn hide_console_window(_command: &mut Command) {}
 
 /// 以 `timeout` 为上限运行命令并收集输出。
 ///
@@ -19,6 +49,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// 于是轮询永远看不到退出、最后被误判为"执行超时"。ffmpeg 处理损坏 / 异常视频时
 /// 会打印大量告警，正是这种情形——表现为扫描时每个坏视频白等一整个超时。
 pub(crate) fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> HpResult<Output> {
+    // 兜底：即使调用方漏用 `hidden_command`，这里也保证不弹控制台窗口
+    // （`creation_flags` 重复设置是幂等的，取最后一次）。
+    hide_console_window(cmd);
     let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

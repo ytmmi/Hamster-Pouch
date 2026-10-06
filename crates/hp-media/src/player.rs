@@ -17,7 +17,7 @@ use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::time::{Duration, Instant};
 
 use hp_core::{HpError, HpResult};
@@ -432,7 +432,8 @@ fn spawn_parts(
     timeout: Duration,
 ) -> HpResult<(Child, File, String)> {
     let pipe_path = pipe_path_for_current_process();
-    let mut cmd = Command::new(mpv_path);
+    // `hidden_command`：GUI 父进程下不新建控制台窗口（mpv 同样以 `--no-terminal` 启动）。
+    let mut cmd = crate::process::hidden_command(mpv_path);
     cmd.arg("--idle=yes")
         .arg("--no-terminal")
         // 播完不卸载文件：停在最后一帧（配合 `playback_state` 的 EOF 检测
