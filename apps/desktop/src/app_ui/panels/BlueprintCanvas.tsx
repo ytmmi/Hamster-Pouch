@@ -14,7 +14,6 @@ import type {
   BlueprintEdge,
   BlueprintGraph,
   BlueprintNode,
-  BlueprintNodeType,
 } from "@hamster-pouch/config";
 import { nodeLayerKey } from "@hamster-pouch/config";
 import type { Translate, TranslationKey } from "../i18n";
@@ -27,6 +26,9 @@ import {
 } from "./blueprintPorts";
 // 节点显示名/摘要等**本地化文案**由纯模块 `blueprintLabels` 承载（画布与属性面板共用）。
 import { nodeDisplayName, nodeSummary, nodeTypeLabel } from "./blueprintLabels";
+// 配色由纯模块 `blueprintNodeColors` 承载（画布与小地图共用同一份色板）。
+import { EDGE_COLORS, edgeColor, nodeColor } from "./blueprintNodeColors";
+import { BlueprintMinimap } from "./BlueprintMinimap";
 import {
   sampleEdgeCurve,
   segmentHitsPolyline,
@@ -34,29 +36,6 @@ import {
   viewportCenterToWorld,
   type Point,
 } from "./blueprintGeometry";
-
-/** 节点类型 → 头部颜色（ComfyUI 风格高对比色板）。 */
-export const NODE_TYPE_COLORS: Record<BlueprintNodeType, string> = {
-  interface: "#7f8cff",
-  layout_block: "#b085f5",
-  overlay: "#8fd0c0",
-  control: "#4a90d9",
-  class: "#6bbf59",
-  object: "#d9b45b",
-  group: "#c98bdb",
-  event: "#e0655a",
-  condition: "#e2a94f",
-  action: "#5ab0c9",
-};
-
-/** 边类型 → 颜色。 */
-export const EDGE_COLORS: Record<BlueprintEdge["kind"], string> = {
-  contains: "#9aa0a6",
-  memberOf: "#c98bdb",
-  on: "#7ec3ff",
-  fires: "#e0655a",
-  guards: "#e2a94f",
-};
 
 /** 节点世界坐标（缺失时回退 0,0；加载时由面板统一补齐）。 */
 function nodePos(node: BlueprintNode): { x: number; y: number } {
@@ -130,6 +109,9 @@ export function BlueprintCanvas({
 }: BlueprintCanvasProps): JSX.Element {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
+  /** 渲染出来的画布可见区域尺寸（小地图据此画视口指示框）。 */
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const viewportSizeRef = useRef(viewportSize);
   const [tempEdge, setTempEdge] = useState<{
     fromKey: string;
     fromPort: string;
@@ -233,6 +215,31 @@ export function BlueprintCanvas({
   }, [doc, view, selectedKey, measurePorts]);
 
   /**
+   * 同步画布可见区域尺寸（小地图画视口指示框用）。
+   * 只在尺寸真的变化时 `setState`，避免 ResizeObserver 反复触发渲染。
+   */
+  const syncViewportSize = useCallback(() => {
+    const el = canvasRef.current;
+    if (!el) {
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      return;
+    }
+    viewportSizeRef.current = { width: rect.width, height: rect.height };
+    setViewportSize((prev) =>
+      prev.width === rect.width && prev.height === rect.height
+        ? prev
+        : { width: rect.width, height: rect.height },
+    );
+  }, []);
+
+  useLayoutEffect(() => {
+    syncViewportSize();
+  }, [syncViewportSize, doc]);
+
+  /**
    * 上报**渲染画布**的视口中心（世界坐标）：新增节点据此落在当前可见区域中间，
    * 而不是世界原点/隐藏区域。容器尺寸变化与平移缩放都会重新上报。
    */
@@ -254,7 +261,7 @@ export function BlueprintCanvas({
     reportViewCenter();
   }, [reportViewCenter]);
 
-  // 容器尺寸变化时重测端口。
+  // 容器尺寸变化时重测端口 + 同步视口尺寸。
   useLayoutEffect(() => {
     const el = canvasRef.current;
     if (!el) {
@@ -262,11 +269,30 @@ export function BlueprintCanvas({
     }
     const obs = new ResizeObserver(() => {
       measurePorts();
+      syncViewportSize();
       reportViewCenter();
     });
     obs.observe(el);
     return () => obs.disconnect();
-  }, [measurePorts, reportViewCenter]);
+  }, [measurePorts, syncViewportSize, reportViewCenter]);
+
+  /**
+   * 小地图导航：把画布视口**中心**移到给定世界坐标（`view` 的分辨率不变，只改平移）。
+   * 依赖用 ref 取当前视口尺寸，因此回调保持稳定（小地图不会因 `view` 变化重建）。
+   */
+  const focusWorld = useCallback((world: Point) => {
+    setView((v) => {
+      const { width, height } = viewportSizeRef.current;
+      if (width === 0 || height === 0) {
+        return v;
+      }
+      return {
+        ...v,
+        x: width / 2 - world.x * v.zoom,
+        y: height / 2 - world.y * v.zoom,
+      };
+    });
+  }, []);
 
   const edgePath = useCallback(
     (a: { x: number; y: number }, b: { x: number; y: number }) => {
@@ -595,7 +621,7 @@ export function BlueprintCanvas({
               <div
                 className="bp-node-header"
                 style={{
-                  background: isUnlinked ? "#6b7280" : NODE_TYPE_COLORS[node.type],
+                  background: nodeColor(node.type, isUnlinked),
                 }}
               >
                 <span className="bp-node-key" title={node.key}>
@@ -659,7 +685,7 @@ export function BlueprintCanvas({
               className={`bp-edge ${selectedEdge === i ? "selected" : ""} ${
                 blade?.edges.includes(i) ? "bladed" : ""
               }`}
-              stroke={blade?.edges.includes(i) ? "#ff4d4f" : EDGE_COLORS[edge.kind]}
+              stroke={blade?.edges.includes(i) ? "#ff4d4f" : edgeColor(edge.kind)}
               onPointerDown={(ev) => {
                 ev.stopPropagation();
                 setSelectedEdge(i);
@@ -702,7 +728,7 @@ export function BlueprintCanvas({
         )}
       </svg>
 
-      {/* 图例（多语言） */}
+      {/* 图例（多语言；画布左下角，右下角留给小地图） */}
       <div className="bp-legend">
         {(Object.keys(EDGE_COLORS) as BlueprintEdge["kind"][]).map((k) => (
           <span key={k} className="bp-legend-item">
@@ -713,6 +739,17 @@ export function BlueprintCanvas({
         <span className="bp-legend-item bp-legend-hint">{t("blueprint.bladeHint")}</span>
         <span className="bp-legend-item bp-legend-hint">{t("blueprint.panHint")}</span>
       </div>
+
+      {/* 小地图（画布右下角）：缩略全层节点/连线 + 当前视口指示框，可拖动定位 */}
+      <BlueprintMinimap
+        nodes={visibleNodes}
+        edges={visibleEdges.map(({ edge }) => edge)}
+        viewport={viewportSize}
+        view={view}
+        unlinked={unlinked}
+        onFocus={focusWorld}
+        t={t}
+      />
     </div>
   );
 }

@@ -1,12 +1,16 @@
 /**
  * 蓝图新增节点"不跨链路挂钩"自检（开发期验证，不参与打包）。
  *
- * 针对真实故障："有时添加节点会自动被连上线"。根因是工厂在没有上级时会**默默复用**
- * 图里已有的对象/操作，于是新规则被接到一条既有规则上。
+ * 针对两个真实故障：
+ * ① "有时添加节点会自动被连上线"——根因是工厂在没有上级时会**默默复用**图里已有的对象/操作，
+ *    于是新规则被接到一条既有规则上；
+ * ② "点一个类型却连带冒出好几个节点"——根因是工厂为了给新节点补"最小合法链路"，顺手新建了
+ *    面板/类目/对象/操作/状态（新增"状态"一次冒出 4 个辅助节点）。
  *
- * 现规则：新增节点只连**上级**（使用者显式指定/沿选中节点推得）；没有上级就新建一条
- * 最小链，绝不挂到别的既有节点上。本脚本验证这些行为，并用 hp-core 真实校验器
- * 复核产出的文档（夹具见 crates/hp-store/tests/blueprint_factory/）。
+ * 现规则：新增节点**只追加自身**，只连使用者**显式指定**的上级；没有上级就**留空引用**
+ * （画布灰显「未接通」），既不新建节点补链，也不挂到别的既有节点上。
+ * 本脚本验证这些行为，并用 hp-core 真实校验器复核产出的文档（夹具见
+ * crates/hp-store/tests/blueprint_factory/）。
  *
  * 用法：pnpm check:blueprint-nodes
  */
@@ -81,45 +85,49 @@ const defaults = () => JSON.parse(JSON.stringify(config.DEFAULT_BLUEPRINT));
 const hasEdge = (doc, from, to, kind) =>
   doc.edges.some((e) => e.from === from && e.to === to && e.kind === kind);
 
-// ---- 1. 在已有规则图上新增"状态"：不得接到既有操作上 ----
+// ---- 1. 在已有规则图上新增"状态"：只加这一个节点，不连带任何节点/边 ----
 {
   const doc0 = defaults();
   const before = new Set(doc0.edges.map((e) => `${e.from}->${e.to}`));
   const { doc, node } = factory.appendNode(doc0, "action", { x: 0, y: 0 }, null);
-  const incoming = doc.edges.filter(
-    (e) => e.to === node.key && (e.kind === "fires" || e.kind === "guards"),
-  );
-  const source = incoming[0]?.from;
-  const sourceIsNew = source ? !doc0.nodes.some((n) => n.key === source) : false;
+  const added = doc.nodes.filter((n) => !doc0.nodes.some((d) => d.key === n.key));
   check(
-    "新增状态：触发来源是新建的操作，而不是既有操作",
-    incoming.length === 1 && sourceIsNew,
-    `来源=${source ?? "无"}`,
+    "新增状态：只追加自身（不连带新建 面板/类目/对象/操作；旧行为一次冒出 4 个节点）",
+    added.length === 1 && added[0].key === node.key && node.type === "action",
+    `新增节点=${added.map((n) => `${n.type}:${n.key}`).join(", ") || "无"}`,
   );
   check(
-    "新增状态：没有新增任何指向既有节点的边",
-    doc.edges
-      .filter((e) => e.from === node.key || e.to === node.key)
-      .every((e) => sourceIsNew || e.from === node.key),
+    "新增状态：不产生任何新边（没有上级就留空 = 未接通，不猜）",
+    doc.edges.length === doc0.edges.length &&
+      doc.edges.every((e) => before.has(`${e.from}->${e.to}`)),
     `新增边=${doc.edges
       .filter((e) => !before.has(`${e.from}->${e.to}`))
       .map((e) => `${e.from}->${e.to}`)
-      .join(", ")}`,
+      .join(", ") || "无"}`,
+  );
+  check(
+    "新增状态：target 不再自动指向某个面板（只由属性面板指定）",
+    node.target === undefined,
+    `target=${node.target ?? "(未设置)"}`,
   );
   writeFixture("append_action_not_attached", doc);
 }
 
-// ---- 2. 在已有规则图上新增"操作"：不得接到既有对象上 ----
+// ---- 2. 在已有规则图上新增"操作"：只加这一个节点，不连带状态 ----
 {
   const doc0 = defaults();
   const { doc, node } = factory.appendNode(doc0, "event", { x: 0, y: 0 }, null);
+  const added = doc.nodes.filter((n) => !doc0.nodes.some((d) => d.key === n.key));
   const onEdges = doc.edges.filter((e) => e.to === node.key && e.kind === "on");
-  const source = onEdges[0]?.from;
-  const sourceIsNew = source ? !doc0.nodes.some((n) => n.key === source) : false;
   check(
-    "新增操作：对象来源是新建的对象，而不是既有对象",
-    onEdges.length === 1 && sourceIsNew,
-    `来源=${source ?? "无"}`,
+    "新增操作：只追加自身（不连带新建 面板/类目/对象/状态；旧行为一次冒出 5 个节点）",
+    added.length === 1 && added[0].key === node.key,
+    `新增节点=${added.map((n) => `${n.type}:${n.key}`).join(", ") || "无"}`,
+  );
+  check(
+    "新增操作：未选中对象时不产生 on 边（留空 = 未接通，不挂到既有对象上）",
+    onEdges.length === 0,
+    `on 入边=${onEdges.length}`,
   );
   writeFixture("append_event_not_attached", doc);
 }
@@ -156,7 +164,8 @@ const hasEdge = (doc, from, to, kind) =>
 {
   let doc = config.makeEmptyBlueprint();
   const keys = [];
-  for (const type of ["interface", "layout_block", "overlay", "control", "class", "object", "group", "event", "condition", "action"]) {
+  const types = ["interface", "layout_block", "overlay", "control", "class", "object", "group", "event", "condition", "action"];
+  for (const type of types) {
     const r = factory.appendNode(doc, type, { x: 40 + doc.nodes.length * 260, y: 40 }, null);
     doc = r.doc;
     keys.push(r.node.key);
@@ -166,6 +175,12 @@ const hasEdge = (doc, from, to, kind) =>
     "空图逐个新增：key 唯一",
     new Set(doc.nodes.map((n) => n.key)).size === doc.nodes.length,
     keys.join(", "),
+  );
+  // 只追加自身：10 次新增 = 10 个节点（旧行为在 event/condition/action 上会各补一串辅助链）。
+  check(
+    "空图逐个新增：每个类型只追加一个节点（10 类 → 10 个节点）",
+    doc.nodes.length === types.length,
+    `节点数=${doc.nodes.length}：${doc.nodes.map((n) => `${n.type}:${n.key}`).join(", ")}`,
   );
   check(
     "空图新增界面节点 → key 为 ui_1（独立节点用类型前缀）",
@@ -512,22 +527,26 @@ const hasEdge = (doc, from, to, kind) =>
 
 // ---- 7. 默认蓝图上批量新增（回归：仍能保存）----
 // 默认蓝图已含界面节点 `ui` 与显式层 l_main，新增布局块按"不跨链路挂钩"规则不会自动
-// 连线（需要时由使用者在画布上拖线），因此文档结构仍合法。
+// 连线（需要时由使用者在画布上拖线），且**每个类型只追加一个节点**（不再补最小链），
+// 因此文档结构仍合法。
 // **不含 `interface`**：一个层至多一个界面节点，新增界面走"新增层"（编辑器即如此）。
 {
+  const types = ["class", "object", "action", "condition", "event", "group", "control", "layout_block", "overlay"];
   let doc = defaults();
-  for (const type of ["class", "object", "action", "condition", "event", "group", "control", "layout_block", "overlay"]) {
+  const before = new Set(doc.nodes.map((n) => n.key));
+  for (const type of types) {
     doc = factory.appendNode(doc, type, { x: 40 + doc.nodes.length * 260, y: 40 }, null).doc;
   }
+  const fresh = doc.nodes.filter((n) => !before.has(n.key));
+  check(
+    "默认蓝图批量新增：每个类型只追加一个节点（9 类 → 9 个新节点，不连带链路）",
+    fresh.length === types.length,
+    `新增 ${fresh.length} 个：${fresh.map((n) => `${n.type}:${n.key}`).join(", ")}`,
+  );
   check(
     "默认蓝图批量新增：新节点归属当前层 l_main（D51）",
-    doc.nodes
-      .filter((n) => !config.DEFAULT_BLUEPRINT.nodes.some((d) => d.key === n.key))
-      .every((n) => n.layer === "l_main"),
-    doc.nodes
-      .filter((n) => !config.DEFAULT_BLUEPRINT.nodes.some((d) => d.key === n.key))
-      .map((n) => `${n.key}:${n.layer ?? "(none)"}`)
-      .join(", "),
+    fresh.every((n) => n.layer === "l_main"),
+    fresh.map((n) => `${n.key}:${n.layer ?? "(none)"}`).join(", "),
   );
   writeFixture("default_plus_new", doc);
 }

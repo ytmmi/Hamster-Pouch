@@ -145,7 +145,8 @@ apps/desktop/src/app_ui/
     BlueprintToolbar.tsx    # 编辑器工具条（名称/保存/一键整理/恢复内置默认/删除/视图切换）
     BlueprintPalette.tsx    # 节点添加面板（可从调色板新增的节点类型）
     BlueprintJsonView.tsx   # JSON 文本视图（直接改 JSON + 解析回文档）
-    BlueprintCanvas.tsx     # 节点画布（拖拽/连线/平移缩放/右键直线刀痕；**只渲染当前层**）
+    BlueprintCanvas.tsx     # 节点画布（拖拽/连线/平移缩放/右键直线刀痕；**只渲染当前层**；挂右下角小地图）
+    BlueprintMinimap.tsx    # 小地图（缩略当前层节点/连线 + 视口指示框；拖动即把视口中心移到该处）
     BlueprintInspector.tsx  # 节点属性面板（浮层 visible/height/size/anchor/offset/shadow/radius/hide_label）
     BlueprintLayerBar.tsx   # 层工具条（切换/新增/重命名/删除/排序 + 无根层标记）
     useBlueprintEditorState.ts # 编辑器界面状态（文档 / JSON 文本 / 选中项 / 视图模式 / 提示）
@@ -153,14 +154,16 @@ apps/desktop/src/app_ui/
     useBlueprintLayerTools.ts  # 层工具接线（切层 / 新增 / 重命名 / 排序 / 删除 / 设为主界面 + 无根层派生）
     useBlueprintGraphEdits.ts  # 图编辑动作接线（新增节点 / 改字段 / 软删除 / 删边 / 连线落引用 / 一键整理）
     useBlueprintUnlinked.ts    # 未接通节点的面板侧派生（画布灰显与顶部提示用的 key 集合）
-    blueprintNodeFactory.ts # 新节点工厂（key/引用由上级推导、**兜底引用只在本层内找**）
+    blueprintNodeFactory.ts # 新节点工厂（**只追加自身**：不补最小链、不跨链路挂钩；引用由显式上级推导、**兜底引用只在本层内找**）
     blueprintPorts.ts       # 端口与边类型契约（**由 `packages/config` 的节点定义表投影**而来）
     blueprintLabels.ts      # 节点本地化显示层（显示名/摘要/字段标签；画布与属性面板共用）
+    blueprintNodeColors.ts  # 节点/边配色纯数据（画布与小地图共用同一份色板；未知/插件类型有中性兜底色）
     blueprintLayers.ts      # 层操作纯函数（新增层自带界面根/重命名唯一/排序/补根）
     blueprintDelete.ts      # 软删除（节点）+ 层硬删除 removeLayer（D55）
     blueprintSlots.ts       # 画布槽位（就近空槽）
     blueprintArrange.ts     # 「一键整理」纯算法（BFS 分层、按列树状展开）
     blueprintGeometry.ts    # 纯几何（视口换算/贝塞尔采样/刀痕命中）
+    blueprintMinimapGeometry.ts # 小地图纯几何（包围盒/等比缩放/坐标换算/视口矩形）
     blueprintStructure.ts   # 由当前布局生成结构骨架（单层）+ 跨窗口结构快照
   dialogs/            # 独立窗口对话框
   i18n/               # 多语言（zh-CN / zh-TW / en；键集一致，支持 {name} 插值）

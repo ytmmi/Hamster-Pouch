@@ -478,6 +478,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.derivedEmpty": "unlinked (filled automatically when connected)",
   "blueprint.derivedHint": "Fields marked \u201cauto\u201d are derived from the parent node / connection.",
   "blueprint.panHint": "Hold middle button and drag to pan the canvas",
+  "blueprint.minimap": "Minimap",
+  "blueprint.minimapHint": "Drag the minimap to move the canvas there",
   "blueprint.nodeAdded": "Node added at ({x}, {y})",
   "blueprint.withStructure": "Include current layout structure",
   "blueprint.structureHint": "Generate interface → layout block → tab group → panel skeleton from the current layout as the base of the new blueprint",

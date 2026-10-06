@@ -2,12 +2,17 @@
  * 蓝图新节点工厂（RFC 0007 D31 / D51）：**本节点只定"类型 + 自身必备字段"，其余从上级推导**。
  *
  * 设计规则：
- * - **引用自动**：类节点的 `control`、对象节点的 `class`、操作的对象来源、状态的 `target`
- *   等 key 型引用**不由用户填写**，一律从**上级**推导；画布上连线也会自动落字段。
- * - **只认上级，不悄悄挂钩**：新增节点只会连到"上级"（显式指定的父节点，或图中已有的
- *   同类上级）。**绝不会把新节点自动接到一条已存在的规则上**——那是使用者没有表达过的
- *   意图，会出现"新增节点莫名被连上线"。需要接入某条链路时，选中那条链路的节点再新增，
- *   或者直接拖线。
+ * - **只追加自身（缺陷修复）**：一次"新增"只在画布上落下**使用者点选的那一个节点**，
+ *   **绝不连带生成任何辅助节点**。旧实现会给操作/条件/状态补一条
+ *   「面板 → 类目 → 对象 → 操作 → 状态」的最小链（新增"状态"会连带冒出 4 个节点），
+ *   表现为"点一个类型却出现好几个节点"——按用户反馈移除。
+ * - **引用自动**：类节点的 `control`、对象节点的 `class`、操作的对象来源等 key 型引用
+ *   **不由用户填写**，从**显式选中的上级**推导（层级关系可在本层内兜底复用**既有**父节点）；
+ *   画布上连线也会自动落字段。
+ * - **只认上级，不悄悄挂钩**：新增节点只会连到"上级"（使用者显式指定的父节点）。
+ *   **既不会自动接到一条已存在的规则上，也不会为了"补链"新建节点**；缺的引用一律
+ *   **留空**（画布灰显「未接通」），由使用者拖线或在属性面板指定——而不是自动猜。
+ *   状态的 `target` 因此不再自动指向某个面板（按 RFC 0007 决策 7：只由属性面板指定）。
  * - **key 自动且可读**：由「上级 key + 自身类型标识」生成（如 `c_media` 下的图像类 →
  *   `c_media_image`，其下双击对象 → `c_media_image_dbl`），冲突才追加序号。
  * - **层归属（D51）**：编辑器同一时刻只画**一个层**，因此新增节点一律归属**当前层**
@@ -208,10 +213,10 @@ function createGroup(doc: BlueprintGraph, layer: string): { doc: BlueprintGraph;
   return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
-/** 建一个类节点（默认媒体类型 image），挂在 `controlKey` 上。 */
+/** 建一个类目节点（默认媒体类型 image）；`controlKey` 为空 = 引用留空（未接通，**不新建面板**）。 */
 function createClass(
   doc: BlueprintGraph,
-  controlKey: string,
+  controlKey: string | undefined,
   layer: string,
   parentKeyForName?: string,
 ): { doc: BlueprintGraph; key: string } {
@@ -219,17 +224,17 @@ function createClass(
     key: nextNodeKey(doc.nodes, "class", parentKeyForName ?? controlKey),
     type: "class",
     layer,
-    control: controlKey,
+    ...(controlKey ? { control: controlKey } : {}),
     media_type: "image",
     position: tempPosition(doc),
   };
   return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
-/** 建一个对象节点（默认双击），挂在 `classKey` 上。 */
+/** 建一个对象节点（默认双击）；`classKey` 为空 = 引用留空（未接通，**不新建类目**）。 */
 function createObject(
   doc: BlueprintGraph,
-  classKey: string,
+  classKey: string | undefined,
   layer: string,
   parentKeyForName?: string,
 ): { doc: BlueprintGraph; key: string } {
@@ -237,17 +242,21 @@ function createObject(
     key: nextNodeKey(doc.nodes, "object", parentKeyForName ?? classKey),
     type: "object",
     layer,
-    class: classKey,
+    ...(classKey ? { class: classKey } : {}),
     scope: "double_clicked",
     position: tempPosition(doc),
   };
   return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
-/** 建一个操作节点并连上 `objectKey`（对象 → 操作 的 on 边）。 */
+/**
+ * 建一个操作节点并（**仅当给出上级对象时**）连上 `objectKey`（对象 → 操作 的 on 边）。
+ *
+ * **不连带生成状态节点**：旧实现顺手补一个状态，让"新增操作"看起来像一次加了两个节点。
+ */
 function createEvent(
   doc: BlueprintGraph,
-  objectKey: string,
+  objectKey: string | undefined,
   layer: string,
   parentKeyForName?: string,
 ): { doc: BlueprintGraph; key: string } {
@@ -258,17 +267,24 @@ function createEvent(
     trigger: "double_click",
     position: tempPosition(doc),
   };
-  const edges = [
-    ...doc.edges,
-    { from: objectKey, to: node.key, kind: "on" as const, order: doc.edges.length + 1 },
-  ];
+  const edges = objectKey
+    ? [
+        ...doc.edges,
+        { from: objectKey, to: node.key, kind: "on" as const, order: doc.edges.length + 1 },
+      ]
+    : doc.edges;
   return { doc: { ...doc, nodes: [...doc.nodes, node], edges }, key: node.key };
 }
 
-/** 建一个状态节点并连上 `eventKey`（操作 → 状态 的 fires 边），target 指向 `targetKey`。 */
+/**
+ * 建一个状态节点并（**仅当给出上级操作时**）连上 `eventKey`（操作 → 状态 的 fires 边）。
+ *
+ * `targetKey` 只在**使用者显式指定**时写入——不再自动指向"图里第一个面板"（RFC 0007 决策 7：
+ * 状态的 `target` 由属性面板指定；缺引用按未接通灰显）。
+ */
 function createAction(
   doc: BlueprintGraph,
-  eventKey: string,
+  eventKey: string | undefined,
   targetKey: string | undefined,
   layer: string,
   parentKeyForName?: string,
@@ -281,10 +297,12 @@ function createAction(
     ...(targetKey ? { target: targetKey } : {}),
     position: tempPosition(doc),
   };
-  const edges = [
-    ...doc.edges,
-    { from: eventKey, to: node.key, kind: "fires" as const, order: doc.edges.length + 1 },
-  ];
+  const edges = eventKey
+    ? [
+        ...doc.edges,
+        { from: eventKey, to: node.key, kind: "fires" as const, order: doc.edges.length + 1 },
+      ]
+    : doc.edges;
   return { doc: { ...doc, nodes: [...doc.nodes, node], edges }, key: node.key };
 }
 
@@ -345,8 +363,8 @@ function addContainsEdge(
 }
 
 /**
- * 构造并接入一个新节点：只连到"上级"，不做跨链路自动挂钩。
- * 返回值是追加后的文档（可能为补链路而新建了上级节点）与新节点 key。
+ * 构造并接入一个新节点：**只追加它自己**，不跨链路挂钩、也不新建任何辅助节点。
+ * 返回值是追加后的文档（除显式连线外不再改动图）与新节点 key。
  *
  * `layerKey` = 新增节点归属的层（D51；缺省取文档第一个有效层）。
  */
@@ -368,7 +386,6 @@ export function appendNode(
     parentNode && (PARENT_CONTAINERS[type] ?? []).includes(parentNode.type)
       ? parentNode.key
       : undefined;
-  // 显式指定上级时不兜底：没有可用上级就新建一条最小链，避免挂到别的节点上。
   let work = doc;
   let key: string;
 
@@ -393,80 +410,43 @@ export function appendNode(
       break;
     }
     case "class": {
-      const controlKey = hinted ?? fallbackParent(work, "class", layer);
-      const parentForName = hinted;
-      if (!controlKey) {
-        const control = createControl(work, layer);
-        work = control.doc;
-        const created = createClass(work, control.key, layer, parentForName ?? control.key);
-        work = created.doc;
-        key = created.key;
-      } else {
-        const created = createClass(work, controlKey, layer, parentForName ?? controlKey);
-        work = created.doc;
-        key = created.key;
-      }
+      // 上级只能来自**显式选中**的节点，或在**本层内**兜底复用**既有**面板（层级关系，
+      // 不跨链路挂钩）；没有可用上级就**留空引用**（画布灰显未接通），绝不新建面板补链。
+      // 只有面板能当类目的结构父——选中别的类型时不硬套（避免"引用类型不符"硬错误）。
+      const upstream = parentNode?.type === "control" ? hinted : undefined;
+      const controlKey = upstream ?? fallbackParent(work, "class", layer);
+      const created = createClass(work, controlKey, layer, upstream ?? controlKey);
+      work = created.doc;
+      key = created.key;
       break;
     }
     case "object": {
-      const classKey = hinted ?? fallbackParent(work, "object", layer);
-      if (!classKey) {
-        // 独立新增：补 控件 → 类 → 对象 一条最小链
-        const control = createControl(work, layer);
-        work = control.doc;
-        const cls = createClass(work, control.key, layer, control.key);
-        work = cls.doc;
-        const created = createObject(work, cls.key, layer, cls.key);
-        work = created.doc;
-        key = created.key;
-      } else {
-        const created = createObject(work, classKey, layer, hinted ?? classKey);
-        work = created.doc;
-        key = created.key;
-      }
+      // 同上：可复用本层既有的类目，但不新建类目/面板。
+      const upstream = parentNode?.type === "class" ? hinted : undefined;
+      const classKey = upstream ?? fallbackParent(work, "object", layer);
+      const created = createObject(work, classKey, layer, upstream ?? classKey);
+      work = created.doc;
+      key = created.key;
       break;
     }
     case "event": {
-      // 上级 = 对象；状态一并补上（否则操作是死节点）。
-      const objectKey = hinted ?? fallbackParent(work, "event", layer);
-      let objectForName = objectKey;
-      if (!objectKey) {
-        const control = createControl(work, layer);
-        work = control.doc;
-        const cls = createClass(work, control.key, layer, control.key);
-        work = cls.doc;
-        const obj = createObject(work, cls.key, layer, cls.key);
-        work = obj.doc;
-        objectForName = obj.key;
-      }
-      const event = createEvent(work, objectForName!, layer, hinted ?? objectForName);
-      work = event.doc;
-      key = event.key;
-      if (!work.nodes.some((n) => n.type === "control")) {
-        const control = createControl(work, layer);
-        work = control.doc;
-      }
-      const targetKey = firstOfInLayer(work.nodes, "control", layer);
-      const action = createAction(work, event.key, targetKey, layer, event.key);
-      work = action.doc;
+      // 上级 = 显式选中的对象（面板/类目也可，兼容旧图的 `target` 来源）；
+      // 没有上级就单独落一个操作节点（不再顺手补一个状态节点）。
+      const upstream =
+        parentNode && ["control", "class", "object"].includes(parentNode.type)
+          ? hinted
+          : undefined;
+      const created = createEvent(work, upstream, layer, upstream);
+      work = created.doc;
+      key = created.key;
       break;
     }
     case "condition": {
-      const eventKey = hinted ?? fallbackParent(work, "condition", layer);
-      let sourceEvent = eventKey;
-      if (!sourceEvent) {
-        const control = createControl(work, layer);
-        work = control.doc;
-        const cls = createClass(work, control.key, layer, control.key);
-        work = cls.doc;
-        const obj = createObject(work, cls.key, layer, cls.key);
-        work = obj.doc;
-        const evt = createEvent(work, obj.key, layer, obj.key);
-        work = evt.doc;
-        sourceEvent = evt.key;
-      }
+      // 上级 = 显式选中的操作/条件；没有上级也照样只落一个条件节点。
+      const upstream =
+        parentNode && ["event", "condition"].includes(parentNode.type) ? hinted : undefined;
       const node: BlueprintNode = {
-        key: nextNodeKey(work.nodes, "condition", hinted ?? sourceEvent),
+        key: nextNodeKey(work.nodes, "condition", upstream),
         type: "condition",
         layer,
         expr: "media_type == image",
@@ -475,41 +455,29 @@ export function appendNode(
       work = {
         ...work,
         nodes: [...work.nodes, node],
-        edges: [
-          ...work.edges,
-          {
-            from: sourceEvent,
-            to: node.key,
-            kind: "fires",
-            order: work.edges.length + 1,
-          },
-        ],
+        edges: upstream
+          ? [
+              ...work.edges,
+              {
+                from: upstream,
+                to: node.key,
+                kind: "fires" as const,
+                order: work.edges.length + 1,
+              },
+            ]
+          : work.edges,
       };
       key = node.key;
       break;
     }
     case "action": {
-      const eventKey = hinted ?? fallbackParent(work, "action", layer);
-      let sourceEvent = eventKey;
-      if (!sourceEvent) {
-        const control = createControl(work, layer);
-        work = control.doc;
-        const cls = createClass(work, control.key, layer, control.key);
-        work = cls.doc;
-        const obj = createObject(work, cls.key, layer, cls.key);
-        work = obj.doc;
-        const evt = createEvent(work, obj.key, layer, obj.key);
-        work = evt.doc;
-        sourceEvent = evt.key;
-      }
-      if (!work.nodes.some((n) => n.type === "control")) {
-        const control = createControl(work, layer);
-        work = control.doc;
-      }
-      const targetKey = firstOfInLayer(work.nodes, "control", layer);
-      const action = createAction(work, sourceEvent, targetKey, layer, hinted ?? sourceEvent);
-      work = action.doc;
-      key = action.key;
+      // 上级 = 显式选中的操作/条件；没有上级就单独落一个状态节点。
+      // `target` 不再自动指向某个面板——由属性面板指定（缺引用灰显未接通）。
+      const upstream =
+        parentNode && ["event", "condition"].includes(parentNode.type) ? hinted : undefined;
+      const created = createAction(work, upstream, undefined, layer, upstream);
+      work = created.doc;
+      key = created.key;
       break;
     }
     default: {

@@ -497,6 +497,8 @@ export const zhCN = {
   "blueprint.derivedEmpty": "未接通（连线后自动获取）",
   "blueprint.derivedHint": "带「自动」的字段由上级节点/连线推导，不需手填。",
   "blueprint.panHint": "中键按住拖动 = 平移画布",
+  "blueprint.minimap": "小地图",
+  "blueprint.minimapHint": "拖动小地图 = 快速把画布移到该位置",
   "blueprint.nodeAdded": "已新增节点于 ({x}, {y})",
   "blueprint.withStructure": "带当前布局结构",
   "blueprint.structureHint": "按当前布局生成 界面→布局块→标签组→面板 骨架，作为新蓝图的基础",

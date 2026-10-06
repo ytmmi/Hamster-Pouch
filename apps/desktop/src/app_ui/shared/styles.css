@@ -2297,10 +2297,10 @@ button.danger {
   color: #ffb3b3;
 }
 
-/* 图例 */
+/* 图例（左下角；右下角留给小地图） */
 .bp-legend {
   position: absolute;
-  right: 8px;
+  left: 8px;
   bottom: 8px;
   display: flex;
   gap: 8px;
@@ -2322,6 +2322,59 @@ button.danger {
   width: 14px;
   height: 3px;
   border-radius: 2px;
+}
+
+/* ── 小地图（画布右下角，RFC 0007 编辑器） ── */
+.bp-minimap {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 176px;
+  padding: 4px;
+  background: rgba(12, 12, 12, 0.82);
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5);
+  user-select: none;
+}
+
+.bp-minimap-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.bp-minimap-bg {
+  fill: #141414;
+  stroke: #2f2f2f;
+  stroke-width: 1;
+  rx: 3;
+}
+
+.bp-minimap-edge {
+  stroke-width: 1;
+  opacity: 0.7;
+}
+
+.bp-minimap-node {
+  opacity: 0.95;
+}
+
+.bp-minimap-view {
+  fill: rgba(126, 195, 255, 0.12);
+  stroke: #7ec3ff;
+  stroke-width: 1.2;
+  rx: 2;
+}
+
+.bp-minimap-label {
+  display: block;
+  margin-top: 2px;
+  font-size: 9px;
+  color: #8a8a8a;
+  text-align: center;
 }
 
 /* 属性检查器 */
