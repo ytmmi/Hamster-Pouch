@@ -262,7 +262,7 @@ check(
 check(
   "设置热加载走多条独立触发源（本地广播 + 后端事件 + 焦点 + 面板激活）",
   /subscribeSettingChanged\(/.test(viewerSettingsSrc) &&
-    /listen\("setting\.changed"/.test(viewerSettingsSrc) &&
+    /listenHp\("setting\.changed"/.test(viewerSettingsSrc) &&
     /window\.addEventListener\("focus"/.test(viewerSettingsSrc) &&
     /onDidActiveChange/.test(viewerSettingsSrc) &&
     /onDidVisibilityChange/.test(viewerSettingsSrc),
@@ -305,7 +305,7 @@ check(
 check(
   "面板设置热加载走多条独立触发源（共享钩子：本地广播 + 后端事件 + 焦点 + 面板激活）",
   /subscribeSettingChanged\(/.test(settingValueSrc) &&
-    /listen\("setting\.changed"/.test(settingValueSrc) &&
+    /listenHp\("setting\.changed"/.test(settingValueSrc) &&
     /window\.addEventListener\("focus"/.test(settingValueSrc) &&
     /onDidActiveChange/.test(settingValueSrc) &&
     /onDidVisibilityChange/.test(settingValueSrc),

@@ -3,7 +3,7 @@
  */
 
 import { useState } from "react";
-import { emit } from "@tauri-apps/api/event";
+import { emitHp } from "../shared/events";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import * as api from "../shared/api";
@@ -29,7 +29,7 @@ export function RepoCreateDialog({ lang }: { lang: string | null }): JSX.Element
     setBusy(true);
     try {
       const repo = await api.repoCreate({ name: trimmed });
-      await emit("repo.changed", { repoId: repo.id });
+      await emitHp("repo.changed", { repoId: repo.id });
       close();
     } catch (e) {
       setError(errorTextOf(t, e));

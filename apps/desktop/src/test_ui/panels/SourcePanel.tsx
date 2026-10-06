@@ -3,7 +3,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { type UnlistenFn } from "@tauri-apps/api/event";
+import { listenHp } from "../../app_ui/shared/events";
 
 import * as api from "../api";
 import type {
@@ -64,7 +65,7 @@ export function SourcePanel({
     void (async () => {
       try {
         unlisteners.push(
-          await listen<ScanProgressPayload>("scan.progress", (e) => {
+          await listenHp<ScanProgressPayload>("scan.progress", (e) => {
             setScanProgress({
               taskId: e.payload.taskId,
               processed: e.payload.processed,
@@ -74,7 +75,7 @@ export function SourcePanel({
           }),
         );
         unlisteners.push(
-          await listen<ScanCompletedPayload>("scan.completed", (e) => {
+          await listenHp<ScanCompletedPayload>("scan.completed", (e) => {
             onStatus(
               `扫描完成: 索引 ${e.payload.indexed}, 变更 ${e.payload.changed}, 缺失 ${e.payload.missing}, 跳过 ${e.payload.skipped}`,
               "ok",
@@ -84,7 +85,7 @@ export function SourcePanel({
           }),
         );
         unlisteners.push(
-          await listen<ScanErrorPayload>("scan.error", (e) => {
+          await listenHp<ScanErrorPayload>("scan.error", (e) => {
             onStatus(`扫描错误: ${e.payload.error}`, "error");
             setScanProgress(null);
           }),

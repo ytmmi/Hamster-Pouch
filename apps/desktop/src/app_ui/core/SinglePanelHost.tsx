@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { emit } from "@tauri-apps/api/event";
+import { emitHp } from "../shared/events";
 
 import { SETTING_KEYS } from "@hamster-pouch/config";
 
@@ -132,7 +132,7 @@ export function SinglePanelHost({ panelId, repoId, lang }: SinglePanelHostProps)
           <button
             className="single-restore"
             onClick={() => {
-              void emit("panel.restore", { id: panelId });
+              void emitHp("panel.restore", { id: panelId });
             }}
           >
             {t("single.restore")}

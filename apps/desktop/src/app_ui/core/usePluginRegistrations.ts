@@ -49,8 +49,8 @@ export function usePluginRegistrations(repoId: string | null, onChanged: () => v
     let dispose: (() => void) | undefined;
     void (async () => {
       try {
-        const { listen } = await import("@tauri-apps/api/event");
-        dispose = await listen<{ repoId?: string }>("plugin.changed", (event) => {
+        const { listenHp } = await import("../shared/events");
+        dispose = await listenHp<{ repoId?: string }>("plugin.changed", (event) => {
           const target = event.payload?.repoId ?? repoId;
           if (target) void reloadPlugins(target);
         });

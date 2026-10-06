@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { listen } from "@tauri-apps/api/event";
+import { listenHp } from "../shared/events";
 
 import type { PluginItem, PluginStateItem } from "@hamster-pouch/shared-types";
 
@@ -57,7 +57,7 @@ export function PluginPanel(): JSX.Element {
     void (async () => {
       try {
         unlistenRef.current.push(
-          await listen<PluginLoadedPayload>("plugin.loaded", () => {
+          await listenHp<PluginLoadedPayload>("plugin.loaded", () => {
             void load();
           }),
         );

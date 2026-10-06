@@ -9,12 +9,13 @@ use hp_core::{
 use hp_plugin_host::PluginHost;
 use hp_store::RepoDb;
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::State;
 
 use crate::commands::shared::{
     api_from_hp, default_repo_dir, ensure_global, global, global_mut, lock_global, lock_repo,
     ApiResponse,
 };
+use crate::commands::shared::EmitHp;
 use crate::AppState;
 
 /// `app_settings` 的一行（`setting.list` 的 `items` 元素）。
@@ -221,7 +222,7 @@ fn emit_setting_changed(app: &tauri::AppHandle, key: &str) {
     struct SettingChanged {
         key: String,
     }
-    let _ = app.emit(
+    app.emit_hp(
         "setting.changed",
         SettingChanged {
             key: key.to_string(),

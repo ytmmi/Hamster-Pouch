@@ -13,7 +13,8 @@
  */
 
 import { useSyncExternalStore } from "react";
-import { listen } from "@tauri-apps/api/event";
+
+import { listenHp } from "../shared/events";
 
 import type { Translate, TranslationKey } from "../i18n";
 import type {
@@ -81,7 +82,7 @@ export function startTaskEvents(): () => void {
 
   const unlisten = [
     // ── 扫描 ──
-    listen<ScanProgressPayload>("scan.progress", (e) => {
+    listenHp<ScanProgressPayload>("scan.progress", (e) => {
       const p = e.payload;
       const walking = p.phase === "walking";
       setTask({
@@ -103,7 +104,7 @@ export function startTaskEvents(): () => void {
         updatedAt: now(),
       });
     }),
-    listen<ScanCompletedPayload>("scan.completed", (e) => {
+    listenHp<ScanCompletedPayload>("scan.completed", (e) => {
       const p = e.payload;
       setTask(null);
       const a = actions;
@@ -122,7 +123,7 @@ export function startTaskEvents(): () => void {
       }
       a.refresh();
     }),
-    listen<ScanErrorPayload>("scan.error", (e) => {
+    listenHp<ScanErrorPayload>("scan.error", (e) => {
       setTask(null);
       const a = actions;
       if (!a) return;
@@ -130,7 +131,7 @@ export function startTaskEvents(): () => void {
     }),
 
     // ── 卸载（完全卸载）──
-    listen<SourceUnmountProgressPayload>("source.unmount.progress", (e) => {
+    listenHp<SourceUnmountProgressPayload>("source.unmount.progress", (e) => {
       const p = e.payload;
       // 阶段 → 文案；total === 0 的阶段（统计 / 删源记录）按不定进度显示
       const messageKey: TranslationKey =
@@ -163,7 +164,7 @@ export function startTaskEvents(): () => void {
         updatedAt: now(),
       });
     }),
-    listen<SourceUnmountCompletedPayload>("source.unmount.completed", (e) => {
+    listenHp<SourceUnmountCompletedPayload>("source.unmount.completed", (e) => {
       const p = e.payload;
       setTask(null);
       const a = actions;
@@ -183,7 +184,7 @@ export function startTaskEvents(): () => void {
       }
       a.refresh();
     }),
-    listen<SourceUnmountErrorPayload>("source.unmount.error", (e) => {
+    listenHp<SourceUnmountErrorPayload>("source.unmount.error", (e) => {
       setTask(null);
       const a = actions;
       if (!a) return;

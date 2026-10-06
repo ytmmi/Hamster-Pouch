@@ -177,7 +177,7 @@ const bridgeAllSrc = bridgeFiles.map((f) => f.src).join("\n");
 const snakeEventFields = [];
 const missingEventAttr = [];
 for (const { file, src } of bridgeFiles) {
-  const emitRe = /\.emit\(\s*"([a-z][a-z0-9.]*)",\s*([A-Z][A-Za-z0-9_]*)\s*\{/g;
+  const emitRe = /\.emit_hp\(\s*"([a-z][a-z0-9.]*)",\s*([A-Z][A-Za-z0-9_]*)\s*\{/g;
   let m;
   while ((m = emitRe.exec(src)) !== null) {
     const [, eventName, dto] = m;
@@ -261,9 +261,9 @@ check(
 );
 check(
   "分析任务复用 scan.* 事件族（= 与源全量同款浮窗），且进度帧标 `pausable: false`",
-  /app\.emit\(\s*"scan\.progress"/.test(fileBridgeSrc) &&
-    /app_handle\.emit\(\s*"scan\.completed"/.test(fileBridgeSrc) &&
-    /app_handle\.emit\(\s*"scan\.error"/.test(fileBridgeSrc) &&
+  /emit_hp\(\s*"scan\.progress"/.test(fileBridgeSrc) &&
+    /emit_hp\(\s*"scan\.completed"/.test(fileBridgeSrc) &&
+    /emit_hp\(\s*"scan\.error"/.test(fileBridgeSrc) &&
     // 单文件分析没有暂停点：不能发出"可暂停"的信号，否则浮窗会留一个按不动的暂停键。
     /pausable: false,/.test(fileBridgeSrc) &&
     // 总数未知 → 不定进度条（单文件没有"百分比"可言）。

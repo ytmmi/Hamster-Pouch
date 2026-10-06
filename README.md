@@ -123,6 +123,7 @@ cargo test
 - `check:encoding` —— 文本文件必须 UTF-8 无 BOM、统一 LF
 - `check:commands` —— 命令 / 事件契约双向守护（前端封装与后端命令一致性）
 - `check:hidden-console` —— 外部子进程不得新建控制台窗口（GUI 桌面壳下的 cmd 弹窗，缺陷 0020）
+- `check:event-names` —— 事件名唯一收发口：逻辑名点分、线上名冒号分（Tauri 2 不接受点号，缺陷 0022）
 - `check:types` —— `hp-dto` 生成类型与 `packages/shared-types` 一致性
 - `check:panels` / `check:settings` / `check:layouts` —— 面板、设置项与布局结构完整性
 - `check:blueprint-*` / `check:controls` —— 事件蓝图引擎各维度行为检查

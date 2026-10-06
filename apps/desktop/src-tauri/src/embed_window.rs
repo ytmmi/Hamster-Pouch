@@ -23,7 +23,9 @@
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
+
+use crate::commands::shared::EmitHp;
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{COLOR_WINDOW, HBRUSH};
@@ -74,7 +76,7 @@ unsafe extern "system" fn wnd_proc(
         }
         if msg == WM_LBUTTONUP && !(*state).click_through.load(Ordering::Relaxed) {
             // 单击视频 = 暂停/继续：把点击翻译成事件，由前端调原子切换命令。
-            let _ = (*state).app.emit("media.surface.click", ());
+            let _ = (*state).app.emit_hp("media.surface.click", ());
             return LRESULT(0);
         }
     }

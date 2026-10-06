@@ -7,11 +7,12 @@
 use hp_core::{Capability, HpError, HpResult};
 use hp_plugin_host::PluginHost;
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::State;
 
 use crate::commands::shared::{
     api_from_hp, ensure_global, global, global_mut, lock_global, ApiResponse,
 };
+use crate::commands::shared::EmitHp;
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -60,7 +61,7 @@ fn emit_plugin_changed(app: &tauri::AppHandle, repo_id: &str) {
     struct PluginChanged {
         repo_id: String,
     }
-    let _ = app.emit(
+    app.emit_hp(
         "plugin.changed",
         PluginChanged {
             repo_id: repo_id.to_string(),
@@ -79,7 +80,7 @@ fn emit_plugin_loaded(app: &tauri::AppHandle, repo_id: &str, plugin_id: &str) {
         plugin_id: String,
         repo_id: String,
     }
-    let _ = app.emit(
+    app.emit_hp(
         "plugin.loaded",
         PluginLoaded {
             plugin_id: plugin_id.to_string(),

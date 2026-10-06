@@ -18,12 +18,13 @@
 use hp_core::{BlueprintGraph, BlueprintRow, HpError, HpResult};
 use hp_dto::{BlueprintItem, BlueprintTemplateItem, BlueprintValidateResult};
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::State;
 
 use crate::commands::shared::{
     api_from_hp, ensure_global, global, lock_global, lock_repo, open_repo, open_repo_mut,
     ApiResponse,
 };
+use crate::commands::shared::EmitHp;
 use crate::AppState;
 
 /// 蓝图变更事件载荷（RFC 0007 命令与事件；字段口径见 `docs/spec/commands-events.md`）。
@@ -36,7 +37,7 @@ struct BlueprintChanged {
 
 /// 广播蓝图变更：前端重载当前生效蓝图并重新对账布局（失败不影响命令结果）。
 fn emit_changed(app: &tauri::AppHandle, repo_id: &str, blueprint_id: Option<&str>) {
-    let _ = app.emit(
+    app.emit_hp(
         "blueprint.changed",
         BlueprintChanged {
             repo_id: repo_id.to_string(),

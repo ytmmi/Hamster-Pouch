@@ -3,8 +3,9 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { type UnlistenFn } from "@tauri-apps/api/event";
 
+import { listenHp } from "../shared/events";
 import { useApp } from "../core/AppContext";
 
 interface TaskLine {
@@ -26,26 +27,26 @@ export function TaskPanel(): JSX.Element {
     void (async () => {
       try {
         unlistenRef.current.push(
-          await listen("scan.progress", (e) =>
+          await listenHp("scan.progress", (e) =>
             push(app.t("task.scanProgress", { payload: JSON.stringify(e.payload) })),
           ),
-          await listen("scan.completed", (e) =>
+          await listenHp("scan.completed", (e) =>
             push(app.t("task.scanCompleted", { payload: JSON.stringify(e.payload) })),
           ),
-          await listen("scan.error", (e) =>
+          await listenHp("scan.error", (e) =>
             push(app.t("task.scanError", { payload: JSON.stringify(e.payload) })),
           ),
-          await listen("album.sync.progress", (e) =>
+          await listenHp("album.sync.progress", (e) =>
             push(app.t("task.albumSync", { payload: JSON.stringify(e.payload) })),
           ),
-          await listen("album.sync.conflict", (e) =>
+          await listenHp("album.sync.conflict", (e) =>
             push(app.t("task.albumConflict", { payload: JSON.stringify(e.payload) })),
           ),
           // 整体失败是独立事件（缺陷 0004）：以前它与"单文件冲突"挤在同一个事件名里
-          await listen("album.sync.failed", (e) =>
+          await listenHp("album.sync.failed", (e) =>
             push(app.t("task.albumSyncFailed", { payload: JSON.stringify(e.payload) })),
           ),
-          await listen("color.extracted", (e) =>
+          await listenHp("color.extracted", (e) =>
             push(app.t("task.colorExtracted", { payload: JSON.stringify(e.payload) })),
           ),
         );

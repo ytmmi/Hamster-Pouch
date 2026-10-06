@@ -3,7 +3,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { type UnlistenFn } from "@tauri-apps/api/event";
+import { listenHp } from "../../app_ui/shared/events";
 
 import * as api from "../api";
 import type {
@@ -97,7 +98,7 @@ export function AlbumPanel({
     void (async () => {
       try {
         unlisteners.push(
-          await listen<AlbumSyncProgressPayload>(
+          await listenHp<AlbumSyncProgressPayload>(
             "album.sync.progress",
             (e) => {
               setSyncInfo({
@@ -114,7 +115,7 @@ export function AlbumPanel({
           ),
         );
         unlisteners.push(
-          await listen<AlbumSyncConflictPayload>(
+          await listenHp<AlbumSyncConflictPayload>(
             "album.sync.conflict",
             (e) => {
               // 逐文件冲突（缺陷 0004）：一个成员一条，fileId 是真实值，同步本身并未失败
@@ -123,7 +124,7 @@ export function AlbumPanel({
           ),
         );
         unlisteners.push(
-          await listen<AlbumSyncFailedPayload>(
+          await listenHp<AlbumSyncFailedPayload>(
             "album.sync.failed",
             (e) => {
               // 整体失败是独立事件（缺陷 0004）

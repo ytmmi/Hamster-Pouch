@@ -489,9 +489,9 @@ function subscribeBlueprintHotReloadInner(
   }
 
   // 路径 3：后端事件（跨窗口/跨命令的权威变更源；非 Tauri 运行时静默忽略）。
-  void import("@tauri-apps/api/event")
-    .then(({ listen }) =>
-      listen<{ repoId: string; blueprintId?: string | null }>("blueprint.changed", (e) => {
+  void import("./events")
+    .then(({ listenHp }) =>
+      listenHp<{ repoId: string; blueprintId?: string | null }>("blueprint.changed", (e) => {
         trace(`[hot] blueprint.changed 到达：payload=${JSON.stringify(e.payload)}`);
         const repoId = getRepoId();
         if (!repoId || e.payload.repoId !== repoId) {

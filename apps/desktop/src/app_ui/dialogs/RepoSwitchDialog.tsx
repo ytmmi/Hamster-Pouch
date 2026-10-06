@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { emit } from "@tauri-apps/api/event";
+import { emitHp } from "../shared/events";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import * as api from "../shared/api";
@@ -35,7 +35,7 @@ export function RepoSwitchDialog({ lang }: { lang: string | null }): JSX.Element
   const open = async (id: string) => {
     try {
       await api.repoOpen({ repoId: id });
-      await emit("repo.changed", { repoId: id });
+      await emitHp("repo.changed", { repoId: id });
       close();
     } catch (e) {
       setError(errorTextOf(t, e));

@@ -10,12 +10,13 @@ use hp_media::extract_exif;
 use hp_scanner::ScanOptions;
 use hp_store::RepoDb;
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::State;
 
 use crate::commands::shared::{
     api_async, api_from_hp, file_to_item, lock_repo, open_repo, open_repo_mut, resolve_file_path,
     AlbumFileItem, ApiAsync, ApiResponse,
 };
+use crate::commands::shared::EmitHp;
 use crate::commands::source::{ScanCompletedEvent, ScanErrorEvent, ScanProgressEvent};
 use crate::tasks::{TaskControl, TaskKind};
 use crate::AppState;
@@ -451,7 +452,7 @@ pub(crate) async fn file_reanalyze(
             }));
             match result {
                 Ok(Ok((source_id, outcome))) => {
-                    let _ = app_handle.emit(
+                    app_handle.emit_hp(
                         "scan.completed",
                         ScanCompletedEvent {
                             task_id: emit_task_id.clone(),
@@ -465,7 +466,7 @@ pub(crate) async fn file_reanalyze(
                     );
                 }
                 Ok(Err((source_id, error))) => {
-                    let _ = app_handle.emit(
+                    app_handle.emit_hp(
                         "scan.error",
                         ScanErrorEvent {
                             task_id: emit_task_id.clone(),
@@ -475,7 +476,7 @@ pub(crate) async fn file_reanalyze(
                     );
                 }
                 Err(_) => {
-                    let _ = app_handle.emit(
+                    app_handle.emit_hp(
                         "scan.error",
                         ScanErrorEvent {
                             task_id: emit_task_id.clone(),
@@ -529,7 +530,7 @@ fn run_reanalyze(
         Err(e) => return Err((source_id, e)),
     };
 
-    let _ = app.emit(
+    app.emit_hp(
         "scan.progress",
         ScanProgressEvent {
             task_id: control.task_id().to_string(),

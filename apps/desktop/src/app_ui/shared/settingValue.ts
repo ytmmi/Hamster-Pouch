@@ -23,7 +23,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listenHp } from "./events";
 
 import {
   normalizeHostSettingValue,
@@ -77,7 +77,7 @@ export function useStoredSetting<T>(
   useEffect(() => {
     let dispose: (() => void) | undefined;
     let cancelled = false;
-    void listen("setting.changed", () => {
+    void listenHp("setting.changed", () => {
       void reload();
     })
       .then((unlisten) => {

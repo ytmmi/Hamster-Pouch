@@ -33,6 +33,7 @@
     "check:commands": "node tools/check-commands.mjs",
     "check:dormant-media": "node tools/check-dormant-media.mjs",
     "check:hidden-console": "node tools/check-hidden-console.mjs",
+    "check:event-names": "node tools/check-event-names.mjs",
     "check:doc-status": "node tools/check-doc-status.mjs",
     "check:status": "node tools/check-status.mjs"
   }

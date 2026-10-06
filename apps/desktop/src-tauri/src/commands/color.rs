@@ -6,12 +6,13 @@
 use hp_core::{HpError, HpResult, MediaType};
 use hp_media::{encode_palette_json, extract_palette};
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::State;
 
 use crate::commands::shared::{
     api_async, api_from_hp, lock_repo, open_repo, open_repo_mut, resolve_file_path, ApiAsync,
     ApiResponse,
 };
+use crate::commands::shared::EmitHp;
 use crate::AppState;
 
 #[derive(Serialize, Clone)]
@@ -73,7 +74,7 @@ pub(crate) async fn color_extract(
 
     tauri::async_runtime::spawn_blocking(move || match run_color_extract(&st, &file_id) {
         Ok(palette) => {
-            let _ = app_handle.emit(
+            app_handle.emit_hp(
                 "color.extracted",
                 ColorExtractedEvent {
                     task_id: emit_task_id.clone(),
@@ -83,7 +84,7 @@ pub(crate) async fn color_extract(
             );
         }
         Err(_) => {
-            let _ = app_handle.emit(
+            app_handle.emit_hp(
                 "color.extracted",
                 ColorExtractedEvent {
                     task_id: emit_task_id.clone(),

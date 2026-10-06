@@ -7,12 +7,13 @@
 use hp_album::AlbumService;
 use hp_core::{AlbumKind, AlbumMediaType, HpError, HpResult, SyncMode};
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::State;
 
 use crate::commands::shared::{
     api_async, api_from_hp, file_to_item, lock_repo, open_repo, open_repo_mut, AlbumFileItem,
     ApiAsync, ApiResponse,
 };
+use crate::commands::shared::EmitHp;
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -338,7 +339,7 @@ pub(crate) async fn album_sync(
 
         tauri::async_runtime::spawn_blocking(move || match run_album_sync(&st, &repo_id, &album_id) {
             Ok(outcome) => {
-                let _ = app_handle.emit(
+                app_handle.emit_hp(
                     "album.sync.progress",
                     AlbumSyncProgressEvent {
                         task_id: emit_task_id.clone(),
@@ -350,7 +351,7 @@ pub(crate) async fn album_sync(
                 );
                 // 逐文件冲突：一个成员一条事件，fileId 一定非空（缺陷 0004）
                 for conflict in &outcome.conflicts {
-                    let _ = app_handle.emit(
+                    app_handle.emit_hp(
                         "album.sync.conflict",
                         AlbumSyncConflictEvent {
                             task_id: emit_task_id.clone(),
@@ -362,7 +363,7 @@ pub(crate) async fn album_sync(
                 }
             }
             Err(e) => {
-                let _ = app_handle.emit(
+                app_handle.emit_hp(
                     "album.sync.failed",
                     AlbumSyncFailedEvent {
                         task_id: emit_task_id.clone(),

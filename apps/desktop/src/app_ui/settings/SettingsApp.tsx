@@ -83,8 +83,8 @@ export function SettingsApp({
     let dispose: (() => void) | undefined;
     void (async () => {
       try {
-        const { listen } = await import("@tauri-apps/api/event");
-        dispose = await listen("setting.changed", () => {
+        const { listenHp } = await import("../shared/events");
+        dispose = await listenHp("setting.changed", () => {
           void reload();
         });
       } catch {

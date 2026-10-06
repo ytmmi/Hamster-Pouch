@@ -14,9 +14,9 @@ use hp_plugin_host::{
     SupervisionStatus, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT,
 };
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::State;
 
-use crate::commands::shared::{api_from_hp, ensure_global, ApiResponse};
+use crate::commands::shared::{api_from_hp, ensure_global, ApiResponse, EmitHp};
 use crate::AppState;
 
 /// 广播 `plugin.error`：某个面板的 schema 查询失败。
@@ -31,7 +31,7 @@ pub(crate) fn emit_plugin_error(app: &tauri::AppHandle, repo_id: &str, plugin_id
         repo_id: String,
         error: String,
     }
-    let _ = app.emit(
+    app.emit_hp(
         "plugin.error",
         PluginError {
             plugin_id: plugin_id.to_string(),

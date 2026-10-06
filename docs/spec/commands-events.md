@@ -8,6 +8,12 @@
 - 插件命令使用 `plugin.{pluginId}.{action}` 命名空间。
 - 所有插件命令必须携带仓库上下文，并经过启用状态与能力授权校验（RFC 0004）。
 - Tauri 桥接层只做参数校验、权限检查、调用 crate、转发事件；不承载业务规则。
+- **事件名**：契约里沿用点分（如 `scan.progress`），但 **Tauri 2 的线上事件名不允许点号**
+  （只允许 `[A-Za-z0-9\-/:_]`）。因此两侧都在**唯一入口**把 `.` 映射为 `:`
+  （`scan.progress` → `scan:progress`）：后端 `commands/shared.rs` 的 `wire_event` /
+  `EmitHp::emit_hp`，前端 `app_ui/shared/events.ts` 的 `listenHp` / `emitHp`。
+  与命令侧 `domain.action` ↔ `domain_action` 是**同一条口径**。由 `pnpm check:event-names` 守护。
+  （缺陷 0022：事件侧此前漏了这层映射，且发送失败被 `let _ =` 吞掉，整族事件静默失效。）
 
 ## 2. 通用载荷约定
 

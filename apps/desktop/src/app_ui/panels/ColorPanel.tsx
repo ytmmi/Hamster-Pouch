@@ -17,7 +17,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { type UnlistenFn } from "@tauri-apps/api/event";
+import { listenHp } from "../shared/events";
 
 import copyIconUrl from "../assets/copy.svg";
 import * as api from "../shared/api";
@@ -115,7 +116,7 @@ export function ColorPanel({ api: panelApi }: ColorPanelProps = {}): JSX.Element
     let dispose: UnlistenFn | undefined;
     let cancelled = false;
     const { status, t } = app;
-    void listen<ColorExtractedPayload>("color.extracted", (e) => {
+    void listenHp<ColorExtractedPayload>("color.extracted", (e) => {
       if (e.payload.fileId !== currentFileIdRef.current) return;
       if (e.payload.palette.length === 0) {
         setColors([]);

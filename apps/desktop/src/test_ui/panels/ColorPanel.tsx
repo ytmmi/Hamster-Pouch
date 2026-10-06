@@ -3,7 +3,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { type UnlistenFn } from "@tauri-apps/api/event";
+import { listenHp } from "../../app_ui/shared/events";
 
 import * as api from "../api";
 import type {
@@ -86,7 +87,7 @@ export function ColorPanel({
     void (async () => {
       try {
         unlisteners.push(
-          await listen<ColorExtractedPayload>("color.extracted", (e) => {
+          await listenHp<ColorExtractedPayload>("color.extracted", (e) => {
             setPalette(e.payload.palette);
             setExtracting(false);
             onStatus(

@@ -22,7 +22,7 @@ import {
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
 
-import { listen } from "@tauri-apps/api/event";
+import { listenHp } from "../shared/events";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { PANEL_MIN_SIZE } from "@hamster-pouch/config";
 import { reconcileActiveBlueprint } from "../shared/blueprintRuntime";
@@ -175,7 +175,7 @@ export function AppUiApp(): JSX.Element {
 
   // 监听对话框窗口的仓库变更（创建/切换）
   useEffect(() => {
-    const un = listen<{ repoId: string }>("repo.changed", (e) => {
+    const un = listenHp<{ repoId: string }>("repo.changed", (e) => {
       setRepoId(e.payload.repoId);
       refresh();
       status(`${t("repo.opened")}: ${e.payload.repoId.slice(0, 8)}`, "ok");
@@ -187,7 +187,7 @@ export function AppUiApp(): JSX.Element {
 
   // 监听独立窗口的「收回主窗口」请求
   useEffect(() => {
-    const un = listen<{ id: string }>("panel.restore", (e) => {
+    const un = listenHp<{ id: string }>("panel.restore", (e) => {
       const id = e.payload.id;
       const apiInstance = apiRef.current;
       if (apiInstance && !apiInstance.getPanel(id)) {

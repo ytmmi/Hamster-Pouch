@@ -22,7 +22,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listenHp } from "../../shared/events";
 
 import { panelSettingStorageKey, panelSpec, type PanelSettingValue } from "@hamster-pouch/config";
 
@@ -184,7 +184,7 @@ export function useViewerSettings(panelApi?: PanelRenderCtx["api"]): ViewerSetti
   useEffect(() => {
     let dispose: (() => void) | undefined;
     let cancelled = false;
-    void listen("setting.changed", () => {
+    void listenHp("setting.changed", () => {
       void reload();
     })
       .then((unlisten) => {

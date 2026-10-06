@@ -24,8 +24,10 @@ use crate::media_type::detect_media_type;
 use crate::scan_pool;
 use crate::scan_task::{compute, pixel_cost, Computed, Prepared};
 
-/// 遍历阶段的进度上报间隔（节流，避免海量小文件把事件通道打满）。
-const WALK_REPORT_INTERVAL: Duration = Duration::from_millis(200);
+/// 遍历阶段的进度上报间隔：**固定间隔**刷新，不做逐文件上报——海量小文件下
+/// 逐文件发事件会把事件通道打满、拖累扫描本身（用户口径 2026-10-06：
+/// "可以固定间隔刷新，无需完全实时，防止拖累性能"）。
+const WALK_REPORT_INTERVAL: Duration = Duration::from_millis(100);
 
 /// 扫描阶段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,8 +204,11 @@ impl Scanner {
 
         // 1. 遍历收集文件路径
         //
-        // 遍历阶段同样上报进度（total 未知记 0）：大型视频源遍历本身就可能耗时，
-        // 旧实现遍历期间完全不发事件，UI 表现为"点了扫描没反应"。
+        // 遍历阶段**固定间隔**上报进度（total 未知记 0）：大型视频源遍历本身就可能耗时，
+        // 旧实现遍历期间完全不发事件，UI 表现为"点了扫描没反应"；后来加了按时间节流，
+        // 但本地盘上几万个文件常常几十毫秒就走完，仍然一帧不发（缺陷 0021）。
+        // 因此补上**首帧**（首个文件，一次性）与**收尾帧**（真实总数，一次性），
+        // 中间一律走固定间隔——既不漏掉短遍历，也不逐文件上报拖累性能。
         let mut outcome = ScanOutcome::default();
         let mut entries: Vec<PathBuf> = Vec::new();
         let mut last_walk_report = Instant::now();
@@ -215,7 +220,12 @@ impl Scanner {
             match entry {
                 Ok(e) if e.file_type().is_file() => {
                     entries.push(e.into_path());
-                    if last_walk_report.elapsed() >= WALK_REPORT_INTERVAL {
+                    let discovered = entries.len() as u64;
+                    // **首个文件立即上报一次**（一次性首帧：让"已发现"从 0 立刻动起来，
+                    // 否则只靠时间节流时，几百毫秒内跑完的遍历一帧都不发，浮窗会一直
+                    // 停在"已发现 0 个文件"，缺陷 0021）；其后按**固定间隔**刷新，
+                    // 不逐文件上报（用户口径：固定间隔即可，别拖累性能）。
+                    if discovered == 1 || last_walk_report.elapsed() >= WALK_REPORT_INTERVAL {
                         last_walk_report = Instant::now();
                         let current = entries
                             .last()
@@ -224,7 +234,7 @@ impl Scanner {
                             .map(|p| p.to_string_lossy().replace('\\', "/"))
                             .filter(|s| !s.is_empty());
                         on_progress(&ScanProgress {
-                            processed: entries.len() as u64,
+                            processed: discovered,
                             total: 0,
                             phase: ScanPhase::Walking,
                             current,
@@ -236,6 +246,15 @@ impl Scanner {
             }
         }
         let total = entries.len() as u64;
+        // 遍历**收尾帧**：把"已发现 N"落到**真实总数**。旧实现只有中间帧，最后可见的
+        // 是一个偏小的数，随后直接切到索引阶段的 0/total——观感是"数到一半就不动了"。
+        // `total` 仍记 0：遍历阶段总数对 UI 而言仍是"不定进度"。
+        on_progress(&ScanProgress {
+            processed: total,
+            total: 0,
+            phase: ScanPhase::Walking,
+            current: None,
+        });
         // 阶段切换帧：遍历结束、索引尚未开始，按 0/total 上报，
         // 保证进度条单调递增（若这里报 total/total，会先冲满再退回 0）。
         on_progress(&ScanProgress {
@@ -251,12 +270,26 @@ impl Scanner {
         //    这些都是廉价操作（一次索引查询 + 一次 stat），不涉及解码；
         //    昂贵的解码/哈希/抽帧留到下一阶段的**并行**里做。
         let mut prepared_list: Vec<Prepared> = Vec::with_capacity(entries.len());
+        // 准备阶段同样是**纯串行**（媒体类型判定 / stat / 查既有行），大源上这一段可能
+        // 持续数秒；整段不发帧会让浮窗看起来停在原地（而且 `TaskOverlay` 超过 5 s
+        // 没有进度就会走"卡住"对账）。这里按同一间隔上报"正在准备的条目"。
+        let mut last_prepare_report = Instant::now();
         for path in entries.iter() {
             let relative = match path.strip_prefix(root) {
                 Ok(r) => r,
                 Err(_) => continue,
             };
             let relative_path = relative.to_string_lossy().replace('\\', "/");
+
+            if last_prepare_report.elapsed() >= WALK_REPORT_INTERVAL {
+                last_prepare_report = Instant::now();
+                on_progress(&ScanProgress {
+                    processed: 0,
+                    total,
+                    phase: ScanPhase::Indexing,
+                    current: Some(relative_path.clone()),
+                });
+            }
 
             let media_type = match detect_media_type(path) {
                 Some(mt) => mt,

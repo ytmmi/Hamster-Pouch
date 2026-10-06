@@ -5,8 +5,54 @@ use std::path::PathBuf;
 use hp_core::{FileIndexRow, HpError, HpResult};
 use hp_store::{GlobalDb, RepoDb};
 use serde::Serialize;
+use tauri::Emitter;
 
 use crate::AppState;
+
+/// 逻辑事件名 → **线上事件名**：`.` 映射为 `:`。
+///
+/// **为什么必须有这一层（缺陷 0022）**：Tauri 2 的事件名只允许
+/// `[A-Za-z0-9\-/:_]`，**不接受点号**——`emit("scan.progress", …)` 会直接报
+/// `only alphanumeric, '-', '/', ':', '_' permitted for event names`。
+/// 而本项目的事件名在契约与代码里沿用点分（与命令的 `domain.action` 同款），
+/// 命令侧早有等价映射（`domain.action` ↔ `domain_action`），**事件侧此前漏了**，
+/// 于是整族事件被 `let _ = emit(..)` 静默丢弃：扫描浮窗、插件/设置/蓝图/调色板刷新
+/// 全部无声失效。事件一律经 [`EmitHp::emit_hp`] 发出，前端一律经 `listenHp` 接收。
+pub(crate) fn wire_event(logical: &str) -> String {
+    logical.replace('.', ":")
+}
+
+/// 追加一行诊断日志到 `<exe 同目录>\data\debug.log`。
+///
+/// 只用于**不该无声无息**的问题（目前是事件发送失败）。诊断通道本身不参与业务。
+pub(crate) fn diag_log(message: &str) {
+    use std::io::Write;
+    let Ok(dir) = app_data_root() else { return };
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("debug.log"))
+    {
+        let _ = writeln!(f, "{message}");
+    }
+}
+
+/// 发事件的**唯一入口**：逻辑名 → 线上名，且失败**留痕**（不再 `let _ =` 吞掉）。
+///
+/// 用法与 `tauri::Emitter::emit` 完全同形：调用点只差方法名（`emit` → `emit_hp`），
+/// 逻辑名照旧点分，例如 `app.emit_hp("scan.progress", ev)`。
+pub(crate) trait EmitHp<R: tauri::Runtime>: Emitter<R> {
+    fn emit_hp<S: Serialize + Clone>(&self, logical: &str, payload: S) {
+        let name = wire_event(logical);
+        if let Err(e) = self.emit(&name, payload) {
+            diag_log(&format!(
+                "[event] 发送失败 {logical}（线上名 {name}）: {e}"
+            ));
+        }
+    }
+}
+
+impl<R: tauri::Runtime, T: Emitter<R>> EmitHp<R> for T {}
 
 /// **D76 迁移已完成（2026-09）**：桥接层不再需要"把领域错误压成 String"的转换函数。
 ///
@@ -542,6 +588,53 @@ pub(crate) fn file_to_item(f: FileIndexRow) -> AlbumFileItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 事件名映射必须产出 **Tauri 自己认**的名字（缺陷 0022）。
+    ///
+    /// 判定口径抄自 Tauri 2.11.5 的 `tauri/src/event/event_name.rs::is_event_name_valid`：
+    /// 全部字符必须是字母数字或 `-` `/` `:` `_`——**点号不在其中**，这正是当时
+    /// `emit("scan.progress", …)` 报 `IllegalEventName` 的原因。
+    fn tauri_accepts_event_name(name: &str) -> bool {
+        name.chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '-' | '/' | ':' | '_'))
+    }
+
+    #[test]
+    fn wire_event_produces_tauri_legal_names() {
+        // 前提：点分名确实被 Tauri 拒绝（若哪天 Tauri 放宽了，这条会红，提醒复核本层是否还需要）。
+        assert!(
+            !tauri_accepts_event_name("scan.progress"),
+            "点分事件名应被 Tauri 拒绝——缺陷 0022 的根因前提"
+        );
+        // 契约里出现过的**全部**逻辑事件名：映射后必须合法。
+        for logical in [
+            "scan.progress",
+            "scan.completed",
+            "scan.error",
+            "source.unmount.progress",
+            "source.unmount.completed",
+            "source.unmount.error",
+            "album.sync.progress",
+            "album.sync.conflict",
+            "album.sync.failed",
+            "plugin.changed",
+            "plugin.loaded",
+            "plugin.error",
+            "setting.changed",
+            "blueprint.changed",
+            "color.extracted",
+            "media.surface.click",
+            "repo.changed",
+            "panel.restore",
+        ] {
+            let wire = wire_event(logical);
+            assert_eq!(wire, logical.replace('.', ":"), "映射规则必须是 `.` → `:`");
+            assert!(
+                tauri_accepts_event_name(&wire),
+                "{logical} → {wire} 必须是 Tauri 合法事件名"
+            );
+        }
+    }
 
     /// 开发期的工作目录就是本 crate（`cargo test` 与 `tauri dev` 都是
     /// `apps/desktop/src-tauri`）——正是旧实现只按 cwd 拼相对路径时解析失败的目录。

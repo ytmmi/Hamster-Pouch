@@ -13,12 +13,13 @@ use hp_core::{HpError, HpResult, Source};
 use hp_scanner::{ScanOptions, ScanOutcome, ScanPhase, ScanProgress};
 use hp_store::{build_source_tree, RepoDb};
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::State;
 
 use crate::commands::shared::{
     api_async, api_from_hp, lock_repo, open_repo, open_repo_mut, ApiAsync, ApiResponse,
 };
 use crate::tasks::{RequestOutcome, TaskControl, TaskKind};
+use crate::commands::shared::EmitHp;
 use crate::AppState;
 
 /// 扫描时单个外部媒体进程（ffprobe 探测 / ffmpeg 抽帧）的超时上限。
@@ -294,7 +295,7 @@ pub(crate) async fn source_unmount(
             }));
             match result {
                 Ok(Ok(outcome)) => {
-                    let _ = app_handle.emit(
+                    app_handle.emit_hp(
                         "source.unmount.completed",
                         UnmountCompletedEvent {
                             task_id: emit_task_id.clone(),
@@ -311,7 +312,7 @@ pub(crate) async fn source_unmount(
                     );
                 }
                 Ok(Err(e)) => {
-                    let _ = app_handle.emit(
+                    app_handle.emit_hp(
                         "source.unmount.error",
                         UnmountErrorEvent {
                             task_id: emit_task_id.clone(),
@@ -321,7 +322,7 @@ pub(crate) async fn source_unmount(
                     );
                 }
                 Err(_) => {
-                    let _ = app_handle.emit(
+                    app_handle.emit_hp(
                         "source.unmount.error",
                         UnmountErrorEvent {
                             task_id: emit_task_id.clone(),
@@ -357,7 +358,7 @@ fn run_unmount(
     let emit_task_id = control.task_id().to_string();
     let emit_source_id = source_id.to_string();
     let emit_phase = |phase: &str, processed: u64, total: u64| {
-        let _ = emit_app.emit(
+        emit_app.emit_hp(
             "source.unmount.progress",
             UnmountProgressEvent {
                 task_id: emit_task_id.clone(),
@@ -574,7 +575,7 @@ pub(crate) async fn source_scan(
             }));
             match result {
                 Ok(Ok(outcome)) => {
-                    let _ = app_handle.emit(
+                    app_handle.emit_hp(
                         "scan.completed",
                         ScanCompletedEvent {
                             task_id: emit_task_id.clone(),
@@ -588,7 +589,7 @@ pub(crate) async fn source_scan(
                     );
                 }
                 Ok(Err(e)) => {
-                    let _ = app_handle.emit(
+                    app_handle.emit_hp(
                         "scan.error",
                         ScanErrorEvent {
                             task_id: emit_task_id.clone(),
@@ -598,7 +599,7 @@ pub(crate) async fn source_scan(
                     );
                 }
                 Err(_) => {
-                    let _ = app_handle.emit(
+                    app_handle.emit_hp(
                         "scan.error",
                         ScanErrorEvent {
                             task_id: emit_task_id.clone(),
@@ -646,19 +647,27 @@ fn run_scan(
     let emit_task_id = control.task_id().to_string();
     let emit_source_id = source_id.to_string();
     let mut last_emit = Instant::now() - PROGRESS_MIN_INTERVAL;
+    let mut last_phase: Option<ScanPhase> = None;
     let mut progress = move |p: &ScanProgress| {
         let phase = match p.phase {
             ScanPhase::Walking => "walking",
             ScanPhase::Indexing => "indexing",
         };
-        // 收尾帧（索引到 100%）必须放行，否则进度条到不了终点；其余帧节流。
-        // 注意 total == 0 是遍历阶段的"总数未知"，不能当成收尾帧。
+        // 三类帧**一律放行**，其余按 `PROGRESS_MIN_INTERVAL` 节流：
+        // - 遍历帧（`total == 0`）：量小（扫描器自带固定间隔节流），
+        //   且"已发现 N 个文件"必须实时；
+        // - **阶段切换帧**：被 80 ms 节流吞掉会让浮窗在漫长的准备/索引阶段一直停在
+        //   上一阶段的文案上（缺陷 0021 的另一半）；
+        // - 收尾帧（索引到 100%）：否则进度条到不了终点。
+        let walking = p.total == 0;
         let terminal = p.total > 0 && p.processed >= p.total;
-        if !terminal && last_emit.elapsed() < PROGRESS_MIN_INTERVAL {
+        let phase_changed = last_phase != Some(p.phase);
+        if !walking && !terminal && !phase_changed && last_emit.elapsed() < PROGRESS_MIN_INTERVAL {
             return;
         }
+        last_phase = Some(p.phase);
         last_emit = Instant::now();
-        let _ = emit_app.emit(
+        emit_app.emit_hp(
             "scan.progress",
             ScanProgressEvent {
                 task_id: emit_task_id.clone(),
