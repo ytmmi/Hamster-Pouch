@@ -17,6 +17,11 @@
  * - 方向键 / PageUp / PageDown = 上一张 / 下一张（顺序即胶片栏序列）；
  * - `Home` = 适应窗口，`1` = 100%（1:1）。
  *
+ * **换图（2026-10-07）**：视图变换与它所属的图像绑定（`OwnedTransform` + `viewerZoom.ts`
+ * 的 `resolveViewTransform`），新图的首帧即按「适应窗口」绘制——**绝不**沿用上一张的
+ * 缩放/平移。理由见 `resolveViewTransform` 的注释与缺陷 0026：`onLoad` 与"重新适应窗口"
+ * 分属两个提交，靠 effect 兜底就必然先画一帧错的（表现为切换瞬间的拉伸）。
+ *
  * **按键可达性（2026-10-07）**：键盘处理挂在面板根节点上，因此**先要有焦点**。
  * 两条入口都必须成立：
  *
@@ -58,19 +63,47 @@ import { useViewerSequence } from "./useViewerSequence";
 import { useViewerSettings } from "./useViewerSettings";
 import { isFilmstripVertical, stepIndex } from "./viewerPlacement";
 import { shouldTakeViewerFocus, viewerKeyAction } from "./viewerKeymap";
+import { decodeImageSize } from "./viewerDecode";
 import {
   centerAnchor,
   centerOn,
   clampOffset,
-  fitZoom,
+  fitTransform,
   IDENTITY_TRANSFORM,
   isOverflowing,
+  resolveViewTransform,
   scaledSize,
   zoomAround,
   type Offset,
   type Size,
   type ViewTransform,
 } from "./viewerZoom";
+
+/**
+ * 视图变换 + **它属于哪张图**（`token` = 该图的 asset URL）。
+ *
+ * 两者必须绑在一起：换图后"上一张的缩放/平移"对新图没有任何意义，而渲染路径必须能
+ * 一眼看出这份记录是否还适用（`resolveViewTransform`）——这正是缺陷 0026 的修复形态。
+ */
+interface OwnedTransform {
+  token: string;
+  transform: ViewTransform;
+}
+
+/**
+ * **正在显示**的那张图：URL + 原图尺寸 + 文件 id。
+ *
+ * 三者必须**同批替换**（缺陷 0028）：只要 URL 换了而尺寸还是上一张的，那一帧就会把新图按
+ * 上一张的大小画出来（用户看到的"下一张按上一张的大小，再复原成原比例"）。放进同一个状态对象后，
+ * 这种"半新半旧"的帧在结构上不可能出现。
+ */
+interface ShownImage {
+  url: string;
+  /** 原图尺寸；`null` = 预解码给不出（兜底路径，等 `<img>` 的 `onLoad` 回填）。 */
+  natural: Size | null;
+  /** 它属于哪个文件（`wantRef` 据此丢弃过期结果）。 */
+  fileId: string;
+}
 
 export interface ImageViewerPanelProps {
   /**
@@ -104,14 +137,69 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
   const file = app.selectedFile;
   const isImage = file?.media_type === "image";
 
-  /** 图像 asset URL；`null` = 未加载（无选中/非图像/加载中）。 */
-  const [url, setUrl] = useState<string | null>(null);
+  /**
+   * **正在显示**的那张图：URL + 原图尺寸 + 它属于哪个文件，**三者同批替换**（缺陷 0028）。
+   *
+   * 为什么把尺寸也放在这里：换图必须先解码（见 `viewerDecode.ts`），解码回来时尺寸已知，
+   * 于是 url 与尺寸可以**一次提交**——换图只发生一帧，而那一帧里新图的位图已就绪、几何已知。
+   * 若分成两次提交（先换 url、等 `onLoad` 再补尺寸），中间必然出现"元素已换、位图还没有"的帧：
+   * 表现为旧画面停留/空白闪烁、或被合成器拉伸成新尺寸。
+   *
+   * `natural` 允许为 `null`：只有"预解码给不出尺寸"（失败/超时）的兜底路径才会出现，
+   * 那条路上由 `.iv-image-pending` 兜底、并在 `onLoad` 时回填。
+   */
+  const [shown, setShown] = useState<ShownImage | null>(null);
   const [failed, setFailed] = useState(false);
-  /** 原图尺寸（`<img>` 解码后由舞台上报）。 */
-  const [natural, setNatural] = useState<Size | null>(null);
   /** 舞台实测尺寸（缩放/夹紧/视口框都依赖它）。 */
   const [viewport, setViewport] = useState<Size>({ width: 0, height: 0 });
-  const [transform, setTransform] = useState<ViewTransform>(IDENTITY_TRANSFORM);
+  /** 最近的视图变换记录（**含它属于哪张图**，见 `OwnedTransform`）。 */
+  const [owned, setOwned] = useState<OwnedTransform>({ token: "", transform: IDENTITY_TRANSFORM });
+  /** 图像 asset URL（空串 = 没有可显示的图）。 */
+  const url = shown?.url ?? "";
+  /** 正在显示的图的原图尺寸（`null` = 兜底路径尚未解码出来）。 */
+  const natural = shown?.natural ?? null;
+  /** 当前图像的 token（asset URL；空串 = 尚未解析出 URL）。 */
+  const token = url;
+  /**
+   * 想要的图像（按文件 id）：异步链路（解析 URL → 解码 → 可能的预览兜底）回来时，
+   * 用它丢弃**过期结果**——用户在解码途中又换了一张图时，旧结果不得再上屏。
+   */
+  const wantRef = useRef<string | null>(null);
+  /**
+   * 渲染当帧真正采用的变换：记录不属于当前图像时退回「适应窗口」
+   * （**在渲染路径上算**，不是等 effect——否则换图首帧会沿用上一张，见缺陷 0026）。
+   */
+  const transform = resolveViewTransform(owned.token, token, owned.transform, natural, viewport);
+  /**
+   * 写入新的视图变换：**同时记下它属于哪张图**（当前 `token`）。
+   *
+   * 用于"绝对"写入——适应窗口、舞台拖动平移（值由舞台自己算好）、以及下面那个 effect 的落账。
+   * "相对"更新（滚轮 / 导航器 / 1:1）走 `updateTransform`。
+   */
+  const commitTransform = useCallback(
+    (next: ViewTransform) => setOwned({ token, transform: next }),
+    [token],
+  );
+  /**
+   * 以"当前图像**真正采用**的变换"为基准做一次相对更新。
+   *
+   * 两处讲究，缺一不可：
+   * 1. **函数式写法**（`prev` 形式）：滚轮这类**连续事件**在 React 18 里会被批处理，
+   *    若先读渲染当帧的 `transform` 再 `setOwned`，同一帧内的第二次事件会读到同一份旧值，
+   *    把中间那一步**丢掉**（`prev` 天然按步累加，不受批处理影响）；
+   * 2. **基准先归一化**：`resolveViewTransform` 把记录折算到当前图像，因此换图后绝不会拿
+   *    上一张的缩放当基准（缺陷 0026 的同一个判据，只是发生在更新侧）。
+   */
+  const updateTransform = useCallback(
+    (derive: (base: ViewTransform) => ViewTransform, baseViewport: Size = viewport) =>
+      setOwned((prev) => ({
+        token,
+        transform: derive(
+          resolveViewTransform(prev.token, token, prev.transform, natural, baseViewport),
+        ),
+      })),
+    [token, natural, viewport],
+  );
   /** 已按"适应窗口"初始化过的图像标识：同一张图不因面板改尺寸而被重置缩放。 */
   const fittedRef = useRef<string | null>(null);
   /** 面板根节点：点击画布后把焦点交给它，键盘（上一张/下一张、适应窗口、1:1）才可达。 */
@@ -128,6 +216,14 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
   /** 最新上下文（供只订阅一次的 effect 读取，避免闭包过期 / 依赖整个 `app` 对象）。 */
   const appRef = useRef(app);
   appRef.current = app;
+  /**
+   * 渲染当帧真正采用的变换（`transform` 的别名）。
+   *
+   * 供下面那个**会写变换**的 effect 读取：把 `transform` 放进它的依赖就自激循环，
+   * 因此按"最新值放 ref"的既有写法取值（与 `ViewerStage` 读原生监听器最新状态同款）。
+   */
+  const transformRef = useRef(transform);
+  transformRef.current = transform;
 
   /**
    * 舞台尺寸上报：**尺寸没变就不换对象**。
@@ -141,24 +237,72 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
     );
   }, []);
 
+  /**
+   * 显示一张图：**先解码，后替换**（缺陷 0028）。
+   *
+   * `shown` 是"URL + 原图尺寸"的**单个状态对象**，所以替换必然原子：任何一帧里都不可能出现
+   * "已经是新 URL、尺寸却还是上一张的"——而那正是用户看到的"下一张按上一张的大小画，再复原成
+   * 原比例"。`wantRef` 用来丢弃过期结果（解码途中又换了一张图时，旧结果不得再上屏）。
+   */
+  const showImage = useCallback(async (nextUrl: string, fileId: string) => {
+    const size = await decodeImageSize(nextUrl);
+    if (wantRef.current !== fileId) return; // 期间已经切走
+    setFailed(false);
+    setShown({ url: nextUrl, natural: size, fileId });
+  }, []);
+
+  /** 原图加载失败时的一次兜底：改用后端全分辨率预览（HEIC/HEIF 之外的自定义格式等）。 */
+  const recoverWithPreview = useCallback(async () => {
+    const ctx = appRef.current;
+    const current = ctx.selectedFile;
+    if (!current) return;
+    // 已经是预览还失败 → 不可用（不再二次请求）。
+    if (needsPreview(current.relative_path)) {
+      wantRef.current = null;
+      setShown(null);
+      setFailed(true);
+      ctx.status(ctx.t("imageviewer.unavailable"), "error");
+      return;
+    }
+    const previewUrl = await resolvePreviewUrl(ctx.repoId ?? "", current.id);
+    if (wantRef.current !== current.id) return;
+    if (!previewUrl) {
+      wantRef.current = null;
+      setShown(null);
+      setFailed(true);
+      ctx.status(ctx.t("imageviewer.unavailable"), "error");
+      return;
+    }
+    await showImage(previewUrl, current.id);
+  }, [showImage]);
+
   // 选中项变化 → 解析图像源：Chromium 可解的格式加载**原图**（全分辨率）；
   // HEIC/HEIF 走后端**全分辨率预览**（`preview.get`，缺陷 0019）。旧请求用令牌丢弃
   // （快速切换不会串图）。取图策略收敛在 `shared/imageUrl.ts`——预加载走**同一份**
   // 缓存，因此预加载过的邻居在这里是**同步命中**，不再有 IPC 往返。
+  //
+  // **换图不再"先换 URL、等 onLoad"**（缺陷 0028）：现在**解码完成后才把 url 与尺寸一起换**
+  // （`shown`），并且**不提前清空当前画面**——解码期间上一张继续显示。于是换图只发生一帧：
+  // 新图的位图已就绪、几何已知，旧画面既不空白、也不会被复用成新尺寸。
   useEffect(() => {
-    setUrl(null);
-    setFailed(false);
-    setNatural(null);
-    if (!repoId || !file || file.media_type !== "image") return;
+    if (!repoId || !file || file.media_type !== "image") {
+      wantRef.current = null;
+      setShown(null);
+      setFailed(false);
+      return;
+    }
+    wantRef.current = file.id;
     let cancelled = false;
     void (async () => {
       const ctx = appRef.current;
       const outcome = await resolveImageUrlOutcome(repoId, file.id, file.relative_path);
-      if (cancelled) return;
+      if (cancelled || wantRef.current !== file.id) return;
       if (outcome.url) {
-        setUrl(outcome.url);
+        await showImage(outcome.url, file.id);
         return;
       }
+      wantRef.current = null;
+      setShown(null);
       setFailed(true);
       if (outcome.error !== null) {
         ctx.status(ctx.t("imageviewer.loadFailed", { err: errorTextOf(ctx.t, outcome.error) }), "error");
@@ -170,26 +314,30 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
     return () => {
       cancelled = true;
     };
-  }, [repoId, file?.id, file?.media_type]);
+  }, [repoId, file?.id, file?.media_type, showImage]);
 
   // 尺寸就绪 → 首次「适应窗口」；此后：仍在适应模式则跟着改尺寸重新适应，
   // 否则只做平移夹紧（**不覆盖**用户的缩放）。
+  //
+  // 注意这里**不再承担"换图后重新适应窗口"的职责**（那是缺陷 0026 的成因）：新图的首帧
+  // 已经由 `resolveViewTransform` 在渲染路径上取「适应窗口」值，本 effect 只负责把它**落账**
+  // （写入 `owned`，使后续的夹紧/改尺寸有基准）以及面板改尺寸时的重适应。
   useEffect(() => {
     if (!natural || viewport.width <= 0 || viewport.height <= 0) return;
-    const token = url ?? "";
     if (fittedRef.current !== token) {
       fittedRef.current = token;
       fitModeRef.current = true;
     }
     if (fitModeRef.current) {
-      setTransform({ zoom: fitZoom(natural, viewport), offset: { x: 0, y: 0 } });
+      commitTransform(fitTransform(natural, viewport));
       return;
     }
-    setTransform((prev) => ({
-      zoom: prev.zoom,
-      offset: clampOffset(prev.offset, scaledSize(natural, prev.zoom), viewport),
-    }));
-  }, [natural, viewport, url]);
+    const current = transformRef.current;
+    commitTransform({
+      zoom: current.zoom,
+      offset: clampOffset(current.offset, scaledSize(natural, current.zoom), viewport),
+    });
+  }, [natural, viewport, token, commitTransform]);
 
   /** 滚轮缩放：中心点按设置取"指针位置"（缺省）或舞台中心。 */
   const handleWheelZoom = useCallback(
@@ -199,9 +347,9 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
       // 用户一旦自己缩放就不再是"适应窗口"模式（改尺寸不覆盖其缩放）。
       fitModeRef.current = false;
       const anchor = settings.zoomAnchor === "pointer" ? pointer : centerAnchor(size);
-      setTransform((prev) => zoomAround(prev, prev.zoom * factor, natural, size, anchor));
+      updateTransform((base) => zoomAround(base, base.zoom * factor, natural, size, anchor), size);
     },
-    [natural, settings.zoomAnchor, updateViewport],
+    [natural, settings.zoomAnchor, updateViewport, updateTransform],
   );
 
   /** 导航器点击/拖动 → 把该点移到舞台正中。 */
@@ -209,23 +357,23 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
     (u: number, v: number) => {
       if (!natural) return;
       fitModeRef.current = false;
-      setTransform((prev) => centerOn(prev, natural, viewport, u, v));
+      updateTransform((base) => centerOn(base, natural, viewport, u, v));
     },
-    [natural, viewport],
+    [natural, viewport, updateTransform],
   );
 
   /** 适应窗口 / 1:1。 */
   const applyFit = useCallback(() => {
     if (!natural) return;
     fitModeRef.current = true;
-    setTransform({ zoom: fitZoom(natural, viewport), offset: { x: 0, y: 0 } });
-  }, [natural, viewport]);
+    commitTransform(fitTransform(natural, viewport));
+  }, [natural, viewport, commitTransform]);
 
   const applyActualSize = useCallback(() => {
     if (!natural) return;
     fitModeRef.current = false;
-    setTransform((prev) => zoomAround(prev, 1, natural, viewport, centerAnchor(viewport)));
-  }, [natural, viewport]);
+    updateTransform((base) => zoomAround(base, 1, natural, viewport, centerAnchor(viewport)));
+  }, [natural, viewport, updateTransform]);
 
   /** 选中序列中的第 `index` 项（点击胶片栏 / 上一张下一张共用）。 */
   const selectIndex = useCallback(
@@ -361,35 +509,23 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
     >
       <div className="iv-main">
         <ViewerStage
-          url={isImage && !failed ? (url ?? "") : ""}
+          url={failed ? "" : url}
           alt={file?.relative_path ?? ""}
           natural={natural}
           transform={transform}
           pannable={pannable}
           onWheelZoom={handleWheelZoom}
-          onNatural={setNatural}
+          // 兜底路径（预解码没给出尺寸）才用得到：`<img>` 解码完成后回填尺寸。
+          onNatural={(size) =>
+            setShown((prev) => (prev && prev.natural === null ? { ...prev, natural: size } : prev))
+          }
           onFailed={() => {
-            // 原图加载失败：若当前不是预览（Chromium 意外不支持的格式等），
-            // 回退到有界预览**一次**；预览也失败或已是预览 → 不可用。
-            if (url && !needsPreview(file?.relative_path ?? "")) {
-              setUrl(null); // 先停掉坏图，占位期间请求预览
-              void resolvePreviewUrl(repoId ?? "", file?.id ?? "").then((previewUrl) => {
-                if (previewUrl) {
-                  setFailed(false);
-                  setUrl(previewUrl);
-                } else {
-                  setFailed(true);
-                  app.status(app.t("imageviewer.unavailable"), "error");
-                }
-              });
-              return;
-            }
-            setFailed(true);
-            setUrl(null);
-            app.status(app.t("imageviewer.unavailable"), "error");
+            // 原图加载失败：改用后端全分辨率预览**一次**（Chromium 意外不支持的格式等）；
+            // 预览也失败或已经是预览 → 不可用。两条路都走 `recoverWithPreview`。
+            void recoverWithPreview();
           }}
           onViewport={updateViewport}
-          onTransform={setTransform}
+          onTransform={commitTransform}
           placeholder={<span className="placeholder">{placeholder}</span>}
           overlay={
             showNavigator && url && natural ? (

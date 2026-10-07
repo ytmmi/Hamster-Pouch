@@ -173,10 +173,21 @@ export function ViewerStage({
       {!url && placeholder}
       {url && (
         <img
+          /**
+           * **每张图一个新元素**（`key={url}`，缺陷 0028）：复用同一个 `<img>` 换 `src` 时，
+           * 合成器可能把**旧图层的光栅**按新盒子拉伸（"下一张被拉成上一张的大小"），
+           * 换元素则不存在"上一张的光栅"可被复用。
+           */
+          key={url}
           className={`iv-image${natural ? "" : " iv-image-pending"}`}
           src={url}
           alt={alt}
           draggable={false}
+          /**
+           * `decoding="sync"`：要**画就画解码好的位图**。面板已经在换图前解过一次码
+           * （`viewerDecode.ts`），这里只是保证"成为可见元素的第一次绘制"不带空位图。
+           */
+          decoding="sync"
           style={imageStyle}
           onLoad={(event) =>
             onNatural({

@@ -120,11 +120,14 @@ apps/desktop/src/app_ui/
   panels/             # 各功能面板（同类组件，平铺即可；含 PluginPanel、TagTablePanel、BlueprintPanel）
     imageviewer/      # 图像查看器（多文件功能域：主面板 / 舞台 / 导航器 / 胶片栏 / 信息栏
                       #   + 纯逻辑模块 viewerZoom·viewerPlacement·viewerFormat·viewerKeymap·viewerPreload
+                      #   + DOM 工具 viewerDecode（换图前离屏解码：解码完成才原子替换 url+尺寸，缺陷 0028）
                       #   + 面板设置 useViewerSettings 与浏览序列 useViewerSequence
                       #   + 相邻图像预加载 useViewerPreload）
                       #   设置热加载走四条独立触发源：本地广播 / setting.changed / 窗口焦点 / 面板激活
                       #   键盘：按键映射与「取焦点判据」都在 viewerKeymap（左=上一张、右=下一张，
                       #   顺序即胶片栏序列；从其他面板进入时面板被程序激活，需自行取焦点）
+                      #   换图：`ShownImage{url,natural,fileId}` 单一状态 + 每 URL 一个新 `<img>` 元素
+                      #   （key+decoding=sync）；解码期间保留上一张画面——首帧不可能"半新半旧"（0026/0027/0028）
                       #   预加载：取哪些邻居在 viewerPreload（前台才取 / 大图不解码 / 同张只预热一次），
                       #   取图策略与缓存收敛在 shared/imageUrl.ts（HEIC 预览与当前图共用一份）
     ViewerPanel.tsx   # 查看器（大图/视频/音频预览；**顶部基础信息栏**由面板设置 infoBarEnabled 控制）

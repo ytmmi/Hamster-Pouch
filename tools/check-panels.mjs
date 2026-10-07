@@ -2062,6 +2062,255 @@ check(
     /preloadRadius:/.test(viewerSettingsSrc),
 );
 
+// ==================== 图像查看器：换图首帧的视图变换 ====================
+//
+// 防的是"切换瞬间的拉伸"（缺陷 0026）。机制（已确证，见该记录的证据行）：
+// 新图解码完成（`<img onLoad>` → `setNatural`）与"重新适应窗口"（**被动** `useEffect`）
+// 分属两个提交——`onLoad` 那一提交**先被浏览器绘制**，effect 才把变换改回来。因此若变换与
+// "它属于哪张图"没有绑定，新图就会被先画成**上一张**的缩放与平移，下一帧才跳到「适应窗口」。
+// 极值对照：从 6000×4000 切到 400×300 时先按 0.13 倍画、下一帧跳到 2.5 倍（反之亦然），
+// 用户看到的就是切换瞬间的一次拉伸/跳变。
+//
+// 修复口径：**判据必须在渲染路径上**（`resolveViewTransform`），不能靠 effect 事后纠正
+// ——换 `useLayoutEffect` 只是把窗口压小，仍依赖"onLoad → 绘制"的时序约定。
+
+const viewerZoom = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerZoom.ts")).href
+);
+const zoomStage = { width: 800, height: 600 };
+const zoomBig = { width: 6000, height: 4000 };
+const zoomSmall = { width: 400, height: 300 };
+/** 上一张的"极端"变换：放大过、也平移过（任何沿用都会一眼看出来）。 */
+const zoomStale = { zoom: 3, offset: { x: 120, y: -80 } };
+
+check(
+  "换图首帧：变换记录**不属于**当前图像时取「适应窗口」（不沿用上一张的缩放/平移）",
+  (() => {
+    const t = viewerZoom.resolveViewTransform(
+      "asset://old.jpg",
+      "asset://new.jpg",
+      zoomStale,
+      zoomSmall,
+      zoomStage,
+    );
+    return (
+      t.zoom === viewerZoom.fitZoom(zoomSmall, zoomStage) && t.offset.x === 0 && t.offset.y === 0
+    );
+  })(),
+  (() => {
+    const t = viewerZoom.resolveViewTransform(
+      "asset://old.jpg",
+      "asset://new.jpg",
+      zoomStale,
+      zoomSmall,
+      zoomStage,
+    );
+    return `zoom=${t.zoom} offset=${t.offset.x},${t.offset.y}`;
+  })(),
+);
+check(
+  "换图首帧的取值与上一张**完全无关**（同一张新图，无论上一张多离谱都得到同一个变换）",
+  (() => {
+    const crazy = { zoom: 32, offset: { x: 9999, y: -9999 } };
+    const a = viewerZoom.resolveViewTransform("asset://old.jpg", "asset://new.jpg", zoomStale, zoomBig, zoomStage);
+    const b = viewerZoom.resolveViewTransform("asset://old.jpg", "asset://new.jpg", crazy, zoomBig, zoomStage);
+    const c = viewerZoom.resolveViewTransform("", "asset://new.jpg", zoomStale, zoomBig, zoomStage);
+    return a.zoom === b.zoom && a.zoom === c.zoom && viewerZoom.fitZoom(zoomBig, zoomStage) === a.zoom;
+  })(),
+);
+check(
+  "同一张图内（记录属于当前图像）**保留**用户的缩放与平移（渲染路径不得把它当换图清掉）",
+  (() => {
+    const t = viewerZoom.resolveViewTransform(
+      "asset://a.jpg",
+      "asset://a.jpg",
+      zoomStale,
+      zoomBig,
+      zoomStage,
+    );
+    return t.zoom === zoomStale.zoom && t.offset.x === 120 && t.offset.y === -80;
+  })(),
+);
+check(
+  "「适应窗口」= contain + 居中（平移清零）；尺寸不可用时退化为恒等（此时舞台无可见区域）",
+  (() => {
+    const fitted = viewerZoom.fitTransform(zoomBig, zoomStage);
+    return (
+      fitted.zoom === viewerZoom.fitZoom(zoomBig, zoomStage) &&
+      fitted.offset.x === 0 &&
+      fitted.offset.y === 0 &&
+      viewerZoom.fitTransform(null, zoomStage) === viewerZoom.IDENTITY_TRANSFORM &&
+      viewerZoom.fitTransform(zoomBig, { width: 0, height: 0 }) === viewerZoom.IDENTITY_TRANSFORM
+    );
+  })(),
+);
+// 正向锚点：面板必须把"这份变换属于哪张图"交给纯函数，并在**写入时**记下 token。
+// 反向锚点：不得再出现"无主的" `useState<ViewTransform>` + 裸 `setTransform(` ——那正是
+// 缺陷 0026 的形态（一个视图变换变量 + 事后 effect 纠正 → 换图首帧必然沿用上一张）。
+check(
+  "面板把「变换属于哪张图」交给纯函数（渲染路径判定 + 写入时记账），不再有无主的视图变换状态",
+  /const transform = resolveViewTransform\(\s*owned\.token,\s*token,\s*owned\.transform,\s*natural,\s*viewport,?\s*\)/.test(
+    imageViewerPanelSrc,
+  ) &&
+    /useState<OwnedTransform>\(\{ token: "", transform: IDENTITY_TRANSFORM \}\)/.test(
+      imageViewerPanelSrc,
+    ) &&
+    /const token = url;/.test(imageViewerPanelSrc) &&
+    /setOwned\(\{ token, transform: next \}\)/.test(imageViewerPanelSrc) &&
+    // 舞台拿到的必须是**渲染路径算出的**变换，而不是某个状态变量直传。
+    /transform=\{transform\}/.test(imageViewerPanelSrc) &&
+    !/useState<ViewTransform>/.test(stripComments(imageViewerPanelSrc)) &&
+    !/setTransform\(/.test(stripComments(imageViewerPanelSrc)),
+);
+// 换图后的"重新适应窗口"只由纯函数给值一次（渲染路径），effect 不得再兼任——否则
+// 又回到"先画一帧旧的、再由 effect 纠正"。
+check(
+  "换图不靠 effect 事后纠正：适应窗口的取值只在纯函数里给，effect 只负责落账与改尺寸重适应",
+  /commitTransform\(fitTransform\(natural, viewport\)\)/.test(imageViewerPanelSrc) &&
+    /const transformRef = useRef\(transform\);/.test(imageViewerPanelSrc) &&
+    !/fitZoom\(natural, viewport\)/.test(stripComments(imageViewerPanelSrc)),
+);
+check(
+  "缩放几何纯逻辑模块无 React / Tauri 依赖（门禁可直接 import）",
+  !/from "react"/.test(
+    readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerZoom.ts"),
+      "utf8",
+    ),
+  ) && !/@tauri-apps/.test(
+    readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerZoom.ts"),
+      "utf8",
+    ),
+  ),
+);
+// 相对更新（滚轮 / 导航器 / 1:1）必须走**函数式**写法，且基准先经纯函数归一化：
+// ① 滚轮这类**连续事件**在 React 18 里会被批处理，若先读渲染当帧的 `transform` 再写入，
+//    同一帧内的第二次事件会读到同一份旧值——中间那一步被丢掉（按步累加的 `prev` 形式不会）；
+// ② 基准若不经归一化，换图后就会拿上一张的缩放当基准（与首帧毛病同源，只是发生在更新侧）。
+check(
+  "相对更新走函数式写法（连续事件不被批处理吞掉），且基准先归一化到当前图像",
+  /setOwned\(\(prev\) => \(\{/.test(imageViewerPanelSrc) &&
+    /resolveViewTransform\(prev\.token, token, prev\.transform, natural, baseViewport\)/.test(
+      imageViewerPanelSrc,
+    ) &&
+    /updateTransform\(\(base\) => zoomAround\(base, base\.zoom \* factor, natural, size, anchor\), size\)/.test(
+      imageViewerPanelSrc,
+    ) &&
+    /updateTransform\(\(base\) => zoomAround\(base, 1, natural, viewport, centerAnchor\(viewport\)\)\)/.test(
+      imageViewerPanelSrc,
+    ) &&
+    /updateTransform\(\(base\) => centerOn\(base, natural, viewport, u, v\)\)/.test(
+      imageViewerPanelSrc,
+    ) &&
+    // 反向锚点：不得把**渲染当帧**的 `transform` 当基准（批处理下会丢步、换图后会串图）。
+    !/zoomAround\(transform,/.test(stripComments(imageViewerPanelSrc)) &&
+    !/centerOn\(transform,/.test(stripComments(imageViewerPanelSrc)),
+);
+
+// 换图必须是**原子替换**：URL 与"这张图的尺寸"同批提交（缺陷 0028）。
+//
+// 用户报的现象（原文）："下一张图片大小为上一张的，然后复原为原比例，然后图像闪烁或抖动一次"。
+// 这要求某一帧里同时成立"已经是新 URL"+"尺寸/几何还是上一张的"——即换图被拆成了两次提交。
+// 修法：把"正在显示的图"收敛成**一个状态对象**（url + natural + fileId），并**先解码后替换**：
+// 解码回来时尺寸已知，于是 url 与尺寸一次提交；换图只发生一帧，而那一帧里位图已就绪、几何已知。
+const stageSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/ViewerStage.tsx"),
+  "utf8",
+);
+const decodeSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerDecode.ts"),
+  "utf8",
+);
+check(
+  "换图是原子替换：url + 尺寸 + 文件 id 同一个状态对象，渲染两值都取自它",
+  /useState<ShownImage \| null>\(null\)/.test(imageViewerPanelSrc) &&
+    /setShown\(\{ url: nextUrl, natural: size, fileId \}\)/.test(imageViewerPanelSrc) &&
+    /const url = shown\?\.url \?\? "";/.test(imageViewerPanelSrc) &&
+    /const natural = shown\?\.natural \?\? null;/.test(imageViewerPanelSrc) &&
+    // 反向锚点：不得再出现"先换 URL、尺寸另一次提交"的老写法（那正是"半新半旧"帧的来源）。
+    !/setUrl\(/.test(stripComments(imageViewerPanelSrc)) &&
+    !/setNatural\(/.test(stripComments(imageViewerPanelSrc)),
+);
+check(
+  "换图**先解码后替换**：解码完成才把 url 与尺寸一起换（换图只发生一帧，且位图已就绪）",
+  /await decodeImageSize\(nextUrl\)/.test(imageViewerPanelSrc) &&
+    /if \(wantRef\.current !== fileId\) return;/.test(imageViewerPanelSrc) &&
+    /await showImage\(outcome\.url, file\.id\)/.test(imageViewerPanelSrc) &&
+    // 兜底（预览）也必须走同一条"解码后替换"的路，不得自己 setShown。
+    /await showImage\(previewUrl, current\.id\)/.test(imageViewerPanelSrc),
+);
+check(
+  "换图不再提前清空画面：解码期间上一张继续显示（没有「载入中」闪烁/空白帧）",
+  // 选中项变化时**不**清空 `shown`（只有"没有可显示的图"和失败才清）。
+  !/wantRef\.current = file\.id;\s*\n\s*setShown\(null\);/.test(imageViewerPanelSrc) &&
+    /if \(!repoId \|\| !file \|\| file\.media_type !== "image"\) \{[\s\S]{0,120}?setShown\(null\);/.test(
+      imageViewerPanelSrc,
+    ),
+);
+check(
+  "舞台：每张图一个新元素（`key={url}`）+ `decoding=\"sync\"`（复用元素会把旧图层的光栅拉成新尺寸）",
+  /key=\{url\}/.test(stageSrc) &&
+    /decoding="sync"/.test(stageSrc) &&
+    /className=\{`iv-image\$\{natural \? "" : " iv-image-pending"\}`\}/.test(stageSrc),
+);
+check(
+  "解码模块是 DOM 工具（不得变成组件/纯函数混装）：无 React 依赖，且只导出 `decodeImageSize`",
+  !/from "react"/.test(decodeSrc) &&
+    !/@tauri-apps/.test(decodeSrc) &&
+    /export async function decodeImageSize\(/.test(decodeSrc),
+);
+
+// 「待解码」兜底几何必须与「适应窗口」同口径（缺陷 0027）。
+//
+// 断言的是**两处实现同一个公式**：`viewerZoom.fitZoom` 是 `min(舞台/图)`，而
+// `.iv-image-pending` 用 `width/height: 100%` + `object-fit: contain`（CSS 的 contain
+// **含放大**）。旧写法 `max-width/max-height: 100%` 只会缩小、**永不放大**，于是"宽高都小于
+// 舞台的图"在解码完成那一帧先按原尺寸画、下一帧才被放大——实测 400×300 的图在 800×600 舞台里
+// 先画 400×300、再跳到 800×600（**50% 偏差**，一帧即用户报的"一瞬间拉伸"）。
+// 大图两帧恰好相同，所以这个缺陷**只在小图上可见**（这也是它此前没被当成"换图"缺陷的原因）。
+
+/** 取某条 CSS 规则的声明块正文（选择器只出现一次时用它做断言）。 */
+function cssRuleBody(source, selector) {
+  const at = source.indexOf(`\n${selector} {`);
+  if (at < 0) return null;
+  const start = source.indexOf("{", at);
+  const end = source.indexOf("}", start);
+  return start < 0 || end < 0 ? null : source.slice(start + 1, end);
+}
+
+const pendingRule = cssRuleBody(stylesSource, ".iv-image-pending");
+check(
+  "「待解码」兜底用 CSS 的 contain（含放大）：宽度/高度吃满舞台 + `object-fit: contain`",
+  Boolean(pendingRule) &&
+    /width:\s*100%/.test(pendingRule) &&
+    /height:\s*100%/.test(pendingRule) &&
+    /object-fit:\s*contain/.test(pendingRule) &&
+    // 居中由 object-position（默认 50% 50%）负责，不再靠 transform 偏移。
+    /left:\s*0/.test(pendingRule) &&
+    /top:\s*0/.test(pendingRule) &&
+    /transform:\s*none/.test(pendingRule),
+);
+check(
+  "**不得**再退回 `max-width/max-height: 100%`（那两条只缩小、不放大 → 小图会先按原尺寸画一帧）",
+  Boolean(pendingRule) &&
+    !/max-width/.test(pendingRule) &&
+    !/max-height/.test(pendingRule),
+);
+check(
+  "「待解码」兜底几何 ↔ `fitZoom` 同一公式（含**放大**与缩小、宽扁与高瘦四组夹具）",
+  [
+    [{ width: 400, height: 300 }, { width: 800, height: 600 }], // 小图：必须被放大
+    [{ width: 6000, height: 4000 }, { width: 800, height: 600 }], // 大图：缩小
+    [{ width: 1200, height: 400 }, { width: 800, height: 600 }], // 宽扁
+    [{ width: 200, height: 2000 }, { width: 800, height: 600 }], // 高瘦
+  ].every(([natural, vp]) => {
+    // CSS `object-fit: contain` 的等比缩放因子
+    const contain = Math.min(vp.width / natural.width, vp.height / natural.height);
+    return Math.abs(viewerZoom.fitZoom(natural, vp) - contain) < 1e-9;
+  }),
+);
+
 check(
   "宿主项与面板项共用同一份归一化内核与订阅内核（只在 config/settingValue.ts 与 shared/settingValue.ts 各一份）",
   /normalizeDeclaredValue/.test(

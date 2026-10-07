@@ -72,6 +72,51 @@ export function fitZoom(natural: Size, viewport: Size): number {
 }
 
 /**
+ * 「适应窗口」的**完整变换**（图像居中 + 缩放为 contain）。
+ *
+ * 与 `fitZoom` 分开是因为**换图**要把它当作"新图尚未落定"时的取值
+ * （见 `resolveViewTransform`）：`fitZoom` 只给倍率，调用方还要自己记得把平移清零，
+ * 而"忘了清零"正是换图跳变的一半（缺陷 0026）。
+ *
+ * 尺寸不可用（`natural` 未解码、舞台尚未测量）时返回 [`IDENTITY_TRANSFORM`]：
+ * 此时舞台没有可见区域，取什么值都不会画出来，选一个确定的常量即可。
+ */
+export function fitTransform(natural: Size | null, viewport: Size): ViewTransform {
+  if (!natural || viewport.width <= 0 || viewport.height <= 0) return IDENTITY_TRANSFORM;
+  return { zoom: fitZoom(natural, viewport), offset: { x: 0, y: 0 } };
+}
+
+/**
+ * 渲染时刻**真正采用**的视图变换。
+ *
+ * `owner` = 一份 `transform` 记录**所属图像**的 token（asset URL），`token` = 当前图像的
+ * token：**只有两者相同才采用记录值**，否则退回「适应窗口」。
+ *
+ * ## 为什么必须由渲染路径决定（缺陷 0026：换图瞬间的拉伸）
+ *
+ * 换图时"新图解码完成"与"重新适应窗口"分属**两个提交**：
+ *
+ * 1. `<img onLoad>` → `setNatural(新图尺寸)` → 提交 → **浏览器绘制**；
+ * 2. 被动 `useEffect` 才把变换改成适应窗口 → 再提交 → 再次绘制。
+ *
+ * 因此第 1 步那一帧**必然**用旧状态渲染；若变换与图像没有绑定，新图会被先画成
+ * **上一张的缩放与平移**（例如从 6000×4000 切到 400×300：先按 0.13 倍画、下一帧跳到 2.5 倍），
+ * 用户看到的就是切换瞬间的一次拉伸/跳变。把它写进渲染路径后，首帧即取适应窗口值，
+ * 跳变在**结构上**不可能出现——不依赖 effect 与绘制的时序约定（换 `useLayoutEffect` 只是
+ * 把窗口压小，仍靠时序，且 `onLoad` → 绘制的顺序并非规范保证）。
+ */
+export function resolveViewTransform(
+  owner: string,
+  token: string,
+  transform: ViewTransform,
+  natural: Size | null,
+  viewport: Size,
+): ViewTransform {
+  if (owner === token) return transform;
+  return fitTransform(natural, viewport);
+}
+
+/**
  * 平移夹紧：图像比舞台小的那一轴**强制居中**；比舞台大的那一轴允许在
  * `±(显示尺寸 - 舞台尺寸)/2` 内移动，从而**图像边缘不会离开舞台边缘**（没有露底）。
  */
