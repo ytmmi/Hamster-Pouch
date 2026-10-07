@@ -1752,6 +1752,124 @@ check(
   "元数据面板**不自带面板设置**（体积/日期是全仓库共用的宿主项，避免两套口径）",
   (config.panelSpec("metadata")?.settings ?? []).length === 0,
 );
+
+// ==================== 图像查看器：按键映射 + 键盘焦点获取 ====================
+//
+// 防的是"功能都在、就是按不动"这一类缺陷（与缺陷 0015「面板内点不动」同族）：
+// ① 键位散落在组件里 → 改一处漏一处；② 键盘处理挂在面板根节点上，而**从其他面板
+// 进来**时焦点还在原面板上，根节点根本收不到 `keydown`。两段都按**行为**断言
+// （直接 import 纯函数），而不是只对源码写正则。
+
+const keymap = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerKeymap.ts")).href
+);
+
+check(
+  "图像查看器按键映射：左方向键 = 上一张、右方向键 = 下一张（顺序即胶片栏序列）",
+  keymap.viewerKeyAction("ArrowLeft") === "prev" &&
+    keymap.viewerKeyAction("ArrowRight") === "next",
+  `左=${keymap.viewerKeyAction("ArrowLeft")} 右=${keymap.viewerKeyAction("ArrowRight")}`,
+);
+check(
+  "按键映射是**纯函数**：无关按键返回 null（调用方放行、不 preventDefault，宿主快捷键照常冒泡）",
+  keymap.viewerKeyAction("a") === null &&
+    keymap.viewerKeyAction("Enter") === null &&
+    keymap.viewerKeyAction("Escape") === null &&
+    keymap.viewerKeyAction("F5") === null,
+);
+check(
+  "方向键上下与 PageUp/PageDown 的既有语义未被删除（回归对照：它们自面板引入起就是换图）",
+  keymap.viewerKeyAction("ArrowUp") === "prev" &&
+    keymap.viewerKeyAction("PageUp") === "prev" &&
+    keymap.viewerKeyAction("ArrowDown") === "next" &&
+    keymap.viewerKeyAction("PageDown") === "next" &&
+    keymap.viewerKeyAction("Home") === "fit" &&
+    keymap.viewerKeyAction("1") === "actual",
+);
+// 上一张 / 下一张必须落到**同一个**换图入口（`step` → `stepIndex` → `selectIndex`），
+// 否则左右键会绕开胶片栏顺序（例如自己 +1 下标、忽略序列边界与空序列）。
+check(
+  "左右方向键落到同一换图入口（`stepIndex` + 选中序列项），不另立一套下标推进",
+  /viewerKeyAction\(event\.key\)/.test(imageViewerPanelSrc) &&
+    /action === "prev"[\s\S]{0,80}?step\(-1\)/.test(imageViewerPanelSrc) &&
+    /action === "next"[\s\S]{0,80}?step\(1\)/.test(imageViewerPanelSrc) &&
+    /stepIndex\(sequence\.index, sequence\.files\.length, delta\)/.test(imageViewerPanelSrc) &&
+    // 组件里不得再有散落的 `case "ArrowLeft"` 分支（键位判定只在 viewerKeymap.ts 一处）。
+    !/case "ArrowLeft"/.test(imageViewerPanelSrc),
+);
+// 「从其他面板进入图像查看器」这条路径：面板被程序激活时 DOM 焦点还在原面板上，
+// 必须由面板自己把焦点拿到根节点——否则方向键永远不可达（用户看到的正是这个）。
+// 三道细节都必须守住，缺一条都会"看起来实现了、实际按不动"：
+//   ① 只在**进入**这个转换上取一次（独立单面板窗口的 `panelApi` 每次渲染都是新替身，
+//      无条件取会反复抢焦点）；
+//   ② 判据在激活的**当帧**读（`onDidActiveChange` 在 `pointerdown` 派发中同步触发，
+//      此刻浏览器尚未执行"点击即聚焦"，读到的是点之前的焦点 → 放行；键盘在标签条
+//      按 Enter 激活时读到标签元素 → 拦下，标签条左右键导航得以保留）；
+//   ③ 取焦点**延后一帧**（鼠标点标签页时浏览器默认动作会把焦点给标签元素，同步
+//      `focus()` 会被覆盖，表现为"进来了却按不动"）。
+check(
+  "从其他面板进入（程序激活）时面板把键盘焦点拿到根节点",
+  /panelApi\.onDidActiveChange\(sync\)/.test(imageViewerPanelSrc) &&
+    /panelApi\.onDidVisibilityChange\(sync\)/.test(imageViewerPanelSrc) &&
+    /const active = Boolean\(panelApi\.isVisible && panelApi\.isActive\);/.test(imageViewerPanelSrc) &&
+    /const entered = active && !enteredRef\.current;/.test(imageViewerPanelSrc) &&
+    /enteredRef\.current = active;/.test(imageViewerPanelSrc) &&
+    /if \(!entered\) return;/.test(imageViewerPanelSrc) &&
+    /shouldTakeViewerFocus\(document\.activeElement\)/.test(imageViewerPanelSrc) &&
+    // 取焦点延后一帧（否则被浏览器"点击即聚焦标签"的默认动作覆盖）；
+    // 帧内重读激活态——这一帧里用户可能已经切走，此时不能再抢焦点。
+    /requestAnimationFrame\(\(\) => \{[\s\S]{0,220}?if \(!panelApi\.isVisible \|\| !panelApi\.isActive\) return;[\s\S]{0,80}?rootRef\.current\?\.focus\(\{ preventScroll: true \}\);/.test(
+      imageViewerPanelSrc,
+    ) &&
+    /cancelAnimationFrame\(focusFrameRef\.current\)/.test(imageViewerPanelSrc),
+);
+// 取焦点**不能无条件抢**：正在输入 / 模态浮层 / 标签条键盘导航都必须让路。
+check(
+  "取焦点有判据：输入框（input/textarea/select/contenteditable）不抢",
+  keymap.shouldTakeViewerFocus({ tagName: "INPUT" }) === false &&
+    keymap.shouldTakeViewerFocus({ tagName: "TEXTAREA" }) === false &&
+    keymap.shouldTakeViewerFocus({ tagName: "SELECT" }) === false &&
+    keymap.shouldTakeViewerFocus({ tagName: "DIV", isContentEditable: true }) === false &&
+    keymap.shouldTakeViewerFocus({ tagName: "INPUT", closest: () => null }) === false,
+);
+check(
+  "取焦点有判据：模态浮层（[role=dialog]）与标签条（[role=tablist]）内不抢",
+  keymap.shouldTakeViewerFocus({ tagName: "DIV", closest: (s) => (s.includes("dialog") ? {} : null) }) ===
+    false &&
+    keymap.shouldTakeViewerFocus({
+      tagName: "DIV",
+      closest: (s) => (s.includes("tablist") ? {} : null),
+    }) === false,
+);
+check(
+  "取焦点有判据：无焦点 / body / 普通元素（即「从别的面板进来」的形态）要取",
+  keymap.shouldTakeViewerFocus(null) === true &&
+    keymap.shouldTakeViewerFocus(undefined) === true &&
+    keymap.shouldTakeViewerFocus({ tagName: "BODY", closest: () => null }) === true &&
+    keymap.shouldTakeViewerFocus({ tagName: "DIV", closest: () => null }) === true,
+);
+// 面板内点击取焦点这条入口保持不变（胶片栏的 `<button>` 仍不抢）。
+check(
+  "面板内点击仍把焦点交给根节点（胶片栏按钮不抢，避免键盘操作被面板吞掉）",
+  /closest\("button"\)/.test(imageViewerPanelSrc) &&
+    /tabIndex=\{0\}/.test(imageViewerPanelSrc) &&
+    /onKeyDown=\{onKeyDown\}/.test(imageViewerPanelSrc),
+);
+check(
+  "按键映射与焦点判据是**纯逻辑模块**（无 React / Tauri 依赖，门禁可直接 import）",
+  !/from "react"/.test(
+    readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerKeymap.ts"),
+      "utf8",
+    ),
+  ) && !/@tauri-apps/.test(
+    readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerKeymap.ts"),
+      "utf8",
+    ),
+  ),
+);
+
 check(
   "宿主项与面板项共用同一份归一化内核与订阅内核（只在 config/settingValue.ts 与 shared/settingValue.ts 各一份）",
   /normalizeDeclaredValue/.test(

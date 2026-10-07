@@ -17,8 +17,20 @@
  * - 方向键 / PageUp / PageDown = 上一张 / 下一张（顺序即胶片栏序列）；
  * - `Home` = 适应窗口，`1` = 100%（1:1）。
  *
+ * **按键可达性（2026-10-07）**：键盘处理挂在面板根节点上，因此**先要有焦点**。
+ * 两条入口都必须成立：
+ *
+ * 1. **从其他面板进入**（蓝图双击图像 → `focusPanel` → `panel.api.setActive()`）：
+ *    程序激活**不会**自动把 DOM 焦点移过来（焦点还在原面板上），根节点的
+ *    `onKeyDown` 于是收不到方向键。本面板订阅 `onDidActiveChange` /
+ *    `onDidVisibilityChange`，成为**激活且可见**的面板时按 `shouldTakeViewerFocus`
+ *    的判据把焦点拿到根节点（正在输入 / 模态浮层 / 标签条键盘导航都不抢）。
+ * 2. **在图像查看器面板内点击**：`onPointerDown` 把焦点交给根节点
+ *    （胶片栏的 `<button>` 不抢，避免键盘操作被面板吞掉）。
+ *
  * 几何与格式化全在 `viewerZoom.ts` / `viewerFormat.ts` / `viewerPlacement.ts`
- * 的纯函数里，本文件只做状态编排；序列来源见 `useViewerSequence.ts`。
+ * 的纯函数里，按键映射与焦点判据在 `viewerKeymap.ts`，本文件只做状态编排；
+ * 序列来源见 `useViewerSequence.ts`。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
@@ -44,6 +56,7 @@ import { ViewerStage } from "./ViewerStage";
 import { useViewerSequence } from "./useViewerSequence";
 import { useViewerSettings } from "./useViewerSettings";
 import { isFilmstripVertical, stepIndex } from "./viewerPlacement";
+import { shouldTakeViewerFocus, viewerKeyAction } from "./viewerKeymap";
 import {
   centerAnchor,
   centerOn,
@@ -98,6 +111,13 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
   const rootRef = useRef<HTMLDivElement>(null);
   /** 是否处于「适应窗口」模式：留在该模式时，面板改尺寸会跟着重新适应。 */
   const fitModeRef = useRef(true);
+  /**
+   * 上一次同步到的"激活且可见"状态：焦点只在**进入**该状态的转换上取一次
+   * （`panelApi` 在独立单面板窗口里每次渲染都是新替身，不加这道判据会反复抢焦点）。
+   */
+  const enteredRef = useRef(false);
+  /** 待执行的"取焦点"帧（延后一帧，等浏览器"点击即聚焦标签"的默认动作走完）。 */
+  const focusFrameRef = useRef(0);
   /** 最新上下文（供只订阅一次的 effect 读取，避免闭包过期 / 依赖整个 `app` 对象）。 */
   const appRef = useRef(app);
   appRef.current = app;
@@ -224,32 +244,71 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
     [selectIndex, sequence.files.length, sequence.index],
   );
 
-  /** 键盘：上一张/下一张 + 适应窗口 + 1:1。 */
+  /** 键盘：上一张/下一张 + 适应窗口 + 1:1（键位判定在 `viewerKeymap.ts`，只此一处）。 */
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    switch (event.key) {
-      case "ArrowLeft":
-      case "ArrowUp":
-      case "PageUp":
-        event.preventDefault();
-        step(-1);
-        return;
-      case "ArrowRight":
-      case "ArrowDown":
-      case "PageDown":
-        event.preventDefault();
-        step(1);
-        return;
-      case "Home":
-        event.preventDefault();
-        applyFit();
-        return;
-      case "1":
-        event.preventDefault();
-        applyActualSize();
-        return;
-      default:
+    const action = viewerKeyAction(event.key);
+    // 无关按键**放行**：不处理也不 `preventDefault`，宿主与浮层的快捷键照常冒泡。
+    if (!action) return;
+    event.preventDefault();
+    if (action === "prev") {
+      step(-1);
+    } else if (action === "next") {
+      step(1);
+    } else if (action === "fit") {
+      applyFit();
+    } else {
+      applyActualSize();
     }
   };
+
+  /**
+   * 「从其他面板进入图像查看器」这条路径：面板被**程序激活**时（蓝图双击图像 →
+   * `focusPanel` → `panel.api.setActive()`）DOM 焦点还留在原面板上，根节点的
+   * `onKeyDown` 收不到方向键。**进入**（或挂载即处于）激活且可见态时把焦点拿到根节点即可。
+   *
+   * 三道收敛，缺一不可：
+   *
+   * 1. **只在"进入"这个转换上取一次**（`enteredRef`）。`panelApi` 在独立单面板窗口里是
+   *    每次渲染新建的替身对象，若不加这道判据，重渲染就会反复抢焦点——把用户正在
+   *    同一个窗口里用键盘操作的按钮顶掉。
+   * 2. **判据在激活的**当帧**读**（`shouldTakeViewerFocus`）：`onDidActiveChange` 在
+   *    `pointerdown` 的派发过程中同步触发（`dndStrategy = "pointer"` 时 dockview 就是
+   *    同步 `openPanel`），此刻浏览器**还没有**执行"点击即聚焦"的默认动作——所以鼠标
+   *    点标签页进来时读到的仍是**点之前**的焦点（通常是别的面板），判据放行；而键盘在
+   *    标签条里按 Enter 激活时读到的就是标签元素本身，判据拦下（标签条的左右键导航
+   *    得以保留）。
+   * 3. **取焦点延后一帧**：鼠标点标签页时浏览器会在默认动作里把焦点给**标签元素**
+   *    （dockview 的标签是可聚焦的 `div`），同步 `focus()` 会被它覆盖掉，表现为
+   *    "点进来了、方向键还是不动"。等默认动作走完再取，面板根节点才真正拿到键盘。
+   *    延后期间**不重复判据**——否则又会读到刚被聚焦的标签而放弃。
+   */
+  useEffect(() => {
+    if (!panelApi) return;
+    const sync = () => {
+      const active = Boolean(panelApi.isVisible && panelApi.isActive);
+      const entered = active && !enteredRef.current;
+      enteredRef.current = active;
+      if (!entered) return;
+      if (!shouldTakeViewerFocus(document.activeElement)) return;
+      // 连续快速切换标签时只保留最后一次待执行的取焦点（不因重渲染丢掉它——
+      // 独立单面板窗口的 `panelApi` 每次渲染都换身份，本 effect 会随之重跑）。
+      cancelAnimationFrame(focusFrameRef.current);
+      focusFrameRef.current = requestAnimationFrame(() => {
+        // 帧内**重读激活态**：这一帧里用户可能已经切走了，此时不能再抢焦点。
+        // （只重读激活态，不重读焦点判据——那时浏览器已把焦点给到标签元素。）
+        if (!panelApi.isVisible || !panelApi.isActive) return;
+        rootRef.current?.focus({ preventScroll: true });
+      });
+    };
+    sync();
+    const disposables = [panelApi.onDidActiveChange(sync), panelApi.onDidVisibilityChange(sync)];
+    return () => {
+      for (const disposable of disposables) disposable.dispose();
+    };
+  }, [panelApi]);
+
+  // 卸载时撤掉尚未执行的取焦点（组件已不在，聚焦无处可去）。
+  useEffect(() => () => cancelAnimationFrame(focusFrameRef.current), []);
 
   const totalBytes = useMemo(
     () => sequence.files.reduce((sum, item) => sum + (item.size || 0), 0),

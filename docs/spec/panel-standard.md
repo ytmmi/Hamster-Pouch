@@ -244,6 +244,13 @@
     - **未解码单元要同时拿到预测高度**：否则槽位已按预测高度定位、单元内容却很矮（占位符），中间出现大空洞（实测瞬时 `maxGap` 达 259px），解码后又被填上，表现为快速滚动时的跳动。
     - **实测收益**（5 万条合成语料，`apps/desktop/perf`）：瀑布流 50 000 → **70** 个单元、滚动 37 030 → **691 ms（52×）**；自适应 50 000 → **85** 个单元、73 660 → **1 202 ms（61×）**；长帧 42 → **0–2**。真机（4717 张真实照片，`tools/real-machine-verify.mjs`）三个视图均 **0 长帧、0 重叠**、自适应行内高度差 **0.02px**。
     - **固有代价（不是缺陷）**：索引里没有图片尺寸（`media_info_json` 只覆盖视频），未渲染的条目按 `DEFAULT_CELL_RATIO` 占位，因此瀑布流/自适应的**滚动条长度是估计值**、随浏览收敛（实测漂移 ≤ 10px / 102 万）。
+11. **图像查看器（`imageviewer`）的按键映射与键盘焦点（2026-10-07）**：面板的键盘处理挂在**根节点**（`tabIndex = 0` 的 `.iv-panel`）上，因此"功能在、就是按不动"的根因通常不是键位写错，而是**焦点不在面板上**。两条入口都必须成立，且各由门禁断言：
+    - **从其他面板进入**（蓝图双击图像 → `focusPanel` → `panel.api.setActive()`）：dockview 的**程序激活不会把 DOM 焦点移过来**（焦点仍留在原面板），根节点于是收不到 `keydown`。面板订阅 `onDidActiveChange` / `onDidVisibilityChange`，在**进入**"激活且可见"这个转换时把焦点拿到根节点（`{ preventScroll: true }`，避免聚焦把面板滚进视口引起跳动）。三处时序细节缺一不可，否则会"看起来实现了、实际按不动"：① **只在"进入"这个转换上取一次**（独立单面板窗口的 `panelApi` 是每次渲染新建的替身，无条件取会反复抢焦点）；② **判据在激活的当帧读**——`onDidActiveChange` 在 `pointerdown` 派发中同步触发（`dndStrategy = "pointer"` 时 dockview 就是同步 `openPanel`），此刻浏览器尚未执行"点击即聚焦"，读到的是**点之前**的焦点 → 放行；而键盘在标签条按 Enter 激活时读到标签元素 → 拦下；③ **取焦点延后一帧**——鼠标点标签页时浏览器默认动作会把焦点给标签元素（dockview 的标签是可聚焦 `div`），同步 `focus()` 会被覆盖；帧内**重读激活态**（这一帧里用户可能已切走），但**不重读焦点判据**（那时焦点已被给到标签）。
+    - **在面板内点击**：`onPointerDown` 把焦点交给根节点；**胶片栏的 `<button>` 不抢**（否则点缩略图后键盘操作被面板吞掉）。
+    - **取焦点必须有判据**（`shouldTakeViewerFocus`，纯函数）：`input` / `textarea` / `select` / `contenteditable`（用户正在输入）、`[role="dialog"]` 内（「全部设置」/ 确认弹窗 / 任务浮窗盖在布局之上，键盘属于浮层）、`[role="tablist"]` 内（dockview 用方向键在标签间移动焦点）**一律不抢**；无焦点 / `<body>` / 普通元素才取。**失败方向刻意选"不抢"**——抢错的代价是把用户正在打的字打到别处。
+    - **键位只在 `apps/desktop/src/app_ui/panels/imageviewer/viewerKeymap.ts` 声明一次**（`viewerKeyAction`）：`ArrowLeft` / `ArrowUp` / `PageUp` = **上一张**，`ArrowRight` / `ArrowDown` / `PageDown` = **下一张**，`Home` = 适应窗口，`1` = 100%；**不匹配返回 `null`**，调用方据此**放行**该按键（既不处理也不 `preventDefault`，宿主与浮层的快捷键照常冒泡）。组件里不得再有散落的 `case "ArrowLeft"` 分支。
+    - **顺序口径**：上一张/下一张**就是胶片栏的顺序**——键位不碰序列，面板把动作交给同一个换图入口 `stepIndex(sequence.index, sequence.files.length, ±1)` → `selectIndex`（序列来源与顺序见 `useViewerSequence.ts`；越界**不环绕**）。**不得**为方向键另立一套下标推进（那会绕开序列边界与空序列）。
+    - `pnpm check:panels` 按**行为**断言以上各条（直接 import `viewerKeymap.ts` 驱动，而不是只对源码写正则）：左右两键的语义、无关按键返回 `null`、上下键与 `PageUp`/`PageDown` 的既有语义未被删除（回归对照）、左右键落到同一换图入口、程序激活时取焦点、三类"不抢"判据、纯逻辑模块不得 import React / Tauri。
 
 - **`cargo test -p hp-core`**：面板声明的硬错误清单、命名空间规则、`settings.kind` 白名单、`has_class = false` 的类目拒绝、`mount.overlay_content = false` 的浮层拒绝。
 - **回归**：内置 14 个面板的声明必须能通过校验且与现状一致（**零行为变化**）；插件面板缺失时蓝图可保存且灰显「未接通」。
