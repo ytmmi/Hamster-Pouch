@@ -44,6 +44,22 @@ const check = (label, ok, detail = "") => {
 };
 const eqList = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 
+/**
+ * 剥掉 `//` 行注释与 `/* … *​/` 块注释，供"**不得出现**某写法"这类断言使用。
+ *
+ * 为什么需要：说明性注释里常常**引用**被禁的写法（例如"不用 `loading="lazy"`"），
+ * 直接对全文匹配会把注释当代码——出现"注释一写就红"的假失败，或反过来让断言形同虚设。
+ * 与 `tools/check-dormant-media.mjs` 的 `stripComments` 同一口径（各门禁自持一份，
+ * 避免为一个小工具引入共享模块）。
+ */
+function stripComments(text) {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, " "))
+    .join("\n");
+}
+
 const doc = readFileSync(join(ROOT, "docs/spec/panel-standard.md"), "utf8");
 const rustPanels = readFileSync(join(ROOT, "crates/hp-core/src/panel_types.rs"), "utf8");
 
@@ -1044,7 +1060,37 @@ check(
 );
 
 check(
-  "缩略图的可见性判定：**共享一个** `IntersectionObserver`，且虚拟化视图不再逐格观察",
+  "缩略图**挂载即预热**：不再有「等进入视口」的闸门（用户 2026-10-07：向上不预加载）",
+  // 三种视图都已虚拟化，"被挂载" ⟺ "在虚拟化窗口内"（窗口以 scrollTop 为中心、上下同余量），
+  // 因此窗口**就是**对称的预加载带。此前的两道闸门都会让取图时机偏离这条窗口：
+  //   ① 共享 IntersectionObserver 等"真的进入视口"（虚拟化之前的做法）；
+  //   ② `<img loading="lazy">` 交给浏览器启发式。
+  // 另加**显式预热**：`.mp-cell` 的 `content-visibility: auto` 会让被跳过渲染的单元
+  // 不触发 `<img>` 取图，而 overscan 带恰恰最容易被跳过。
+  //
+  // **断言前先剥注释**：本文件的说明文字里会**引用**这些被禁的写法（"不用
+  // `loading="lazy"`"之类），直接对全文匹配会把注释当成代码，出现"注释一写就红"的假失败。
+  (() => {
+    const code = stripComments(mediaCellSrc);
+    return (
+      /const warmedThumbs = new Set<string>\(\);/.test(code) &&
+      /new Image\(\)/.test(code) &&
+      /warmedThumbs\.add\(file\.id\)/.test(code) &&
+      // **正向锚点**：缩略图 effect 的守卫必须**只有** `needsThumb` 一个条件——
+      // 后面紧跟 `resolveThumbUrl`，因此再挂任何"等可见"的条件（`!visible` /
+      // `!audioVisible` / 别的状态）都会让这条不成立。
+      // 只写"禁止某个旧拼法"是不够的：换成另一种可见性状态名就绕过去了
+      // （实测：把守卫改成 `!needsThumb || !audioVisible` 时，旧断言仍然通过）。
+      /if \(!needsThumb\) return;\s*let cancelled = false;\s*void resolveThumbUrl\(/.test(code) &&
+      // 去掉浏览器懒加载：窗口已有界，取图要确定。
+      !/loading="lazy"/.test(code) &&
+      // 音频仍走共享观察器（`decodeAudioData` 是实打实的 CPU）。
+      /observeUntilVisible\(el, \(\) => setAudioVisible\(true\)\)/.test(code)
+    );
+  })(),
+);
+check(
+  "音频波形的可见性判定：**共享一个** `IntersectionObserver`（不逐格新建）",
   // 缺陷 0018：原实现每个单元各建一个观察器（5 万个单元 = 5 万个观察器）。
   // 观察器本就是"一个观察者观察多个目标"，收成模块级唯一一个即可。
   /const visibilityCallbacks = new WeakMap<Element, \(\) => void>\(\);/.test(mediaCellSrc) &&
@@ -1052,10 +1098,26 @@ check(
     /function observeUntilVisible\(/.test(mediaCellSrc) &&
     // 关键不变量：整个单元模块里 `new IntersectionObserver` **恰好一次**
     // （逐格新建就会变成 N 次——这正是缺陷 0018 里 5 万个观察器的来源）。
-    (mediaCellSrc.match(/new IntersectionObserver/g) ?? []).length === 1 &&
-    // 虚拟化视图直接判定"在视口内"，连观察都不做。
-    /if \(nearViewport\) \{\s*setVisible\(true\);/.test(mediaCellSrc) &&
-    /nearViewport=\{view === "tile"\}/.test(mediaPanelSrc),
+    (mediaCellSrc.match(/new IntersectionObserver/g) ?? []).length === 1,
+);
+// 方向性差异的**根**在"窗口是否对称"：上下余量必须相等，否则预加载带本身就偏向一侧。
+// 用纯函数按行为断言（不是读源码正则）——这是本次缺陷的第一性判据。
+check(
+  "虚拟化窗口**上下对称**（预加载带必须以 scrollTop 为中心，否则天然偏向一侧）",
+  (() => {
+    const offsets = Array.from({ length: 40 }, (_, i) => i * 200);
+    const heights = Array.from({ length: 40 }, () => 200);
+    const scrollTop = 4000;
+    const viewportHeight = 800;
+    const overscan = Math.max(200, viewportHeight / 2);
+    const r = virtual.masonryVisibleRange(offsets, heights, scrollTop, viewportHeight, overscan);
+    const above = Math.max(0, scrollTop - (offsets[r.start] ?? 0));
+    const below = Math.max(
+      0,
+      (offsets[r.end - 1] ?? 0) + (heights[r.end - 1] ?? 0) - (scrollTop + viewportHeight),
+    );
+    return r.start < r.end && above === below && above > 0;
+  })(),
 );
 
 const mediaSpec = config.panelSpec("media");

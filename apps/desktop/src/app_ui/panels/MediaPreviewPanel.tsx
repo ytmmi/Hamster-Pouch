@@ -530,7 +530,6 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
         selected={app.selectedIds.has(file.id)}
         showName={showFileName}
         intrinsicHeight={cellIntrinsicHeight(file)}
-        nearViewport={view === "tile"}
         onSelect={cellSelect}
         onDoubleClick={cellDoubleClick}
         onDragStart={cellDragStart}
@@ -544,7 +543,6 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
       app.t,
       showFileName,
       cellIntrinsicHeight,
-      view,
       cellSelect,
       cellDoubleClick,
       cellDragStart,

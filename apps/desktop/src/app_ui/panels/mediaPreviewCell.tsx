@@ -1,13 +1,49 @@
 /**
- * 媒体预览面板：**缩略图单元**（含音频波形、缩略图懒加载与宽高比测量）。
+ * 已**显式预热**过缩略图的 fileId。
+ *
+ * 为什么需要显式预热，而不是"设了 `<img src>` 浏览器就会取"：`.mp-cell` 带
+ * `content-visibility: auto`（样式表的基础规则），**被跳过渲染的单元里的 `<img>` 不会触发取图**。
+ * 而虚拟窗口里除视口之外的那一圈（overscan 带）正是最容易被跳过的地方——
+ * 于是"取图时机"又落回浏览器的渲染启发式，不再等于那条对称窗口，
+ * 表现为方向性差异（用户 2026-10-07 报的"向上不预加载"）。
+ *
+ * 这里用 `new Image()` 主动取一次，把取图与"该单元是否被渲染"解耦：
+ * 只要单元**挂载**（= 在对称窗口内）就取，两个方向完全一致。
+ * 结果进浏览器缓存，随后 `<img src>` 直接命中，不重复下载。
+ *
+ * 用**模块级** Set 而不是组件内的 ref：单元会随滚动反复卸载/重挂，
+ * 组件级记录会随之丢失并重复预热。
+ */
+const warmedThumbs = new Set<string>();
+
+/**
+ * 媒体预览面板：**缩略图单元**（含音频波形、缩略图加载与宽高比测量）。
  *
  * 从 `MediaPreviewPanel.tsx` 拆出来的（单文件 1200 行硬上限，`pnpm check:line-count`）：
- * 单元的职责只有三件事——懒加载、画波形、量宽高比。
+ * 单元的职责只有三件事——取缩略图、画波形、量宽高比。
  *
- * 使用 IntersectionObserver（rootMargin 200px）在接近视口时才：
- * - 图片/视频：请求并显示后端缓存的缩略图（而非原始全分辨率文件）；
- * - 音频：挂载波形组件并开始解码（而非一次性预解码全部音频）。
- * 离屏时显示占位符，节省网络与 CPU。
+ * ## 缩略图（图片/视频）：**挂载即预热**
+ *
+ * 本面板三种视图（平铺 / 自适应 / 瀑布流）都已按行/列**虚拟化**（缺陷 0018 P1-A），
+ * 因此"被挂载" ⟺ "在虚拟化窗口内"。窗口以 `scrollTop` 为中心、**上下同余量**
+ * （`masonryVisibleRange` 的 `overscan` 上下各一份；行虚拟化同理），
+ * 所以窗口**就是**一条对称的预加载带：在这里就把缩略图取回来，滚到该单元时已经就位。
+ *
+ * 此前这条链路上有两道**多余且会破坏对称性**的闸门，现均已移除：
+ *
+ * 1. 共享 `IntersectionObserver`（`rootMargin: "200px"`）把请求推迟到"真的进入视口"
+ *    ——那是**虚拟化之前**（全量渲染）的做法，虚拟化之后它把取图时机交给了相交回调；
+ * 2. `<img loading="lazy">` 又交给浏览器的懒加载启发式。
+ *
+ * 并且补上**显式预热**（`warmedThumbs` + `new Image()`）：`.mp-cell` 的
+ * `content-visibility: auto` 会让被跳过渲染的单元不触发 `<img>` 取图，而 overscan 带
+ * 恰恰最容易被跳过——不显式预热的话，取图时机仍不等于那条对称窗口。
+ *
+ * ## 音频：仍然等**真的进入视口**才解码
+ *
+ * 波形要 `decodeAudioData`，是实打实的 CPU；为离屏条目预先解码没有观感收益
+ * （波形不参与"翻到就有图"的观感），因此**保留**共享观察器这一道闸门。
+ * 这也是本文件里 `IntersectionObserver` 的**唯一**用途。
  *
  * 缩略图 URL 走 `shared/thumbUrl.ts` 的**共享**缓存与请求去重（图像查看器胶片栏同源）；
  * 宽高比走本文件的 `ratioCache`（同款口径）。
@@ -18,7 +54,7 @@
  * 另外两个视图不设相关规则，因此同一个变量在那里是惰性的。
  */
 
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import { resolveThumbUrl } from "../shared/thumbUrl";
@@ -128,7 +164,7 @@ function AudioWaveform({ url, t }: { url: string; t: Translate }): JSX.Element {
 }
 
 /**
- * 缩略图单元的**共享可见性观察器**。
+ * 单元的**共享可见性观察器**（**只服务音频波形**）。
  *
  * 缺陷 0018：原实现**每个单元各建一个 `IntersectionObserver`**——5 万个单元就是
  * 5 万个观察器对象，光是创建与注册就足以让面板卡住。
@@ -136,8 +172,8 @@ function AudioWaveform({ url, t }: { url: string; t: Translate }): JSX.Element {
  * 观察器本身是"一个观察者观察多个目标"的设计，因此这里收成**模块级唯一一个**：
  * 所有单元共用它，目标与回调用 `WeakMap` 关联（单元卸载即被回收，不会泄漏）。
  *
- * 已经由虚拟化保证"在视口内"的视图（平铺 / 列表）根本不走这条路——
- * 见 `nearViewport` 参数。
+ * **缩略图不走这条路**（见文件头）：三种视图都已虚拟化，"挂载"即"在预加载带内"，
+ * 再等一次异步回调只会把窗口内、视口外的单元推迟到真的可见——那正是要修的方向性差异。
  */
 const visibilityCallbacks = new WeakMap<Element, () => void>();
 let sharedObserver: IntersectionObserver | null = null;
@@ -186,7 +222,6 @@ export const ThumbCell = memo(function ThumbCell({
   onContextMenu,
   t,
   intrinsicHeight,
-  nearViewport,
 }: {
   file: FileItem;
   repoId: string;
@@ -212,17 +247,15 @@ export const ThumbCell = memo(function ThumbCell({
    * 由面板按当前视图算一个**接近真实**的值下发，就可以把跳过渲染打开。
    */
   intrinsicHeight?: number;
-  /**
-   * 该单元是否**已经**由虚拟化判定为"在视口内"。
-   *
-   * 平铺与列表视图只渲染窗口内的行，因此这两个视图里的单元**必然**接近视口——
-   * 直接请求缩略图即可，不必再为每一格建观察器、也不必等一次异步测量。
-   * 自适应/瀑布流仍是全量渲染，传 `undefined` 走共享观察器。
-   */
-  nearViewport?: boolean;
 }): JSX.Element {
   const cellRef = useRef<HTMLButtonElement>(null);
-  const [visible, setVisible] = useState(false);
+  /**
+   * 音频是否已进入视口。
+   *
+   * **只有音频用它**：波形要 `decodeAudioData`（实打实的 CPU），等真可见再解码。
+   * 缩略图（图片/视频）没有这道闸门——见文件头与下面 effect 的说明。
+   */
+  const [audioVisible, setAudioVisible] = useState(false);
   /** 宽高比：缓存优先；音频没有宽高比，用固定卡片比例（否则是一张方块）。 */
   const [ratio, setRatio] = useState<number>(() =>
     file.media_type === "audio"
@@ -235,30 +268,44 @@ export const ThumbCell = memo(function ThumbCell({
   // undefined=尚未请求；null=请求了但不可用；string=已就绪
   const [thumbUrl, setThumbUrl] = useState<string | null | undefined>(undefined);
 
-  // 进入视口附近后标记可见（仅触发一次，随后取消观察）。
-  // `nearViewport` 为真时**跳过观察**：虚拟化已经保证这些单元在视口内，
-  // 再建观察器等一次异步回调只会推迟缩略图请求（多一帧空白）。
+  // 缩略图（图片/视频）：**挂载即预热**。
+  //
+  // 三种视图都已按行/列虚拟化，"被挂载" ⟺ "在虚拟化窗口内"（窗口以 scrollTop 为中心、
+  // 上下同余量），窗口**就是**预加载带。在这里就把图取回来，滚到该单元时已经就位；
+  // 不再等观察器回调、也不交给 `<img loading="lazy">` 的启发式（那会让取图时机不再对称）。
+  //
+  // 请求走 `thumbUrl.ts` 的模块级缓存 + in-flight 去重，重复挂载不会重复发命令。
   useEffect(() => {
-    if (nearViewport) {
-      setVisible(true);
-      return;
-    }
-    const el = cellRef.current;
-    if (!el) return;
-    return observeUntilVisible(el, () => setVisible(true));
-  }, [nearViewport]);
-
-  // 可见后请求缩略图（带模块级缓存 + in-flight 去重）
-  useEffect(() => {
-    if (!visible || !needsThumb) return;
+    if (!needsThumb) return;
     let cancelled = false;
     void resolveThumbUrl(repoId, file.id).then((resolved) => {
-      if (!cancelled) setThumbUrl(resolved);
+      if (cancelled) return;
+      setThumbUrl(resolved);
+      // **显式预热**：`.mp-cell` 的 `content-visibility: auto` 会让被跳过渲染的单元
+      // 不触发 `<img>` 取图，而 overscan 带恰恰最容易被跳过——只设 `src` 不够，
+      // 取图时机仍会落回渲染启发式（正是"向上不预加载"的来源）。
+      // 用 `new Image()` 主动取一次，把取图与"该单元是否被渲染"解耦。
+      if (resolved && !warmedThumbs.has(file.id)) {
+        warmedThumbs.add(file.id);
+        const image = new Image();
+        image.decoding = "async";
+        image.src = resolved;
+        // 不持有引用：结果交由浏览器缓存管理，随后 `<img src>` 直接命中。
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [visible, needsThumb, repoId, file.id]);
+  }, [needsThumb, repoId, file.id]);
+
+  // 音频：等**真的进入视口**才挂载波形并解码（`decodeAudioData` 是实打实的 CPU，
+  // 为离屏条目预先解码没有观感收益——波形不参与"翻到就有图"的观感）。
+  useEffect(() => {
+    if (needsThumb) return;
+    const el = cellRef.current;
+    if (!el) return;
+    return observeUntilVisible(el, () => setAudioVisible(true));
+  }, [needsThumb]);
 
   return (
     <button
@@ -301,7 +348,9 @@ export const ThumbCell = memo(function ThumbCell({
             <img
               src={thumbUrl}
               alt={file.relative_path}
-              loading="lazy"
+              // **不用 `loading="lazy"`**：窗口已是"视口 ± 对称 overscan"的**有界**集合，
+              // 再叠一层浏览器懒加载只会把取图时机交给它的启发式（与那条对称窗口无关），
+              // 而这正是"向上不预加载"的来源之一。这里要的是确定性：窗口内一律取。
               onLoad={(e) => {
                 // 解码后量一次真实宽高比：自适应/瀑布流据此重新配平（并推进版本号，
                 // 让面板重算行/列偏移——见 `setRatioCache` 的说明）。
@@ -314,7 +363,7 @@ export const ThumbCell = memo(function ThumbCell({
               }}
             />
           )
-        ) : visible ? (
+        ) : audioVisible ? (
           <AudioWaveform url={url} t={t} />
         ) : (
           <span className="mp-thumb-placeholder">audio</span>
