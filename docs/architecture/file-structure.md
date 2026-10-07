@@ -138,7 +138,10 @@ apps/desktop/src/app_ui/
     mediaPreviewActions.ts  # 文件操作动作（删除/重命名/复制路径/重新分析）
     mediaPreviewMenu.tsx    # 右键菜单（动作开关与渲染）
     mediaPreviewSelection.ts # 选中集与 `selection_change` 上报（令牌防过期 + 运行期 context）
-    mediaPreviewCell.tsx    # 缩略图单元 + 宽高比测量 + 共享可见性观察器 + ratioCache 版本号
+    mediaPreviewCell.tsx    # 缩略图单元 + 宽高比测量 + ratioCache 版本号
+                            #   缩略图**挂载即预热**（窗口即对称预加载带；`warmedThumbs` + `new Image()`
+                            #   把取图与 `content-visibility` 的跳过渲染解耦，D89）
+                            #   共享可见性观察器**只服务音频波形**（`decodeAudioData` 是实打实的 CPU）
     mediaPreviewDropdown.tsx # 工具条下拉
     mediaPreviewView.ts     # 取值域与纯函数
     mediaPreviewVirtual.ts  # 虚拟化的行/列模型（纯函数：切行、行高、列偏移、窗口区间、自适应断行）
