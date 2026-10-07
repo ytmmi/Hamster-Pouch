@@ -216,6 +216,17 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &["pointer", "center"],
         requires_capability: None,
     },
+    SettingDeclFact {
+        // 相邻图像预加载半径（0 = 关闭）。数值范围由面板夹紧（声明层无 min/max），
+        // 与 `filmstripSize` 同一处置。
+        id: "preloadRadius",
+        owner_kind: "panel",
+        owner_id: Some("imageviewer"),
+        kind: "numberInput",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
     // 色彩参考（`panel.color.*`）：色值显示格式（十六进制 / 十进制 RGB）。
     SettingDeclFact {
         id: "valueFormat",

@@ -34,7 +34,6 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 
 import {
   resolveDateFormat,
@@ -43,16 +42,18 @@ import {
   SETTING_KEYS,
 } from "@hamster-pouch/config";
 
-import * as api from "../../shared/api";
 import { errorTextOf } from "../../shared/api/response";
 import { useApp } from "../../core/AppContext";
 import type { PanelRenderCtx } from "../../core/panelRegistry";
+import { resolveImageUrlOutcome } from "../../shared/imageUrl";
 import { needsPreview, resolvePreviewUrl } from "../../shared/previewUrl";
+import { usePanelForeground } from "../../shared/panelForeground";
 import { useHostSettingValue } from "../../shared/settingValue";
 import { ViewerFilmstrip } from "./ViewerFilmstrip";
 import { ViewerInfoBar } from "./ViewerInfoBar";
 import { ViewerNavigator } from "./ViewerNavigator";
 import { ViewerStage } from "./ViewerStage";
+import { useViewerPreload } from "./useViewerPreload";
 import { useViewerSequence } from "./useViewerSequence";
 import { useViewerSettings } from "./useViewerSettings";
 import { isFilmstripVertical, stepIndex } from "./viewerPlacement";
@@ -92,6 +93,12 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
   );
   const settings = useViewerSettings(panelApi);
   const sequence = useViewerSequence(app);
+  /**
+   * 面板是否**正在显示**（判据只看 `isVisible`，理由见 `shared/panelForeground.ts`）。
+   * 预加载只在显示时进行：dockview 会把后台标签留在 DOM 里，隐藏时预加载纯属浪费
+   * （用户看不到，还占磁盘与内存）。
+   */
+  const foreground = usePanelForeground(panelApi);
 
   const repoId = app.repoId;
   const file = app.selectedFile;
@@ -135,8 +142,9 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
   }, []);
 
   // 选中项变化 → 解析图像源：Chromium 可解的格式加载**原图**（全分辨率）；
-  // HEIC/HEIF 走后端**有界预览**（`preview.get`，缺陷 0019）。旧请求用令牌丢弃
-  // （快速切换不会串图）。
+  // HEIC/HEIF 走后端**全分辨率预览**（`preview.get`，缺陷 0019）。旧请求用令牌丢弃
+  // （快速切换不会串图）。取图策略收敛在 `shared/imageUrl.ts`——预加载走**同一份**
+  // 缓存，因此预加载过的邻居在这里是**同步命中**，不再有 IPC 往返。
   useEffect(() => {
     setUrl(null);
     setFailed(false);
@@ -145,24 +153,18 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
     let cancelled = false;
     void (async () => {
       const ctx = appRef.current;
-      try {
-        const path = needsPreview(file.relative_path)
-          ? await api.previewGet({ repoId, fileId: file.id })
-          : await api.filePath({ repoId, fileId: file.id });
-        if (!cancelled) {
-          if (path) {
-            setUrl(convertFileSrc(path));
-          } else {
-            // 预览不可用（生成失败等）：按"不可用"占位，不再二次请求。
-            setFailed(true);
-            ctx.status(ctx.t("imageviewer.unavailable"), "error");
-          }
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setFailed(true);
-          ctx.status(ctx.t("imageviewer.loadFailed", { err: errorTextOf(ctx.t, e) }), "error");
-        }
+      const outcome = await resolveImageUrlOutcome(repoId, file.id, file.relative_path);
+      if (cancelled) return;
+      if (outcome.url) {
+        setUrl(outcome.url);
+        return;
+      }
+      setFailed(true);
+      if (outcome.error !== null) {
+        ctx.status(ctx.t("imageviewer.loadFailed", { err: errorTextOf(ctx.t, outcome.error) }), "error");
+      } else {
+        // 预览不可用（生成失败等）：按"不可用"占位，不再二次请求。
+        ctx.status(ctx.t("imageviewer.unavailable"), "error");
       }
     })();
     return () => {
@@ -243,6 +245,19 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
     },
     [selectIndex, sequence.files.length, sequence.index],
   );
+
+  /**
+   * 相邻图像预加载：把"上一张/下一张"最贵的那段（HEIC/HEIF 的全分辨率生成，
+   * 实测 102 MP 需 0.8 s）提前到用户还在看当前图的时候。取哪些邻居、取多少在
+   * `viewerPreload.ts` 的纯函数里，本钩子只负责"取"。
+   */
+  useViewerPreload({
+    enabled: foreground && Boolean(repoId),
+    repoId,
+    files: sequence.files,
+    index: sequence.index,
+    radius: settings.preloadRadius,
+  });
 
   /** 键盘：上一张/下一张 + 适应窗口 + 1:1（键位判定在 `viewerKeymap.ts`，只此一处）。 */
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {

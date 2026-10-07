@@ -211,8 +211,8 @@ check(
     imageViewerSpec?.settings?.find((s) => s.key === "filmstripEnabled")?.default === true,
 );
 check(
-  "imageviewer 声明了 7 项面板设置（导航器启用/位置、胶片栏启用/位置/尺寸/视图、缩放中心）",
-  (imageViewerSpec?.settings ?? []).length === 7,
+  "imageviewer 声明了 8 项面板设置（导航器启用/位置、胶片栏启用/位置/尺寸/视图、缩放中心、预加载半径）",
+  (imageViewerSpec?.settings ?? []).length === 8,
   `实际 ${(imageViewerSpec?.settings ?? []).length}`,
 );
 check(
@@ -227,8 +227,8 @@ const dividerKeys = (imageViewerSpec?.settings ?? [])
   .filter((s) => s.divider_before)
   .map((s) => s.key);
 check(
-  "面板设置用 `divider_before` 分成三组（导航器 / 胶片栏 / 缩放），首项无分隔线",
-  eqList(dividerKeys, ["filmstripEnabled", "zoomAnchor"]) &&
+  "面板设置用 `divider_before` 分成四组（导航器 / 胶片栏 / 缩放 / 预加载），首项无分隔线",
+  eqList(dividerKeys, ["filmstripEnabled", "zoomAnchor", "preloadRadius"]) &&
     imageViewerSpec?.settings?.[0]?.divider_before !== true,
   `divider_before: ${dividerKeys.join(",") || "（无）"}`,
 );
@@ -1868,6 +1868,136 @@ check(
       "utf8",
     ),
   ),
+);
+
+// ==================== 图像查看器：相邻图像预加载 ====================
+//
+// 防的是"预加载写了但没接上/接了却把内存吃光"：取哪些邻居由纯函数决定（按行为断言），
+// 而"什么时候取、取到什么程度"由三条边界守住（前台才取 / 大图不解码 / 同张只预热一次）。
+
+const preload = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerPreload.ts")).href
+);
+const preloadHookSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/useViewerPreload.ts"),
+  "utf8",
+);
+const imageUrlSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/imageUrl.ts"),
+  "utf8",
+);
+
+check(
+  "预加载取相邻项：以当前项为中心前后各 N 张，近的优先、同距离时向前优先",
+  eqList(preload.preloadTargets(5, 20, 2), [6, 4, 7, 3]),
+  `targets=${preload.preloadTargets(5, 20, 2).join(",")}`,
+);
+check(
+  "预加载**越界不环绕**（与换图口径一致：到头就停，不绕回序列另一端）",
+  eqList(preload.preloadTargets(0, 5, 2), [1, 2]) &&
+    eqList(preload.preloadTargets(4, 5, 2), [3, 2]) &&
+    eqList(preload.preloadTargets(1, 3, 3), [2, 0]),
+);
+check(
+  "预加载半径 0 = **关闭**（不是「至少一张」）；当前项不在序列内时返回空",
+  eqList(preload.preloadTargets(5, 20, 0), []) &&
+    eqList(preload.preloadTargets(-1, 20, 2), []) &&
+    eqList(preload.preloadTargets(0, 0, 2), []) &&
+    eqList(preload.preloadTargets(20, 20, 2), []),
+);
+check(
+  "预加载半径夹紧到 [0, 3]（上限的理由是内存：100 MP 解码后可达数百 MB）",
+  preload.clampPreloadRadius(0) === 0 &&
+    preload.clampPreloadRadius(-5) === 0 &&
+    preload.clampPreloadRadius(99) === preload.PRELOAD_RADIUS_MAX &&
+    preload.clampPreloadRadius(2.4) === 2 &&
+    preload.clampPreloadRadius(Number.NaN) === preload.PRELOAD_RADIUS_FALLBACK &&
+    preload.PRELOAD_RADIUS_MAX === 3,
+);
+check(
+  "预加载半径的**声明缺省**落在面板夹紧范围内（与 filmstripSize 同一处置）",
+  (() => {
+    const decl = imageViewerSpec?.settings?.find((s) => s.key === "preloadRadius");
+    return (
+      decl?.kind === "numberInput" &&
+      typeof decl?.default === "number" &&
+      decl.default >= preload.PRELOAD_RADIUS_MIN &&
+      decl.default <= preload.PRELOAD_RADIUS_MAX
+    );
+  })(),
+  `kind=${imageViewerSpec?.settings?.find((s) => s.key === "preloadRadius")?.kind} ` +
+    `default=${imageViewerSpec?.settings?.find((s) => s.key === "preloadRadius")?.default}`,
+);
+// 边界 1：面板不在前台就不预加载（dockview 会把后台标签留在 DOM 里）。
+check(
+  "预加载只在面板**前台**进行（判据只看 isVisible，见 shared/panelForeground.ts）",
+  /usePanelForeground\(panelApi\)/.test(imageViewerPanelSrc) &&
+    /enabled: foreground && Boolean\(repoId\)/.test(imageViewerPanelSrc) &&
+    /if \(!enabled \|\| !repoId\)/.test(preloadHookSrc),
+);
+// 边界 2：大图只"解析 + 生成"，不"解码预热"（把解码位图留在内存里会吃光内存）。
+check(
+  "大图不参与**解码预热**（仍解析 URL 并触发后端生成，只是不用 new Image() 驻留位图）",
+  /PRELOAD_DECODE_MAX_BYTES/.test(preloadHookSrc) &&
+    /if \(file\.size > PRELOAD_DECODE_MAX_BYTES\) return;/.test(preloadHookSrc) &&
+    /new Image\(\)/.test(preloadHookSrc) &&
+    /image\.decoding = "async"/.test(preloadHookSrc),
+);
+// 边界 3：同一张只预热一次；换序列才重置。
+check(
+  "同一张只预热一次（换序列才重置记录），避免每次渲染重造 Image",
+  /warmedRef\.current\.has\(file\.id\)/.test(preloadHookSrc) &&
+    /warmedRef\.current\.add\(file\.id\)/.test(preloadHookSrc) &&
+    /filesRef\.current !== files/.test(preloadHookSrc) &&
+    /warmedRef\.current\.clear\(\)/.test(preloadHookSrc),
+);
+// 登记与预热必须**成对**：若"已登记"之后又因 effect 清理而放弃预热，那张图就永远
+// 不会再试（登记表说它做过了）。这类缺陷没有任何外部症状，只能靠这条断言钉住。
+check(
+  "预热不因 effect 清理而丢弃（登记表说做过、就必须真的做，否则永不重试）",
+  !/let cancelled = false;/.test(preloadHookSrc) &&
+    !/if \(cancelled \|\| !url\) return;/.test(preloadHookSrc) &&
+    /void resolveImageUrl\(repoId, file\.id, file\.relative_path\)\.then\(\(url\) => \{\s*if \(!url\) return;/.test(
+      preloadHookSrc,
+    ),
+);
+// 预加载必须走与当前图**同一份** URL 缓存，否则 HEIC 会被生成两次。
+check(
+  "预加载与当前图共用同一份 URL 缓存与去重（否则 HEIC 全分辨率生成两次）",
+  /resolveImageUrl\(repoId, file\.id, file\.relative_path\)/.test(preloadHookSrc) &&
+    /resolveImageUrlOutcome\(repoId, file\.id, file\.relative_path\)/.test(imageViewerPanelSrc) &&
+    /imageUrlCache/.test(imageUrlSrc) &&
+    /imagePromiseCache/.test(imageUrlSrc) &&
+    // HEIC/HEIF 复用 previewUrl 的缓存（两个入口命中同一份）。
+    /resolvePreviewUrl\(repoId, fileId\)/.test(imageUrlSrc) &&
+    /needsPreview\(relativePath\)/.test(imageUrlSrc),
+);
+check(
+  "取图策略收敛到一处：面板不再自己写 needsPreview ? previewGet : filePath 分支",
+  !/api\.previewGet\(/.test(imageViewerPanelSrc) &&
+    !/api\.filePath\(/.test(imageViewerPanelSrc) &&
+    !/convertFileSrc/.test(imageViewerPanelSrc),
+);
+check(
+  "预加载纯逻辑模块无 React / Tauri 依赖（门禁可直接 import）",
+  !/from "react"/.test(
+    readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerPreload.ts"),
+      "utf8",
+    ),
+  ) && !/@tauri-apps/.test(
+    readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerPreload.ts"),
+      "utf8",
+    ),
+  ),
+);
+// 面板消费该设置（声明 ↔ 消费闭环，与 filmstripSize 同款）。
+check(
+  "面板真的消费预加载半径设置（读设置 → 传进钩子）",
+  /radius: settings\.preloadRadius/.test(imageViewerPanelSrc) &&
+    /preloadRadius: clampPreloadRadius\(declaredDefault\("preloadRadius", 1\)\)/.test(viewerSettingsSrc) &&
+    /preloadRadius:/.test(viewerSettingsSrc),
 );
 
 check(

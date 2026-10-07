@@ -342,6 +342,19 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
           { value: "center", title_key: "imageviewer.settings.zoomAnchor.center" },
         ],
       },
+      {
+        // **相邻图像预加载**半径：以当前图为中心，前后各预加载 N 张（0 = 关闭）。
+        // 换图链路里最贵的是 HEIC/HEIF 的**全分辨率生成**（实测 102 MP 需 0.8 s，
+        // 见缺陷 0019），预加载把它提前到用户还在看当前图的时候。
+        // 数值范围由面板夹紧（`viewerPreload.clampPreloadRadius`，上限 3）——声明层
+        // 没有 min/max 字段，与 `filmstripSize` 同一处置；上限的理由是内存：
+        // 一张 100 MP 的图解码后可达数百 MB。
+        key: "preloadRadius",
+        kind: "numberInput",
+        title_key: "imageviewer.settings.preloadRadius",
+        default: 1,
+        divider_before: true,
+      },
     ],
   },
   { id: "metadata", titleKey: "panel.metadata", category: "info", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },

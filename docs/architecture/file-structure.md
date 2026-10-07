@@ -119,11 +119,14 @@ apps/desktop/src/app_ui/
       controlTypes.ts       # 宿主渲染上下文（主题/i18n/数据/事件/状态注入）
   panels/             # 各功能面板（同类组件，平铺即可；含 PluginPanel、TagTablePanel、BlueprintPanel）
     imageviewer/      # 图像查看器（多文件功能域：主面板 / 舞台 / 导航器 / 胶片栏 / 信息栏
-                      #   + 纯逻辑模块 viewerZoom·viewerPlacement·viewerFormat·viewerKeymap
-                      #   + 面板设置 useViewerSettings 与浏览序列 useViewerSequence）
+                      #   + 纯逻辑模块 viewerZoom·viewerPlacement·viewerFormat·viewerKeymap·viewerPreload
+                      #   + 面板设置 useViewerSettings 与浏览序列 useViewerSequence
+                      #   + 相邻图像预加载 useViewerPreload）
                       #   设置热加载走四条独立触发源：本地广播 / setting.changed / 窗口焦点 / 面板激活
                       #   键盘：按键映射与「取焦点判据」都在 viewerKeymap（左=上一张、右=下一张，
                       #   顺序即胶片栏序列；从其他面板进入时面板被程序激活，需自行取焦点）
+                      #   预加载：取哪些邻居在 viewerPreload（前台才取 / 大图不解码 / 同张只预热一次），
+                      #   取图策略与缓存收敛在 shared/imageUrl.ts（HEIC 预览与当前图共用一份）
     ViewerPanel.tsx   # 查看器（大图/视频/音频预览；**顶部基础信息栏**由面板设置 infoBarEnabled 控制）
     MetadataPanel.tsx # 元数据面板（索引字段 + EXIF/ffprobe 摘要；消费宿主设置 ui.sizeUnit/dateFormat/dateShowTime）
     metadataInfo.ts   # 元数据面板的**纯解析**（ffprobe 原始 JSON、EXIF 摘要 → 尺寸/时长/编码/码率/帧率）

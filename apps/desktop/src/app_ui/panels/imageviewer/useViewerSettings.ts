@@ -40,6 +40,7 @@ import {
   type NavigatorCorner,
   type ZoomAnchor,
 } from "./viewerPlacement";
+import { clampPreloadRadius } from "./viewerPreload";
 
 /** 面板 id（与 `BUILTIN_PANEL_IDS` 一致）。 */
 export const VIEWER_PANEL_ID = "imageviewer";
@@ -53,6 +54,7 @@ export const VIEWER_SETTING_STORAGE_KEY = {
   filmstripSize: panelSettingStorageKey(VIEWER_PANEL_ID, "filmstripSize"),
   filmstripView: panelSettingStorageKey(VIEWER_PANEL_ID, "filmstripView"),
   zoomAnchor: panelSettingStorageKey(VIEWER_PANEL_ID, "zoomAnchor"),
+  preloadRadius: panelSettingStorageKey(VIEWER_PANEL_ID, "preloadRadius"),
 } as const;
 
 export type ViewerSettingKey = keyof typeof VIEWER_SETTING_STORAGE_KEY;
@@ -68,6 +70,8 @@ export interface ViewerSettings {
   /** 胶片栏视图：自适应（缺省）/ 平铺。 */
   filmstripView: FilmstripView;
   zoomAnchor: ZoomAnchor;
+  /** 相邻图像预加载半径：前后各预加载 N 张（`0` = 关闭）。 */
+  preloadRadius: number;
 }
 
 /**
@@ -90,6 +94,7 @@ export const VIEWER_SETTING_DEFAULTS: ViewerSettings = {
   filmstripSize: clampFilmstripSize(declaredDefault("filmstripSize", 76)),
   filmstripView: firstView(declaredDefault("filmstripView", "adaptive")),
   zoomAnchor: firstAnchor(declaredDefault("zoomAnchor", "pointer")),
+  preloadRadius: clampPreloadRadius(declaredDefault("preloadRadius", 1)),
 };
 
 function firstCorner(value: PanelSettingValue): NavigatorCorner {
@@ -136,6 +141,8 @@ export function parseViewerSettings(raw: Partial<Record<ViewerSettingKey, unknow
     filmstripSize: raw.filmstripSize === undefined ? d.filmstripSize : clampFilmstripSize(raw.filmstripSize),
     filmstripView: isFilmstripView(raw.filmstripView) ? raw.filmstripView : d.filmstripView,
     zoomAnchor: isZoomAnchor(raw.zoomAnchor) ? raw.zoomAnchor : d.zoomAnchor,
+    preloadRadius:
+      raw.preloadRadius === undefined ? d.preloadRadius : clampPreloadRadius(raw.preloadRadius),
   };
 }
 

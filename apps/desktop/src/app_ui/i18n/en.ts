@@ -352,6 +352,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "imageviewer.settings.zoomAnchor": "Wheel zoom center",
   "imageviewer.settings.zoomAnchor.pointer": "Pointer position",
   "imageviewer.settings.zoomAnchor.center": "Image center",
+  "imageviewer.settings.preloadRadius": "Preload neighbouring images (N before/after, 0 = off)",
   "imageviewer.settings.corner.topLeft": "Top left",
   "imageviewer.settings.corner.topRight": "Top right",
   "imageviewer.settings.corner.bottomLeft": "Bottom left",

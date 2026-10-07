@@ -352,6 +352,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "imageviewer.settings.zoomAnchor": "滾輪縮放中心",
   "imageviewer.settings.zoomAnchor.pointer": "指標位置",
   "imageviewer.settings.zoomAnchor.center": "圖像中心",
+  "imageviewer.settings.preloadRadius": "預載相鄰圖像（前後各 N 張，0 = 關閉）",
   "imageviewer.settings.corner.topLeft": "左上角",
   "imageviewer.settings.corner.topRight": "右上角",
   "imageviewer.settings.corner.bottomLeft": "左下角",

@@ -367,6 +367,7 @@ export const zhCN = {
   "imageviewer.settings.zoomAnchor": "滚轮缩放中心",
   "imageviewer.settings.zoomAnchor.pointer": "指针位置",
   "imageviewer.settings.zoomAnchor.center": "图像中心",
+  "imageviewer.settings.preloadRadius": "预加载相邻图像（前后各 N 张，0 = 关闭）",
   "imageviewer.settings.corner.topLeft": "左上角",
   "imageviewer.settings.corner.topRight": "右上角",
   "imageviewer.settings.corner.bottomLeft": "左下角",
