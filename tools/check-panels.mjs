@@ -2617,6 +2617,75 @@ check(
     /plugin\.statelessState/.test(pluginPanelSrc),
 );
 
+// ==================== 仓库面板：当前仓库显示**仓库名**（不是内部 repoId）====================
+//
+// 防的是"把自己的内部主键当显示值印出来"：`repoId` 是 `RepoId::generate()` 的 UUID，
+// 对用户没有意义，而且与**同一个面板**里「切换仓库」子菜单显示的**名字**对不上——
+// 同一件事在一个面板里两套写法。解析口径按**行为**断言（直接 import 纯函数），
+// 源码侧只锚定"渲染的是名字"这一条正向事实。
+
+const repoPanelSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/RepoPanel.tsx"),
+  "utf8",
+);
+const repoDisplaySrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/repoDisplay.ts"),
+  "utf8",
+);
+const repoDisplay = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/repoDisplay.ts")).href
+);
+
+const repoFixtures = [
+  { id: "00c37ce8-8464-4808-8c51-c9af38e86516", name: "素材库" },
+  { id: "a1b2c3d4-0000-0000-0000-000000000000", name: "照片归档" },
+];
+check(
+  "当前仓库按 repoId 查到**仓库名**（判据是 id 相等，不是列表顺序）",
+  repoDisplay.resolveRepoName(repoFixtures, repoFixtures[0].id) === "素材库" &&
+    repoDisplay.resolveRepoName(repoFixtures, repoFixtures[1].id) === "照片归档" &&
+    // 名称**可重名**：重名行里必须取 id 命中的那一条，而不是"第一条同名的"。
+    repoDisplay.resolveRepoName(
+      [
+        { id: "x", name: "同名" },
+        { id: "y", name: "同名" },
+      ],
+      "y",
+    ) === "同名",
+);
+check(
+  "名字不可得时**不回落 repoId**：未打开仓库 / 列表里查不到 → 占位符",
+  repoDisplay.repoNameLabel(repoFixtures, null) === repoDisplay.REPO_NAME_PLACEHOLDER &&
+    repoDisplay.repoNameLabel(repoFixtures, undefined) === repoDisplay.REPO_NAME_PLACEHOLDER &&
+    repoDisplay.repoNameLabel(repoFixtures, "") === repoDisplay.REPO_NAME_PLACEHOLDER &&
+    repoDisplay.repoNameLabel(repoFixtures, "不存在的-id") === repoDisplay.REPO_NAME_PLACEHOLDER &&
+    // 空名 / 纯空白名同样算「不可得」（后端只拒空名，历史行仍可能有空白）。
+    repoDisplay.repoNameLabel([{ id: "z", name: "   " }], "z") ===
+      repoDisplay.REPO_NAME_PLACEHOLDER,
+);
+check(
+  "占位符与全应用其它缺值处同款（`—`），不是空串（空串会让「没有名字」与「面板坏了」外观一致）",
+  repoDisplay.REPO_NAME_PLACEHOLDER === "—",
+);
+check(
+  "仓库面板的「当前仓库」渲染的是仓库名（经纯函数），**不再**印 repoId",
+  /repoNameLabel\(repos, app\.repoId\)/.test(repoPanelSrc) &&
+    // 反向：不得再把 repoId 当**显示值**渲染。`app.repoId === r.id` 这类**比较**是允许的，
+    // 故只禁"把它渲染进节点"的形态；先剥注释——文件头会**引用** repoId 说明口径。
+    !/\{app\.repoId \?\?/.test(stripComments(repoPanelSrc)) &&
+    !/<span className="mono">/.test(stripComments(repoPanelSrc)),
+);
+check(
+  "长仓库名在列内截断（名称是用户输入、长度不限；不截断会把 .kv 的 1fr 列顶宽）",
+  /\.repo-current-name\s*\{[^}]*overflow:\s*hidden/.test(stylesSource) &&
+    /\.repo-current-name\s*\{[^}]*text-overflow:\s*ellipsis/.test(stylesSource) &&
+    /\.repo-current-name\s*\{[^}]*white-space:\s*nowrap/.test(stylesSource),
+);
+check(
+  "显示名解析是**纯逻辑模块**（无 React / Tauri 依赖，门禁可直接 import）",
+  !/from "react"/.test(repoDisplaySrc) && !/@tauri-apps/.test(repoDisplaySrc),
+);
+
 // ============================== 汇总 ==============================
 
 const passed = results.filter((r) => r.ok).length;

@@ -2,6 +2,10 @@
  * 仓库组件 — 子菜单形式：创建仓库 / 切换仓库（点击展开子菜单）。
  *
  * 仓库条目右键菜单：重命名、删除仓库、设为默认仓库。
+ *
+ * 「当前仓库」显示的是**仓库名**（不是 `repoId`）：内部主键是 UUID，印在界面上对用户
+ * 没有意义，也与同一个面板里「切换仓库」子菜单显示的**名字**对不上。解析口径收敛在
+ * `repoDisplay.ts`（纯函数，门禁按行为断言）。
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -10,6 +14,7 @@ import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { ContextMenu } from "../menu/ContextMenu";
+import { repoNameLabel } from "./repoDisplay";
 import type { RepoListItem } from "../shared/types";
 
 export function RepoPanel(): JSX.Element {
@@ -185,7 +190,7 @@ export function RepoPanel(): JSX.Element {
 
       <div className="kv">
         <span>{t("repo.current")}</span>
-        <span className="mono">{app.repoId ?? "—"}</span>
+        <span className="repo-current-name">{repoNameLabel(repos, app.repoId)}</span>
       </div>
 
       {menu && (

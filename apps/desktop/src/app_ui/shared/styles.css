@@ -958,6 +958,14 @@ button.danger {
   color: var(--fg-dim);
 }
 
+/* 「当前仓库」一行显示的是**仓库名**（用户输入、长度不限），不是内部 UUID：
+   名称比主键长得多，必须允许在列内截断，否则会把 `.kv` 的 1fr 列顶宽、面板出现横向滚动。 */
+.repo-current-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .json-block {
   background: var(--bg);
   border: 1px solid var(--border);

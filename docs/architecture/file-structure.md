@@ -176,6 +176,8 @@ apps/desktop/src/app_ui/
     blueprintGeometry.ts    # 纯几何（视口换算/贝塞尔采样/刀痕命中）
     blueprintMinimapGeometry.ts # 小地图纯几何（包围盒/等比缩放/坐标换算/视口矩形）
     blueprintStructure.ts   # 由当前布局生成结构骨架（单层）+ 跨窗口结构快照
+    repoDisplay.ts          # 仓库面板的**当前仓库显示名**解析（纯函数：按 repoId 查名字，
+                            #   查不到即占位符——**永不回落 repoId**，内部主键不是显示值）
   dialogs/            # 独立窗口对话框
   i18n/               # 多语言（zh-CN / zh-TW / en；键集一致，支持 {name} 插值）
 
