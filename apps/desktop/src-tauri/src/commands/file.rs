@@ -22,6 +22,9 @@ use crate::tasks::{TaskControl, TaskKind};
 use crate::AppState;
 
 /// 后台线程按需生成缩略图（缓存未命中时才调用；不阻塞 IPC 线程）。
+///
+/// `out` 的扩展名决定图片缩略图的落盘格式（`.webp` = 有损 WebP，见
+/// `hp_media::ThumbFormat`）：调用方用 `ThumbnailCache::path_for_format` 按媒体类型取。
 fn generate_thumbnail(
     cache: hp_media::ThumbnailCache,
     hash: String,
@@ -227,7 +230,11 @@ pub(crate) async fn thumb_get(
             return Ok(None);
         };
 
-        let thumb_path = cache.path_for(&hash);
+        // 缓存路径按媒体类型选格式（图片 WebP / 视频 JPEG；音频不生成缩略图）。
+        let Some(format) = hp_media::ThumbFormat::for_media_type(media_type) else {
+            return Ok(None);
+        };
+        let thumb_path = cache.path_for_format(&hash, format);
         if thumb_path.exists() {
             return Ok(Some(thumb_path.to_string_lossy().to_string()));
         }
@@ -256,6 +263,9 @@ pub(crate) async fn thumb_get(
 /// 用途：Chromium 无法原生解码的图片（HEIC/HEIF，缺陷 0019）的查看器取图；
 /// 不缩放——查看器要能 100% 检视细节（用户 2026-10-06 裁定：不要 2048 有界预览）。
 /// 仅图片，其余媒体类型 / 无内容哈希 / 生成失败返回 `None`（前端降级为不可用）。
+///
+/// **预览保持 JPEG**（不随缩略图改 WebP）：它是 100% 检视用的原始尺寸图，
+/// 与"网格缩略图"是两件事，本就不该有损到缩略图那种程度。
 #[tauri::command]
 pub(crate) async fn preview_get(
     repo_id: String,

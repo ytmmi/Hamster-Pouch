@@ -142,7 +142,11 @@ fn process_video(
     }
 
     if let (Some(ffmpeg), Some(cache)) = (&options.ffmpeg_bin, &options.thumbnail_cache) {
-        let thumb_path = cache.path_for(&content.value);
+        // 视频首帧缩略图**保持 JPEG**：下方 `dhash_file` 对缩略图本身算感知哈希，
+        // 换编码会轻微改变像素、使已入库的视频感知哈希与新值不再逐位可比
+        // （实测汉明距离中位 0、最大 5 bit）——属需独立裁决的迁移问题，
+        // 故本轮只把**图片**缩略图切到体积更小的 WebP（见 `hp_media::thumbnail` 模块文档）。
+        let thumb_path = cache.path_for_video(&content.value);
         if cache.ensure_dir_for(&content.value).is_ok() {
             match extract_thumbnail(path, &thumb_path, ffmpeg, options.video_timeout) {
                 Ok(()) => {

@@ -49,14 +49,47 @@ pub(crate) fn hide_console_window(_command: &mut Command) {}
 /// 于是轮询永远看不到退出、最后被误判为"执行超时"。ffmpeg 处理损坏 / 异常视频时
 /// 会打印大量告警，正是这种情形——表现为扫描时每个坏视频白等一整个超时。
 pub(crate) fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> HpResult<Output> {
+    run_with_timeout_stdin(cmd, timeout, None)
+}
+
+/// 同 [`run_with_timeout`]，但可把 `stdin_data` 经管道喂给子进程。
+///
+/// **写入必须与抽干并发**：喂入的数据可能远大于管道缓冲（缩略图的 320×320 RGB 约
+/// 300 KiB，Windows 管道约 64 KiB），若先写完再抽干 stdout/stderr，双方会互相
+/// 死等——子进程写满了输出管道等我们读，我们卡在写输入管道等子进程读。
+/// 因此输入在独立线程里写，主线程照常轮询退出 + 并发抽干两条输出管道。
+///
+/// `stdin_data` 为 `None` 时沿用 [`run_with_timeout`] 的语义（stdin 继承父进程）。
+pub(crate) fn run_with_timeout_stdin(
+    cmd: &mut Command,
+    timeout: Duration,
+    stdin_data: Option<Vec<u8>>,
+) -> HpResult<Output> {
     // 兜底：即使调用方漏用 `hidden_command`，这里也保证不弹控制台窗口
     // （`creation_flags` 重复设置是幂等的，取最后一次）。
     hide_console_window(cmd);
+    if stdin_data.is_some() {
+        cmd.stdin(Stdio::piped());
+    }
     let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| HpError::Io(format!("启动外部进程失败: {e}")))?;
+
+    // 输入在独立线程里写：数据可能超过管道缓冲，与输出抽干必须并发（见函数文档）。
+    let in_writer = stdin_data.map(|data| {
+        let mut pipe = child.stdin.take();
+        std::thread::spawn(move || {
+            use std::io::Write;
+            if let Some(p) = pipe.as_mut() {
+                // 子进程提前退出（如解码失败）会让写端 EPIPE，属正常路径，不视为错误。
+                let _ = p.write_all(&data);
+                let _ = p.flush();
+            }
+            // `pipe` 在此 drop → 关闭 stdin，子进程读到 EOF 后才会收尾。
+        })
+    });
 
     let drain = |pipe: Option<std::process::ChildStdout>| {
         pipe.map(|mut p| {
@@ -94,6 +127,10 @@ pub(crate) fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> HpResult
                     if let Some(h) = err_reader {
                         let _ = h.join();
                     }
+                    // 写入线程同样因管道关闭而结束（写失败即返回）。
+                    if let Some(h) = in_writer {
+                        let _ = h.join();
+                    }
                     return Err(HpError::Io("外部进程执行超时".into()));
                 }
                 std::thread::sleep(POLL_INTERVAL);
@@ -104,6 +141,10 @@ pub(crate) fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> HpResult
 
     let stdout = out_reader.and_then(|h| h.join().ok()).unwrap_or_default();
     let stderr = err_reader.and_then(|h| h.join().ok()).unwrap_or_default();
+    // 进程已退出，写入线程必然已收尾（写完或 EPIPE）；join 只为不泄漏句柄。
+    if let Some(h) = in_writer {
+        let _ = h.join();
+    }
 
     Ok(Output {
         status,

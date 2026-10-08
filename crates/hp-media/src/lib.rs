@@ -18,7 +18,7 @@ mod probe;
 mod process;
 mod thumbnail;
 
-pub use cache::ThumbnailCache;
+pub use cache::{ThumbFormat, ThumbnailCache};
 pub use decode::{decode_image_fallback, ensure_libheif_hooks};
 pub use exif::{extract_exif, ImageExif};
 pub use palette::{
@@ -29,4 +29,5 @@ pub use player::{MediaProcess, DEFAULT_PIPE_PATH};
 pub use probe::{probe, MediaProbe};
 pub use thumbnail::{
     extract_thumbnail, generate_image_preview, generate_image_thumbnail, IMAGE_THUMB_MAX_DIM,
+    IMAGE_THUMB_WEBP_QUALITY,
 };

@@ -13,7 +13,8 @@
  * 断言：
  * 1. `hp-media/src/process.rs` 定义 `hidden_command`，其函数体经 `hide_console_window`
  *    设置 `CREATE_NO_WINDOW`；
- * 2. `run_with_timeout` 自带兜底（函数体内调用 `hide_console_window`）；
+ * 2. `run_with_timeout` 委派给 `run_with_timeout_stdin`，且后者函数体内调用
+ *    `hide_console_window`（兜底：漏用 helper 也不会弹窗）；
  * 3. 白名单以外**零裸 `Command::new(`**——外部进程一律经 helper 构造；
  * 4. hp-media 的四个接入口（probe / decode / thumbnail / player）都出现 `hidden_command(`；
  * 5. 前提仍成立：`main.rs` 的发布构建仍是 GUI 子系统（有控制台就不会弹窗）。
@@ -85,10 +86,18 @@ check(
 );
 
 // ───────── 2. run_with_timeout 自带兜底 ─────────
+// 兜底实现落在 `run_with_timeout_stdin`（可喂 stdin 的通用实现），`run_with_timeout`
+// 是它的薄封装。因此要**两段都断言**：封装确实委派过去，且通用实现体内确实置了标志。
+// 只断言其一都会留缺口——前者漏掉"委派目标里没兜底"，后者漏掉"封装改成裸 spawn"。
 const runBody = bodyOf(processText, "run_with_timeout");
 check(
-  "run_with_timeout 函数体自带 hide_console_window 兜底（漏用 helper 也不会弹窗）",
-  Boolean(runBody) && runBody.includes("hide_console_window"),
+  "run_with_timeout 委派给 run_with_timeout_stdin（兜底的唯一实现处）",
+  Boolean(runBody) && runBody.includes("run_with_timeout_stdin"),
+);
+const runStdinBody = bodyOf(processText, "run_with_timeout_stdin");
+check(
+  "run_with_timeout_stdin 函数体自带 hide_console_window 兜底（漏用 helper 也不会弹窗）",
+  Boolean(runStdinBody) && runStdinBody.includes("hide_console_window"),
 );
 
 // ───────── 3. 白名单以外零裸 Command::new ─────────
