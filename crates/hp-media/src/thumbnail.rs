@@ -4,12 +4,28 @@
 //! **落盘格式按媒体类型分流**（用户 2026-10-08 口径：「同像素和质量的情况下，选择
 //! 体积更小的格式」）：
 //!
-//! - **图片缩略图 → WebP**（ffmpeg 的 `libwebp`，质量 [`IMAGE_THUMB_WEBP_QUALITY`]）；
+//! - **图片缩略图 → WebP**（质量 [`IMAGE_THUMB_WEBP_QUALITY`]）；
 //! - **视频首帧缩略图 → JPEG**（ffmpeg 的 `mjpeg`，沿用既有 `-q:v 3`）。
 //!
 //! 实测依据（真实照片语料，长边 320、SSIM 对齐，见 `docs/issues/0029`）：WebP 在
 //! **每张图**上都比 JPEG 小，等质量下体积约为 JPEG 的 **0.53–0.57**（省 43%–47%）；
 //! 真实生产代码路径 A/B（60 张）实测 **0.572（省 42.8%）**。
+//!
+//! ## WebP 编码器的三级降级（D91）
+//!
+//! 用户 2026-10-08 裁定「换成 libwebp-sys，并保留 ffmpeg 作降级」。顺序是
+//! **快路径优先、可用性兜底**，前两级产出**同一个 WebP**（实测**逐字节相同**）：
+//!
+//! 1. **进程内 `libwebp`**（`libwebp-sys`，默认特性 `libwebp`）——每张省掉一次进程开销，
+//!    真实生产路径实测 **64 ms/张**（对照 ffmpeg 子进程 **157 ms/张**，**2.44×**）；
+//! 2. **ffmpeg 子进程**（`libwebp` 编码器，rawvideo 经 stdin 喂像素）——特性关闭、
+//!    非 Windows、或进程内失败时使用；
+//! 3. **JPEG 同路径落盘**——前两级都不可用时（见 [`write_jpeg`] 的说明）。
+//!
+//! **为什么敢说"换了也不变"**：`libwebp-sys` 与 ffmpeg 内嵌的 libwebp **同源同版本**，
+//! 实测 145/145 组（29 张 × 5 个质量）**逐字节相同**——因此切换**不需要重新生成任何
+//! 既有缩略图**，质量口径零变化，`IMAGE_THUMB_WEBP_QUALITY` 也无需重设。
+//! 该等价性由 `in_process_and_ffmpeg_webp_are_byte_identical` 持续钉住。
 //!
 //! 视频**不跟着换**，理由是 `crates/hp-scanner` 在抽帧后对**缩略图本身**算 dHash
 //! （`process_video` 的 `dhash_file(&thumb_path)`），换编码会轻微改变像素、使已入库的
@@ -108,15 +124,123 @@ pub const IMAGE_THUMB_MAX_DIM: u32 = 320;
 /// `-quality 90` 的 SSIM 0.9908 已明显高于旧 JPEG，体积也反超（1.05×），不再是"同质量"比较。
 pub const IMAGE_THUMB_WEBP_QUALITY: u8 = 70;
 
+// 仅测试用：强制"进程内编码失败"，以验证 ffmpeg 降级**真的会接手**。
+//
+// **必须是 `thread_local`**：测试并行跑，用全局静态会让"注入失败"泄漏到同进程的
+// 其他用例（实测：`in_process_encoder_produces_lossy_webp` 因被邻居置位而误走降级、
+// 拿到 JPEG 后断言失败）。每个用例各在自己的线程上，线程局部变量天然隔离。
+//
+// `cfg(test)` 门控——**不进生产构建**，因此不是可被误用的运行时开关。
+#[cfg(test)]
+thread_local! {
+    static FORCE_IN_PROCESS_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// 把图像编码为 WebP 并原子落盘到 `output_webp`，**快路径优先**（见模块文档的三级降级）：
+///
+/// 1. 进程内 `libwebp`（`libwebp` 特性）——最快；
+/// 2. ffmpeg 子进程（`ffmpeg_bin` 可用时）；
+///
+/// 两级都不可用 / 都失败时返回 `Err`，由调用方降级为 JPEG。
+fn encode_webp(
+    img: &image::DynamicImage,
+    output_webp: &Path,
+    ffmpeg_bin: Option<&Path>,
+    timeout: Duration,
+) -> HpResult<()> {
+    // 1. 进程内 libwebp（D91 快路径）。
+    #[cfg(feature = "libwebp")]
+    {
+        #[cfg(test)]
+        let forced = FORCE_IN_PROCESS_FAILURE.with(std::cell::Cell::get);
+        #[cfg(not(test))]
+        let forced = false;
+
+        let attempt = if forced {
+            Err(HpError::Io("测试注入：进程内编码失败".into()))
+        } else {
+            encode_webp_in_process(img, output_webp)
+        };
+        match attempt {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                // 不静默吞掉：进程内失败要能看出是"退回 ffmpeg"还是"彻底失败"。
+                // 但**不能**直接返回 Err——ffmpeg 仍可能成功（见模块文档的三级降级）。
+                if ffmpeg_bin.is_none() {
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    // 2. ffmpeg 子进程（保留的降级路径，D91）。
+    match ffmpeg_bin {
+        Some(bin) => encode_webp_via_ffmpeg(img, output_webp, bin, timeout),
+        None => Err(HpError::Io(
+            "WebP 编码不可用：未启用 libwebp 特性且没有 ffmpeg".into(),
+        )),
+    }
+}
+
+/// 进程内 `libwebp` 编码（`libwebp-sys`，MIT，C 源码随 crate vendored）。
+///
+/// 与 ffmpeg 内嵌的 libwebp **同源同版本**，实测输出**逐字节相同**（见模块文档），
+/// 因此这是纯粹的"省一次进程开销"替换，不改变任何像素结果。
+///
+/// **`unsafe` 的必要性**：`libwebp-sys` 只暴露 C ABI。这里的两处 `unsafe` 是
+/// ①把 `rgb` 的指针交给 C（长度由 `width*height*3` 与 `stride = width*3` 保证一致，
+/// `WebPEncodeRGB` 只读该区间）；②把 C `malloc` 的输出按返回长度构造成切片并
+/// `WebPFree` 释放——**`WebPFree` 必须在 `to_vec()` 之前配对**，否则泄漏。
+#[cfg(feature = "libwebp")]
+fn encode_webp_in_process(img: &image::DynamicImage, output_webp: &Path) -> HpResult<()> {
+    use libwebp_sys::{WebPEncodeRGB, WebPFree};
+
+    let rgb = img.to_rgb8();
+    let (w, h) = (rgb.width(), rgb.height());
+    let bytes = rgb.as_raw();
+
+    let mut out: *mut u8 = std::ptr::null_mut();
+    // SAFETY：`bytes` 是 `w*h*3` 字节的连续 RGB 缓冲（`to_rgb8` 保证），
+    // stride 传 `w*3` 与之相符；`WebPEncodeRGB` 只读入参、只写 `out` 指向的新分配。
+    let len = unsafe {
+        WebPEncodeRGB(
+            bytes.as_ptr(),
+            w as i32,
+            h as i32,
+            (w * 3) as i32,
+            IMAGE_THUMB_WEBP_QUALITY as f32,
+            &mut out as *mut *mut u8,
+        )
+    };
+    if len == 0 || out.is_null() {
+        return Err(HpError::Io("libwebp 编码失败（返回空缓冲）".into()));
+    }
+    // SAFETY：`len > 0` 且 `out` 非空时，libwebp 保证该指针指向 `len` 字节有效数据。
+    let data = unsafe { std::slice::from_raw_parts(out, len) }.to_vec();
+    // 复制完成后再释放（顺序不能反）。
+    // SAFETY：`out` 由 libwebp 分配，只能交回 `WebPFree`，且此处只释放一次。
+    unsafe { WebPFree(out as *mut std::ffi::c_void) };
+
+    // 原子落盘：与 ffmpeg 路径同一套临时文件 + rename（见模块文档）。
+    let temp = temp_sibling(output_webp);
+    if let Err(e) = std::fs::write(&temp, &data) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(HpError::Io(format!("写入 WebP 缩略图失败: {e}")));
+    }
+    commit(&temp, output_webp)
+}
+
 /// 用 ffmpeg 的 `libwebp` 把 `img` 编码成 WebP 并原子落盘到 `output_webp`。
 ///
-/// 走**进程内解码 + 缩放 → ffmpeg 只做编码**（rawvideo 经 stdin 管道喂像素），而不是
+/// **这是降级路径**（D91：进程内 `libwebp` 优先，见 [`encode_webp`]）。走
+/// **进程内解码 + 缩放 → ffmpeg 只做编码**（rawvideo 经 stdin 管道喂像素），而不是
 /// `ffmpeg -i <源文件>` 一把梭：缩放仍在进程内完成，因此
 /// - 结果与既有实现**同一套缩放算法**（`image::DynamicImage::thumbnail`），
 /// - 源图若已由进程内路径解码（含 libheif 的 HEIC/AVIF），不必让 ffmpeg 再解一遍，
 /// - 实测比"一把梭"更快（省掉 ffmpeg 的源图解码）。
 ///
-/// 编码失败（ffmpeg 缺失 / 版本无 libwebp / 超时）返回 `HpError::Io`，调用方降级为 JPEG。
+/// 编码失败（ffmpeg 缺失 / 版本无 libwebp / 超时）返回 `HpError::Io`，由 [`encode_webp`]
+/// 决定是否继续降级（它是**第二级**，见模块文档的三级降级）。
 fn encode_webp_via_ffmpeg(
     img: &image::DynamicImage,
     output_webp: &Path,
@@ -233,7 +357,7 @@ fn generate_preview_via_image(
 /// 生成图片缩略图：应用 EXIF 方向后等比缩放到长边不超过 `max_dim`，写入 `output`。
 ///
 /// **落盘格式由 `output` 的扩展名决定**（调用方经 `ThumbnailCache::path_for_image` 取路径）：
-/// - `.webp` → ffmpeg `libwebp`（默认路径，体积约为 JPEG 的一半，见模块文档）；
+/// - `.webp` → WebP（**进程内 `libwebp` 优先，ffmpeg 降级**，见 [`encode_webp`]）；
 /// - 其它（如 `.jpg`）→ 进程内 JPEG，沿用 `image` crate 的默认质量 75。
 ///
 /// 解码优先走进程内 `image` crate（jpg/png 等既有格式输出与旧实现**逐位相同**）；
@@ -241,8 +365,8 @@ fn generate_preview_via_image(
 /// 缩到 ≤ `max_dim`，ffmpeg 默认应用旋转元数据）。小图不放大；读取 / 解码 / 写入失败
 /// 返回 `HpError::Io`（调用方可降级为占位）。
 ///
-/// **WebP 失败时降级为 JPEG 同路径落盘**：`ffmpeg_bin` 缺失、或该构建没有 `libwebp`
-/// 时，宁可用体积大些的 JPEG 也要有图（与 `ffmpeg` 缺失时既有行为一致）。
+/// **WebP 失败时降级为 JPEG 同路径落盘**：两级 WebP 编码都不可用（特性关闭且无 ffmpeg /
+/// 编码失败）时，宁可用体积大些的 JPEG 也要有图（与 `ffmpeg` 缺失时既有行为一致）。
 pub fn generate_image_thumbnail(
     src: &Path,
     output: &Path,
@@ -260,12 +384,10 @@ pub fn generate_image_thumbnail(
     };
 
     if is_webp_path(output) {
-        if let Some(bin) = ffmpeg_bin {
-            if encode_webp_via_ffmpeg(&thumb, output, bin, timeout).is_ok() {
-                return Ok(());
-            }
+        if encode_webp(&thumb, output, ffmpeg_bin, timeout).is_ok() {
+            return Ok(());
         }
-        // 降级：没有 ffmpeg / 无 libwebp / 编码失败——写 JPEG 到**同一个目标路径**
+        // 降级：两级 WebP 都不可用——写 JPEG 到**同一个目标路径**
         // （后缀仍是 .webp，但内容按魔数自描述，Chromium 与 ffmpeg 都能按内容识别）。
         // 保证"有图"优先于"格式正确"；换路径会让调用方的缓存命中判断失效。
         return write_jpeg(&thumb, output);
@@ -504,11 +626,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 没有 ffmpeg 时（`None`）降级为 JPEG：内容须是 JPEG，且**不得**退化成无损 WebP。
+    /// 无 ffmpeg **且**未启用 `libwebp` 特性时降级为 JPEG：内容须是 JPEG，
+    /// 且**不得**退化成无损 WebP。
     ///
-    /// 这是本改动的关键回归点：`DynamicImage::save` 按**扩展名**选编码器，写 `.webp`
+    /// 这是关键回归点：`DynamicImage::save` 按**扩展名**选编码器，写 `.webp`
     /// 目标会选中 `WebPEncoder::new_lossless`——实测无损 WebP 体积约为 JPEG 的 **4.5×**。
     /// 因此降级必须显式用 `JpegEncoder`，本断言按魔数钉死。
+    ///
+    /// 启用 `libwebp` 后（默认）这条端到端降级**不再可达**——没有 ffmpeg 也能出 WebP，
+    /// 故整体 `cfg` 掉；但"显式 JpegEncoder"这个陷阱守卫由
+    /// [`write_jpeg_to_webp_path_stays_jpeg`] 在**所有**特性组合下继续把守。
+    #[cfg(not(feature = "libwebp"))]
     #[test]
     fn webp_target_without_ffmpeg_falls_back_to_jpeg_not_lossless_webp() {
         let dir = std::env::temp_dir().join(format!("hp-thumb-fallback-{}", nanos()));
@@ -522,9 +650,7 @@ mod tests {
 
         generate_image_thumbnail(&src, &out, 320, None, Duration::from_secs(30))
             .expect("无 ffmpeg 时应降级成功");
-        let head = magic(&out);
-        assert_eq!(&head[0..3], &[0xFF, 0xD8, 0xFF], "降级产物应为 JPEG，实际 {head:?}");
-        assert_ne!(&head[0..4], b"RIFF", "降级**不得**写成无损 WebP");
+        assert_jpeg_content(&out);
         // 按**内容**解码（`image::open` 按扩展名选解码器，而这里后缀与内容刻意不一致）。
         let thumb = image::ImageReader::open(&out)
             .expect("打开失败")
@@ -535,6 +661,43 @@ mod tests {
         assert_eq!((thumb.width(), thumb.height()), (320, 160));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 直接验证降级写入器：目标路径是 `.webp`，但内容**必须**是 JPEG。
+    ///
+    /// 与特性组合无关，因此始终运行——它把守的是"按扩展名 `save` 会写成无损 WebP"
+    /// 那个 4.5× 陷阱（见 `write_jpeg` 文档）。
+    #[test]
+    fn write_jpeg_to_webp_path_stays_jpeg() {
+        let dir = std::env::temp_dir().join(format!("hp-thumb-wj-{}", nanos()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let out = dir.join("out.webp");
+        let img = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(64, 32, |x, _| {
+            image::Rgb([(x % 256) as u8, 128, 64])
+        }));
+
+        write_jpeg(&img, &out).expect("降级写入应成功");
+        assert_jpeg_content(&out);
+        let decoded = image::ImageReader::open(&out)
+            .expect("打开失败")
+            .with_guessed_format()
+            .expect("识别格式失败")
+            .decode()
+            .expect("应可解码");
+        assert_eq!((decoded.width(), decoded.height()), (64, 32));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 断言文件内容确实是 JPEG（按魔数），且**不是** RIFF/WebP 容器。
+    fn assert_jpeg_content(path: &Path) {
+        let head = magic(path);
+        assert_eq!(
+            &head[0..3],
+            &[0xFF, 0xD8, 0xFF],
+            "产物应为 JPEG，实际 {head:?}"
+        );
+        assert_ne!(&head[0..4], b"RIFF", "**不得**写成无损 WebP");
     }
 
     /// `.jpg` 目标仍走进程内 JPEG（视频首帧抽帧那条路径不受影响）。
@@ -555,11 +718,145 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// WebP 质量常量必须在 `libwebp` 的合法区间内（0–100），且是我们实测选定的 70。
+    /// WebP 质量常量必须是我们实测选定的 70，且在 `libwebp` 的合法区间内。
+    ///
+    /// 用 `const` 断言而非 `assert!`：`assert!(CONST <= 100)` 是**编译期已知为真**的
+    /// 常量表达式，运行时断言毫无意义（clippy 也会报 `assertions_on_constants`）。
+    /// 改成 `const` 块后，若将来有人把常量改出区间，**编译就不过**。
     #[test]
     fn webp_quality_is_within_libwebp_range() {
-        assert!(IMAGE_THUMB_WEBP_QUALITY <= 100);
+        const _: () = assert!(IMAGE_THUMB_WEBP_QUALITY <= 100);
         assert_eq!(IMAGE_THUMB_WEBP_QUALITY, 70);
+    }
+
+    /// **D91 的核心不变量**：进程内 `libwebp` 与 ffmpeg 的 `libwebp` 输出**逐字节相同**。
+    ///
+    /// 这条断言是"换成进程内编码器**不需要重新生成既有缩略图**、质量口径零变化"的
+    /// 唯一依据（`docs/issues/0029` §8.3 实测 145/145 组）。它一旦变红，说明两个
+    /// 编码器不再等价——那时**不能**默默接受：要么重新生成缓存，要么重新标定
+    /// [`IMAGE_THUMB_WEBP_QUALITY`]。因此这里逐字节比，而不是只比体积或只比魔数。
+    #[cfg(feature = "libwebp")]
+    #[test]
+    fn in_process_and_ffmpeg_webp_are_byte_identical() {
+        let Some(ffmpeg) = bundled_ffmpeg() else {
+            eprintln!("跳过：未找到 external-cli/ffmpeg（对照路径不可用）");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("hp-thumb-identical-{}", nanos()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+
+        // 多样本：渐变、噪点、纯色、极端宽高比——覆盖不同熵与色度分布。
+        let cases: Vec<(&str, image::RgbImage)> = vec![
+            (
+                "gradient",
+                image::RgbImage::from_fn(400, 240, |x, y| {
+                    image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8])
+                }),
+            ),
+            (
+                "noise",
+                image::RgbImage::from_fn(320, 320, |x, y| {
+                    let n = (x * 7919 + y * 104729) % 256;
+                    image::Rgb([n as u8, (n * 3 % 256) as u8, (n * 7 % 256) as u8])
+                }),
+            ),
+            ("solid", image::RgbImage::from_pixel(200, 150, image::Rgb([12, 200, 90]))),
+            ("wide", image::RgbImage::from_fn(640, 40, |x, _| {
+                image::Rgb([(x % 256) as u8, 40, 200])
+            })),
+            ("tall", image::RgbImage::from_fn(40, 640, |_, y| {
+                image::Rgb([200, (y % 256) as u8, 40])
+            })),
+        ];
+
+        for (label, img) in cases {
+            let src = dir.join(format!("{label}.png"));
+            img.save(&src).expect("写入测试图片失败");
+            // ① 进程内（快路径）② ffmpeg（降级路径）——直接调两级编码器，绕开调度顺序。
+            let decoded = image::open(&src).expect("解码失败");
+            let inproc = dir.join(format!("{label}.inproc.webp"));
+            let viaff = dir.join(format!("{label}.ffmpeg.webp"));
+            encode_webp_in_process(&decoded, &inproc).expect("进程内编码失败");
+            encode_webp_via_ffmpeg(&decoded, &viaff, &ffmpeg, Duration::from_secs(30))
+                .expect("ffmpeg 编码失败");
+
+            let a = std::fs::read(&inproc).expect("读取失败");
+            let b = std::fs::read(&viaff).expect("读取失败");
+            assert_eq!(
+                a, b,
+                "{label}: 进程内 libwebp 与 ffmpeg libwebp 输出不再逐字节相同\
+                 （{}B vs {}B）——不得默默接受，需重生成缓存或重新标定质量",
+                a.len(),
+                b.len()
+            );
+            assert_eq!(&a[0..4], b"RIFF", "{label}: 应为 WebP");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 进程内快路径产出的确实是**有损 WebP**（魔数 + 可解码 + 尺寸正确）。
+    #[cfg(feature = "libwebp")]
+    #[test]
+    fn in_process_encoder_produces_lossy_webp() {
+        let dir = std::env::temp_dir().join(format!("hp-thumb-inproc-{}", nanos()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let src = dir.join("src.png");
+        let out = dir.join("out.webp");
+        image::RgbImage::from_fn(800, 400, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x * y) % 256) as u8])
+        })
+        .save(&src)
+        .expect("写入测试图片失败");
+
+        // ffmpeg_bin = None：证明**不依赖 ffmpeg** 也能出 WebP（这正是本改动的目的）。
+        generate_image_thumbnail(&src, &out, 320, None, Duration::from_secs(30))
+            .expect("进程内路径应成功");
+        let head = magic(&out);
+        assert_eq!(&head[0..4], b"RIFF", "应为 RIFF 容器，实际 {head:?}");
+        assert_eq!(&head[8..12], b"WEBP", "应为 WebP，实际 {head:?}");
+        let thumb = image::open(&out).expect("应可解码");
+        assert_eq!((thumb.width(), thumb.height()), (320, 160));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **降级确实会接手**：强制进程内编码失败后，ffmpeg 必须仍产出 WebP。
+    ///
+    /// 这是"保留 ffmpeg 作降级"这条要求的**行为证据**——只写 `match ... Err(_) =>`
+    /// 并不能证明那条分支真的可达、真的能成功（可能永远走不到，或走到了也失败）。
+    /// 用 `cfg(test)` 的注入开关把快路径打断，再看产物是不是 ffmpeg 的 WebP。
+    #[cfg(feature = "libwebp")]
+    #[test]
+    fn ffmpeg_fallback_engages_when_in_process_fails() {
+        let Some(ffmpeg) = bundled_ffmpeg() else {
+            eprintln!("跳过：未找到 external-cli/ffmpeg（降级路径不可用）");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("hp-thumb-fb-{}", nanos()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let src = dir.join("src.png");
+        let out = dir.join("out.webp");
+        image::RgbImage::from_fn(600, 300, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, 77])
+        })
+        .save(&src)
+        .expect("写入测试图片失败");
+
+        // 打断快路径，再走完整链路（decode → 缩放 → encode_webp）。
+        FORCE_IN_PROCESS_FAILURE.with(|f| f.set(true));
+        let result =
+            generate_image_thumbnail(&src, &out, 320, Some(&ffmpeg), Duration::from_secs(30));
+        FORCE_IN_PROCESS_FAILURE.with(|f| f.set(false));
+
+        result.expect("进程内失败后，ffmpeg 降级应接手并成功");
+        let head = magic(&out);
+        assert_eq!(&head[0..4], b"RIFF", "降级产物仍应为 WebP，实际 {head:?}");
+        assert_eq!(&head[8..12], b"WEBP", "降级产物仍应为 WebP，实际 {head:?}");
+        let thumb = image::open(&out).expect("应可解码");
+        assert_eq!((thumb.width(), thumb.height()), (320, 160));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn nanos() -> String {

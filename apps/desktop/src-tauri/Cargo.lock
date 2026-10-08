@@ -1738,6 +1738,7 @@ dependencies = [
  "image",
  "kamadak-exif",
  "libheif-rs",
+ "libwebp-sys",
  "serde_json",
  "windows 0.61.3",
 ]
@@ -2480,6 +2481,17 @@ dependencies = [
  "cc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "libwebp-sys"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b3a87b44e34d17161e4f17d92a463d596cb13825dcd1758ed18fd3a721e189c"
+dependencies = [
+ "cc",
+ "glob",
+ "pkg-config",
 ]
 
 [[package]]

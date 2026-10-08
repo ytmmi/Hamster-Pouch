@@ -72,6 +72,8 @@ Rust crates：
   ```
 
   > 注意：libheif 端口的默认特性含 **x265（GPL-2.0 编码器，静态链入）**，发布许可需自行评估；解码用不到它。没有 vcpkg 的环境可用 `--no-default-features` 构建 `hp-media`，退回捆绑的 ffmpeg 兜底（功能不受影响）。
+  >
+  > `hp-media` 的 `libwebp` 特性（**默认开启**，D91）用于图片缩略图的**进程内 WebP 编码**：libwebp 的 C 源码**随 `libwebp-sys` crate vendored**（MIT），构建期由 `cc` 静态编译，**不联网、不依赖系统库**（C 工具链本就随 Rust MSVC 工具链提供）。关掉后自动退回 ffmpeg 子进程编码，结果**逐字节相同**、只是每张多一次进程开销。
 
 ## 快速开始
 

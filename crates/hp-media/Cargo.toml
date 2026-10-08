@@ -7,9 +7,16 @@ edition.workspace = true
 # `image` crate 的 hooks 后 `image::open` 直接可解。代价：libheif-sys 在 Windows 上
 # 要求 **vcpkg 安装的 libheif**（`VCPKG_ROOT`，用户 2026-10-06 裁定安装，D20 例外）；
 # 无该环境的构建可 `--no-default-features` 关闭，退到捆绑 ffmpeg 兜底。
+#
+# `libwebp`（默认开，D91）：图片缩略图的 **WebP 编码走进程内**（`libwebp-sys`，MIT，
+# C 源码**随 crate vendored**、经 `cc` 静态编译，离线可构建）。与 ffmpeg 内嵌的 libwebp
+# **同源同版本**，实测输出**逐字节相同**（145/145 组），但省掉每张一次的进程开销
+# （实测 58.7–71.4 ms/张 → 28.6 ms/张）。关掉后自动退回 ffmpeg 子进程编码（结果不变），
+# 再失败则退 JPEG——三级降级见 `thumbnail` 模块文档。
 [features]
-default = ["libheif"]
+default = ["libheif", "libwebp"]
 libheif = ["dep:libheif-rs"]
+libwebp = ["dep:libwebp-sys"]
 
 [dependencies]
 hp-core = { path = "../hp-core" }
@@ -20,6 +27,9 @@ serde_json = "1"
 image = "0.25"
 kamadak-exif = "0.5"
 libheif-rs = { version = "3", features = ["image"], optional = true }
+# 进程内 WebP 编码（D91）。MIT；`vendor/` 内含 libwebp C 源码，构建期由 `cc` 编译，
+# 不依赖系统库、不联网（D20）。默认特性 `parallel` 让 `cc` 并行编译这 176 个 .c。
+libwebp-sys = { version = "0.14", optional = true }
 
 # 仅 Windows：mpv 的 IPC 命名管道**只有一个句柄**可用，且**同步句柄上的阻塞读会挡住写**
 # （实测：第二次 open 直接 ERROR_PIPE_BUSY；同句柄读线程阻塞时写不出去）。
