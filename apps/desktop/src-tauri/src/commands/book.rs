@@ -1,4 +1,4 @@
-//! 图书元数据命令桥接（`book.meta`）：EPUB 的作者 / 简介 / 内嵌封面。
+//! 图书命令桥接：`book.meta`（作者 / 简介 / 内嵌封面）与 `book.content`（查看器正文）。
 //!
 //! **为什么不进索引**：封面是二进制、简介是长文本，把它们塞进 `files` 行会让
 //! 每次文件查询都背上几十 KB 的负载，而列表只用得到"有没有封面"。
@@ -8,10 +8,21 @@
 //!
 //! **失败降级为"没有元数据"，不是错误**：一本书解析不了（损坏的 zip、缺 OPF）
 //! 不该让整个图书预览面板变成错误态——面板回落成文件名文字封面即可。
+//!
+//! ## `book.content`（查看器正文，2026-10-09）
+//!
+//! 查看器要"显示书的开头内容"（用户口径），因此本文件另有 `book_content`：
+//! - **txt / md**：判编码（实测语料 8/14 是 GBK，见 `hp_book::text`）后按字符偏移分页；
+//! - **epub**：按 **spine 章节**分页，章节的 XHTML 由 `hp-book` 转成**类型化块**
+//!   （**不返回 HTML**——安全边界见 `hp_book::epub_text`）。
+//!
+//! epub 章节里的图片要落盘才能给前端 `convertFileSrc`：复用缩略图缓存目录的
+//! `<hash>.book-<章节>.<序号>.<ext>`（按内容哈希失效，与封面/元数据同一套口径）。
 
 use std::path::{Path, PathBuf};
 
 use hp_core::{HpError, HpResult, MediaType};
+use hp_dto::{BookBlockItem, BookContentResult};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -188,6 +199,190 @@ pub(crate) async fn book_meta(
     api_async(api_from_hp(outcome))
 }
 
+/// 一页正文的游标上限：纯文本按**字符偏移**、epub 按**章节序号**（见 `book.content`）。
+///
+/// 解析失败（游标写坏、越界）一律回落第一页而**不是**报错——"翻页游标"不该
+/// 成为新的错误来源。
+fn parse_cursor(cursor: Option<&str>) -> u32 {
+    cursor.and_then(|c| c.parse::<u32>().ok()).unwrap_or(0)
+}
+
+/// 把 epub 的正文块转成 DTO，并把图片落盘成前端可用的绝对路径。
+///
+/// 图片落盘命名 `<hash>.book-<章节>-<序号>.<ext>`（与封面/元数据同分片、同名不同
+/// 后缀），因此同一本书第二次打开直接命中缓存。
+fn blocks_to_items(
+    blocks: Vec<hp_book::BookBlock>,
+    cache: &hp_media::ThumbnailCache,
+    hash: &str,
+    section: u32,
+) -> Vec<BookBlockItem> {
+    let mut out = Vec::with_capacity(blocks.len());
+    let mut image_index = 0usize;
+    for block in blocks {
+        match block {
+            hp_book::BookBlock::Heading { level, text } => out.push(BookBlockItem {
+                kind: "heading".into(),
+                level: Some(level),
+                text: Some(text),
+                path: None,
+            }),
+            hp_book::BookBlock::Paragraph { text } => out.push(BookBlockItem {
+                kind: "paragraph".into(),
+                level: None,
+                text: Some(text),
+                path: None,
+            }),
+            hp_book::BookBlock::Image { ext, bytes, .. } => {
+                // 认不出格式的图直接丢（渲染不了，留着只会是个坏图占位）。
+                let Some(ext) = ext else { continue };
+                let path = cache.path_for_book_content_image(hash, section, image_index, ext);
+                image_index += 1;
+                if !path.exists() {
+                    if cache.ensure_dir_for(hash).is_err() || write_atomic(&path, &bytes).is_err() {
+                        // 单张图落盘失败不该让整章变成错误态：跳过它，正文照常显示。
+                        continue;
+                    }
+                }
+                out.push(BookBlockItem {
+                    kind: "image".into(),
+                    level: None,
+                    text: None,
+                    path: Some(path.to_string_lossy().to_string()),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// `book.content`：读取查看器要显示的**一页正文**（`txt` / `md` / `epub`）。
+///
+/// 用户口径（2026-10-09）：查看器新增 txt 与 epub 两种查看，**显示开头内容**、
+/// 范围为查看器面板大小；"固定上限 + 面板内滚动看更多，滚动时按需缓存"。
+/// 因此本命令是**分页**的：每次只回一页，游标由前端带着走。
+///
+/// - `cursor` 缺省 = 第一页；纯文本是字符偏移、epub 是章节序号；
+/// - 非文本类 / 无内容哈希 / 解析失败 → **空结果而不是错误**（与 `book.meta` 同口径：
+///   一本书打不开不该让查看器变成错误态）。
+#[tauri::command]
+pub(crate) async fn book_content(
+    repo_id: String,
+    file_id: String,
+    cursor: Option<String>,
+    state: State<'_, AppState>,
+) -> ApiAsync<BookContentResult> {
+    let _ = repo_id;
+
+    let outcome = async {
+        // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard。
+        let (src_path, media_type, content_hash, cache) = {
+            let guard = lock_repo(&state)?;
+            let db = open_repo(&guard)?;
+            let file = db
+                .get_file(&file_id)?
+                .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
+            let src_path = resolve_file_path(db, &file)?;
+            (
+                src_path,
+                file.media_type,
+                file.content_hash,
+                (*state.thumb_cache).clone(),
+            )
+        };
+
+        // 非文本类没有"正文"可看：空结果（不是错误）。
+        if media_type != MediaType::Text {
+            return Ok(empty_content());
+        }
+        let Some(hash) = content_hash else {
+            return Ok(empty_content());
+        };
+
+        let offset = parse_cursor(cursor.as_deref());
+        let ext = src_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        // 整本读盘 / 解压放在阻塞线程（大 epub 与 24 MB 的 txt 都不能占着 IPC 线程）。
+        let read = tauri::async_runtime::spawn_blocking(move || {
+            if ext == "epub" {
+                read_epub_page(&src_path, offset, &cache, &hash)
+            } else {
+                read_text_page(&src_path, offset)
+            }
+        })
+        .await
+        .map_err(|e| HpError::Io(format!("正文读取线程异常: {e}")))??;
+
+        Ok(read)
+    }
+    .await;
+    api_async(api_from_hp(outcome))
+}
+
+/// 空正文（非文本类 / 无内容哈希）：**不是错误**，前端显示占位。
+fn empty_content() -> BookContentResult {
+    BookContentResult {
+        format: String::new(),
+        encoding: None,
+        text: None,
+        blocks: None,
+        next_cursor: None,
+        section: 0,
+        section_count: None,
+        title: None,
+        capped: false,
+    }
+}
+
+/// 纯文本一页：判编码 → 解码开头 → 按字符偏移切页。
+fn read_text_page(src_path: &Path, offset: u32) -> HpResult<BookContentResult> {
+    // 解码到「偏移 + 一页 **+ 1**」为止：多要一个字符才判得出"本页之后还有内容"。
+    // 只解码到 `offset + 一页` 的话，`page_at` 看到的正好是末尾，
+    // `next_offset` 恒为 `None`——"还有下一页"这件事就永远发现不了。
+    let want = offset as usize + hp_book::TEXT_PAGE_CHARS + 1;
+    let decoded = hp_book::decode_file_head(src_path, want)?;
+    let page = hp_book::page_at(&decoded.text, offset as usize, hp_book::TEXT_PAGE_CHARS);
+    Ok(BookContentResult {
+        format: "text".into(),
+        encoding: Some(decoded.encoding.name().to_string()),
+        text: Some(page.text),
+        blocks: None,
+        next_cursor: page.next_offset.map(|n| n.to_string()),
+        section: 0,
+        section_count: None,
+        title: None,
+        // 本页之后还有内容、或解码时就被上限截断，都算"仅显示开头"。
+        capped: decoded.capped || page.next_offset.is_some(),
+    })
+}
+
+/// epub 一章：读 spine 的第 `section` 章，转成类型化块（**不返回 HTML**）。
+fn read_epub_page(
+    src_path: &Path,
+    section: u32,
+    cache: &hp_media::ThumbnailCache,
+    hash: &str,
+) -> HpResult<BookContentResult> {
+    let read = hp_book::read_epub_section(src_path, section)?;
+    let blocks = blocks_to_items(read.blocks, cache, hash, read.section);
+    Ok(BookContentResult {
+        format: "epub".into(),
+        encoding: None,
+        text: None,
+        blocks: Some(blocks),
+        next_cursor: (read.section + 1 < read.section_count).then(|| (read.section + 1).to_string()),
+        section: read.section,
+        section_count: Some(read.section_count),
+        title: Some(read.title),
+        // 还有下一章 = "仅显示开头"（用户口径：只显示开头的内容）。
+        capped: read.section + 1 < read.section_count,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,8 +390,15 @@ mod tests {
     /// 测试用临时目录（**不引入 `tempfile`**：桥接层只做装配，为测试加一个依赖不划算；
     /// 本 crate 之外的同款测试（`hp-scanner` / `hp-media`）也是 `std::env::temp_dir` +
     /// 进程号隔离这一套）。
+    ///
+    /// **每次调用都给一个新目录**（进程号 + 自增序号）：cargo 默认**并行**跑测试，
+    /// 若所有用例共用 `hp-book-cmd-<pid>` 一个目录，它们会互相 `remove_dir_all`——
+    /// 表现为"单跑绿、一起跑红"的随机失败（实测：5 个用例同时红）。
     fn temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("hp-book-cmd-{}", std::process::id()));
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static SEQ: AtomicUsize = AtomicUsize::new(0);
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("hp-book-cmd-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("创建临时目录失败");
         dir
@@ -281,6 +483,143 @@ mod tests {
         std::fs::write(&broken, b"not a zip at all").expect("写入失败");
         let record = parse_and_cache(&broken, &cache, "ffff").expect("坏书不该报错");
         assert!(record.author.is_none() && record.cover_ext.is_none());
+    }
+
+    // ---- book.content：查看器正文（2026-10-09）----
+
+    #[test]
+    fn cursor_falls_back_to_first_page() {
+        // 游标写坏 / 越界不该成为新的错误来源：一律回落第一页。
+        assert_eq!(parse_cursor(None), 0);
+        assert_eq!(parse_cursor(Some("12")), 12);
+        assert_eq!(parse_cursor(Some("abc")), 0);
+        assert_eq!(parse_cursor(Some("-5")), 0);
+        assert_eq!(parse_cursor(Some("")), 0);
+    }
+
+    #[test]
+    fn text_page_walks_the_whole_file_by_char_offset() {
+        let dir = temp_dir();
+        let path = dir.join("a.txt");
+        // 造一段长到需要两页的 UTF-8 文本。
+        let total = hp_book::TEXT_PAGE_CHARS + 50;
+        let text = "字".repeat(total);
+        std::fs::write(&path, text.as_bytes()).expect("写入失败");
+
+        let first = read_text_page(&path, 0).expect("读取失败");
+        assert_eq!(first.format, "text");
+        assert_eq!(first.encoding.as_deref(), Some("UTF-8"));
+        assert_eq!(first.text.as_deref().unwrap().chars().count(), hp_book::TEXT_PAGE_CHARS);
+        assert_eq!(first.next_cursor.as_deref(), Some(&*hp_book::TEXT_PAGE_CHARS.to_string()));
+        assert!(first.capped, "还有下一页 → 应标记「仅显示开头」");
+
+        let second = read_text_page(&path, hp_book::TEXT_PAGE_CHARS as u32).expect("读取失败");
+        assert_eq!(second.text.as_deref().unwrap().chars().count(), 50);
+        assert_eq!(second.next_cursor, None, "末页没有下一页");
+    }
+
+    #[test]
+    fn text_page_reports_gbk_encoding() {
+        let dir = temp_dir();
+        let path = dir.join("gbk.txt");
+        // 硬编码 GBK 字节而不是在测试里调编码器：桥接层的测试依赖里没有 `encoding_rs`
+        // （它属于 `hp-book`），而这段字节是 `"第一章 山边小村。"` 的标准 GBK 编码。
+        // 判定与解码的正确性由 `hp-book::text` 的单元测试负责，这里只验**接线**。
+        const GBK: &[u8] = &[
+            181, 218, 210, 187, 213, 194, 32, 201, 189, 177, 223, 208, 161, 180, 229, 161, 163,
+        ];
+        std::fs::write(&path, GBK).expect("写入失败");
+        let page = read_text_page(&path, 0).expect("读取失败");
+        assert_eq!(page.encoding.as_deref(), Some("GBK"), "GBK 文件必须被判成 GBK");
+        assert_eq!(
+            page.text.as_deref(),
+            Some("第一章 山边小村。"),
+            "应按判定出的编码还原正文（乱码即失败）"
+        );
+    }
+
+    #[test]
+    fn epub_page_returns_typed_blocks_and_pages_by_section() {
+        let dir = temp_dir();
+        let path = dir.join("b.epub");
+        let container = r#"<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"#;
+        let opf = r#"<package><metadata/><manifest>
+            <item id="a" href="Text/a.xhtml" media-type="application/xhtml+xml"/>
+            <item id="b" href="Text/b.xhtml" media-type="application/xhtml+xml"/>
+          </manifest><spine><itemref idref="a"/><itemref idref="b"/></spine></package>"#;
+        let a = r#"<html><head><title>第一章</title></head><body>
+            <h1>第一章</h1><p>甲</p><img src="../Images/i.png"/></body></html>"#;
+        let b = r#"<html><head><title>第二章</title></head><body><p>乙</p></body></html>"#;
+        let png: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1];
+        std::fs::write(
+            &path,
+            test_zip(&[
+                ("META-INF/container.xml", container.as_bytes()),
+                ("OEBPS/content.opf", opf.as_bytes()),
+                ("OEBPS/Text/a.xhtml", a.as_bytes()),
+                ("OEBPS/Text/b.xhtml", b.as_bytes()),
+                ("OEBPS/Images/i.png", png),
+            ]),
+        )
+        .expect("写入失败");
+
+        let cache = hp_media::ThumbnailCache::new(dir.join("cache"));
+        let hash = "0123456789abcdef";
+        let first = read_epub_page(&path, 0, &cache, hash).expect("读取失败");
+        assert_eq!(first.format, "epub");
+        assert_eq!(first.section, 0);
+        assert_eq!(first.section_count, Some(2));
+        assert_eq!(first.title.as_deref(), Some("第一章"));
+        assert_eq!(first.next_cursor.as_deref(), Some("1"));
+        assert!(first.capped, "还有下一章 → 应标记「仅显示开头」");
+
+        let blocks = first.blocks.expect("epub 页应当有块");
+        // **不含 HTML**：只有类型化块（安全边界）。
+        assert!(blocks.iter().all(|b| b.kind == "heading" || b.kind == "paragraph" || b.kind == "image"));
+        assert_eq!(blocks[0].kind, "heading");
+        assert_eq!(blocks[0].level, Some(1));
+        assert_eq!(blocks[0].text.as_deref(), Some("第一章"));
+        assert_eq!(blocks[1].kind, "paragraph");
+        assert_eq!(blocks[1].text.as_deref(), Some("甲"));
+
+        // 插图已落盘，且给出的是**绝对路径**（供 convertFileSrc）。
+        let image = blocks.iter().find(|b| b.kind == "image").expect("应当有插图块");
+        let image_path = image.path.as_deref().expect("插图应当有路径");
+        assert!(Path::new(image_path).exists(), "插图必须已落盘：{image_path}");
+        assert!(Path::new(image_path).is_absolute(), "必须是绝对路径：{image_path}");
+        assert!(image_path.ends_with(".png"), "落盘后缀应保留原格式：{image_path}");
+
+        let second = read_epub_page(&path, 1, &cache, hash).expect("读取失败");
+        assert_eq!(second.title.as_deref(), Some("第二章"));
+        assert_eq!(second.next_cursor, None, "末章没有下一章");
+    }
+
+    #[test]
+    fn epub_page_never_returns_raw_html() {
+        // 安全边界的行为断言：`<script>` 的内容不得出现在任何块的文字里。
+        let dir = temp_dir();
+        let path = dir.join("x.epub");
+        let container = r#"<container><rootfiles><rootfile full-path="c.opf"/></rootfiles></container>"#;
+        let opf = r#"<package><metadata/><manifest>
+            <item id="a" href="a.xhtml" media-type="application/xhtml+xml"/>
+          </manifest><spine><itemref idref="a"/></spine></package>"#;
+        let a = r#"<html><head><title>T</title></head><body><p>正文</p>
+            <script>alert('xss')</script></body></html>"#;
+        std::fs::write(
+            &path,
+            test_zip(&[
+                ("META-INF/container.xml", container.as_bytes()),
+                ("c.opf", opf.as_bytes()),
+                ("a.xhtml", a.as_bytes()),
+            ]),
+        )
+        .expect("写入失败");
+
+        let cache = hp_media::ThumbnailCache::new(dir.join("cache"));
+        let page = read_epub_page(&path, 0, &cache, "hash").expect("读取失败");
+        let joined = format!("{:?}", page.blocks);
+        assert!(!joined.contains("alert"), "script 内容不得进入正文：{joined}");
+        assert!(!joined.contains("<p>"), "不得回传原始 HTML：{joined}");
     }
 }
 

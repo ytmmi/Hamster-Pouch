@@ -344,6 +344,12 @@ export const en: Record<keyof DictZhCN, string> = {
   "viewer.previewFailed": "Preview failed: {err}",
   "viewer.unavailable": "Preview unavailable",
   "viewer.settings.infoBarEnabled": "Show the info bar",
+  // Text reading area (txt / md / epub, 2026-10-09)
+  "viewer.noContent": "This file has no readable text",
+  "viewer.encoding": "Text encoding: {enc}",
+  "viewer.sectionOf": "Section {n} of {total}",
+  "viewer.imageUnavailable": "Illustration unavailable",
+  "viewer.endOfPreview": "— start of the book shown —",
 
   "imageviewer.loadFailed": "Failed to read image: {err}",
   "imageviewer.unavailable": "Image unavailable",

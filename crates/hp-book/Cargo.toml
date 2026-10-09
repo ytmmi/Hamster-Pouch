@@ -12,6 +12,12 @@ edition.workspace = true
 [dependencies]
 hp-core = { path = "../hp-core" }
 flate2 = "1"
+# 纯文本（txt/md）的编码判定与解码：实测语料 14 本里 8 本 GBK、6 本 UTF-8 且
+# **无一带 BOM**，必须真判编码（见 src/text.rs 的模块文档）。
+# - `encoding_rs`：WHATWG 编码标准的实现（Apache-2.0/MIT），UTF-8/UTF-16/GBK 等；
+# - `chardetng`：Firefox 用的统计式编码探测器（Apache-2.0/MIT）。
+encoding_rs = "0.8"
+chardetng = "0.1"
 
 [dev-dependencies]
 tempfile = "3"

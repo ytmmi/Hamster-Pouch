@@ -222,3 +222,53 @@ pub struct BlueprintTemplateItem {
     #[ts(type = "number")]
     pub schema_version: i64,
 }
+
+/// 查看器正文的**块**（`book.content` 返回）。
+///
+/// **不是 HTML**：EPUB 的正文是 XHTML，渲染它要么走 `dangerouslySetInnerHTML`
+/// （本项目不接受），要么做一遍受控白名单。后端把白名单**做在解析侧**，
+/// 前端只拿到这样的纯数据并渲染 React 元素——前端因此没有可注入 HTML 的入口
+/// （见 `hp-book` 的 `epub_text` 模块文档）。
+///
+/// `kind` 取值：`heading`（`level` + `text`）/ `paragraph`（`text`）/
+/// `image`（`path`，已落盘的绝对路径，供 `convertFileSrc`）。
+#[derive(Serialize, TS, Debug)]
+pub struct BookBlockItem {
+    pub kind: String,
+    /// `heading` 的层级 1–6；其余块为 `null`。
+    pub level: Option<u8>,
+    /// `heading` / `paragraph` 的文字；`image` 为 `null`。
+    pub text: Option<String>,
+    /// `image` 的已落盘绝对路径（供前端 `convertFileSrc`）；其余为 `null`。
+    pub path: Option<String>,
+}
+
+/// `book.content` 返回：查看器要显示的正文**一页**。
+///
+/// 两种文件走同一个返回体（用户 2026-10-09 口径：txt 与 epub 都在查看器里看）：
+/// - `txt` / `md`：一页就是一段连续文本（`text` 非空、`blocks` 为空）；
+/// - `epub`：一页就是**一个章节**的块（`blocks` 非空、`text` 为空）。
+#[derive(Serialize, TS)]
+pub struct BookContentResult {
+    /// 书的格式：`text`（纯文本）或 `epub`。
+    pub format: String,
+    /// 纯文本的**编码名**（`UTF-8` / `GBK` / `UTF-16LE` …）；epub 为 `null`。
+    ///
+    /// 面板据此提示"这是 GBK 文件"，也让"读出来是乱码"这件事可被用户判断。
+    pub encoding: Option<String>,
+    /// 纯文本页的内容；epub 为 `null`。
+    pub text: Option<String>,
+    /// epub 章节的块；纯文本为 `null`。
+    pub blocks: Option<Vec<BookBlockItem>>,
+    /// 下一页游标（纯文本 = 下一个**字符偏移**；epub = 下一个**章节序号**）；
+    /// `null` = 没有更多（**到末尾不是错误**）。
+    pub next_cursor: Option<String>,
+    /// 本页序号（0 起；纯文本恒为 0，epub 是章节序号）。
+    pub section: u32,
+    /// epub 的章节总数；纯文本为 `null`。
+    pub section_count: Option<u32>,
+    /// 本页标题（epub 的章节标题；纯文本为 `null`）。
+    pub title: Option<String>,
+    /// 内容是否因**上限**被截断（用户口径"固定上限"；面板据此提示"仅显示开头"）。
+    pub capped: bool,
+}

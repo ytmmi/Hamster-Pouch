@@ -1880,6 +1880,98 @@ button.danger {
   object-fit: contain;
 }
 
+/* --- 查看器正文阅读区（txt / md / epub，2026-10-09）---
+
+   阅读区**自己滚**（面板其余部分不动）：用户口径"显示范围为查看器面板大小"
+   + "面板内滚动看更多、滚动时按需缓存"。
+
+   分栏与字号由面板按宽度经 CSS 变量下发（`--vr-columns` / `--vr-font-size`，
+   判据在 `viewer/viewerReader.ts`）：`column-count` 交给浏览器断栏，
+   内容是文本流，"一栏读满再读下一栏"是它的天然语义。 */
+.vr-scroll {
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  padding: 12px 24px;
+  background: var(--media-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  /* 阅读区要有自己的滚动条，滚到头不要把手势传给外层。 */
+  overscroll-behavior: contain;
+}
+
+.vr-scroll:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* 章节进度 / 编码提示：只占一行，不参与分栏（否则会被切进某一栏里）。 */
+.vr-meta {
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+
+.vr-content {
+  column-count: var(--vr-columns, 1);
+  column-gap: 32px;
+  font-size: var(--vr-font-size, 13px);
+  line-height: 1.8;
+  /* 中英混排的断行交给浏览器；`break-word` 防止长 URL 顶破栏宽。 */
+  overflow-wrap: break-word;
+}
+
+/* 整页只有图片（epub 的封面 / 彩页）：居中显示，不要挤在左上角。 */
+.vr-content.vr-image-only {
+  column-count: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.vr-heading {
+  font-size: 1.15em;
+  font-weight: 600;
+  margin: 0 0 10px;
+  /* 标题不要被留在栏尾（而正文在下一栏）。 */
+  break-after: avoid;
+}
+
+.vr-paragraph {
+  margin: 0 0 10px;
+  /* 段落里的 `\n` 来自 `<br>`：诗句与对话的行结构必须保留。 */
+  white-space: pre-line;
+}
+
+.vr-text {
+  margin: 0;
+  /* 纯文本整篇就是一段：换行原样保留（txt 的排版全靠它）。 */
+  white-space: pre-wrap;
+}
+
+.vr-image {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  margin: 10px auto;
+  object-fit: contain;
+  /* 图片不该被断栏切开。 */
+  break-inside: avoid;
+}
+
+.vr-image-fallback {
+  display: block;
+  color: var(--fg-dim);
+  font-size: 11px;
+  text-align: center;
+  margin: 8px 0;
+}
+
+.vr-more {
+  font-size: 11px;
+  text-align: center;
+  margin-top: 10px;
+}
+
 /* ===== 黑暗模式（深色） ===== */
 
 .app-root.theme-dark {

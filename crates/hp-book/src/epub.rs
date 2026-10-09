@@ -94,7 +94,10 @@ fn cover_entry_from_archive(archive: &ZipArchive) -> Option<String> {
 }
 
 /// 从已打开的包读出 OPF 文本与它的条目路径。
-fn read_opf(archive: &ZipArchive) -> HpResult<Option<(String, String)>> {
+///
+/// `pub(crate)`：正文读取（`epub_text.rs`）也要走同一份 OPF 定位逻辑——
+/// 两处各写一套 container.xml / 兜底 `.opf` 的查找必然会漂移。
+pub(crate) fn read_opf(archive: &ZipArchive) -> HpResult<Option<(String, String)>> {
     // 规范路径：`META-INF/container.xml` 的 `<rootfile full-path="...">`。
     let container = archive.read("META-INF/container.xml")?;
     if let Some(bytes) = container {

@@ -116,6 +116,25 @@ impl ThumbnailCache {
             .join(format!("{content_hash}.bookmeta.json"))
     }
 
+    /// 电子书**正文插图**的缓存路径（`<hash>.book-<章节>-<序号>.<ext>`）。
+    ///
+    /// EPUB 的章节正文里可能有插图（实测语料 22/22 本都有，共 420 个 `<img>`），
+    /// 它们要落盘才能交给前端 `convertFileSrc` 渲染。与封面/元数据**同分片、
+    /// 同名不同后缀**，因此互不冲突，且同一本书第二次打开直接命中缓存。
+    ///
+    /// 序号是**章内**的图片序号（同一章里第几张），章节号是 spine 序号——
+    /// 两者一起保证同一本书内不重名。
+    pub fn path_for_book_content_image(
+        &self,
+        content_hash: &str,
+        section: u32,
+        index: usize,
+        ext: &str,
+    ) -> PathBuf {
+        self.shard_dir(content_hash)
+            .join(format!("{content_hash}.book-{section}-{index}.{ext}"))
+    }
+
     /// 确保缓存根目录存在。
     pub fn ensure_dir(&self) -> HpResult<()> {
         std::fs::create_dir_all(&self.root)

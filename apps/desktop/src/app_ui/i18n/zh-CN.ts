@@ -358,6 +358,12 @@ export const zhCN = {
   "viewer.previewFailed": "预览失败：{err}",
   "viewer.unavailable": "预览不可用",
   "viewer.settings.infoBarEnabled": "显示基础信息栏",
+  // 正文阅读区（txt / md / epub，2026-10-09）
+  "viewer.noContent": "该文件没有可显示的正文",
+  "viewer.encoding": "文本编码：{enc}",
+  "viewer.sectionOf": "第 {n} / {total} 章",
+  "viewer.imageUnavailable": "插图不可用",
+  "viewer.endOfPreview": "— 已显示开头内容 —",
 
   // 图像查看器
   "imageviewer.loadFailed": "读取图像失败：{err}",

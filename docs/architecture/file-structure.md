@@ -133,11 +133,20 @@ apps/desktop/src/app_ui/
                       #   （key+decoding=sync）；解码期间保留上一张画面——首帧不可能"半新半旧"（0026/0027/0028）
                       #   预加载：取哪些邻居在 viewerPreload（前台才取 / 大图不解码 / 同张只预热一次），
                       #   取图策略与缓存收敛在 shared/imageUrl.ts（HEIC 预览与当前图共用一份）
-    ViewerPanel.tsx   # 查看器（大图/视频/音频预览；**顶部基础信息栏**由面板设置 infoBarEnabled 控制）
-                      #   **已知缺口**：epub / txt 预览本版不做（用户 2026-10-08 裁决），
-                      #   见 docs/roadmap/book-preview-plan.md §2.1
-    bookpreview/      # 图书预览（panel.bookpreview；文本类文件 txt/md/epub）
-                      #   BookPreviewPanel.tsx 主面板（工具条 + 三种视图容器 + 封面宽度滑条
+    ViewerPanel.tsx   # 查看器（大图/视频/音频预览 + **文本类正文阅读**；**顶部基础信息栏**
+                      #   由面板设置 infoBarEnabled 控制）
+                      #   文本类（media_type=text，txt/md/epub）交 panels/viewer/ 阅读区渲染，
+                      #   判据用媒体类型而不是扩展名（免得与扫描器两份口径）
+    viewer/           # 查看器的正文阅读区（2026-10-09：用户口径"查看器新增 txt / epub 查看"）
+                      #   ViewerReader.tsx 阅读区装配（按宽度下发分栏/字号 CSS 变量；自己滚）
+                      #   BookBlocks.tsx EPUB 块渲染（**不注入 HTML**：用 React 元素渲染
+                      #     后端给的 heading/paragraph/image 纯数据块）
+                      #   useViewerBookContent.ts 分页取数（滚动到底部附近才取下一页；
+                      #     切书即丢页——用户口径"字符缓存不需要大、滚动时按需缓存"）
+                      #   viewerReaderView.ts 纯逻辑（分栏阈值/字号/是否该取下一页；零依赖，
+                      #     门禁直接 import。**注意**：不能叫 viewerReader.ts——与
+                      #     ViewerReader.tsx 在 Windows 上大小写不敏感地撞名，tsc 报 TS1261）
+    bookpreview/      # 图书预览（panel.bookpreview；文本类文件 txt/md/epub）                      #   BookPreviewPanel.tsx 主面板（工具条 + 三种视图容器 + 封面宽度滑条
                       #     + 右键菜单装配：复用 ../mediaPreviewMenu 与 ../mediaPreviewActions，
                       #     删除动作 `albumScoped: false`——文本类进不了相册成员列表）
                       #   BookCard.tsx 卡片模式单元（封面在上 + 文件名在下；文件名悬停滚轮横滚；
@@ -290,9 +299,13 @@ HamsterPouch/
     hp-plugin-host/           # 插件生命周期、权限、宿主 API
     hp-ai/                    # AI 打标接口抽象、任务队列、结果回写边界
     hp-media/                 # 媒体子进程管理、播放控制、ffprobe 元数据、ffmpeg 抽帧宿主
-    hp-book/                  # 电子书元数据与封面解析（EPUB = ZIP + OPF；txt/md 无元数据）
+    hp-book/                  # 电子书元数据 / 封面 / **正文**解析（EPUB = ZIP + OPF；txt/md 需判编码）
                               #   自实现最小 ZIP 读取器（zip.rs）+ 极简 XML 取值（xml.rs）+
-                              #   EPUB 解析（epub.rs）+ 封面格式判定（cover.rs）+ 格式分发（meta.rs）；
+                              #   EPUB 元数据解析（epub.rs）+ 封面格式判定（cover.rs）+ 格式分发（meta.rs）；
+                              #   **正文（2026-10-09）**：text.rs 纯文本判编码与分页（BOM → UTF-8 合法性
+                              #   → chardetng → GBK 可解码性兜底；实测语料 14 本无一带 BOM、7 GBK + 7 UTF-8）、
+                              #   epub_text.rs 把章节 XHTML 过**受控白名单**转成类型化块（**不返回 HTML**：
+                              #   渲染它要么 dangerouslySetInnerHTML（不接受）要么白名单，白名单做在解析侧）；
                               #   **不引入 `zip` crate**（D20 依赖本地化），解压走已在依赖树里的 flate2
     hp-dto/                   # 跨层 DTO（前端 shared-types 由这些类型生成；`src/lib.rs` 按域分组、
                               #   `src/bin/generate.rs` 负责导出）。桥接层必须直接用这里的类型

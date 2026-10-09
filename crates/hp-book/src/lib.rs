@@ -1,6 +1,6 @@
-//! hp-book：电子书的元数据与封面解析（EPUB = ZIP + OPF；txt/md 无元数据）。
+//! hp-book：电子书的**元数据 / 封面**与**正文读取**（EPUB = ZIP + OPF；txt/md 需判编码）。
 //!
-//! **职责边界**：本 crate 只做"从一个文件读出作者 / 简介 / 封面字节"这一件事。
+//! **职责边界**：本 crate 只做"从一个文件读出作者 / 简介 / 封面字节 / 正文开头"这几件事。
 //! 它不碰数据库、不认识 `file_id`、不决定封面存到哪——那些属于桥接层
 //! （`apps/desktop/src-tauri/src/commands/book.rs`）与 `hp_media::ThumbnailCache`。
 //!
@@ -13,12 +13,20 @@
 
 mod cover;
 mod epub;
+mod epub_text;
 mod meta;
+mod text;
 mod xml;
 mod zip;
 
 pub use cover::{cover_from_bytes, detect_image_ext, BookCover};
 pub use epub::read_epub;
+pub use epub_text::{blocks_from_xhtml, read_epub_section, BookBlock, EpubSectionRead};
 pub use meta::{read_book_meta, BookMeta};
+pub use text::{
+    decode_file_head, decode_head, detect_encoding, is_strict_utf8, is_utf8_but_maybe_truncated,
+    page_at, trim_to_char_boundary, DecodedText, TextEncoding, TextPage, TEXT_PAGE_CHARS,
+    TEXT_VIEW_MAX_BYTES,
+};
 pub use xml::{decode_xml_bytes, percent_decode, resolve_zip_path};
 pub use zip::{ZipArchive, ZipEntry};

@@ -343,6 +343,12 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "viewer.previewFailed": "預覽失敗：{err}",
   "viewer.unavailable": "預覽不可用",
   "viewer.settings.infoBarEnabled": "顯示基礎資訊列",
+  // 正文閱讀區（txt / md / epub，2026-10-09）
+  "viewer.noContent": "該檔案沒有可顯示的正文",
+  "viewer.encoding": "文字編碼：{enc}",
+  "viewer.sectionOf": "第 {n} / {total} 章",
+  "viewer.imageUnavailable": "插圖不可用",
+  "viewer.endOfPreview": "— 已顯示開頭內容 —",
 
   // 圖像檢視器
   "imageviewer.loadFailed": "讀取圖像失敗：{err}",

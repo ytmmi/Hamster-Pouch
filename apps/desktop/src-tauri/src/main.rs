@@ -208,6 +208,9 @@ fn main() {
             commands::file::file_reverify,
             // 图书预览面板的取数：EPUB 作者/简介/内嵌封面（磁盘缓存，按内容哈希失效）。
             commands::book::book_meta,
+            // 查看器的正文取数：txt/md（判编码后按字符分页）与 epub（按章节分页，
+            // 章节 XHTML 由 hp-book 转成类型化块——**不返回 HTML**）。
+            commands::book::book_content,
             commands::fsops::fsops_copy,
             commands::fsops::fsops_move,
             commands::plugin::plugin_list,

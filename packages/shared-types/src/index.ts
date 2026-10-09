@@ -22,3 +22,5 @@ export type { TagRelationItem } from "./TagRelationItem";
 export type { BlueprintItem } from "./BlueprintItem";
 export type { BlueprintValidateResult } from "./BlueprintValidateResult";
 export type { BlueprintTemplateItem } from "./BlueprintTemplateItem";
+export type { BookBlockItem } from "./BookBlockItem";
+export type { BookContentResult } from "./BookContentResult";
