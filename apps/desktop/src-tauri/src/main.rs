@@ -211,6 +211,12 @@ fn main() {
             // 查看器的正文取数：txt/md（判编码后按字符分页）与 epub（按章节分页，
             // 章节 XHTML 由 hp-book 转成类型化块——**不返回 HTML**）。
             commands::book::book_content,
+            // 封面覆盖（用户口径"txt 右键可以更换封面颜色或自定义图片"）：
+            // 批量读（面板一页一次）/ 单读 / 设（颜色或图片）/ 清除（回默认封面）。
+            commands::book::book_covers,
+            commands::book::book_cover,
+            commands::book::book_set_cover,
+            commands::book::book_clear_cover,
             commands::fsops::fsops_copy,
             commands::fsops::fsops_move,
             commands::plugin::plugin_list,

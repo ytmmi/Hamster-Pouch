@@ -13,8 +13,11 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   BookContentArgs,
   BookContentResult,
+  BookCoverItem,
+  BookCoverResult,
   BookMetaArgs,
   BookMetaResult,
+  BookSetCoverArgs,
 } from "../types";
 import { unwrapApi, type ApiResponse } from "./response";
 
@@ -39,4 +42,44 @@ export function bookContent(args: BookContentArgs): Promise<BookContentResult> {
     fileId: args.fileId,
     cursor: args.cursor ?? null,
   }).then(unwrapApi);
+}
+
+/**
+ * **批量**读取一组文件的封面覆盖（用户自设的颜色 / 图片）。
+ *
+ * 只返回**真有覆盖**的文件；没有覆盖的书不在结果里（面板按默认封面渲染）。
+ * 面板按一页传 id，因此不会退化成"每本书一次 IPC"。
+ */
+export function bookCovers(repoId: string, fileIds: string[]): Promise<BookCoverItem[]> {
+  return invoke<ApiResponse<BookCoverItem[]>>("book_covers", {
+    repoId,
+    fileIds,
+  }).then(unwrapApi);
+}
+
+/** 读取**单个**文件的封面覆盖（两个字段为 `null` = 没有覆盖）。 */
+export function bookCover(repoId: string, fileId: string): Promise<BookCoverResult> {
+  return invoke<ApiResponse<BookCoverResult>>("book_cover", { repoId, fileId }).then(unwrapApi);
+}
+
+/**
+ * 设置封面覆盖。
+ *
+ * `kind: "color"` 时 `value` 是 `#rrggbb`；`kind: "image"` 时 `value` 是**源图片的
+ * 绝对路径**（用户在系统对话框里挑的那张），桥接层会把它拷进 `data\user\covers\`。
+ */
+export function bookSetCover(args: BookSetCoverArgs): Promise<BookCoverResult> {
+  return invoke<ApiResponse<BookCoverResult>>("book_set_cover", {
+    repoId: args.repoId,
+    fileId: args.fileId,
+    kind: args.kind,
+    value: args.value,
+  }).then(unwrapApi);
+}
+
+/** 清除封面覆盖，回到默认封面（内嵌封面或文字封面）。 */
+export function bookClearCover(repoId: string, fileId: string): Promise<BookCoverResult> {
+  return invoke<ApiResponse<BookCoverResult>>("book_clear_cover", { repoId, fileId }).then(
+    unwrapApi,
+  );
 }

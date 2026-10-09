@@ -17,6 +17,7 @@ mod blueprint_warnings;
 pub mod color;
 pub mod control;
 mod control_types;
+pub mod cover;
 pub mod error;
 pub mod file;
 pub mod namespace;
@@ -61,6 +62,7 @@ pub use blueprint_registry::{
     RULE_EDGE_SOURCES, RULE_EDGE_TARGETS,
 };
 pub use color::ColorRef;
+pub use cover::{is_safe_cover_file_name, normalize_cover_color, CoverKind, FileCover};
 pub use control::{
     is_valid_id, ControlBind, ControlNode, ControlPredicate, ControlSchema, ControlValidateCtx,
     ControlValidateResult,

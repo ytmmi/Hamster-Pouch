@@ -1664,7 +1664,9 @@ button.danger {
   padding: 4px 8px;
 }
 
-/* 封面画面：**文字封面打底 + 内嵌封面盖上**（加载期间与加载失败都自然回落，无空窗）。 */
+/* 封面画面：**文字封面打底 + 内嵌封面盖上**（加载期间与加载失败都自然回落，无空窗）。
+   底色用**白色**（用户 2026-10-09 口径）：内嵌封面按 `contain` 完整显示，留白就是书的
+   "纸边"——跟着主题走会在深色下变成一圈深灰，看着像图没加载完。 */
 .bp-art {
   position: relative;
   width: 100%;
@@ -1673,7 +1675,25 @@ button.danger {
   border: 1px solid var(--border);
   border-radius: 4px;
   overflow: hidden;
-  background: var(--bg-3);
+  background: #ffffff;
+  /* 封面容器的投影（用户 2026-10-09 口径）：让书从面板底色里"立"起来。
+     用两段阴影（近处实、远处散），比单段更接近纸张叠放的观感。 */
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    0 4px 12px rgba(0, 0, 0, 0.16);
+}
+
+/* 深色主题下加重投影：同样的 alpha 在深底上几乎看不见。 */
+.app-root.theme-dark .bp-art {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+/* 内嵌封面**加载完成**后把打底的文字封面藏起来：否则 `contain` 留出的白边里
+   会透出文字封面的彩色渐变，"白底"就不成立了。加载中/失败时它仍在（无空窗）。 */
+.bp-art.bp-art-loaded .bp-textcover {
+  display: none;
 }
 
 .bp-art-img {
@@ -1731,6 +1751,40 @@ button.danger {
   outline: 1px solid var(--accent);
   outline-offset: -1px;
   border-radius: 2px;
+}
+
+/* 右键菜单里的**封面色板**（用户口径 2026-10-09："txt 右键可以更换封面颜色"）。
+   一格一色、点一下即生效；末位是系统取色器（预设之外的任意颜色）。 */
+.bp-cover-colors {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  padding: 4px 8px 6px;
+}
+
+.bp-cover-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.bp-cover-swatch:hover {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 系统取色器：外观与色板同尺寸，免得一行里高矮不齐。 */
+.bp-cover-picker {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
 }
 
 /* 列表模式（原「封面模式」改名，用户 2026-10-09：它本来就是列表）：封面在左，

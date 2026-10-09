@@ -4,6 +4,7 @@ mod ai_undo_repo;
 mod album_repo;
 mod blueprint_repo;
 mod color_repo;
+mod cover_repo;
 mod file_repo;
 mod ops_repo;
 mod purge_repo;

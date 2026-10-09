@@ -243,8 +243,7 @@ pub struct BookBlockItem {
     pub path: Option<String>,
 }
 
-/// `book.content` 返回：查看器要显示的正文**一页**。
-///
+/// `book.content` 返回：查看器要显示的正文**一页**。///
 /// 两种文件走同一个返回体（用户 2026-10-09 口径：txt 与 epub 都在查看器里看）：
 /// - `txt` / `md`：一页就是一段连续文本（`text` 非空、`blocks` 为空）；
 /// - `epub`：一页就是**一个章节**的块（`blocks` 非空、`text` 为空）。
@@ -271,4 +270,32 @@ pub struct BookContentResult {
     pub title: Option<String>,
     /// 内容是否因**上限**被截断（用户口径"固定上限"；面板据此提示"仅显示开头"）。
     pub capped: bool,
+}
+
+/// `book.cover` 返回：一个文件的**封面覆盖**（用户自设的颜色或图片）。
+///
+/// 用户口径（2026-10-09）："txt 右键可以更换封面颜色或自定义图片"。
+/// `kind` 取值：`color`（`value` = `#rrggbb`）/ `image`（`value` = **已落盘**的
+/// 绝对路径，供前端 `convertFileSrc`）；两个字段同为 `null` = 这本书没有覆盖，
+/// 面板按默认封面渲染（内嵌封面或文字封面）。
+#[derive(Serialize, TS, Debug)]
+pub struct BookCoverResult {
+    /// `color` / `image`；`null` = 没有覆盖。
+    pub kind: Option<String>,
+    /// `color` 为 `#rrggbb`；`image` 为**已落盘**的绝对路径；无覆盖为 `null`。
+    pub value: Option<String>,
+}
+
+/// `book.covers` 返回元素：一个文件的封面覆盖（**只返回真有覆盖的**）。
+///
+/// 与 [`BookCoverResult`] 的差别只有一处：这里带 `file_id`（批量结果要靠它对应回条目），
+/// 且**两个字段都必然有值**——没有覆盖的文件根本不出现在数组里。
+#[derive(Serialize, TS, Debug)]
+pub struct BookCoverItem {
+    /// 文件 ID。
+    pub file_id: String,
+    /// `color` / `image`。
+    pub kind: String,
+    /// `color` 为 `#rrggbb`；`image` 为**已落盘**的绝对路径（供 `convertFileSrc`）。
+    pub value: String,
 }

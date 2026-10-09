@@ -74,3 +74,33 @@ export interface BookContentResult {
   /** 内容是否因**上限**被截断（面板据此提示"仅显示开头"）。 */
   capped: boolean;
 }
+
+/** `book.cover` / `book.setCover` / `book.clearCover` 返回体。 */
+export interface BookCoverResult {
+  /** `color` / `image`；`null` = 没有覆盖（按默认封面渲染）。 */
+  kind: string | null;
+  /** `color` 为 `#rrggbb`；`image` 为**已落盘**的绝对路径；无覆盖为 `null`。 */
+  value: string | null;
+}
+
+/** `book.setCover` 命令参数。 */
+export interface BookSetCoverArgs {
+  repoId: string;
+  fileId: string;
+  /** `color`（`value` = `#rrggbb`）或 `image`（`value` = 源图片绝对路径）。 */
+  kind: "color" | "image";
+  value: string;
+}
+
+/**
+ * `book.covers` 批量查询的返回元素（`file_id` → 覆盖）。
+ *
+ * **批量而不是逐个查**：图书预览一页可能有几百本，逐本一次 IPC 就是几百次往返。
+ */
+export interface BookCoverItem {
+  file_id: string;
+  /** `color` / `image`。 */
+  kind: string;
+  /** `color` 为 `#rrggbb`；`image` 为**已落盘**的绝对路径。 */
+  value: string;
+}

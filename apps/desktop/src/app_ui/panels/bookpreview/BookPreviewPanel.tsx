@@ -35,6 +35,8 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { useApp } from "../../core/AppContext";
 import type { PanelRenderCtx } from "../../core/panelRegistry";
+import * as api from "../../shared/api";
+import { errorTextOf } from "../../shared/api/response";
 import { usePanelForeground } from "../../shared/panelForeground";
 import { usePanelSettingValue } from "../../shared/settingValue";
 import { useStableCallback } from "../../shared/stableCallback";
@@ -43,7 +45,9 @@ import { useMediaFileActions } from "../mediaPreviewActions";
 import { MediaContextMenu, useMediaContextMenu } from "../mediaPreviewMenu";
 import { BookCard } from "./BookCard";
 import { BookCoverCell } from "./BookCoverCell";
+import { BookCoverMenu } from "./BookCoverMenu";
 import { BookListRow } from "./BookListRow";
+import { coverOverrideOf, invalidateBookCovers, loadBookCovers } from "./bookCoverCache";
 import { useBookPreviewData } from "./bookPreviewData";
 import {
   BOOK_COVER_SIZE_MIN,
@@ -144,6 +148,58 @@ export function BookPreviewPanel({ api: panelApi }: BookPreviewPanelProps = {}):
     [items, app.selectedIds],
   );
 
+  /**
+   * **批量**取这一页的封面覆盖（用户自设的颜色 / 图片）。
+   *
+   * 为什么在面板这里批量取而不是让单元各取各的：一页可能几百本，
+   * 逐本一次 IPC 就是几百次往返（见 `bookCoverCache` 的说明）。
+   * `items` 变化（翻页 / 切源 / 刷新）时重取一次；`invalidateBookCovers` 之后
+   * 由 `app.refresh()` 触发 `items` 变化，因此改完封面会自动重新拉。
+   */
+  useEffect(() => {
+    if (!app.repoId || items.length === 0) return;
+    void loadBookCovers(
+      app.repoId,
+      items.map((item) => item.id),
+    );
+  }, [app.repoId, items]);
+
+  /** 设置封面（颜色或图片）后：失效缓存 + 刷新（刷新会让上面的批量取重跑）。 */
+  const applyCover = useCallback(
+    async (kind: "color" | "image", value: string) => {
+      if (!app.repoId || !app.selectedFile) return;
+      const fileId = app.selectedFile.id;
+      try {
+        await api.bookSetCover({ repoId: app.repoId, fileId, kind, value });
+        invalidateBookCovers(app.repoId);
+        app.refresh();
+      } catch (e) {
+        // 失败必须报出来：图片格式不认 / 源文件读不到都在这里，
+        // 静默失败会让用户以为"设了但没生效"（那是另一类缺陷）。
+        app.status(app.t("book.cover.setFailed", { err: errorTextOf(app.t, e) }), "error");
+      }
+    },
+    [app],
+  );
+
+  /** 清除封面覆盖，回默认封面。 */
+  const clearCover = useCallback(async () => {
+    if (!app.repoId || !app.selectedFile) return;
+    const repoId = app.repoId;
+    try {
+      await api.bookClearCover(repoId, app.selectedFile.id);
+      invalidateBookCovers(repoId);
+      app.refresh();
+    } catch (e) {
+      app.status(app.t("book.cover.setFailed", { err: errorTextOf(app.t, e) }), "error");
+    }
+  }, [app]);
+
+  /** 菜单里"更换封面"区当前这本书有没有覆盖（决定「恢复默认」是否可点）。 */
+  const menuFileOverride = menu.target
+    ? coverOverrideOf(app.repoId, menu.target.file.id)
+    : null;
+
   // `--bp-cover-size` 供全部三种视图共用；`--bp-desc-lines` 是简介的截断行数
   // （列表 / 封面模式按封面高度推得，见 `bookDescLineCount`）。
   const style = {
@@ -237,7 +293,9 @@ export function BookPreviewPanel({ api: panelApi }: BookPreviewPanelProps = {}):
         </div>
       )}
 
-      {/* 右键上下文菜单：**媒体预览那一份**（开关与菜单项都不重写第二套） */}
+      {/* 右键上下文菜单：**媒体预览那一份**（开关与菜单项都不重写第二套）。
+          「更换封面」经 `extraItems` 插槽挂进来——那是**图书特有**的能力，
+          媒体预览没有封面可言（用户口径 2026-10-09）。 */}
       {menu.target && (
         <MediaContextMenu
           target={menu.target}
@@ -245,6 +303,16 @@ export function BookPreviewPanel({ api: panelApi }: BookPreviewPanelProps = {}):
           actions={actions}
           onClose={menu.close}
           t={app.t}
+          extraItems={
+            <BookCoverMenu
+              hasOverride={menuFileOverride !== null}
+              onPickColor={(color) => void applyCover("color", color)}
+              onPickImage={(path) => void applyCover("image", path)}
+              onClear={() => void clearCover()}
+              onClose={menu.close}
+              t={app.t}
+            />
+          }
         />
       )}
     </div>

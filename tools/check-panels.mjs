@@ -2910,6 +2910,10 @@ const BOOK_FAMILY_FILES = [
   "apps/desktop/src/app_ui/panels/bookpreview/bookPreviewView.ts",
   "apps/desktop/src/app_ui/panels/bookpreview/bookMetaCache.ts",
   "apps/desktop/src/app_ui/panels/bookpreview/useBookMeta.ts",
+  // 封面覆盖（用户口径 2026-10-09："txt 右键可以更换封面颜色或自定义图片"）
+  "apps/desktop/src/app_ui/panels/bookpreview/bookCoverCache.ts",
+  "apps/desktop/src/app_ui/panels/bookpreview/useBookCoverOverride.ts",
+  "apps/desktop/src/app_ui/panels/bookpreview/BookCoverMenu.tsx",
 ];
 const bookFamilySrc = BOOK_FAMILY_FILES.map((p) => readFileSync(join(ROOT, p), "utf8")).join("\n");
 const bookViewSrc = readFileSync(BOOK_FAMILY_FILES[8], "utf8");
@@ -3086,6 +3090,16 @@ check(
 
 // 文件名滚轮横滚：**必须是原生非被动监听**。
 const bookCardSrc = readFileSync(join(ROOT, BOOK_FAMILY_FILES[1]), "utf8");
+/** 共享右键菜单源码（封面覆盖经它的 `extraItems` 插槽挂进来）。 */
+const mediaMenuSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewMenu.tsx"),
+  "utf8",
+);
+// 封面覆盖相关的家族文件（在下面的断言里被多处引用，提前读以免踩 `const` 的 TDZ）。
+const bookCoverArtSrc = readFileSync(join(ROOT, BOOK_FAMILY_FILES[5]), "utf8");
+const bookTextCoverSrc = readFileSync(join(ROOT, BOOK_FAMILY_FILES[6]), "utf8");
+const bookCoverCacheSrc = readFileSync(join(ROOT, BOOK_FAMILY_FILES[11]), "utf8");
+const bookCoverMenuSrc = readFileSync(join(ROOT, BOOK_FAMILY_FILES[13]), "utf8");
 const bookCardCode = stripComments(bookCardSrc);
 check(
   "文件名滚轮横滚走**原生监听器 + { passive: false }**（React 的 onWheel 是被动的，preventDefault 无效）",
@@ -3128,6 +3142,105 @@ check(
     // 右栏 flex: none——"不填充剩余空间"在布局层面的字面保证。
     /\.bp-cover-cell-info\s*\{[^}]*flex:\s*none/.test(stylesSource),
 );
+
+// ---- 封面外观：**白底 + 容器阴影**（2026-10-09 用户口径）----
+//
+// 用户原话："图书预览的 epub 的封面的背景改为白色，并为封面容器添加阴影"。
+// 两件事都必须在**同一份 CSS** 上（三种视图共用 `.bp-art`），否则只有一种视图变。
+check(
+  "封面容器白底（不跟主题走）+ 有投影（用户口径 2026-10-09）",
+  // 底色必须是**字面白色**而不是主题变量：跟主题走会在深色下变成一圈深灰，
+  // 看着像图没加载完（`contain` 留出的就是这层底色）。
+  /\.bp-art\s*\{[^}]*background:\s*#fff/i.test(stylesSource) &&
+    // 投影：两段（近处实、远处散）。
+    /\.bp-art\s*\{[^}]*box-shadow:/.test(stylesSource) &&
+    // 深色主题下另给一组更重的投影（同样的 alpha 在深底上几乎看不见）。
+    /\.app-root\.theme-dark\s+\.bp-art\s*\{[^}]*box-shadow:/.test(stylesSource),
+);
+check(
+  "内嵌封面加载完成后藏起打底的文字封面（否则 `contain` 的白边里会透出彩色渐变）",
+  /\.bp-art\.bp-art-loaded\s+\.bp-textcover\s*\{[^}]*display:\s*none/.test(stylesSource) &&
+    // 面板侧：有图时才加 `bp-art-loaded`（加载中 / 失败时文字封面仍在 = 无空窗）。
+    /bp-art-loaded/.test(bookCoverArtSrc) &&
+    /className=\{`bp-art\$\{imageSrc \? " bp-art-loaded" : ""\}`\}/.test(bookCoverArtSrc),
+);
+
+// ---- 封面覆盖：颜色 / 自定义图片（2026-10-09 用户口径："txt 右键可以更换封面颜色或自定义图片"）----
+//
+// 这一段的守护重点是四件**看不见就必然是缺陷**的事：
+// 1. **优先级**：图片覆盖 > 颜色覆盖 > 内嵌封面 / 文字封面。颜色必须**压过内嵌封面**，
+//    否则对 epub 设颜色毫无效果（图盖在上面），用户会以为功能坏了；
+// 2. **不是第二份菜单**：挂在共享菜单的 `extraItems` 插槽里（缺陷 0013 的 portal 口径）；
+// 3. **批量取**：一页几百本不能逐本一次 IPC；且**按 id 记账**而不是按仓库整体去重
+//    （翻页时每次带的 id 更多，整体去重会让新一页的封面永远取不到）；
+// 4. **目录穿越**：库里的文件名会拼进磁盘路径，安全校验在后端（`hp_core`）与桥接层各一道。
+
+check(
+  "封面覆盖的**优先级**：图片 > 颜色 > 内嵌封面（颜色必须压过内嵌封面）",
+  // 颜色覆盖时不出内嵌封面（`override === null` 是内嵌封面的前提）。
+  /const embedded = override === null && coverUrl \? coverUrl : null;/.test(bookCoverArtSrc) &&
+    // 图源：覆盖图片优先，其次内嵌。
+    /const candidate = overrideImage \?\? embedded;/.test(bookCoverArtSrc) &&
+    // 文字封面接颜色覆盖（用户选的纯色）。
+    /colorOverride=\{override\?\.kind === "color" \? override\.value : null\}/.test(
+      bookCoverArtSrc,
+    ) &&
+    // 文字封面：给了颜色就用它，否则回落到派生色相的渐变。
+    /const background =\s*\n?\s*colorOverride \?\?/.test(bookTextCoverSrc),
+);
+check(
+  "图片加载失败按**图源**记录（不是一个布尔）：内嵌封面失败不得压住用户设的图片",
+  /const \[failedSrc, setFailedSrc\] = useState<string \| null>\(null\)/.test(bookCoverArtSrc) &&
+    /candidate !== failedSrc \? candidate : null/.test(bookCoverArtSrc) &&
+    // 反向：不得再用一个布尔去表达"哪张图失败了"。
+    !/const \[failed, setFailed\] = useState\(false\)/.test(bookCoverArtSrc),
+);
+check(
+  "「更换封面」挂在**共享菜单的插槽**里（不是第二份菜单）",
+  /extraItems\?: ReactNode;/.test(mediaMenuSrc) &&
+    // 共享菜单把它渲染在标准动作之后、删除之前。
+    /\{extraItems && \(/.test(mediaMenuSrc) &&
+    /extraItems=\{\s*\n?\s*<BookCoverMenu/.test(bookFamilySrc) &&
+    // 反向：图书家族不得再 import portal 容器自己拼一份（缺陷 0013 的 portal 口径）。
+    !/from "\.\.\/menu\/ContextMenu"/.test(bookFamilySrc),
+);
+check(
+  "封面覆盖**批量取**（一页一次），且按 **id 粒度**记账（翻页时 id 会变多）",
+  /export function loadBookCovers\(repoId: string, fileIds: string\[\]\)/.test(bookCoverCacheSrc) &&
+    /const fresh = fileIds\.filter\(\(id\) => !done\.has\(id\)\)/.test(bookCoverCacheSrc) &&
+    // 面板在 `items` 变化时批量拉一次。
+    /void loadBookCovers\(\s*\n?\s*app\.repoId,\s*\n?\s*items\.map\(\(item\) => item\.id\),\s*\n?\s*\);/.test(
+      bookFamilySrc,
+    ) &&
+    // 反向：不得逐本发一次命令（那正是批量要避免的形态）。
+    !/items\.map\(\(item\) => void loadBookCovers/.test(bookFamilySrc),
+);
+check(
+  "改完封面**失效缓存 + 刷新**（刷新会让批量取重跑，界面随即跟上）",
+  /invalidateBookCovers\(app\.repoId\)/.test(bookFamilySrc) &&
+    /invalidateBookCovers\(repoId\)/.test(bookFamilySrc) &&
+    /app\.refresh\(\)/.test(bookFamilySrc) &&
+    // 失效必须把**记账**也清掉，否则那一本被记为"已请求过"、重新拉不到。
+    /requestedIds\.delete\(repoId\)/.test(bookCoverCacheSrc),
+);
+check(
+  "封面设置失败要报错（静默失败会让用户以为「设了但没生效」）",
+  /book\.cover\.setFailed/.test(bookFamilySrc) &&
+    /errorTextOf\(app\.t, e\)/.test(bookFamilySrc),
+);
+check(
+  "「恢复默认」只在**真有覆盖**时给出（否则是一个必然无效果的空操作）",
+  /hasOverride &&/.test(bookCoverMenuSrc) &&
+    /hasOverride=\{menuFileOverride !== null\}/.test(bookFamilySrc),
+);
+check(
+  "颜色是**预设色板 + 系统取色器**两种入口（快速挑一个 / 任意颜色）",
+  /BOOK_COVER_PRESET_COLORS/.test(bookCoverMenuSrc) &&
+    /type="color"/.test(bookCoverMenuSrc) &&
+    /\.bp-cover-swatch\s*\{/.test(stylesSource) &&
+    /\.bp-cover-picker\s*\{/.test(stylesSource),
+);
+
 
 // ---- 右键菜单（2026-10-09 用户口径："图书预览用媒体预览同款右键菜单"）----
 //

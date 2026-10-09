@@ -52,9 +52,11 @@ crates/hp-store/src/
     source_repo.rs    file_repo.rs   album_repo.rs
     tag_repo.rs       tag_relation_repo.rs  tag_tree.rs
     rating_repo.rs    color_repo.rs
+    cover_repo.rs     # 文件**封面覆盖**（用户自设的颜色 / 图片，迁移 0009；批量取 + 取值校验）
     ops_repo.rs       ai_undo_repo.rs
     blueprint_repo.rs # 蓝图（整文档 JSON，RFC 0007；写库前归一化 schema 版本 + 打开时一次性迁移回写）
     source_tree.rs
+    purge_repo.rs     # 卸载源的逐表清理清单（`DERIVED_TABLES`：**新增引用 files(id) 的表必须登记**）
   global/             # 全局配置库
     global_db.rs      plugin_repo.rs
     blueprint_template_repo.rs  # 应用级共享的蓝图模板
@@ -65,7 +67,7 @@ crates/hp-store/src/
     tag_lib_set.rs    # 四库**聚合查询层**：用户库 > 扩展包 > 内置基底的统一视图（TagLibSet）
     tag_lib_merge.rs  # 多扩展包之间的**重复概念归并**（MergeIndex，D36.3）
   migrations/         # 迁移 SQL（forward-only，发布后禁止修改；权威文本在这些文件里）
-    repo/             # 仓库库：0001_init … 0008_text_subtype.sql（当前版本 = 8）
+    repo/             # 仓库库：0001_init … 0009_file_covers.sql（当前版本 = 9）
     global/           # 全局配置库：0001_init … 0004_layout_layers.sql（当前版本 = 4）
     dict/             # tag 词库：0001_init.sql
                       # 注意：**没有** `dict_lib/` 目录——实际只有 repo/ global/ dict/ 三个。
@@ -160,6 +162,12 @@ apps/desktop/src/app_ui/
                       #   bookPreviewData.ts 取数（file.query 过滤 mediaTypes:['text']；不按相册）
                       #   bookMetaCache.ts 元数据缓存（结果缓存 + in-flight 去重）
                       #   useBookMeta.ts 单本读取（只对需要内嵌封面的书发 book.meta）
+                      #   --- 封面覆盖（用户口径 2026-10-09："txt 右键可以更换封面颜色或自定义图片"）---
+                      #   bookCoverCache.ts 覆盖的批量缓存（按 **id 粒度**记账：翻页时 id 变多，
+                      #     按仓库整体去重会让新一页的封面永远取不到）+ 版本号订阅
+                      #   useBookCoverOverride.ts 单元侧同步读（不发命令；发命令是面板的事）
+                      #   BookCoverMenu.tsx 右键菜单里的「更换封面」（预设色板 + 取色器 + 选图 + 恢复默认），
+                      #     经共享菜单的 `extraItems` 插槽挂进来（不是第二份菜单）
     MetadataPanel.tsx # 元数据面板（索引字段 + EXIF/ffprobe 摘要；消费宿主设置 ui.sizeUnit/dateFormat/dateShowTime）
     metadataInfo.ts   # 元数据面板的**纯解析**（ffprobe 原始 JSON、EXIF 摘要 → 尺寸/时长/编码/码率/帧率）
     MediaPreviewPanel.tsx   # 媒体预览主面板（列表行渲染 + 三种视图容器 + 图片尺寸 CSS 变量）

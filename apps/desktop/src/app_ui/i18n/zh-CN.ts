@@ -225,6 +225,14 @@ export const zhCN = {
   "book.count": "共 {n} 本",
   "book.empty": "当前来源下没有可预览的图书（支持 txt / md / epub）",
   "book.loadFailed": "图书列表加载失败：{err}",
+  // 封面覆盖（右键菜单；用户口径 2026-10-09："txt 右键可以更换封面颜色或自定义图片"）
+  "book.cover.title": "更换封面",
+  "book.cover.pickColor": "换颜色",
+  "book.cover.customColor": "自定义颜色",
+  "book.cover.pickImage": "选择图片…",
+  "book.cover.imageFilter": "图片",
+  "book.cover.reset": "恢复默认封面",
+  "book.cover.setFailed": "设置封面失败：{err}",
 
   // 扫描进度浮窗
   "scan.title": "正在扫描源",

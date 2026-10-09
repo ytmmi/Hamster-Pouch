@@ -219,6 +219,14 @@ export const en: Record<keyof DictZhCN, string> = {
   "book.count": "{n} books",
   "book.empty": "No books to preview under the current source (txt / md / epub)",
   "book.loadFailed": "Failed to load books: {err}",
+  // Cover override (context menu; user ruling 2026-10-09)
+  "book.cover.title": "Change cover",
+  "book.cover.pickColor": "Change colour",
+  "book.cover.customColor": "Custom colour",
+  "book.cover.pickImage": "Choose image…",
+  "book.cover.imageFilter": "Images",
+  "book.cover.reset": "Reset to default cover",
+  "book.cover.setFailed": "Failed to set cover: {err}",
 
   // Scan progress overlay
   "scan.title": "Scanning source",

@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 
 import { ContextMenu } from "../menu/ContextMenu";
 import type { Translate } from "../i18n";
@@ -72,6 +72,7 @@ export function MediaContextMenu({
   actions,
   onClose,
   t,
+  extraItems,
 }: {
   target: MediaContextMenuTarget;
   /** 已选中条目数：重命名 / 复制路径 / 重新分析只在**单选**时给出。 */
@@ -82,6 +83,15 @@ export function MediaContextMenu({
   onClose: () => void;
   /** 翻译函数。 */
   t: Translate;
+  /**
+   * **面板特有的附加菜单项**（可选）：渲染在四类标准动作之后、「删除选中」之前。
+   *
+   * 为什么是插槽而不是"各面板自己拼菜单"：菜单的开关、光标定位、越界翻侧
+   * （缺陷 0013 的 portal 口径）与四类标准动作**只有一份实现**，各面板不该复制它。
+   * 图书预览用它挂"更换封面"（用户口径 2026-10-09："txt 右键可以更换封面颜色或
+   * 自定义图片"）——那是**图书特有**的能力，媒体预览没有封面可言。
+   */
+  extraItems?: ReactNode;
 }): JSX.Element {
   // 内联重命名输入状态
   const [renaming, setRenaming] = useState(false);
@@ -151,6 +161,13 @@ export function MediaContextMenu({
             >
               {t("media.reanalyzeFile")}
             </button>
+          )}
+          {/* 面板特有的附加项（如图书预览的「更换封面」）；没有就不占位。 */}
+          {extraItems && (
+            <>
+              <div className="menu-sep" />
+              {extraItems}
+            </>
           )}
           <div className="menu-sep" />
           <button

@@ -24,3 +24,5 @@ export type { BlueprintValidateResult } from "./BlueprintValidateResult";
 export type { BlueprintTemplateItem } from "./BlueprintTemplateItem";
 export type { BookBlockItem } from "./BookBlockItem";
 export type { BookContentResult } from "./BookContentResult";
+export type { BookCoverResult } from "./BookCoverResult";
+export type { BookCoverItem } from "./BookCoverItem";

@@ -19,6 +19,7 @@ import type { FileItem } from "../../shared/types";
 import { BookCoverArt } from "./BookCoverArt";
 import { BookRowInfo } from "./BookRowInfo";
 import { bookDisplayName } from "./bookPreviewView";
+import { useBookCoverOverride } from "./useBookCoverOverride";
 import { useBookMeta } from "./useBookMeta";
 
 export interface BookListRowProps {
@@ -41,6 +42,7 @@ export const BookListRow = memo(function BookListRow({
 }: BookListRowProps): JSX.Element {
   const name = bookDisplayName(item.relative_path);
   const meta = useBookMeta(repoId, item);
+  const override = useBookCoverOverride(repoId, item.id);
   return (
     <div
       className={`bp-row${selected ? " selected" : ""}`}
@@ -50,7 +52,7 @@ export const BookListRow = memo(function BookListRow({
         onContextMenu(item, e);
       }}
     >
-      <BookCoverArt name={name} coverUrl={meta?.coverUrl ?? null} />
+      <BookCoverArt name={name} coverUrl={meta?.coverUrl ?? null} override={override} />
       <div className="bp-row-info">
         <BookRowInfo
           name={name}

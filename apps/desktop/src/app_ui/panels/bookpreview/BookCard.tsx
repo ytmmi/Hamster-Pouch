@@ -21,6 +21,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import type { FileItem } from "../../shared/types";
 import { BookCoverArt } from "./BookCoverArt";
 import { bookDisplayName, nextScrollLeft } from "./bookPreviewView";
+import { useBookCoverOverride } from "./useBookCoverOverride";
 import { useBookMeta } from "./useBookMeta";
 
 export interface BookCardProps {
@@ -43,6 +44,7 @@ export const BookCard = memo(function BookCard({
 }: BookCardProps): JSX.Element {
   const name = bookDisplayName(item.relative_path);
   const meta = useBookMeta(repoId, item);
+  const override = useBookCoverOverride(repoId, item.id);
   const nameRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
@@ -71,7 +73,7 @@ export const BookCard = memo(function BookCard({
         onContextMenu(item, e);
       }}
     >
-      <BookCoverArt name={name} coverUrl={meta?.coverUrl ?? null} />
+      <BookCoverArt name={name} coverUrl={meta?.coverUrl ?? null} override={override} />
       {/* `tabIndex` 让"焦点在文件名上"也**字面上**成立（键盘用户同样能滚轮查看）。 */}
       <span className="bp-name" ref={nameRef} tabIndex={0} title={item.relative_path}>
         {name}

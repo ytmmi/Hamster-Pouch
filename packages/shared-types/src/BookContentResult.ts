@@ -2,8 +2,7 @@
 import type { BookBlockItem } from "./BookBlockItem";
 
 /**
- * `book.content` 返回：查看器要显示的正文**一页**。
- *
+ * `book.content` 返回：查看器要显示的正文**一页**。///
  * 两种文件走同一个返回体（用户 2026-10-09 口径：txt 与 epub 都在查看器里看）：
  * - `txt` / `md`：一页就是一段连续文本（`text` 非空、`blocks` 为空）；
  * - `epub`：一页就是**一个章节**的块（`blocks` 非空、`text` 为空）。

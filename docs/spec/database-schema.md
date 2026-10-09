@@ -317,6 +317,48 @@ CREATE TABLE color_refs (
 > ——前端 `apps/desktop/src/app_ui/shared/paletteJson.ts` 据此把**旧版本缓存当作「未提取」并自动重算**
 > （色板规模从 6 改到 8 就是靠它自愈，D81）；手动锁定写 `locked:true`，**不受版本影响**。
 
+### 4.5.1 文件封面覆盖 `file_covers`（迁移 repo/0009）
+
+```sql
+-- 用户口径（2026-10-09）："txt 右键可以更换封面颜色或自定义图片"。
+-- 一本书的默认封面是**算出来的**（epub 取内嵌封面、其余文本按作品名派生文字封面），
+-- 本表存用户**显式指定**的封面，优先级高于那两套默认。
+CREATE TABLE file_covers (
+  file_id    TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL,             -- color|image
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+);
+```
+
+> **为什么按 `file_id` 存而不是内容哈希**：这是**用户在某个条目上的选择**，不是内容的属性
+> （与 `subtype` / `ratings` 同一口径）。`file_id` 在重扫时保持不变（`hp-scanner` 的 `write_one`
+> 复用既有 id），因此重扫 / 重新分析都不会把用户设的封面打回默认。
+>
+> **为什么颜色与图片用同一张表**：两者是**同一个决策的两种取值**（"这本书的封面长什么样"），
+> 互斥且必选其一；分成两张表就会出现"同时有颜色和图片、优先级靠代码约定"的状态。
+> `kind` 区分，一行只表达一种，`ON CONFLICT(file_id)` 天然实现"换一种就顶掉另一种"。
+>
+> **`value` 的含义随 `kind` 变**：`color` → `#rrggbb` 小写（`hp_core::normalize_cover_color`
+> 规范化后写入，**只接受这一种形态**——三位简写 / 颜色名 / `rgb()` 一律拒绝，否则同一个颜色
+> 会有多种写法，"去重"与"比较"都失去意义）；`image` → `data\user\covers\` 下的**裸文件名**
+> （`hp_core::is_safe_cover_file_name` 校验）。
+>
+> **`image` 为什么存裸文件名而不是绝对路径**：`data\user\covers\` 的位置随安装目录变
+> （开发包与发布包不同、整夹搬走也不同），存绝对路径会在换位置后全部失效——这正是全局库
+> `repos.repo_db_path` 需要在打包时被改写的那种麻烦。命令返回时再把文件名拼成**当前**的
+> 绝对路径给前端 `convertFileSrc`。
+>
+> **安全边界**：`value` 会被拼进磁盘路径去读文件，因此放行 `..` / 路径分隔符就等于让库里的
+> 一行决定"读哪个文件"（目录穿越）。校验做在**两处**：`hp-core` 的 `is_safe_cover_file_name`
+> （仓储写入前）与桥接层的 `copy_cover_image`（用 `file_id` 拼文件名前）。
+>
+> **孤儿清理**：文件行被删除（回收站 / 卸载源）时覆盖随 `ON DELETE CASCADE` 消失；
+> `data\user\covers\` 下的图片文件由 `book.clearCover` / 换图时的 `prune_other_cover_images` 删除。
+> 卸载源的逐表清理清单（`purge_repo.rs` 的 `DERIVED_TABLES`）也显式登记了本表——
+> 不依赖 `foreign_keys` 开关是否恰好打开，也便于清点。
+
 ### 4.6 相册（与 RFC 0002 数据模型草案一致）
 
 ```sql
@@ -468,7 +510,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blueprints_default
 ## 5. 迁移策略
 
 - 三库**共用同一个版本追踪机制**：`PRAGMA user_version`。读：`crates/hp-store/src/migrate.rs:12`；版本号以"迁移数组下标 + 1"推导（`migrate.rs:16`）；每次未执行版本单开事务执行后写回（`migrate.rs:23`）。三库分别在 `crates/hp-store/src/repo/repo_db.rs:71`、`crates/hp-store/src/global/global_db.rs:65`、`crates/hp-store/src/dict/dict_db.rs:41` 调用同一个 `migrate::apply`。
-  - **当前仓库库版本 = 8**（`0008` 为 `files.subtype` 列；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs:92`）。
+  - **当前仓库库版本 = 9**（`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
   - **当前全局配置库版本 = 4**（`global/0001_init` … `global/0004_layout_layers`，见 `crates/hp-store/src/global/global_db.rs:15`-`18` 的四个 `include_str!`）；全局库内**没有**镜像表（7 张表里没有 `global_meta`）。
   - **当前词库版本 = 1**（`dict_db.rs:19`）；`dict_meta`（`dict/0001:6-9`）是数据元信息 K/V，**不是** schema 版本。
 - **`repo_meta.schema_version` 是**镜像键**，每次打开仓库库都按权威值回写**（2026-09 修复缺陷 0006）：`repo_db.rs:86`-`89`（`sync_schema_version_meta`）在 `repo_db.rs:78`-`79`（`open_inner` 汇总点，`migrate::apply` 与蓝图文档迁移之后）执行，**新建与打开两条路径共用这一处**，因此升级过的库不再与 `user_version` 分叉。回写**不能**下沉到 `migrate::apply`（`migrate.rs:10`）：那个执行器由仓库库/全局库/词库共用，且全局库与词库**没有** `repo_meta`。**版本判断一律以 `PRAGMA user_version` 为准**，不要读镜像键（该键仍无读取方）。

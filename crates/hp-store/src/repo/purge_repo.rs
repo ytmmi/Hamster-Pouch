@@ -51,6 +51,8 @@ pub struct SourceDataCounts {
     pub ratings: u64,
     /// 色彩参考数。
     pub color_refs: u64,
+    /// 封面覆盖数（用户自设的封面颜色 / 图片，迁移 0009）。
+    pub covers: u64,
     /// AI 覆盖撤销记录条数。
     pub ai_undo: u64,
     /// 因该源被卸载而改为普通（fixed）的跟随相册数。
@@ -62,7 +64,7 @@ pub struct SourceDataCounts {
 impl SourceDataCounts {
     /// 需要逐行清理的派生数据条数（不含 `files`、同步规则与子源）。
     pub fn derived_total(&self) -> u64 {
-        self.album_members + self.tags + self.ratings + self.color_refs + self.ai_undo
+        self.album_members + self.tags + self.ratings + self.color_refs + self.covers + self.ai_undo
     }
 }
 
@@ -93,12 +95,17 @@ pub enum PurgePhase {
 }
 
 /// 引用 `files(id)` 的派生数据表（按删除顺序）。
+///
+/// **新增引用 `files(id)` 的表必须登记在这里**：卸载源要把它清干净，
+/// 漏一张就会留下指向已删文件的孤儿行（`file_covers` 虽带 `ON DELETE CASCADE`，
+/// 但这里显式列出——不依赖 `foreign_keys` 开关是否恰好打开，也便于清点）。
 const DERIVED_TABLES: &[&str] = &[
     "album_member",
     "file_tags",
     "file_auto_tags",
     "ratings",
     "color_refs",
+    "file_covers",
     "ai_tag_undo",
 ];
 
@@ -126,6 +133,7 @@ impl RepoDb {
             tags: count("file_tags")? + count("file_auto_tags")?,
             ratings: count("ratings")?,
             color_refs: count("color_refs")?,
+            covers: count("file_covers")?,
             ai_undo: count("ai_tag_undo")?,
             sync_albums: scalar("SELECT COUNT(*) FROM album_sync_rule WHERE source_id = ?1")?,
             child_sources: scalar("SELECT COUNT(*) FROM sources WHERE parent_source_id = ?1")?,
@@ -228,6 +236,7 @@ impl RepoDb {
                 "file_tags" | "file_auto_tags" => removed.tags += n,
                 "ratings" => removed.ratings = n,
                 "color_refs" => removed.color_refs = n,
+                "file_covers" => removed.covers = n,
                 "ai_tag_undo" => removed.ai_undo = n,
                 _ => {}
             }

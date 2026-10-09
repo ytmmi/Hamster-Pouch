@@ -18,6 +18,7 @@ const REPO_MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/repo/0006_blueprint.sql"),
     include_str!("../../migrations/repo/0007_album_member_file_index.sql"),
     include_str!("../../migrations/repo/0008_text_subtype.sql"),
+    include_str!("../../migrations/repo/0009_file_covers.sql"),
 ];
 
 /// 仓库库句柄。

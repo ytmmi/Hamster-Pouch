@@ -402,6 +402,18 @@ pub(crate) fn default_repo_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// 用户**自定义封面**目录（`<exe 同目录>\data\user\covers\`）。
+///
+/// 为什么放 `user\`：这是**用户数据**（用户自己挑的图片），不是可重建的缓存——
+/// 放 `thumbnails\` 会被当缓存清掉，放 `system\` 又会进发布包（那是应用自身数据）。
+/// 按 `data\user\` 的既定口径，它随开发包整体带走、**不进发布包**
+/// （`tools/package-build.mjs` 排除整个 `user\`）。
+pub(crate) fn user_covers_dir() -> Result<PathBuf, String> {
+    let dir = app_data_root()?.join("user").join("covers");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建封面目录失败: {e}"))?;
+    Ok(dir)
+}
+
 /// 从工作目录与可执行文件目录出发，逐级向上查找仓库内相对路径（如 `external-cli/...`）。
 ///
 /// 为什么必须向上找：开发期 `tauri dev` 以 `apps/desktop/src-tauri` 为工作目录运行二进制，

@@ -218,6 +218,14 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "book.count": "共 {n} 本",
   "book.empty": "目前來源下沒有可預覽的圖書（支援 txt / md / epub）",
   "book.loadFailed": "圖書清單載入失敗：{err}",
+  // 封面覆蓋（右鍵選單；使用者口徑 2026-10-09）
+  "book.cover.title": "更換封面",
+  "book.cover.pickColor": "換顏色",
+  "book.cover.customColor": "自訂顏色",
+  "book.cover.pickImage": "選擇圖片…",
+  "book.cover.imageFilter": "圖片",
+  "book.cover.reset": "恢復預設封面",
+  "book.cover.setFailed": "設定封面失敗：{err}",
 
   // 掃描進度浮窗
   "scan.title": "正在掃描源",
