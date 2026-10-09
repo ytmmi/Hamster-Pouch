@@ -9,9 +9,14 @@
  * - 只有在**真的被省略**（`scrollWidth > clientWidth`）时才拦截：没超长的名字
  *   不该把滚轮吃掉，否则每个单元都变成滚动黑洞；
  * - 位移算术在纯函数 `nextScrollLeft` 里（门禁按行为断言它）。
+ *
+ * 选中与右键：本单元只把"点的是哪一本"回传面板（`onSelect` / `onContextMenu`），
+ * 选中集口径、菜单定位与菜单项都在面板侧（与媒体预览的单元同款）；右键的
+ * `preventDefault()` 在单元里做掉，免得 WebView 的默认菜单先弹出来。
  */
 
 import { memo, useEffect, useRef } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 
 import type { FileItem } from "../../shared/types";
 import { BookCoverArt } from "./BookCoverArt";
@@ -21,9 +26,21 @@ import { useBookMeta } from "./useBookMeta";
 export interface BookCardProps {
   repoId: string | null;
   item: FileItem;
+  /** 是否选中（选中态样式，同时是右键菜单的删除目标）。 */
+  selected: boolean;
+  /** 单击选中本项（面板负责选中集口径）。 */
+  onSelect: (file: FileItem) => void;
+  /** 右键：面板负责落选中、光标定位与渲染菜单。 */
+  onContextMenu: (file: FileItem, e: ReactMouseEvent) => void;
 }
 
-export const BookCard = memo(function BookCard({ repoId, item }: BookCardProps): JSX.Element {
+export const BookCard = memo(function BookCard({
+  repoId,
+  item,
+  selected,
+  onSelect,
+  onContextMenu,
+}: BookCardProps): JSX.Element {
   const name = bookDisplayName(item.relative_path);
   const meta = useBookMeta(repoId, item);
   const nameRef = useRef<HTMLSpanElement | null>(null);
@@ -46,7 +63,14 @@ export const BookCard = memo(function BookCard({ repoId, item }: BookCardProps):
   }, [name]);
 
   return (
-    <div className="bp-card">
+    <div
+      className={`bp-card${selected ? " selected" : ""}`}
+      onClick={() => onSelect(item)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu(item, e);
+      }}
+    >
       <BookCoverArt name={name} coverUrl={meta?.coverUrl ?? null} />
       {/* `tabIndex` 让"焦点在文件名上"也**字面上**成立（键盘用户同样能滚轮查看）。 */}
       <span className="bp-name" ref={nameRef} tabIndex={0} title={item.relative_path}>

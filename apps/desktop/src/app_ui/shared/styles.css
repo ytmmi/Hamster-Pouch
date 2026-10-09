@@ -1835,6 +1835,19 @@ button.danger {
   gap: 4px;
 }
 
+/* 选中态：三种视图（卡片 / 列表 / 封面）**同一份**，取与媒体预览同款的 token
+   （`--sel-border` / `--sel-bg`）。用 `outline` 而不是 `border`：三视图的几何
+   （卡片网格列数、封面模式"固定列宽不拉伸"）都不该因为选中多了 1px 边框而挪位；
+   `outline-offset: -1px` 让环画在单元内侧，不吃掉 10px 的列/行间距。 */
+.bp-card.selected,
+.bp-row.selected,
+.bp-cover-cell.selected {
+  outline: 1px solid var(--sel-border);
+  outline-offset: -1px;
+  background: var(--sel-bg);
+  border-radius: 4px;
+}
+
 /* ===== 查看器面板 ===== */
 
 .viewer-panel {

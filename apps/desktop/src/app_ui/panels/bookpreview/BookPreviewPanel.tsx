@@ -20,15 +20,27 @@
  * 理由见 `bookPreviewData.ts`）。当前不做虚拟化：文本库的量级是几十到几百本，
  * 与"数万张图"不是一个问题（媒体预览的虚拟化是为后者的量级做的）。
  *
+ * 右键菜单（2026-10-09）**与媒体预览同款**：开关状态与菜单项复用媒体预览那一份
+ * （`../mediaPreviewMenu`），四类动作复用 `../mediaPreviewActions`（只把删除的相册分流
+ * 关掉，见下），三种视图的单元接同一套 `selected` / `onSelect` / `onContextMenu`。
+ * 选中集用的是**全局那一份**（`app.selectedIds`，媒体预览同一口径），因此本面板的
+ * "选中"只有单选：范围选择 / Ctrl 切换 / 拖拽是媒体预览的交互（连带蓝图事件源），
+ * 文本库的量级（几十–几百本）用不上，本版不引入。
+ *
  * 面板设置走 `shared/settingValue.ts`（四条触发源），因此需要 dockview 面板 API。
  */
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { useApp } from "../../core/AppContext";
 import type { PanelRenderCtx } from "../../core/panelRegistry";
 import { usePanelForeground } from "../../shared/panelForeground";
 import { usePanelSettingValue } from "../../shared/settingValue";
+import { useStableCallback } from "../../shared/stableCallback";
+import type { FileItem } from "../../shared/types";
+import { useMediaFileActions } from "../mediaPreviewActions";
+import { MediaContextMenu, useMediaContextMenu } from "../mediaPreviewMenu";
 import { BookCard } from "./BookCard";
 import { BookCoverCell } from "./BookCoverCell";
 import { BookListRow } from "./BookListRow";
@@ -76,6 +88,61 @@ export function BookPreviewPanel({ api: panelApi }: BookPreviewPanelProps = {}):
   const { items, loading } = useBookPreviewData();
   // 后台标签冻结：dockview 把非激活标签留在 DOM 里，不冻结就会为看不见的书取封面。
   const foreground = usePanelForeground(panelApi);
+
+  // 右键菜单的开关状态与光标定位：**媒体预览那一份**（`../mediaPreviewMenu`）。
+  const menu = useMediaContextMenu();
+  /**
+   * 四类文件动作同款，只把**删除的相册分流**关掉：文本类文件进不了相册成员列表
+   * （相册成员分页只认 image / video / audio），跟着"当前选中的相册"走会把删除
+   * 变成"移出相册 0 项"的静默空操作——文件还在盘上。
+   */
+  const actions = useMediaFileActions({ albumScoped: false });
+
+  /** 单击选中本项（单选：本面板不引入范围/Ctrl 多选，理由见文件头）。 */
+  const selectBook = useCallback(
+    (file: FileItem) => {
+      app.setSelectedIds(new Set([file.id]));
+      app.setSelectedFile(file);
+    },
+    [app],
+  );
+
+  /**
+   * 右键前的选中口径（与媒体预览同款）：未选中项先单选，已选中则保持当前选中集
+   * （因此"右键已选中的那本"不会把多选打散）。
+   */
+  const ensureSelected = useCallback(
+    (file: FileItem) => {
+      if (!app.selectedIds.has(file.id)) {
+        app.setSelectedIds(new Set([file.id]));
+        app.setSelectedFile(file);
+      }
+    },
+    [app],
+  );
+
+  /** 在光标位置打开菜单（先按选中口径落选中，再由菜单的 `open` 挡掉默认菜单）。 */
+  const openMenu = useCallback(
+    (file: FileItem, e: ReactMouseEvent) => {
+      ensureSelected(file);
+      menu.open(file, e);
+    },
+    [ensureSelected, menu],
+  );
+
+  // 单元是 `memo` 的：两个回调必须收敛为**恒定引用**，否则每次选中变化都会重渲整列书。
+  const cellSelect = useStableCallback(selectBook);
+  const cellContextMenu = useStableCallback(openMenu);
+
+  /**
+   * 菜单里"重命名 / 复制路径 / 重新分析"只在**单选**时给出，"删除选中"恒有
+   * （与媒体预览的菜单口径逐项一致）。计数按**本面板列出的书**算，
+   * 不让别处残留的选中项影响这个判断。
+   */
+  const selectedCount = useMemo(
+    () => items.reduce((n, item) => (app.selectedIds.has(item.id) ? n + 1 : n), 0),
+    [items, app.selectedIds],
+  );
 
   // `--bp-cover-size` 供全部三种视图共用；`--bp-desc-lines` 是简介的截断行数
   // （列表 / 封面模式按封面高度推得，见 `bookDescLineCount`）。
@@ -127,26 +194,58 @@ export function BookPreviewPanel({ api: panelApi }: BookPreviewPanelProps = {}):
           {app.repoId && items.length > 0 && view === "card" && (
             <div className="bp-cards">
               {items.map((item) => (
-                <BookCard key={item.id} repoId={app.repoId} item={item} />
+                <BookCard
+                  key={item.id}
+                  repoId={app.repoId}
+                  item={item}
+                  selected={app.selectedIds.has(item.id)}
+                  onSelect={cellSelect}
+                  onContextMenu={cellContextMenu}
+                />
               ))}
             </div>
           )}
           {app.repoId && items.length > 0 && view === "list" && (
             <div className="bp-rows">
               {items.map((item) => (
-                <BookListRow key={item.id} repoId={app.repoId} item={item} />
+                <BookListRow
+                  key={item.id}
+                  repoId={app.repoId}
+                  item={item}
+                  selected={app.selectedIds.has(item.id)}
+                  onSelect={cellSelect}
+                  onContextMenu={cellContextMenu}
+                />
               ))}
             </div>
           )}
           {app.repoId && items.length > 0 && view === "cover" && (
             <div className="bp-cover-grid">
               {items.map((item) => (
-                <BookCoverCell key={item.id} repoId={app.repoId} item={item} />
+                <BookCoverCell
+                  key={item.id}
+                  repoId={app.repoId}
+                  item={item}
+                  selected={app.selectedIds.has(item.id)}
+                  onSelect={cellSelect}
+                  onContextMenu={cellContextMenu}
+                />
               ))}
             </div>
           )}
           {loading && <span className="bp-loading dim">{app.t("common.loading")}</span>}
         </div>
+      )}
+
+      {/* 右键上下文菜单：**媒体预览那一份**（开关与菜单项都不重写第二套） */}
+      {menu.target && (
+        <MediaContextMenu
+          target={menu.target}
+          selectedCount={selectedCount}
+          actions={actions}
+          onClose={menu.close}
+          t={app.t}
+        />
       )}
     </div>
   );

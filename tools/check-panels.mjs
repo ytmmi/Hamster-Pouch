@@ -587,9 +587,19 @@ const mediaToolbarSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewToolbar.tsx"),
   "utf8",
 );
+const mediaActionsSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewActions.ts"),
+  "utf8",
+);
 // 后台冻结的判据（共享钩子）：面板不可见时不该继续干活。
 const panelForegroundSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/shared/panelForeground.ts"),
+  "utf8",
+);
+// 恒定引用回调（共享钩子）：两个面板的单元 `memo` 都靠它生效（2026-10 从
+// MediaPreviewPanel 抽到 shared/，图书预览接入右键菜单时一并复用）。
+const stableCallbackSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/stableCallback.ts"),
   "utf8",
 );
 const mediaView = await import(
@@ -1400,7 +1410,10 @@ check(
   /export const ThumbCell = memo\(function ThumbCell\(/.test(mediaCellSrc) &&
     /onDoubleClick: \(file: FileItem\) => void;/.test(mediaCellSrc) &&
     /onDoubleClick=\{\(\) => onDoubleClick\(file\)\}/.test(mediaCellSrc) &&
-    /function useStableCallback<A extends unknown\[\], R>/.test(mediaPanelSrc) &&
+    // 恒定引用回调本身住在 `shared/stableCallback.ts`（媒体预览与图书预览共用一份），
+    // 面板侧只保留"用了它"的锚点。
+    /function useStableCallback<A extends unknown\[\], R>/.test(stableCallbackSrc) &&
+    /import \{ useStableCallback \} from "\.\.\/shared\/stableCallback"/.test(mediaPanelSrc) &&
     /const cellSelect = useStableCallback\(handleSelect\);/.test(mediaPanelSrc) &&
     /onSelect=\{cellSelect\}/.test(renderCellSrc) &&
     /onDoubleClick=\{cellDoubleClick\}/.test(renderCellSrc) &&
@@ -2951,6 +2964,81 @@ check(
     ) &&
     // 右栏 flex: none——"不填充剩余空间"在布局层面的字面保证。
     /\.bp-cover-cell-info\s*\{[^}]*flex:\s*none/.test(stylesSource),
+);
+
+// ---- 右键菜单（2026-10-09 用户口径："图书预览用媒体预览同款右键菜单"）----
+//
+// "同款"落在三件事上，各由断言钉住：
+// 1. **同一份实现**——菜单的开关/定位/菜单项与四类文件动作都复用媒体预览那两个模块
+//    （`mediaPreviewMenu` / `mediaPreviewActions`），本家族不得再出现第二份菜单；
+// 2. **删除不按相册分流**——文本类文件进不了相册成员列表（相册成员分页只认三个媒体
+//    字面量），跟着"当前选中的相册"走会把删除变成"移出相册 0 项"的静默空操作，
+//    文件还在盘上；同时媒体预览那一侧的缺省不许被这次改动带偏；
+// 3. **三种视图同一套口径**——单元只回传"点的是哪一本"（并自己挡掉默认菜单），
+//    选中集、菜单定位与菜单项都在面板侧；回调必须是恒定引用（单元是 `memo` 的）。
+const bookRowSrc = readFileSync(join(ROOT, BOOK_FAMILY_FILES[2]), "utf8");
+const bookCoverCellSrc = readFileSync(join(ROOT, BOOK_FAMILY_FILES[3]), "utf8");
+/** 选中态类名的字面拼法（三视图同款，跟着 `selected` 走）。 */
+const selectedClassLiteral = (cls) => `className={\`${cls}\${selected ? " selected" : ""}\`}`;
+const bookCellViews = [
+  ["卡片", bookCardSrc, "bp-card"],
+  ["列表", bookRowSrc, "bp-row"],
+  ["封面", bookCoverCellSrc, "bp-cover-cell"],
+];
+check(
+  "图书预览的右键菜单就是**媒体预览那一份**（复用开关与菜单项，不自建第二份菜单）",
+  /import \{ MediaContextMenu, useMediaContextMenu \} from "\.\.\/mediaPreviewMenu"/.test(
+    bookFamilySrc,
+  ) &&
+    /const menu = useMediaContextMenu\(\);/.test(bookFamilySrc) &&
+    /<MediaContextMenu/.test(bookFamilySrc) &&
+    // 反向：不得绕过共享菜单、直接拿 portal 容器自己拼一份（缺陷 0013 的 portal 口径也会跟着丢）。
+    !/from "\.\.\/menu\/ContextMenu"/.test(bookFamilySrc),
+);
+check(
+  "四类文件动作复用媒体预览那一份，且**删除不按相册分流**（文本类进不了相册成员列表）",
+  /import \{ useMediaFileActions \} from "\.\.\/mediaPreviewActions"/.test(bookFamilySrc) &&
+    /useMediaFileActions\(\{ albumScoped: false \}\)/.test(bookFamilySrc) &&
+    // 媒体预览的缺省必须仍是"按相册上下文分流"：这条改了 = 相册里删除变成真删盘。
+    /albumScoped = true,/.test(mediaActionsSrc),
+);
+check(
+  "三种视图的单元接同一套选中 / 右键口径（选中态类名 + 回传 props + 先挡默认菜单）",
+  bookCellViews.every(
+    ([, src, cls]) =>
+      src.includes(selectedClassLiteral(cls)) &&
+      /onSelect: \(file: FileItem\) => void;/.test(src) &&
+      /onContextMenu: \(file: FileItem, e: ReactMouseEvent\) => void;/.test(src) &&
+      /onClick=\{\(\) => onSelect\(item\)\}/.test(src) &&
+      /e\.preventDefault\(\);/.test(src) &&
+      /onContextMenu\(item, e\);/.test(src),
+  ),
+  bookCellViews
+    .filter(([, src, cls]) => !src.includes(selectedClassLiteral(cls)))
+    .map(([name]) => name)
+    .join(","),
+);
+check(
+  "面板：三种视图三处接线齐备 + 回调恒定引用 + 右键先落选中（菜单项由所选数量决定）",
+  (bookFamilySrc.match(/selected=\{app\.selectedIds\.has\(item\.id\)\}/g) || []).length === 3 &&
+    (bookFamilySrc.match(/onSelect=\{cellSelect\}/g) || []).length === 3 &&
+    (bookFamilySrc.match(/onContextMenu=\{cellContextMenu\}/g) || []).length === 3 &&
+    /const cellSelect = useStableCallback\(selectBook\);/.test(bookFamilySrc) &&
+    /const cellContextMenu = useStableCallback\(openMenu\);/.test(bookFamilySrc) &&
+    // 右键 = 先按选中口径落选中，再在光标处开菜单（顺序反了会删错文件）。
+    /ensureSelected\(file\);\s*\n\s*menu\.open\(file, e\);/.test(bookFamilySrc) &&
+    /selectedCount=\{selectedCount\}/.test(bookFamilySrc) &&
+    // 计数只数**本面板列出的书**：别处残留的选中项不能把"是否单选"判断带偏。
+    /items\.reduce\(\(n, item\) => \(app\.selectedIds\.has\(item\.id\) \? n \+ 1 : n\), 0\)/.test(
+      bookFamilySrc,
+    ),
+);
+check(
+  "三种视图的选中态是同一份 CSS（同款 token；用 outline 不吃掉网格间距）",
+  /\.bp-card\.selected,\s*\n\.bp-row\.selected,\s*\n\.bp-cover-cell\.selected\s*\{[\s\S]{0,220}?outline:\s*1px solid var\(--sel-border\)/.test(
+    stylesSource,
+  ) &&
+    /\.bp-card\.selected,[\s\S]{0,220}?background:\s*var\(--sel-bg\)/.test(stylesSource),
 );
 
 // 元数据取数：只对需要内嵌封面的书发命令，且有缓存 + in-flight 去重。

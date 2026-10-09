@@ -103,6 +103,8 @@ apps/desktop/src/app_ui/
   menu/               # 顶部功能条、右键菜单
   shared/             # waveform、TagInput、SwitchToggle（胶囊开关：**所有**勾选框的唯一实现）、
                       #   panelLayout（布局 JSON 规范化）、settingValue（设置值读取 + 四条触发源热加载：宿主项与面板项共用）、
+                      #   stableCallback（恒定引用回调：让条目单元的 memo 真正生效；
+                      #     媒体预览与图书预览共用一份）、
                       #   format（显示格式纯函数：体积自适应 KiB/KB、日期三格式、时长/码率/帧率）、
                       #   styles、api/（按域）、types/（按域）、thumbUrl
     blueprintRuntime.ts   # 生效蓝图加载/升级/回退（含解析层校验与回退提示）+ 当前层与每层布局 + 热更新订阅
@@ -135,8 +137,11 @@ apps/desktop/src/app_ui/
                       #   **已知缺口**：epub / txt 预览本版不做（用户 2026-10-08 裁决），
                       #   见 docs/roadmap/book-preview-plan.md §2.1
     bookpreview/      # 图书预览（panel.bookpreview；文本类文件 txt/md/epub）
-                      #   BookPreviewPanel.tsx 主面板（工具条 + 三种视图容器 + 封面宽度滑条）
-                      #   BookCard.tsx 卡片模式单元（封面在上 + 文件名在下；文件名悬停滚轮横滚）
+                      #   BookPreviewPanel.tsx 主面板（工具条 + 三种视图容器 + 封面宽度滑条
+                      #     + 右键菜单装配：复用 ../mediaPreviewMenu 与 ../mediaPreviewActions，
+                      #     删除动作 `albumScoped: false`——文本类进不了相册成员列表）
+                      #   BookCard.tsx 卡片模式单元（封面在上 + 文件名在下；文件名悬停滚轮横滚；
+                      #     选中/右键回传面板：selected + onSelect + onContextMenu）
                       #   BookListRow.tsx 列表模式单元（封面在左 + 文件名/作者/简介，右栏填充剩余）
                       #   BookCoverCell.tsx 封面模式单元（一行多本；右栏固定为封面宽度 × 2）
                       #   BookRowInfo.tsx 列表/封面共用信息三行（作者：/简介：，简介溢出齐平封面底）
@@ -154,7 +159,9 @@ apps/desktop/src/app_ui/
     mediaPreviewSession.ts  # 面板设置读取与本会话覆盖（四条设置的缺省/覆盖口径）
     mediaPreviewToolbar.tsx # 顶部工具条（模式/类型/计数/尺寸滑条/视图与排序下拉）
     mediaPreviewActions.ts  # 文件操作动作（删除/重命名/复制路径/重新分析）
-    mediaPreviewMenu.tsx    # 右键菜单（动作开关与渲染）
+                            #   **两个面板共用**：媒体预览缺省按相册上下文分流（`albumScoped = true`），
+                            #   图书预览传 `false`（文本类进不了相册成员列表，否则删除是静默空操作）
+    mediaPreviewMenu.tsx    # 右键菜单（动作开关与渲染；**媒体预览与图书预览同一份实现**）
     mediaPreviewSelection.ts # 选中集与 `selection_change` 上报（令牌防过期 + 运行期 context）
     mediaPreviewCell.tsx    # 缩略图单元 + 宽高比测量 + ratioCache 版本号
                             #   缩略图**挂载即预热**（窗口即对称预加载带；`warmedThumbs` + `new Image()`

@@ -6,6 +6,10 @@
  * 菜单的开关与渲染在 `mediaPreviewMenu.tsx`，选中集口径在 `mediaPreviewSelection.ts`。
  *
  * 动作都以**显式参数**接目标文件（`menu.file` 由菜单传入），因此本文件不持有菜单状态。
+ *
+ * **两个面板共用这一份实现**（用户 2026-10-09 口径"图书预览用媒体预览同款右键菜单"）：
+ * 媒体预览与图书预览的右键菜单是同一套动作，差别只有**删除的相册分流**一条——
+ * 由 `MediaFileActionsOptions.albumScoped` 表达，不为图书预览再抄一套动作。
  */
 
 import { useCallback } from "react";
@@ -14,6 +18,18 @@ import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import type { FileItem } from "../shared/types";
+
+/** `useMediaFileActions` 的口径选项（面板差异只有下面这一条）。 */
+export interface MediaFileActionsOptions {
+  /**
+   * 删除动作是否按**相册上下文**分流（缺省 `true` = 媒体预览的口径）。
+   *
+   * 图书预览显式传 `false`：文本类文件**进不了相册成员列表**（相册成员分页与相册属性
+   * 只认 image / video / audio），若跟着"当前选中的相册"走，删除就会变成
+   * "从相册移出 0 项"的**静默空操作**——文件还在盘上，用户却看到"已移出相册（0）"。
+   */
+  albumScoped?: boolean;
+}
 
 /** 面板可触发的文件操作（右键菜单与条目容器快捷键共用）。 */
 export interface MediaFileActions {
@@ -43,14 +59,16 @@ export interface MediaFileActions {
 }
 
 /** 面板当前上下文（仓库 / 相册 / 选中集）下的四类文件操作。 */
-export function useMediaFileActions(): MediaFileActions {
+export function useMediaFileActions({
+  albumScoped = true,
+}: MediaFileActionsOptions = {}): MediaFileActions {
   const app = useApp();
 
   const deleteSelected = useCallback(async () => {
     if (!app.repoId || app.selectedIds.size === 0) return;
     const fileIds = [...app.selectedIds];
     try {
-      if (app.albumId) {
+      if (albumScoped && app.albumId) {
         const r = await api.albumRemoveMember({
           repoId: app.repoId,
           albumId: app.albumId,
@@ -66,7 +84,7 @@ export function useMediaFileActions(): MediaFileActions {
     } catch (e) {
       app.status(app.t("media.deleteFailed", { err: errorTextOf(app.t, e) }), "error");
     }
-  }, [app]);
+  }, [app, albumScoped]);
 
   /** 确认内联重命名：调用 `fileRename`，成功后刷新。 */
   const renameFile = useCallback(

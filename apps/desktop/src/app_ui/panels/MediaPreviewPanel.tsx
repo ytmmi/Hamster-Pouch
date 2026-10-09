@@ -38,7 +38,7 @@
  * - `mediaPreviewCell.tsx`：缩略图单元；`mediaPreviewView.ts`：取值域与纯函数。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -50,6 +50,7 @@ import { resolveSizeUnit, SETTING_KEYS } from "@hamster-pouch/config";
 import { formatByteSize } from "../shared/format";
 import { usePanelForeground } from "../shared/panelForeground";
 import { useHostSettingValue } from "../shared/settingValue";
+import { useStableCallback } from "../shared/stableCallback";
 import { useApp } from "../core/AppContext";
 import type { PanelRenderCtx } from "../core/panelRegistry";
 import type { FileItem } from "../shared/types";
@@ -96,20 +97,6 @@ import {
  */
 const thumbScroll = createScrollSlot();
 const nameScroll = createScrollSlot();
-
-/**
- * 把"每帧都会换身份"的回调收敛为**恒定引用**，好让 `ThumbCell` 的 `memo` 真正生效。
- *
- * 为什么需要它：`app` 上下文对象在**每次选中变化**时都会换身份，于是依赖 `app` 的
- * `useCallback` 也全部换身份——300 个单元的 props 逐个"变了"，`memo` 形同虚设。
- * 这里把最新实现放进 ref、对外只暴露一个恒定引用；单元只在 `selected` 真的变化时重渲。
- * 语义与直接传原函数**完全一致**（调用时读的是最新实现，不存在闭包过期）。
- */
-function useStableCallback<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
-  const ref = useRef(fn);
-  ref.current = fn;
-  return useCallback((...args: A) => ref.current(...args), []);
-}
 
 export interface MediaPreviewPanelProps {
   /**
