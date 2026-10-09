@@ -158,6 +158,11 @@ pub(crate) fn api_async<T>(response: ApiResponse<T>) -> ApiAsync<T> {
 ///   完整词库为按需安装的 `plugins-dist/tagdict-*` / `tagrel-*` 扩展包，D36.5）；
 ///   应用自身数据，随版本/可重建。
 /// - **用户数据库**：`data\user\repos\`——每仓库一个库，用户 tag / 评分 / 相册等，需备份。
+/// - **用户封面**：`data\user\covers\`——用户自选的自定义封面图片（`book.setCover`，
+///   用户口径 2026-10-09）。与仓库库同在 `user\` 下：它是**用户数据**而不是可重建的缓存
+///   （放 `thumbnails\` 会被当缓存清掉，放 `system\` 又会进发布包）。文件名是
+///   `<file_id>.<ext>`；仓库库里 `file_covers.value` **只存这个裸文件名**，不存绝对路径
+///   （位置随安装目录变，存了会在换位置后全失效）。
 /// - **插件扩展**：`data\plugins\`——插件包安装目录；插件自持的扩展数据库落在各自
 ///   `<plugin_id>\` 包目录内，不入全局库/仓库库。
 /// - 缓存与日志：`data\thumbnails\`（可重建）、`data\debug.log`。
