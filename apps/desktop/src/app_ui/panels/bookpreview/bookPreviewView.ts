@@ -13,11 +13,14 @@
 export const BOOK_PREVIEW_PANEL_ID = "bookpreview";
 
 /**
- * 两种视图（用户 2026-10-08 命名，与声明层的 `options` 逐项相等）：
+ * 三种视图（用户 2026-10-09 修订命名，与声明层的 `options` 逐项相等）：
  * - `card`：**卡片模式** —— 封面在上、文件名在下；
- * - `cover`：**封面模式** —— 封面在左、右侧自上而下是文件名 / 作者 / 简介。
+ * - `list`：**列表模式** —— 封面在左、右侧自上而下是文件名 / 作者 / 简介，
+ *   右栏填充剩余空间（原「封面模式」改名而来，用户口径：它本来就是列表）；
+ * - `cover`：**封面模式** —— 规则与列表模式一致，但一行可展示多本（网格），
+ *   右栏**不填充剩余空间**，固定为**封面宽度的 2 倍**。
  */
-export const BOOK_VIEW_MODES = ["card", "cover"] as const;
+export const BOOK_VIEW_MODES = ["card", "list", "cover"] as const;
 export type BookViewMode = (typeof BOOK_VIEW_MODES)[number];
 
 /** 缺省视图（与声明层 `default` 相等）。 */
@@ -28,12 +31,71 @@ export function resolveBookView(raw: unknown): BookViewMode {
   return BOOK_VIEW_MODES.includes(raw as BookViewMode) ? (raw as BookViewMode) : DEFAULT_BOOK_VIEW;
 }
 
-/** 封面上限尺寸的取值范围（声明层没有 min/max，只能在这里夹紧）。 */
+/** 封面宽度的取值范围（声明层没有 min/max，只能在这里夹紧）。 */
 export const BOOK_COVER_SIZE_MIN = 96;
 export const BOOK_COVER_SIZE_MAX = 400;
 
-/** 缺省封面上限尺寸（与声明层 `default` 相等，且必须落在夹紧范围内）。 */
+/** 缺省封面宽度（与声明层 `default` 相等，且必须落在夹紧范围内）。 */
 export const DEFAULT_BOOK_COVER_SIZE = 160;
+
+/**
+ * 封面宽度滑条的步进（与媒体预览的 `MEDIA_IMAGE_SIZE_STEP` 同口径：滑条拖起来
+ * 有档位感，但不会卡在中间值上）。
+ */
+export const BOOK_COVER_SIZE_STEP = 8;
+
+/**
+ * 封面框的宽高比（宽:高 = 2:3，与 styles.css 的 `.bp-art { aspect-ratio: 2 / 3 }` 相同）。
+ * 列表 / 封面模式下，信息列的高度 = 封面框高度（行高由封面撑起）。
+ */
+export const BOOK_COVER_ASPECT = 2 / 3;
+
+/**
+ * 列表 / 封面模式信息列的**固定行高参数**（与 styles.css 的 `.bp-row-*` 逐项相等：
+ * 字体 13 / 12 / 12 px × `line-height: 1.5`，列内 gap 4px × 两处）。
+ * 简介截断行数要靠这套算术算出来，两处不一致就会算错行数——所以参数只定义一次。
+ */
+export const BOOK_ROW_NAME_LINE_PX = 13 * 1.5;
+export const BOOK_ROW_AUTHOR_LINE_PX = 12 * 1.5;
+export const BOOK_ROW_DESC_LINE_PX = 12 * 1.5;
+export const BOOK_ROW_INFO_GAP_PX = 4 * 2;
+
+/**
+ * 简介可用的**纵向空间**（px）：信息列与封面同高，减去文件名与作者两行的固定高度
+ * 与两处间距，剩下的全部给简介。
+ */
+export function bookDescAvailableHeight(coverSize: number): number {
+  return (
+    (coverSize / BOOK_COVER_ASPECT) -
+    BOOK_ROW_NAME_LINE_PX -
+    BOOK_ROW_AUTHOR_LINE_PX -
+    BOOK_ROW_INFO_GAP_PX
+  );
+}
+
+/**
+ * 简介的截断行数：**填满到封面图片底部**（用户 2026-10-09 口径——不再固定 3 行，
+ * 溢出标准是和封面底部齐平），至少 1 行。
+ *
+ * 面板把这个数下发成 `--bp-desc-lines`，CSS 用 `-webkit-line-clamp: var(--bp-desc-lines)`
+ * 截断：行数由封面尺寸推得，封面变大简介就能多显示几行。
+ */
+export function bookDescLineCount(coverSize: number): number {
+  const lines = Math.floor(bookDescAvailableHeight(coverSize) / BOOK_ROW_DESC_LINE_PX);
+  return Math.max(1, lines);
+}
+
+/**
+ * 封面模式（网格）右栏 = **封面宽度的 2 倍**（用户口径：不填充剩余空间）。
+ * 加 10px 是封面与右栏之间的列内间距（与列表模式同款）。
+ */
+export const BOOK_COVER_INFO_SCALE = 2;
+export const BOOK_COVER_ROW_GAP_PX = 10;
+
+/** 封面模式一个单元格的总宽（封面 + 间距 + 2 倍封面的右栏）。 */
+export function bookCoverCellWidth(coverSize: number): number {
+  return coverSize * (1 + BOOK_COVER_INFO_SCALE) + BOOK_COVER_ROW_GAP_PX;
+}
 
 /**
  * 把设置里的任意值夹到合法范围。

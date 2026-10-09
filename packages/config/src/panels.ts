@@ -263,7 +263,7 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
     hasClass: false,
     blueprintNode: "control",
     origin: SYSTEM_ORIGIN,
-    // 面板设置（`docs/spec/panel-standard.md` 第 5.3 节）：视图与封面上限尺寸。
+    // 面板设置（`docs/spec/panel-standard.md` 第 5.3 节）：视图与封面宽度。
     // 取值域与 `panels/bookpreview/bookPreviewView.ts` 的 `BOOK_VIEW_MODES` 逐项对齐
     // （一致性由 `pnpm check:panels` 断言）；`coverSize` 的范围由面板夹紧
     // （声明层没有 min/max，与 `media.imageSize`、`imageviewer.filmstripSize` 同理）。
@@ -276,6 +276,7 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
         default: "card",
         options: [
           { value: "card", title_key: "book.settings.view.card" },
+          { value: "list", title_key: "book.settings.view.list" },
           { value: "cover", title_key: "book.settings.view.cover" },
         ],
       },

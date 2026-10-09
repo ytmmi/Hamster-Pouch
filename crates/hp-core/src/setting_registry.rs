@@ -297,11 +297,11 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
         owner_id: Some("bookpreview"),
         kind: "select",
         scope: SettingScope::App,
-        options: &["card", "cover"],
+        options: &["card", "list", "cover"],
         requires_capability: None,
     },
     SettingDeclFact {
-        // 封面上限尺寸（两种视图共用）。范围由面板夹紧
+        // 封面宽度（三种视图共用）。范围由面板夹紧
         // （`bookPreviewView.clampCoverSize`，声明层没有 min/max），因此这里只镜像 kind。
         id: "coverSize",
         owner_kind: "panel",

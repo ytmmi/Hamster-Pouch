@@ -1618,7 +1618,8 @@ button.danger {
 
 /* ===== 图书预览面板 ===== */
 
-/* 封面上限尺寸由面板按设置下发（`--bp-cover-size`），两种视图共用同一个变量。 */
+/* 封面宽度由面板按设置/滑条下发（`--bp-cover-size`），三种视图共用同一个变量；
+   工具条上的封面宽度滑条复用媒体预览的 `mp-size*` 样式类（同款，见工具栏那段）。 */
 .bp-panel {
   gap: 6px;
   /* 只让 `.bp-body` 滚：面板本体也 overflow:auto 的话会出现两条滚动条。 */
@@ -1732,7 +1733,8 @@ button.danger {
   border-radius: 2px;
 }
 
-/* 封面模式：封面在左，右侧自上而下是 文件名 / 作者 / 简介 */
+/* 列表模式（原「封面模式」改名，用户 2026-10-09：它本来就是列表）：封面在左，
+   右侧自上而下是 文件名 / 作者 / 简介，右栏填充剩余空间。 */
 .bp-rows {
   display: flex;
   flex-direction: column;
@@ -1742,7 +1744,8 @@ button.danger {
 .bp-row {
   display: flex;
   gap: 10px;
-  align-items: flex-start;
+  /* stretch：信息列与封面同高——简介的"溢出到封面底部"由这个高度决定。 */
+  align-items: stretch;
   min-width: 0;
 }
 
@@ -1762,6 +1765,9 @@ button.danger {
 .bp-row-name {
   font-size: 13px;
   font-weight: 600;
+  /* 行高写死 1.5：`bookDescLineCount` 按 13px × 1.5 算简介的可用空间，
+     两处不一致简介就会多/少一行（参数只在 bookPreviewView.ts 定义一次）。 */
+  line-height: 1.5;
   /* 单行省略：文件名本身是短标识。 */
   overflow: hidden;
   white-space: nowrap;
@@ -1770,6 +1776,7 @@ button.danger {
 
 .bp-row-author {
   font-size: 12px;
+  line-height: 1.5;
   color: var(--fg-dim);
   overflow: hidden;
   white-space: nowrap;
@@ -1778,12 +1785,54 @@ button.danger {
 
 .bp-row-desc {
   font-size: 12px;
+  line-height: 1.5;
   color: var(--fg-dim);
-  /* 简介多行截断：单行会把简介变成没有信息的碎屑。 */
+  /* 简介多行截断：行数由封面高度推得（`--bp-desc-lines`，见 `bookDescLineCount`），
+     溢出标准 = 和封面图片底部齐平——不再是写死的 3 行；flex 拉伸把内容区
+     填满封面高度，clamp 在最后一行加省略号。 */
+  flex: 1;
+  min-height: 0;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: var(--bp-desc-lines, 3);
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* 封面模式（用户 2026-10-09 重新定义）：规则与列表模式一致，但**一行可展示多本**；
+   右栏**不填充剩余空间**，固定为封面宽度的 2 倍（`BOOK_COVER_INFO_SCALE`）。 */
+.bp-cover-grid {
+  display: grid;
+  /* 单元格总宽 = 封面 + 列内间距 10px + 2 倍封面（`bookCoverCellWidth` 同款算术）：
+     固定列宽不拉伸，面板再宽右栏也不会变宽。 */
+  grid-template-columns: repeat(
+    auto-fill,
+    calc(var(--bp-cover-size, 160px) * 3 + 10px)
+  );
+  gap: 10px;
+  align-content: start;
+}
+
+.bp-cover-cell {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.bp-cover-cell .bp-art {
+  width: var(--bp-cover-size, 160px);
+  flex: none;
+}
+
+.bp-cover-cell-info {
+  /* 右栏固定 2 倍封面宽（不填充剩余空间，用户口径）；min-width: 0 让文件名
+     单行省略在窄栏里仍生效。 */
+  width: calc(var(--bp-cover-size, 160px) * 2);
+  flex: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 /* ===== 查看器面板 ===== */

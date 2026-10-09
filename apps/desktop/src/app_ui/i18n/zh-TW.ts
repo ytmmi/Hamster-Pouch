@@ -209,8 +209,12 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   // 圖書預覽面板（文字類檔案：txt / md / epub）
   "book.settings.view": "檢視",
   "book.settings.view.card": "卡片模式",
+  "book.settings.view.list": "列表模式",
   "book.settings.view.cover": "封面模式",
-  "book.settings.coverSize": "封面上限尺寸",
+  "book.settings.coverSize": "封面寬度",
+  "book.coverSizeHint": "封面寬度（封面模式下右欄為封面寬度的 2 倍）",
+  "book.authorLabel": "作者：",
+  "book.descLabel": "簡介：",
   "book.count": "共 {n} 本",
   "book.empty": "目前來源下沒有可預覽的圖書（支援 txt / md / epub）",
   "book.loadFailed": "圖書清單載入失敗：{err}",

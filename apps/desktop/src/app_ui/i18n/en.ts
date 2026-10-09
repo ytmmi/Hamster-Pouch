@@ -210,8 +210,12 @@ export const en: Record<keyof DictZhCN, string> = {
   // Book preview panel (text files: txt / md / epub)
   "book.settings.view": "View",
   "book.settings.view.card": "Card mode",
+  "book.settings.view.list": "List mode",
   "book.settings.view.cover": "Cover mode",
-  "book.settings.coverSize": "Max cover size",
+  "book.settings.coverSize": "Cover width",
+  "book.coverSizeHint": "Cover width (in Cover mode the info column is 2× the cover width)",
+  "book.authorLabel": "Author: ",
+  "book.descLabel": "Description: ",
   "book.count": "{n} books",
   "book.empty": "No books to preview under the current source (txt / md / epub)",
   "book.loadFailed": "Failed to load books: {err}",

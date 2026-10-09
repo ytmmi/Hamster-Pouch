@@ -2708,8 +2708,10 @@ check(
 
 // ==================== 图书预览面板（`panel.bookpreview`）====================
 //
-// 2026-10-08 新增：文本类文件（txt / md / epub）的可视化展览，两种视图
-// （**卡片模式** = 封面在上 + 文件名在下；**封面模式** = 封面在左 + 文件名/作者/简介）。
+// 2026-10-08 新增：文本类文件（txt / md / epub）的可视化展览；2026-10-09 用户修订：
+// 三种视图（**卡片模式** = 封面在上 + 文件名在下；**列表模式** = 封面在左 +
+// 文件名/作者/简介、右栏填充剩余空间，由原「封面模式」改名；**封面模式** = 规则与
+// 列表一致、一行多本、右栏固定为封面宽度的 2 倍）。
 //
 // 这一段的守护重点是三件**看不见就必然是缺陷**的事：
 // 1. 声明层的 `view` 候选 ↔ 面板取值域逐项一致（设置界面能选、面板认不出 = "改了没反应"）；
@@ -2723,7 +2725,9 @@ check(
 const BOOK_FAMILY_FILES = [
   "apps/desktop/src/app_ui/panels/bookpreview/BookPreviewPanel.tsx",
   "apps/desktop/src/app_ui/panels/bookpreview/BookCard.tsx",
-  "apps/desktop/src/app_ui/panels/bookpreview/BookCoverRow.tsx",
+  "apps/desktop/src/app_ui/panels/bookpreview/BookListRow.tsx",
+  "apps/desktop/src/app_ui/panels/bookpreview/BookCoverCell.tsx",
+  "apps/desktop/src/app_ui/panels/bookpreview/BookRowInfo.tsx",
   "apps/desktop/src/app_ui/panels/bookpreview/BookCoverArt.tsx",
   "apps/desktop/src/app_ui/panels/bookpreview/BookTextCover.tsx",
   "apps/desktop/src/app_ui/panels/bookpreview/bookPreviewData.ts",
@@ -2732,8 +2736,8 @@ const BOOK_FAMILY_FILES = [
   "apps/desktop/src/app_ui/panels/bookpreview/useBookMeta.ts",
 ];
 const bookFamilySrc = BOOK_FAMILY_FILES.map((p) => readFileSync(join(ROOT, p), "utf8")).join("\n");
-const bookViewSrc = readFileSync(BOOK_FAMILY_FILES[6], "utf8");
-const bookView = await import(pathToFileURL(join(ROOT, BOOK_FAMILY_FILES[6])).href);
+const bookViewSrc = readFileSync(BOOK_FAMILY_FILES[8], "utf8");
+const bookView = await import(pathToFileURL(join(ROOT, BOOK_FAMILY_FILES[8])).href);
 
 const bookSpec = config.panelSpec("bookpreview");
 const bookSettingKeys = (bookSpec?.settings ?? []).map((s) => s.key);
@@ -2745,9 +2749,9 @@ check(
   `keys=${bookSettingKeys.join(",")}`,
 );
 check(
-  "bookpreview 的 select 候选 ↔ 面板取值域逐项一致（卡片模式 / 封面模式）",
+  "bookpreview 的 select 候选 ↔ 面板取值域逐项一致（卡片 / 列表 / 封面三种模式）",
   eqList(optionValues("bookpreview", "view"), [...bookView.BOOK_VIEW_MODES]) &&
-    eqList([...bookView.BOOK_VIEW_MODES], ["card", "cover"]),
+    eqList([...bookView.BOOK_VIEW_MODES], ["card", "list", "cover"]),
 );
 check(
   "bookpreview 的 view 缺省 = `card`，且落在取值域内",
@@ -2775,8 +2779,37 @@ check(
     bookView.clampCoverSize(undefined) === bookView.DEFAULT_BOOK_COVER_SIZE,
 );
 check(
+  "bookDescLineCount：简介截断行数由封面高度推得（溢出到封面底部，不再固定 3 行）",
+  // 封面高 = 宽 × 3/2；信息列扣掉文件名 19.5 + 作者 18 + 两处间距 8 后，
+  // 每行 18px：160 → 10 行、96 → 5 行、400 → 30 行；小到没空间时至少 1 行。
+  bookView.bookDescLineCount(160) === 10 &&
+    bookView.bookDescLineCount(96) === 5 &&
+    bookView.bookDescLineCount(400) === 30 &&
+    bookView.bookDescLineCount(1) === 1 &&
+    // 行数随封面尺寸单调不减（封面变大、简介能显示更多）。
+    bookView.bookDescLineCount(400) > bookView.bookDescLineCount(96) &&
+    // 可用高度 = 封面高 − 固定行高（与 styles.css 的 line-height 参数逐项相等）。
+    Math.abs(
+      bookView.bookDescAvailableHeight(160) -
+        (160 * 1.5 - bookView.BOOK_ROW_NAME_LINE_PX - bookView.BOOK_ROW_AUTHOR_LINE_PX - bookView.BOOK_ROW_INFO_GAP_PX),
+    ) < 1e-9,
+);
+check(
+  "封面模式右栏 = 封面宽度 × 2（BOOK_COVER_INFO_SCALE），单元格总宽不含拉伸",
+  bookView.BOOK_COVER_INFO_SCALE === 2 &&
+    bookView.bookCoverCellWidth(160) === 160 * 3 + bookView.BOOK_COVER_ROW_GAP_PX &&
+    bookView.bookCoverCellWidth(96) === 96 * 3 + bookView.BOOK_COVER_ROW_GAP_PX,
+);
+check(
+  "封面宽度滑条带步进常量（与媒体预览同口径：有档位感）",
+  Number.isInteger(bookView.BOOK_COVER_SIZE_STEP) &&
+    bookView.BOOK_COVER_SIZE_STEP > 0 &&
+    (bookView.BOOK_COVER_SIZE_MAX - bookView.BOOK_COVER_SIZE_MIN) % bookView.BOOK_COVER_SIZE_STEP === 0,
+);
+check(
   "resolveBookView：非法取值回落缺省（失败关闭）",
   bookView.resolveBookView("cover") === "cover" &&
+    bookView.resolveBookView("list") === "list" &&
     bookView.resolveBookView("card") === "card" &&
     bookView.resolveBookView("masonry") === bookView.DEFAULT_BOOK_VIEW &&
     bookView.resolveBookView(undefined) === bookView.DEFAULT_BOOK_VIEW,
@@ -2839,6 +2872,30 @@ check(
     /<BookPreviewPanel api=\{ctx\.api\}/.test(registrySource),
 );
 check(
+  "工具条有**媒体预览同款**的封面宽度滑条（range + 夹紧范围 + 步进 + 数字显示）",
+  // 滑块复用 `mp-size*` 样式类（同款），min/max/step 取自取值域常量。
+  /<span className="mp-size">/.test(bookFamilySrc) &&
+    /type="range"/.test(bookFamilySrc) &&
+    /className="mp-size-range"/.test(bookFamilySrc) &&
+    /min=\{BOOK_COVER_SIZE_MIN\}/.test(bookFamilySrc) &&
+    /max=\{BOOK_COVER_SIZE_MAX\}/.test(bookFamilySrc) &&
+    /step=\{BOOK_COVER_SIZE_STEP\}/.test(bookFamilySrc) &&
+    /className="mp-size-value"/.test(bookFamilySrc),
+);
+check(
+  "列表 / 封面模式的信息三行共用一个 `BookRowInfo`，作者与简介带前缀（作者：/简介：）",
+  // 共享组件 + i18n 键（不硬编码中文）——两模式规则一致的落点。
+  /<BookRowInfo/.test(bookFamilySrc) &&
+    /book\.authorLabel/.test(bookFamilySrc) &&
+    /book\.descLabel/.test(bookFamilySrc) &&
+    /const MISSING = "—"/.test(bookFamilySrc),
+);
+check(
+  "简介截断行数经 `--bp-desc-lines` 下发（面板算行数，CSS 只消费）",
+  /"--bp-desc-lines":\s*String\(bookDescLineCount\(coverSize\)\)/.test(bookFamilySrc) &&
+    /"--bp-cover-size":\s*`\$\{coverSize\}px`/.test(bookFamilySrc),
+);
+check(
   "面板按后台可见性冻结条目容器（不显示就不为看不见的书取封面）",
   /usePanelForeground\(panelApi\)/.test(bookFamilySrc) &&
     /foreground\s*&&/.test(bookFamilySrc),
@@ -2869,7 +2926,7 @@ check(
   /max\s*<=\s*0\)\s*return/.test(bookCardCode),
 );
 
-// 文件名可聚焦（"焦点在文件名上"要字面上成立）+ 三种截断形态齐备。
+// 文件名可聚焦（"焦点在文件名上"要字面上成立）+ 三种截断形态齐备 + 封面模式右栏规格。
 check(
   "卡片模式的文件名可聚焦（tabIndex），三种视图的文本截断形态齐备",
   /tabIndex=\{0\}/.test(bookCardSrc) &&
@@ -2877,10 +2934,23 @@ check(
     /\.bp-name\s*\{[^}]*overflow:\s*hidden/.test(stylesSource) &&
     /\.bp-name\s*\{[^}]*text-overflow:\s*ellipsis/.test(stylesSource) &&
     /\.bp-name\s*\{[^}]*white-space:\s*nowrap/.test(stylesSource) &&
-    // 封面模式：文件名与作者各单行省略，简介多行截断。
+    // 列表/封面模式：文件名与作者各单行省略，简介多行截断。
     /\.bp-row-name\s*\{[^}]*text-overflow:\s*ellipsis/.test(stylesSource) &&
     /\.bp-row-author\s*\{[^}]*text-overflow:\s*ellipsis/.test(stylesSource) &&
-    /\.bp-row-desc\s*\{[^}]*webkit-line-clamp/.test(stylesSource),
+    // 钉住"行数来自封面高度"：clamp 必须读 `--bp-desc-lines`，不许退回写死的数字。
+    /\.bp-row-desc\s*\{[^}]*webkit-line-clamp:\s*var\(--bp-desc-lines/.test(stylesSource),
+);
+check(
+  "封面模式：网格列宽固定（不拉伸）+ 右栏 = 封面宽度 × 2",
+  // 单元格总宽 = 封面 + 间距 + 2 倍封面（与 `bookCoverCellWidth` 同款算术）。
+  /\.bp-cover-grid\s*\{[^}]*calc\(var\(--bp-cover-size[^}]*\*\s*3\s*\+\s*10px\)/.test(
+    stylesSource,
+  ) &&
+    /\.bp-cover-cell-info\s*\{[^}]*width:\s*calc\(var\(--bp-cover-size[^}]*\*\s*2\)/.test(
+      stylesSource,
+    ) &&
+    // 右栏 flex: none——"不填充剩余空间"在布局层面的字面保证。
+    /\.bp-cover-cell-info\s*\{[^}]*flex:\s*none/.test(stylesSource),
 );
 
 // 元数据取数：只对需要内嵌封面的书发命令，且有缓存 + in-flight 去重。

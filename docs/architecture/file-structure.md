@@ -135,13 +135,15 @@ apps/desktop/src/app_ui/
                       #   **已知缺口**：epub / txt 预览本版不做（用户 2026-10-08 裁决），
                       #   见 docs/roadmap/book-preview-plan.md §2.1
     bookpreview/      # 图书预览（panel.bookpreview；文本类文件 txt/md/epub）
-                      #   BookPreviewPanel.tsx 主面板（工具条 + 两种视图容器）
+                      #   BookPreviewPanel.tsx 主面板（工具条 + 三种视图容器 + 封面宽度滑条）
                       #   BookCard.tsx 卡片模式单元（封面在上 + 文件名在下；文件名悬停滚轮横滚）
-                      #   BookCoverRow.tsx 封面模式单元（封面在左 + 文件名/作者/简介）
+                      #   BookListRow.tsx 列表模式单元（封面在左 + 文件名/作者/简介，右栏填充剩余）
+                      #   BookCoverCell.tsx 封面模式单元（一行多本；右栏固定为封面宽度 × 2）
+                      #   BookRowInfo.tsx 列表/封面共用信息三行（作者：/简介：，简介溢出齐平封面底）
                       #   BookCoverArt.tsx 封面画面（文字封面打底 + 内嵌封面盖上，失败自然回落）
                       #   BookTextCover.tsx 文字封面（底色由作品名派生，同名恒同色）
                       #   bookPreviewView.ts 取值域与纯函数（零依赖，门禁直接 import）
-                      #   bookPreviewData.ts 取数（file.query 过滤 mediaType='text'；不按相册）
+                      #   bookPreviewData.ts 取数（file.query 过滤 mediaTypes:['text']；不按相册）
                       #   bookMetaCache.ts 元数据缓存（结果缓存 + in-flight 去重）
                       #   useBookMeta.ts 单本读取（只对需要内嵌封面的书发 book.meta）
     MetadataPanel.tsx # 元数据面板（索引字段 + EXIF/ffprobe 摘要；消费宿主设置 ui.sizeUnit/dateFormat/dateShowTime）

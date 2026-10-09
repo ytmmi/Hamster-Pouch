@@ -216,8 +216,12 @@ export const zhCN = {
   // 图书预览面板（文本类文件：txt / md / epub）
   "book.settings.view": "视图",
   "book.settings.view.card": "卡片模式",
+  "book.settings.view.list": "列表模式",
   "book.settings.view.cover": "封面模式",
-  "book.settings.coverSize": "封面上限尺寸",
+  "book.settings.coverSize": "封面宽度",
+  "book.coverSizeHint": "封面宽度（封面模式下右栏为封面宽度的 2 倍）",
+  "book.authorLabel": "作者：",
+  "book.descLabel": "简介：",
   "book.count": "共 {n} 本",
   "book.empty": "当前来源下没有可预览的图书（支持 txt / md / epub）",
   "book.loadFailed": "图书列表加载失败：{err}",
