@@ -32,14 +32,22 @@ impl fmt::Display for SourceId {
     }
 }
 
-/// 文件媒体类型。`files` 表仅存 `image`/`video`/`audio`（D11）。
+/// 文件媒体类型。`files` 表存 `image`/`video`/`audio`/`text`。
 ///
 /// `multimedia` 是相册属性概念（M3），不属于文件媒体类型。
+///
+/// **音频（`Audio`）与文本（`Text`）的入库口径不同**：音频是 D11 的**占位行**
+/// （无内容哈希、无缩略图、无派生数据）；文本自 2026-10 起是**完整索引行**
+/// （内容哈希照算，用于移动识别与去重），只是不产出感知哈希 / 缩略图 / 调色板。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaType {
     Image,
     Video,
     Audio,
+    /// 文本类（`txt` / `md` / `epub` 等，扩展名判定，无内容兜底）。
+    ///
+    /// 子类型见 [`crate::file::FileSubtype`]：`epub` 默认 `book`，其余默认 `document`。
+    Text,
 }
 
 impl MediaType {
@@ -49,6 +57,7 @@ impl MediaType {
             MediaType::Image => "image",
             MediaType::Video => "video",
             MediaType::Audio => "audio",
+            MediaType::Text => "text",
         }
     }
 
@@ -58,8 +67,14 @@ impl MediaType {
             "image" => Some(MediaType::Image),
             "video" => Some(MediaType::Video),
             "audio" => Some(MediaType::Audio),
+            "text" => Some(MediaType::Text),
             _ => None,
         }
+    }
+
+    /// 该类型是否是**文本类**（子类型只在文本类上有意义）。
+    pub fn is_text(&self) -> bool {
+        *self == MediaType::Text
     }
 }
 

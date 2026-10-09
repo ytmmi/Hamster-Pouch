@@ -38,7 +38,8 @@ export interface FilePathArgs {
 
 /** `file.query` 的过滤条件（契约里的 `filter` 对象）。 */
 export interface FileQueryFilter {
-  mediaType?: string;
+  /** 只返回这些媒体类型；**缺省或空数组 = 不筛**（集合语义，D95）。 */
+  mediaTypes?: string[];
   sourceId?: string;
   dirPrefix?: string;
 }

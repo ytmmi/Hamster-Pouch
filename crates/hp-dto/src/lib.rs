@@ -47,6 +47,8 @@ pub struct AlbumFileItem {
     pub source_id: String,
     pub relative_path: String,
     pub media_type: String,
+    /// 媒体类型之下的子类型（`book` / `document`；非文本类为 `null`）。
+    pub subtype: Option<String>,
     #[ts(type = "number")]
     pub size: i64,
     pub mtime: String,
@@ -59,6 +61,8 @@ pub struct FileMetadataResult {
     pub source_id: String,
     pub relative_path: String,
     pub media_type: String,
+    /// 媒体类型之下的子类型（`book` / `document`；非文本类为 `null`）。
+    pub subtype: Option<String>,
     pub content_hash: Option<String>,
     #[ts(type = "number")]
     pub size: i64,

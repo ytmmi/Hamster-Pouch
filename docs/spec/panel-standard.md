@@ -8,7 +8,7 @@
 
 | 术语 | 指代 | 谁可注册 | 枚举 / 落点 |
 | --- | --- | --- | --- |
-| **面板（Panel）** | dockview 承载单元：仓库、媒体源、相册、媒体预览、查看器、图像查看器、元数据、标签/评分、tag表、色彩参考、媒体播放器、任务、插件、蓝图 | **宿主内置 14 个 + 插件可注册** | 蓝图节点枚举 `control`（**不变**）；`PANEL_IDS` / `panel_layouts` 表 |
+| **面板（Panel）** | dockview 承载单元：仓库、源、相册、媒体预览、图书预览、查看器、图像查看器、元数据、标签/评分、tag表、色彩参考、媒体播放器、任务、插件、蓝图 | **宿主内置 15 个 + 插件可注册** | 蓝图节点枚举 `control`（**不变**）；`PANEL_IDS` / `panel_layouts` 表 |
 | **控件（Control）** | 面板**内部**的标准 UI 单元（26 种） | **仅宿主**（D62） | 控件 schema 的 `kind` |
 | **类目（Category）** | 面板内部条目分类（原显示名「类」） | 宿主 | 蓝图节点枚举 `class`（**不变**） |
 
@@ -42,7 +42,7 @@
 
 | 关注点 | 权威实现 | 说明 |
 | --- | --- | --- |
-| 面板注册表（内置 13） | `packages/config/src/panels.ts`（`PANEL_IDS` / `PANEL_TITLES`） | 当前为常量清单，实现时升级为注册表 |
+| 面板注册表（内置 15） | `packages/config/src/panels.ts`（`PANEL_IDS` / `PANEL_TITLES`） | 当前为常量清单，实现时升级为注册表 |
 | 面板 → 组件映射 | `apps/desktop/src/app_ui/core/panelRegistry.tsx`（`PANEL_DEFS` / `DOCK_COMPONENTS`） | 插件面板需要动态注册路径 |
 | 面板注册的 manifest 侧 | `crates/hp-core/src/plugin_contribution.rs`（`ContributionKind::Panel`） | 声明参数扩展见 `docs/spec/plugin-standard.md` 第 4 节 |
 | 面板校验 | `crates/hp-core/src/plugin_validate.rs`（`PluginManifest::validate`；清单结构在 `plugin.rs`） | 硬错误清单见本文第 7 节 |
@@ -55,8 +55,8 @@
 
 | `category` | 中文 | 含义 | 内置成员 |
 | --- | --- | --- | --- |
-| `source` | 仓库与媒体源 | 仓库、源、相册的归属与组织 | `repo`、`sources`、`albums` |
-| `media` | 媒体与查看 | 看/听媒体本体 | `media`、`viewer`、`imageviewer`、`player`、`color` |
+| `source` | 仓库与源 | 仓库、源、相册的归属与组织 | `repo`、`sources`、`albums` |
+| `media` | 媒体与查看 | 看/听媒体本体 | `media`、`bookpreview`、`viewer`、`imageviewer`、`player`、`color` |
 | `info` | 信息与元数据 | 描述与检索 | `metadata`、`tags`、`tagtable` |
 | `system` | 系统与插件 | 应用自身与扩展 | `tasks`、`plugins`、`blueprint` |
 | `other` | 其它 | **兜底分类**：未归类或插件自带分类 | 未分类的插件面板 |
@@ -106,14 +106,14 @@
 | 面板 | `has_class` | 说明 |
 | --- | --- | --- |
 | `media`（媒体预览） | **`true`** | 内部有 图像 / 视频 / 音频 三个类目 |
-| 其余 13 个（含 `imageviewer`） | `false` | 无条目分类 |
+| 其余 14 个（含 `imageviewer`） | `false` | 无条目分类 |
 
 - `has_class` **不是**"该面板是否显示媒体"：查看器、图像查看器、媒体播放器都显示媒体，但它们的条目由外部选中驱动，不自分类型。
 - **`has_class = false` 面板下已有类目节点时的口径，按声明者区分**（避免"要么全硬要么全软"的两难）：
 
   | 面板来源 | `has_class` 可否变化 | `panel → class` 边 | 理由 |
   | --- | --- | --- | --- |
-  | **宿主内置**（14 个） | **固定不变** | **硬错误**（拒绝保存） | 宿主声明是不变量，出现即是构造错误（同"引用存在但类型不符"） |
+  | **宿主内置**（15 个） | **固定不变** | **硬错误**（拒绝保存） | 宿主声明是不变量，出现即是构造错误（同"引用存在但类型不符"） |
   | **插件注册** | **随插件版本可变** | **未接通软告警**（灰显、「允许保存」，插件恢复后自动恢复） | 插件升级把 `has_class` 从 `true` 改成 `false` 时，不能把用户既有文档变成"保存失败"（与 RFC 0010 决策 6 同口径） |
 
 - 编辑器职责：**禁止**在 `has_class = false` 的面板下新建类目节点，属性面板不把类目列入该面板的候选（与结构父唯一性同属编辑器责任）。
@@ -122,7 +122,7 @@
 
 声明"该面板在蓝图里由哪种节点承载"，让**面板注册表与蓝图节点注册表互相对得上**：
 
-- 内置 14 个面板的 `blueprint_node` 均为 `control`（当前唯一承载面板的节点类型）。
+- 内置 15 个面板的 `blueprint_node` 均为 `control`（当前唯一承载面板的节点类型）。
 - 取值必须命中**已注册的蓝图节点类型**（`docs/spec/blueprint-node-standard.md`）；未命中即硬错误。
 - 该字段是**反向映射**的权威：蓝图侧 `control` 节点的 `panel_id` 是正向引用，两侧一致性由门禁断言（第 8 节）。
 - 若某节点类型声明自己**可承载面板**，它就必须在蓝图中允许 `panel_id` 字段；否则注册表不一致。
@@ -273,14 +273,34 @@
     - **长名截断**：名称是用户输入、长度不限（UUID 定长，名称不是），`.repo-current-name` 必须 `overflow: hidden` + `text-overflow: ellipsis` + `white-space: nowrap`，否则会把 `.kv` 的 `1fr` 列顶宽、面板出现横向滚动。
     - `pnpm check:panels` 按**行为**断言（直接 import `repoDisplay.ts` 驱动）：按 id 命中（含**重名**行取 id 命中的那一条，而不是"第一条同名的"）、未打开/查不到/空名/纯空白名 → 占位符、占位符取值 `—`；外加源码锚点——正向：面板经 `repoNameLabel(repos, app.repoId)` 渲染；反向：**不得**再把 `repoId` 当显示值渲染（`app.repoId === r.id` 这类**比较**仍允许，故只禁"渲染进节点"的形态，且断言前先剥注释——文件头会**引用** `repoId` 说明口径）；CSS 三条截断属性齐备；纯逻辑模块无 React / Tauri 依赖。**回退即红**实测：面板改回 `{app.repoId ?? "—"}` → 1 项红；解析函数回落到 `repoId` → 1 项红；删掉 CSS 截断 → 1 项红。
 
+15. **图书预览（`bookpreview`）的两种视图 / 封面来源 / 文件名滚轮（2026-10-08）**：面板把**文本类文件**当"书"展览。声明两项设置：`view`（`select`，缺省 **`card`**）与 `coverSize`（`numberInput`，缺省 **160**）；`view` 的候选逐项等于 `panels/bookpreview/bookPreviewView.ts` 的 `BOOK_VIEW_MODES`，`coverSize` 的范围 `[96, 400]` 由面板夹紧（`clampCoverSize`；声明层没有 min/max，与 `media.imageSize`、`imageviewer.filmstripSize` 同理）。面板按"单文件 ≤ 1200 行"分文件：`BookPreviewPanel.tsx` 主面板（工具条 + 两种视图容器）、`bookPreviewView.ts` 取值域与纯函数（**零依赖**，门禁直接 import）、`bookPreviewData.ts` 取数、`bookMetaCache.ts` 元数据缓存、`useBookMeta.ts` 单本读取、`BookCard.tsx` 卡片单元、`BookCoverRow.tsx` 封面单元、`BookCoverArt.tsx` 封面画面、`BookTextCover.tsx` 文字封面——门禁 `check:panels` 读**整个家族**（`BOOK_FAMILY_FILES` 是硬编码清单，**新增文件必须手动登记**）。
+    - **两种视图**（用户 2026-10-08 命名）：**卡片模式** = 封面在上、**文件名**在下；**封面模式** = 封面在左，右侧自上而下是**文件名 / 作者 / 简介**。文件名取**去目录与去扩展名的文件名**（= 用户口径里的「作品名」），**不读** EPUB 内嵌 `dc:title`——内嵌标题与文件名经常不一致（实测样本如此），取它会让"显示的是哪本书"变得对不上号。工具条上的视图切换是**本会话内的临时覆盖**（与媒体预览右上角下拉同口径），声明层的 `default` 才是缺省；设置一变即丢弃覆盖。
+    - **封面来源按子类型分流**（`usesEmbeddedCover`）：子类型 `book` → 走 `book.meta` 取**内嵌封面**；其余 → **文字封面**（把作品名渲染成书皮，底色由名字派生：`textCoverHue` 用 FNV-1a，**同名恒同色、跨会话稳定**——用随机色相的话每次打开都是另一个颜色，用户会当成渲染故障）。子类型就是**标记**，所以把它改成 `document` 就不再取内嵌封面，这正是"标记"该有的效果。**旧行兜底**：迁移 0008 之前入库的行子类型为 `null`，此时按扩展名（`epub`）判定，免得存量 EPUB 在重扫前全退化成文字封面（"还没重扫"与"面板坏了"必须看起来不一样）。
+    - **封面画面 = 文字封面打底 + 内嵌封面盖上**：加载期间看到的是这本书的文字封面（不是灰块），图片解码完成后直接盖上去；图片加载失败（路径失效 / 格式 Chromium 不认）把图摘掉即可自然回落——**不需要第二套错误态**。封面框是 `2/3` 书形 + `object-fit: contain`（**不裁剪**：裁掉书名是书封最不能接受的一种"好看"）。
+    - **文件名滚轮横向滚动**（"焦点在文件名上可滚动滚轮查看"）必须满足四条，缺一条都会表现为"看起来实现了、实际不好用"：① 用**原生监听器 + `{ passive: false }`**——React 的 `onWheel` 在根节点上是**被动**监听，`preventDefault()` 被忽略，滚轮会同时滚名字与面板；② **只有真的被省略**（`scrollWidth > clientWidth`）时才拦截，否则每个单元都变成滚动黑洞；③ 位移算术在纯函数 `nextScrollLeft` 里（两端夹紧，门禁按行为断言）；④ 文件名元素 `tabIndex = 0`，使"焦点在文件名上"**字面上**也成立。
+    - **截断形态刻意分两种**：文件名与作者**单行省略**（`text-overflow: ellipsis`），简介**多行截断**（`-webkit-line-clamp: 3`）——单行会把简介变成没有信息的碎屑，而"简介"这一栏的全部价值就是能读进去一两句。缺值渲染 `—`（不省略该行，与元数据面板同口径）。
+    - **取数只按仓库 / 源 / 目录**过滤 `mediaTypes: ['text']`，**不按相册**：相册成员分页的 SQL 只认 `image` / `video` / `audio` 三个字面量，文本类进不了相册成员列表；因此相册被选中时面板仍按源/目录列文本文件，而不是显示空列表把"相册不支持文本"伪装成"这里没有书"。翻页复用媒体预览的纯逻辑 `mediaPreviewPaging.drainPages`（严格前进 + 页数上限两道闸门只有一份实现）。
+    - **元数据不进索引**：封面是二进制、简介是长文本，塞进 `files` 行会让每次文件查询都背上几十 KB 的负载，而列表只用得到"有没有封面"。因此 `book.meta` 走**按内容哈希的磁盘缓存**（`<hash>.cover.<ext>` 原格式不转码 + `<hash>.bookmeta.json`），解析在**阻塞线程**里跑；**坏书降级为"没有元数据"而不是错误**（一本书打不开不该让整个面板变成错误态）。前端缓存（`bookMetaCache`）做结果缓存 + in-flight 去重，且**只为需要内嵌封面的书发命令**（`txt` / `md` 一本一个 IPC 是纯浪费，那是面板端就能判定的事）。
+    - **不做虚拟化**：文本库的量级是几十到几百本，与"数万张图"不是一个问题（媒体预览的虚拟化是为后者的量级做的）。**后台标签冻结照做**（`usePanelForeground`）：dockview 把非激活标签留在 DOM 里，不冻结就会为看不见的书取封面。本项列入 §10 开放点。
+    - `pnpm check:panels` 按**行为**断言（直接 import `bookPreviewView.ts` 驱动）：声明候选与取值域逐项一致、缺省落在夹紧范围内、`clampCoverSize` 的夹紧与"缺失回落缺省"、`resolveBookView` 的失败关闭、`bookDisplayName`（中间的点保留、无扩展名、Windows 分隔符、点开头的隐藏文件）、`usesEmbeddedCover`（子类型优先 + 旧行按扩展名兜底）、`nextScrollLeft` 两端夹紧、`wrapCoverName` 只在真截断时加省略号、`textCoverHue` 的稳定性与值域；外加源码锚点——正向：面板经 `usePanelSettingValue` 消费两项设置、注册表把 dockview API 传下去、按 `foreground` 冻结、取数写死 `mediaTypes: ["text"]` 且**不出现** `albumId`、卡片单元用原生 `wheel` + `{ passive: false }` 且**不出现** `onWheel=`、CSS 三种截断形态齐备；反向：纯逻辑模块**零依赖**（无 React / Tauri、**没有任何 import**）。
+
+16. **文本媒体类型与子类型（2026-10：面板的上游口径）**：`bookpreview` 能列出书，靠的是扫描期新增的 `text` 媒体类型（`hp-core` 的 `MediaType::Text`，存 `"text"`）与**子类型** `book` / `document`（`hp-core` 的 `FileSubtype`，存 `files.subtype`）。
+    - **判定只认扩展名**（`hp-scanner/src/media_type.rs` 的 `ext_to_media_type`：`txt` / `md` / `markdown` / `epub` → `Text`）：`txt` / `md` 没有 magic bytes，任何"看着像文本"的内容兜底都会把未知二进制吸进索引，让「未知类型不索引」失守。
+    - **默认子类型表与扩展名表放在一起**（`default_file_subtype`）：`epub` → `book`，其余文本 → `document`。两件事同源，免得"哪些扩展名算文本"与"文本默认是书还是文档"各写一遍、日后漂移。
+    - **子类型是标注，不是判定**：`MediaType` 由扩展名给出、用户不可改；子类型**可编辑**，扫描**只在行内为空时补默认值**，**绝不覆盖**已有值（与调色板 `locked` 同口径：用户的判定权不被重扫打回）。用户侧切换入口**本版未做**（列入 §10 开放点）。
+    - **入库口径**：文本**不是**音频那种占位行——照算内容哈希（移动识别/去重与图片同口径），但不产出感知哈希 / 缩略图 / 调色板 / `media_info_json`（文本没有视觉本体）。
+    - **迁移 0008**（`crates/hp-store/migrations/repo/0008_text_subtype.sql`）：`ALTER TABLE files ADD COLUMN subtype TEXT;`。`files.media_type` 是裸 TEXT 列、**没有 CHECK 约束**（0001 如此），因此新增取值不需要重建表；既有行 `subtype` 为 NULL，下次扫描按"缺失即补"补齐，未重扫的旧行仍按 `text` 正常显示。
+    - **已知边界（如实记录）**：① 相册成员分页（`hp-store` 的 `query_album_members_page`）与相册属性（`AlbumMediaType`）都只认 `image` / `video` / `audio`，**文本类文件进不了相册**；要不要把相册扩到文本类属未排期决定（列入 §10 开放点）。**相册属性这一侧已按同一口径收紧**：`AlbumMediaType::contains` 对所有取值（含 `Multimedia`）都返回"不含文本类"——否则 `multimedia` 的跟随源相册会把文本文件**写成成员**，而成员分页永远列不出它们（"有成员但看不见"），卸载源的影响评估也会多算。② **媒体预览不含文本类**（用户 2026-10-08 裁决，D95）：媒体预览的类型筛选里「全部」= **图片 / 视频 / 音频这三个**，不是"不筛"——`file.query` 的 `filter.mediaTypes` 因此是**集合**（缺省/空 = 不筛），单值 `mediaType` 已废弃。两条口径互不重叠：**文本类只在图书预览显示**。`pnpm check:panels` 按行为断言这一点（任何档位的请求集合都不含 `text`，且筛选选项由取值域生成而不是手写 `<option>`）。
+    - `pnpm check:panels` 断言：Rust 侧 `text` 与 `book` / `document` 取值域齐备、文本类**不参与内容兜底**、迁移 0008 存在且已登记进 `REPO_MIGRATIONS`、`0001_init.sql` **不得**被改（forward-only）。
+
 - **`cargo test -p hp-core`**：面板声明的硬错误清单、命名空间规则、`settings.kind` 白名单、`has_class = false` 的类目拒绝、`mount.overlay_content = false` 的浮层拒绝。
-- **回归**：内置 14 个面板的声明必须能通过校验且与现状一致（**零行为变化**）；插件面板缺失时蓝图可保存且灰显「未接通」。
+- **回归**：内置 15 个面板的声明必须能通过校验且与现状一致（**零行为变化**）；插件面板缺失时蓝图可保存且灰显「未接通」。
 - `pnpm typecheck` / `pnpm build` / `check-line-count` / `check-doc-status` 通过。
 
 ## 9. 落地顺序（强制）
 
 1. ✅ 本文（面板标准）定稿；RFC 0010 决策 1–4、7 记录。
-2. ✅ 面板注册表升级为可注册结构（`packages/config/src/panels.ts` 的 `BUILTIN_PANEL_SPECS` / `registerPluginPanels` / `allPanels`；14 个内置项行为不变）。
+2. ✅ 面板注册表升级为可注册结构（`packages/config/src/panels.ts` 的 `BUILTIN_PANEL_SPECS` / `registerPluginPanels` / `allPanels`；内置项行为不变）。
 3. ✅ manifest 贡献点 `panel` 的声明参数扩展 + 校验（`plugin_contribution.rs` + `panel_types.rs` 的 `validate_panel_decl`；TS↔Rust 由 `pnpm check:panels` **23 项**断言）。
 4. ✅ 蓝图侧按 `has_class` 过滤类目候选（`panels/blueprintNodeFactory.ts`、`shared/blueprintLint.ts`）；`blueprint_node` 反向一致性接入门禁。
 5. ✅ 「全部设置 → 面板」界面（`app_ui/settings/SettingsApp.tsx` + `settingsRegistry.ts`；`pnpm check:settings` **43 项**）。
@@ -298,3 +318,9 @@
   - **音频**：`files` 表对音频是 **D11 占位行**（无哈希、无缩略图、**无 `media_info_json`**），索引里**根本没有时长**。元数据面板当前由前端 `preload="metadata"` 读一次容器时长（探完 `load()` 复位释放文件）。若要"库里就有"，需在扫描期对音频也跑 ffprobe——那会改变 D11 对音频的占位行口径，属**未排期**的决定（用户 2026-09：先延后、只记录）。
   - **视频**：尺寸 / 时长 / 编码 / 码率 / 帧率来自 `media_info_json`（**扫描时 ffprobe 可用才写入**，`crates/hp-scanner/src/scanner.rs` 的 `process_video`）。**早于该状态的索引行永远是空的**——实测索引库里存在这种行，表现为"设置没错、面板却没显示任何媒体行"。现由面板用前端 `<video>` 兜底**尺寸与时长**；*编码 / 码率 / 帧率 DOM 拿不到，如实显示 `—`*。是否补"重新分析"入口或按需后端探测来补齐这三个字段，待定。
   - 两者的共同点：**面板只读索引 + 前端兜底，绝不隐式写入索引**（不替用户改数据）；缺值一律渲染为 `—` 而不是省略该行（省略会让"索引没数据"与"面板坏了"外观一致）。
+- **图书预览（`bookpreview`，2026-10-08 用户裁决"本版不做"）**：
+  - **查看器面板（`viewer`）的 `epub` / `txt` 预览本版不做**：查看器现在只会对 `image` / `video` / `audio` 出画面（`ViewerPanel.tsx` 按 `file.media_type` 分支），选中一本 `epub` / `txt` 时**不会**渲染书的内容，也不会内嵌阅读器。这是**已记录的缺口**（不是缺陷登记：它不违反任何已定稿规范，属"还没做"），落实位置见 `docs/roadmap/book-preview-plan.md`。
+  - **子类型的用户切换入口**：子类型（`book` / `document`）自设计起就是**可编辑标记**（用户口径："子类型类似于标记，后期用户可以进行更改切换"），但本版只做到"扫描补默认值、不覆盖已有值"，**没有**面板/右键菜单里的切换入口，也没有 `file.setSubtype` 命令。加它时要同时定：候选取值域是否封闭、切换是否触发重新解析封面、以及是否需要在重扫时保护用户选择（现有 `existing_subtype` 保留规则已经覆盖最后一条）。
+  - **虚拟化与排序**：文本库的量级（几十–几百本）不值得上虚拟化（媒体预览那套是为数万张图做的）；排序本版固定为 `file.query` 的自然序（相对路径升序），**没有**排序设置。若将来文本库涨到数千本，再按媒体预览的路子补虚拟化与排序（届时 `coverSize` / `view` 之外还要加 `sortKey` / `sortDir`）。
+  - **更多文本格式**：当前只把 `txt` / `md` / `markdown` / `epub` 判为 `text`。`mobi` / `azw3` 这类也能进同一张扩展名表，但它们是二进制容器、`hp-book` 解析不了封面与元数据（会落到文字封面）；要不要支持属未排期决定。
+  - **相册与文本类**：见 §8 第 16 项的"已知边界"——文本类文件进不了相册成员列表，本版按"面板不按相册取数"绕开，**没有**扩相册的语义。

@@ -8,6 +8,13 @@ export interface FileItem {
   source_id: string;
   relative_path: string;
   media_type: string;
+  /**
+   * 媒体类型之下的**子类型**（当前只有文本类有值：`book` / `document`）。
+   *
+   * 它是**可编辑标记**（与 `media_type` 的扫描判定不同），因此可能是 `null`
+   * ——旧索引行在重扫补齐前就是这个状态。消费方不得把它当"必有"。
+   */
+  subtype: string | null;
   size: number;
   mtime: string;
 }
@@ -23,6 +30,8 @@ export interface FileMetadataResult {
   source_id: string;
   relative_path: string;
   media_type: string;
+  /** 见 {@link FileItem.subtype}。 */
+  subtype: string | null;
   content_hash: string | null;
   size: number;
   mtime: string;
@@ -42,8 +51,14 @@ export interface FilePathArgs {
  * 三者都是**可选**：不传即不按该维度过滤。
  */
 export interface FileQueryFilter {
-  /** `image` / `video` / `audio` / `multimedia`（缺省不过滤）。 */
-  mediaType?: string;
+  /**
+   * 只返回这些媒体类型（`image` / `video` / `audio` / `text`）；**缺省或空数组 = 不筛**。
+   *
+   * 是**集合**而不是单个取值（D95）：面板的类型域本来就是一组——媒体预览的「全部」
+   * 指的是图片 / 视频 / 音频这三个（不是"索引里的一切"），图书预览指的是文本这一个。
+   * 未知取值由后端拒为 `validation`（不静默丢掉那一项）。
+   */
+  mediaTypes?: string[];
   sourceId?: string;
   /** 只返回相对路径以 `<dirPrefix>/` 开头的文件（含更深子目录）。 */
   dirPrefix?: string;

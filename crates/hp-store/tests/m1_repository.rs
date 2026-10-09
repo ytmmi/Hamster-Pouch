@@ -30,7 +30,7 @@ fn create_two_repos_files_are_separate() {
     assert_ne!(a, b, "两个仓库库文件必须是不同路径");
     assert!(a.exists() && b.exists(), "两个仓库库文件都应存在");
 
-    assert_eq!(da.schema_version().expect("读版本失败"), 7);
+    assert_eq!(da.schema_version().expect("读版本失败"), 8);
     assert_eq!(db.meta("name").expect("读名失败").as_deref(), Some("仓库B"));
     da.close().expect("关闭A失败");
     db.close().expect("关闭B失败");
@@ -81,27 +81,32 @@ fn registry_survives_reopen() {
 fn repo_meta_roundtrip_and_version() {
     let path = temp_repo_path("meta");
     let db = RepoDb::create(&path, "元信息仓库").expect("创建失败");
-    assert_eq!(db.schema_version().expect("读版本失败"), 7);
+    assert_eq!(db.schema_version().expect("读版本失败"), 8);
     assert_eq!(db.meta("name").expect("读名失败").as_deref(), Some("元信息仓库"));
     assert_eq!(
         db.meta("schema_version").expect("读版本失败").as_deref(),
-        Some("7"),
+        Some("8"),
         "镜像键必须等于权威版本（缺陷 0006）"
     );
     db.close().expect("关闭失败");
 
     let db = RepoDb::open(&path).expect("重开失败");
-    assert_eq!(db.schema_version().expect("读版本失败"), 7);
-    assert_eq!(db.meta("schema_version").expect("读版本失败").as_deref(), Some("7"));
+    assert_eq!(db.schema_version().expect("读版本失败"), 8);
+    assert_eq!(db.meta("schema_version").expect("读版本失败").as_deref(), Some("8"));
     db.close().expect("关闭失败");
 }
 
 /// 缺陷 0006 回归：由**旧版本**创建的仓库库被当前版本打开后，
 /// 权威版本（`PRAGMA user_version`）与镜像键（`repo_meta.schema_version`）必须一致。
 ///
-/// 构造方式：先把库退化成 v6 形态（删掉 `repo/0007` 建的那条索引 + 两处版本一起退回 6），
-/// 再让 `RepoDb::open` 应用 `repo/0007`。修复前镜像键会停留在 6（本测试即红），
-/// 修复后两边都是 7。
+/// 构造方式：先把库退化成 v6 形态（删掉 `repo/0007` 建的索引与 `repo/0008` 加的列，
+/// 两处版本一起退回 6），再让 `RepoDb::open` 应用 `repo/0007` + `repo/0008`。
+/// 修复前镜像键会停留在 6（本测试即红），修复后两边都是 8。
+///
+/// **两个 `DROP` 不是摆设**：`RepoDb::create` 已经建到最新版本，把 `user_version`
+/// 调回 6 会让 7/8 两条迁移**重跑**。0007 是 `CREATE INDEX IF NOT EXISTS`（天然幂等），
+/// 而 0008 是 `ALTER TABLE ... ADD COLUMN`——列还在就会报 `duplicate column name`。
+/// 所以退化必须真的把 v7/v8 的产物删掉，否则测的是"迁移能否重复执行"，那是另一件事。
 #[test]
 fn upgraded_repo_schema_version_mirror_does_not_diverge() {
     let path = temp_repo_path("meta-upgrade");
@@ -111,6 +116,7 @@ fn upgraded_repo_schema_version_mirror_does_not_diverge() {
         let conn = rusqlite::Connection::open(&path).expect("打开原始库失败");
         conn.execute_batch(
             "DROP INDEX IF EXISTS idx_album_member_file;
+             ALTER TABLE files DROP COLUMN subtype;
              PRAGMA user_version = 6;
              INSERT INTO repo_meta (key, value) VALUES ('schema_version', '6')
                ON CONFLICT(key) DO UPDATE SET value = '6';",
@@ -119,10 +125,10 @@ fn upgraded_repo_schema_version_mirror_does_not_diverge() {
     }
 
     let db = RepoDb::open(&path).expect("重开并升级失败");
-    assert_eq!(db.schema_version().expect("读版本失败"), 7, "迁移应把权威版本升到 7");
+    assert_eq!(db.schema_version().expect("读版本失败"), 8, "迁移应把权威版本升到 8");
     assert_eq!(
         db.meta("schema_version").expect("读镜像键失败").as_deref(),
-        Some("7"),
+        Some("8"),
         "升级后镜像键必须跟随权威版本，不得停留在建库时的 6（缺陷 0006）"
     );
     db.close().expect("关闭失败");

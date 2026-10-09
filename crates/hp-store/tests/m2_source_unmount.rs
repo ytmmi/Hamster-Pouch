@@ -24,6 +24,7 @@ fn file_row(source_id: &SourceId, relative_path: &str) -> FileIndexRow {
         source_id: source_id.clone(),
         relative_path: relative_path.to_string(),
         media_type: MediaType::Video,
+        subtype: None,
         content_hash: Some(format!("hash-{relative_path}")),
         content_hash_algo: Some("blake3".into()),
         content_hash_algo_version: Some(1),

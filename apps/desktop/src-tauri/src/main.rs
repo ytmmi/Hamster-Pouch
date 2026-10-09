@@ -206,6 +206,8 @@ fn main() {
             commands::file::file_trash,
             commands::file::file_reanalyze,
             commands::file::file_reverify,
+            // 图书预览面板的取数：EPUB 作者/简介/内嵌封面（磁盘缓存，按内容哈希失效）。
+            commands::book::book_meta,
             commands::fsops::fsops_copy,
             commands::fsops::fsops_move,
             commands::plugin::plugin_list,

@@ -1,9 +1,9 @@
-//! M2 验收测试：扫描索引、同名替换识别、移动/重命名不丢身份、音频占位、未知跳过。
+//! M2 验收测试：扫描索引、同名替换识别、移动/重命名不丢身份、音频占位、文本入库、未知跳过。
 //! 对应 docs/roadmap/phase-1-top-level-plan.md 的 M2 验证线。
 
 use std::path::Path;
 
-use hp_core::{MediaType, Source, VerifyStatus};
+use hp_core::{FileSubtype, MediaType, Source, VerifyStatus};
 use hp_scanner::{ScanOptions, ScanProgress, Scanner};
 use hp_store::RepoDb;
 
@@ -46,10 +46,13 @@ fn scan_indexes_image_skips_unknown_and_audio_placeholder() {
     make_png(&dir.join("photo.png"), 1);
     std::fs::write(dir.join("notes.txt"), b"hello plain text").expect("写 txt 失败");
     std::fs::write(dir.join("song.mp3"), b"ID3 fake audio").expect("写 mp3 失败");
+    // 真正的未知类型：扩展名不在任何表里、内容也没有 magic bytes。
+    // **不能再用 `.txt` 当"未知"**：2026-10 起 `txt` 是 `text` 媒体类型（D93）。
+    std::fs::write(dir.join("blob.bin"), b"hello plain text").expect("写 bin 失败");
 
     let outcome = scan(&mut db, &source, false).expect("扫描失败");
-    assert_eq!(outcome.indexed, 2, "图片与音频应各写一行");
-    assert_eq!(outcome.skipped, 1, "未知 txt 应跳过");
+    assert_eq!(outcome.indexed, 3, "图片 / 音频 / 文本应各写一行");
+    assert_eq!(outcome.skipped, 1, "未知 .bin 应跳过");
 
     // 图片：有内容哈希 + 感知哈希
     let img = db
@@ -70,10 +73,22 @@ fn scan_indexes_image_skips_unknown_and_audio_placeholder() {
     assert!(audio.content_hash.is_none(), "音频占位行不应有内容哈希");
     assert_eq!(audio.verify_status, VerifyStatus::Placeholder);
 
+    // 文本（2026-10 / D93）：**算内容哈希**（移动识别与去重），但不产出视觉派生；
+    // 子类型按扩展名补默认值（txt → document）。
+    let text = db
+        .get_file_by_path(source.id.as_str(), "notes.txt")
+        .expect("查询 txt 失败")
+        .expect("文本应已索引");
+    assert_eq!(text.media_type, MediaType::Text);
+    assert_eq!(text.subtype, Some(FileSubtype::Document), "txt 默认子类型为 document");
+    assert!(text.content_hash.is_some(), "文本应有内容哈希（与音频占位行不同）");
+    assert!(text.perceptual_hash.is_none(), "文本没有视觉本体，不应有感知哈希");
+    assert_eq!(text.verify_status, VerifyStatus::Ok);
+
     // 未知类型不入库
     assert!(
-        db.get_file_by_path(source.id.as_str(), "notes.txt")
-            .expect("查询 txt 失败")
+        db.get_file_by_path(source.id.as_str(), "blob.bin")
+            .expect("查询 bin 失败")
             .is_none(),
         "未知类型不应进入文件索引"
     );

@@ -288,6 +288,29 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &["asc", "desc"],
         requires_capability: None,
     },
+    // 图书预览（`panel.bookpreview.*`）：**缺省**视图与封面上限尺寸。
+    // 候选与 `packages/config/src/panels.ts` 的 `bookpreview.settings`、
+    // `apps/desktop/src/app_ui/panels/bookpreview/bookPreviewView.ts` 的枚举三方一致。
+    SettingDeclFact {
+        id: "view",
+        owner_kind: "panel",
+        owner_id: Some("bookpreview"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["card", "cover"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        // 封面上限尺寸（两种视图共用）。范围由面板夹紧
+        // （`bookPreviewView.clampCoverSize`，声明层没有 min/max），因此这里只镜像 kind。
+        id: "coverSize",
+        owner_kind: "panel",
+        owner_id: Some("bookpreview"),
+        kind: "numberInput",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
 ];
 
 /// 按**落库键**查宿主/面板声明（插件项走 manifest 反查，不在此列）。

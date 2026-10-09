@@ -199,6 +199,30 @@ export function shouldCloseDropdown(inButton: boolean, inPopup: boolean): boolea
 export const MASONRY_GAP = 8;
 
 /**
+ * 工具条的**类型筛选**档位（面板自己的取值域；`all` = 三种媒体类型，**不是**"不筛"）。
+ *
+ * 2026-10-08 用户口径：「媒体预览不包含 text 类型，text 类型在图书预览显示」。
+ * 因此"全部"必须**显式列出**图片 / 视频 / 音频，而不是把筛选条件留空——
+ * 留空在 `file.query` 里是"不筛"，会让文本类（txt / md / epub，2026-10 起已进索引）
+ * 漏进媒体预览。口径只在本模块声明一次，面板与门禁都消费它。
+ */
+export const MEDIA_TYPE_FILTERS = ["all", "image", "video", "audio"] as const;
+export type MediaTypeFilter = (typeof MEDIA_TYPE_FILTERS)[number];
+
+/** 每个档位实际请求的媒体类型集合（`DEFAULT_MEDIA_TYPE_FILTER_TYPES` 是「全部」那一档）。 */
+export const MEDIA_FILTER_TYPES: Readonly<Record<MediaTypeFilter, readonly string[]>> = {
+  all: ["image", "video", "audio"],
+  image: ["image"],
+  video: ["video"],
+  audio: ["audio"],
+};
+
+/** 档位 → 请求的媒体类型集合（返回**可变副本**，调用方直接放进命令参数）。 */
+export function mediaTypesForFilter(filter: MediaTypeFilter): string[] {
+  return [...(MEDIA_FILTER_TYPES[filter] ?? MEDIA_FILTER_TYPES.all)];
+}
+
+/**
  * 图片尺寸（px）：面板右上角**滑条**与面板设置 `imageSize` 的共用取值域。
  *
  * 语义随视图变化（见 `MEDIA_VIEW_MODES`）：平铺 / 瀑布流 = **单元格宽度**，

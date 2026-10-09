@@ -27,12 +27,16 @@ impl ThumbFormat {
         }
     }
 
-    /// 某媒体类型的缩略图格式；音频不生成缩略图，返回 `None`。
+    /// 某媒体类型的缩略图格式；音频与文本不生成缩略图，返回 `None`。
+    ///
+    /// 文本（`text`）的"封面"不是缩略图：`epub` 的内嵌封面由 `hp_book` 解析后
+    /// 按原格式落到 [`ThumbnailCache::path_for_book_cover`]，`txt` 根本没有封面
+    /// （前端用文件名渲染文字封面）。因此这里恒为 `None`，别把两件事混起来。
     pub fn for_media_type(media_type: MediaType) -> Option<Self> {
         match media_type {
             MediaType::Image => Some(ThumbFormat::Webp),
             MediaType::Video => Some(ThumbFormat::Jpeg),
-            MediaType::Audio => None,
+            MediaType::Audio | MediaType::Text => None,
         }
     }
 }
@@ -91,6 +95,27 @@ impl ThumbnailCache {
             .join(format!("{content_hash}.preview.jpg"))
     }
 
+    /// 电子书**内嵌封面**的缓存路径（`<hash>.cover.<ext>`）。
+    ///
+    /// 与缩略图同分片、同名不同后缀，互不冲突。`ext` 由 `hp_book` 按封面图片的
+    /// magic bytes 给出（`jpg` / `png` / `gif` / `webp` / `bmp` / `svg`）——
+    /// 这里**不转码**：封面是书的门面，原样保留原格式与原质量。
+    pub fn path_for_book_cover(&self, content_hash: &str, ext: &str) -> PathBuf {
+        self.shard_dir(content_hash)
+            .join(format!("{content_hash}.cover.{ext}"))
+    }
+
+    /// 电子书**元数据缓存**路径（`<hash>.bookmeta.json`）。
+    ///
+    /// 缓存的是"解析一次 EPUB 才知道的东西"（作者 / 简介 / 封面扩展名）。
+    /// 没有它，面板每次装载都要把整本 epub 读一遍并解压封面——一本书几十兆，
+    /// 那点延迟在卡片网格里是看得见的。**内容以内容哈希为键**：文件一变，
+    /// 哈希就变，旧缓存自然失效（与缩略图同一套失效口径）。
+    pub fn path_for_book_meta(&self, content_hash: &str) -> PathBuf {
+        self.shard_dir(content_hash)
+            .join(format!("{content_hash}.bookmeta.json"))
+    }
+
     /// 确保缓存根目录存在。
     pub fn ensure_dir(&self) -> HpResult<()> {
         std::fs::create_dir_all(&self.root)
@@ -133,6 +158,21 @@ mod tests {
             Some(ThumbFormat::Jpeg)
         );
         assert_eq!(ThumbFormat::for_media_type(MediaType::Audio), None);
+        // 文本没有"缩略图"：epub 封面走 `path_for_book_cover`，txt 走前端文字封面。
+        assert_eq!(ThumbFormat::for_media_type(MediaType::Text), None);
+    }
+
+    #[test]
+    fn book_cover_shares_shard_but_not_file() {
+        let cache = ThumbnailCache::new("C:/tmp/thumbs");
+        let cover = cache.path_for_book_cover("abcdef0123456789", "png");
+        let thumb = cache.path_for_image("abcdef0123456789");
+        assert_eq!(
+            cover,
+            PathBuf::from("C:/tmp/thumbs/ab/abcdef0123456789.cover.png")
+        );
+        assert_eq!(cover.parent(), thumb.parent(), "封面与缩略图共用分片目录");
+        assert_ne!(cover, thumb, "封面与缩略图不得共用同一缓存文件");
     }
 
     #[test]

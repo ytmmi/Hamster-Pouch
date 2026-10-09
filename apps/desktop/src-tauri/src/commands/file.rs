@@ -56,6 +56,9 @@ fn generate_thumbnail(
             None => false,
         },
         MediaType::Audio => false,
+        // 文本没有视觉本体：`epub` 的内嵌封面走 `book.meta`（`hp_book` 解析 +
+        // 原格式落盘），`txt` 由前端用文件名渲染文字封面。这里恒为"没有缩略图"。
+        MediaType::Text => false,
     }
 }
 
@@ -65,6 +68,8 @@ pub(crate) struct FileMetadataResult {
     source_id: String,
     relative_path: String,
     media_type: String,
+    /// 媒体类型之下的子类型（`book` / `document`；非文本类为 `null`）。
+    subtype: Option<String>,
     content_hash: Option<String>,
     size: i64,
     mtime: String,
@@ -102,6 +107,7 @@ pub(crate) fn file_metadata(
             source_id: file.source_id.as_str().to_string(),
             relative_path: file.relative_path,
             media_type: file.media_type.as_str().to_string(),
+            subtype: file.subtype.map(|s| s.as_str().to_string()),
             content_hash: file.content_hash,
             size: file.size,
             mtime: file.mtime,
@@ -117,7 +123,11 @@ pub(crate) fn file_metadata(
 #[derive(serde::Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FileQueryFilterArgs {
-    media_type: Option<String>,
+    /// 只返回这些媒体类型（`image` / `video` / `audio` / `text`）；缺省或空数组 = 不筛。
+    ///
+    /// **集合语义**（D95）：媒体预览的「全部」= 图片/视频/音频这三个，图书预览 = 文本这一个。
+    /// 取值不在闭集内一律 `validation`（歧义即拒绝，不静默回落"不筛"）。
+    media_types: Option<Vec<String>>,
     source_id: Option<String>,
     dir_prefix: Option<String>,
 }
@@ -145,13 +155,17 @@ pub(crate) fn file_query(
 ) -> ApiResponse<FileQueryPage> {
     let outcome = (|| -> HpResult<FileQueryPage> {
         let filter = filter.unwrap_or_default();
-        let media_type = match filter.media_type.as_deref() {
-            None | Some("") | Some("multimedia") => None,
-            Some(s) => Some(
+        // 媒体类型集合：**逐个校验**，出现未知取值即拒（不静默丢掉那一项，
+        // 否则"选了没生效"会被伪装成"筛出来是空的"）。
+        let media_types: Vec<MediaType> = filter
+            .media_types
+            .unwrap_or_default()
+            .iter()
+            .map(|s| {
                 MediaType::from_str(s)
-                    .ok_or_else(|| HpError::InvalidArgument(format!("未知媒体类型: {s}")))?,
-            ),
-        };
+                    .ok_or_else(|| HpError::InvalidArgument(format!("未知媒体类型: {s}")))
+            })
+            .collect::<HpResult<Vec<_>>>()?;
         let parsed_cursor = match cursor.as_deref().map(str::trim) {
             None | Some("") => None,
             Some(raw) => Some(hp_store::FileQueryCursor::decode(raw)?),
@@ -161,7 +175,7 @@ pub(crate) fn file_query(
         let (rows, next) = db.query_files(
             &repo_id,
             &hp_store::FileQueryFilter {
-                media_type,
+                media_types: &media_types,
                 source_id: filter.source_id.as_deref(),
                 dir_prefix: filter.dir_prefix.as_deref(),
             },

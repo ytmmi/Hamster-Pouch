@@ -65,7 +65,7 @@ crates/hp-store/src/
     tag_lib_set.rs    # 四库**聚合查询层**：用户库 > 扩展包 > 内置基底的统一视图（TagLibSet）
     tag_lib_merge.rs  # 多扩展包之间的**重复概念归并**（MergeIndex，D36.3）
   migrations/         # 迁移 SQL（forward-only，发布后禁止修改；权威文本在这些文件里）
-    repo/             # 仓库库：0001_init … 0007_album_member_file_index.sql（当前版本 = 7）
+    repo/             # 仓库库：0001_init … 0008_text_subtype.sql（当前版本 = 8）
     global/           # 全局配置库：0001_init … 0004_layout_layers.sql（当前版本 = 4）
     dict/             # tag 词库：0001_init.sql
                       # 注意：**没有** `dict_lib/` 目录——实际只有 repo/ global/ dict/ 三个。
@@ -87,6 +87,7 @@ crates/hp-store/src/
     plugin_catalog.rs   # 「扩展」菜单的目录通道（plugin.panelCatalog：面板 + 无面板的数据扩展）
     plugin_panel_data.rs # 面板 bind 的受控取数通道（plugin.panelData）
     blueprint.rs        # 蓝图命令桥接（含 blueprint.changed 广播）
+    book.rs             # 图书元数据桥接（book.meta：EPUB 作者/简介/内嵌封面，磁盘缓存）
     ai.rs fsops.rs      # AI 打标桥接 / 文件操作桥接
 
 apps/desktop/src/app_ui/
@@ -131,6 +132,18 @@ apps/desktop/src/app_ui/
                       #   预加载：取哪些邻居在 viewerPreload（前台才取 / 大图不解码 / 同张只预热一次），
                       #   取图策略与缓存收敛在 shared/imageUrl.ts（HEIC 预览与当前图共用一份）
     ViewerPanel.tsx   # 查看器（大图/视频/音频预览；**顶部基础信息栏**由面板设置 infoBarEnabled 控制）
+                      #   **已知缺口**：epub / txt 预览本版不做（用户 2026-10-08 裁决），
+                      #   见 docs/roadmap/book-preview-plan.md §2.1
+    bookpreview/      # 图书预览（panel.bookpreview；文本类文件 txt/md/epub）
+                      #   BookPreviewPanel.tsx 主面板（工具条 + 两种视图容器）
+                      #   BookCard.tsx 卡片模式单元（封面在上 + 文件名在下；文件名悬停滚轮横滚）
+                      #   BookCoverRow.tsx 封面模式单元（封面在左 + 文件名/作者/简介）
+                      #   BookCoverArt.tsx 封面画面（文字封面打底 + 内嵌封面盖上，失败自然回落）
+                      #   BookTextCover.tsx 文字封面（底色由作品名派生，同名恒同色）
+                      #   bookPreviewView.ts 取值域与纯函数（零依赖，门禁直接 import）
+                      #   bookPreviewData.ts 取数（file.query 过滤 mediaType='text'；不按相册）
+                      #   bookMetaCache.ts 元数据缓存（结果缓存 + in-flight 去重）
+                      #   useBookMeta.ts 单本读取（只对需要内嵌封面的书发 book.meta）
     MetadataPanel.tsx # 元数据面板（索引字段 + EXIF/ffprobe 摘要；消费宿主设置 ui.sizeUnit/dateFormat/dateShowTime）
     metadataInfo.ts   # 元数据面板的**纯解析**（ffprobe 原始 JSON、EXIF 摘要 → 尺寸/时长/编码/码率/帧率）
     MediaPreviewPanel.tsx   # 媒体预览主面板（列表行渲染 + 三种视图容器 + 图片尺寸 CSS 变量）
@@ -268,6 +281,10 @@ HamsterPouch/
     hp-plugin-host/           # 插件生命周期、权限、宿主 API
     hp-ai/                    # AI 打标接口抽象、任务队列、结果回写边界
     hp-media/                 # 媒体子进程管理、播放控制、ffprobe 元数据、ffmpeg 抽帧宿主
+    hp-book/                  # 电子书元数据与封面解析（EPUB = ZIP + OPF；txt/md 无元数据）
+                              #   自实现最小 ZIP 读取器（zip.rs）+ 极简 XML 取值（xml.rs）+
+                              #   EPUB 解析（epub.rs）+ 封面格式判定（cover.rs）+ 格式分发（meta.rs）；
+                              #   **不引入 `zip` crate**（D20 依赖本地化），解压走已在依赖树里的 flate2
     hp-dto/                   # 跨层 DTO（前端 shared-types 由这些类型生成；`src/lib.rs` 按域分组、
                               #   `src/bin/generate.rs` 负责导出）。桥接层必须直接用这里的类型
     # hp-core/examples/check-blueprint.rs：蓝图体检小工具（stdin 读 JSON，打印解析/硬错误/软告警），
@@ -328,6 +345,7 @@ apps/desktop -> src-tauri -> crates/*
 crates/hp-* -> hp-core
 hp-scanner/hp-album/hp-ai -> hp-store
 hp-media -> hp-store（元数据/抽帧结果缓存）+ hp-core（媒体任务模型）
+hp-book -> hp-core（只用 HpError/HpResult；纯文件格式解析，不碰数据库、不碰 Tauri）
 hp-plugin-host -> hp-core + hp-store 的稳定接口
 hp-fsops -> hp-core + hp-store
 hp-dto -> hp-core（跨层 DTO；由 ts-rs 生成 packages/shared-types）

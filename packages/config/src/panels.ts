@@ -2,7 +2,7 @@
  * 面板注册表（RFC 0010 决策 4 / `docs/spec/panel-standard.md`）。
  *
  * 「面板」是 dockview 承载单元与功能边界（蓝图节点枚举 `control`），**可注册**：
- * 宿主内置 14 个 + 插件注册项（`plugin.<plugin_id>.<local_id>`）。它与「控件」
+ * 宿主内置 15 个 + 插件注册项（`plugin.<plugin_id>.<local_id>`）。它与「控件」
  * （面板**内部**的 26 种宿主 UI 单元，`docs/spec/control-standard.md`）**不是一回事**。
  *
  * 声明是**纯数据**：不含代码、样式、像素布局或任意表达式；`origin` 由宿主按实际安装方式
@@ -114,7 +114,7 @@ export interface PanelSpec {
   category: PanelCategory;
   /** **有无类目**：该面板能否挂「类目」节点（第 5.1 节）。 */
   hasClass: boolean;
-  /** 该面板在蓝图里由哪种节点承载（内置 14 个均为 `control`）。 */
+  /** 该面板在蓝图里由哪种节点承载（内置 15 个均为 `control`）。 */
   blueprintNode: string;
   /** 面板自身设置项（供「全部设置 → 面板」按面板分节渲染）。 */
   settings?: readonly PanelSettingDecl[];
@@ -151,7 +151,7 @@ export function isValidPanelId(id: string): boolean {
   return isBareId(id) || isPluginNamespacedId(id);
 }
 
-// ============================== 内置 14 个面板 ==============================
+// ============================== 内置 15 个面板 ==============================
 
 /** 宿主内置面板 id（封闭清单）。 */
 export const BUILTIN_PANEL_IDS = [
@@ -159,6 +159,7 @@ export const BUILTIN_PANEL_IDS = [
   "sources",
   "albums",
   "media",
+  "bookpreview",
   "viewer",
   "imageviewer",
   "metadata",
@@ -179,10 +180,10 @@ export type PanelId = BuiltinPanelId | `plugin.${string}`;
 const SYSTEM_ORIGIN: PanelOrigin = { kind: "system" };
 
 /**
- * 宿主内置 14 个面板的声明（顺序即 `PANEL_IDS` 顺序）。
+ * 宿主内置 15 个面板的声明（顺序即 `PANEL_IDS` 顺序）。
  *
  * `has_class` 如实反映当前默认蓝图：**只有媒体预览（`media`）有类目**
- * （图像 / 视频 / 音频），其余 13 个没有条目分类（第 5.1 节）。
+ * （图像 / 视频 / 音频），其余 14 个没有条目分类（第 5.1 节）。
  * `category` 用于「全部设置 → 面板」二级列表分组（第 3 节）。
  */
 export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
@@ -252,6 +253,37 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
           { value: "asc", title_key: "media.settings.sortDir.asc" },
           { value: "desc", title_key: "media.settings.sortDir.desc" },
         ],
+      },
+    ],
+  },
+  {
+    id: "bookpreview",
+    titleKey: "panel.bookpreview",
+    category: "media",
+    hasClass: false,
+    blueprintNode: "control",
+    origin: SYSTEM_ORIGIN,
+    // 面板设置（`docs/spec/panel-standard.md` 第 5.3 节）：视图与封面上限尺寸。
+    // 取值域与 `panels/bookpreview/bookPreviewView.ts` 的 `BOOK_VIEW_MODES` 逐项对齐
+    // （一致性由 `pnpm check:panels` 断言）；`coverSize` 的范围由面板夹紧
+    // （声明层没有 min/max，与 `media.imageSize`、`imageviewer.filmstripSize` 同理）。
+    settings: [
+      {
+        key: "view",
+        kind: "select",
+        title_key: "book.settings.view",
+        // 缺省**卡片模式**（封面在上 + 文件名在下）。
+        default: "card",
+        options: [
+          { value: "card", title_key: "book.settings.view.card" },
+          { value: "cover", title_key: "book.settings.view.cover" },
+        ],
+      },
+      {
+        key: "coverSize",
+        kind: "numberInput",
+        title_key: "book.settings.coverSize",
+        default: 160,
       },
     ],
   },
@@ -389,7 +421,7 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
   { id: "blueprint", titleKey: "panel.blueprint", category: "system", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
 ];
 
-/** 规范面板 ID 列表（内置 14 个；插件面板不进这张常量表，走运行时注册表）。 */
+/** 规范面板 ID 列表（内置 15 个；插件面板不进这张常量表，走运行时注册表）。 */
 export const PANEL_IDS: readonly PanelId[] = BUILTIN_PANEL_IDS;
 
 /** 面板 ID → 标题翻译键（内置；插件面板用 `panelTitleKeyOf`）。 */
@@ -450,7 +482,7 @@ export function unregisterPluginPanels(pluginId?: string): void {
   bumpPanels();
 }
 
-/** 全部已注册面板（内置 14 个 + 插件项）。 */
+/** 全部已注册面板（内置 15 个 + 插件项）。 */
 export function allPanels(): readonly PanelSpec[] {
   return pluginPanels.length === 0 ? BUILTIN_PANEL_SPECS : [...BUILTIN_PANEL_SPECS, ...pluginPanels];
 }

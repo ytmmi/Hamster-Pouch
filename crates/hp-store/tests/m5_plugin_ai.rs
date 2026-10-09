@@ -171,7 +171,7 @@ fn ai_provider_config_crud() {
 fn ai_tag_undo_records_and_latest() {
     let path = temp_repo_path("ai-undo");
     let mut db = RepoDb::create(&path, "AI 仓库").expect("创建仓库失败");
-    assert_eq!(db.schema_version().expect("读版本失败"), 7);
+    assert_eq!(db.schema_version().expect("读版本失败"), 8);
 
     let undo = AiTagUndo {
         id: "undo-1".into(),

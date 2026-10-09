@@ -158,16 +158,19 @@ CREATE INDEX idx_sources_repo ON sources(repo_id);
 
 ```sql
 -- 字段覆盖 RFC 0001 数据约束：身份=内容哈希；size/mtime/路径只用于变更发现
--- media_type 判定：扩展名优先 + 内容兜底（D11）
+-- media_type 判定：扩展名优先 + 内容兜底（D11）；**文本类只认扩展名**（txt/md/markdown/epub）
 -- 音频占位行（D11）：media_type=audio，content_hash/perceptual_hash 为 NULL，
 --   无缩略图，后续开放音频索引时原位升级
+-- 文本（2026-10）：media_type=text，**算内容哈希**（移动识别/去重与图片同口径），
+--   但不产出 perceptual_hash / 缩略图 / media_info_json（文本没有视觉本体）
 -- 视频（D14-D16）：全量媒体信息由 ffprobe 探测后缓存（存储形式见实现期开放点），
 --   首帧缩略图扫描时由 ffmpeg 生成，thumb_status 标记是否已生成
 CREATE TABLE files (
   id                        TEXT PRIMARY KEY,  -- 稳定文件 ID
   source_id                 TEXT NOT NULL,
   relative_path             TEXT NOT NULL,
-  media_type                TEXT NOT NULL,     -- image|video|audio
+  media_type                TEXT NOT NULL,     -- image|video|audio|text
+  subtype                   TEXT,              -- 媒体类型之下的**可编辑标记**（迁移 repo/0008 以 ALTER TABLE 追加，故位于列尾）；当前文本类用 book|document
   content_hash              TEXT,              -- 音频占位行可空
   content_hash_algo         TEXT,              -- 如 BLAKE3/SHA-256
   content_hash_algo_version INTEGER,
@@ -188,6 +191,14 @@ CREATE UNIQUE INDEX idx_files_source_path ON files(source_id, relative_path);
 CREATE INDEX idx_files_content_hash ON files(content_hash);
 CREATE INDEX idx_files_media_type ON files(media_type);
 ```
+
+> **`subtype` 的口径（2026-10，`docs/spec/panel-standard.md` §8 第 16 项）**：它是**可编辑标记**，
+> 不是判定结果——`media_type` 由扫描器的扩展名判定给出、用户不可改，子类型**可改**，
+> 且扫描**只在为空时补默认值**（`epub` → `book`，其余文本 → `document`），**绝不覆盖**已有值。
+> 因此它是**独立列**，不能从 `media_type` / 扩展名现算。既有行（迁移 0008 之前）为 `NULL`：
+> 下次扫描按"缺失即补"补齐；未重扫的旧行仍按 `text` 正常显示（消费方按扩展名兜底）。
+> 用户侧切换入口**本版未做**（见 `docs/roadmap/book-preview-plan.md` §2.2）。
+
 
 视频全量元数据（音轨/字幕/章节等）**已定为列** `media_info_json`（迁移 `repo/0002_media_info.sql:4` 以 `ALTER TABLE` 追加，故位于 `files` 列尾，见上表）；**不得另建表**。
 
@@ -457,7 +468,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blueprints_default
 ## 5. 迁移策略
 
 - 三库**共用同一个版本追踪机制**：`PRAGMA user_version`。读：`crates/hp-store/src/migrate.rs:12`；版本号以"迁移数组下标 + 1"推导（`migrate.rs:16`）；每次未执行版本单开事务执行后写回（`migrate.rs:23`）。三库分别在 `crates/hp-store/src/repo/repo_db.rs:71`、`crates/hp-store/src/global/global_db.rs:65`、`crates/hp-store/src/dict/dict_db.rs:41` 调用同一个 `migrate::apply`。
-  - **当前仓库库版本 = 7**（`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs:92`）。
+  - **当前仓库库版本 = 8**（`0008` 为 `files.subtype` 列；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs:92`）。
   - **当前全局配置库版本 = 4**（`global/0001_init` … `global/0004_layout_layers`，见 `crates/hp-store/src/global/global_db.rs:15`-`18` 的四个 `include_str!`）；全局库内**没有**镜像表（7 张表里没有 `global_meta`）。
   - **当前词库版本 = 1**（`dict_db.rs:19`）；`dict_meta`（`dict/0001:6-9`）是数据元信息 K/V，**不是** schema 版本。
 - **`repo_meta.schema_version` 是**镜像键**，每次打开仓库库都按权威值回写**（2026-09 修复缺陷 0006）：`repo_db.rs:86`-`89`（`sync_schema_version_meta`）在 `repo_db.rs:78`-`79`（`open_inner` 汇总点，`migrate::apply` 与蓝图文档迁移之后）执行，**新建与打开两条路径共用这一处**，因此升级过的库不再与 `user_version` 分叉。回写**不能**下沉到 `migrate::apply`（`migrate.rs:10`）：那个执行器由仓库库/全局库/词库共用，且全局库与词库**没有** `repo_meta`。**版本判断一律以 `PRAGMA user_version` 为准**，不要读镜像键（该键仍无读取方）。
@@ -478,4 +489,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blueprints_default
 - `filter_json` 的具体 DSL 范围。
 - `undo_json` 的撤销范围与交互方式。
 - 缩略图缓存位置与清理策略（缓存不属于核心 schema，另行处理）。
-- 后续新增媒体类型枚举值时的迁移方式（`media_type` 已存文本，扩展无需改列结构，仅需数据回填规则）。
+- 后续新增媒体类型枚举值时的迁移方式（`media_type` 已存文本、**没有 CHECK 约束**，扩展无需改列结构，仅需数据回填规则）。**已落地一例**：`text`（2026-10，迁移 `repo/0008` 只加 `subtype` 列，`media_type` 取值本身不需要迁移）。

@@ -1,7 +1,7 @@
 /**
  * 面板注册表 — 面板 id / 标题 / 渲染函数，供 dockview 与菜单共用。
  *
- * **内置 14 个面板**的组件表在 `PANEL_DEFS`（行为与 RFC 0010 之前完全一致）；
+ * **内置 15 个面板**的组件表在 `PANEL_DEFS`（行为与 RFC 0010 之前完全一致）；
  * **插件注册的面板**（`docs/spec/panel-standard.md`）走 `allPanelDefs()` 的动态路径：
  * 宿主按注册表里的声明生成面板项，内部 UI 仍由控件 schema 与宿主白名单决定
  * （`docs/spec/control-standard.md`），插件不得创建自由 React 组件（D44/RFC 0010 决策 2）。
@@ -20,6 +20,7 @@ import {
 import type { Translate, TranslationKey } from "../i18n";
 import { AlbumPanel } from "../panels/AlbumPanel";
 import { BlueprintPanel } from "../panels/BlueprintPanel";
+import { BookPreviewPanel } from "../panels/bookpreview/BookPreviewPanel";
 import { ColorPanel } from "../panels/ColorPanel";
 import { ImageViewerPanel } from "../panels/imageviewer/ImageViewerPanel";
 import { MediaPlayerPanel } from "../panels/MediaPlayerPanel";
@@ -52,7 +53,7 @@ export interface PanelDef {
   render: (ctx: PanelRenderCtx) => JSX.Element;
 }
 
-/** 宿主内置 14 个面板（顺序与 `PANEL_IDS` 一致）。 */
+/** 宿主内置 15 个面板（顺序与 `PANEL_IDS` 一致）。 */
 export const PANEL_DEFS: PanelDef[] = [
   { id: "repo", titleKey: "panel.repo", render: () => <RepoPanel /> },
   { id: "sources", titleKey: "panel.sources", render: () => <SourcePanel /> },
@@ -60,6 +61,9 @@ export const PANEL_DEFS: PanelDef[] = [
   // 媒体预览需要 dockview 面板 API：面板设置（缺省视图/排序）的第 4 条热加载触发源
   // 「面板从后台标签回到前台时补读一次」靠它可达（与 `viewer` 同款）。
   { id: "media", titleKey: "panel.media", render: (ctx) => <MediaPreviewPanel api={ctx.api} /> },
+  // 图书预览持有面板设置（`bookpreview.view` / `coverSize`），需要激活状态凑齐四条热加载触发源；
+  // 同时它是"后台标签冻结"的使用者（不显示就不为看不见的书取封面）。
+  { id: "bookpreview", titleKey: "panel.bookpreview", render: (ctx) => <BookPreviewPanel api={ctx.api} /> },
   // 查看器持有面板设置（`viewer.infoBarEnabled`），需要激活状态才凑齐四条热加载触发源。
   { id: "viewer", titleKey: "panel.viewer", render: (ctx) => <ViewerPanel api={ctx.api} /> },
   { id: "imageviewer", titleKey: "panel.imageviewer", render: (ctx) => <ImageViewerPanel api={ctx.api} /> },
@@ -90,7 +94,7 @@ function pluginPanelDef(spec: PanelSpec): PanelDef {
   };
 }
 
-/** 全部面板项（内置 14 个 + 当前已注册的插件面板）。 */
+/** 全部面板项（内置 15 个 + 当前已注册的插件面板）。 */
 export function allPanelDefs(): PanelDef[] {
   const pluginSpecs = pluginRegisteredPanels();
   return pluginSpecs.length === 0
@@ -122,7 +126,7 @@ export function panelRender(id: string, ctx: PanelRenderCtx): JSX.Element | null
   return def ? def.render(ctx) : null;
 }
 
-/** dockview 组件表（内置 14 个；与 `PANEL_DEFS` 一一对应）。 */
+/** dockview 组件表（内置 15 个；与 `PANEL_DEFS` 一一对应）。 */
 export const DOCK_COMPONENTS: Record<string, FC<IDockviewPanelProps>> = buildComponents(
   PANEL_DEFS,
 );

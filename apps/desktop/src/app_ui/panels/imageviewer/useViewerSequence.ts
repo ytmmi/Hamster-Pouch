@@ -114,7 +114,7 @@ export async function loadViewerFiles(
     const page = await api.fileQuery({
       repoId: scope.repoId,
       filter: {
-        mediaType: "image",
+        mediaTypes: ["image"],
         sourceId: scope.sourceId ?? undefined,
         dirPrefix: scope.dirPath ?? undefined,
       },

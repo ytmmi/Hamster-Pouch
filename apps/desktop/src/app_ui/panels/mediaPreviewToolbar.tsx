@@ -16,6 +16,7 @@ import {
   MEDIA_IMAGE_SIZE_MIN,
   MEDIA_IMAGE_SIZE_STEP,
   MEDIA_SORT_KEYS,
+  MEDIA_TYPE_FILTERS,
   MEDIA_VIEW_MODES,
   SORT_DIRECTIONS,
   type MediaSortKey,
@@ -36,6 +37,14 @@ function sortKeyLabelKey(key: MediaSortKey): TranslationKey {
 function sortDirLabelKey(dir: SortDirection): TranslationKey {
   return `media.settings.sortDir.${dir}`;
 }
+
+/** 类型筛选档位 → i18n 键（档位清单来自 `MEDIA_TYPE_FILTERS`，这里只给文案）。 */
+export const MEDIA_FILTER_LABEL_KEYS: Readonly<Record<MediaTypeFilter, TranslationKey>> = {
+  all: "media.filter.all",
+  image: "media.filter.image",
+  video: "media.filter.video",
+  audio: "media.filter.audio",
+};
 
 export interface MediaPreviewToolbarProps {
   viewMode: MediaPreviewMode;
@@ -130,10 +139,13 @@ export function MediaPreviewToolbar({
         value={typeFilter}
         onChange={(e) => onTypeFilterChange(e.target.value as MediaTypeFilter)}
       >
-        <option value="all">{t("media.filter.all")}</option>
-        <option value="image">{t("media.filter.image")}</option>
-        <option value="video">{t("media.filter.video")}</option>
-        <option value="audio">{t("media.filter.audio")}</option>
+        {/* 选项由**取值域**生成（`MEDIA_TYPE_FILTERS`），不手写四个 `<option>`：
+            手写的话"多一个档位忘加选项 / 加了一个面板认不出的档位"都不会被发现。 */}
+        {MEDIA_TYPE_FILTERS.map((value) => (
+          <option key={value} value={value}>
+            {t(MEDIA_FILTER_LABEL_KEYS[value])}
+          </option>
+        ))}
       </select>
       <span className="mp-count" title={loading ? t("media.loadingAllHint") : undefined}>
         {selectedCount > 0

@@ -42,7 +42,7 @@ export function GridPanel({
       try {
         const page = await api.fileQuery({
           repoId,
-          filter: { mediaType: mediaType || undefined },
+          filter: { mediaTypes: mediaType ? [mediaType] : undefined },
           limit: 500,
         });
         if (!cancelled) {

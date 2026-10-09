@@ -710,6 +710,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hp-book"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "hp-core",
+ "tempfile",
+]
+
+[[package]]
 name = "hp-core"
 version = "0.1.0"
 dependencies = [

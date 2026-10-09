@@ -100,7 +100,16 @@ impl AlbumMediaType {
     }
 
     /// 本相册属性是否包含给定文件媒体类型（D10）。
+    ///
+    /// **相册一律不含文本类**（2026-10-08 用户口径「媒体预览不包含 text 类型，text 类型在
+    /// 图书预览显示」）：`Multimedia` 的含义是"图像 + 视频 + 音频"，不是"索引里的一切"。
+    /// 这一条必须与 `query_album_members_page`（只认三个媒体字面量）保持一致——
+    /// 否则 `multimedia` 的跟随源相册会把文本文件**写成成员**，而成员分页永远列不出它们，
+    /// 表现为"有成员但看不见"，卸载源的影响评估也会多算。
     pub fn contains(&self, file_type: MediaType) -> bool {
+        if file_type == MediaType::Text {
+            return false;
+        }
         match self {
             AlbumMediaType::Multimedia => true,
             AlbumMediaType::Image => file_type == MediaType::Image,
@@ -252,6 +261,24 @@ mod tests {
         assert!(AlbumMediaType::Audio.contains(MediaType::Audio));
         assert!(!AlbumMediaType::Audio.contains(MediaType::Image));
         assert!(!AlbumMediaType::Audio.contains(MediaType::Video));
+    }
+
+    /// **相册不含文本类**（D95）：`Multimedia` 是"图像 + 视频 + 音频"，不是"索引里的一切"。
+    /// 这条与 `query_album_members_page` 的三个媒体字面量必须一致——否则 `multimedia`
+    /// 的跟随源相册会把文本文件写成成员，而成员分页永远列不出它们（"有成员但看不见"）。
+    #[test]
+    fn album_media_type_never_contains_text() {
+        for album_type in [
+            AlbumMediaType::Image,
+            AlbumMediaType::Video,
+            AlbumMediaType::Audio,
+            AlbumMediaType::Multimedia,
+        ] {
+            assert!(
+                !album_type.contains(MediaType::Text),
+                "{album_type:?} 不应包含文本类（图书预览才是它的落点）"
+            );
+        }
     }
 
     #[test]

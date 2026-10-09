@@ -3,4 +3,8 @@
 /**
  * album.members / file.query 返回元素。
  */
-export type AlbumFileItem = { id: string, source_id: string, relative_path: string, media_type: string, size: number, mtime: string, };
+export type AlbumFileItem = { id: string, source_id: string, relative_path: string, media_type: string, 
+/**
+ * 媒体类型之下的子类型（`book` / `document`；非文本类为 `null`）。
+ */
+subtype: string | null, size: number, mtime: string, };

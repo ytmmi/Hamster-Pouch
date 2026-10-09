@@ -71,7 +71,7 @@ pub use control_types::{
     CONTROL_NODE_SOFT_LIMIT, CONTROL_REGISTRY, TABLE_COLUMN_MAX,
 };
 pub use error::{HpError, HpResult};
-pub use file::{FileId, FileIndexRow, ThumbStatus, VerifyStatus};
+pub use file::{FileId, FileIndexRow, FileSubtype, ThumbStatus, VerifyStatus};
 pub use plugin::{
     Capability, HostApiVersion, PluginId, PluginManifest, PluginRegistryRow, PluginRepoState,
     RuntimeKind, SourceKind, TrustLevel, HOST_API_VERSION,

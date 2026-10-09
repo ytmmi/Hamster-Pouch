@@ -18,11 +18,23 @@ import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import type { FileItem, SourceItem } from "../shared/types";
-import { sortFiles, type MediaSortKey, type SortDirection } from "./mediaPreviewView";
+import {
+  mediaTypesForFilter,
+  sortFiles,
+  type MediaSortKey,
+  type MediaTypeFilter,
+  type SortDirection,
+} from "./mediaPreviewView";
 import { drainPages, MEDIA_PREVIEW_PAGE_LIMIT } from "./mediaPreviewPaging";
 
-/** 工具条的类型筛选（`all` = 不筛）。 */
-export type MediaTypeFilter = "all" | "image" | "video" | "audio";
+/**
+ * 工具条的类型筛选档位（`all` = **三种媒体类型**，不是"不筛"）。
+ *
+ * 取值域在 `mediaPreviewView.ts` 的 `MEDIA_TYPE_FILTERS` / `MEDIA_FILTER_TYPES`
+ * ——"每个档位到底请求哪些媒体类型"只有那一处权威。这里只是把类型沿用原来的
+ * import 路径再导出一遍（工具条从本文件 import 它）。
+ */
+export type { MediaTypeFilter };
 
 /** 一条可渲染条目：文件本体 + 已解析的绝对路径 URL（无绝对路径时为空串）。 */
 export interface MediaPreviewItem {
@@ -107,7 +119,9 @@ export function useMediaPreviewData(
                 filter: {
                   sourceId: sourceId ?? undefined,
                   dirPrefix: dirPath ?? undefined,
-                  mediaType: typeFilter === "all" ? undefined : typeFilter,
+                  // **「全部」= 图片/视频/音频这三个**（不是"不筛"）：文本类自 2026-10 起
+                  // 已进索引，但它是**图书预览**的内容（用户口径 2026-10-08）。
+                  mediaTypes: mediaTypesForFilter(typeFilter),
                 },
                 cursor,
                 limit: MEDIA_PREVIEW_PAGE_LIMIT,

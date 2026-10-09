@@ -120,8 +120,8 @@ check(
   titleMismatch.map((s) => `${s.id}: ${config.PANEL_TITLES[s.id]} != ${s.titleKey}`).join(" | "),
 );
 check(
-  "内置面板恰好 14 个",
-  builtinIds.length === 14,
+  "内置面板恰好 15 个",
+  builtinIds.length === 15,
   `实际 ${builtinIds.length}`,
 );
 
@@ -168,7 +168,7 @@ for (const spec of config.BUILTIN_PANEL_SPECS) {
 check(
   "control.panel_id ↔ 面板注册表 blueprint_node 双向一致",
   carrierProblems.length === 0,
-  carrierProblems.join(" | ") || "14 个面板全部指向 control，且 control 允许 panel_id",
+  carrierProblems.join(" | ") || "15 个面板全部指向 control，且 control 允许 panel_id",
 );
 
 // 面板设置里 `select` 必须有候选（否则「全部设置」渲染不出、后端也拒写）。
@@ -723,6 +723,26 @@ check(
   // 整个取数——在"翻完全库"的语义下就是每次点击重发上百次游标请求。
   /\[repoId, albumId, sourceId, dirPath, typeFilter, refreshKey\]/.test(mediaFamilySrc) &&
     !/\}, \[app, typeFilter\]\)/.test(mediaFamilySrc),
+);
+
+// 类型筛选：**媒体预览永不请求文本类**（用户口径 2026-10-08「媒体预览不包含 text 类型，
+// text 类型在图书预览显示」，D95）。防的是"「全部」= 不筛"这个看似无害的写法：
+// 文本类自 2026-10 起已进索引，不筛就会让它漏进媒体预览（以无缩略图的条目出现）。
+check(
+  "媒体预览的类型筛选档位与请求集合：**「全部」= 图片/视频/音频三个**，任何档位都不含 text",
+  eqList([...mediaView.MEDIA_TYPE_FILTERS], ["all", "image", "video", "audio"]) &&
+    Object.values(mediaView.MEDIA_FILTER_TYPES).every((types) => !types.includes("text")) &&
+    eqList(mediaView.mediaTypesForFilter("all"), ["image", "video", "audio"]) &&
+    eqList(mediaView.mediaTypesForFilter("image"), ["image"]) &&
+    eqList(mediaView.mediaTypesForFilter("video"), ["video"]) &&
+    eqList(mediaView.mediaTypesForFilter("audio"), ["audio"]) &&
+    // 正向锚点：取数把**档位映射成集合**交给 `file.query`（不是把档位当单值直传，
+    // 也不是留空表示"不筛"——留空就会把文本类放进来）。
+    /mediaTypes:\s*mediaTypesForFilter\(typeFilter\)/.test(mediaFamilySrc),
+);
+check(
+  "类型筛选的选项由取值域生成（手写四个 `<option>` 时，加档位忘了加选项不会被发现）",
+  /MEDIA_TYPE_FILTERS\.map\(/.test(mediaToolbarSrc) && !/<option value="all"/.test(mediaToolbarSrc),
 );
 
 check(
@@ -2425,7 +2445,7 @@ const afterRegister = config.allPanels().map((p) => p.id);
 const registeredOk =
   afterRegister.includes(pluginPanelId) &&
   config.panelTitleKeyOf(pluginPanelId) === "plugin.palette.panel" &&
-  // 组件表的**动态注册路径**：面板项清单由注册表派生（不是写死的 14 项），
+  // 组件表的**动态注册路径**：面板项清单由注册表派生（不是写死的 15 项），
   // dockview 组件表也走订阅版（插件注册/卸载后重建）。
   /pluginRegisteredPanels\(\)/.test(registrySource) &&
   /export function useDockComponents/.test(registrySource) &&
@@ -2440,7 +2460,7 @@ config.unregisterPluginPanels("dev.hamsterpouch.palette");
 const afterUnregister = config.allPanels().map((p) => p.id);
 check(
   "插件卸载后注册项消失（节点与边由蓝图侧按「未接通」保留，不在此删除用户数据）",
-  !afterUnregister.includes(pluginPanelId) && afterUnregister.length === 14,
+  !afterUnregister.includes(pluginPanelId) && afterUnregister.length === 15,
   `panels=${afterUnregister.length}`,
 );
 
@@ -2684,6 +2704,256 @@ check(
 check(
   "显示名解析是**纯逻辑模块**（无 React / Tauri 依赖，门禁可直接 import）",
   !/from "react"/.test(repoDisplaySrc) && !/@tauri-apps/.test(repoDisplaySrc),
+);
+
+// ==================== 图书预览面板（`panel.bookpreview`）====================
+//
+// 2026-10-08 新增：文本类文件（txt / md / epub）的可视化展览，两种视图
+// （**卡片模式** = 封面在上 + 文件名在下；**封面模式** = 封面在左 + 文件名/作者/简介）。
+//
+// 这一段的守护重点是三件**看不见就必然是缺陷**的事：
+// 1. 声明层的 `view` 候选 ↔ 面板取值域逐项一致（设置界面能选、面板认不出 = "改了没反应"）；
+// 2. 文件名滚轮横滚**必须**是原生非被动监听（React 的 `onWheel` 是被动的，
+//    `preventDefault()` 会被忽略 → 滚轮同时滚名字与面板）；
+// 3. 只有**需要内嵌封面**的书才发 `book.meta`（txt/md 每本发一次 IPC 是纯浪费）。
+//
+// 反面断言读**整个家族**（`BOOK_FAMILY_FILES`，与 `MEDIA_FAMILY_FILES` 同口径）：
+// 日后把面板拆成更多文件时，断言不能因此失效。
+
+const BOOK_FAMILY_FILES = [
+  "apps/desktop/src/app_ui/panels/bookpreview/BookPreviewPanel.tsx",
+  "apps/desktop/src/app_ui/panels/bookpreview/BookCard.tsx",
+  "apps/desktop/src/app_ui/panels/bookpreview/BookCoverRow.tsx",
+  "apps/desktop/src/app_ui/panels/bookpreview/BookCoverArt.tsx",
+  "apps/desktop/src/app_ui/panels/bookpreview/BookTextCover.tsx",
+  "apps/desktop/src/app_ui/panels/bookpreview/bookPreviewData.ts",
+  "apps/desktop/src/app_ui/panels/bookpreview/bookPreviewView.ts",
+  "apps/desktop/src/app_ui/panels/bookpreview/bookMetaCache.ts",
+  "apps/desktop/src/app_ui/panels/bookpreview/useBookMeta.ts",
+];
+const bookFamilySrc = BOOK_FAMILY_FILES.map((p) => readFileSync(join(ROOT, p), "utf8")).join("\n");
+const bookViewSrc = readFileSync(BOOK_FAMILY_FILES[6], "utf8");
+const bookView = await import(pathToFileURL(join(ROOT, BOOK_FAMILY_FILES[6])).href);
+
+const bookSpec = config.panelSpec("bookpreview");
+const bookSettingKeys = (bookSpec?.settings ?? []).map((s) => s.key);
+check(
+  "bookpreview 声明了 2 项面板设置（view / coverSize），且都带 i18n 键",
+  Boolean(bookSpec) &&
+    eqList(bookSettingKeys, ["view", "coverSize"]) &&
+    (bookSpec?.settings ?? []).every((s) => Boolean(s.title_key)),
+  `keys=${bookSettingKeys.join(",")}`,
+);
+check(
+  "bookpreview 的 select 候选 ↔ 面板取值域逐项一致（卡片模式 / 封面模式）",
+  eqList(optionValues("bookpreview", "view"), [...bookView.BOOK_VIEW_MODES]) &&
+    eqList([...bookView.BOOK_VIEW_MODES], ["card", "cover"]),
+);
+check(
+  "bookpreview 的 view 缺省 = `card`，且落在取值域内",
+  bookSpec?.settings?.find((s) => s.key === "view")?.default === bookView.DEFAULT_BOOK_VIEW &&
+    bookView.BOOK_VIEW_MODES.includes(bookView.DEFAULT_BOOK_VIEW),
+);
+check(
+  "coverSize 缺省落在面板自己的夹紧范围内（声明层没有 min/max，范围只能由面板夹紧）",
+  bookSpec?.settings?.find((s) => s.key === "coverSize")?.default ===
+    bookView.DEFAULT_BOOK_COVER_SIZE &&
+    bookView.DEFAULT_BOOK_COVER_SIZE >= bookView.BOOK_COVER_SIZE_MIN &&
+    bookView.DEFAULT_BOOK_COVER_SIZE <= bookView.BOOK_COVER_SIZE_MAX,
+);
+
+// 纯函数行为（直接 import 驱动，不写正则）。
+check(
+  "clampCoverSize：越界夹紧；**缺失**回落缺省（不把「没设置」当成「设成了 0」）",
+  bookView.clampCoverSize(bookView.BOOK_COVER_SIZE_MIN - 100) === bookView.BOOK_COVER_SIZE_MIN &&
+    bookView.clampCoverSize(bookView.BOOK_COVER_SIZE_MAX + 100) === bookView.BOOK_COVER_SIZE_MAX &&
+    bookView.clampCoverSize(200) === 200 &&
+    bookView.clampCoverSize("240") === 240 &&
+    bookView.clampCoverSize("abc") === bookView.DEFAULT_BOOK_COVER_SIZE &&
+    bookView.clampCoverSize("") === bookView.DEFAULT_BOOK_COVER_SIZE &&
+    bookView.clampCoverSize(null) === bookView.DEFAULT_BOOK_COVER_SIZE &&
+    bookView.clampCoverSize(undefined) === bookView.DEFAULT_BOOK_COVER_SIZE,
+);
+check(
+  "resolveBookView：非法取值回落缺省（失败关闭）",
+  bookView.resolveBookView("cover") === "cover" &&
+    bookView.resolveBookView("card") === "card" &&
+    bookView.resolveBookView("masonry") === bookView.DEFAULT_BOOK_VIEW &&
+    bookView.resolveBookView(undefined) === bookView.DEFAULT_BOOK_VIEW,
+);
+check(
+  "bookDisplayName：去掉目录与扩展名（作品名 = 文件名），中间的点保留",
+  bookView.bookDisplayName("dir/小说.epub") === "小说" &&
+    bookView.bookDisplayName("a.b.epub") === "a.b" &&
+    bookView.bookDisplayName("无扩展名") === "无扩展名" &&
+    bookView.bookDisplayName("dir\\win\\path.txt") === "path" &&
+    // 隐藏文件（点开头）不是"扩展名"：`.` 之后的整段就是名字本身。
+    bookView.bookDisplayName(".hidden") === ".hidden",
+);
+check(
+  "usesEmbeddedCover：子类型优先，子类型缺失的旧行按扩展名兜底",
+  bookView.usesEmbeddedCover({ subtype: "book", relative_path: "x.txt" }) === true &&
+    // 标记是可编辑的：改成 document 就不再取内嵌封面。
+    bookView.usesEmbeddedCover({ subtype: "document", relative_path: "x.epub" }) === false &&
+    // 迁移 0008 之前的存量行（子类型为 null）：epub 仍按内嵌封面处理，txt 不走。
+    bookView.usesEmbeddedCover({ subtype: null, relative_path: "x.epub" }) === true &&
+    bookView.usesEmbeddedCover({ subtype: null, relative_path: "x.EPUB" }) === true &&
+    bookView.usesEmbeddedCover({ subtype: null, relative_path: "x.txt" }) === false,
+);
+check(
+  "nextScrollLeft：两端夹紧；没有可滚动的余量时返回 0",
+  bookView.nextScrollLeft(0, -40, 100) === 0 &&
+    bookView.nextScrollLeft(50, 20, 100) === 70 &&
+    bookView.nextScrollLeft(95, 20, 100) === 100 &&
+    bookView.nextScrollLeft(10, 5, 0) === 0,
+);
+check(
+  "wrapCoverName：只在**真的截断**时加省略号，且不超过行数上限",
+  eqList(bookView.wrapCoverName("一二三", 6, 4), ["一二三"]) &&
+    eqList(bookView.wrapCoverName("一二三四五六七", 3, 4), ["一二三", "四五六", "七"]) &&
+    // 7 个字 / 每行 3 / 最多 2 行 → 第二行被截断，末尾必须出现省略号。
+    eqList(bookView.wrapCoverName("一二三四五六七", 3, 2), ["一二三", "四五…"]) &&
+    bookView.wrapCoverName("   ", 3, 2).length === 0,
+);
+check(
+  "textCoverHue：同名恒同色、取值落在色相环内（跨会话稳定，不随随机数变）",
+  bookView.textCoverHue("同一本书") === bookView.textCoverHue("同一本书") &&
+    [1, 2, 3, 4, 5].every((n) => {
+      const hue = bookView.textCoverHue(`书${n}`);
+      return Number.isInteger(hue) && hue >= 0 && hue < 360;
+    }),
+);
+check(
+  "取值域与纯函数模块**零依赖**（无 React / Tauri，门禁可直接 import）",
+  !/from\s+"react"/.test(bookViewSrc) &&
+    !/@tauri-apps/.test(bookViewSrc) &&
+    !/^\s*import\s/m.test(bookViewSrc),
+);
+
+// 面板侧：设置消费、冻结、取数口径。
+check(
+  "面板经 `usePanelSettingValue` 消费 view / coverSize，且注册表把 dockview API 传下去",
+  /usePanelSettingValue\(\s*BOOK_PREVIEW_PANEL_ID,\s*"view"/.test(bookFamilySrc) &&
+    /usePanelSettingValue\(\s*BOOK_PREVIEW_PANEL_ID,\s*"coverSize"/.test(bookFamilySrc) &&
+    // 第 4 条触发源（面板重新可见时补读设置）需要面板 API。
+    /<BookPreviewPanel api=\{ctx\.api\}/.test(registrySource),
+);
+check(
+  "面板按后台可见性冻结条目容器（不显示就不为看不见的书取封面）",
+  /usePanelForeground\(panelApi\)/.test(bookFamilySrc) &&
+    /foreground\s*&&/.test(bookFamilySrc),
+);
+check(
+  "取数只按仓库 / 源 / 目录过滤 `mediaTypes: ['text']`（不按相册：相册成员分页只认三种媒体字面量）",
+  /mediaTypes:\s*\["text"\]/.test(bookFamilySrc) &&
+    !/albumId/.test(bookFamilySrc) &&
+    // 反向：不得再出现旧的单值拼法（媒体类型过滤已改为集合，D95）。
+    !/mediaType:\s*"text"/.test(bookFamilySrc),
+);
+
+// 文件名滚轮横滚：**必须是原生非被动监听**。
+const bookCardSrc = readFileSync(join(ROOT, BOOK_FAMILY_FILES[1]), "utf8");
+const bookCardCode = stripComments(bookCardSrc);
+check(
+  "文件名滚轮横滚走**原生监听器 + { passive: false }**（React 的 onWheel 是被动的，preventDefault 无效）",
+  /addEventListener\(\s*"wheel"/.test(bookCardCode) &&
+    /passive:\s*false/.test(bookCardCode) &&
+    /preventDefault\(\)/.test(bookCardCode) &&
+    // 反向：不得用 React 的合成事件（它拦不住滚动，名字会与面板一起滚）。
+    !/onWheel=/.test(bookCardCode) &&
+    // DOM 事件类型必须是 `WheelEvent`：拿 React 的合成事件类型去接原生监听会读不到 deltaY 的真实语义。
+    /WheelEvent/.test(bookCardCode),
+);
+check(
+  "没被省略就不拦截滚轮（拦截它会让滚动列表在长名字单元上失灵）",
+  /max\s*<=\s*0\)\s*return/.test(bookCardCode),
+);
+
+// 文件名可聚焦（"焦点在文件名上"要字面上成立）+ 三种截断形态齐备。
+check(
+  "卡片模式的文件名可聚焦（tabIndex），三种视图的文本截断形态齐备",
+  /tabIndex=\{0\}/.test(bookCardSrc) &&
+    // 卡片：单行省略。
+    /\.bp-name\s*\{[^}]*overflow:\s*hidden/.test(stylesSource) &&
+    /\.bp-name\s*\{[^}]*text-overflow:\s*ellipsis/.test(stylesSource) &&
+    /\.bp-name\s*\{[^}]*white-space:\s*nowrap/.test(stylesSource) &&
+    // 封面模式：文件名与作者各单行省略，简介多行截断。
+    /\.bp-row-name\s*\{[^}]*text-overflow:\s*ellipsis/.test(stylesSource) &&
+    /\.bp-row-author\s*\{[^}]*text-overflow:\s*ellipsis/.test(stylesSource) &&
+    /\.bp-row-desc\s*\{[^}]*webkit-line-clamp/.test(stylesSource),
+);
+
+// 元数据取数：只对需要内嵌封面的书发命令，且有缓存 + in-flight 去重。
+check(
+  "只为需要内嵌封面的书取元数据（txt/md 一个 IPC 都不发），并做结果缓存与 in-flight 去重",
+  /if\s*\(!repoId\s*\|\|\s*!wants\)/.test(bookFamilySrc) &&
+    /inflight/.test(bookFamilySrc) &&
+    /const cached = metaCache\.get\(fileId\)/.test(bookFamilySrc),
+);
+
+// 桥接层：命令形态、坏书降级、封面落盘路径。
+const bookBridgeSrc = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/book.rs"),
+  "utf8",
+);
+check(
+  "book.meta 是已包装命令，解析在阻塞线程里跑，坏书降级为「没有元数据」而不是错误",
+  /pub\(crate\) async fn book_meta\(/.test(bookBridgeSrc) &&
+    /ApiAsync<BookMetaResult>/.test(bookBridgeSrc) &&
+    /spawn_blocking/.test(bookBridgeSrc) &&
+    /Err\(_\) => hp_book::BookMeta::default\(\)/.test(bookBridgeSrc),
+);
+check(
+  "封面原格式落盘（不转码），元数据缓存按内容哈希失效",
+  /path_for_book_cover/.test(bookBridgeSrc) && /path_for_book_meta/.test(bookBridgeSrc),
+);
+
+// 文本媒体类型与子类型：跨层口径只有一处。
+const coreSourceSrc = readFileSync(join(ROOT, "crates/hp-core/src/source.rs"), "utf8");
+const scannerMediaTypeSrc = readFileSync(
+  join(ROOT, "crates/hp-scanner/src/media_type.rs"),
+  "utf8",
+);
+check(
+  "Rust 侧 `text` 媒体类型与 `book` / `document` 子类型取值域齐备",
+  /MediaType::Text => "text"/.test(coreSourceSrc) &&
+    /"text" => Some\(MediaType::Text\)/.test(coreSourceSrc) &&
+    /"epub" => Some\(FileSubtype::Book\)/.test(scannerMediaTypeSrc) &&
+    /FileSubtype::Document/.test(scannerMediaTypeSrc) &&
+    // 文本类**只认扩展名**：不参与内容兜底（否则未知二进制会被吸进索引）。
+    !/sniff[\s\S]{0,400}MediaType::Text/.test(scannerMediaTypeSrc),
+);
+check(
+  "迁移 0008 为 `files` 加 `subtype` 列并登记进迁移清单（forward-only，不改 0001）",
+  readFileSync(join(ROOT, "crates/hp-store/migrations/repo/0008_text_subtype.sql"), "utf8")
+    .includes("ALTER TABLE files ADD COLUMN subtype TEXT;") &&
+    /0008_text_subtype\.sql/.test(
+      readFileSync(join(ROOT, "crates/hp-store/src/repo/repo_db.rs"), "utf8"),
+    ) &&
+    !/subtype/.test(
+      readFileSync(join(ROOT, "crates/hp-store/migrations/repo/0001_init.sql"), "utf8"),
+    ),
+);
+check(
+  "Rust：`file.query` 的媒体类型过滤是**集合**（四个固定旗标 ⇒ SQL 静态、参数个数固定）",
+  /pub media_types: &'a \[MediaType\]/.test(
+    readFileSync(join(ROOT, "crates/hp-store/src/repo/file_repo.rs"), "utf8"),
+  ) &&
+    /media_types: Option<Vec<String>>/.test(
+      readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"), "utf8"),
+    ) &&
+    // 空集合 = 不筛（不是"什么都不返回"）；非空即"只这些"。
+    /空切片 = 不筛/.test(
+      readFileSync(join(ROOT, "crates/hp-store/src/repo/file_repo.rs"), "utf8"),
+    ),
+);
+check(
+  "Rust：相册属性一律不含文本类（`Multimedia` 是三种媒体，不是「索引里的一切」）",
+  // 否则跟随源相册会把文本文件**写成成员**，而 `query_album_members_page` 只认三个
+  // 媒体字面量、永远列不出它们——表现为"有成员但看不见"。
+  /if file_type == MediaType::Text \{\s*\n\s*return false;/.test(
+    readFileSync(join(ROOT, "crates/hp-core/src/album.rs"), "utf8"),
+  ),
 );
 
 // ============================== 汇总 ==============================

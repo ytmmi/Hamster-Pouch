@@ -12,7 +12,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use hp_core::{
-    FileId, FileIndexRow, HpError, HpResult, MediaType, Source, ThumbStatus, VerifyStatus,
+    FileId, FileIndexRow, FileSubtype, HpError, HpResult, MediaType, Source, ThumbStatus,
+    VerifyStatus,
 };
 use hp_hash::{ContentHash, PerceptualHash};
 use hp_media::{encode_palette_json, palette_is_locked, ThumbnailCache};
@@ -20,7 +21,7 @@ use hp_store::RepoDb;
 use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
 
-use crate::media_type::detect_media_type;
+use crate::media_type::{default_file_subtype, detect_media_type};
 use crate::scan_pool;
 use crate::scan_task::{compute, pixel_cost, Computed, Prepared};
 
@@ -326,7 +327,8 @@ impl Scanner {
                 size,
                 mtime,
                 unchanged,
-                existing_id: existing.map(|row| row.id.as_str().to_string()),
+                existing_id: existing.as_ref().map(|row| row.id.as_str().to_string()),
+                existing_subtype: existing.as_ref().and_then(|row| row.subtype),
                 want_palette,
             });
         }
@@ -437,7 +439,8 @@ impl Scanner {
             size,
             mtime,
             unchanged: false,
-            existing_id: existing.map(|row| row.id.as_str().to_string()),
+            existing_id: existing.as_ref().map(|row| row.id.as_str().to_string()),
+            existing_subtype: existing.as_ref().and_then(|row| row.subtype),
             want_palette,
         };
         let computed = compute(&prepared, options);
@@ -479,6 +482,14 @@ impl Scanner {
             return Ok(());
         }
 
+        // 子类型是**标注**（2026-10-08 用户口径：「子类型类似于标记，后期用户可以
+        // 进行更改切换」）：已有值一律保留，扫描只在为空时补默认值。否则重扫会把
+        // 用户改过的标记打回自动判定——那正是"用户的判定权被覆盖"的一类缺陷
+        // （与调色板 `locked` 同口径）。
+        let subtype = prep
+            .existing_subtype
+            .or_else(|| default_subtype_for(prep));
+
         if comp.unreadable {
             // 读不到内容（RFC 0001）：新文件写"不可读"占位行，既有文件只更新状态。
             match &prep.existing_id {
@@ -492,6 +503,7 @@ impl Scanner {
                         source,
                         &prep.relative_path,
                         prep.media_type,
+                        subtype,
                         prep.size,
                         &prep.mtime,
                     )?;
@@ -517,6 +529,7 @@ impl Scanner {
             source,
             &prep.relative_path,
             prep.media_type,
+            subtype,
             prep.size,
             &prep.mtime,
             comp.content,
@@ -551,6 +564,7 @@ impl Scanner {
         source: &Source,
         relative_path: &str,
         media_type: MediaType,
+        subtype: Option<FileSubtype>,
         size: i64,
         mtime: &str,
     ) -> HpResult<()> {
@@ -559,6 +573,7 @@ impl Scanner {
             source,
             relative_path,
             media_type,
+            subtype,
             size,
             mtime,
             None,
@@ -601,6 +616,7 @@ impl Scanner {
         source: &Source,
         relative_path: &str,
         media_type: MediaType,
+        subtype: Option<FileSubtype>,
         size: i64,
         mtime: &str,
         content: Option<ContentHash>,
@@ -614,6 +630,7 @@ impl Scanner {
             source_id: source.id.clone(),
             relative_path: relative_path.to_string(),
             media_type,
+            subtype,
             content_hash: content.as_ref().map(|c| c.value.clone()),
             content_hash_algo: content.as_ref().map(|c| c.algo.clone()),
             content_hash_algo_version: content.as_ref().map(|c| c.algo_version),
@@ -629,6 +646,18 @@ impl Scanner {
             media_info_json,
         }
     }
+}
+
+/// 某个待写行的**默认子类型**（按相对路径的扩展名；非文本类恒为 `None`）。
+///
+/// 扩展名口径只有一处（`media_type.rs` 的 `default_file_subtype`），这里只负责
+/// 从相对路径取出扩展名。取不到扩展名时按空串处理（文本类落到 `document`）。
+fn default_subtype_for(prep: &Prepared) -> Option<FileSubtype> {
+    let ext = Path::new(&prep.relative_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    default_file_subtype(prep.media_type, ext)
 }
 
 /// 读取文件 size 与 mtime（mtime 存 epoch 纳秒十进制字符串，便于精确比较）。

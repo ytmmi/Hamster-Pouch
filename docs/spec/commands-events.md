@@ -173,9 +173,9 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 
 | 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| `file.query` | **游标分页**查询文件 | `{ repoId, filter?, cursor?, limit? }` | `{ ok, data: { items, nextCursor } }` | **已包装** | 代码 `commands/file.rs` 的 `file_query`；**D76 批次 `file` 已迁移 + D78 游标分页已落地（2026-09）**。`filter` = `{ mediaType?, sourceId?, dirPrefix? }`；`limit` **只是页大小**；把 `nextCursor` 原样回传即可续页，`null` = 末页。**排序键 = `(relative_path, source_id, id)` 升序**（`relative_path` 单独不是全序：同名不同源会并列）。游标是**不透明字符串**（当前编码 `{路径字节长度}`+US+路径+US+sourceId+US+id，先读长度再按字节切，因此路径里出现分隔符也不歧义）；非法游标 → `validation`，**不静默从头开始**。键集游标在翻页途中库内容变动时**不漏项/不重复**（原 `offset` 分页会），用例 `crates/hp-store/tests/m2_source_file.rs` 的 `cursor_pagination_is_stable_under_inserts` |
+| `file.query` | **游标分页**查询文件 | `{ repoId, filter?, cursor?, limit? }` | `{ ok, data: { items, nextCursor } }` | **已包装** | 代码 `commands/file.rs` 的 `file_query`；**D76 批次 `file` 已迁移 + D78 游标分页已落地（2026-09）**。`filter` = `{ mediaTypes?, sourceId?, dirPrefix? }`（`mediaTypes` 为**集合**、缺省/空 = 不筛；2026-10-08 由单值 `mediaType` 改为集合，见 D95）；`limit` **只是页大小**；把 `nextCursor` 原样回传即可续页，`null` = 末页。**排序键 = `(relative_path, source_id, id)` 升序**（`relative_path` 单独不是全序：同名不同源会并列）。游标是**不透明字符串**（当前编码 `{路径字节长度}`+US+路径+US+sourceId+US+id，先读长度再按字节切，因此路径里出现分隔符也不歧义）；非法游标 → `validation`，**不静默从头开始**。键集游标在翻页途中库内容变动时**不漏项/不重复**（原 `offset` 分页会），用例 `crates/hp-store/tests/m2_source_file.rs` 的 `cursor_pagination_is_stable_under_inserts` |
 | `file.reverify` | 重新校验单个文件 | `{ repoId, fileId }` | `{ ok, data: { verifyStatus } }` | **已包装** | 代码 `commands/file.rs` 的 `file_reverify`；线上 `data` 是**裸状态串**（文档写 `{ verifyStatus }`，差异随 D78/D76 收尾一并处理） |
-| `file.metadata` | 读取文件元数据 | `{ repoId, fileId }` | `{ ok, data: { size, mtime, hash, mediaType, ... } }` | **已包装** | `data` 是 `FileMetadataResult` 对象，字段为蛇形：`content_hash`（文档 `hash`）、`source_id`、`relative_path`、`media_type`、`verify_status`、`media_info_json`、`exif_json` |
+| `file.metadata` | 读取文件元数据 | `{ repoId, fileId }` | `{ ok, data: { size, mtime, hash, mediaType, ... } }` | **已包装** | `data` 是 `FileMetadataResult` 对象，字段为蛇形：`content_hash`（文档 `hash`）、`source_id`、`relative_path`、`media_type`、`subtype`、`verify_status`、`media_info_json`、`exif_json` |
 | `file.path` | 取文件绝对路径（供前端 `convertFileSrc` 预览） | `{ repoId, fileId }` | `{ ok, data: { path } }` | **已包装** | 线上 `data` 是裸路径串；前端 `api/file.ts` |
 | `thumb.get` | 按需生成并取缩略图绝对路径（前端 `convertFileSrc` 预览） | `{ repoId, fileId }` | `{ ok, data: { path \| null } }` | **已包装** | 线上 `data` 是 `string \| null`；`null` = 无内容哈希 / 生成失败 / 不支持的类型，前端降级为占位；缓存命中直接返回，**缓存键为内容哈希 + 媒体类型**（第 7 节「缩略图请求形状与缓存键」开放点仍未定稿）；前端 `api/file.ts`。**落盘格式按媒体类型分流**（用户 2026-10-08 口径："同像素和质量的情况下，选择体积更小的格式"）：**图片缩略图 = 有损 WebP**（默认**进程内 `libwebp-sys`**，失败退 ffmpeg 子进程的 `libwebp`；质量 70，`<hash>.webp`；实测等 SSIM 下体积约为 JPEG 的 **0.53–0.57**，真实生产路径 60/60 张更小、省 42.8%），**视频首帧 = JPEG**（`<hash>.jpg`，因为其 dHash 取自缩略图本身，换编码会扰动已入库的感知哈希）；ffmpeg 缺失或无 `libwebp` 时图片降级为 JPEG（内容自描述，后缀仍是 `.webp`）；`hp_media::ThumbFormat` |
 | `preview.get` | 按需生成并取**全分辨率**预览绝对路径（原始尺寸 JPEG、质量 90；供 Chromium 无法解码的 HEIC/HEIF 查看，缺陷 0019） | `{ repoId, fileId }` | `{ ok, data: { path \| null } }` | **已包装** | 线上 `data` 是 `string \| null`；**仅图片**，`null` = 无内容哈希 / 生成失败 / 非图片；与 `thumb.get` 同源缓存（`<content_hash>.preview.jpg`，互不冲突）；生成走 `hp_media::generate_image_preview`（**不缩放**，用户 2026-10-06 裁定不要 2048 有界预览），缓存命中直接返回；前端 `api/file.ts` |
@@ -193,11 +193,17 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 > 已迁移域按 `code` 走 i18n，**未迁移域仍是裸串**时原样显示（不丢信息），
 > 该域迁移后自动收敛。
 
-`filter` 可含 `mediaType`（`image`/`video`/`audio`/`multimedia`），用于相册显示过滤（D10）与源视图筛选。
+`filter` 可含 `mediaTypes`（**集合**：`image`/`video`/`audio`/`text`；**缺省或空数组 = 不筛**），用于相册显示过滤（D10）与源视图筛选。**2026-10-08 由单值 `mediaType` 改为集合**（D95，用户口径「媒体预览不包含 text 类型，text 类型在图书预览显示」）：媒体预览的「全部」指的是**图片 / 视频 / 音频这三个**（不是"索引里的一切"），图书预览指的是**文本**这一个——单值表达不出前者，"全部"就只能落到"不筛"上，于是 `text`（2026-10 新增的文本媒体类型：`txt` / `md` / `markdown` / `epub`，扩展名判定、不做内容兜底）会漏进媒体预览。取值不在闭集内一律 `validation`（**不静默丢掉那一项**）。
 
 `file.rename` / `file.trash` 是**真实磁盘操作**，当前**不留操作记录**（无 `opRecordId`），与第 3.6 节 `fsops.*`「真实文件操作必须返回操作记录 ID」的口径不一致；缺口如实记录，是否补记录属另议（见 `docs/architecture/command-event-drift.md`）。`file.trash` 只删除索引行，不连带清理 tag/评分/相册成员。
 
 **`file.query` 分页形态（D78，2026-09）**：按本表实现 **`cursor` / `nextCursor`**（`limit` 为页大小），**不**改用 `limit`/`offset`。理由：`offset` 分页在库内容变动时会漏项/重复，而前端列表、蓝图对象作用域与元数据面板都依赖该查询。代码现状是扁平过滤参数 + 裸数组、无游标（见 `docs/issues/0005`），属**能力级缺口**，需 `hp-store` 查询层配合。
+
+### 3.3.1 `book.*`（图书元数据；2026-10 新增）
+
+| 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
+| --- | --- | --- | --- | --- | --- |
+| `book.meta` | 读取一本书的作者 / 简介 / 内嵌封面路径（EPUB） | `{ repoId, fileId }` | `{ ok, data: { author, description, cover_path } }` | **已包装** | 代码 `commands/book.rs` 的 `book_meta`。**新增命令一律直接按新口径落地**（D76 §2.1）。只有 `media_type = text` 且能拿到内容哈希时才有内容；其余类型返回三个 `null`（**不是错误**）。`cover_path` 是**已落盘**的封面绝对路径（供前端 `convertFileSrc`），`null` = 这本书没有封面（`txt` / `md` 本来就没有；epub 里也确实有没封面的书）。解析走 `hp-book`（自实现最小 ZIP + OPF），在**阻塞线程**里跑；结果按**内容哈希**缓存到缩略图缓存目录（`<hash>.cover.<ext>` 原格式不转码 + `<hash>.bookmeta.json`），因此同一本书只解一次。**解析失败降级为"没有元数据"而不是 `io` 错误**——一本书打不开不该让整个图书预览面板变成错误态。前端 `api/book.ts`，消费方 `panels/bookpreview/` |
 
 ### 3.4 `album.*`
 

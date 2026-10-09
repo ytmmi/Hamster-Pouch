@@ -9,6 +9,7 @@ members = [
   "crates/hp-plugin-host",
   "crates/hp-ai",
   "crates/hp-media",
+  "crates/hp-book",
   "crates/hp-dto",
   "crates/hp-plugin-signing",
 ]

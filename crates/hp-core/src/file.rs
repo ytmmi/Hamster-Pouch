@@ -106,6 +106,48 @@ impl ThumbStatus {
     }
 }
 
+/// 文件**子类型**：媒体类型之下的一层可编辑标记。
+///
+/// 与 [`crate::source::MediaType`] 的分工（2026-10-08 用户口径：「子类型类似于标记，
+/// 后期用户可以进行更改切换」）：
+/// - `MediaType` 由扫描器的**扩展名判定**给出，用户不可改；
+/// - 子类型是**标注**——扫描只在行内为空时补一个默认值，**不覆盖**已有值。
+///
+/// 默认值的唯一来源是扫描器的扩展名表（`hp_scanner::media_type::default_file_subtype`），
+/// 与媒体类型判定放在同一张表里，避免两处扩展名口径各自漂移。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileSubtype {
+    /// 电子书（默认：`epub`）。
+    Book,
+    /// 普通文档（默认：文本类里除电子书以外的格式，如 `txt` / `md`）。
+    Document,
+}
+
+impl FileSubtype {
+    /// 存储层字符串表示。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FileSubtype::Book => "book",
+            FileSubtype::Document => "document",
+        }
+    }
+
+    /// 从存储层字符串解析；未知值返回 `None`（不静默回落，缺省由调用方决定）。
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "book" => Some(FileSubtype::Book),
+            "document" => Some(FileSubtype::Document),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for FileSubtype {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// 文件索引行：与 `files` 表一一对应。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileIndexRow {
@@ -113,6 +155,8 @@ pub struct FileIndexRow {
     pub source_id: SourceId,
     pub relative_path: String,
     pub media_type: MediaType,
+    /// 媒体类型之下的可编辑标记（当前只有文本类有值；见 [`FileSubtype`]）。
+    pub subtype: Option<FileSubtype>,
     pub content_hash: Option<String>,
     pub content_hash_algo: Option<String>,
     pub content_hash_algo_version: Option<i64>,

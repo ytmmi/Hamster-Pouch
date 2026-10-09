@@ -12,6 +12,7 @@ export * from "./repo";
 export * from "./source";
 export * from "./album";
 export * from "./file";
+export * from "./book";
 export * from "./media";
 export * from "./color";
 export * from "./tag";

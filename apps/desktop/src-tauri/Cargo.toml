@@ -25,6 +25,8 @@ hp-store = { path = "../../../crates/hp-store" }
 hp-dto = { path = "../../../crates/hp-dto" }
 hp-scanner = { path = "../../../crates/hp-scanner" }
 hp-media = { path = "../../../crates/hp-media" }
+# 电子书（EPUB）元数据与封面解析：`book.meta` 命令用（`crates/hp-book`）。
+hp-book = { path = "../../../crates/hp-book" }
 hp-album = { path = "../../../crates/hp-album" }
 hp-fsops = { path = "../../../crates/hp-fsops" }
 hp-plugin-host = { path = "../../../crates/hp-plugin-host" }

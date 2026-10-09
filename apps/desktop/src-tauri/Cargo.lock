@@ -1608,6 +1608,7 @@ version = "0.1.0"
 dependencies = [
  "hp-ai",
  "hp-album",
+ "hp-book",
  "hp-core",
  "hp-dto",
  "hp-fsops",
@@ -1692,6 +1693,14 @@ dependencies = [
  "hp-store",
  "serde_json",
  "time",
+]
+
+[[package]]
+name = "hp-book"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "hp-core",
 ]
 
 [[package]]

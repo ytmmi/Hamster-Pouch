@@ -13,6 +13,7 @@ fn sample_row(source_id: &str, relative_path: &str) -> FileIndexRow {
         source_id: hp_core::SourceId::from_raw(source_id),
         relative_path: relative_path.to_string(),
         media_type: MediaType::Image,
+        subtype: None,
         content_hash: Some(format!("hash-{relative_path}")),
         content_hash_algo: Some("blake3".into()),
         content_hash_algo_version: Some(1),

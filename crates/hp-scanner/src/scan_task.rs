@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use hp_core::{MediaType, ThumbStatus};
+use hp_core::{FileSubtype, MediaType, ThumbStatus};
 use hp_hash::{hash_file, ContentHash, PerceptualHash};
 use hp_media::extract_thumbnail;
 
@@ -32,6 +32,9 @@ pub struct Prepared {
     /// 已存在行的 id（`None` = 新文件）。写库阶段据此决定"更新"还是"新建"，
     /// 并保留原 id（RFC 0001：内容未变时身份不变）。
     pub existing_id: Option<String>,
+    /// 已存在行的**子类型**（`None` = 行内为空）。扫描只在为空时补默认值，
+    /// **不覆盖**已有值——子类型是用户的标记（2026-10-08 口径）。
+    pub existing_subtype: Option<FileSubtype>,
     /// 调色板是否需要重算（仅图片有意义；已手动锁定时为 `false`，见 `write_palette`）。
     pub want_palette: bool,
 }
@@ -122,6 +125,22 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
             thumb_status: Some(ThumbStatus::NotGenerated),
             ..Computed::default()
         },
+        // 文本（2026-10）：**照算内容哈希**（移动识别/去重与图片同口径），
+        // 但不产出感知哈希 / 缩略图 / 调色板 / 媒体信息——文本没有视觉本体，
+        // 封面由 `hp_book` 在面板取数时按需解析（不进索引，见 book.meta）。
+        MediaType::Text => {
+            let Ok(content) = hash_file(&prepared.path) else {
+                return Computed {
+                    unreadable: true,
+                    ..Computed::default()
+                };
+            };
+            Computed {
+                content: Some(content),
+                thumb_status: Some(ThumbStatus::NotGenerated),
+                ..Computed::default()
+            }
+        }
     }
 }
 
@@ -174,6 +193,7 @@ mod tests {
             mtime: "0".to_string(),
             unchanged,
             existing_id: None,
+            existing_subtype: None,
             want_palette,
         }
     }
@@ -245,5 +265,40 @@ mod tests {
         // 视频走外部进程，内存占用与像素无关 → 配额恒为 1，不受尺寸影响。
         let p = prepared(PathBuf::from("v.mp4"), MediaType::Video, false, false);
         assert_eq!(pixel_cost(&p), 1);
+    }
+
+    #[test]
+    fn text_hashes_content_but_no_visual_derivations() {
+        // 文本与音频的差别：音频是**占位行**（无哈希），文本要有内容哈希
+        // （移动识别/去重靠它），但感知哈希 / 调色板 / 媒体信息一律为空。
+        let dir = std::env::temp_dir().join(format!("hp-scan-task-text-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let path = dir.join("book.epub");
+        std::fs::write(&path, b"PK\x03\x04 not really a zip").expect("写入测试文件失败");
+
+        let p = prepared(path, MediaType::Text, false, false);
+        let got = compute(&p, &ScanOptions::default());
+        assert!(got.content.is_some(), "文本应有内容哈希");
+        assert!(got.perceptual.is_none(), "文本没有视觉本体，不该有感知哈希");
+        assert!(got.palette.is_none(), "文本没有调色板");
+        assert!(got.media_info.is_none(), "文本不走 ffprobe");
+        assert!(!got.unreadable);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn text_cost_is_not_pixel_weighted() {
+        let p = prepared(PathBuf::from("book.epub"), MediaType::Text, false, false);
+        assert_eq!(pixel_cost(&p), 1);
+    }
+
+    #[test]
+    fn subtype_field_defaults_to_none_in_fixtures() {
+        // 夹具把 `existing_subtype` 设为 `None`（= 行内为空 → 扫描补默认值）。
+        // 这条断言只是把"默认无子类型"钉住，防止日后夹具悄悄带上一个值。
+        let p = prepared(PathBuf::from("a.txt"), MediaType::Text, false, false);
+        assert_eq!(p.existing_subtype, None);
+        assert_eq!(FileSubtype::from_str("book"), Some(FileSubtype::Book));
     }
 }

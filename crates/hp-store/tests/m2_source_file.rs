@@ -73,6 +73,7 @@ fn file_upsert_get_and_media_info_migration() {
         source_id: s.id.clone(),
         relative_path: "a.jpg".to_string(),
         media_type: MediaType::Image,
+        subtype: None,
         content_hash: Some("abc".to_string()),
         content_hash_algo: Some("BLAKE3".to_string()),
         content_hash_algo_version: Some(1),
@@ -101,8 +102,84 @@ fn file_upsert_get_and_media_info_migration() {
         Some(r#"{"format":{"duration":"1.5"}}"#)
     );
 
-    // 迁移 0007 已生效：schema_version 应为 7（0001..0007）
-    assert_eq!(db.schema_version().expect("读版本失败"), 7);
+    // 迁移 0008 已生效：schema_version 应为 8（0001..0008）
+    assert_eq!(db.schema_version().expect("读版本失败"), 8);
+
+    db.close().expect("关闭失败");
+}
+
+/// 媒体类型过滤是**集合**（D95）：空 = 不筛；非空 = 只这些。
+///
+/// 用户口径（2026-10-08）：「媒体预览不包含 text 类型，text 类型在图书预览显示」——
+/// 媒体预览请求的是"图片 / 视频 / 音频这三个"，不是"不筛"，否则文本类会漏进来。
+#[test]
+fn query_files_media_type_set_filter() {
+    let path = temp_path("mediatypes");
+    let mut db = RepoDb::create(&path, "仓库").expect("创建仓库失败");
+    let s = db
+        .mount_source("repo-1", "C:/mixed", None, None)
+        .expect("挂载失败");
+
+    let make = |rel: &str, media_type: MediaType| FileIndexRow {
+        id: FileId::generate(),
+        source_id: s.id.clone(),
+        relative_path: rel.to_string(),
+        media_type,
+        subtype: None,
+        content_hash: Some(format!("h-{rel}")),
+        content_hash_algo: Some("BLAKE3".to_string()),
+        content_hash_algo_version: Some(1),
+        perceptual_hash: None,
+        perceptual_hash_algo: None,
+        perceptual_hash_algo_version: None,
+        size: 1,
+        mtime: "1".to_string(),
+        scan_time: "t".to_string(),
+        verify_status: VerifyStatus::Ok,
+        thumb_status: ThumbStatus::NotGenerated,
+        missing_status: 0,
+        media_info_json: None,
+    };
+    for (rel, media_type) in [
+        ("a.jpg", MediaType::Image),
+        ("b.mp4", MediaType::Video),
+        ("c.mp3", MediaType::Audio),
+        ("d.epub", MediaType::Text),
+    ] {
+        db.upsert_file(&make(rel, media_type))
+            .expect("写入文件索引失败");
+    }
+
+    let names = |media_types: &[MediaType]| -> Vec<String> {
+        let (rows, _) = db
+            .query_files(
+                "repo-1",
+                &hp_store::FileQueryFilter {
+                    media_types,
+                    source_id: Some(s.id.as_str()),
+                    ..Default::default()
+                },
+                None,
+                100,
+            )
+            .expect("查询失败");
+        let mut rels: Vec<String> = rows.into_iter().map(|r| r.relative_path).collect();
+        rels.sort();
+        rels
+    };
+
+    // 空集合 = **不筛**（不是"什么都不返回"）。
+    assert_eq!(names(&[]).len(), 4, "空集合应当不筛");
+    // 媒体预览的「全部」：三种媒体，**不含文本类**。
+    assert_eq!(
+        names(&[MediaType::Image, MediaType::Video, MediaType::Audio]),
+        vec!["a.jpg", "b.mp4", "c.mp3"],
+        "图片/视频/音频三个不应含文本类"
+    );
+    // 图书预览：只要文本类。
+    assert_eq!(names(&[MediaType::Text]), vec!["d.epub"]);
+    // 单元素集合等价于原来的单值语义。
+    assert_eq!(names(&[MediaType::Video]), vec!["b.mp4"]);
 
     db.close().expect("关闭失败");
 }
@@ -121,6 +198,7 @@ fn query_files_dir_prefix_filter() {
         source_id: s.id.clone(),
         relative_path: rel.to_string(),
         media_type: MediaType::Image,
+        subtype: None,
         content_hash: Some(format!("h-{rel}")),
         content_hash_algo: Some("BLAKE3".to_string()),
         content_hash_algo_version: Some(1),
@@ -191,6 +269,7 @@ fn cursor_pagination_is_stable_under_inserts() {
         source_id: s.id.clone(),
         relative_path: rel.to_string(),
         media_type: MediaType::Image,
+        subtype: None,
         content_hash: Some(format!("h-{rel}")),
         content_hash_algo: Some("BLAKE3".to_string()),
         content_hash_algo_version: Some(1),

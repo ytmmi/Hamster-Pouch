@@ -7,7 +7,7 @@ mod scan_task;
 mod scanner;
 mod watcher;
 
-pub use media_type::detect_media_type;
+pub use media_type::{default_file_subtype, detect_media_type};
 pub use scan_compute::{analyze_image, image_pixel_cost, ImageDerivations};
 pub use scan_pool::{map_bounded, pixel_cost, worker_count, PIXEL_BUDGET_MP};
 pub use scanner::{ScanOptions, ScanOutcome, ScanPhase, ScanProgress, Scanner};

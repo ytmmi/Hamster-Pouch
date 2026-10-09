@@ -1,6 +1,6 @@
 //! 文件索引仓储（RFC 0001 / database-schema.md 第 4.3 节）。
 
-use hp_core::{FileId, FileIndexRow, HpError, HpResult, MediaType, SourceId, ThumbStatus, VerifyStatus};
+use hp_core::{FileId, FileIndexRow, FileSubtype, HpError, HpResult, MediaType, SourceId, ThumbStatus, VerifyStatus};
 use rusqlite::{params, OptionalExtension, Row};
 
 use crate::repo::repo_db::RepoDb;
@@ -10,9 +10,15 @@ use crate::util::{require_nonempty, store_err};
 pub const FILE_QUERY_MAX_LIMIT: i64 = 1000;
 
 /// `file.query` 的过滤条件。
+///
+/// `media_types` 是**集合**而不是单个取值（2026-10-08 用户口径：「媒体预览不包含 text 类型，
+/// text 类型在图书预览显示」）：面板的类型域本来就是"一组"——媒体预览的「全部」指的是
+/// **图片 / 视频 / 音频这三个**（不是"索引里的一切"），图书预览指的是**文本**这一个。
+/// 用单值表达不出前者，"全部"就只能落到"不筛"上，于是文本类会漏进媒体预览。
+/// **空切片 = 不筛**（没有限定，返回全部）。
 #[derive(Debug, Clone, Default)]
 pub struct FileQueryFilter<'a> {
-    pub media_type: Option<MediaType>,
+    pub media_types: &'a [MediaType],
     pub source_id: Option<&'a str>,
     /// 只返回 `relative_path` 以 `<dir_prefix>/` 开头的文件（含更深子目录）。
     pub dir_prefix: Option<&'a str>,
@@ -82,8 +88,8 @@ impl FileQueryCursor {
     }
 }
 
-/// `files` 表列清单（与迁移 0001 + 0002 顺序一致）。
-const FILE_COLUMNS: &str = "id, source_id, relative_path, media_type, \
+/// `files` 表列清单（与迁移 0001 + 0002 + 0008 顺序一致）。
+const FILE_COLUMNS: &str = "id, source_id, relative_path, media_type, subtype, \
      content_hash, content_hash_algo, content_hash_algo_version, \
      perceptual_hash, perceptual_hash_algo, perceptual_hash_algo_version, \
      size, mtime, scan_time, verify_status, thumb_status, missing_status, media_info_json";
@@ -91,27 +97,28 @@ const FILE_COLUMNS: &str = "id, source_id, relative_path, media_type, \
 /// 带 `f.` 前缀的列清单（JOIN 查询用）。
 ///
 /// `pub(crate)`：同 crate 的相册分页查询复用同一套列，保证"文件行长什么样"只有一处定义。
-pub(crate) const FILE_COLUMNS_F: &str = "f.id, f.source_id, f.relative_path, f.media_type, \
+pub(crate) const FILE_COLUMNS_F: &str = "f.id, f.source_id, f.relative_path, f.media_type, f.subtype, \
      f.content_hash, f.content_hash_algo, f.content_hash_algo_version, \
      f.perceptual_hash, f.perceptual_hash_algo, f.perceptual_hash_algo_version, \
      f.size, f.mtime, f.scan_time, f.verify_status, f.thumb_status, f.missing_status, f.media_info_json";
 
 /// [`FILE_COLUMNS_F`] 的列数。JOIN 查询若要在末尾追加列（如相册的 `added_at`），
 /// 用它算出追加列的下标，避免把数字写死在两处。
-pub(crate) const FILE_COLUMN_COUNT: usize = 17;
+pub(crate) const FILE_COLUMN_COUNT: usize = 18;
 
 impl RepoDb {
     /// 插入或更新文件索引行（按 `source_id + relative_path` 唯一索引冲突时更新，保留原 id）。
     pub fn upsert_file(&mut self, row: &FileIndexRow) -> HpResult<()> {
         self.conn()
             .execute(
-                "INSERT INTO files (id, source_id, relative_path, media_type,
+                "INSERT INTO files (id, source_id, relative_path, media_type, subtype,
                      content_hash, content_hash_algo, content_hash_algo_version,
                      perceptual_hash, perceptual_hash_algo, perceptual_hash_algo_version,
                      size, mtime, scan_time, verify_status, thumb_status, missing_status, media_info_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
                  ON CONFLICT(source_id, relative_path) DO UPDATE SET
                      media_type = excluded.media_type,
+                     subtype = excluded.subtype,
                      content_hash = excluded.content_hash,
                      content_hash_algo = excluded.content_hash_algo,
                      content_hash_algo_version = excluded.content_hash_algo_version,
@@ -130,6 +137,7 @@ impl RepoDb {
                     row.source_id.as_str(),
                     row.relative_path,
                     row.media_type.as_str(),
+                    row.subtype.map(|s| s.as_str()),
                     row.content_hash,
                     row.content_hash_algo,
                     row.content_hash_algo_version,
@@ -237,9 +245,10 @@ impl RepoDb {
         Ok(rows)
     }
 
-    /// 按仓库分页查询文件索引（**游标分页**，D78；可选媒体类型 / 媒体源 / 目录前缀过滤）。
+    /// 按仓库分页查询文件索引（**游标分页**，D78；可选媒体类型集合 / 媒体源 / 目录前缀过滤）。
     ///
     /// `dir_prefix` 非空时仅返回 `relative_path` 以 `<dir_prefix>/` 开头的文件（含更深子目录）。
+    /// `media_types` **空 = 不筛**（D95：集合语义见 [`FileQueryFilter`]）。
     ///
     /// **排序键（游标的依据，契约要求写明）**：`(relative_path, source_id, id)` **升序**。
     /// - `relative_path` 单独**不是**全序：同一仓库下两个源可以有同名相对路径，
@@ -262,24 +271,35 @@ impl RepoDb {
             .dir_prefix
             .filter(|p| !p.trim().is_empty())
             .map(|p| format!("{}/%", escape_like(p.trim_matches('/'))));
+        // 媒体类型集合 → **四个固定旗标**（与 `query_album_members_page` 同一手法）：
+        // 这样 SQL 是静态的、参数个数固定，不必按集合长度拼 `IN (...)` 并把游标参数的
+        // 编号整体挪位（`?N` 是手写的，动态长度会让人算错）。
+        let want_image = filter.media_types.contains(&MediaType::Image) as i64;
+        let want_video = filter.media_types.contains(&MediaType::Video) as i64;
+        let want_audio = filter.media_types.contains(&MediaType::Audio) as i64;
+        let want_text = filter.media_types.contains(&MediaType::Text) as i64;
         // 键集谓词：`(relative_path, source_id, id) > (游标三元组)`，展开写以避开行值比较的方言差异。
         let after = cursor.map(|_| {
-            "(f.relative_path > ?6
-              OR (f.relative_path = ?6
-                  AND (f.source_id > ?7
-                       OR (f.source_id = ?7 AND f.id > ?8))))"
+            "(f.relative_path > ?9
+              OR (f.relative_path = ?9
+                  AND (f.source_id > ?10
+                       OR (f.source_id = ?10 AND f.id > ?11))))"
         });
         let sql = format!(
             "SELECT {FILE_COLUMNS_F}
              FROM files f JOIN sources s ON s.id = f.source_id
              WHERE s.repo_id = ?1
                AND s.mounted = 1
-               AND (?2 IS NULL OR f.media_type = ?2)
-               AND (?3 IS NULL OR f.source_id = ?3)
-               AND (?4 IS NULL OR f.relative_path LIKE ?4 ESCAPE '\\')
-               AND (?5 = 0 OR {after})
+               AND ((?2 = 0 AND ?3 = 0 AND ?4 = 0 AND ?5 = 0)
+                    OR (?2 = 1 AND f.media_type = 'image')
+                    OR (?3 = 1 AND f.media_type = 'video')
+                    OR (?4 = 1 AND f.media_type = 'audio')
+                    OR (?5 = 1 AND f.media_type = 'text'))
+               AND (?6 IS NULL OR f.source_id = ?6)
+               AND (?7 IS NULL OR f.relative_path LIKE ?7 ESCAPE '\\')
+               AND (?8 = 0 OR {after})
              ORDER BY f.relative_path, f.source_id, f.id
-             LIMIT ?9",
+             LIMIT ?12",
             after = after.unwrap_or("1 = 1")
         );
         let mut stmt = self
@@ -291,7 +311,10 @@ impl RepoDb {
             .query_map(
                 params![
                     repo_id,
-                    filter.media_type.map(|m| m.as_str()),
+                    want_image,
+                    want_video,
+                    want_audio,
+                    want_text,
                     filter.source_id,
                     dir_pattern,
                     if cursor.is_empty() { 0 } else { 1 },
@@ -420,31 +443,35 @@ fn escape_like(s: &str) -> String {
 /// 文件行映射：`FILE_COLUMNS_F` 的列顺序 → [`FileIndexRow`]。
 ///
 /// `pub(crate)`：相册分页查询在同一 SELECT 末尾追加 `added_at`，
-/// 复用这里的 0..17 列映射，保证两处对"文件行长什么样"的理解不会漂移。
+/// 复用这里的 0..18 列映射，保证两处对"文件行长什么样"的理解不会漂移。
 pub(crate) fn row_to_file(row: &Row) -> rusqlite::Result<FileIndexRow> {
     let id: String = row.get(0)?;
     let source_id: String = row.get(1)?;
     let relative_path: String = row.get(2)?;
     let media_type: String = row.get(3)?;
-    let content_hash: Option<String> = row.get(4)?;
-    let content_hash_algo: Option<String> = row.get(5)?;
-    let content_hash_algo_version: Option<i64> = row.get(6)?;
-    let perceptual_hash: Option<String> = row.get(7)?;
-    let perceptual_hash_algo: Option<String> = row.get(8)?;
-    let perceptual_hash_algo_version: Option<i64> = row.get(9)?;
-    let size: i64 = row.get(10)?;
-    let mtime: String = row.get(11)?;
-    let scan_time: String = row.get(12)?;
-    let verify_status: String = row.get(13)?;
-    let thumb_status: i64 = row.get(14)?;
-    let missing_status: i64 = row.get(15)?;
-    let media_info_json: Option<String> = row.get(16)?;
+    let subtype: Option<String> = row.get(4)?;
+    let content_hash: Option<String> = row.get(5)?;
+    let content_hash_algo: Option<String> = row.get(6)?;
+    let content_hash_algo_version: Option<i64> = row.get(7)?;
+    let perceptual_hash: Option<String> = row.get(8)?;
+    let perceptual_hash_algo: Option<String> = row.get(9)?;
+    let perceptual_hash_algo_version: Option<i64> = row.get(10)?;
+    let size: i64 = row.get(11)?;
+    let mtime: String = row.get(12)?;
+    let scan_time: String = row.get(13)?;
+    let verify_status: String = row.get(14)?;
+    let thumb_status: i64 = row.get(15)?;
+    let missing_status: i64 = row.get(16)?;
+    let media_info_json: Option<String> = row.get(17)?;
 
     Ok(FileIndexRow {
         id: FileId::from_raw(id),
         source_id: SourceId::from_raw(source_id),
         relative_path,
         media_type: MediaType::from_str(&media_type).unwrap_or(MediaType::Image),
+        // 未知子类型按"没有标记"处理（与 `media_type` 的兜底不同：子类型缺失是常态，
+        // 不是损坏——旧行在重扫前一直是 NULL）。
+        subtype: subtype.as_deref().and_then(FileSubtype::from_str),
         content_hash,
         content_hash_algo,
         content_hash_algo_version,

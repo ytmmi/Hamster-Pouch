@@ -3,4 +3,8 @@
 /**
  * file.metadata 返回。
  */
-export type FileMetadataResult = { id: string, source_id: string, relative_path: string, media_type: string, content_hash: string | null, size: number, mtime: string, verify_status: string, media_info_json: string | null, exif_json: string | null, };
+export type FileMetadataResult = { id: string, source_id: string, relative_path: string, media_type: string, 
+/**
+ * 媒体类型之下的子类型（`book` / `document`；非文本类为 `null`）。
+ */
+subtype: string | null, content_hash: string | null, size: number, mtime: string, verify_status: string, media_info_json: string | null, exif_json: string | null, };

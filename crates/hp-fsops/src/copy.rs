@@ -42,6 +42,7 @@ pub(crate) fn copy_one(
         source_id: target_source.id.clone(),
         relative_path: target_rel,
         media_type: file.media_type,
+        subtype: file.subtype,
         content_hash: file.content_hash.clone(),
         content_hash_algo: file.content_hash_algo.clone(),
         content_hash_algo_version: file.content_hash_algo_version,

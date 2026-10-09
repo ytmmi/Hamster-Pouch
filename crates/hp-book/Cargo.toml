@@ -1,0 +1,17 @@
+[package]
+name = "hp-book"
+version.workspace = true
+edition.workspace = true
+
+# 电子书元数据与封面解析（EPUB = ZIP + OPF，txt/md 无元数据）。
+#
+# **不引入 `zip` crate**（D20 依赖本地化）：EPUB 只需要"读中央目录 + 取若干条目 + inflate"，
+# 这点子集由 `src/zip.rs` 自实现（约 200 行），解压走已在依赖树里的 `flate2`
+# （纯 Rust `miniz_oxide` 后端，无 C 依赖）。引入一个完整 ZIP 实现会为这点用途
+# 附带写/加密/zip64/多卷等一大片用不到的面。
+[dependencies]
+hp-core = { path = "../hp-core" }
+flate2 = "1"
+
+[dev-dependencies]
+tempfile = "3"

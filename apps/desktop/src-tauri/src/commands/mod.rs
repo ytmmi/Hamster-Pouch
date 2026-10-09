@@ -3,6 +3,7 @@
 pub(crate) mod ai;
 pub(crate) mod album;
 pub(crate) mod blueprint;
+pub(crate) mod book;
 pub(crate) mod color;
 pub(crate) mod file;
 pub(crate) mod fsops;
