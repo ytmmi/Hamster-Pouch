@@ -11,6 +11,13 @@
 //! 白名单之外的标签一律**丢掉标签、保留其文字**（不丢正文）；`<script>` / `<style>` /
 //! `<head>` 的内容**整段丢弃**（那是代码与样式，不是正文）。
 //!
+//! ## 与 Markdown 共用同一套块模型
+//!
+//! 本模块产出的 [`BookBlock`] 定义在 `crate::block`，与 Markdown 解析器
+//! （`crate::markdown`）**完全同形**——前端因此只有**一份渲染器**，
+//! 两种格式的观感不会各自漂移。EPUB 只用到其中的一部分变体
+//! （不产表格 / 任务列表 / 分隔线），这与"XHTML 里没有这些块级语义"一致。
+//!
 //! ## 为什么手写而不是上 HTML 解析库（D20）
 //!
 //! 与 `xml.rs` 同一条口径：我们只需要"块级元素切段 + 行内元素取文字 + 图片取 src"
@@ -28,34 +35,10 @@ use std::path::Path;
 
 use hp_core::{HpError, HpResult};
 
+use crate::block::{BookBlock, SpanStyle};
+use crate::inline::{inline_style, local_name, spans_from_html, RunBuilder, LINE_BREAK_MARKER};
 use crate::xml::{attr_value, decode_entities, resolve_zip_path};
 use crate::zip::ZipArchive;
-
-/// 正文块（**纯数据**，前端据此渲染 React 元素；见模块文档的安全边界）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BookBlock {
-    /// 标题（`h1`–`h6`）。
-    Heading {
-        /// 层级 1–6（原样来自 `h1`–`h6`）。
-        level: u8,
-        /// 标题文字。
-        text: String,
-    },
-    /// 一个段落（块级元素的文字内容）。
-    Paragraph {
-        /// 段落文字（段内的 `br` 已变成 `\n`）。
-        text: String,
-    },
-    /// 图片（章节内联插图）。
-    Image {
-        /// 图片在包内的条目名（调用方据此落盘并换成前端可用的路径）。
-        name: String,
-        /// 落盘扩展名（按 magic bytes 判定；认不出为 `None`，调用方跳过该图）。
-        ext: Option<&'static str>,
-        /// 图片原始字节。
-        bytes: Vec<u8>,
-    },
-}
 
 /// 一次章节读取的结果（一次打开包即可拿到目录 + 指定章节，避免重复解包）。
 #[derive(Debug, Clone)]
@@ -77,8 +60,20 @@ const SKIPPED_CONTENT: [&str; 3] = ["script", "style", "head"];
 
 /// 块级标签：遇到它们就**先结束当前段落**。
 const BLOCK_TAGS: [&str; 14] = [
-    "p", "div", "section", "article", "blockquote", "li", "tr", "td", "th", "figure",
-    "figcaption", "body", "html", "nav",
+    "p",
+    "div",
+    "section",
+    "article",
+    "blockquote",
+    "li",
+    "tr",
+    "td",
+    "th",
+    "figure",
+    "figcaption",
+    "body",
+    "html",
+    "nav",
 ];
 
 /// 取 `h1`–`h6` 的层级；不是标题标签返回 `None`。
@@ -86,18 +81,6 @@ fn heading_level(name: &str) -> Option<u8> {
     let rest = name.strip_prefix('h')?;
     let digit = rest.parse::<u8>().ok()?;
     (1..=6).contains(&digit).then_some(digit)
-}
-
-/// 标签名（小写、去命名空间前缀）：`dc:title` → `title`，`H1` → `h1`。
-fn local_name(tag: &str) -> String {
-    let raw = tag
-        .trim_start_matches('<')
-        .trim_start_matches('/')
-        .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
-        .next()
-        .unwrap_or("");
-    let tail = raw.rsplit_once(':').map(|(_, t)| t).unwrap_or(raw);
-    tail.to_ascii_lowercase()
 }
 
 /// 取图片地址：`<img src>` 与 SVG 的 `<image xlink:href>` / `href` 都要认。
@@ -137,22 +120,20 @@ fn image_ref(tag: &str) -> Option<String> {
 /// XHTML → 正文块的**受控白名单**转换（见模块文档的安全边界）。
 ///
 /// `chapter_path` 是本章在包内的路径，用于把相对 `src` 解析成包内条目名。
-pub fn blocks_from_xhtml(
-    xhtml: &str,
-    chapter_path: &str,
-    archive: &ZipArchive,
-) -> Vec<BookBlock> {
+pub fn blocks_from_xhtml(xhtml: &str, chapter_path: &str, archive: &ZipArchive) -> Vec<BookBlock> {
     let mut blocks: Vec<BookBlock> = Vec::new();
-    let mut pending = String::new();
+    let mut pending = RunBuilder::new();
+    // 当前生效的行内样式与链接（标签嵌套 → 栈式生效）。
+    let mut styles: Vec<SpanStyle> = Vec::new();
+    let mut href: Option<String> = None;
     // 丢弃内容的标签嵌套深度（`script` / `style` / `head`）。
     let mut skip_depth = 0usize;
 
-    /** 把已积累的文字收成一个段落（空白折叠后为空则丢弃）。 */
-    fn flush(pending: &mut String, blocks: &mut Vec<BookBlock>) {
-        let text = collapse_whitespace(pending);
-        pending.clear();
-        if !text.is_empty() {
-            blocks.push(BookBlock::Paragraph { text });
+    /// 把已积累的文字收成一个段落（折叠后为空则丢弃）。
+    fn flush(pending: &mut RunBuilder, blocks: &mut Vec<BookBlock>) {
+        let spans = std::mem::replace(pending, RunBuilder::new()).into_spans();
+        if !spans.is_empty() {
+            blocks.push(BookBlock::Paragraph { spans });
         }
     }
 
@@ -161,12 +142,16 @@ pub fn blocks_from_xhtml(
         let start = at + lt;
         // 标签之前的文字（丢弃区段内直接忽略）。
         if skip_depth == 0 && start > at {
-            pending.push_str(&decode_entities(&xhtml[at..start]));
+            pending.push(
+                &decode_entities(&xhtml[at..start]),
+                &styles,
+                href.as_deref(),
+            );
         }
         let Some(gt) = xhtml[start..].find('>') else {
             // 没有闭合的 `<`：把剩下的当文字收尾。
             if skip_depth == 0 {
-                pending.push_str(&decode_entities(&xhtml[start..]));
+                pending.push(&decode_entities(&xhtml[start..]), &styles, href.as_deref());
             }
             break;
         };
@@ -197,6 +182,14 @@ pub fn blocks_from_xhtml(
         }
 
         if closing {
+            // 行内标签的离开：撤销它带来的样式 / 链接。
+            if name == "a" {
+                href = None;
+            } else if let Some(style) = inline_style(&name) {
+                if let Some(pos) = styles.iter().rposition(|s| *s == style) {
+                    styles.remove(pos);
+                }
+            }
             // 块级元素结束 → 收段。
             if BLOCK_TAGS.contains(&name.as_str()) || heading_level(&name).is_some() {
                 flush(&mut pending, &mut blocks);
@@ -222,22 +215,33 @@ pub fn blocks_from_xhtml(
         }
 
         // 换行：段内换行（不切段，避免诗句被切成一堆碎段）。
-        // 写的是**标记**而不是 `\n`：源码里的原始换行是排版空白，两者见 `collapse_whitespace`。
+        // 写的是**标记**而不是 `\n`：源码里的原始换行是排版空白，两者见 `collapse_runs`。
         if name == "br" || name == "hr" {
-            pending.push(BR_MARKER);
+            pending.push(&LINE_BREAK_MARKER.to_string(), &styles, href.as_deref());
             continue;
         }
 
-        // 标题：先收段，并把标题文字单独成块。
+        // 标题：先收段，并把标题文字单独成块（内文按行内规则解析）。
         if let Some(level) = heading_level(&name) {
             flush(&mut pending, &mut blocks);
             if let Some((text, next)) = element_inner_text(xhtml, tag_end, &name) {
-                let text = collapse_whitespace(&text);
-                if !text.is_empty() {
-                    blocks.push(BookBlock::Heading { level, text });
+                // `keep_images = false`：章节插图在块级循环里处理，标题里不插图。
+                let spans = spans_from_html(&text, false);
+                if !spans.is_empty() {
+                    blocks.push(BookBlock::Heading { level, spans });
                 }
                 at = next;
             }
+            continue;
+        }
+
+        // 行内元素：链接记 href，样式标签压栈（文字由后续的字符累积进新段）。
+        if name == "a" {
+            href = attr_value(tag, "href").filter(|h| !h.is_empty());
+            continue;
+        }
+        if let Some(style) = inline_style(&name) {
+            styles.push(style);
             continue;
         }
 
@@ -245,7 +249,7 @@ pub fn blocks_from_xhtml(
         if BLOCK_TAGS.contains(&name.as_str()) {
             flush(&mut pending, &mut blocks);
         }
-        // 行内元素（span / b / a / ruby / sup …）：什么都不做，文字自然累积。
+        // 其余行内元素（span / ruby / rt / sup 之外…）：什么都不做，文字自然累积。
     }
 
     if skip_depth == 0 {
@@ -265,46 +269,6 @@ fn element_inner_text(xhtml: &str, from: usize, name: &str) -> Option<(String, u
     let end_start = from + rel;
     let end_gt = xhtml[end_start..].find('>')? + end_start + 1;
     Some((xhtml[from..end_start].to_string(), end_gt))
-}
-
-/// `<br>` 的**行内标记**（见 [`collapse_whitespace`]）。
-///
-/// 用一个不可能出现在正文里的控制字符做标记：源码里的原始换行是**排版空白**，
-/// 只有 `<br>` 才是语义上的换行。两者必须在折叠时区分开，否则 XHTML 的缩进
-/// 会被当成正文里的换行（实测：Re:Zero 的章节源码每个 `<p>` 之间都有换行与缩进）。
-const BR_MARKER: char = '\u{1}';
-
-/// 折叠空白：**原始空白（含换行）一律压成单个空格**，`<br>` 的标记变成真正的换行。
-///
-/// 为什么必须区分：XHTML 源码的换行与缩进是排版空白，不是正文的换行；
-/// 而 `<br>` 产出的换行是正文的一部分（诗句与对话的行结构）。把前者也当换行，
-/// 正文里会凭空多出大量断行。
-fn collapse_whitespace(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut last_space = false;
-    for ch in text.chars() {
-        if ch == BR_MARKER {
-            // 换行前把行尾空格去掉；连续标记不重复。
-            while out.ends_with(' ') {
-                out.pop();
-            }
-            if !out.is_empty() && !out.ends_with('\n') {
-                out.push('\n');
-            }
-            last_space = false;
-            continue;
-        }
-        if ch.is_whitespace() {
-            if !last_space && !out.is_empty() && !out.ends_with('\n') {
-                out.push(' ');
-            }
-            last_space = true;
-            continue;
-        }
-        out.push(ch);
-        last_space = false;
-    }
-    out.trim().to_string()
 }
 
 /// 读出章节清单（spine 顺序）与各章路径。
@@ -385,6 +349,7 @@ pub fn read_epub_section(path: &Path, section: u32) -> HpResult<EpubSectionRead>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::block::BookSpan;
     use crate::zip::build_test_zip;
 
     fn archive_with(files: &[(&str, &[u8], bool)]) -> ZipArchive {
@@ -392,6 +357,11 @@ mod tests {
     }
 
     const PNG: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0];
+
+    /// 测试夹具：把纯文字包成一个无样式片段（大多数断言只关心文字）。
+    fn text(s: &str) -> BookSpan {
+        BookSpan::plain(s)
+    }
 
     #[test]
     fn paragraphs_and_headings_become_blocks() {
@@ -402,9 +372,16 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                BookBlock::Heading { level: 1, text: "序章 『愚者的坚持』".into() },
-                BookBlock::Paragraph { text: "第一段。".into() },
-                BookBlock::Paragraph { text: "第二段。".into() },
+                BookBlock::Heading {
+                    level: 1,
+                    spans: vec![text("序章 『愚者的坚持』")]
+                },
+                BookBlock::Paragraph {
+                    spans: vec![text("第一段。")]
+                },
+                BookBlock::Paragraph {
+                    spans: vec![text("第二段。")]
+                },
             ]
         );
     }
@@ -416,7 +393,10 @@ mod tests {
           <style>.x{}</style><p>之后</p></body>"#;
         let blocks = blocks_from_xhtml(xhtml, "c.xhtml", &archive_with(&[]));
         let joined = format!("{blocks:?}");
-        assert!(!joined.contains("alert"), "script 内容不得进入正文：{joined}");
+        assert!(
+            !joined.contains("alert"),
+            "script 内容不得进入正文：{joined}"
+        );
         assert!(!joined.contains("xss"));
         assert!(!joined.contains(".x{}"), "style 内容不得进入正文");
         assert_eq!(blocks.len(), 2, "两个段落仍应在：{blocks:?}");
@@ -428,8 +408,31 @@ mod tests {
         let blocks = blocks_from_xhtml(xhtml, "c.xhtml", &archive_with(&[]));
         assert_eq!(
             blocks,
-            vec![BookBlock::Paragraph { text: "他大声说：\n「你好」".into() }]
+            vec![BookBlock::Paragraph {
+                spans: vec![
+                    text("他"),
+                    BookSpan {
+                        text: "大声".into(),
+                        styles: vec![SpanStyle::Strong],
+                        href: None,
+                        image: None,
+                    },
+                    text("说：\n「你好」"),
+                ],
+            }]
         );
+    }
+
+    /// 词间空格必须**跨样式边界**存活（`a <b>b</b> c` → `a b c`，不是 `ab c`）。
+    #[test]
+    fn whitespace_survives_across_style_boundaries() {
+        let xhtml = r#"<p>a <b>b</b> c</p>"#;
+        let blocks = blocks_from_xhtml(xhtml, "c.xhtml", &archive_with(&[]));
+        let joined: String = match &blocks[0] {
+            BookBlock::Paragraph { spans } => spans.iter().map(|s| s.text.as_str()).collect(),
+            other => panic!("不是段落：{other:?}"),
+        };
+        assert_eq!(joined, "a b c", "样式边界不得吃掉词间空格");
     }
 
     #[test]
@@ -438,7 +441,9 @@ mod tests {
         let blocks = blocks_from_xhtml(xhtml, "c.xhtml", &archive_with(&[]));
         assert_eq!(
             blocks,
-            vec![BookBlock::Paragraph { text: "a & b <c> 国".into() }]
+            vec![BookBlock::Paragraph {
+                spans: vec![text("a & b <c> 国")]
+            }]
         );
     }
 
@@ -465,7 +470,8 @@ mod tests {
     #[test]
     fn svg_image_href_is_recognized() {
         // 实测语料里有 1 本用 `<svg><image xlink:href=...>`（2026-10-09 实测）。
-        let xhtml = r#"<body><svg viewBox="0 0 1 1"><image xlink:href="Images/c.png"/></svg></body>"#;
+        let xhtml =
+            r#"<body><svg viewBox="0 0 1 1"><image xlink:href="Images/c.png"/></svg></body>"#;
         let archive = archive_with(&[("Images/c.png", PNG, false)]);
         let blocks = blocks_from_xhtml(xhtml, "c.xhtml", &archive);
         assert!(
@@ -499,8 +505,12 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                BookBlock::Paragraph { text: "甲".into() },
-                BookBlock::Paragraph { text: "乙".into() },
+                BookBlock::Paragraph {
+                    spans: vec![text("甲")]
+                },
+                BookBlock::Paragraph {
+                    spans: vec![text("乙")]
+                },
             ],
             "单元格应各自成段，不该粘成「甲乙」"
         );
@@ -514,11 +524,32 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                BookBlock::Paragraph { text: "前 中 后".into() },
-                BookBlock::Paragraph { text: "甲\n乙".into() },
+                BookBlock::Paragraph {
+                    spans: vec![text("前 中 后")]
+                },
+                BookBlock::Paragraph {
+                    spans: vec![text("甲\n乙")]
+                },
             ],
             "原始换行折叠为空格，br 保留为换行"
         );
+    }
+
+    #[test]
+    fn links_carry_their_href() {
+        let xhtml = r#"<p>见 <a href="https://example.com">这里</a>。</p>"#;
+        let blocks = blocks_from_xhtml(xhtml, "c.xhtml", &archive_with(&[]));
+        match &blocks[0] {
+            BookBlock::Paragraph { spans } => {
+                let link = spans
+                    .iter()
+                    .find(|s| s.href.is_some())
+                    .expect("应当有链接片段");
+                assert_eq!(link.text, "这里");
+                assert_eq!(link.href.as_deref(), Some("https://example.com"));
+            }
+            other => panic!("不是段落：{other:?}"),
+        }
     }
 
     #[test]
@@ -546,11 +577,21 @@ mod tests {
         assert_eq!(first.titles, vec!["第一章".to_string(), "第二章".into()]);
         assert_eq!(first.section, 0);
         assert_eq!(first.title, "第一章");
-        assert_eq!(first.blocks, vec![BookBlock::Paragraph { text: "甲".into() }]);
+        assert_eq!(
+            first.blocks,
+            vec![BookBlock::Paragraph {
+                spans: vec![text("甲")]
+            }]
+        );
 
         let second = read_epub_section(&path, 1).expect("读取失败");
         assert_eq!(second.title, "第二章");
-        assert_eq!(second.blocks, vec![BookBlock::Paragraph { text: "乙".into() }]);
+        assert_eq!(
+            second.blocks,
+            vec![BookBlock::Paragraph {
+                spans: vec![text("乙")]
+            }]
+        );
 
         // 越界按最后一章处理（滚到底再请求一次不该变成错误态）。
         let past = read_epub_section(&path, 99).expect("越界不该报错");

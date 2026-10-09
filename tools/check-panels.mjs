@@ -364,6 +364,15 @@ const viewerBlocksSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/viewer/BookBlocks.tsx"),
   "utf8",
 );
+// Markdown 解析侧（后端；2026-10-10）——门禁也读它，守住"同一套块模型"这条不变量。
+const markdownParserSrc = readFileSync(
+  join(ROOT, "crates/hp-book/src/markdown.rs"),
+  "utf8",
+);
+const markdownBlockSrc = readFileSync(
+  join(ROOT, "crates/hp-book/src/block.rs"),
+  "utf8",
+);
 const viewerContentSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/viewer/useViewerBookContent.ts"),
   "utf8",
@@ -488,9 +497,14 @@ const viewerReaderFamilyCode = stripComments(viewerReaderFamilySrc);
 check(
   "正文**不是 HTML**：全家族不得出现 dangerouslySetInnerHTML（白名单做在后端解析侧）",
   !/dangerouslySetInnerHTML/.test(viewerReaderFamilyCode) &&
-    // 正向：块用 React 元素渲染（`<p>` / `<img>` / `createElement('hN')`）。
-    /<p key=\{index\} className="vr-paragraph">/.test(viewerBlocksSrc) &&
+    // 正向：块用 React 元素渲染（`<p>` / `<img>` / `<pre>` / `<table>` /
+    // `createElement('hN')`）。注意不再断言 `<p key={index} …>` 这种字面形态——
+    // 渲染器已拆成 `Block` 递归组件（列表项 / 引用 / 脚注内部都要复用），
+    // key 落在 `Blocks` 的 map 上。断言"渲染了什么元素"比断言"key 写在哪"更本质。
+    /<p className="vr-paragraph">/.test(viewerBlocksSrc) &&
     /className="vr-image"/.test(viewerBlocksSrc) &&
+    /<pre className="vr-code">/.test(viewerBlocksSrc) &&
+    /<table className="vr-table">/.test(viewerBlocksSrc) &&
     /createElement\(/.test(viewerBlocksSrc),
 );
 check(
@@ -499,6 +513,90 @@ check(
     readFileSync(join(ROOT, "crates/hp-dto/src/lib.rs"), "utf8"),
   ) &&
     /BookContentResult/.test(readFileSync(join(ROOT, "crates/hp-dto/src/lib.rs"), "utf8")),
+);
+
+// ---- Markdown 渲染（2026-10-10，用户口径"渲染 + 完整 Markdown 语法覆盖"）----
+//
+// 这一段的守护重点是四件**看不见就必然是缺陷**的事：
+// 1. **正文不是 HTML**（安全边界）——Markdown 可以内嵌 HTML，解析侧必须过白名单，
+//    `<script>` 内容不得进入正文；前端不得有 `dangerouslySetInnerHTML` 入口。
+//    实测抓到过一个真洞：pulldown 把 `<script>alert()</script>` 拆成
+//    `InlineHtml + Text + InlineHtml`，只过滤 HTML 事件会漏掉正中间那段代码，
+//    因此"丢弃深度"必须**跨事件**存活（见 `markdown.rs` 的 `html_skip_depth`）。
+// 2. **两种格式共用一套块模型**——否则前端会各自长出一个渲染器、观感必然漂移；
+// 3. **图片只给能渲染的绝对路径**——解析侧确认文件在盘上，破图在结构上不出现；
+// 4. **`.md` 仍按 `media_type === "text"` 分流**，不在前端再列一遍扩展名。
+check(
+  "Markdown 解析侧丢弃 `<script>`/`<style>` 内容，且丢弃深度**跨事件**存活（实测抓到的洞）",
+  /DROPPED_HTML_TAGS/.test(markdownParserSrc) &&
+    /html_skip_depth/.test(markdownParserSrc) &&
+    // 正向锚点：文字事件也要看丢弃深度（只过滤 HTML 事件会漏掉中间那段代码）。
+    /html_skip_depth > 0 \{\s*return;/.test(markdownParserSrc.replace(/\s+/g, " ")),
+);
+check(
+  "Markdown 与 EPUB **共用同一套块模型**（前端只有一份渲染器的前提）",
+  /use crate::block::\{/.test(markdownParserSrc) &&
+    /BookBlock::Paragraph/.test(markdownParserSrc) &&
+    /pub enum BookBlock/.test(markdownBlockSrc) &&
+    // 反向：Markdown 侧不得自建第二套块类型。
+    !/pub enum MarkdownBlock/.test(markdownParserSrc),
+);
+check(
+  "Markdown 图片只给**真的在盘上**的绝对路径（破图在结构上不出现）",
+  /fn resolve_image/.test(markdownParserSrc) &&
+    /is_file\(\)/.test(markdownParserSrc) &&
+    // 远程图片与 data URI 不落成 img（前端拿不到、也没必要）。
+    /http:\/\//.test(markdownParserSrc) &&
+    /data:/.test(markdownParserSrc),
+);
+check(
+  "Markdown 覆盖完整语法（表格 / 任务列表 / 脚注 / 定义列表 / 数学 / 上下标）",
+  // 只看 `options()` 的函数体：这些常量名在文档注释里也会被提到，
+  // 全文匹配会让"关掉某个开关"的变异**仍然通过**（空洞断言）。
+  (() => {
+    const body = markdownParserSrc.slice(
+      markdownParserSrc.indexOf("fn options() -> Options"),
+    );
+    const flags = [
+      "ENABLE_TABLES",
+      "ENABLE_TASKLISTS",
+      "ENABLE_FOOTNOTES",
+      "ENABLE_DEFINITION_LIST",
+      "ENABLE_MATH",
+      "ENABLE_SUPERSCRIPT",
+      "ENABLE_SUBSCRIPT",
+    ];
+    return flags.every((flag) => body.includes(flag));
+  })(),
+);
+check(
+  "前端渲染 Markdown 的新块种类（代码块 / 引用 / 列表 / 表格 / 分隔线）",
+  ["code_block", "blockquote", "list", "table", "rule"].every((kind) =>
+    viewerBlocksSrc.includes(`case "${kind}"`),
+  ) &&
+    // 行内样式按**固定顺序**套元素（同一组样式 → 同一棵元素树）。
+    /STYLE_ORDER/.test(viewerBlocksSrc) &&
+    /vr-code-inline/.test(viewerBlocksSrc),
+);
+check(
+  "阅读区按 `format` 分流：纯文本走 `<p>`，markdown / epub 走块渲染器",
+  /page\.format === "text"/.test(viewerReaderSrc) &&
+    /isBlocked/.test(viewerReaderSrc) &&
+    /format === "markdown"/.test(viewerReaderSrc),
+);
+check(
+  "桥接层按扩展名分流到 Markdown 渲染，且游标是**块序号**（不是字符偏移）",
+  (() => {
+    const bridge = readFileSync(
+      join(ROOT, "apps/desktop/src-tauri/src/commands/book.rs"),
+      "utf8",
+    );
+    return (
+      /"md" \| "markdown" => read_markdown_page/.test(bridge) &&
+        /format: "markdown"/.test(bridge) &&
+        /MARKDOWN_PAGE_BLOCKS/.test(bridge)
+    );
+  })(),
 );
 
 

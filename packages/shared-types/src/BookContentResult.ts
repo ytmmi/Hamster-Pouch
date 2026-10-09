@@ -2,14 +2,17 @@
 import type { BookBlockItem } from "./BookBlockItem";
 
 /**
- * `book.content` 返回：查看器要显示的正文**一页**。///
- * 两种文件走同一个返回体（用户 2026-10-09 口径：txt 与 epub 都在查看器里看）：
- * - `txt` / `md`：一页就是一段连续文本（`text` 非空、`blocks` 为空）；
+ * `book.content` 返回：查看器要显示的正文**一页**。
+ *
+ * 三种文件走同一个返回体（用户 2026-10-09 口径：txt 与 epub 都在查看器里看；
+ * 2026-10-10 追加 md 的**渲染**）：
+ * - `txt`：一页就是一段连续文本（`text` 非空、`blocks` 为空）；
+ * - `md` / `markdown`：一页是**渲染后**的块（`blocks` 非空、`text` 为空）；
  * - `epub`：一页就是**一个章节**的块（`blocks` 非空、`text` 为空）。
  */
 export type BookContentResult = { 
 /**
- * 书的格式：`text`（纯文本）或 `epub`。
+ * 书的格式：`text`（纯文本）、`markdown`（渲染后的 md）或 `epub`。
  */
 format: string, 
 /**

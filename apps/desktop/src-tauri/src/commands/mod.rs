@@ -4,6 +4,9 @@ pub(crate) mod ai;
 pub(crate) mod album;
 pub(crate) mod blueprint;
 pub(crate) mod book;
+// `book.rs` 的测试独立成文件（`book.rs` 要守住"单文件 ≤ 1200 行"）。
+#[cfg(test)]
+pub(crate) mod book_tests;
 pub(crate) mod color;
 pub(crate) mod file;
 pub(crate) mod fsops;

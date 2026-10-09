@@ -36,26 +36,96 @@ export interface BookContentArgs {
 }
 
 /**
+ * 一段**行内内容**（**不是 HTML**）。
+ *
+ * EPUB 的正文是 XHTML、Markdown 可以内嵌 HTML，渲染它们要么走
+ * `dangerouslySetInnerHTML`（本项目不接受），要么做一遍受控白名单——后端把白名单
+ * **做在解析侧**，前端只拿到这样的纯数据并渲染 React 元素，
+ * 因此前端**没有**可注入 HTML 的入口。
+ */
+export interface BookSpanItem {
+  /** 文字内容（图片片段里是 **alt 文本**）。 */
+  text: string;
+  /** 叠加的行内样式（`emphasis` / `strong` / `strikethrough` / `code` …）。 */
+  styles: string[];
+  /** 链接目标；`null` = 不是链接。 */
+  href: string | null;
+  /** 图片的**已落盘绝对路径**（供 `convertFileSrc`）；`null` = 不是图片。 */
+  image: string | null;
+}
+
+/** 一个列表项（GFM 任务列表的勾选态 + 项内的块）。 */
+export interface BookListItem {
+  /** `true` / `false` = 已勾选 / 未勾选；`null` = 不是任务项。 */
+  checked: boolean | null;
+  /** 项内的块（列表项可以含多段、嵌套列表、代码块）。 */
+  blocks: BookBlockItem[];
+}
+
+/** 表格的一行。 */
+export interface BookTableRowItem {
+  /** 各单元格（每个单元格是一组行内片段）。 */
+  cells: BookSpanItem[][];
+}
+
+/** 定义列表的一项（术语 + 若干条释义）。 */
+export interface BookDefinitionItem {
+  /** 术语（行内内容）。 */
+  term: BookSpanItem[];
+  /** 释义（每条释义是一组块）。 */
+  definitions: BookBlockItem[][];
+}
+
+/**
  * 正文的**块**（**不是 HTML**）。
  *
- * EPUB 的正文是 XHTML，渲染它要么走 `dangerouslySetInnerHTML`（本项目不接受），
- * 要么做一遍受控白名单——后端把白名单**做在解析侧**，前端只拿到这样的纯数据并
- * 渲染 React 元素，因此前端**没有**可注入 HTML 的入口。
+ * EPUB 与 Markdown 产出的是**同一套块**（后端 `hp_book::block`），
+ * 因此前端**只有一份渲染器**，两种格式的观感不会各自漂移。
  */
 export interface BookBlockItem {
-  /** `heading` / `paragraph` / `image`。 */
+  /**
+   * `heading` / `paragraph` / `image` / `code_block` / `blockquote` /
+   * `list` / `rule` / `table` / `footnote` / `definition_list`。
+   */
   kind: string;
   /** `heading` 的层级 1–6；其余块为 `null`。 */
   level: number | null;
-  /** `heading` / `paragraph` 的文字；`image` 为 `null`。 */
-  text: string | null;
+  /** 行内内容（`heading` / `paragraph`）；其余块为 `null`。 */
+  spans: BookSpanItem[] | null;
   /** `image` 的已落盘绝对路径（供 `convertFileSrc`）；其余为 `null`。 */
   path: string | null;
+  /** `code_block` 的语言标记；其余为 `null`。 */
+  lang: string | null;
+  /** `code_block` 的代码原文（**保留缩进**）；其余为 `null`。 */
+  text: string | null;
+  /** `blockquote` / `footnote` 内的块；其余为 `null`。 */
+  blocks: BookBlockItem[] | null;
+  /** GFM 告示种类（`note` / `tip` …）；其余为 `null`。 */
+  quote_kind: string | null;
+  /** `list` 是否有序；其余为 `null`。 */
+  ordered: boolean | null;
+  /** `list` 的起始序号；其余为 `null`。 */
+  start: number | null;
+  /** `list` 的项；其余为 `null`。 */
+  list_items: BookListItem[] | null;
+  /** `table` 的每列对齐（`none` / `left` / `center` / `right`）；其余为 `null`。 */
+  align: string[] | null;
+  /** `table` 的表头单元格；其余为 `null`。 */
+  head: BookSpanItem[][] | null;
+  /** `table` 的表体行；其余为 `null`。 */
+  rows: BookTableRowItem[] | null;
+  /** `footnote` 的标签；其余为 `null`。 */
+  label: string | null;
+  /** `definition_list` 的各项；其余为 `null`。 */
+  definitions: BookDefinitionItem[] | null;
 }
 
 /** `book.content` 返回体：查看器要显示的正文**一页**。 */
 export interface BookContentResult {
-  /** 书的格式：`text`（纯文本）或 `epub`；空串 = 不是可看的文本类。 */
+  /**
+   * 书的格式：`text`（纯文本）/ `markdown`（渲染后的 md）/ `epub`；
+   * 空串 = 不是可看的文本类。
+   */
   format: string;
   /** 纯文本的**编码名**（`UTF-8` / `GBK` / …）；epub 为 `null`。 */
   encoding: string | null;

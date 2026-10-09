@@ -18,6 +18,7 @@ flate2 = "1"
 # - `chardetng`：Firefox 用的统计式编码探测器（Apache-2.0/MIT）。
 encoding_rs = "0.8"
 chardetng = "0.1"
+pulldown-cmark = { version = "0.13", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

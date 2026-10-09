@@ -91,7 +91,9 @@ export function ViewerReader(): JSX.Element {
   const first = pages[0];
   const isText = first?.format === "text";
   const isEpub = first?.format === "epub";
-  const imageOnly = isEpub && first.blocks ? isImageOnly(first.blocks) : false;
+  /** Markdown 与 epub 一样走**块渲染**（后端产出的是同一套块）。 */
+  const isBlocked = isEpub || first?.format === "markdown";
+  const imageOnly = isBlocked && first.blocks ? isImageOnly(first.blocks) : false;
 
   return (
     <div
@@ -122,8 +124,8 @@ export function ViewerReader(): JSX.Element {
               {first.title ? ` · ${first.title}` : ""}
             </div>
           )}
-          {/* 纯文本的编码提示：让"读出来是乱码"这件事可被用户判断。 */}
-          {isText && first.encoding && first.encoding !== "UTF-8" && (
+          {/* 纯文本 / Markdown 的编码提示：让"读出来是乱码"这件事可被用户判断。 */}
+          {(isText || isBlocked) && first.encoding && first.encoding !== "UTF-8" && (
             <div className="vr-meta dim">
               {app.t("viewer.encoding", { enc: first.encoding })}
             </div>

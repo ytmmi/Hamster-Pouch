@@ -139,10 +139,13 @@ apps/desktop/src/app_ui/
                       #   由面板设置 infoBarEnabled 控制）
                       #   文本类（media_type=text，txt/md/epub）交 panels/viewer/ 阅读区渲染，
                       #   判据用媒体类型而不是扩展名（免得与扫描器两份口径）
-    viewer/           # 查看器的正文阅读区（2026-10-09：用户口径"查看器新增 txt / epub 查看"）
-                      #   ViewerReader.tsx 阅读区装配（按宽度下发分栏/字号 CSS 变量；自己滚）
-                      #   BookBlocks.tsx EPUB 块渲染（**不注入 HTML**：用 React 元素渲染
-                      #     后端给的 heading/paragraph/image 纯数据块）
+    viewer/           # 查看器的正文阅读区（2026-10-09 txt/epub；2026-10-10 追加 md 渲染）
+                      #   ViewerReader.tsx 阅读区装配（按宽度下发分栏/字号 CSS 变量；自己滚；
+                      #     按 format 分流：text 走 <p>、markdown/epub 走块渲染器）
+                      #   BookBlocks.tsx **块渲染（EPUB 与 Markdown 共用）**（**不注入 HTML**：
+                      #     用 React 元素渲染后端给的纯数据块；容器块递归 + 深度护栏；
+                      #     行内样式按 STYLE_ORDER 固定顺序套元素；行内 code 的类名是
+                      #     vr-code-inline 而不是 vr-code——后者是代码**块**的类名）
                       #   useViewerBookContent.ts 分页取数（滚动到底部附近才取下一页；
                       #     切书即丢页——用户口径"字符缓存不需要大、滚动时按需缓存"）
                       #   viewerReaderView.ts 纯逻辑（分栏阈值/字号/是否该取下一页；零依赖，
@@ -310,11 +313,20 @@ HamsterPouch/
     hp-book/                  # 电子书元数据 / 封面 / **正文**解析（EPUB = ZIP + OPF；txt/md 需判编码）
                               #   自实现最小 ZIP 读取器（zip.rs）+ 极简 XML 取值（xml.rs）+
                               #   EPUB 元数据解析（epub.rs）+ 封面格式判定（cover.rs）+ 格式分发（meta.rs）；
-                              #   **正文（2026-10-09）**：text.rs 纯文本判编码与分页（BOM → UTF-8 合法性
-                              #   → chardetng → GBK 可解码性兜底；实测语料 14 本无一带 BOM、7 GBK + 7 UTF-8）、
-                              #   epub_text.rs 把章节 XHTML 过**受控白名单**转成类型化块（**不返回 HTML**：
-                              #   渲染它要么 dangerouslySetInnerHTML（不接受）要么白名单，白名单做在解析侧）；
-                              #   **不引入 `zip` crate**（D20 依赖本地化），解压走已在依赖树里的 flate2
+                              #   **正文（2026-10-09 txt/epub；2026-10-10 追加 md 渲染，D100）**：
+                              #   block.rs **共用的块模型**（BookBlock / BookSpan / SpanStyle / ColumnAlign；
+                              #     EPUB 与 Markdown 都产出它 ⇒ 前端只有一份渲染器）、
+                              #   inline.rs 行内累积 + HTML 片段扫描（两格式共用；丢弃深度**跨事件**存活
+                              #     ——pulldown 把 `<script>alert()</script>` 拆成 InlineHtml+Text+InlineHtml）、
+                              #   text.rs 纯文本判编码与分页（BOM → UTF-8 合法性 → chardetng →
+                              #     GBK 可解码性兜底；实测语料 14 本无一带 BOM、7 GBK + 7 UTF-8）、
+                              #   epub_text.rs 把章节 XHTML 过**受控白名单**转成类型化块、
+                              #   markdown.rs 把 CommonMark + GFM 转成**同一套**块（pulldown-cmark 只产出
+                              #     事件流，`html` 特性**刻意不开**；图片按文档目录解析并确认在盘）、
+                              #   markdown_tests.rs 测试独立成文件（守 1200 行）；
+                              #   **正文不是 HTML**：渲染它要么 dangerouslySetInnerHTML（不接受）要么白名单，
+                              #   白名单做在解析侧；**不引入 `zip` crate**（D20 依赖本地化），
+                              #   解压走已在依赖树里的 flate2
     hp-dto/                   # 跨层 DTO（前端 shared-types 由这些类型生成；`src/lib.rs` 按域分组、
                               #   `src/bin/generate.rs` 负责导出）。桥接层必须直接用这里的类型
     # hp-core/examples/check-blueprint.rs：蓝图体检小工具（stdin 读 JSON，打印解析/硬错误/软告警），

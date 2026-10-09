@@ -223,33 +223,110 @@ pub struct BlueprintTemplateItem {
     pub schema_version: i64,
 }
 
+/// 一段**行内内容**（`book.content` 返回）。
+///
+/// **不是 HTML**：EPUB 的正文是 XHTML、Markdown 可以内嵌 HTML，渲染它们要么走
+/// `dangerouslySetInnerHTML`（本项目不接受），要么做一遍受控白名单。后端把白名单
+/// **做在解析侧**，前端只拿到这样的纯数据并渲染 React 元素——前端因此没有可注入
+/// HTML 的入口（见 `hp-book` 的 `block` / `markdown` 模块文档）。
+#[derive(Serialize, TS, Debug, Clone)]
+pub struct BookSpanItem {
+    /// 文字内容（图片片段里是 **alt 文本**）。
+    pub text: String,
+    /// 叠加的行内样式（`emphasis` / `strong` / `strikethrough` / `code` /
+    /// `superscript` / `subscript` / `math` / `footnote`；**已归一化成固定次序**）。
+    pub styles: Vec<String>,
+    /// 链接目标；`null` = 不是链接。
+    pub href: Option<String>,
+    /// 图片的**已落盘绝对路径**（供前端 `convertFileSrc`）；`null` = 不是图片。
+    pub image: Option<String>,
+}
+
+/// 一个**列表项**（`book.content` 返回）。
+#[derive(Serialize, TS, Debug, Clone)]
+pub struct BookListItem {
+    /// `true` / `false` = 已勾选 / 未勾选（GFM 任务列表）；`null` = 不是任务项。
+    pub checked: Option<bool>,
+    /// 项内的块（列表项可以含多段、嵌套列表、代码块）。
+    pub blocks: Vec<BookBlockItem>,
+}
+
+/// **表格的一行**（`book.content` 返回）。
+#[derive(Serialize, TS, Debug, Clone)]
+pub struct BookTableRowItem {
+    /// 各单元格（每个单元格是一组行内片段）。
+    pub cells: Vec<Vec<BookSpanItem>>,
+}
+
 /// 查看器正文的**块**（`book.content` 返回）。
 ///
-/// **不是 HTML**：EPUB 的正文是 XHTML，渲染它要么走 `dangerouslySetInnerHTML`
-/// （本项目不接受），要么做一遍受控白名单。后端把白名单**做在解析侧**，
-/// 前端只拿到这样的纯数据并渲染 React 元素——前端因此没有可注入 HTML 的入口
-/// （见 `hp-book` 的 `epub_text` 模块文档）。
+/// **不是 HTML**：见 [`BookSpanItem`] 的安全边界说明。
 ///
-/// `kind` 取值：`heading`（`level` + `text`）/ `paragraph`（`text`）/
-/// `image`（`path`，已落盘的绝对路径，供 `convertFileSrc`）。
-#[derive(Serialize, TS, Debug)]
+/// `kind` 取值与各自填充的字段：
+/// - `heading`：`level` + `spans`
+/// - `paragraph`：`spans`
+/// - `image`：`path`（已落盘的绝对路径，供 `convertFileSrc`）
+/// - `code_block`：`lang` + `text`
+/// - `blockquote`：`quote_kind` + `blocks`
+/// - `list`：`ordered` + `start` + `list_items`
+/// - `rule`：无附加字段
+/// - `table`：`align` + `head` + `rows`
+/// - `footnote`：`label` + `blocks`
+/// - `definition_list`：`definitions`
+#[derive(Serialize, TS, Debug, Clone)]
 pub struct BookBlockItem {
     pub kind: String,
     /// `heading` 的层级 1–6；其余块为 `null`。
     pub level: Option<u8>,
-    /// `heading` / `paragraph` 的文字；`image` 为 `null`。
-    pub text: Option<String>,
+    /// 行内内容（`heading` / `paragraph`）；其余块为 `null`。
+    pub spans: Option<Vec<BookSpanItem>>,
     /// `image` 的已落盘绝对路径（供前端 `convertFileSrc`）；其余为 `null`。
     pub path: Option<String>,
+    /// `code_block` 的语言标记；其余为 `null`。
+    pub lang: Option<String>,
+    /// `code_block` 的代码原文（**保留缩进**）；其余为 `null`。
+    pub text: Option<String>,
+    /// `blockquote` / `footnote` 内的块；其余为 `null`。
+    pub blocks: Option<Vec<BookBlockItem>>,
+    /// GFM 告示种类（`note` / `tip` / `important` / `warning` / `caution`）；其余为 `null`。
+    pub quote_kind: Option<String>,
+    /// `list` 是否有序；其余为 `null`。
+    pub ordered: Option<bool>,
+    /// `list` 的起始序号；其余为 `null`。
+    pub start: Option<u32>,
+    /// `list` 的项；其余为 `null`。
+    pub list_items: Option<Vec<BookListItem>>,
+    /// `table` 的每列对齐（`none` / `left` / `center` / `right`）；其余为 `null`。
+    pub align: Option<Vec<String>>,
+    /// `table` 的表头单元格；其余为 `null`。
+    pub head: Option<Vec<Vec<BookSpanItem>>>,
+    /// `table` 的表体行；其余为 `null`。
+    pub rows: Option<Vec<BookTableRowItem>>,
+    /// `footnote` 的标签；其余为 `null`。
+    pub label: Option<String>,
+    /// `definition_list` 的各项（术语 + 释义组）；其余为 `null`。
+    pub definitions: Option<Vec<BookDefinitionItem>>,
 }
 
-/// `book.content` 返回：查看器要显示的正文**一页**。///
-/// 两种文件走同一个返回体（用户 2026-10-09 口径：txt 与 epub 都在查看器里看）：
-/// - `txt` / `md`：一页就是一段连续文本（`text` 非空、`blocks` 为空）；
+/// **定义列表的一项**（`术语` + 若干条释义）。
+#[derive(Serialize, TS, Debug, Clone)]
+pub struct BookDefinitionItem {
+    /// 术语（行内内容）。
+    pub term: Vec<BookSpanItem>,
+    /// 释义（每条释义是一组块）。
+    pub definitions: Vec<Vec<BookBlockItem>>,
+}
+
+/// `book.content` 返回：查看器要显示的正文**一页**。
+///
+/// 三种文件走同一个返回体（用户 2026-10-09 口径：txt 与 epub 都在查看器里看；
+/// 2026-10-10 追加 md 的**渲染**）：
+/// - `txt`：一页就是一段连续文本（`text` 非空、`blocks` 为空）；
+/// - `md` / `markdown`：一页是**渲染后**的块（`blocks` 非空、`text` 为空）；
 /// - `epub`：一页就是**一个章节**的块（`blocks` 非空、`text` 为空）。
 #[derive(Serialize, TS)]
 pub struct BookContentResult {
-    /// 书的格式：`text`（纯文本）或 `epub`。
+    /// 书的格式：`text`（纯文本）、`markdown`（渲染后的 md）或 `epub`。
     pub format: String,
     /// 纯文本的**编码名**（`UTF-8` / `GBK` / `UTF-16LE` …）；epub 为 `null`。
     ///

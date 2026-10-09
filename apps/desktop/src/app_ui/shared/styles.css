@@ -2026,6 +2026,174 @@ button.danger {
   margin-top: 10px;
 }
 
+/* --- Markdown / EPUB 共用的块级样式（2026-10-10）---
+
+   两种格式产出**同一套块**（后端 `hp_book::block`），因此样式也只有一套：
+   改一处，两种观感一起变（反过来各写一份必然漂移）。
+   EPUB 只用到其中一部分 `.vr-*`，未命中的规则不生效。
+
+   分栏（`column-count`）下要遵守的两条：
+   1. **不该被切开**的元素加 `break-inside: avoid`（代码块 / 表格 / 图片）；
+   2. **不该被留在栏尾**的加 `break-after: avoid`（标题）。 */
+
+.vr-code {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-2);
+  /* 代码**不折叠空白**：缩进是代码语义的一部分。 */
+  white-space: pre;
+  overflow-x: auto;
+  font-family: var(--font-mono, monospace);
+  /* 比正文字号小一档：代码字符宽，同栏内容量不同。 */
+  font-size: 0.92em;
+  line-height: 1.5;
+  break-inside: avoid;
+}
+
+.vr-code-lang {
+  font-family: var(--font-sans, inherit);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.vr-quote {
+  margin: 0 0 10px;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--border);
+  color: var(--fg-dim);
+}
+
+.vr-quote .vr-paragraph:last-child {
+  margin-bottom: 0;
+}
+
+.vr-quote-kind {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+
+.vr-list {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+
+.vr-list .vr-list {
+  margin-bottom: 0;
+}
+
+.vr-li {
+  margin-bottom: 2px;
+  /* 项内可能有多段 / 代码块：行结构交给内部块，不在这里压成一行。 */
+}
+
+/* 任务列表：勾选框后紧跟内容，且整项不缩进（勾选框代替了项目符号）。 */
+.vr-task-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.vr-task-list .vr-li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.vr-checkbox {
+  flex: 0 0 auto;
+  font-size: 1.1em;
+  line-height: 1;
+}
+
+.vr-rule {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
+}
+
+.vr-table {
+  width: 100%;
+  margin: 0 0 10px;
+  border-collapse: collapse;
+  font-size: 0.95em;
+  break-inside: avoid;
+}
+
+.vr-cell {
+  border: 1px solid var(--border);
+  padding: 3px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.vr-table thead .vr-cell {
+  background: var(--bg-2);
+  font-weight: 600;
+}
+
+.vr-footnote {
+  margin: 0 0 10px;
+  padding-left: 10px;
+  border-left: 2px dotted var(--border);
+  font-size: 0.92em;
+  color: var(--fg-dim);
+}
+
+.vr-footnote-label {
+  margin-right: 6px;
+  font-family: var(--font-mono, monospace);
+}
+
+/* 脚注引用（`[^1]`）：上标编号，不把标签当正文。 */
+.vr-footnote-ref {
+  font-size: 0.8em;
+  vertical-align: super;
+  line-height: 1;
+}
+
+.vr-definitions {
+  margin: 0 0 10px;
+}
+
+.vr-definition {
+  margin-bottom: 6px;
+}
+
+.vr-definition dt {
+  font-weight: 600;
+}
+
+.vr-definition dd {
+  margin: 0 0 4px 16px;
+}
+
+/* ---- 行内样式 ---- */
+
+.vr-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.vr-link:hover {
+  text-decoration: underline;
+}
+
+.vr-code-inline,
+.vr-math {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--bg-2);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.92em;
+}
+
+.vr-strikethrough {
+  text-decoration: line-through;
+}
+
 /* ===== 黑暗模式（深色） ===== */
 
 .app-root.theme-dark {
