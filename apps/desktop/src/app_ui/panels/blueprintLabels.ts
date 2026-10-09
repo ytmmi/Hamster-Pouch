@@ -72,9 +72,54 @@ export function nodeTypeLabel(type: string, t: Translate): string {
   return "";
 }
 
-/** 媒体类型中文标签（图像/视频/音频；未知值原样返回）。 */
+/** 媒体类型中文标签（图像/视频/音频/文本；未知值原样返回）。 */
 export function mediaTypeLabel(value: string, t: Translate): string {
   return t(`blueprint.mediaType.${value}` as TranslationKey);
+}
+
+/**
+ * **子类** `format` 标签（`subclass` 节点：`epub` / `txt` / `md`）。
+ *
+ * 它是**格式**（与扩展名一一对应），因此文案直接用格式名。
+ */
+export function subclassFormatLabel(value: string, t: Translate): string {
+  return t(`blueprint.format.${value}` as TranslationKey);
+}
+
+/**
+ * **标记**标签（`mark` 节点的 `mark` 字段：`book` / `manga` …）。
+ *
+ * 标记与类目**正交、可交叉**（用户口径：`漫画.zip` 的类目是压缩包、可标记为 `manga`），
+ * 因此文案与"格式"分开一组键——同一个 `book` 在标记里的含义是"这是一本书"，
+ * 而不是"这是 book 格式"。
+ */
+export function markLabel(value: string, t: Translate): string {
+  const key = `blueprint.mark.${value}`;
+  const resolved = t(key as TranslationKey);
+  // 未登记的标记（清单可注册）：不暴露裸键，退回显示 id 本身。
+  return resolved === key ? value : resolved;
+}
+
+/**
+ * 类目的显示摘要：**只有媒体类型**（D102 起细分属于 `subclass` 节点，
+ * 不再挂在类目上）。
+ */
+export function classSummary(
+  node: Pick<BlueprintNode, "media_type">,
+  t: Translate,
+): string {
+  return mediaTypeLabel(node.media_type ?? "", t);
+}
+
+/** 子类的显示摘要：格式（`epub` / `txt` / `md`）+ 所属类目名。 */
+export function subclassSummary(
+  node: Pick<BlueprintNode, "format">,
+  t: Translate,
+  ownerName?: string,
+): string {
+  const format = node.format ? subclassFormatLabel(node.format, t) : "";
+  const head = format || "—";
+  return ownerName ? `${head} · ${ownerName}` : head;
 }
 
 /** 对象范围中文标签（单击/双击/选中；未知值原样返回）。 */
@@ -146,11 +191,20 @@ export function nodeSummary(
     case "control":
       return resolveControlTitle(node, t) || "—";
     case "class":
-      return mediaTypeLabel(node.media_type ?? "", t);
+      return classSummary(node, t);
+    case "subclass": {
+      // 子类摘要 = 格式（+ 所属类目名）：光有 `epub` 读不出"哪一支子类"。
+      const owner = node.subclass ? nodes.find((n) => n.key === node.subclass) : undefined;
+      return subclassSummary(node, t, owner ? nodeDisplayName(owner, t, nodes) : undefined);
+    }
+    case "mark":
+      return markLabel(node.mark ?? "", t);
     case "object": {
-      const cls = node.class ? nodes.find((n) => n.key === node.class) : undefined;
-      const clsName = cls ? nodeDisplayName(cls, t, nodes) : node.class ?? "?";
-      return `${clsName} · ${scopeLabel(node.scope ?? "", t)}`;
+      // 对象的结构父有**三条正交轴**（类目 / 子类 / 标记，三者互斥）：显示实际声明的那条。
+      const parentKey = node.class ?? node.subclass ?? node.mark_ref;
+      const parent = parentKey ? nodes.find((n) => n.key === parentKey) : undefined;
+      const parentName = parent ? nodeDisplayName(parent, t, nodes) : parentKey ?? "?";
+      return `${parentName} · ${scopeLabel(node.scope ?? "", t)}`;
     }
     case "group": {
       const mode =

@@ -33,6 +33,12 @@ pub enum NodeType {
     Control,
     /// 类目：面板内部条目分类（枚举 `class` 不变；按 media_type，显示名由 D71 定为「类目」）。
     Class,
+    /// 子类（D102）：**类目之下**的细分（`class ⊃ subclass ⊃ object`），
+    /// 取值域由所属类目的媒体类型决定（`text` → `epub` / `txt` / `md`）。
+    Subclass,
+    /// 标记（D102）：与类目树**平行**的标记（`control ⊃ mark ⊃ object`），
+    /// 引用可注册的标记清单（`book` / `manga` …）；与类目**正交、可交叉**。
+    Mark,
     /// 对象：类目内条目实例。
     Object,
     /// 组：面板容器（互斥/独立）。
@@ -52,12 +58,17 @@ impl NodeType {
     ///
     /// 插件注册的节点类型（`plugin.<plugin_id>.<local_id>`）**不在**这张清单里：
     /// 它是**开放取值域**，由宿主按插件注册表判定（RFC 0010 决策 5/6）。
-    pub const BUILTIN_NAMES: [&'static str; 10] = [
+    ///
+    /// 2026-10-10（D102）由 10 种扩为 **12 种**，加入两条正交的细分轴
+    /// `subclass`（子类）与 `mark`（标记）。
+    pub const BUILTIN_NAMES: [&'static str; 12] = [
         "interface",
         "layout_block",
         "overlay",
         "control",
         "class",
+        "subclass",
+        "mark",
         "object",
         "group",
         "event",
@@ -65,13 +76,15 @@ impl NodeType {
         "action",
     ];
 
-    /// 全部 10 种内置类型（顺序与 [`NodeType::BUILTIN_NAMES`] 一致）。
-    pub const BUILTINS: [NodeType; 10] = [
+    /// 全部 12 种内置类型（顺序与 [`NodeType::BUILTIN_NAMES`] 一致）。
+    pub const BUILTINS: [NodeType; 12] = [
         NodeType::Interface,
         NodeType::LayoutBlock,
         NodeType::Overlay,
         NodeType::Control,
         NodeType::Class,
+        NodeType::Subclass,
+        NodeType::Mark,
         NodeType::Object,
         NodeType::Group,
         NodeType::Event,
@@ -86,6 +99,8 @@ impl NodeType {
             NodeType::Overlay => "overlay",
             NodeType::Control => "control",
             NodeType::Class => "class",
+            NodeType::Subclass => "subclass",
+            NodeType::Mark => "mark",
             NodeType::Object => "object",
             NodeType::Group => "group",
             NodeType::Event => "event",
@@ -128,6 +143,52 @@ impl fmt::Display for NodeType {
     }
 }
 
+/// 类目节点 `media_type` 的**取值域**（与 TS `BLUEPRINT_MEDIA_TYPES` 逐项一致）。
+///
+/// `text` 于 2026-10 加入（与扫描器 `MediaType::Text` 同源，D93）。
+pub const CLASS_MEDIA_TYPES: [&str; 4] = ["image", "video", "audio", "text"];
+
+/// **子类取值域**（`subclass` 节点的 `format` 字段，D102）——**按类目的媒体类型分域**。
+///
+/// 目前只有 `text` 有分域（`epub` / `txt` / `md`）；其余媒体类型没有子类取值域，
+/// 即"该类目下不能建子类"。与 TS `BLUEPRINT_SUBCLASS_FORMATS` 逐项一致。
+pub const SUBCLASS_FORMATS_TEXT: [&str; 3] = ["epub", "txt", "md"];
+
+/// 某类目媒体类型允许的子类取值域（空 = 该类目下不能建子类）。
+pub fn subclass_formats_for(media_type: &str) -> &'static [&'static str] {
+    match media_type {
+        "text" => &SUBCLASS_FORMATS_TEXT,
+        _ => &[],
+    }
+}
+
+/// 某类目媒体类型下是否允许挂子类节点。
+pub fn media_type_has_subclass(media_type: &str) -> bool {
+    !subclass_formats_for(media_type).is_empty()
+}
+
+/// **宿主内置标记清单**（`mark` 节点的 `mark` 字段引用它，D102）——**可注册**。
+///
+/// 标记与类目**正交、可交叉**（用户口径：`漫画.zip` 的类目是压缩包、可标记为
+/// `manga`，据此走漫画阅读器蓝图）。与 TS `BLUEPRINT_BUILTIN_MARKS` 逐项一致。
+pub const BUILTIN_MARKS: [&str; 2] = [BOOK_MARK, MANGA_MARK];
+
+/// **book 标记**的取值名（`epub` 默认带它；与库表存储值同字面量）。
+pub const BOOK_MARK: &str = "book";
+
+/// **漫画标记**的取值名（用户口径的例子）。
+pub const MANGA_MARK: &str = "manga";
+
+/// 类目的 `media_type` 是否在取值域内。
+pub fn is_valid_class_media_type(value: &str) -> bool {
+    CLASS_MEDIA_TYPES.contains(&value)
+}
+
+/// 是否为**宿主内置**标记（可注册清单的内置部分，恒在）。
+pub fn is_builtin_mark(value: &str) -> bool {
+    BUILTIN_MARKS.contains(&value)
+}
+
 impl Serialize for NodeType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -150,8 +211,7 @@ impl<'de> Deserialize<'de> for NodeType {
 /// 组模式（RFC 0007 决策 1）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum GroupMode {
-    /// 互斥组：同一时间至多一个成员显示，其余默认隐藏。
+pub enum GroupMode {    /// 互斥组：同一时间至多一个成员显示，其余默认隐藏。
     Exclusive,
     /// 独立组：各成员显隐互不影响。
     Independent,

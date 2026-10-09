@@ -9,12 +9,14 @@ export interface FileItem {
   relative_path: string;
   media_type: string;
   /**
-   * 媒体类型之下的**子类型**（当前只有文本类有值：`book` / `document`）。
+   * 文件的**标记集合**（D102 用户口径："book 为标记，标记可以交叉"）。
    *
-   * 它是**可编辑标记**（与 `media_type` 的扫描判定不同），因此可能是 `null`
-   * ——旧索引行在重扫补齐前就是这个状态。消费方不得把它当"必有"。
+   * 标记是**可多值**、**与类目正交**的一维：一个文件可以同时带 `book` 与 `manga`。
+   * 取值是**可注册清单**的 id（内置 `book` / `manga`，见 `BLUEPRINT_BUILTIN_MARKS`）。
+   *
+   * 恒为数组（可能为空）——**不再是单值"子类型"**，消费方不要当"必有"。
    */
-  subtype: string | null;
+  marks: string[];
   size: number;
   mtime: string;
 }
@@ -30,8 +32,8 @@ export interface FileMetadataResult {
   source_id: string;
   relative_path: string;
   media_type: string;
-  /** 见 {@link FileItem.subtype}。 */
-  subtype: string | null;
+  /** 见 {@link FileItem.marks}。 */
+  marks: string[];
   content_hash: string | null;
   size: number;
   mtime: string;
@@ -112,6 +114,22 @@ export interface FileRenameArgs {
 export interface FileTrashArgs {
   repoId: string;
   fileIds: string[];
+}
+
+/**
+ * `file.setMarks` 命令参数：**增删**一组文件的标记。
+ *
+ * 标记是**可多值**的（D102：一个文件可以同时带 `book` 与 `manga`），因此接口是
+ * "加哪些、减哪些"而不是"设成什么"：`add` / `remove` 各自幂等。
+ */
+export interface FileSetMarksArgs {
+  repoId: string;
+  /** 要改标记的文件 ID（不存在的 id 由后端静默跳过，见命令说明）。 */
+  fileIds: string[];
+  /** 要**打上**的标记 id（未注册的标记允许写入，清单注册后自动生效）。 */
+  add?: string[];
+  /** 要**移除**的标记 id。 */
+  remove?: string[];
 }
 
 /** file_reanalyze 命令参数 */

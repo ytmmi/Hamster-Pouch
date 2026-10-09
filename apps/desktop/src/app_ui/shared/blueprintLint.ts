@@ -14,7 +14,7 @@ import type {
   BlueprintUnlinkedMap,
   BlueprintUnlinkedReason,
 } from "@hamster-pouch/config";
-import { nodeSpecOrNull, panelSpec } from "@hamster-pouch/config";
+import { isMarkRegistered, nodeSpecOrNull, panelSpec } from "@hamster-pouch/config";
 
 /** 求值链节点（操作/条件/状态）必须有触发来源，否则不会被执行。 */
 const CHAIN_TYPES: BlueprintNode["type"][] = ["event", "condition", "action"];
@@ -107,8 +107,37 @@ export function analyzeUnlinked(graph: BlueprintGraph): BlueprintUnlinkedMap {
         }
         break;
       }
+      case "subclass": {
+        // 子类（D102）指向**类目**：缺引用/已删除 = 未接通；缺 `format` = 未接通
+        // （没有细分就说不清收哪些文件，与后端软告警同口径）。
+        if (!node.subclass || !byKey.has(node.subclass)) {
+          mark(node.key, "missing-class");
+        }
+        if (!node.format) {
+          mark(node.key, "subclass-missing-format");
+        }
+        break;
+      }
+      case "mark": {
+        // 标记（D102）指向**面板**；缺引用/已删除 = 未接通；
+        // 填了但**不在可注册清单**里也按未接通（清单可注册，未注册不等于非法）。
+        if (!node.control || !byKey.has(node.control)) {
+          mark(node.key, "missing-control");
+        }
+        if (node.mark && !isMarkRegistered(node.mark)) {
+          mark(node.key, "mark-unregistered");
+        }
+        break;
+      }
       case "object":
-        if (!node.class || !byKey.has(node.class)) {
+        // 对象有**三条正交轴**（类目 / 子类 / 标记）：一条都没声明 = 未接通；
+        // 声明了的那条引用已删除 = 未接通。（同时声明多条是**硬错误**，由后端拒绝，
+        // 不算"未接通"。）
+        if (
+          ![node.class, node.subclass, node.mark_ref].some(
+            (k) => typeof k === "string" && k.trim() !== "" && byKey.has(k),
+          )
+        ) {
           mark(node.key, "missing-class");
         }
         break;

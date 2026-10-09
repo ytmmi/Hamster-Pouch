@@ -227,6 +227,10 @@ export const en: Record<keyof DictZhCN, string> = {
   "book.cover.imageFilter": "Images",
   "book.cover.reset": "Reset to default cover",
   "book.cover.setFailed": "Failed to set cover: {err}",
+  // Marks (user ruling D102: "book is a mark, marks can cross", multi-select)
+  "book.mark.title": "Marks",
+  "book.mark.hint": "Marks are orthogonal to categories and can overlap; a file may carry several marks",
+  "book.mark.setFailed": "Failed to set marks: {err}",
 
   // Scan progress overlay
   "scan.title": "Scanning source",
@@ -461,6 +465,11 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.panelId": "Panel",
   "blueprint.titleKey": "Title key",
   "blueprint.mediaType": "Media type",
+  "blueprint.subclassFormat": "Subclass format",
+  "blueprint.classOfSubclass": "Owning category",
+  "blueprint.subclassNoDomain": "This category has no subclass domain (currently only Text: EPUB / TXT / Markdown)",
+  "blueprint.markKind": "Mark",
+  "blueprint.markOf": "Owning panel",
   "blueprint.scope": "Object scope",
   "blueprint.mode": "Group mode",
   "blueprint.mode.exclusive": "Exclusive",
@@ -477,6 +486,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.noSelection": "No blueprint selected",
   "blueprint.type.control": "Panel",
   "blueprint.type.class": "Category",
+  "blueprint.type.subclass": "Subclass",
+  "blueprint.type.mark": "Mark",
   "blueprint.type.object": "Object",
   "blueprint.type.group": "Tab group",
   "blueprint.type.event": "Operation",
@@ -585,6 +596,14 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.mediaType.image": "Image",
   "blueprint.mediaType.video": "Video",
   "blueprint.mediaType.audio": "Audio",
+  "blueprint.mediaType.text": "Text",
+  // Subclass formats (`subclass.format`): the three subclasses under the Text category.
+  "blueprint.format.epub": "EPUB",
+  "blueprint.format.txt": "TXT",
+  "blueprint.format.md": "Markdown",
+  // Marks (`mark.mark`): the axis **orthogonal** to categories, freely overlapping.
+  "blueprint.mark.book": "Book",
+  "blueprint.mark.manga": "Manga",
   "blueprint.hideDir.left": "Left",
   "blueprint.hideDir.right": "Right",
   "blueprint.hideDir.up": "Up",

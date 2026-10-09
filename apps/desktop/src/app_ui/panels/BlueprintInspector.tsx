@@ -32,20 +32,24 @@ import {
   overlayOffsetLabel,
   overlaySizeLabel,
   nodeLayerKey,
+  subclassFormatsFor,
   type PanelSpec,
   TOKEN_LEVELS,
 } from "@hamster-pouch/config";
 
 import type { Translate, TranslationKey } from "../i18n";
 import { useAllPanels } from "../core/panelStore";
+import { useAllMarks } from "../core/markStore";
 import {
   hideDirLabel,
+  markLabel,
   mediaTypeLabel,
   nodeDisplayName,
   nodeTypeLabel,
   opLabel,
   resolveControlTitle,
   scopeLabel,
+  subclassFormatLabel,
   triggerLabel,
 } from "./blueprintLabels";
 
@@ -143,6 +147,8 @@ function panelIdOptions(
 }): JSX.Element {
   // 面板注册表（React 订阅版）：必须在任何提前返回之前调用（hooks 规则）。
   const panels = useAllPanels();
+  /** 标记清单（React 订阅版，D102）：同样是 hooks 规则，必须在提前返回之前调用。 */
+  const marks = useAllMarks();
   /** 当前主题：胶囊开关（布尔字段）按 token 表取色。 */
   const { theme } = useApp();
   if (!node) {
@@ -261,6 +267,8 @@ function panelIdOptions(
           t("blueprint.mediaType"),
           node.media_type ?? "",
           BLUEPRINT_MEDIA_TYPES.map((m) => ({ v: m, l: mediaTypeLabel(m, t) })),
+          // 类目只有 `media_type` 一个字段（D102）：细分是 `subclass`、与类目正交的
+          // 维度是 `mark`，两者都是**独立节点**，因此这里切换媒体类型不需要联动清理。
           (v) => onPatch({ media_type: v }),
         )}
       {node.type === "class" && (
@@ -271,7 +279,65 @@ function panelIdOptions(
           t={t}
         />
       )}
-      {/* 对象：本节点只需选作用范围；class 从上级（类）自动获取 */}
+      {/* 子类（D102）：format 的取值域**按所属类目的媒体类型分域**（text → epub/txt/md）。
+          因此先从 `doc` 解出所属类目，再按它的媒体类型取候选。 */}
+      {node.type === "subclass" && (() => {
+        const owner = node.subclass
+          ? doc.nodes.find((n) => n.key === node.subclass)
+          : undefined;
+        const domain = subclassFormatsFor(owner?.media_type ?? "");
+        return (
+          <>
+            {select(
+              t("blueprint.subclassFormat"),
+              node.format ?? "",
+              [
+                // 未设置 / 所属类目没有子类取值域时给空候选：否则浏览器会显示第一个候选，
+                // 看着像"已经选了"，而实际字段为空（旧文档或类目未接通就是这个状态）。
+                ...(node.format && domain.includes(node.format)
+                  ? []
+                  : [{ v: "", l: t("blueprint.derivedEmpty") }]),
+                ...domain.map((f) => ({ v: f, l: subclassFormatLabel(f, t) })),
+              ],
+              (v) => onPatch({ format: v === "" ? undefined : v }),
+            )}
+            {domain.length === 0 && (
+              <span className="dim bp-hints">{t("blueprint.subclassNoDomain")}</span>
+            )}
+            <DerivedField
+              label={t("blueprint.classOfSubclass")}
+              value={node.subclass}
+              label_={derivedLabel(node.subclass)}
+              t={t}
+            />
+          </>
+        );
+      })()}
+      {/* 标记（D102）：与类目树**平行**的轴，引用可注册的标记清单；与类目正交、可交叉。 */}
+      {node.type === "mark" &&
+        select<string>(
+          t("blueprint.markKind"),
+          node.mark ?? "",
+          [
+            ...(node.mark ? [] : [{ v: "", l: t("blueprint.derivedEmpty") }]),
+            ...marks.map((m) => ({ v: m, l: markLabel(m, t) })),
+            // 已写但当前不在清单里的取值**原样保留**并标注：清单可注册，未注册不等于非法
+            // （与"插件缺失的节点类型"同口径——不得绑架用户已保存的文档）。
+            ...(node.mark && !marks.includes(node.mark)
+              ? [{ v: node.mark, l: `${node.mark}（${t("blueprint.unlinkedTag")}）` }]
+              : []),
+          ],
+          (v) => onPatch({ mark: v === "" ? undefined : v }),
+        )}
+      {node.type === "mark" && (
+        <DerivedField
+          label={t("blueprint.markOf")}
+          value={node.control}
+          label_={derivedLabel(node.control)}
+          t={t}
+        />
+      )}
+      {/* 对象：本节点只需选作用范围；结构父（类目 / 子类 / 标记）从连线自动获取 */}
       {node.type === "object" &&
         select(
           t("blueprint.scope"),
@@ -282,8 +348,9 @@ function panelIdOptions(
       {node.type === "object" && (
         <DerivedField
           label={t("blueprint.tab.classes")}
-          value={node.class}
-          label_={derivedLabel(node.class)}
+          // 三条正交轴任选其一：显示**实际声明的那一条**（三者互斥，Rust 与解析层同口径）。
+          value={node.class ?? node.subclass ?? node.mark_ref}
+          label_={derivedLabel(node.class ?? node.subclass ?? node.mark_ref)}
           t={t}
         />
       )}

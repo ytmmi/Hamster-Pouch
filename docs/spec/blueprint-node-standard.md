@@ -1,6 +1,6 @@
 # 蓝图节点标准（节点类型定义表 + 注册表声明参数 + 端口/边规则）
 
-状态：正式草案。本文是 RFC 0007「决策 1 节点分层与节点类型」的**标准化展开**，并经 **RFC 0010 决策 5/6 扩展**：把 10 种内置节点类型的字段、取值域、引用目标、端口与边规则收敛为**一份定义表**，并把该定义表升级为**注册表**（宿主内置 + **插件可注册**），供后端校验、前端解析层、画布端口表与属性面板**共用同一口径**。
+状态：正式草案。本文是 RFC 0007「决策 1 节点分层与节点类型」的**标准化展开**，并经 **RFC 0010 决策 5/6 扩展**：把 **12 种**内置节点类型的字段、取值域、引用目标、端口与边规则收敛为**一份定义表**，并把该定义表升级为**注册表**（宿主内置 + **插件可注册**），供后端校验、前端解析层、画布端口表与属性面板**共用同一口径**。
 
 **2026-09 术语修订（RFC 0010 决策 1，仅显示用语，JSON 不变）**：
 
@@ -20,7 +20,7 @@
 | 硬错误 | `crates/hp-core/src/blueprint_validate.rs` | 拒绝保存；见第 6 节 |
 | 软告警（未接通） | `crates/hp-core/src/blueprint_warnings.rs` | 不阻塞保存；见第 6 节 |
 | 迁移与版本闸门 | `crates/hp-core/src/blueprint_migrate.rs` / `blueprint.rs` | `schema_version` 权威在文档内（D52/D58） |
-| **节点类型注册表（前端）** | `packages/config/src/blueprintNodes.ts`（`BLUEPRINT_NODE_REGISTRY`） | **单一事实来源**；内置 10 种 + 插件注册项 |
+| **节点类型注册表（前端）** | `packages/config/src/blueprintNodes.ts`（`BLUEPRINT_NODE_REGISTRY`） | **单一事实来源**；内置 **12** 种 + 插件注册项 |
 | 前端取值域与解析层校验 | `packages/config/src/blueprint.ts` | `parseBlueprintDocument` / `forUserSave` / 分层工具 |
 | 浮层几何纯函数 | `packages/config/src/blueprintOverlay.ts` | `resolveOverlayPosition` / `resolveOverlaySize` 等 |
 | 端口与边类型契约 | `apps/desktop/src/app_ui/panels/blueprintPorts.ts` | `PORT_DEFS` / `CONTAINMENT` / `kindForEdge` |
@@ -29,7 +29,7 @@
 
 **实测对齐缺口（已知）**：`blueprintPorts.ts` 的端口可用性目前靠人工维护，与 `blueprint_validate.rs` 的包含层级规则是两处独立表述，改动一侧容易漏另一侧。第 2–4 节即为**双方共用的定义表**；两侧的取值域断言由 `pnpm check:blueprint-nodes` 覆盖。
 
-## 2. 节点类型定义表（内置 10 种）
+## 2. 节点类型定义表（内置 12 种）
 
 约定：**每层至多一个 `interface`**；`key` 蓝图内唯一（第 7 节命名规范）；**每个节点都带 `layer`**（多页文档必填，单层文档可缺省兜底）；节点可选带 `name`（显示名，缺省由前端按类型本地化生成）与 `position {x, y}`（画布坐标，浮层/组节点另有语义，见下）。
 
@@ -39,9 +39,11 @@
 | `layout_block` | Layout Block | 布局块（区域/栏） | 结构中间层 | `name` | `position` | `interface` | `group`、`control` |
 | `overlay` | Overlay | 浮层（容器） | 与布局块同级 | —（显示名派生） | `name`、`position`、`visible`、`height`、`size`、`anchor`、`offset_x`、`offset_y`、`shadow`、`radius`、`hide_label` | `interface` | `group`、`control` |
 | `group` | Group | 标签组 | 面板容器 | `mode` | `default_visible`、`hide_direction`、`position`、`name` | `layout_block`、`overlay` | `control` |
-| `control` | Panel | **面板** | 面板实例 | `panel_id` | `title_key`、`name` | `layout_block`、`group`、`overlay` | `class` |
-| `class` | Category | **类目** | 面板内条目分类 | `control` | `media_type`、`name` | `control` | `object` |
-| `object` | Object | 对象 | 类目内条目实例 | `class`、`scope` | `name` | `class` | — |
+| `control` | Panel | **面板** | 面板实例 | `panel_id` | `title_key`、`name` | `layout_block`、`group`、`overlay` | `class`、`mark` |
+| `class` | Category | **类目** | 面板内条目分类（按媒体类型） | `control`、`media_type` | `name` | `control` | `subclass`、`object` |
+| `subclass` | Subclass | **子类** | 类目之下的细分（如文本 → epub/txt/md） | `subclass`、`format` | `name` | `class` | `object` |
+| `mark` | Mark | **标记** | 与类目树**平行**的标记（book / manga …） | `control`、`mark` | `name` | `control` | `object` |
+| `object` | Object | 对象 | 条目实例（挂在**三条轴之一**下） | `scope` | `class` / `subclass` / `mark_ref`（三选一）、`name` | `class`、`subclass`、`mark` | — |
 | `event` | Event | 操作（事件） | 规则起点 | `trigger` | `target`、`name` | 无结构边 | — |
 | `condition` | Condition | 条件 | 规则中间 | `expr` | `name` | 无结构边 | — |
 | `action` | Action | 状态（动作） | 规则终点 | `op`、`target` | `payload`、`name` | 无结构边 | — |
@@ -49,10 +51,60 @@
 要点：
 
 - `overlay` 与 `layout_block` **同级**（界面直接子级），且是**容器**（D50 修订）；界面**不得**直接 contains 标签组/面板/类目/对象。
-- `layout_block` 不能嵌套 `layout_block`（布局块嵌套列为 RFC 0007 开放点）；`overlay` 不能 contains `layout_block` / `overlay` / `class` / `object`。
+- `layout_block` 不能嵌套 `layout_block`（布局块嵌套列为 RFC 0007 开放点）；`overlay` 不能 contains `layout_block` / `overlay` / `class` / `subclass` / `mark` / `object`。
 - 规则三节点（`event`/`condition`/`action`）**不参与结构 `contains`**，只通过 `on` / `fires` / `guards` 连线。
 - `interface` 的显示名取自**层名**（D51）；节点上**不存** `name`。
-- `control`（面板）的 `panel_id` 引用**面板注册表**（`docs/spec/panel-standard.md`）；该面板的 `has_class` 决定其下**能否**挂 `class`（类目）节点。
+- `control`（面板）的 `panel_id` 引用**面板注册表**（`docs/spec/panel-standard.md`）；该面板的 `has_class` 决定其下**能否**挂 `class`（类目）与 `mark`（标记）节点——两者都直接挂在面板下，受**同一个**开关约束。
+
+#### 2.0.1 三轴模型：类目 / 子类 / 标记（2026-10-10 / D102）
+
+用户口径（原话）：
+
+> "**text 为类目，md、txt、epub 为子类，book 为标记，标记可以交叉**，例子：漫画.zip 文件的
+> 类目为压缩包，可以标记为 manga（漫画），当漫画标记的文件被打开时，会按照漫画标记的蓝图
+> 设定打开，如漫画阅读器面板。"
+
+因此条目由**三条正交的轴**定位，各有自己的节点类型：
+
+| 轴 | 节点类型 | 取值来源 | 例子 |
+| --- | --- | --- | --- |
+| **类目** | `class` | `media_type`：`image` / `video` / `audio` / `text`（扫描判定） | 「文本」类目 |
+| **子类** | `subclass` | `format`：**按类目分域**（`text` → `epub` / `txt` / `md`） | 「txt」子类 |
+| **标记** | `mark` | `mark`：**可注册清单**（内置 `book` / `manga`） | 「漫画」标记 |
+
+三者的结构位置不同，这是本模型的关键：
+
+```
+面板 ⊃ 类目 ⊃ 子类 ⊃ 对象        （类目—子类是**层级**关系）
+面板 ⊃ 标记 ⊃ 对象               （标记与类目树**平行**）
+```
+
+- **子类挂在类目之下**（`class ⊃ subclass`）：它是该类目的细分，因此 `format` 的取值域
+  **由所属类目的 `media_type` 决定**（`text` → `epub`/`txt`/`md`；其余媒体类型当前**没有**
+  子类取值域，即该类目下不能建子类）。挂在 `image` 类目下的子类 = **硬错误**。
+- **标记挂在面板之下**（与类目树平行）：它**不属于任何类目**，因此**与类目正交**。
+- **`object` 的结构父是三者之一**（`class` / `subclass` / `mark_ref`，**互斥**）：
+  一个对象要么描述"某类目里的条目"、要么"某子类里的条目"、要么"带某标记的条目"。
+
+**"标记可以交叉"的落点**：标记是**可多值**的集合（`file_marks` 表），一个文件可以**同时**
+带多个标记；且标记节点匹配时**只看标记、不看 `media_type`**——因此
+
+- 一个被标为 `manga` 的 `txt` **同时**命中「txt 子类」与「漫画标记」；
+- 一个被标为 `manga` 的 `zip`（类目=压缩包，**未来扩展**）与那本 `txt` 命中**同一个**
+  「漫画标记」规则 → 按漫画标记的蓝图设定打开（如漫画阅读器面板）。
+
+这正是用户例子里"类目为压缩包、标记为 manga"能驱动同一套行为的原因：**标记是跨类目的**。
+
+**`book` 与 `epub` 的关系**（最容易读错的一处）：`epub` 是**子类**（由扩展名判定，
+用户不可改），`book` 是**标记**（用户可改，`epub` 默认带它）。两者**不是**同一维度的两个取值，
+因此"一本 epub 不带 book 标记"是合法状态（用户取消了标记）。
+
+**未接通的分级**：
+
+- 子类缺 `format`（或 `format` 不在其类目分域内）→ 该类目分域内不存在时是**硬错误**；
+  缺 `format` 本身是**软告警**（允许保存，补上即恢复）。
+- 标记的 `mark` 取值**不在当前可注册清单**内 → **软告警**（与"插件缺失的节点类型"同口径：
+  清单可注册，未注册不等于非法，**允许保存**，注册后自动生效）。
 
 ### 2.1 字段定义（逐一）
 
@@ -65,8 +117,13 @@
 | `position` | 全部 | `{x, y}` | 数值；组节点还表示目标锚点 | 画布自动落位 |
 | `panel_id` | `control` | string | 面板注册表内 id（后端不校验注册表，见第 6 节） | — |
 | `title_key` | `control` | string | i18n 键（D27） | 取面板注册表标题 |
-| `control` | `class` | key 引用 | 必须指向 `control` | — |
-| `media_type` | `class` | enum | `image` / `video` / `audio` | —（必需） |
+| `control` | `class` / `mark` | key 引用 | 必须指向 `control`（类目与标记都直接挂在面板下） | — |
+| `media_type` | `class` | enum | `image` / `video` / `audio` / `text` | —（必需） |
+| `format` | `subclass` | enum | **按所属类目的 `media_type` 分域**（`text` → `epub` / `txt` / `md`） | —（缺失按未接通软告警） |
+| `mark` | `mark` | enum | **可注册标记清单** id（内置 `book` / `manga`）；未注册按未接通软告警 | —（必需） |
+| `class` | `object` | key 引用 | 必须指向 `class`（三条轴之一，与下面两个**互斥**） | — |
+| `subclass` | `subclass` / `object` | key 引用 | 在 `subclass` 节点上指**所属类目**；在 `object` 节点上指**所属子类**（同名不同义） | — |
+| `mark_ref` | `object` | key 引用 | 必须指向 `mark`（三条轴之一；**不是**标记 id） | — |
 | `class` | `object` | key 引用 | 必须指向 `class` | — |
 | `scope` | `object` | string | `selected` / `clicked` / `double_clicked` / 具体 `file_id` | —（必需） |
 | `mode` | `group` | enum | `exclusive` / `independent` | —（必需） |
@@ -101,7 +158,7 @@
 
 ### 2.3 节点类型注册表：声明参数列表（RFC 0010 决策 5）
 
-节点类型定义表升级为**注册表**。内置 10 种与插件注册项**同形**，只有 `origin` 不同。
+节点类型定义表升级为**注册表**。内置 **12** 种与插件注册项**同形**，只有 `origin` 不同。
 
 | 声明参数 | 类型 | 取值域 / 约束 | 必需 | 来源 | 说明 |
 | --- | --- | --- | --- | --- | --- |
@@ -122,7 +179,7 @@
 规则：
 
 - **声明是纯数据**：不含代码、自定义渲染、任意 CSS/像素、任意表达式（RFC 0010 决策 6）。
-- **推导与显式声明并存**：`ports` / `severity` / `evaluation_role` 未声明时按现有规则推导——**内置 10 种节点类型的行为必须完全不变**（零回归）。
+- **推导与显式声明并存**：`ports` / `severity` / `evaluation_role` 未声明时按现有规则推导——**内置节点类型的行为必须完全不变**（零回归；D102 新增的 `subclass` / `mark` 只是追加两个类型，既有的 10 种逐项不变）。
 - **插件注册项的受控校验规则**：只能从宿主提供的**固定最小集**里选（同 `condition.expr` 的口径，D32）；不接受自定义表达式或自定义执行逻辑。
 - `parents` / `children` / `ports` 的取值必须是**已注册**的节点类型或既有边类型；未命中即硬错误。
 - **可承载面板的节点类型**必须在 `fields` 里允许 `panel_id`，并与面板注册表的 `blueprint_node` 互相对应（`docs/spec/panel-standard.md` 第 5.2 节）；两侧不一致即门禁失败。
@@ -182,7 +239,7 @@
 ## 5. 条件表达式（`condition.expr`，固定最小集）
 
 ```text
-media_type == image | video | audio
+media_type == image | video | audio | text
 selection != empty
 rating >= 0..5
 has_tag == <tag_name>
@@ -200,6 +257,11 @@ has_tag == <tag_name>
 2. 悬空边、重复边、端点类型与边类型不匹配；`fires`/`guards` 成环。
 3. 取值域非法：`trigger` / `op` / `mode` / `media_type` / `expr` / `hide_direction` / `anchor` / `shadow` / `radius` 不在白名单。
 4. 引用**存在但类型不符**：`class.control` 非 `control`、`object.class` 非 `class`、`action.target` 与 `op` 不配对、`default_visible` / `hide_direction` 指向错误类型。
+4b. **`format` 用在非子类节点上**，或子类的 `format` **不在其所属类目的分域内**
+    （如 `image` 类目下建子类、或 `text` 类目下写 `format = "png"`）——与"字段用在错误的
+    类型上"同级（第 2.0.1 节）。
+4c. **对象的三个结构父同时声明**（`class` / `subclass` / `mark_ref` 多于一个）：
+    对象只能挂在**三条轴之一**下（与"结构父唯一性"同一条约束）。
 5. 必备字段缺失：`class.media_type`、`object.scope`、`group.mode`、`condition.expr`、`action.op`、`control.panel_id`（缺 `panel_id` 见软告警例外）。
 6. 互斥组 `default_visible` 多于一个成员。
 7. 分层：层 `key` 唯一非空、层 `name` 非空且蓝图内唯一（D60）、至少一层；节点 `layer` 指向不存在的层（**`layers` 存在而节点缺 `layer` 也是硬错误**，不静默压成单层）；跨层结构/规则边。
@@ -232,6 +294,9 @@ has_tag == <tag_name>
 5. `overlay.size` 被夹紧到最小值。
 6. 面板 `mount.multiple_per_interface = false` 但同一界面出现多个实例（`docs/spec/panel-standard.md` 第 5.4 节）。
 7. **插件注册面板**的 `has_class = false` 但文档里已有类目节点（插件升级改了声明）：灰显「未接通」、**允许保存**，与插件缺失同口径（第 12 条硬错误只适用于**宿主内置**面板）。
+8. **子类缺 `format`**（说不出收哪些文件、运行时不命中任何条目）与**标记不在可注册清单内**
+   （清单可注册，未注册不等于非法）：都按未接通软告警处理 → 灰显「未接通」、**允许保存**，
+   补上细分 / 注册清单后自动恢复（第 2.0.1 节）。
 
 **编辑器职责（后端不校验，避免耦合面板注册表）**：`panel_id` 是否在面板注册表内、`hide_direction: toward:<groupKey>` 引用的组是否存在、结构父唯一性、候选引用按**同层**过滤（`navigate` 例外）。
 
@@ -252,7 +317,7 @@ has_tag == <tag_name>
 - **`pnpm check:blueprint-nodes`**（**59 项**）：结构层级/边类型一致性（`CONTAINMENT` ↔ `kindForEdge` ↔ `PORT_DEFS`，均由定义表派生）、节点工厂**只追加自身**（不连带补链、不跨链路挂钩）、上级推导、层归属、浮层容器与外观/定位/尺寸、层增删改名、结构骨架、状态冲突的 TS↔Rust 同结论，并用 hp-core 真实校验器复核全部夹具。
 - **`pnpm check:blueprint-minimap`**（**11 项**）：画布右下角小地图的纯几何——内容包围盒、等比缩放与留边、只缩小不放大、世界↔小地图往返、视口指示框随缩放变小且平移到图外仍留在框内、视口矩形与 `viewportCenterToWorld` 同源、空图不崩。
 - **RFC 0010 新增断言**：
-  - 注册表声明参数完整性（第 2.3 节的必需项齐全；`ports` / `severity` / `evaluation_role` 缺省时推导结果与内置 10 种的现有行为**逐项相同**）。
+  - 注册表声明参数完整性（第 2.3 节的必需项齐全；`ports` / `severity` / `evaluation_role` 缺省时推导结果与既有内置类型的现有行为**逐项相同**）。
   - 命名空间规则：插件注册项必须 `plugin.<plugin_id>.<local_id>`；不得与内置裸 type 冲突。
   - **未知 `type` 分流**：不合命名规则 → 硬错误；命名合法但无注册项 → **软告警且可保存**，且该节点与其边原样保留。
   - `control.panel_id` ↔ 面板注册表 `blueprint_node` 双向一致（`docs/spec/panel-standard.md` 第 5.2 节）。

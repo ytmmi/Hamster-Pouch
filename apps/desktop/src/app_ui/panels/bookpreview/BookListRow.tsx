@@ -29,6 +29,8 @@ export interface BookListRowProps {
   selected: boolean;
   /** 单击选中本项（面板负责选中集口径）。 */
   onSelect: (file: FileItem) => void;
+  /** 双击：面板上报蓝图引擎（本面板三个视图同一口径）。 */
+  onDoubleClick: (file: FileItem) => void;
   /** 右键：面板负责落选中、光标定位与渲染菜单。 */
   onContextMenu: (file: FileItem, e: ReactMouseEvent) => void;
 }
@@ -38,6 +40,7 @@ export const BookListRow = memo(function BookListRow({
   item,
   selected,
   onSelect,
+  onDoubleClick,
   onContextMenu,
 }: BookListRowProps): JSX.Element {
   const name = bookDisplayName(item.relative_path);
@@ -47,6 +50,7 @@ export const BookListRow = memo(function BookListRow({
     <div
       className={`bp-row${selected ? " selected" : ""}`}
       onClick={() => onSelect(item)}
+      onDoubleClick={() => onDoubleClick(item)}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu(item, e);

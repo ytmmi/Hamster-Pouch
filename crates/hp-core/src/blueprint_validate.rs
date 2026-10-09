@@ -14,7 +14,10 @@ use crate::blueprint::{
 };
 use crate::blueprint_node::{BlueprintEdge, BlueprintNode};
 use crate::blueprint_registry::{NodeRegistry, SeverityLevel};
-use crate::blueprint_types::{ActionOp, EdgeKind, GroupMode, NodeType, Trigger};
+use crate::blueprint_types::{
+    is_valid_class_media_type, subclass_formats_for, ActionOp, EdgeKind, GroupMode, NodeType,
+    Trigger, CLASS_MEDIA_TYPES,
+};
 
 /// 一条校验结论：消息 + **分级**（硬错误 / 未接通软告警）。
 ///
@@ -493,23 +496,133 @@ fn validate_node_fields(
                 }
             }
             match node.media_type.as_deref() {
-                Some("image") | Some("video") | Some("audio") => {}
+                Some(mt) if is_valid_class_media_type(mt) => {}
                 _ => errors.push(format!(
-                    "类节点 {key} 的 media_type 必须是 image/video/audio（当前: {}）",
+                    "类节点 {key} 的 media_type 必须是 {}（当前: {}）",
+                    CLASS_MEDIA_TYPES.join("/"),
                     node.media_type.as_deref().unwrap_or("")
                 )),
             }
+            // 类目**只按媒体类型分类**：细分交给 `subclass`、与类目正交的维度交给
+            // `mark`（D102）。类目上出现 `format` 是 2026-10-10 之前的旧写法，
+            // 属"字段用在错误的类型上"→ 硬错误（与解析层同口径）。
+            if node.format.is_some() {
+                errors.push(format!(
+                    "类节点 {key} 不得带 format：类目只按 media_type 分类，细分请用 subclass 节点、与类目正交的维度请用 mark 节点"
+                ));
+            }
+            if node.mark.is_some() {
+                errors.push(format!(
+                    "类节点 {key} 不得带 mark：标记是独立节点（与类目树平行）"
+                ));
+            }
         }
-        NodeType::Object => {
-            if let Some(class_key) = node.class.as_deref() {
-                if let Some(target) = by_key.get(class_key) {
+        NodeType::Subclass => {
+            // 所属类目引用：缺失/已删除 → 未接通（软）；指向存在但类型不符 → 硬错误。
+            if let Some(ck) = node.subclass.as_deref() {
+                if let Some(target) = by_key.get(ck) {
                     if target.node_type != NodeType::Class {
                         errors.push(format!(
-                            "对象节点 {key} 的 class 必须指向类节点（当前指向 {}）",
+                            "子类节点 {key} 的 subclass 必须指向类目节点（当前指向 {}）",
                             target.node_type
                         ));
                     }
                 }
+            }
+            // `format` 的取值域**按所属类目的媒体类型分域**：`text` 类目下只能是
+            // epub/txt/md；其余媒体类型**没有**子类取值域（该类目下不该有子类）。
+            match node.format.as_deref() {
+                Some(fmt_value) if !fmt_value.trim().is_empty() => {
+                    // 能解析到所属类目时就按它的媒体类型精确判定；解析不到（未接通）时
+                    // 退化为"必须是某个分域里的取值"，避免把未接通的文档判死。
+                    let owner_media = node
+                        .subclass
+                        .as_deref()
+                        .and_then(|ck| by_key.get(ck))
+                        .filter(|t| t.node_type == NodeType::Class)
+                        .and_then(|t| t.media_type.clone());
+                    match owner_media.as_deref() {
+                        Some(mt) => {
+                            let allowed = subclass_formats_for(mt);
+                            if allowed.is_empty() {
+                                errors.push(format!(
+                                    "子类节点 {key} 挂在 media_type = {mt} 的类目下，但该类目没有子类取值域（节点标准第 2.0.1 节）"
+                                ));
+                            } else if !allowed.contains(&fmt_value) {
+                                errors.push(format!(
+                                    "子类节点 {key} 的 format 必须是 {}（{mt} 类目，当前: {fmt_value}）",
+                                    allowed.join("/")
+                                ));
+                            }
+                        }
+                        None => {
+                            // 解析不到所属类目（未接通）：退化为"必须是**某个**分域里的
+                            // 取值"，避免把未接通的文档判死（类目接回来即按分域复核）。
+                            let known = CLASS_MEDIA_TYPES
+                                .iter()
+                                .any(|mt| subclass_formats_for(mt).contains(&fmt_value));
+                            if !known {
+                                errors.push(format!(
+                                    "子类节点 {key} 的 format 不在任何子类取值域内（当前: {fmt_value}）"
+                                ));
+                            }
+                        }
+                    }
+                }
+                // 缺 format → 未接通（软告警），不阻塞保存。
+                _ => {}
+            }
+        }
+        NodeType::Mark => {
+            if let Some(ck) = node.control.as_deref() {
+                if let Some(target) = by_key.get(ck) {
+                    if target.node_type != NodeType::Control {
+                        errors.push(format!(
+                            "标记节点 {key} 的 control 必须指向面板控件节点（当前指向 {}）",
+                            target.node_type
+                        ));
+                    }
+                }
+            }
+            // `mark` 的取值域是**可注册的标记清单**；内置项恒在，未注册的取值按
+            // 「未接通」软告警处理（与节点类型注册表同口径，D102），因此这里只校验
+            // **命名合法**（不合规则才是硬错误），注册与否交给软告警层。
+            if let Some(m) = node.mark.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                if !crate::namespace::is_valid_namespaced_id(m) {
+                    errors.push(format!("标记节点 {key} 的 mark 命名不合规则: {m}"));
+                }
+            }
+        }
+        NodeType::Object => {
+            // 结构父有**三种**（三条正交的轴任选其一）：类目、子类、标记。
+            // 指向存在但类型不符 → 硬错误；缺失 → 未接通（软）。
+            let parents: [(&str, Option<&str>, NodeType); 3] = [
+                ("class", node.class.as_deref(), NodeType::Class),
+                ("subclass", node.subclass.as_deref(), NodeType::Subclass),
+                ("mark_ref", node.mark_ref.as_deref(), NodeType::Mark),
+            ];
+            let mut declared = 0usize;
+            for (field, key_opt, want) in parents {
+                let Some(parent_key) = key_opt else { continue };
+                // 空串按"未声明"处理（属性面板清空引用时会写出空串）。
+                if parent_key.trim().is_empty() {
+                    continue;
+                }
+                declared += 1;
+                if let Some(target) = by_key.get(parent_key) {
+                    if target.node_type != want {
+                        errors.push(format!(
+                            "对象节点 {key} 的 {field} 必须指向 {} 节点（当前指向 {}）",
+                            want, target.node_type
+                        ));
+                    }
+                }
+            }
+            // **三条轴互斥**：对象只属于一个结构父（与"结构父唯一性"同一条约束）。
+            if declared > 1 {
+                errors.push(format!(
+                    "对象节点 {key} 同时声明了 {declared} 个结构父：对象只能挂在 类目 / 子类 / 标记 三者之一"
+                ));
             }
             if node.scope.as_deref().unwrap_or("").trim().is_empty() {
                 errors.push(format!("对象节点 {key} 缺少 scope"));
@@ -769,8 +882,12 @@ pub(crate) fn validate_expr(expr: &str) -> Option<String> {
     let rhs = tokens[2];
     match (lhs, op) {
         ("media_type", "==") => match rhs {
-            "image" | "video" | "audio" => None,
-            _ => Some(format!("media_type 值必须是 image/video/audio: {expr}")),
+            // 取值域与类目节点的 `media_type` 同源（含 `text`，2026-10-10）。
+            v if is_valid_class_media_type(v) => None,
+            _ => Some(format!(
+                "media_type 值必须是 {}: {expr}",
+                CLASS_MEDIA_TYPES.join("/")
+            )),
         },
         ("selection", "!=") if rhs == "empty" => None,
         ("selection", _) => Some(format!("selection 仅支持 `selection != empty`: {expr}")),

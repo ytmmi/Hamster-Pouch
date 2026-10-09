@@ -20,6 +20,7 @@ import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import type { Translate } from "../../i18n";
+import { markLabel } from "../blueprintLabels";
 
 /**
  * 预设色板（与文字封面的观感一致：中低明度的深色，白字压得住）。
@@ -50,6 +51,63 @@ export interface BookCoverMenuProps {
   /** 关闭菜单（动作发起前）。 */
   onClose: () => void;
   t: Translate;
+}
+
+/**
+ * 图书预览：右键菜单里的**「标记」**区（D102 用户口径："book 为标记，标记可以交叉"）。
+ *
+ * 标记与**类目正交**、**可多值**：一个文件可以同时带 `book` 与 `manga`，
+ * 因此这里是**一组可勾选的开关**（按可注册清单渲染），而不是"在几个子类型里挑一个"。
+ *
+ * 与「更换封面」同款：挂在共享菜单的 `extraItems` 插槽里，不另起一份菜单。
+ */
+export interface BookMarkMenuProps {
+  /** 当前这本书已带的标记（集合）。 */
+  marks: readonly string[];
+  /** 全部可用标记 id（可注册清单：内置 + 登记项）。 */
+  available: readonly string[];
+  /** 切换某个标记（`on = true` 打上，`false` 移除）。 */
+  onToggle: (mark: string, on: boolean) => void;
+  /** 关闭菜单（动作发起前）。 */
+  onClose: () => void;
+  t: Translate;
+}
+
+export function BookMarkMenu({
+  marks,
+  available,
+  onToggle,
+  onClose,
+  t,
+}: BookMarkMenuProps): JSX.Element {
+  // 已带但当前**不在清单**里的标记（清单可注册，未注册不等于非法）也要显示出来，
+  // 否则用户看不到自己打过的标记、也就无从取消（与"插件缺失的节点类型"同口径）。
+  const extra = marks.filter((m) => !available.includes(m));
+  const all = [...available, ...extra];
+  return (
+    <>
+      <div className="menu-label dim">{t("book.mark.title")}</div>
+      {all.map((mark) => {
+        const on = marks.includes(mark);
+        return (
+          <button
+            key={mark}
+            className="menu-item bp-mark-item"
+            aria-pressed={on}
+            title={t("book.mark.hint")}
+            onClick={() => {
+              onClose();
+              onToggle(mark, !on);
+            }}
+          >
+            {/* 勾选态用符号表达（与菜单其它项的纯文字风格一致，不引入图标集）。 */}
+            <span className="bp-mark-check">{on ? "✓" : "\u00a0"}</span>
+            {markLabel(mark, t)}
+          </button>
+        );
+      })}
+    </>
+  );
 }
 
 export function BookCoverMenu({

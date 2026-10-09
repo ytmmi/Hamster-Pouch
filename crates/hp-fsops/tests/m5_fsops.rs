@@ -23,7 +23,7 @@ fn sample_file(id: &FileId, source_id: &hp_core::SourceId) -> FileIndexRow {
         source_id: source_id.clone(),
         relative_path: "pic.jpg".into(),
         media_type: MediaType::Image,
-        subtype: None,
+        marks: Vec::new(),
         content_hash: Some("hash-1".into()),
         content_hash_algo: Some("blake3".into()),
         content_hash_algo_version: Some(1),

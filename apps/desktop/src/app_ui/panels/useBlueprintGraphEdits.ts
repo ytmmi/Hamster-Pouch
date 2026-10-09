@@ -107,9 +107,30 @@ export function useBlueprintGraphEdits({
 
   const updateNode = useCallback(
     (key: string, patch: Partial<BlueprintNode>) => {
+      // 值为 `undefined` 的补丁字段是**删除该字段**的意图（如把类目从 text 切到
+      // image 时要清掉 `format`）。必须真的删键而不是留一个 `format: undefined`：
+      // 解析层按 `Object.entries` 逐字段校验，显式 `undefined` 会被判成取值域非法
+      // （enum 字段要求 string），从而让整份文档解析失败。
+      const cleaned: Record<string, unknown> = {};
+      for (const [field, value] of Object.entries(patch)) {
+        if (value !== undefined) {
+          cleaned[field] = value;
+        }
+      }
       mutate({
         ...doc,
-        nodes: doc.nodes.map((n) => (n.key === key ? { ...n, ...patch } : n)),
+        nodes: doc.nodes.map((n) => {
+          if (n.key !== key) {
+            return n;
+          }
+          const next = { ...n, ...cleaned } as unknown as Record<string, unknown>;
+          for (const field of Object.keys(patch)) {
+            if ((patch as Record<string, unknown>)[field] === undefined) {
+              delete next[field];
+            }
+          }
+          return next as unknown as BlueprintNode;
+        }),
       });
     },
     [doc, mutate],

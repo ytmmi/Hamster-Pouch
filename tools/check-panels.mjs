@@ -138,8 +138,8 @@ check(
 
 const hasClassTrue = config.BUILTIN_PANEL_SPECS.filter((s) => s.hasClass).map((s) => s.id);
 check(
-  "has_class：内置面板中**只有** media 为 true（面板标准第 5.1 节）",
-  eqList(hasClassTrue, ["media"]),
+  "has_class：内置面板中只有 media 与 bookpreview 为 true（面板标准第 5.1 节）",
+  eqList(hasClassTrue, ["media", "bookpreview"]),
   `has_class=true: ${hasClassTrue.join(",") || "（无）"}`,
 );
 
@@ -2642,10 +2642,12 @@ check(
   missingParam.length === 0,
   `缺: ${missingParam.join(", ") || "无"}`,
 );
-// 文档声明的「只有 media 有类目」必须与注册表一致（防文档与代码脱节）。
+// 文档声明的「有类目的内置面板」必须与注册表一致（防文档与代码脱节）。
 check(
-  "文档与注册表在 has_class 上口径一致（media 是唯一有类目的内置面板）",
-  doc.includes("`media`") && /`media`（媒体预览）\s*\|\s*\*\*`true`\*\*/.test(doc),
+  "文档与注册表在 has_class 上口径一致（media 与 bookpreview 是有类目的内置面板）",
+  doc.includes("`media`") &&
+    /`media`（媒体预览）\s*\|\s*\*\*`true`\*\*/.test(doc) &&
+    /`bookpreview`（图书预览）\s*\|\s*\*\*`true`\*\*/.test(doc),
 );
 
 // ============================== 4. Rust ↔ TS 取值域 ==============================
@@ -3102,14 +3104,116 @@ check(
     bookView.bookDisplayName(".hidden") === ".hidden",
 );
 check(
-  "usesEmbeddedCover：子类型优先，子类型缺失的旧行按扩展名兜底",
-  bookView.usesEmbeddedCover({ subtype: "book", relative_path: "x.txt" }) === true &&
-    // 标记是可编辑的：改成 document 就不再取内嵌封面。
-    bookView.usesEmbeddedCover({ subtype: "document", relative_path: "x.epub" }) === false &&
-    // 迁移 0008 之前的存量行（子类型为 null）：epub 仍按内嵌封面处理，txt 不走。
-    bookView.usesEmbeddedCover({ subtype: null, relative_path: "x.epub" }) === true &&
-    bookView.usesEmbeddedCover({ subtype: null, relative_path: "x.EPUB" }) === true &&
-    bookView.usesEmbeddedCover({ subtype: null, relative_path: "x.txt" }) === false,
+  "usesEmbeddedCover：book 标记优先，标记缺失的旧行按扩展名兜底",
+  bookView.usesEmbeddedCover({ marks: ["book"], relative_path: "x.txt" }) === true &&
+    // 标记是**集合**：带别的标记（如 manga）不等于带 book。
+    bookView.usesEmbeddedCover({ marks: ["manga"], relative_path: "x.epub" }) === false &&
+    // 迁移 0010 之前的存量行（标记为空）：epub 仍按内嵌封面处理，txt 不走。
+    bookView.usesEmbeddedCover({ marks: [], relative_path: "x.epub" }) === true &&
+    bookView.usesEmbeddedCover({ marks: [], relative_path: "x.EPUB" }) === true &&
+    bookView.usesEmbeddedCover({ marks: [], relative_path: "x.txt" }) === false,
+);
+
+// ==================== 三轴模型：类目 / 子类 / 标记（D102）====================
+check(
+  "类目取值域含 text；子类取值域按类目分域（text → epub / txt / md）",
+  eqList([...config.BLUEPRINT_MEDIA_TYPES], ["image", "video", "audio", "text"]) &&
+    eqList([...config.subclassFormatsFor("text")], ["epub", "txt", "md"]) &&
+    // 其余媒体类型**没有**子类取值域（该类目下不能建子类）。
+    config.subclassFormatsFor("image").length === 0 &&
+    config.mediaTypeHasSubclass("text") === true &&
+    config.mediaTypeHasSubclass("image") === false,
+);
+check(
+  "标记清单**可注册**：内置 book / manga，登记项可加入、可注销、不覆盖内置",
+  eqList([...config.BLUEPRINT_BUILTIN_MARKS], ["book", "manga"]) &&
+    config.isMarkRegistered("book") &&
+    !config.isMarkRegistered("plugin.demo.extra") &&
+    (() => {
+      config.registerBlueprintMarks([{ mark: "plugin.demo.extra", origin: "demo" }]);
+      const added = config.allMarkKinds().includes("plugin.demo.extra");
+      config.unregisterBlueprintMarks("demo");
+      return added && !config.isMarkRegistered("plugin.demo.extra");
+    })(),
+);
+check(
+  "bookpreview 有类目（has_class = true，此前为 false：文本类当时没有类目能表达）",
+  config.panelSpec("bookpreview")?.hasClass === true,
+);
+check(
+  "fileFormat：扩展名归一到**子类**取值域（markdown → md），非文本与认不出的为空",
+  bookView.fileFormat({ media_type: "text", relative_path: "a.epub" }) === "epub" &&
+    bookView.fileFormat({ media_type: "text", relative_path: "a.EPUB" }) === "epub" &&
+    bookView.fileFormat({ media_type: "text", relative_path: "a.txt" }) === "txt" &&
+    bookView.fileFormat({ media_type: "text", relative_path: "a.md" }) === "md" &&
+    bookView.fileFormat({ media_type: "text", relative_path: "a.markdown" }) === "md" &&
+    bookView.fileFormat({ media_type: "text", relative_path: "a.mobi" }) === "" &&
+    bookView.fileFormat({ media_type: "image", relative_path: "a.png" }) === "",
+);
+check(
+  "fileBookMark / fileMarks：标记是**集合**，与子类正交（同一个 txt 可同时是 txt 与 manga）",
+  bookView.fileBookMark({ marks: ["book"], relative_path: "a.txt" }) === true &&
+    // 用户口径的"标记可以交叉"：同一个 txt 既有 txt 子类、又带 manga 标记。
+    bookView.fileFormat({ media_type: "text", relative_path: "a.txt" }) === "txt" &&
+    bookView.fileMarks({ marks: ["manga"] })[0] === "manga" &&
+    bookView.fileBookMark({ marks: ["manga"], relative_path: "a.txt" }) === false &&
+    // **可多值**：book 与 manga 并存。
+    bookView.fileBookMark({ marks: ["book", "manga"], relative_path: "a.txt" }) === true &&
+    bookView.fileMarks({ marks: ["book", "manga"] }).length === 2 &&
+    // 未标记的 txt 不命中 book；旧行（空集合）按扩展名兜底。
+    bookView.fileBookMark({ marks: [], relative_path: "a.txt" }) === false &&
+    bookView.fileBookMark({ marks: [], relative_path: "a.epub" }) === true,
+);
+check(
+  "bookDispatchTarget：上报带上**三条轴**（mediaType + format + marks）",
+  JSON.stringify(
+    bookView.bookDispatchTarget({
+      id: "f1",
+      media_type: "text",
+      marks: ["book", "manga"],
+      relative_path: "a.txt",
+    }),
+  ) ===
+    JSON.stringify({
+      mediaType: "text",
+      fileId: "f1",
+      format: "txt",
+      marks: ["book", "manga"],
+    }),
+);
+// 类目的缺省字段表必须与 `has_class` 的面板集合一致（两处各写一遍必然漂移）。
+const classPanelIds = Object.keys(config.PANEL_CLASS_MEDIA_TYPES ?? {}).sort();
+const hasClassIds = config.BUILTIN_PANEL_SPECS.filter((s) => s.hasClass)
+  .map((s) => s.id)
+  .sort();
+check(
+  "PANEL_CLASS_MEDIA_TYPES 的面板集合 ↔ has_class=true 的内置面板逐项一致",
+  eqList(classPanelIds, hasClassIds),
+  `classTypes=${classPanelIds.join(",")} hasClass=${hasClassIds.join(",")}`,
+);
+check(
+  "defaultClassFieldsForPanel：图书预览下新建类目默认是**文本**类目，其余为 image",
+  JSON.stringify(config.defaultClassFieldsForPanel("bookpreview")) ===
+    JSON.stringify({ media_type: "text" }) &&
+    JSON.stringify(config.defaultClassFieldsForPanel("media")) ===
+      JSON.stringify({ media_type: "image" }) &&
+    // 未注册 / 未知面板：与既有行为一致（image，零回归）。
+    JSON.stringify(config.defaultClassFieldsForPanel(undefined)) ===
+      JSON.stringify({ media_type: "image" }),
+);
+check(
+  "defaultSubclassFormatFor：取该类目分域的第一个取值；无分域返回空串（据此拒绝建子类）",
+  config.defaultSubclassFormatFor("text") === "epub" &&
+    config.defaultSubclassFormatFor("image") === "" &&
+    config.defaultSubclassFormatFor(undefined) === "",
+);
+check(
+  "图书预览面板把单击 / 双击上报蓝图引擎（此前本面板完全不发事件）",
+  /app\.dispatch\(\{\s*trigger:\s*"click"/.test(bookFamilySrc) &&
+    /app\.dispatch\(\{\s*trigger:\s*"double_click"/.test(bookFamilySrc) &&
+    /bookDispatchTarget\(/.test(bookFamilySrc) &&
+    // 三个视图的单元都要接上双击（只接一个视图 = 另两个视图静默不生效）。
+    (bookFamilySrc.match(/onDoubleClick=\{cellDoubleClick\}/g) ?? []).length === 3,
 );
 check(
   "nextScrollLeft：两端夹紧；没有可滚动的余量时返回 0",
@@ -3294,11 +3398,12 @@ check(
     !/const \[failed, setFailed\] = useState\(false\)/.test(bookCoverArtSrc),
 );
 check(
-  "「更换封面」挂在**共享菜单的插槽**里（不是第二份菜单）",
+  "「更换封面」与「book 标记」挂在**共享菜单的插槽**里（不是第二份菜单）",
   /extraItems\?: ReactNode;/.test(mediaMenuSrc) &&
     // 共享菜单把它渲染在标准动作之后、删除之前。
     /\{extraItems && \(/.test(mediaMenuSrc) &&
-    /extraItems=\{\s*\n?\s*<BookCoverMenu/.test(bookFamilySrc) &&
+    // 两个图书特有的附加项都经同一个 `extraItems` 插槽（先标记开关、后更换封面）。
+    /extraItems=\{[\s\S]{0,200}?<BookMarkMenu[\s\S]{0,400}?<BookCoverMenu/.test(bookFamilySrc) &&
     // 反向：图书家族不得再 import portal 容器自己拼一份（缺陷 0013 的 portal 口径）。
     !/from "\.\.\/menu\/ContextMenu"/.test(bookFamilySrc),
 );
@@ -3446,23 +3551,57 @@ const scannerMediaTypeSrc = readFileSync(
   join(ROOT, "crates/hp-scanner/src/media_type.rs"),
   "utf8",
 );
+// 蓝图取值域（内置标记清单 book / manga 在这里定义，D102）。
+const blueprintTypesSrc = readFileSync(
+  join(ROOT, "crates/hp-core/src/blueprint_types.rs"),
+  "utf8",
+);
+// 文件模型（`default_book_mark_for_ext` 的唯一来源在 hp-core 的 file.rs）。
+const coreFileSrc = readFileSync(join(ROOT, "crates/hp-core/src/file.rs"), "utf8");
 check(
-  "Rust 侧 `text` 媒体类型与 `book` / `document` 子类型取值域齐备",
+  "Rust 侧 `text` 媒体类型与**标记**取值域齐备（标记可多值、不再有 document 子类型）",
   /MediaType::Text => "text"/.test(coreSourceSrc) &&
     /"text" => Some\(MediaType::Text\)/.test(coreSourceSrc) &&
-    /"epub" => Some\(FileSubtype::Book\)/.test(scannerMediaTypeSrc) &&
-    /FileSubtype::Document/.test(scannerMediaTypeSrc) &&
+    // 默认标记表在扫描器（`default_file_marks` 调 hp-core 的 `default_book_mark_for_ext`），
+    // 而 epub → book 的**映射本身**在 hp-core（唯一来源）。
+    /default_book_mark_for_ext/.test(scannerMediaTypeSrc) &&
+    /default_book_mark_for_ext[\s\S]{0,200}?BOOK_MARK/.test(coreFileSrc) &&
+    // 内置标记清单含 book 与 manga（用户口径的例子）。
+    /BOOK_MARK/.test(blueprintTypesSrc) &&
+    /MANGA_MARK/.test(blueprintTypesSrc) &&
+    // 旧 `document` 子类型**已废弃**：扫描器不再产出它（`FileSubtype` 枚举本身已删除）。
+    !/FileSubtype/.test(scannerMediaTypeSrc) &&
     // 文本类**只认扩展名**：不参与内容兜底（否则未知二进制会被吸进索引）。
     !/sniff[\s\S]{0,400}MediaType::Text/.test(scannerMediaTypeSrc),
 );
 check(
-  "迁移 0008 为 `files` 加 `subtype` 列并登记进迁移清单（forward-only，不改 0001）",
-  readFileSync(join(ROOT, "crates/hp-store/migrations/repo/0008_text_subtype.sql"), "utf8")
-    .includes("ALTER TABLE files ADD COLUMN subtype TEXT;") &&
-    /0008_text_subtype\.sql/.test(
+  "迁移 0010 建 `file_marks` 多值标记表、搬迁旧 book 子类型，且登记进迁移清单（forward-only，不改 0001）",
+  // 0010 的要点：一对多表 + 存量搬迁（只搬 book，不搬 document）。
+  (() => {
+    const m = readFileSync(
+      join(ROOT, "crates/hp-store/migrations/repo/0010_file_marks.sql"),
+      "utf8",
+    );
+    // 只取**可执行语句**（去掉 `--` 注释）再断言，避免注释里提到 `document` 就误判。
+    const sql = m
+      .split("\n")
+      .map((line) => line.replace(/--.*$/, ""))
+      .join("\n");
+    return (
+      /CREATE TABLE file_marks/.test(sql) &&
+      // 一对多：主键是 (file_id, mark)，因此同一文件可带多个标记。
+      /PRIMARY KEY \(file_id, mark\)/.test(sql) &&
+      // 存量搬迁：只搬 `book`。
+      /WHERE subtype = 'book'/.test(sql) &&
+      // 语句里**不得**出现 `document`（它不是标记状态，不该被搬成标记）。
+      !/document/.test(sql)
+    );
+  })() &&
+    /0010_file_marks\.sql/.test(
       readFileSync(join(ROOT, "crates/hp-store/src/repo/repo_db.rs"), "utf8"),
     ) &&
-    !/subtype/.test(
+    // 0001 是 forward-only，不得被改（其中不应出现标记相关字样）。
+    !/subtype|file_marks/.test(
       readFileSync(join(ROOT, "crates/hp-store/migrations/repo/0001_init.sql"), "utf8"),
     ),
 );

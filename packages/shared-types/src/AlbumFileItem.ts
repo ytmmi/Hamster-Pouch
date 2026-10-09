@@ -5,6 +5,9 @@
  */
 export type AlbumFileItem = { id: string, source_id: string, relative_path: string, media_type: string, 
 /**
- * 媒体类型之下的子类型（`book` / `document`；非文本类为 `null`）。
+ * 文件的**标记集合**（D102：可多值、与类目正交；`book` / `manga` / …）。
+ *
+ * 恒为数组（可能为空）；不再是单值"子类型"——用户口径是"标记可以交叉"，
+ * 一个文件可以同时带多个标记。
  */
-subtype: string | null, size: number, mtime: string, };
+marks: Array<string>, size: number, mtime: string, };

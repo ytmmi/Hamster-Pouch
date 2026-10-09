@@ -18,7 +18,7 @@ fn seed_file(db: &mut RepoDb, source_id: &SourceId, rel: &str) -> FileId {
         source_id: source_id.clone(),
         relative_path: rel.to_string(),
         media_type: MediaType::Image,
-        subtype: None,
+        marks: Vec::new(),
         content_hash: Some("same-content".to_string()),
         content_hash_algo: Some("BLAKE3".to_string()),
         content_hash_algo_version: Some(1),

@@ -182,8 +182,9 @@ const SYSTEM_ORIGIN: PanelOrigin = { kind: "system" };
 /**
  * 宿主内置 15 个面板的声明（顺序即 `PANEL_IDS` 顺序）。
  *
- * `has_class` 如实反映当前默认蓝图：**只有媒体预览（`media`）有类目**
- * （图像 / 视频 / 音频），其余 14 个没有条目分类（第 5.1 节）。
+ * `has_class` 如实反映当前默认蓝图：**媒体预览（`media`）与图书预览（`bookpreview`）
+ * 有类目**（前者图像 / 视频 / 音频，后者文本类的 epub / txt / md + book 标记），
+ * 其余 13 个没有条目分类（第 5.1 节）。
  * `category` 用于「全部设置 → 面板」二级列表分组（第 3 节）。
  */
 export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
@@ -260,7 +261,11 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
     id: "bookpreview",
     titleKey: "panel.bookpreview",
     category: "media",
-    hasClass: false,
+    // **有类目**（2026-10-10）：文本类条目的 epub / txt / md 三个格式 + book 标记
+    // （见 `BOOK_VIEW_MODES` 旁的类目取值域 `blueprintValues.ts`）。
+    // 此前是 `false`（文本类没有任何类目能表达），`media_type` 增加 `text`
+    // 与类目增加 `format` 之后才成立。
+    hasClass: true,
     blueprintNode: "control",
     origin: SYSTEM_ORIGIN,
     // 面板设置（`docs/spec/panel-standard.md` 第 5.3 节）：视图与封面宽度。

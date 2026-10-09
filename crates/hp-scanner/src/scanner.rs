@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use hp_core::{
-    FileId, FileIndexRow, FileSubtype, HpError, HpResult, MediaType, Source, ThumbStatus,
+    FileId, FileIndexRow, FileMark, HpError, HpResult, MediaType, Source, ThumbStatus,
     VerifyStatus,
 };
 use hp_hash::{ContentHash, PerceptualHash};
@@ -21,7 +21,7 @@ use hp_store::RepoDb;
 use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
 
-use crate::media_type::{default_file_subtype, detect_media_type};
+use crate::media_type::{default_file_marks, detect_media_type};
 use crate::scan_pool;
 use crate::scan_task::{compute, pixel_cost, Computed, Prepared};
 
@@ -328,7 +328,10 @@ impl Scanner {
                 mtime,
                 unchanged,
                 existing_id: existing.as_ref().map(|row| row.id.as_str().to_string()),
-                existing_subtype: existing.as_ref().and_then(|row| row.subtype),
+                existing_marks: existing
+                    .as_ref()
+                    .map(|row| row.marks.clone())
+                    .unwrap_or_default(),
                 want_palette,
             });
         }
@@ -440,7 +443,10 @@ impl Scanner {
             mtime,
             unchanged: false,
             existing_id: existing.as_ref().map(|row| row.id.as_str().to_string()),
-            existing_subtype: existing.as_ref().and_then(|row| row.subtype),
+            existing_marks: existing
+                .as_ref()
+                .map(|row| row.marks.clone())
+                .unwrap_or_default(),
             want_palette,
         };
         let computed = compute(&prepared, options);
@@ -482,13 +488,17 @@ impl Scanner {
             return Ok(());
         }
 
-        // 子类型是**标注**（2026-10-08 用户口径：「子类型类似于标记，后期用户可以
-        // 进行更改切换」）：已有值一律保留，扫描只在为空时补默认值。否则重扫会把
-        // 用户改过的标记打回自动判定——那正是"用户的判定权被覆盖"的一类缺陷
-        // （与调色板 `locked` 同口径）。
-        let subtype = prep
-            .existing_subtype
-            .or_else(|| default_subtype_for(prep));
+        // 标记是**用户的选择**（D102 用户口径："book 为标记，标记可以交叉"）：已有标记
+        // 一律保留，扫描只在**一个标记都没有**时补默认值。否则重扫会把用户改过的标记
+        // 打回自动判定——那正是"用户的判定权被覆盖"的一类缺陷（与调色板 `locked` 同口径）。
+        //
+        // 判据是"**集合为空**"而不是"某个值有没有"：标记可多值，用户可能只删了 `book`
+        // 而留着 `manga`，那时**不该**把 `book` 补回来（他明确删过）。
+        let marks: Vec<FileMark> = if prep.existing_marks.is_empty() {
+            default_marks_for(prep)
+        } else {
+            prep.existing_marks.clone()
+        };
 
         if comp.unreadable {
             // 读不到内容（RFC 0001）：新文件写"不可读"占位行，既有文件只更新状态。
@@ -503,7 +513,7 @@ impl Scanner {
                         source,
                         &prep.relative_path,
                         prep.media_type,
-                        subtype,
+                        &marks,
                         prep.size,
                         &prep.mtime,
                     )?;
@@ -529,7 +539,7 @@ impl Scanner {
             source,
             &prep.relative_path,
             prep.media_type,
-            subtype,
+            marks.clone(),
             prep.size,
             &prep.mtime,
             comp.content,
@@ -548,6 +558,13 @@ impl Scanner {
             outcome.changed += 1;
         }
 
+        // **标记单独落库**（D102）：它在 `file_marks` 一对多表，不在 `files` 行里。
+        // 用"补齐到目标集合"（`INSERT OR IGNORE`）而不是"清空重写"：既保证幂等，
+        // 也不会清掉用户在这期间刚加的其它标记。
+        for mark in &marks {
+            db.add_file_mark(id.as_str(), mark.as_str())?;
+        }
+
         // 调色板是"全面分析"的副产品（D18）：并行阶段算好，这里只落库。
         // `want_palette == false`（手动锁定 / 不需要）时 `comp.palette` 为 None，跳过。
         if let Some(colors) = comp.palette.as_deref() {
@@ -564,7 +581,7 @@ impl Scanner {
         source: &Source,
         relative_path: &str,
         media_type: MediaType,
-        subtype: Option<FileSubtype>,
+        marks: &[FileMark],
         size: i64,
         mtime: &str,
     ) -> HpResult<()> {
@@ -573,7 +590,7 @@ impl Scanner {
             source,
             relative_path,
             media_type,
-            subtype,
+            marks.to_vec(),
             size,
             mtime,
             None,
@@ -582,7 +599,12 @@ impl Scanner {
             ThumbStatus::Failed,
             None,
         );
-        db.upsert_file(&row)
+        db.upsert_file(&row)?;
+        // 标记单独落库（同 `write_one`：它在 `file_marks` 表，不在 `files` 行里）。
+        for mark in marks {
+            db.add_file_mark(row.id.as_str(), mark.as_str())?;
+        }
+        Ok(())
     }
 
     /// 移动/重命名识别：内容哈希一致且旧路径已消失 → 更新旧行路径（保留身份，RFC 0001）。
@@ -616,7 +638,7 @@ impl Scanner {
         source: &Source,
         relative_path: &str,
         media_type: MediaType,
-        subtype: Option<FileSubtype>,
+        marks: Vec<FileMark>,
         size: i64,
         mtime: &str,
         content: Option<ContentHash>,
@@ -630,7 +652,7 @@ impl Scanner {
             source_id: source.id.clone(),
             relative_path: relative_path.to_string(),
             media_type,
-            subtype,
+            marks,
             content_hash: content.as_ref().map(|c| c.value.clone()),
             content_hash_algo: content.as_ref().map(|c| c.algo.clone()),
             content_hash_algo_version: content.as_ref().map(|c| c.algo_version),
@@ -648,16 +670,16 @@ impl Scanner {
     }
 }
 
-/// 某个待写行的**默认子类型**（按相对路径的扩展名；非文本类恒为 `None`）。
+/// 某个待写行的**默认标记**（按相对路径的扩展名；非文本类恒为空）。
 ///
-/// 扩展名口径只有一处（`media_type.rs` 的 `default_file_subtype`），这里只负责
-/// 从相对路径取出扩展名。取不到扩展名时按空串处理（文本类落到 `document`）。
-fn default_subtype_for(prep: &Prepared) -> Option<FileSubtype> {
+/// 扩展名口径只有一处（`media_type.rs` 的 `default_file_marks`），这里只负责
+/// 从相对路径取出扩展名。取不到扩展名时按空串处理（文本类 → 无默认标记）。
+fn default_marks_for(prep: &Prepared) -> Vec<FileMark> {
     let ext = Path::new(&prep.relative_path)
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
-    default_file_subtype(prep.media_type, ext)
+    default_file_marks(prep.media_type, ext)
 }
 
 /// 读取文件 size 与 mtime（mtime 存 epoch 纳秒十进制字符串，便于精确比较）。

@@ -18,26 +18,39 @@
 
 export {
   BLUEPRINT_ACTION_OPS,
+  BLUEPRINT_BUILTIN_MARKS,
   BLUEPRINT_BUILTIN_NODE_TYPES,
   BLUEPRINT_EDGE_KINDS,
   BLUEPRINT_GROUP_MODES,
   BLUEPRINT_MEDIA_TYPES,
   BLUEPRINT_NODE_TYPES,
   BLUEPRINT_SCHEMA_VERSION,
+  BLUEPRINT_SUBCLASS_FORMATS,
   BLUEPRINT_TRIGGERS,
+  BOOK_MARK,
   DEFAULT_BLUEPRINT_VERSION,
   FALLBACK_LAYER_KEY,
   FALLBACK_LAYER_NAME,
   HIDE_DIRECTIONS,
+  MANGA_MARK,
   OVERLAY_HEIGHT_MAX,
   OVERLAY_HEIGHT_MIN,
+  allMarkKinds,
   enumAllows,
   inList,
+  isBuiltinMark,
   isHideDirection,
+  isMarkRegistered,
   isNodeTypeRegistered,
   isPluginNodeType,
   isValidNodeTypeName,
+  marksRevision,
+  mediaTypeHasSubclass,
+  registerBlueprintMarks,
   registerBlueprintNodeTypes,
+  subclassFormatsFor,
+  subscribeMarks,
+  unregisterBlueprintMarks,
   unregisterBlueprintNodeTypes,
 } from "./blueprintValues";
 export type {
@@ -46,9 +59,11 @@ export type {
   BlueprintEdgeKind,
   BlueprintGroupMode,
   BlueprintHideDirection,
+  BlueprintMarkKind,
   BlueprintMediaType,
   BlueprintNodeType,
   BlueprintTrigger,
+  RegisteredMark,
   RegisteredNodeType,
 } from "./blueprintValues";
 
@@ -124,8 +139,28 @@ export interface BlueprintNode {
   // class
   control?: string;
   media_type?: BlueprintMediaType;
-  // object
+  // subclass
+  /**
+   * 子类的 **format**（`subclass` 节点）：取值域按**所属类目的媒体类型**分域
+   * （`text` → `epub` / `txt` / `md`）。
+   *
+   * ⚠️ **同名不同义**：在 `subclass` 节点上，`subclass` 字段指"所属的**类目**"，
+   * 本字段是它的细分；在 `object` 节点上，`subclass` 字段指"所属的**子类**"。
+   */
+  format?: string;
+  // mark
+  /** 标记种类 id（`mark` 节点）：引用可注册的标记清单（`book` / `manga` …）。 */
+  mark?: string;
+  // object（三条正交轴任选其一）
   class?: string;
+  /**
+   * 所属**子类** key（`object` 节点）/ 所属**类目** key（`subclass` 节点）。
+   *
+   * ⚠️ 按节点类型分流，见 `format` 的说明。
+   */
+  subclass?: string;
+  /** 所属**标记节点** key（`object` 节点，三条轴之一；**不是**标记 id）。 */
+  mark_ref?: string;
   scope?: string;
   // group
   mode?: BlueprintGroupMode;
@@ -185,7 +220,11 @@ export type BlueprintUnlinkedReason =
   /** 节点类型**当前无注册项**（插件未安装 / 未启用 / 宿主 API 不兼容，RFC 0010 决策 6）。 */
   | "missing-registration"
   /** 类目挂在**无类目**的面板下（`has_class = false`，RFC 0010 决策 4 / 面板标准第 5.1 节）。 */
-  | "panel-has-no-class";
+  | "panel-has-no-class"
+  /** **子类缺 `format`**：说不清收哪些文件，运行时不命中任何条目（软告警，可保存）。 */
+  | "subclass-missing-format"
+  /** **标记不在可注册清单内**：清单可注册，未注册按未接通（可保存，注册后自动生效）。 */
+  | "mark-unregistered";
 
 /** 派生分析结果：未接通节点 key → 原因。 */
 export type BlueprintUnlinkedMap = Record<string, BlueprintUnlinkedReason>;
@@ -211,12 +250,27 @@ export interface BlueprintGraph {
 
 /** 引擎求值目标引用（预览条目单击/双击/选中时上报；控件事件亦复用）。 */
 export interface BlueprintTargetRef {
-  /** 条目媒体类型（image/video/audio）。 */
+  /** 条目媒体类型（image/video/audio/text）。 */
   mediaType?: string;
   /** 条目文件 ID。 */
   fileId?: string;
   /** 显式 scope（clicked / double_clicked / selected）；缺省按 trigger 推导。 */
   scope?: string;
+  /**
+   * **子类细分**（`subclass` 节点的 `format` 命中依据）：文本条目的
+   * `epub` / `txt` / `md`（按扩展名判定，与扫描器 `ext_to_media_type` 同源）。
+   *
+   * 只有文本类上报才带它；其余媒体类型恒为 `undefined`。
+   */
+  format?: string;
+  /**
+   * **条目的标记集合**（`mark` 节点的 `mark` 命中依据，D102）：一个文件**可带多个**标记
+   * （用户口径：`epub` 默认带 `book`，而 `txt` / `md` 也能被标为 `manga`）。
+   *
+   * 标记与**类目正交、可交叉**，因此标记节点的匹配**只看这个集合**、不看 `mediaType`：
+   * 一个被标为 `manga` 的 zip 与一本被标为 `manga` 的 epub 命中同一个「漫画」规则。
+   */
+  marks?: readonly string[];
   /**
    * **控件事件来源**：插件面板的 panel id（控件标准第 6 节 / D63）。
    *
@@ -420,6 +474,10 @@ function parseNode(value: unknown): BlueprintNode | null {
     }
     // `unlinked` 是画布派生标记（不落库），允许出现在内存对象上；其余未知字段即拒绝。
     if (field === "unlinked") continue;
+    // 值为 `undefined` 的字段视为**未设置**：`JSON.parse` 不会产出它，只有内存对象
+    // 上的"删除字段"意图会短暂留下（见 `useBlueprintGraphEdits.updateNode`）。
+    // 按缺失处理，避免"清空某字段"反而让整份文档解析失败。
+    if (fieldValue === undefined) continue;
     if (!spec) continue;
     const fieldSpec = spec.fields.find((f) => f.name === field);
     if (!fieldSpec) {
@@ -431,6 +489,20 @@ function parseNode(value: unknown): BlueprintNode | null {
   }
   if (node.hide_direction !== undefined && !isHideDirection(node.hide_direction)) {
     return null;
+  }
+  // 类目**只按媒体类型分类**（D102）：细分交给 `subclass`、与类目正交的维度交给 `mark`。
+  // 类目上出现 `format` / `mark` 是旧写法（或字段用错类型）→ 解析层拒绝（与 Rust 同口径）。
+  if (node.type === "class" && (node.format !== undefined || node.mark !== undefined)) {
+    return null;
+  }
+  // 对象**三条轴互斥**：只能挂在 类目 / 子类 / 标记 三者之一（与 Rust 同口径）。
+  if (node.type === "object") {
+    const declared = [node.class, node.subclass, node.mark_ref].filter(
+      (k) => typeof k === "string" && k.trim() !== "",
+    );
+    if (declared.length > 1) {
+      return null;
+    }
   }
   return node as unknown as BlueprintNode;
 }

@@ -65,7 +65,7 @@ fn assert_valid(json: &str) -> BlueprintGraph {
 fn blueprint_crud_roundtrip_and_default() {
     let path = temp_repo_path("blueprint");
     let mut db = RepoDb::create(&path, "蓝图仓库").expect("创建仓库失败");
-    assert_eq!(db.schema_version().expect("读版本失败"), 9);
+    assert_eq!(db.schema_version().expect("读版本失败"), 10);
 
     assert_eq!(db.count_blueprints("repo-1").expect("统计失败"), 0);
 

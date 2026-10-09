@@ -34,6 +34,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "r
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { useApp } from "../../core/AppContext";
+import { useAllMarks } from "../../core/markStore";
 import type { PanelRenderCtx } from "../../core/panelRegistry";
 import * as api from "../../shared/api";
 import { errorTextOf } from "../../shared/api/response";
@@ -45,7 +46,7 @@ import { useMediaFileActions } from "../mediaPreviewActions";
 import { MediaContextMenu, useMediaContextMenu } from "../mediaPreviewMenu";
 import { BookCard } from "./BookCard";
 import { BookCoverCell } from "./BookCoverCell";
-import { BookCoverMenu } from "./BookCoverMenu";
+import { BookCoverMenu, BookMarkMenu } from "./BookCoverMenu";
 import { BookListRow } from "./BookListRow";
 import { coverOverrideOf, invalidateBookCovers, loadBookCovers } from "./bookCoverCache";
 import { useBookPreviewData } from "./bookPreviewData";
@@ -55,7 +56,9 @@ import {
   BOOK_COVER_SIZE_STEP,
   BOOK_PREVIEW_PANEL_ID,
   bookDescLineCount,
+  bookDispatchTarget,
   clampCoverSize,
+  fileMarks,
   resolveBookView,
   type BookViewMode,
 } from "./bookPreviewView";
@@ -102,11 +105,34 @@ export function BookPreviewPanel({ api: panelApi }: BookPreviewPanelProps = {}):
    */
   const actions = useMediaFileActions({ albumScoped: false });
 
-  /** 单击选中本项（单选：本面板不引入范围/Ctrl 多选，理由见文件头）。 */
+  /**
+   * 单击选中本项（单选：本面板不引入范围/Ctrl 多选，理由见文件头），
+   * 并把**单击上报蓝图引擎**（带类目细分，见下方 `doubleClickBook` 的说明）。
+   */
   const selectBook = useCallback(
     (file: FileItem) => {
       app.setSelectedIds(new Set([file.id]));
       app.setSelectedFile(file);
+      app.dispatch({ trigger: "click", target: bookDispatchTarget(file) });
+    },
+    [app],
+  );
+
+  /**
+   * **把双击上报蓝图引擎**（RFC 0007 决策 1；2026-10-10 接线）。
+   *
+   * 上报必须带上**类目细分**才可能命中图书预览的类目：`format`（epub / txt / md）
+   * 与 `bookMark`（book 标记）是两个**正交**维度，同一个被标为 book 的 txt
+   * 会**同时**命中「txt 类目」与「book 类目」。只报一个裸的文本媒体类型的话，
+   * 任何细分都命中不了——这正是本次接线要解决的问题。
+   *
+   * 与媒体预览的差别（如实记录）：本面板**只做单选**，因此不上报
+   * `selection_change` 的 `rating` / `tags` context（那是多选与条件求值的口径，
+   * 见 `docs/spec/panel-standard.md` 第 10 节「多选与拖拽」未做项）。
+   */
+  const doubleClickBook = useCallback(
+    (file: FileItem) => {
+      app.dispatch({ trigger: "double_click", target: bookDispatchTarget(file) });
     },
     [app],
   );
@@ -134,8 +160,9 @@ export function BookPreviewPanel({ api: panelApi }: BookPreviewPanelProps = {}):
     [ensureSelected, menu],
   );
 
-  // 单元是 `memo` 的：两个回调必须收敛为**恒定引用**，否则每次选中变化都会重渲整列书。
+  // 单元是 `memo` 的：三个回调必须收敛为**恒定引用**，否则每次选中变化都会重渲整列书。
   const cellSelect = useStableCallback(selectBook);
+  const cellDoubleClick = useStableCallback(doubleClickBook);
   const cellContextMenu = useStableCallback(openMenu);
 
   /**
@@ -200,6 +227,35 @@ export function BookPreviewPanel({ api: panelApi }: BookPreviewPanelProps = {}):
     ? coverOverrideOf(app.repoId, menu.target.file.id)
     : null;
 
+  /** 菜单里"标记"区当前这本书带的标记（集合）与全部可用标记。 */
+  const menuFileMarks = menu.target ? fileMarks(menu.target.file) : [];
+  const allMarks = useAllMarks();
+
+  /**
+   * 增删一个标记（D102：标记**可多值**、与类目正交）。
+   *
+   * 标记影响封面来源（`book` 决定要不要取内嵌封面），因此写入后一并失效封面缓存。
+   */
+  const toggleBookMark = useCallback(
+    async (mark: string, on: boolean) => {
+      if (!app.repoId || !menu.target) return;
+      try {
+        await api.fileSetMarks({
+          repoId: app.repoId,
+          fileIds: [menu.target.file.id],
+          add: on ? [mark] : [],
+          remove: on ? [] : [mark],
+        });
+        // 标记影响封面来源（book 决定内嵌封面 vs 文字封面），因此封面缓存也要失效。
+        invalidateBookCovers(app.repoId);
+        app.refresh();
+      } catch (e) {
+        app.status(app.t("book.mark.setFailed", { err: errorTextOf(app.t, e) }), "error");
+      }
+    },
+    [app, menu.target],
+  );
+
   // `--bp-cover-size` 供全部三种视图共用；`--bp-desc-lines` 是简介的截断行数
   // （列表 / 封面模式按封面高度推得，见 `bookDescLineCount`）。
   const style = {
@@ -256,6 +312,7 @@ export function BookPreviewPanel({ api: panelApi }: BookPreviewPanelProps = {}):
                   item={item}
                   selected={app.selectedIds.has(item.id)}
                   onSelect={cellSelect}
+                  onDoubleClick={cellDoubleClick}
                   onContextMenu={cellContextMenu}
                 />
               ))}
@@ -270,6 +327,7 @@ export function BookPreviewPanel({ api: panelApi }: BookPreviewPanelProps = {}):
                   item={item}
                   selected={app.selectedIds.has(item.id)}
                   onSelect={cellSelect}
+                  onDoubleClick={cellDoubleClick}
                   onContextMenu={cellContextMenu}
                 />
               ))}
@@ -284,6 +342,7 @@ export function BookPreviewPanel({ api: panelApi }: BookPreviewPanelProps = {}):
                   item={item}
                   selected={app.selectedIds.has(item.id)}
                   onSelect={cellSelect}
+                  onDoubleClick={cellDoubleClick}
                   onContextMenu={cellContextMenu}
                 />
               ))}
@@ -294,8 +353,8 @@ export function BookPreviewPanel({ api: panelApi }: BookPreviewPanelProps = {}):
       )}
 
       {/* 右键上下文菜单：**媒体预览那一份**（开关与菜单项都不重写第二套）。
-          「更换封面」经 `extraItems` 插槽挂进来——那是**图书特有**的能力，
-          媒体预览没有封面可言（用户口径 2026-10-09）。 */}
+          「更换封面」与「book 标记」经 `extraItems` 插槽挂进来——两者都是**图书特有**
+          的能力（媒体预览没有封面可言、也没有 book 标记这个维度）。 */}
       {menu.target && (
         <MediaContextMenu
           target={menu.target}
@@ -304,14 +363,23 @@ export function BookPreviewPanel({ api: panelApi }: BookPreviewPanelProps = {}):
           onClose={menu.close}
           t={app.t}
           extraItems={
-            <BookCoverMenu
-              hasOverride={menuFileOverride !== null}
-              onPickColor={(color) => void applyCover("color", color)}
-              onPickImage={(path) => void applyCover("image", path)}
-              onClear={() => void clearCover()}
-              onClose={menu.close}
-              t={app.t}
-            />
+            <>
+              <BookMarkMenu
+                marks={menuFileMarks}
+                available={allMarks}
+                onToggle={(mark, on) => void toggleBookMark(mark, on)}
+                onClose={menu.close}
+                t={app.t}
+              />
+              <BookCoverMenu
+                hasOverride={menuFileOverride !== null}
+                onPickColor={(color) => void applyCover("color", color)}
+                onPickImage={(path) => void applyCover("image", path)}
+                onClear={() => void clearCover()}
+                onClose={menu.close}
+                t={app.t}
+              />
+            </>
           }
         />
       )}

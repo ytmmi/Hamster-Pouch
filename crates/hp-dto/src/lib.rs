@@ -47,8 +47,11 @@ pub struct AlbumFileItem {
     pub source_id: String,
     pub relative_path: String,
     pub media_type: String,
-    /// 媒体类型之下的子类型（`book` / `document`；非文本类为 `null`）。
-    pub subtype: Option<String>,
+    /// 文件的**标记集合**（D102：可多值、与类目正交；`book` / `manga` / …）。
+    ///
+    /// 恒为数组（可能为空）；不再是单值"子类型"——用户口径是"标记可以交叉"，
+    /// 一个文件可以同时带多个标记。
+    pub marks: Vec<String>,
     #[ts(type = "number")]
     pub size: i64,
     pub mtime: String,
@@ -61,8 +64,8 @@ pub struct FileMetadataResult {
     pub source_id: String,
     pub relative_path: String,
     pub media_type: String,
-    /// 媒体类型之下的子类型（`book` / `document`；非文本类为 `null`）。
-    pub subtype: Option<String>,
+    /// 文件的**标记集合**（见 [`AlbumFileItem::marks`]）。
+    pub marks: Vec<String>,
     pub content_hash: Option<String>,
     #[ts(type = "number")]
     pub size: i64,

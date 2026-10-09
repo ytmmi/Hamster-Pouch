@@ -140,22 +140,95 @@ export function extensionOf(relativePath: string): string {
   return dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
 }
 
+/** book 标记的取值名（与 `@hamster-pouch/config` 的 `BOOK_MARK` 同字面量）。 */
+const BOOK_MARK_NAME = "book";
+
 /**
- * 该条目是否要用**内嵌封面**（= 要去 `book.meta` 取图）。
+ * 该文件是否带 **book 标记**（D102：标记是**可多值**的集合，这里是"含不含 book"）。
  *
- * 判据是**子类型**（用户口径：子类型是可编辑的标记），因此把某本书的子类型改成
- * `document` 就不再取内嵌封面、改用文字封面——这正是"标记"该有的效果。
+ * 它是**标记**而不是"子类型"：与**类目**（`media_type`）正交，且一个文件可以同时带
+ * 多个标记（`book` + `manga`）。因此判据是 `marks.includes("book")`，不是"等于某个值"。
  *
- * **旧索引行兜底**：迁移 0008 之前入库的行没有子类型（`null`），若只认子类型，
+ * **旧索引行兜底**：迁移 0010 之前入库的行没有标记（`marks` 为空），若只认标记，
  * 存量 EPUB 在重扫前会全部退化成文字封面。这类行按扩展名兜底，
  * 让"还没重扫"与"面板坏了"看起来不一样。
  */
-export function usesEmbeddedCover(item: {
-  subtype: string | null;
+export function fileBookMark(item: {
+  marks: string[];
   relative_path: string;
 }): boolean {
-  if (item.subtype) return item.subtype === "book";
+  if (item.marks.length > 0) return item.marks.includes(BOOK_MARK_NAME);
   return extensionOf(item.relative_path) === "epub";
+}
+
+/**
+ * 该条目是否要用**内嵌封面**（= 要去 `book.meta` 取图）。
+ *
+ * 判据就是 book 标记（见 {@link fileBookMark}）；单列一个名字是为了让封面来源
+ * 的调用点读起来是"要不要内嵌封面"，而不是"它是不是书"。
+ */
+export function usesEmbeddedCover(item: {
+  marks: string[];
+  relative_path: string;
+}): boolean {
+  return fileBookMark(item);
+}
+
+/**
+ * 文本条目的**子类**（`epub` / `txt` / `md`）：与蓝图 `subclass` 节点的 `format` 比对。
+ *
+ * 扩展名（`markdown` → `md`）归一化到子类取值域；**认不出的扩展名返回空串**
+ * （没有子类能表达它，蓝图侧按未接通处理）。非文本类返回空串。
+ *
+ * 子类与标记是**两条正交的轴**：本函数只管子类，标记由 {@link fileMarks} 给出。
+ */
+export function fileFormat(item: { media_type: string; relative_path: string }): string {
+  if (item.media_type !== "text") return "";
+  const ext = extensionOf(item.relative_path);
+  if (ext === "epub") return "epub";
+  if (ext === "md" || ext === "markdown") return "md";
+  if (ext === "txt") return "txt";
+  return "";
+}
+
+/**
+ * 条目的**标记集合**（原样透传；D102 起标记可多值）。
+ *
+ * 与 {@link fileFormat} **正交**：一个被标为 `manga` 的 `txt` 会**同时**命中
+ * 「txt 子类」与「manga 标记」——这正是用户口径"标记可以交叉"的落点。
+ */
+export function fileMarks(item: { marks: string[] }): string[] {
+  return item.marks;
+}
+
+/**
+ * 本面板上报蓝图引擎时的**目标引用**（RFC 0007 决策 1 + D102 的三轴）。
+ *
+ * 带上**三条轴**，引擎才能按各自的节点类型匹配：
+ * - `mediaType` → 类目节点（`class`，如「文本」）；
+ * - `format` → 子类节点（`subclass`，如「txt」）；
+ * - `marks` → 标记节点（`mark`，如「漫画」）。
+ *
+ * 后两者**正交**：一个被标为 `manga` 的 `txt` 会同时命中「txt 子类」与「manga 标记」
+ * ——这正是用户口径"标记可以交叉"的落点。
+ */
+export function bookDispatchTarget(item: {
+  id: string;
+  media_type: string;
+  marks: string[];
+  relative_path: string;
+}): {
+  mediaType: string;
+  fileId: string;
+  format: string;
+  marks: string[];
+} {
+  return {
+    mediaType: item.media_type,
+    fileId: item.id,
+    format: fileFormat(item),
+    marks: fileMarks(item),
+  };
 }
 
 /**

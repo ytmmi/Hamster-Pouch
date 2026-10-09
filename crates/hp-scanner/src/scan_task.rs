@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use hp_core::{FileSubtype, MediaType, ThumbStatus};
+use hp_core::{FileMark, MediaType, ThumbStatus};
 use hp_hash::{hash_file, ContentHash, PerceptualHash};
 use hp_media::extract_thumbnail;
 
@@ -32,9 +32,9 @@ pub struct Prepared {
     /// 已存在行的 id（`None` = 新文件）。写库阶段据此决定"更新"还是"新建"，
     /// 并保留原 id（RFC 0001：内容未变时身份不变）。
     pub existing_id: Option<String>,
-    /// 已存在行的**子类型**（`None` = 行内为空）。扫描只在为空时补默认值，
-    /// **不覆盖**已有值——子类型是用户的标记（2026-10-08 口径）。
-    pub existing_subtype: Option<FileSubtype>,
+    /// 已存在行的**标记集合**（D102：可多值）。扫描只在**一个标记都没有**时补默认值，
+    /// **不覆盖**已有标记——标记是用户的选择（用户口径："标记可以交叉"）。
+    pub existing_marks: Vec<FileMark>,
     /// 调色板是否需要重算（仅图片有意义；已手动锁定时为 `false`，见 `write_palette`）。
     pub want_palette: bool,
 }
@@ -193,7 +193,7 @@ mod tests {
             mtime: "0".to_string(),
             unchanged,
             existing_id: None,
-            existing_subtype: None,
+            existing_marks: Vec::new(),
             want_palette,
         }
     }
@@ -294,11 +294,15 @@ mod tests {
     }
 
     #[test]
-    fn subtype_field_defaults_to_none_in_fixtures() {
-        // 夹具把 `existing_subtype` 设为 `None`（= 行内为空 → 扫描补默认值）。
-        // 这条断言只是把"默认无子类型"钉住，防止日后夹具悄悄带上一个值。
+    fn marks_default_to_empty_in_fixtures() {
+        // 夹具把 `existing_marks` 设为空（= 该文件还没有任何标记 → 扫描补默认值）。
+        // 这条断言只是把"默认无标记"钉住，防止日后夹具悄悄带上一个值。
         let p = prepared(PathBuf::from("a.txt"), MediaType::Text, false, false);
-        assert_eq!(p.existing_subtype, None);
-        assert_eq!(FileSubtype::from_str("book"), Some(FileSubtype::Book));
+        assert!(p.existing_marks.is_empty());
+        // 标记是**可多值**的（D102）：同一个文件可以同时带 book 与 manga。
+        let book = FileMark::from_raw("book");
+        let manga = FileMark::from_raw("manga");
+        assert!(book.is_book());
+        assert!(!manga.is_book());
     }
 }

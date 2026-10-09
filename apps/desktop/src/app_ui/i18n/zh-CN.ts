@@ -233,6 +233,10 @@ export const zhCN = {
   "book.cover.imageFilter": "图片",
   "book.cover.reset": "恢复默认封面",
   "book.cover.setFailed": "设置封面失败：{err}",
+  // 标记（用户口径 D102："book 为标记，标记可以交叉"，可多选）
+  "book.mark.title": "标记",
+  "book.mark.hint": "标记与类目正交、可以交叉；一个文件可同时带多个标记",
+  "book.mark.setFailed": "设置标记失败：{err}",
 
   // 扫描进度浮窗
   "scan.title": "正在扫描源",
@@ -480,6 +484,11 @@ export const zhCN = {
   "blueprint.panelId": "面板",
   "blueprint.titleKey": "标题键",
   "blueprint.mediaType": "媒体类型",
+  "blueprint.subclassFormat": "子类格式",
+  "blueprint.classOfSubclass": "所属类目",
+  "blueprint.subclassNoDomain": "该类目没有子类取值域（当前只有文本类目有：EPUB / TXT / Markdown）",
+  "blueprint.markKind": "标记",
+  "blueprint.markOf": "所属面板",
   "blueprint.scope": "对象范围",
   "blueprint.mode": "组模式",
   "blueprint.mode.exclusive": "互斥组",
@@ -496,6 +505,8 @@ export const zhCN = {
   "blueprint.noSelection": "未选择蓝图",
   "blueprint.type.control": "面板",
   "blueprint.type.class": "类目",
+  "blueprint.type.subclass": "子类",
+  "blueprint.type.mark": "标记",
   "blueprint.type.object": "对象",
   "blueprint.type.group": "标签组",
   "blueprint.type.event": "操作",
@@ -604,6 +615,14 @@ export const zhCN = {
   "blueprint.mediaType.image": "图像",
   "blueprint.mediaType.video": "视频",
   "blueprint.mediaType.audio": "音频",
+  "blueprint.mediaType.text": "文本",
+  // 子类格式（`subclass.format`）：文本类目下的三个子类。
+  "blueprint.format.epub": "EPUB",
+  "blueprint.format.txt": "TXT",
+  "blueprint.format.md": "Markdown",
+  // 标记（`mark.mark`）：与类目**正交、可交叉**的轴（用户口径：漫画.zip 可标记为 manga）。
+  "blueprint.mark.book": "书籍",
+  "blueprint.mark.manga": "漫画",
   "blueprint.hideDir.left": "左",
   "blueprint.hideDir.right": "右",
   "blueprint.hideDir.up": "上",

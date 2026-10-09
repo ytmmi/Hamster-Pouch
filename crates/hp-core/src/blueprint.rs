@@ -33,8 +33,9 @@ pub use crate::blueprint_row::{BlueprintRow, BlueprintTemplateRow};
 pub use crate::blueprint_validate::NodeIssue;
 pub use crate::blueprint_registry::{PanelFact, RegisteredPluginNode};
 pub use crate::blueprint_types::{
-    ActionOp, AnchorAxis, EdgeKind, GroupMode, HideDirection, NodeType, OverlayAnchor, TokenLevel,
-    Trigger,
+    is_valid_class_media_type, media_type_has_subclass, subclass_formats_for, ActionOp, AnchorAxis,
+    EdgeKind, GroupMode, HideDirection, NodeType, OverlayAnchor, TokenLevel, Trigger, BOOK_MARK,
+    BUILTIN_MARKS, CLASS_MEDIA_TYPES, MANGA_MARK, SUBCLASS_FORMATS_TEXT,
 };
 
 /// 蓝图文档 schema 版本（当前 = 2；v1 → v2 为「引入分层」迁移，D52/D58）。

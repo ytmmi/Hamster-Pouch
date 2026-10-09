@@ -45,11 +45,12 @@ pub use album::{
     SyncMode,
 };
 pub use blueprint::{
-    ActionOp, AnchorAxis, BlueprintEdge, BlueprintGraph, BlueprintLayer, BlueprintNode,
-    BlueprintPosition, BlueprintRow, BlueprintTemplateRow, EdgeKind, GroupMode, HideDirection,
-    NodeIssue, NodeType, OverlayAnchor, OverlaySize, TokenLevel, Trigger, BLUEPRINT_SCHEMA_VERSION,
-    OVERLAY_HEIGHT_MAX, OVERLAY_HEIGHT_MIN, OVERLAY_MAX_SIZE, OVERLAY_MIN_HEIGHT,
-    OVERLAY_MIN_WIDTH,
+    is_valid_class_media_type, media_type_has_subclass, subclass_formats_for, ActionOp, AnchorAxis,
+    BlueprintEdge, BlueprintGraph, BlueprintLayer, BlueprintNode, BlueprintPosition, BlueprintRow,
+    BlueprintTemplateRow, EdgeKind, GroupMode, HideDirection, NodeIssue, NodeType, OverlayAnchor,
+    OverlaySize, TokenLevel, Trigger, BLUEPRINT_SCHEMA_VERSION, BOOK_MARK, BUILTIN_MARKS,
+    CLASS_MEDIA_TYPES, MANGA_MARK, OVERLAY_HEIGHT_MAX, OVERLAY_HEIGHT_MIN, OVERLAY_MAX_SIZE,
+    OVERLAY_MIN_HEIGHT, OVERLAY_MIN_WIDTH, SUBCLASS_FORMATS_TEXT,
 };
 pub use blueprint_migrate::{
     migrate_document, migrate_graph, normalize_document, MigratedDocument,
@@ -73,7 +74,9 @@ pub use control_types::{
     CONTROL_NODE_SOFT_LIMIT, CONTROL_REGISTRY, TABLE_COLUMN_MAX,
 };
 pub use error::{HpError, HpResult};
-pub use file::{FileId, FileIndexRow, FileSubtype, ThumbStatus, VerifyStatus};
+pub use file::{
+    default_book_mark_for_ext, FileId, FileIndexRow, FileMark, ThumbStatus, VerifyStatus,
+};
 pub use plugin::{
     Capability, HostApiVersion, PluginId, PluginManifest, PluginRegistryRow, PluginRepoState,
     RuntimeKind, SourceKind, TrustLevel, HOST_API_VERSION,

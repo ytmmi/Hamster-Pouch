@@ -5,6 +5,6 @@
  */
 export type FileMetadataResult = { id: string, source_id: string, relative_path: string, media_type: string, 
 /**
- * 媒体类型之下的子类型（`book` / `document`；非文本类为 `null`）。
+ * 文件的**标记集合**（见 [`AlbumFileItem::marks`]）。
  */
-subtype: string | null, content_hash: string | null, size: number, mtime: string, verify_status: string, media_info_json: string | null, exif_json: string | null, };
+marks: Array<string>, content_hash: string | null, size: number, mtime: string, verify_status: string, media_info_json: string | null, exif_json: string | null, };

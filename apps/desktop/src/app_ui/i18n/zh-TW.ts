@@ -226,6 +226,10 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "book.cover.imageFilter": "圖片",
   "book.cover.reset": "恢復預設封面",
   "book.cover.setFailed": "設定封面失敗：{err}",
+  // 標記（使用者口徑 D102："book 為標記，標記可以交叉"，可多選）
+  "book.mark.title": "標記",
+  "book.mark.hint": "標記與類目正交、可以交叉；一個檔案可同時帶多個標記",
+  "book.mark.setFailed": "設定標記失敗：{err}",
 
   // 掃描進度浮窗
   "scan.title": "正在掃描源",
@@ -461,6 +465,11 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.panelId": "面板",
   "blueprint.titleKey": "標題鍵",
   "blueprint.mediaType": "媒體類型",
+  "blueprint.subclassFormat": "子類格式",
+  "blueprint.classOfSubclass": "所屬類目",
+  "blueprint.subclassNoDomain": "該類目沒有子類取值域（目前只有文字類目有：EPUB / TXT / Markdown）",
+  "blueprint.markKind": "標記",
+  "blueprint.markOf": "所屬面板",
   "blueprint.scope": "物件範圍",
   "blueprint.mode": "群組模式",
   "blueprint.mode.exclusive": "互斥群組",
@@ -477,6 +486,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.noSelection": "未選擇藍圖",
   "blueprint.type.control": "面板",
   "blueprint.type.class": "類目",
+  "blueprint.type.subclass": "子類",
+  "blueprint.type.mark": "標記",
   "blueprint.type.object": "物件",
   "blueprint.type.group": "標籤組",
   "blueprint.type.event": "操作",
@@ -585,6 +596,14 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.mediaType.image": "圖像",
   "blueprint.mediaType.video": "影片",
   "blueprint.mediaType.audio": "音訊",
+  "blueprint.mediaType.text": "文字",
+  // 子類格式（`subclass.format`）：文字類目下的三個子類。
+  "blueprint.format.epub": "EPUB",
+  "blueprint.format.txt": "TXT",
+  "blueprint.format.md": "Markdown",
+  // 標記（`mark.mark`）：與類目**正交、可交叉**的軸。
+  "blueprint.mark.book": "書籍",
+  "blueprint.mark.manga": "漫畫",
   "blueprint.hideDir.left": "左",
   "blueprint.hideDir.right": "右",
   "blueprint.hideDir.up": "上",

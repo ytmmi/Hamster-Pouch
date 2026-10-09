@@ -163,6 +163,38 @@ pub(crate) fn collect_issues(
                     ));
                 }
             }
+            NodeType::Subclass => {
+                // 子类缺 `format` = **未接通**（软告警，不阻塞保存）：没有细分就说不清
+                // "这一支子类收哪些文件"，运行时也无从匹配。
+                if node.format.as_deref().unwrap_or("").trim().is_empty() {
+                    warnings.push((
+                        format!(
+                            "子类节点 {key} 暂未接通：缺少 format（按所属类目的媒体类型取值，如 text → epub / txt / md）",
+                            key = node.key
+                        ),
+                        SeverityLevel::Soft,
+                    ));
+                }
+            }
+            NodeType::Mark => {
+                // 标记缺 `mark` = 未接通；填了但**不在可注册清单**里也按未接通
+                // （与"节点类型无注册项"同口径：清单是可注册的，未注册不等于非法，
+                // 允许保存、清单恢复后自动生效，D102）。
+                match node.mark.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                    None => warnings.push((
+                        format!("标记节点 {key} 暂未接通：缺少 mark（标记清单 id）", key = node.key),
+                        SeverityLevel::Soft,
+                    )),
+                    Some(m) if !crate::blueprint_types::is_builtin_mark(m) => warnings.push((
+                        format!(
+                            "标记节点 {key} 暂未接通：标记 {m} 不在当前可注册清单内（未注册的标记允许保存，注册后自动生效）",
+                            key = node.key
+                        ),
+                        SeverityLevel::Soft,
+                    )),
+                    Some(_) => {}
+                }
+            }
             NodeType::Overlay => {
                 // 浮层是容器：内容是**面板/标签组**（由 contains 边表达），
                 // 因此不再有"未绑定浮动控件"这类软告警（2026-09 取消浮动控件概念）；
@@ -209,10 +241,33 @@ pub(crate) fn collect_issues(
                 Some(ck) => !by_key.contains_key(ck),
                 None => true,
             },
-            NodeType::Object => match node.class.as_deref() {
+            // 子类指向**类目**（`subclass` 字段在子类节点上是"所属类目"）。
+            NodeType::Subclass => match node.subclass.as_deref() {
                 Some(ck) => !by_key.contains_key(ck),
                 None => true,
             },
+            // 标记指向**面板**。
+            NodeType::Mark => match node.control.as_deref() {
+                Some(ck) => !by_key.contains_key(ck),
+                None => true,
+            },
+            // 对象有**三条正交轴**：声明了哪一条就校验哪一条；一条都没声明 = 未接通。
+            NodeType::Object => {
+                let declared: Vec<&str> = [
+                    node.class.as_deref(),
+                    node.subclass.as_deref(),
+                    node.mark_ref.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                .filter(|k| !k.trim().is_empty())
+                .collect();
+                if declared.is_empty() {
+                    true
+                } else {
+                    declared.iter().any(|k| !by_key.contains_key(*k))
+                }
+            }
             NodeType::Action => match node.target.as_deref() {
                 // 界面跳转的目标是界面节点；指向已删除界面属未接通（软告警，D48/D55）。
                 Some(t) if node.op == Some(ActionOp::Navigate) => !matches!(

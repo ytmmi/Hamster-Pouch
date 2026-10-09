@@ -108,14 +108,37 @@ pub struct BlueprintNode {
     pub panel_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_key: Option<String>,
-    // class（所属控件 key）
+    // class（所属面板 key）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<NodeKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media_type: Option<String>,
-    // object（所属类 key）
+    // subclass
+    /// 子类的**格式细分**（`subclass` 节点；取值域按所属类目的 `media_type` 分域：
+    /// `text` → `epub` / `txt` / `md`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    // mark
+    /// **标记 id**（`mark` 节点；引用可注册的标记清单：`book` / `manga` …）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mark: Option<String>,
+    // object（所属 类目 / 子类 / 标记 三条轴之一）
+    /// 对象所属的**类目** key（三条轴任选其一）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub class: Option<NodeKey>,
+    /// 对象所属的**子类** key（三条轴任选其一）。
+    ///
+    /// 字段名与 TS 定义表一致；注意它在 `subclass` 节点上是"所属类目"的引用，
+    /// 而在 `object` 节点上是"所属子类"的引用——**同名不同义**，按节点类型分流。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subclass: Option<NodeKey>,
+    /// 对象所属的**标记节点** key（三条轴任选其一）。
+    ///
+    /// 刻意**不叫** `mark`：`mark` 已经是"标记 id"（`mark` 节点上的枚举字段），
+    /// 而本字段是"挂在哪个标记节点下"的 **key 引用**；扁平的 JSON 结构不允许
+    /// 一个键有两种含义，因此加 `_ref` 后缀区分（与 `panel_id` 同为 snake_case）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mark_ref: Option<NodeKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
     // group

@@ -73,7 +73,7 @@ fn file_upsert_get_and_media_info_migration() {
         source_id: s.id.clone(),
         relative_path: "a.jpg".to_string(),
         media_type: MediaType::Image,
-        subtype: None,
+        marks: Vec::new(),
         content_hash: Some("abc".to_string()),
         content_hash_algo: Some("BLAKE3".to_string()),
         content_hash_algo_version: Some(1),
@@ -102,8 +102,8 @@ fn file_upsert_get_and_media_info_migration() {
         Some(r#"{"format":{"duration":"1.5"}}"#)
     );
 
-    // 迁移 0009 已生效：schema_version 应为 9（0001..0009）
-    assert_eq!(db.schema_version().expect("读版本失败"), 9);
+    // 迁移 0010 已生效：schema_version 应为 10（0001..0010）
+    assert_eq!(db.schema_version().expect("读版本失败"), 10);
 
     db.close().expect("关闭失败");
 }
@@ -125,7 +125,7 @@ fn query_files_media_type_set_filter() {
         source_id: s.id.clone(),
         relative_path: rel.to_string(),
         media_type,
-        subtype: None,
+        marks: Vec::new(),
         content_hash: Some(format!("h-{rel}")),
         content_hash_algo: Some("BLAKE3".to_string()),
         content_hash_algo_version: Some(1),
@@ -198,7 +198,7 @@ fn query_files_dir_prefix_filter() {
         source_id: s.id.clone(),
         relative_path: rel.to_string(),
         media_type: MediaType::Image,
-        subtype: None,
+        marks: Vec::new(),
         content_hash: Some(format!("h-{rel}")),
         content_hash_algo: Some("BLAKE3".to_string()),
         content_hash_algo_version: Some(1),
@@ -269,7 +269,7 @@ fn cursor_pagination_is_stable_under_inserts() {
         source_id: s.id.clone(),
         relative_path: rel.to_string(),
         media_type: MediaType::Image,
-        subtype: None,
+        marks: Vec::new(),
         content_hash: Some(format!("h-{rel}")),
         content_hash_algo: Some("BLAKE3".to_string()),
         content_hash_algo_version: Some(1),

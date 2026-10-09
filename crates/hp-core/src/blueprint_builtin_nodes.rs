@@ -27,10 +27,10 @@ pub struct BuiltinNodeSpec {
     pub events: &'static [&'static str],
 }
 
-/// 宿主内置 10 种节点类型的定义表（顺序与 [`NodeType::BUILTIN_NAMES`] 一致）。
+/// 宿主内置 **12 种**节点类型的定义表（顺序与 [`NodeType::BUILTIN_NAMES`] 一致）。
 ///
 /// 与 `packages/config/src/blueprintNodes.ts` 的 `BLUEPRINT_NODE_REGISTRY` 逐项对齐。
-pub const BUILTIN_NODE_SPECS: [BuiltinNodeSpec; 10] = [
+pub const BUILTIN_NODE_SPECS: [BuiltinNodeSpec; 12] = [
     BuiltinNodeSpec {
         node_type: NodeType::Interface,
         role: NodeRole::Root,
@@ -88,6 +88,28 @@ pub const BUILTIN_NODE_SPECS: [BuiltinNodeSpec; 10] = [
         name_from_layer: false,
         provides_name: true,
         parents: &["control"],
+        // 类目之下有**两条**：子类（细分）与对象（条目实例）。
+        children: &["subclass", "object"],
+        events: &[],
+    },
+    BuiltinNodeSpec {
+        node_type: NodeType::Subclass,
+        role: NodeRole::Structural,
+        evaluation_role: EvaluationRole::Structural,
+        name_from_layer: false,
+        provides_name: true,
+        parents: &["class"],
+        children: &["object"],
+        events: &[],
+    },
+    BuiltinNodeSpec {
+        node_type: NodeType::Mark,
+        role: NodeRole::Structural,
+        evaluation_role: EvaluationRole::Structural,
+        name_from_layer: false,
+        provides_name: true,
+        // 标记与类目树**平行**：直接挂在面板下（不是挂在类目下）。
+        parents: &["control"],
         children: &["object"],
         events: &[],
     },
@@ -97,7 +119,8 @@ pub const BUILTIN_NODE_SPECS: [BuiltinNodeSpec; 10] = [
         evaluation_role: EvaluationRole::Structural,
         name_from_layer: false,
         provides_name: true,
-        parents: &["class"],
+        // 结构父有**三种**（三条正交的轴任选其一）。
+        parents: &["class", "subclass", "mark"],
         children: &[],
         events: &[],
     },

@@ -17,6 +17,7 @@ import type {
   FileQueryPage,
   FileReanalyzeArgs,
   FileRenameArgs,
+  FileSetMarksArgs,
   FileTrashArgs,
   PreviewGetArgs,
   ThumbGetArgs,
@@ -90,6 +91,21 @@ export function fileTrash(args: FileTrashArgs): Promise<number> {
   return invoke<ApiResponse<number>>("file_trash", {
     repoId: args.repoId,
     fileIds: args.fileIds,
+  }).then(unwrapApi);
+}
+
+/**
+ * **增删**一组文件的标记（返回实际改动的文件数）。
+ *
+ * 标记是**可多值**、**与类目正交**的一维（D102 用户口径："book 为标记，标记可以交叉"）：
+ * 一个文件可以同时带 `book` 与 `manga`，因此是"加哪些 / 减哪些"而不是"设成什么"。
+ */
+export function fileSetMarks(args: FileSetMarksArgs): Promise<number> {
+  return invoke<ApiResponse<number>>("file_set_marks", {
+    repoId: args.repoId,
+    fileIds: args.fileIds,
+    add: args.add ?? [],
+    remove: args.remove ?? [],
   }).then(unwrapApi);
 }
 

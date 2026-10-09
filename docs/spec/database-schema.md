@@ -170,7 +170,7 @@ CREATE TABLE files (
   source_id                 TEXT NOT NULL,
   relative_path             TEXT NOT NULL,
   media_type                TEXT NOT NULL,     -- image|video|audio|text
-  subtype                   TEXT,              -- 媒体类型之下的**可编辑标记**（迁移 repo/0008 以 ALTER TABLE 追加，故位于列尾）；当前文本类用 book|document
+  subtype                   TEXT,              -- **已废弃（D102）**：标记改存 file_marks 一对多表；本列新代码不读不写，仅为 forward-only 保留
   content_hash              TEXT,              -- 音频占位行可空
   content_hash_algo         TEXT,              -- 如 BLAKE3/SHA-256
   content_hash_algo_version INTEGER,
@@ -192,12 +192,33 @@ CREATE INDEX idx_files_content_hash ON files(content_hash);
 CREATE INDEX idx_files_media_type ON files(media_type);
 ```
 
-> **`subtype` 的口径（2026-10，`docs/spec/panel-standard.md` §8 第 16 项）**：它是**可编辑标记**，
-> 不是判定结果——`media_type` 由扫描器的扩展名判定给出、用户不可改，子类型**可改**，
-> 且扫描**只在为空时补默认值**（`epub` → `book`，其余文本 → `document`），**绝不覆盖**已有值。
-> 因此它是**独立列**，不能从 `media_type` / 扩展名现算。既有行（迁移 0008 之前）为 `NULL`：
-> 下次扫描按"缺失即补"补齐；未重扫的旧行仍按 `text` 正常显示（消费方按扩展名兜底）。
-> 用户侧切换入口**本版未做**（见 `docs/roadmap/book-preview-plan.md` §2.2）。
+> **`subtype` 已废弃、标记改存 `file_marks`（2026-10-10 / D102）**：用户口径是
+> "text 为类目，md、txt、epub 为子类，**book 为标记，标记可以交叉**，例子：漫画.zip 文件的
+> 类目为压缩包，可以标记为 manga（漫画）"。标记因此是**可多值**、**与类目正交**的一维，
+> 单列表达不了集合——迁移 **0010** 新建一对多表 `file_marks`：
+>
+> ```sql
+> CREATE TABLE file_marks (
+>   file_id  TEXT NOT NULL,
+>   mark     TEXT NOT NULL,               -- 标记 id（可注册清单：book / manga / …）
+>   added_at TEXT NOT NULL,
+>   PRIMARY KEY (file_id, mark),          -- 同一文件同一标记只存一行（天然幂等）
+>   FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+> );
+> ```
+>
+> - **按 `file_id` 存**（不是内容哈希）：这是**用户在某个条目上的选择**，不是内容的属性
+>   （与 `file_covers` / `ratings` 同一口径）。`file_id` 在重扫时保持不变
+>   （`hp-scanner` 的 `write_one` 复用既有 id），因此重扫 / 重新分析都不会把标记打回默认。
+> - **存量搬迁**：旧 `subtype = 'book'` → 一行 `book` 标记；旧 `subtype = 'document'`
+>   **不搬**（它从来不是"标记状态"，只是"没打标记"的旧默认值）。`NULL` 不搬。
+> - **`files.subtype` 列保留不删**：forward-only（`0001` 不得被改），且
+>   `ALTER TABLE ... DROP COLUMN` 在旧 SQLite 上不可用、删了会让"降级回旧版本"直接崩。
+>   它现在恒为 `NULL`（`upsert_file` 写 `NULL`），新代码**不读不写**。
+> - 扫描**只在该文件一个标记都没有时**补默认值（现在只有 `epub` → `book`），
+>   **绝不覆盖**用户已有标记。
+> - 用户入口：图书预览右键菜单的「标记」多选区 → `file.setMarks`
+>   （见 `docs/spec/commands-events.md`）。
 
 
 视频全量元数据（音轨/字幕/章节等）**已定为列** `media_info_json`（迁移 `repo/0002_media_info.sql:4` 以 `ALTER TABLE` 追加，故位于 `files` 列尾，见上表）；**不得另建表**。
@@ -510,7 +531,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blueprints_default
 ## 5. 迁移策略
 
 - 三库**共用同一个版本追踪机制**：`PRAGMA user_version`。读：`crates/hp-store/src/migrate.rs:12`；版本号以"迁移数组下标 + 1"推导（`migrate.rs:16`）；每次未执行版本单开事务执行后写回（`migrate.rs:23`）。三库分别在 `crates/hp-store/src/repo/repo_db.rs:71`、`crates/hp-store/src/global/global_db.rs:65`、`crates/hp-store/src/dict/dict_db.rs:41` 调用同一个 `migrate::apply`。
-  - **当前仓库库版本 = 9**（`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
+  - **当前仓库库版本 = 10**（`0010` 为 `file_marks` 一对多标记表 + 存量搬迁；`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列（**已废弃**）；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
   - **当前全局配置库版本 = 4**（`global/0001_init` … `global/0004_layout_layers`，见 `crates/hp-store/src/global/global_db.rs:15`-`18` 的四个 `include_str!`）；全局库内**没有**镜像表（7 张表里没有 `global_meta`）。
   - **当前词库版本 = 1**（`dict_db.rs:19`）；`dict_meta`（`dict/0001:6-9`）是数据元信息 K/V，**不是** schema 版本。
 - **`repo_meta.schema_version` 是**镜像键**，每次打开仓库库都按权威值回写**（2026-09 修复缺陷 0006）：`repo_db.rs:86`-`89`（`sync_schema_version_meta`）在 `repo_db.rs:78`-`79`（`open_inner` 汇总点，`migrate::apply` 与蓝图文档迁移之后）执行，**新建与打开两条路径共用这一处**，因此升级过的库不再与 `user_version` 分叉。回写**不能**下沉到 `migrate::apply`（`migrate.rs:10`）：那个执行器由仓库库/全局库/词库共用，且全局库与词库**没有** `repo_meta`。**版本判断一律以 `PRAGMA user_version` 为准**，不要读镜像键（该键仍无读取方）。

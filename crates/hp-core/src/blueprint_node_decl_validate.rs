@@ -198,8 +198,12 @@ pub fn derive_ports(
     let has_parents = !parents.is_empty();
     let has_children = !children.is_empty();
     let child_names: Vec<&str> = children.iter().map(String::as_str).collect();
-    let is_panel_like = child_names.as_slice() == ["class"];
-    let is_class_like = child_names.as_slice() == ["object"];
+    // 判据一律用「**包含**某个子类型」而不是「恰好只有一个该子类型」——与 TS 侧
+    // `resolveNodePorts` 逐项一致（由 `pnpm check:blueprint-nodes` 断言）。
+    // 旧写法 `children == ["class"]` 在类目加了 `subclass` 子级之后会**静默丢掉
+    // `on` 输出口**，画布上"类目 → 操作"就再也连不出来（真实回归）。
+    let is_panel_like = child_names.contains(&"class");
+    let is_object_parent = child_names.contains(&"object");
     let is_object_like = has_parents && !has_children;
 
     let mut push = |id: &str, side: PortSide, edge: &str| {
@@ -229,7 +233,7 @@ pub fn derive_ports(
                     EdgeKind::MemberOf.as_str(),
                 );
             }
-            if is_panel_like || is_class_like || is_object_like {
+            if is_panel_like || is_object_parent || is_object_like {
                 push(EdgeKind::On.as_str(), PortSide::Out, EdgeKind::On.as_str());
             }
         }

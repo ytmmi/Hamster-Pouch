@@ -23,8 +23,12 @@
 
 import type { BlueprintGraph, BlueprintNode, BlueprintNodeType } from "@hamster-pouch/config";
 import {
+  BLUEPRINT_BUILTIN_MARKS,
   BLUEPRINT_NODE_TYPES,
+  defaultClassFieldsForPanel,
+  defaultSubclassFormatFor,
   effectiveLayers,
+  mediaTypeHasSubclass,
   nodeLayerKey,
   panelSpec,
   structuralParentsOf,
@@ -33,22 +37,33 @@ import type { PanelId } from "@hamster-pouch/config";
 import { PANEL_IDS } from "@hamster-pouch/config";
 
 /**
- * 该上级**能否**承载这个新类型（RFC 0010 决策 4 / 面板标准第 5.1 节）。
+ * 该上级**能否**承载这个新类型（RFC 0010 决策 4 / 面板标准第 5.1 节 / D102）。
  *
- * 目前只有一条收窄规则：**类目不能挂在无类目的面板下**（`has_class = false`）。
- * 面板当前无注册项（插件缺失）时无从判定 → 放行，由蓝图侧按「未接通」处理
- * （插件缺失不得绑架用户数据）。
+ * 两条收窄规则（都在编辑器侧拦，避免工厂产出必然被后端拒绝的文档）：
+ * 1. **类目 / 标记**挂在面板下时，该面板必须 `has_class = true`（面板声明"有类目"）；
+ * 2. **子类**挂在类目下时，该类目的媒体类型必须**有子类取值域**
+ *    （当前只有 `text`；`image` 类目下建子类必然被校验拒绝）。
+ *
+ * 面板/类目当前无注册项或引用缺失时无从判定 → 放行，由蓝图侧按「未接通」处理
+ * （缺失不得绑架用户数据）。
  */
 function parentAcceptsChild(
   doc: BlueprintGraph,
   parentKey: string,
   childType: BlueprintNodeType,
 ): boolean {
-  if (childType !== "class") return true;
   const parent = doc.nodes.find((n) => n.key === parentKey);
-  const panelId = parent?.panel_id?.trim();
-  if (!panelId) return true;
-  return panelSpec(panelId)?.hasClass !== false;
+  if (!parent) return true;
+  // 类目与标记都直接挂在面板下，受同一个开关约束。
+  if (childType === "class" || childType === "mark") {
+    const panelId = parent.panel_id?.trim();
+    if (!panelId) return true;
+    return panelSpec(panelId)?.hasClass !== false;
+  }
+  if (childType === "subclass") {
+    return mediaTypeHasSubclass(parent.media_type ?? "");
+  }
+  return true;
 }
 
 /** 在某层内找第一个**能承载**该新类型的上级（层缺省 = 不按层过滤）。 */
@@ -73,6 +88,8 @@ export const TYPE_PREFIX: Record<string, string> = {
   overlay: "ov",
   control: "c",
   class: "k",
+  subclass: "k",
+  mark: "m",
   object: "o",
   group: "g",
   event: "e",
@@ -124,26 +141,32 @@ export function parentKeyOf(
   graph: BlueprintGraph,
   node: BlueprintNode,
 ): string | undefined {
-  const explicit = node.control ?? node.class;
+  // 结构父的**字段引用**优先（三条正交轴上的引用都算）。
+  const explicit =
+    node.control ?? node.class ?? node.subclass ?? node.mark_ref;
   if (explicit) {
     return explicit;
   }
   const parentTypes: BlueprintNodeType[] =
     node.type === "class"
       ? ["control"]
-      : node.type === "object"
+      : node.type === "subclass"
         ? ["class"]
-        : node.type === "event"
-          ? ["control", "class", "object"]
-          : node.type === "condition" || node.type === "action"
-            ? ["event", "condition"]
-            : node.type === "overlay" || node.type === "layout_block"
-              ? ["interface"]
-              : node.type === "control"
-                ? ["layout_block", "overlay", "group"]
-                : node.type === "group"
-                  ? ["layout_block", "overlay"]
-                  : [];
+        : node.type === "mark"
+          ? ["control"]
+          : node.type === "object"
+            ? ["class", "subclass", "mark"]
+            : node.type === "event"
+              ? ["control", "class", "subclass", "mark", "object"]
+              : node.type === "condition" || node.type === "action"
+                ? ["event", "condition"]
+                : node.type === "overlay" || node.type === "layout_block"
+                  ? ["interface"]
+                  : node.type === "control"
+                    ? ["layout_block", "overlay", "group"]
+                    : node.type === "group"
+                      ? ["layout_block", "overlay"]
+                      : [];
   const edge = graph.edges.find((e) => {
     if (e.to !== node.key) {
       return false;
@@ -165,11 +188,15 @@ export function nextNodeKey(
   const suffix =
     type === "class"
       ? "image"
-      : type === "object"
-        ? "dbl"
-        : type === "action"
-          ? "show"
-          : type;
+      : type === "subclass"
+        ? "epub"
+        : type === "mark"
+          ? "book"
+          : type === "object"
+            ? "dbl"
+            : type === "action"
+              ? "show"
+              : type;
   const base = parentKey ? `${parentKey}_${suffix}` : `${TYPE_PREFIX[type] ?? "n"}_1`;
   return uniqueKey(nodes, base);
 }
@@ -213,36 +240,87 @@ function createGroup(doc: BlueprintGraph, layer: string): { doc: BlueprintGraph;
   return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
-/** 建一个类目节点（默认媒体类型 image）；`controlKey` 为空 = 引用留空（未接通，**不新建面板**）。 */
+/** 建一个类目节点；`controlKey` 为空 = 引用留空（未接通，**不新建面板**）。
+ *
+ * `media_type` 的缺省值按**所属面板**取（`defaultClassFieldsForPanel`）：
+ * 图书预览下新建的类目默认是**文本**类目，而不是"图像类目"——否则用户每次都要
+ * 手动改下拉框才能得到想要的类目。 */
 function createClass(
   doc: BlueprintGraph,
   controlKey: string | undefined,
   layer: string,
   parentKeyForName?: string,
+  panelId?: string,
 ): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
     key: nextNodeKey(doc.nodes, "class", parentKeyForName ?? controlKey),
     type: "class",
     layer,
     ...(controlKey ? { control: controlKey } : {}),
-    media_type: "image",
+    ...defaultClassFieldsForPanel(panelId),
     position: tempPosition(doc),
   };
   return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
-/** 建一个对象节点（默认双击）；`classKey` 为空 = 引用留空（未接通，**不新建类目**）。 */
-function createObject(
+/** 建一个**子类**节点（D102）：挂在类目下，`format` 取该类目分域的第一个取值。
+ *
+ * `subclass` 字段在子类节点上指**所属类目**（同名不同义，见节点定义表）。 */
+function createSubclass(
   doc: BlueprintGraph,
   classKey: string | undefined,
+  mediaType: string | undefined,
+  layer: string,
+  parentKeyForName?: string,
+): { doc: BlueprintGraph; key: string } {
+  const format = defaultSubclassFormatFor(mediaType);
+  const node: BlueprintNode = {
+    key: nextNodeKey(doc.nodes, "subclass", parentKeyForName ?? classKey),
+    type: "subclass",
+    layer,
+    ...(classKey ? { subclass: classKey } : {}),
+    // 缺省给分域里第一个取值；该类目没有分域时留空（未接通软告警，可后补）。
+    ...(format ? { format } : {}),
+    position: tempPosition(doc),
+  };
+  return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
+}
+
+/** 建一个**标记**节点（D102）：与类目树平行，直接挂在面板下；`mark` 取清单第一个内置项。 */
+function createMark(
+  doc: BlueprintGraph,
+  controlKey: string | undefined,
   layer: string,
   parentKeyForName?: string,
 ): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
-    key: nextNodeKey(doc.nodes, "object", parentKeyForName ?? classKey),
+    key: nextNodeKey(doc.nodes, "mark", parentKeyForName ?? controlKey),
+    type: "mark",
+    layer,
+    ...(controlKey ? { control: controlKey } : {}),
+    mark: BLUEPRINT_BUILTIN_MARKS[0],
+    position: tempPosition(doc),
+  };
+  return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
+}
+
+/**
+ * 建一个对象节点（默认双击）；`parentKey` 为空 = 引用留空（未接通，**不新建父节点**）。
+ *
+ * 结构父由 `parentField` 决定（三条正交轴之一）：`class` / `subclass` / `mark_ref`。
+ */
+function createObject(
+  doc: BlueprintGraph,
+  parentKey: string | undefined,
+  parentField: "class" | "subclass" | "mark_ref",
+  layer: string,
+  parentKeyForName?: string,
+): { doc: BlueprintGraph; key: string } {
+  const node: BlueprintNode = {
+    key: nextNodeKey(doc.nodes, "object", parentKeyForName ?? parentKey),
     type: "object",
     layer,
-    ...(classKey ? { class: classKey } : {}),
+    ...(parentKey ? { [parentField]: parentKey } : {}),
     scope: "double_clicked",
     position: tempPosition(doc),
   };
@@ -323,11 +401,33 @@ function fallbackParent(
       // 类目必须挂在**有类目**的面板下（RFC 0010 决策 4）：跳过错 `has_class = false`
       // 的面板，避免工厂产出被后端拒绝的文档（编辑器职责，面板标准第 5.1 节）。
       return firstAcceptingParent(doc, "control", "class", layer);
+    case "mark":
+      // 标记与类目树平行，受**同一个** `hasClass` 约束（都要求面板声明"有类目"）。
+      return firstAcceptingParent(doc, "control", "mark", layer);
+    case "subclass":
+      // 子类要挂在**有子类取值域**的类目下（当前只有 text 类目）。
+      return firstAcceptingParent(doc, "class", "subclass", layer);
     case "object":
-      return firstOfInLayer(doc.nodes, "class", layer);
+      // 本层内第一个结构父：优先类目（最常见的轴），没有再看子类/标记。
+      return (
+        firstOfInLayer(doc.nodes, "class", layer) ??
+        firstOfInLayer(doc.nodes, "subclass", layer) ??
+        firstOfInLayer(doc.nodes, "mark", layer)
+      );
     default:
       return undefined;
   }
+}
+
+/** 由父节点 key 反推对象该写哪个引用字段（三条正交轴之一）。 */
+function inferObjectParentField(
+  doc: BlueprintGraph,
+  parentKey: string | undefined,
+): "class" | "subclass" | "mark_ref" {
+  const parent = parentKey ? doc.nodes.find((n) => n.key === parentKey) : undefined;
+  if (parent?.type === "subclass") return "subclass";
+  if (parent?.type === "mark") return "mark_ref";
+  return "class";
 }
 
 /**
@@ -415,25 +515,62 @@ export function appendNode(
       // 只有面板能当类目的结构父——选中别的类型时不硬套（避免"引用类型不符"硬错误）。
       const upstream = parentNode?.type === "control" ? hinted : undefined;
       const controlKey = upstream ?? fallbackParent(work, "class", layer);
-      const created = createClass(work, controlKey, layer, upstream ?? controlKey);
+      // 类目的媒体类型域由**所属面板**决定（`hasClass` 说有类目，缺省值看面板 id）。
+      const ownerPanelId = controlKey
+        ? work.nodes.find((n) => n.key === controlKey)?.panel_id
+        : undefined;
+      const created = createClass(work, controlKey, layer, upstream ?? controlKey, ownerPanelId);
+      work = created.doc;
+      key = created.key;
+      break;
+    }
+    case "subclass": {
+      // 上级只能是**显式选中**的类目，或本层内第一个**有子类取值域**的类目
+      // （`image` 类目下建子类必然被校验拒绝，因此跳过它）。
+      const upstream = parentNode?.type === "class" ? hinted : undefined;
+      const classKey =
+        upstream ?? firstAcceptingParent(work, "class", "subclass", layer);
+      const ownerMedia = classKey
+        ? work.nodes.find((n) => n.key === classKey)?.media_type
+        : undefined;
+      const created = createSubclass(work, classKey, ownerMedia, layer, upstream ?? classKey);
+      work = created.doc;
+      key = created.key;
+      break;
+    }
+    case "mark": {
+      // 标记与类目树**平行**：上级是显式选中的**面板**（受同一个 `hasClass` 约束）。
+      const upstream = parentNode?.type === "control" ? hinted : undefined;
+      const controlKey = upstream ?? fallbackParent(work, "mark", layer);
+      const created = createMark(work, controlKey, layer, upstream ?? controlKey);
       work = created.doc;
       key = created.key;
       break;
     }
     case "object": {
-      // 同上：可复用本层既有的类目，但不新建类目/面板。
-      const upstream = parentNode?.type === "class" ? hinted : undefined;
-      const classKey = upstream ?? fallbackParent(work, "object", layer);
-      const created = createObject(work, classKey, layer, upstream ?? classKey);
+      // 结构父有**三条正交轴**：显式选中的是哪一条就挂哪一条（类目 / 子类 / 标记）。
+      // 没有可用上级就**留空引用**（画布灰显未接通），绝不新建父节点补链。
+      const axis: "class" | "subclass" | "mark_ref" | undefined =
+        parentNode?.type === "class"
+          ? "class"
+          : parentNode?.type === "subclass"
+            ? "subclass"
+            : parentNode?.type === "mark"
+              ? "mark_ref"
+              : undefined;
+      const upstream = axis ? hinted : undefined;
+      const parentKey = upstream ?? fallbackParent(work, "object", layer);
+      const parentField = axis ?? inferObjectParentField(work, parentKey);
+      const created = createObject(work, parentKey, parentField, layer, upstream ?? parentKey);
       work = created.doc;
       key = created.key;
       break;
     }
     case "event": {
-      // 上级 = 显式选中的对象（面板/类目也可，兼容旧图的 `target` 来源）；
+      // 上级 = 显式选中的对象（面板/类目/子类/标记也可，兼容旧图的 `target` 来源）；
       // 没有上级就单独落一个操作节点（不再顺手补一个状态节点）。
       const upstream =
-        parentNode && ["control", "class", "object"].includes(parentNode.type)
+        parentNode && ["control", "class", "subclass", "mark", "object"].includes(parentNode.type)
           ? hinted
           : undefined;
       const created = createEvent(work, upstream, layer, upstream);
@@ -526,34 +663,45 @@ export function parentHintFor(
   layerKey?: string | null,
 ): ParentHint | null {
   if (!selectedKey) {
-    // 未选中：普通层级（类/对象）可以兜底挂到已有控件/类；规则链节点不兜底，
+    // 未选中：普通层级（类目/子类/标记/对象）可以兜底挂到已有父节点；规则链节点不兜底，
     // 免得新节点被接到一条既有规则上。
     const allowed: BlueprintNodeType[] =
       type === "class"
         ? ["control"]
-        : type === "object"
-          ? ["class"]
-          : [];
+        : type === "mark"
+          ? ["control"]
+          : type === "subclass"
+            ? ["class"]
+            : type === "object"
+              ? ["class", "subclass", "mark"]
+              : [];
     if (allowed.length === 0) {
       return null;
     }
-    const key = firstAcceptingParent(
-      doc,
-      allowed[0],
-      type,
-      layerKey?.trim() || undefined,
-    );
-    return key ? { key } : null;
+    // 三条轴按顺序找**能承载该类型**的第一个父节点（`parentAcceptsChild` 会跳过
+    // 无子类取值域的类目、无类目的面板等）。
+    const layer = layerKey?.trim() || undefined;
+    for (const parentType of allowed) {
+      const key = firstAcceptingParent(doc, parentType, type, layer);
+      if (key) {
+        return { key };
+      }
+    }
+    return null;
   }
   const wanted: BlueprintNodeType[] =
     type === "class"
       ? ["control"]
-      : type === "object"
-        ? ["class"]
-        : type === "event"
-          ? ["object"]
-          : type === "condition" || type === "action"
-            ? ["event", "condition"]
+      : type === "mark"
+        ? ["control"]
+        : type === "subclass"
+          ? ["class"]
+          : type === "object"
+            ? ["class", "subclass", "mark"]
+            : type === "event"
+              ? ["object"]
+              : type === "condition" || type === "action"
+                ? ["event", "condition"]
             // 面板控件/标签组的"上级"是容器：布局块、浮层（D50 修订）或标签组。
             : type === "control"
               ? ["layout_block", "overlay", "group"]

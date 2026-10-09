@@ -586,11 +586,12 @@ pub(crate) struct AlbumFileItem {
     pub(crate) source_id: String,
     pub(crate) relative_path: String,
     pub(crate) media_type: String,
-    /// 媒体类型之下的**子类型**（当前只有文本类有值：`book` / `document`）。
+    /// 文件的**标记集合**（D102：可多值、与类目正交；`book` / `manga` / …）。
     ///
-    /// 与 `media_type` 的分工见 `hp_core::FileSubtype`：`media_type` 是扫描判定的类型，
-    /// 子类型是**可编辑标记**。前端据此决定"这本书要不要去取内嵌封面"。
-    pub(crate) subtype: Option<String>,
+    /// 与 `media_type` 的分工见 `hp_core::FileMark`：`media_type` 是扫描判定的**类目**，
+    /// 标记是**用户在条目上的选择**。前端据此决定"这本书要不要去取内嵌封面"
+    /// 以及蓝图按标记分派的行为。
+    pub(crate) marks: Vec<String>,
     pub(crate) size: i64,
     pub(crate) mtime: String,
 }
@@ -602,7 +603,7 @@ pub(crate) fn file_to_item(f: FileIndexRow) -> AlbumFileItem {
         source_id: f.source_id.as_str().to_string(),
         relative_path: f.relative_path,
         media_type: f.media_type.as_str().to_string(),
-        subtype: f.subtype.map(|s| s.as_str().to_string()),
+        marks: f.marks.iter().map(|m| m.as_str().to_string()).collect(),
         size: f.size,
         mtime: f.mtime,
     }

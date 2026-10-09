@@ -19,6 +19,9 @@ const PALETTE_TYPES: readonly BlueprintNodeType[] = [
   "overlay",
   "control",
   "class",
+  // 两条正交的细分轴（D102）：子类挂在类目下，标记与类目树平行。
+  "subclass",
+  "mark",
   "object",
   "group",
   "event",

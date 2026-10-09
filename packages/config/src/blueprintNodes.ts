@@ -14,14 +14,18 @@
 
 import {
   BLUEPRINT_ACTION_OPS,
+  BLUEPRINT_BUILTIN_MARKS,
   BLUEPRINT_BUILTIN_NODE_TYPES,
   BLUEPRINT_EDGE_KINDS,
   BLUEPRINT_GROUP_MODES,
   BLUEPRINT_MEDIA_TYPES,
+  BLUEPRINT_SUBCLASS_FORMATS,
   BLUEPRINT_TRIGGERS,
   OVERLAY_HEIGHT_MAX,
   OVERLAY_HEIGHT_MIN,
   isNodeTypeRegistered,
+  mediaTypeHasSubclass,
+  subclassFormatsFor,
   type BlueprintActionOp,
   type BlueprintEdgeKind,
   type BlueprintGroupMode,
@@ -38,6 +42,18 @@ import {
 
 /** 结构角色：`root`（层根）/ `structural`（结构中间层）/ `logic`（规则三节点）/ `container`（浮层）。 */
 export type BlueprintNodeRole = "root" | "container" | "structural" | "logic";
+
+/**
+ * 子类 `format` 的**扁平取值并集**（各分域的并集，供定义表的 `values` 与解析层查表）。
+ *
+ * 定义表的 `values` 是**单层清单**，而子类的取值域是**按类目分域**的
+ * （`text` → epub/txt/md）；这里给解析层一个"至少得是这些之一"的粗筛，
+ * **精确的分域判定**（"这个 format 属于它那个类目吗"）由 Rust 侧与编辑器按
+ * `subclassFormatsFor(mediaType)` 做——两处用的是同一张分域表。
+ */
+export const SUBCLASS_FORMAT_VALUES: readonly string[] = [
+  ...new Set(Object.values(BLUEPRINT_SUBCLASS_FORMATS).flat()),
+];
 
 /** 引擎语义（`evaluation_role`）：是否进结构树、是否为规则节点、是否可做动作目标。 */
 export type BlueprintEvaluationRole = "structural" | "trigger" | "condition" | "action";
@@ -220,7 +236,61 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
     fields: [
       { name: "name", type: "string" },
       { name: "control", type: "ref", required: true, softWhenMissing: true, values: ["control"] },
+      // 类目按**媒体类型**分类，仅此一个字段（2026-10-10 / D102：细分交给 `subclass`，
+      // `book` 那类与类目正交的维度交给 `mark`——不再往类目上挂 `format`）。
       { name: "media_type", type: "enum", required: true, values: BLUEPRINT_MEDIA_TYPES },
+      { name: "position", type: "position" },
+    ],
+    parents: ["control"],
+    children: ["subclass", "object"],
+    events: [],
+  },
+  {
+    // 子类（2026-10-10 / D102）：类目**之下**的细分（text → epub / txt / md）。
+    // 它可以挂自己的对象与规则，因此"每个子类各自的行为"能表达出来。
+    type: "subclass",
+    label: "子类",
+    role: "structural",
+    providesName: true,
+    fields: [
+      { name: "name", type: "string" },
+      // **同名不同义**：在 `subclass` 节点上 `subclass` 指"所属的**类目**"
+      // （子类指向类目），在 `object` 节点上指"所属的**子类**"。按节点类型分流。
+      { name: "subclass", type: "ref", required: true, softWhenMissing: true, values: ["class"], note: "所属类目 key" },
+      {
+        // 取值域**按所属类目的媒体类型分域**（`subclassFormatsFor`）：text → epub/txt/md。
+        name: "format",
+        type: "enum",
+        required: true,
+        softWhenMissing: true,
+        values: SUBCLASS_FORMAT_VALUES,
+        note: "按所属类目的 media_type 分域（text → epub/txt/md）",
+      },
+      { name: "position", type: "position" },
+    ],
+    parents: ["class"],
+    children: ["object"],
+    events: [],
+  },
+  {
+    // 标记（2026-10-10 / D102）：与类目树**平行**的轴（`control ⊃ mark ⊃ object`），
+    // 引用**可注册的标记清单**；与类目正交、可交叉。
+    type: "mark",
+    label: "标记",
+    role: "structural",
+    providesName: true,
+    fields: [
+      { name: "name", type: "string" },
+      // 标记直接挂在**面板**下（与类目树平行），因此引用目标是 `control`。
+      { name: "control", type: "ref", required: true, softWhenMissing: true, values: ["control"], note: "所属面板 key" },
+      {
+        name: "mark",
+        type: "enum",
+        required: true,
+        softWhenMissing: true,
+        values: BLUEPRINT_BUILTIN_MARKS,
+        note: "标记清单 id（可注册；未注册按未接通）",
+      },
       { name: "position", type: "position" },
     ],
     parents: ["control"],
@@ -234,11 +304,14 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
     providesName: true,
     fields: [
       { name: "name", type: "string" },
-      { name: "class", type: "ref", required: true, softWhenMissing: true, values: ["class"] },
+      // 结构父有**三种**（三条正交的轴任选其一）：类目、子类、标记。
+      { name: "class", type: "ref", softWhenMissing: true, values: ["class"], note: "所属类目 key" },
+      { name: "subclass", type: "ref", softWhenMissing: true, values: ["subclass"], note: "所属子类 key" },
+      { name: "mark_ref", type: "ref", softWhenMissing: true, values: ["mark"], note: "所属标记节点 key（不是标记 id）" },
       { name: "scope", type: "string", required: true, note: "selected / clicked / double_clicked / file_id" },
       { name: "position", type: "position" },
     ],
-    parents: ["class"],
+    parents: ["class", "subclass", "mark"],
     children: [],
     events: [],
   },
@@ -396,15 +469,19 @@ export function resolveNodePorts(spec: BlueprintNodeSpec): BlueprintPortSpec[] {
     out.push({ id, side, edge });
   const children = [...spec.children];
   const hasParents = spec.parents.length > 0;
-  const isPanelLike = children.length === 1 && children[0] === "class";
-  const isClassLike = children.length === 1 && children[0] === "object";
+  // 判据一律用「**包含**某个子类型」而不是「恰好只有一个该子类型」：后者是
+  // 早期只有 10 种节点时的写法（那时类目只有一个 `object` 子级），一旦给类目加上
+  // `subclass` 子级就会**静默丢掉 `on` 端口**（画布上"类目 → 操作"再也连不出来）。
+  // 现在两条轴并存（`class ⊃ {subclass, object}`），必须按"包含"判定。
+  const isPanelLike = children.includes("class");
+  const isObjectParent = children.includes("object");
   const isObjectLike = hasParents && children.length === 0;
 
   if (role === "structural") {
     if (hasParents) push(isPanelLike ? "in" : "contains", "in", "contains");
     if (children.length > 0) push("contains", "out", "contains");
     if (isPanelLike) push("memberOf", "out", "memberOf");
-    if (isPanelLike || isClassLike || isObjectLike) push("on", "out", "on");
+    if (isPanelLike || isObjectParent || isObjectLike) push("on", "out", "on");
   } else if (role === "trigger") {
     push("on", "in", "on");
     push("fires", "out", "fires");
@@ -519,3 +596,45 @@ export const BLUEPRINT_VALUE_DOMAINS: BlueprintValueDomains = {
 export const BLUEPRINT_STRUCTURAL_CHILD_TYPES: readonly BlueprintNodeType[] = STRUCT_ANY.filter(
   (type) => structuralParentsOf(type).length > 0,
 ) as readonly BlueprintNodeType[];
+
+/**
+ * **有类目**的面板各自的类目类型域（面板标准第 5.1 节；2026-10-10 加入图书预览）。
+ *
+ * 这张表只服务于**编辑器工厂的缺省值**：在某个面板下新增类目时，`media_type`
+ * 该默认成什么。没有它就是"任何面板下新建的类目都默认 `image`"——在图书预览
+ * （文本面板）下会直接建出一个**图像**类目，用户得手动改两个下拉框才拿到想要的类目。
+ *
+ * 它与面板注册表的 `hasClass` **不是一回事**：`hasClass` 说"能不能挂类目"，
+ * 本表说"挂上去默认是哪个类型域"。两处的面板集合必须一致（都由 `pnpm check:panels` 断言）。
+ *
+ * 取值域不必穷举该面板支持的所有类型——`media` 的类目类型域就是
+ * `image` / `video` / `audio` / `text` 里的前三个，`bookpreview` 只用 `text`。
+ */
+export const PANEL_CLASS_MEDIA_TYPES: Readonly<Record<string, BlueprintMediaType>> = {
+  media: "image",
+  bookpreview: "text",
+};
+
+/**
+ * 某面板下新增类目时的**缺省 `media_type`**。
+ *
+ * - `media`（默认未登记的面板）→ `image`（与既有行为一致，零回归）；
+ * - `bookpreview` → `text`（图书预览收的是文本类文件）。
+ *
+ * 类目**只**有 `media_type`（细分是 `subclass` 节点的事，见 `defaultSubclassFieldsFor`）。
+ */
+export function defaultClassFieldsForPanel(panelId: string | undefined): {
+  media_type: BlueprintMediaType;
+} {
+  return { media_type: PANEL_CLASS_MEDIA_TYPES[panelId ?? ""] ?? "image" };
+}
+
+/**
+ * 某**类目**下新增子类时的缺省 `format`：取该类目媒体类型分域里的第一个取值。
+ *
+ * 该类目没有子类取值域（如 `image`）时返回空串——调用方据此**拒绝建子类**
+ * （而不是建出一个必然被校验拒绝的节点）。
+ */
+export function defaultSubclassFormatFor(mediaType: string | undefined): string {
+  return subclassFormatsFor(mediaType ?? "")[0] ?? "";
+}

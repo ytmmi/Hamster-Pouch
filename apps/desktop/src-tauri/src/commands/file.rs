@@ -68,8 +68,8 @@ pub(crate) struct FileMetadataResult {
     source_id: String,
     relative_path: String,
     media_type: String,
-    /// 媒体类型之下的子类型（`book` / `document`；非文本类为 `null`）。
-    subtype: Option<String>,
+    /// 文件的**标记集合**（D102：可多值、与类目正交）。
+    marks: Vec<String>,
     content_hash: Option<String>,
     size: i64,
     mtime: String,
@@ -107,7 +107,7 @@ pub(crate) fn file_metadata(
             source_id: file.source_id.as_str().to_string(),
             relative_path: file.relative_path,
             media_type: file.media_type.as_str().to_string(),
-            subtype: file.subtype.map(|s| s.as_str().to_string()),
+            marks: file.marks.iter().map(|m| m.as_str().to_string()).collect(),
             content_hash: file.content_hash,
             size: file.size,
             mtime: file.mtime,
@@ -419,6 +419,47 @@ pub(crate) fn file_trash(
         }
         db.delete_files(&removed)?;
         Ok(removed.len() as u32)
+    })();
+    api_from_hp(outcome)
+}
+
+/// file.setMarks：**增删**一组文件的标记（D102 用户口径："book 为标记，标记可以交叉"）。
+///
+/// 标记是**可多值**的（一个文件可以同时带 `book` 与 `manga`），因此接口是"加哪些、
+/// 减哪些"而不是"设成什么"：`add` / `remove` 各自幂等，重复点击不会累积重复行。
+///
+/// `marks` 的取值是**可注册清单**的 id；这里只校验**命名规则**（与"插件缺失的节点类型"
+/// 同口径）——未注册的标记**允许写入**（清单可注册，注册后自动生效），不静默丢弃。
+///
+/// 与 `file.rename` / `file.trash` 同一形状（`repoId` 只作上下文，实际库由当前打开的
+/// 仓库决定）；返回实际改动的文件数（不存在的 id 静默跳过，与 `file.trash` 同口径）。
+#[tauri::command]
+pub(crate) fn file_set_marks(
+    repo_id: String,
+    file_ids: Vec<String>,
+    add: Option<Vec<String>>,
+    remove: Option<Vec<String>>,
+    state: State<AppState>,
+) -> ApiResponse<u32> {
+    let _ = repo_id;
+    let outcome = (|| -> HpResult<u32> {
+        let add = add.unwrap_or_default();
+        let remove = remove.unwrap_or_default();
+        // 标记 id 必须命名合法（不合规则的才拒绝；未注册的允许写入，见命令文档）。
+        for mark in add.iter().chain(remove.iter()) {
+            if !hp_core::is_valid_namespaced_id(mark) {
+                return Err(HpError::InvalidArgument(format!("标记命名不合规则: {mark}")));
+            }
+        }
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        // 只写**存在**的 id：不存在的静默跳过（与 trash 同口径）。
+        let existing: Vec<String> = file_ids
+            .into_iter()
+            .filter(|id| matches!(db.get_file(id), Ok(Some(_))))
+            .collect();
+        let changed = db.set_file_marks(&existing, &add, &remove)?;
+        Ok(changed as u32)
     })();
     api_from_hp(outcome)
 }

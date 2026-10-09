@@ -272,6 +272,19 @@ export class BlueprintEngine {
     if (node.type === "class") {
       return node.media_type === target.mediaType;
     }
+    if (node.type === "subclass") {
+      // 子类（D102）：命中判据是它自己的 `format` 与上报的细分一致；
+      // 所属类目的媒体类型不在这里重复判定——子类**从属于**类目，上报方保证了
+      // `mediaType` 与 `format` 同源（`bookDispatchTarget`）。
+      return node.format !== undefined && node.format === target.format;
+    }
+    if (node.type === "mark") {
+      // 标记（D102）：与类目**正交、可交叉**，因此**只**看标记是否命中，
+      // **不看** `mediaType`——一个被标为 `manga` 的 zip 与一本被标为 `manga`
+      // 的 epub 都该命中同一个「漫画」规则（这正是"可交叉"的含义）。
+      // 标记是**集合**：上报的 `marks` 里含它即命中。
+      return node.mark !== undefined && (target.marks ?? []).includes(node.mark);
+    }
     if (node.type === "object") {
       // `scope` 既可以是三个交互关键字（clicked / double_clicked / selected），
       // 也可以是**具体 file_id**（RFC 0007 决策 1）：后者只对上报的那个文件生效。
@@ -282,13 +295,16 @@ export class BlueprintEngine {
       if (!scopeMatches) {
         return false;
       }
-      const classNode = node.class
-        ? graph.nodes.find((n) => n.key === node.class)
+      // 对象的**三条正交轴**（类目 / 子类 / 标记）：按实际声明的那一条判定。
+      // 三者互斥（同时声明多条是硬错误，由校验拒绝），因此这里取第一个非空的。
+      const parentKey = node.class ?? node.subclass ?? node.mark_ref;
+      const parent = parentKey
+        ? graph.nodes.find((n) => n.key === parentKey)
         : undefined;
-      if (!classNode || classNode.type !== "class") {
+      if (!parent) {
         return false;
       }
-      return classNode.media_type === target.mediaType;
+      return this.objectNodeMatches(parent, target, scope, graph);
     }
     return false;
   }
@@ -337,6 +353,7 @@ export class BlueprintEngine {
     const [lhs, op, rhs] = tokens;
     switch (lhs) {
       case "media_type":
+        // 取值域含 `text`（与类目 `media_type` 同源）。
         return op === "==" && input.target.mediaType === rhs;
       case "selection":
         return op === "!=" && rhs === "empty" && !!input.target.fileId;

@@ -181,6 +181,7 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 | `preview.get` | 按需生成并取**全分辨率**预览绝对路径（原始尺寸 JPEG、质量 90；供 Chromium 无法解码的 HEIC/HEIF 查看，缺陷 0019） | `{ repoId, fileId }` | `{ ok, data: { path \| null } }` | **已包装** | 线上 `data` 是 `string \| null`；**仅图片**，`null` = 无内容哈希 / 生成失败 / 非图片；与 `thumb.get` 同源缓存（`<content_hash>.preview.jpg`，互不冲突）；生成走 `hp_media::generate_image_preview`（**不缩放**，用户 2026-10-06 裁定不要 2048 有界预览），缓存命中直接返回；前端 `api/file.ts` |
 | `file.rename` | 重命名文件（**磁盘重命名** + 更新索引相对路径） | `{ repoId, fileId, newName }` | `{ ok, data: { file } }` | **已包装** | 新名不得为空/含路径分隔符（→ `validation`），目标已存在 → `conflict`；前端 `api/file.ts` |
 | `file.trash` | 批量移入系统回收站，并从索引移除 | `{ repoId, fileIds }` | `{ ok, data: { removed } }` | **已包装** | 线上 `data` 是裸计数（`u32`）；前端 `api/file.ts` |
+| `file.setMarks` | **增删**一组文件的**标记**（可多值） | `{ repoId, fileIds, add?, remove? }` | `{ ok, data: { changed } }` | **已包装** | 线上 `data` 是裸计数（`u32`）。**标记**（D102 用户口径："text 为类目，md、txt、epub 为子类，book 为标记，标记可以交叉，例子：漫画.zip 文件的类目为压缩包，可以标记为 manga（漫画）"）是**可多值**、**与类目正交**的一维，因此接口是"**加哪些、减哪些**"而不是"设成什么"：`add` / `remove` 各自幂等（重复点击不累积重复行）。存 `file_marks` 表（迁移 **0010**，按 `file_id` 存，重扫不变；旧 `files.subtype` 列**已废弃**、新代码不读不写）。取值是**可注册清单**的 id（内置 `book` / `manga`）；命令只校验**命名规则**，未注册的标记**允许写入**（清单可注册，注册后自动生效），不静默丢弃。**不存在的 id 静默跳过**（与 `file.trash` 同口径），返回实际改动的文件数。文件操作类命令，同样**不**返回 `opRecordId`。前端 `api/file.ts` 的 `fileSetMarks()`，消费方 `panels/bookpreview/` 的「标记」右键多选区 |
 | `file.reanalyze` | 重新分析单个文件（重算哈希 / 缩略图 / 媒体信息 / **调色板**）并更新索引 | `{ repoId, fileId }` | `{ ok, data: { taskId } }` | **已包装** | **后台任务**（2026-09 用户口径："右键分析文件要和源全量同款弹窗"）：登记 `TaskKind::Analyze` → 独立仓库库连接上跑 `rescan_file(full: true)`，进度浮窗/取消/完成状态全部复用 `scan.progress` / `scan.completed` / `scan.error` 事件族（`taskStore` 只认事件不认命令）。单文件分析**没有暂停点**，故进度帧带 `pausable: false`（浮窗不显示暂停按钮）；取消只在**开工前**生效（与源扫描"每文件之间检查"同款）。前端 `api/file.ts` |
 
 > **本批的 D76 落地细节（批次 `file`，2026-09）**：全部命令改为返回
@@ -194,6 +195,8 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 > 该域迁移后自动收敛。
 
 `filter` 可含 `mediaTypes`（**集合**：`image`/`video`/`audio`/`text`；**缺省或空数组 = 不筛**），用于相册显示过滤（D10）与源视图筛选。**2026-10-08 由单值 `mediaType` 改为集合**（D95，用户口径「媒体预览不包含 text 类型，text 类型在图书预览显示」）：媒体预览的「全部」指的是**图片 / 视频 / 音频这三个**（不是"索引里的一切"），图书预览指的是**文本**这一个——单值表达不出前者，"全部"就只能落到"不筛"上，于是 `text`（2026-10 新增的文本媒体类型：`txt` / `md` / `markdown` / `epub`，扩展名判定、不做内容兜底）会漏进媒体预览。取值不在闭集内一律 `validation`（**不静默丢掉那一项**）。
+
+> **蓝图侧的同名取值域也在 2026-10-10 补齐**（D101）：类目节点的 `media_type` 增加 `text`（此前只有 image/video/audio，文本类**没有任何类目能表达**），并新增 `format` 承载 `epub` / `txt` / `md` / `book`。注意两者**不是同一个东西**：`file.query` 的 `mediaTypes` 是**取数过滤**（前端分区），类目的 `media_type` 是**蓝图匹配**（规则求值）；它们共用 `text` 这个字面量，但消费方不同。
 
 `file.rename` / `file.trash` 是**真实磁盘操作**，当前**不留操作记录**（无 `opRecordId`），与第 3.6 节 `fsops.*`「真实文件操作必须返回操作记录 ID」的口径不一致；缺口如实记录，是否补记录属另议（见 `docs/architecture/command-event-drift.md`）。`file.trash` 只删除索引行，不连带清理 tag/评分/相册成员。
 

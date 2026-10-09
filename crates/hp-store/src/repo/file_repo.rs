@@ -1,10 +1,13 @@
 //! 文件索引仓储（RFC 0001 / database-schema.md 第 4.3 节）。
 
-use hp_core::{FileId, FileIndexRow, FileSubtype, HpError, HpResult, MediaType, SourceId, ThumbStatus, VerifyStatus};
-use rusqlite::{params, OptionalExtension, Row};
+use hp_core::{
+    FileId, FileIndexRow, FileMark, HpError, HpResult, MediaType, SourceId, ThumbStatus,
+    VerifyStatus,
+};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::repo::repo_db::RepoDb;
-use crate::util::{require_nonempty, store_err};
+use crate::util::{now_iso, require_nonempty, store_err};
 
 /// 单页最大条数（防调用方一次拉全库；契约里 `limit` 只是页大小）。
 pub const FILE_QUERY_MAX_LIMIT: i64 = 1000;
@@ -89,6 +92,11 @@ impl FileQueryCursor {
 }
 
 /// `files` 表列清单（与迁移 0001 + 0002 + 0008 顺序一致）。
+///
+/// **`subtype` 列已废弃（D102）**：标记改存 `file_marks` 一对多表，本列新代码**不读不写**。
+/// 它仍留在 SELECT 里是为了让[列下标稳定]（`FILE_COLUMN_COUNT` 被相册分页用于算追加列
+/// 下标），删除它会让拼接的 `?N` 编号与 JOIN 偏移整体挪位——而 `0001` 是 forward-only、
+/// 不能改。读取时该列被**忽略**（`row_to_file` 不把它写进 `FileIndexRow`）。
 const FILE_COLUMNS: &str = "id, source_id, relative_path, media_type, subtype, \
      content_hash, content_hash_algo, content_hash_algo_version, \
      perceptual_hash, perceptual_hash_algo, perceptual_hash_algo_version, \
@@ -108,6 +116,10 @@ pub(crate) const FILE_COLUMN_COUNT: usize = 18;
 
 impl RepoDb {
     /// 插入或更新文件索引行（按 `source_id + relative_path` 唯一索引冲突时更新，保留原 id）。
+    ///
+    /// **不再写 `files.subtype`**（D102 起该列已废弃，标记存 `file_marks`）：
+    /// 这里恒写 `NULL`，把"标记"这件事完全交给 [`RepoDb::set_file_marks`]。
+    /// 用户的标记因此不会被重扫打回（扫描只在标记**为空**时补默认值，见 `hp-scanner`）。
     pub fn upsert_file(&mut self, row: &FileIndexRow) -> HpResult<()> {
         self.conn()
             .execute(
@@ -115,10 +127,9 @@ impl RepoDb {
                      content_hash, content_hash_algo, content_hash_algo_version,
                      perceptual_hash, perceptual_hash_algo, perceptual_hash_algo_version,
                      size, mtime, scan_time, verify_status, thumb_status, missing_status, media_info_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
                  ON CONFLICT(source_id, relative_path) DO UPDATE SET
                      media_type = excluded.media_type,
-                     subtype = excluded.subtype,
                      content_hash = excluded.content_hash,
                      content_hash_algo = excluded.content_hash_algo,
                      content_hash_algo_version = excluded.content_hash_algo_version,
@@ -137,7 +148,6 @@ impl RepoDb {
                     row.source_id.as_str(),
                     row.relative_path,
                     row.media_type.as_str(),
-                    row.subtype.map(|s| s.as_str()),
                     row.content_hash,
                     row.content_hash_algo,
                     row.content_hash_algo_version,
@@ -159,14 +169,19 @@ impl RepoDb {
 
     /// 按文件 ID 查询索引行；不存在返回 `None`。
     pub fn get_file(&self, file_id: &str) -> HpResult<Option<FileIndexRow>> {
-        self.conn()
+        let mut row = self
+            .conn()
             .query_row(
                 &format!("SELECT {FILE_COLUMNS} FROM files WHERE id = ?1"),
                 params![file_id],
                 row_to_file,
             )
             .optional()
-            .map_err(|e| store_err("查询文件索引", e))
+            .map_err(|e| store_err("查询文件索引", e))?;
+        if let Some(file) = row.as_mut() {
+            load_marks_for(self.conn(), std::slice::from_mut(file))?;
+        }
+        Ok(row)
     }
 
     /// 按 `source_id + relative_path` 查询索引行；不存在返回 `None`。
@@ -175,14 +190,19 @@ impl RepoDb {
         source_id: &str,
         relative_path: &str,
     ) -> HpResult<Option<FileIndexRow>> {
-        self.conn()
+        let mut row = self
+            .conn()
             .query_row(
                 &format!("SELECT {FILE_COLUMNS} FROM files WHERE source_id = ?1 AND relative_path = ?2"),
                 params![source_id, relative_path],
                 row_to_file,
             )
             .optional()
-            .map_err(|e| store_err("按路径查询文件索引", e))
+            .map_err(|e| store_err("按路径查询文件索引", e))?;
+        if let Some(file) = row.as_mut() {
+            load_marks_for(self.conn(), std::slice::from_mut(file))?;
+        }
+        Ok(row)
     }
 
     /// 查找所有内容哈希一致的文件（用于移动/重命名识别与重复候选）。
@@ -193,11 +213,12 @@ impl RepoDb {
                 "SELECT {FILE_COLUMNS} FROM files WHERE content_hash = ?1"
             ))
             .map_err(|e| store_err("按内容哈希查询文件", e))?;
-        let rows = stmt
+        let mut rows = stmt
             .query_map(params![content_hash], row_to_file)
             .map_err(|e| store_err("读取内容哈希查询结果", e))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| store_err("解析内容哈希查询结果", e))?;
+        load_marks_for(self.conn(), &mut rows)?;
         Ok(rows)
     }
 
@@ -209,11 +230,12 @@ impl RepoDb {
                 "SELECT {FILE_COLUMNS} FROM files WHERE source_id = ?1"
             ))
             .map_err(|e| store_err("查询源文件列表", e))?;
-        let rows = stmt
+        let mut rows = stmt
             .query_map(params![source_id], row_to_file)
             .map_err(|e| store_err("读取源文件列表", e))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| store_err("解析源文件列表", e))?;
+        load_marks_for(self.conn(), &mut rows)?;
         Ok(rows)
     }
 
@@ -237,11 +259,12 @@ impl RepoDb {
             .conn()
             .prepare(&format!("SELECT {FILE_COLUMNS} FROM files"))
             .map_err(|e| store_err("查询全部文件", e))?;
-        let rows = stmt
+        let mut rows = stmt
             .query_map([], row_to_file)
             .map_err(|e| store_err("读取全部文件", e))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| store_err("解析全部文件", e))?;
+        load_marks_for(self.conn(), &mut rows)?;
         Ok(rows)
     }
 
@@ -343,6 +366,8 @@ impl RepoDb {
         } else {
             None
         };
+        // 标记**批量**装载（只对本页的这几十行查一次，不是每行一次）。
+        load_marks_for(self.conn(), &mut rows)?;
         Ok((rows, next_cursor))
     }
 
@@ -360,6 +385,71 @@ impl RepoDb {
             )
             .map_err(|e| store_err("更新文件路径", e))?;
         Ok(())
+    }
+
+    /// 列出某文件的全部标记（按 `mark` 升序）。
+    pub fn list_file_marks(&self, file_id: &str) -> HpResult<Vec<FileMark>> {
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT mark FROM file_marks WHERE file_id = ?1 ORDER BY mark")
+            .map_err(|e| store_err("查询文件标记", e))?;
+        let rows = stmt
+            .query_map(params![file_id], |row| row.get::<_, String>(0))
+            .map_err(|e| store_err("读取文件标记", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析文件标记", e))?;
+        Ok(rows.into_iter().map(FileMark::from_raw).collect())
+    }
+
+    /// **添加**一个标记（幂等：已存在即为无操作）。
+    ///
+    /// 标记是**多值**的（D102）：一个文件可以同时带 `book` 与 `manga`，
+    /// 因此这里是"加一条"而不是"改成一个"。用户口径的"可以交叉"就落在这一点上。
+    pub fn add_file_mark(&mut self, file_id: &str, mark: &str) -> HpResult<()> {
+        self.conn()
+            .execute(
+                "INSERT OR IGNORE INTO file_marks (file_id, mark, added_at) VALUES (?1, ?2, ?3)",
+                params![file_id, mark, now_iso()],
+            )
+            .map_err(|e| store_err("添加文件标记", e))?;
+        Ok(())
+    }
+
+    /// **移除**一个标记（幂等：本来没有即为无操作）。
+    pub fn remove_file_mark(&mut self, file_id: &str, mark: &str) -> HpResult<()> {
+        self.conn()
+            .execute(
+                "DELETE FROM file_marks WHERE file_id = ?1 AND mark = ?2",
+                params![file_id, mark],
+            )
+            .map_err(|e| store_err("移除文件标记", e))?;
+        Ok(())
+    }
+
+    /// 批量增删标记（图书预览的右键入口用；返回实际改动的文件数）。
+    ///
+    /// `add` / `remove` 各自幂等，因此重复点击不会累积出重复行，
+    /// "打上已打上的标记"也不算失败（与 `file.trash` 对不存在的 id 静默跳过同口径）。
+    pub fn set_file_marks(
+        &mut self,
+        file_ids: &[String],
+        add: &[String],
+        remove: &[String],
+    ) -> HpResult<u64> {
+        let mut changed = 0u64;
+        for file_id in file_ids {
+            let before = self.list_file_marks(file_id)?.len();
+            for mark in add {
+                self.add_file_mark(file_id, mark)?;
+            }
+            for mark in remove {
+                self.remove_file_mark(file_id, mark)?;
+            }
+            if self.list_file_marks(file_id)?.len() != before {
+                changed += 1;
+            }
+        }
+        Ok(changed)
     }
 
     /// 更新文件校验状态与缺失标记（扫描校验/失效标记用）。
@@ -444,12 +534,18 @@ fn escape_like(s: &str) -> String {
 ///
 /// `pub(crate)`：相册分页查询在同一 SELECT 末尾追加 `added_at`，
 /// 复用这里的 0..18 列映射，保证两处对"文件行长什么样"的理解不会漂移。
+///
+/// **标记不在本函数里装载**（D102）：它存在 `file_marks` 一对多表，需要**批量**取
+/// （逐行一条 SQL 会让列表查询变成 N+1）；调用方用 [`load_marks_for`] 补齐。
+/// 这里给 `marks: Vec::new()`，因此**直接**用本函数拿到行的调用方要自己调
+/// [`load_marks_for`]（仓储的公开查询方法都已经做了）。
 pub(crate) fn row_to_file(row: &Row) -> rusqlite::Result<FileIndexRow> {
     let id: String = row.get(0)?;
     let source_id: String = row.get(1)?;
     let relative_path: String = row.get(2)?;
     let media_type: String = row.get(3)?;
-    let subtype: Option<String> = row.get(4)?;
+    // 第 4 列是**已废弃**的 `files.subtype`：刻意不读（标记改存 `file_marks`）。
+    // 保留占位是为了让后续列下标不变（`FILE_COLUMN_COUNT` 被相册分页用于算追加列）。
     let content_hash: Option<String> = row.get(5)?;
     let content_hash_algo: Option<String> = row.get(6)?;
     let content_hash_algo_version: Option<i64> = row.get(7)?;
@@ -469,9 +565,7 @@ pub(crate) fn row_to_file(row: &Row) -> rusqlite::Result<FileIndexRow> {
         source_id: SourceId::from_raw(source_id),
         relative_path,
         media_type: MediaType::from_str(&media_type).unwrap_or(MediaType::Image),
-        // 未知子类型按"没有标记"处理（与 `media_type` 的兜底不同：子类型缺失是常态，
-        // 不是损坏——旧行在重扫前一直是 NULL）。
-        subtype: subtype.as_deref().and_then(FileSubtype::from_str),
+        marks: Vec::new(),
         content_hash,
         content_hash_algo,
         content_hash_algo_version,
@@ -486,4 +580,47 @@ pub(crate) fn row_to_file(row: &Row) -> rusqlite::Result<FileIndexRow> {
         missing_status,
         media_info_json,
     })
+}
+
+/// **批量**为文件行装载标记（一次查全部，避免逐行 SQL 的 N+1）。
+///
+/// `file_marks` 是 `(file_id, mark)` 一对多表；返回的每个 `row.marks` 按 `mark` 升序，
+/// 保证同一份数据两次读出来顺序一致（便于比较与断言）。
+pub(crate) fn load_marks_for(conn: &Connection, rows: &mut [FileIndexRow]) -> HpResult<()> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    // 逐行占位符 `?1..?N`：这里按行数拼（调用方的行数由分页大小决定，可控）。
+    let placeholders = (1..=rows.len())
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT file_id, mark FROM file_marks WHERE file_id IN ({placeholders}) ORDER BY file_id, mark"
+    );
+    let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| store_err("查询文件标记", e))?;
+    let pairs = stmt
+        .query_map(rusqlite::params_from_iter(ids.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| store_err("查询文件标记", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| store_err("查询文件标记", e))?;
+    let mut by_id: std::collections::HashMap<String, Vec<FileMark>> =
+        std::collections::HashMap::new();
+    for (file_id, mark) in pairs {
+        by_id
+            .entry(file_id)
+            .or_default()
+            .push(FileMark::from_raw(mark));
+    }
+    for row in rows.iter_mut() {
+        if let Some(marks) = by_id.remove(row.id.as_str()) {
+            row.marks = marks;
+        }
+    }
+    Ok(())
 }

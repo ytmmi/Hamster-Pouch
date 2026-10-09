@@ -86,7 +86,9 @@ export function nodeHasPort(
 /** 规则边（非结构边）的输出侧来源：`边类型 → 允许的输出节点类型`。 */
 export const RULE_EDGE_SOURCES: Record<string, readonly BlueprintNodeType[]> = {
   memberOf: ["control"],
-  on: ["control", "class", "object"],
+  // `on` 的来源含**三条正交轴上的对象父**：类目、子类、标记（都能挂对象，
+  // 因此都能由对象发起规则）；与 Rust `RULE_EDGE_SOURCES` 逐项一致。
+  on: ["control", "class", "subclass", "mark", "object"],
   fires: ["event"],
   guards: ["condition"],
 };

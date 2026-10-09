@@ -106,45 +106,53 @@ impl ThumbStatus {
     }
 }
 
-/// 文件**子类型**：媒体类型之下的一层可编辑标记。
+/// 文件的**标记**（原「子类型」，2026-10-09 更名；2026-10-10 / D102 变更为**可多值**）。
 ///
-/// 与 [`crate::source::MediaType`] 的分工（2026-10-08 用户口径：「子类型类似于标记，
-/// 后期用户可以进行更改切换」）：
-/// - `MediaType` 由扫描器的**扩展名判定**给出，用户不可改；
-/// - 子类型是**标注**——扫描只在行内为空时补一个默认值，**不覆盖**已有值。
+/// **性质（用户口径）**："text 为类目，md、txt、epub 为子类，**book 为标记**，
+/// 标记可以交叉，例子：漫画.zip 文件的类目为压缩包，可以标记为 manga（漫画）。"
 ///
-/// 默认值的唯一来源是扫描器的扩展名表（`hp_scanner::media_type::default_file_subtype`），
-/// 与媒体类型判定放在同一张表里，避免两处扩展名口径各自漂移。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileSubtype {
-    /// 电子书（默认：`epub`）。
-    Book,
-    /// 普通文档（默认：文本类里除电子书以外的格式，如 `txt` / `md`）。
-    Document,
-}
+/// 因此标记是**与类目正交、可交叉**的一维：
+/// - 与**类目**正交——类目由 `media_type` 给出（内容判定），标记是用户的选择；
+/// - **可多值**——一个文件可以同时带多个标记（一本 epub 可以既是 `book` 又是 `manga`），
+///   因此存储上是 `file_marks` **一对多表**，不是一个列。
+///
+/// 取值是**可注册清单**的 id（`book` / `manga` …，见 `blueprint_types::BUILTIN_MARKS`）；
+/// 扫描只在"一个标记都没有"时补默认值（`epub` → `book`），**绝不覆盖**用户已有标记
+/// （与调色板 `locked` 同口径：用户的判定权不被重扫打回）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileMark(String);
 
-impl FileSubtype {
+impl FileMark {
+    /// 从存储层字符串构造（调用方负责校验取值域 / 命名规则）。
+    pub fn from_raw(raw: impl Into<String>) -> Self {
+        Self(raw.into())
+    }
+
     /// 存储层字符串表示。
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            FileSubtype::Book => "book",
-            FileSubtype::Document => "document",
-        }
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 
-    /// 从存储层字符串解析；未知值返回 `None`（不静默回落，缺省由调用方决定）。
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "book" => Some(FileSubtype::Book),
-            "document" => Some(FileSubtype::Document),
-            _ => None,
-        }
+    /// 是否为 **book 标记**（`epub` 的默认标记；蓝图里 `mark = book` 的匹配依据）。
+    pub fn is_book(&self) -> bool {
+        self.0 == crate::blueprint_types::BOOK_MARK
     }
 }
 
-impl fmt::Display for FileSubtype {
+/// 扫描期的**默认标记**：`epub` → `book`，其余文本 → **无标记**。
+///
+/// 唯一来源就是这里（与 `hp-scanner` 的扩展名表放在一起调用），避免两处口径漂移。
+pub fn default_book_mark_for_ext(ext: &str) -> Option<FileMark> {
+    if ext.eq_ignore_ascii_case("epub") {
+        Some(FileMark::from_raw(crate::blueprint_types::BOOK_MARK))
+    } else {
+        None
+    }
+}
+
+impl fmt::Display for FileMark {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        f.write_str(&self.0)
     }
 }
 
@@ -155,8 +163,11 @@ pub struct FileIndexRow {
     pub source_id: SourceId,
     pub relative_path: String,
     pub media_type: MediaType,
-    /// 媒体类型之下的可编辑标记（当前只有文本类有值；见 [`FileSubtype`]）。
-    pub subtype: Option<FileSubtype>,
+    /// 该文件的**标记集合**（2026-10-10 / D102：可多值、与类目正交）。
+    ///
+    /// 由 `file_marks` 表装载（`hp-store` 的 `list_files_*` 会一并带出）；
+    /// **不是** `files` 上的列（`files.subtype` 已废弃、新代码不读不写）。
+    pub marks: Vec<FileMark>,
     pub content_hash: Option<String>,
     pub content_hash_algo: Option<String>,
     pub content_hash_algo_version: Option<i64>,

@@ -42,7 +42,9 @@ pub(crate) fn copy_one(
         source_id: target_source.id.clone(),
         relative_path: target_rel,
         media_type: file.media_type,
-        subtype: file.subtype,
+        // 标记随文件一起复制（D102）：它是用户在条目上的选择，复制出的新条目
+        // 应当继承（与 tag / 评分"内容哈希一致时保留解释数据"同一口径）。
+        marks: file.marks.clone(),
         content_hash: file.content_hash.clone(),
         content_hash_algo: file.content_hash_algo.clone(),
         content_hash_algo_version: file.content_hash_algo_version,

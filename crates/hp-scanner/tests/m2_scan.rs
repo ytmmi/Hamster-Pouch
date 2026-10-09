@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use hp_core::{FileSubtype, MediaType, Source, VerifyStatus};
+use hp_core::{MediaType, Source, VerifyStatus};
 use hp_scanner::{ScanOptions, ScanProgress, Scanner};
 use hp_store::RepoDb;
 
@@ -73,14 +73,18 @@ fn scan_indexes_image_skips_unknown_and_audio_placeholder() {
     assert!(audio.content_hash.is_none(), "音频占位行不应有内容哈希");
     assert_eq!(audio.verify_status, VerifyStatus::Placeholder);
 
-    // 文本（2026-10 / D93）：**算内容哈希**（移动识别与去重），但不产出视觉派生；
-    // 子类型按扩展名补默认值（txt → document）。
+    // 文本（2026-10 / D93）：**算内容哈希**（移动识别与去重），但不产出视觉派生。
+    // **标记（2026-10-10 / D102）**：`txt` / `md` 默认**不带**任何标记，
+    // 只有 `epub` 默认带 `book`；标记是**可多值**的、与类目正交（用户可自行打上 manga）。
     let text = db
         .get_file_by_path(source.id.as_str(), "notes.txt")
         .expect("查询 txt 失败")
         .expect("文本应已索引");
     assert_eq!(text.media_type, MediaType::Text);
-    assert_eq!(text.subtype, Some(FileSubtype::Document), "txt 默认子类型为 document");
+    assert!(
+        text.marks.is_empty(),
+        "txt 默认不带标记（旧口径的 document 子类型已废弃）"
+    );
     assert!(text.content_hash.is_some(), "文本应有内容哈希（与音频占位行不同）");
     assert!(text.perceptual_hash.is_none(), "文本没有视觉本体，不应有感知哈希");
     assert_eq!(text.verify_status, VerifyStatus::Ok);

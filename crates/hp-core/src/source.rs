@@ -46,7 +46,9 @@ pub enum MediaType {
     Audio,
     /// 文本类（`txt` / `md` / `epub` 等，扩展名判定，无内容兜底）。
     ///
-    /// 子类型见 [`crate::file::FileSubtype`]：`epub` 默认 `book`，其余默认 `document`。
+    /// 它是**类目**（蓝图 `class` 节点的 `media_type` 取值之一）；其下的**子类**细分
+    /// （`epub` / `txt` / `md`）由蓝图 `subclass` 节点按扩展名表达，
+    /// **标记**（`book` / `manga` …）是与类目正交的另一维，见 [`crate::file::FileMark`]。
     Text,
 }
 

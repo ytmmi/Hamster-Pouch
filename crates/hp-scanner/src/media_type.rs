@@ -3,7 +3,7 @@
 use std::io::Read;
 use std::path::Path;
 
-use hp_core::{FileSubtype, MediaType};
+use hp_core::{default_book_mark_for_ext, FileMark, MediaType};
 
 /// 扩展名 → 媒体类型映射（扩展名优先，D11）。
 ///
@@ -21,26 +21,29 @@ fn ext_to_media_type(ext: &str) -> Option<MediaType> {
         "mp3" | "wav" | "flac" | "aac" | "ogg" | "m4a" | "wma" | "opus" | "ape" => {
             Some(MediaType::Audio)
         }
-        // 文本（2026-10：新增 `text` 媒体类型；子类型默认值见 `default_file_subtype`）
+        // 文本（2026-10：新增 `text` 媒体类型；默认标记见 `default_file_marks`）
         "txt" | "md" | "markdown" | "epub" => Some(MediaType::Text),
         _ => None,
     }
 }
 
-/// 文本类文件的**默认子类型**（扫描只在行内子类型为空时写它，不覆盖用户已有选择）。
+/// 文本类文件的**默认标记**（扫描只在"一个标记都没有"时补它，不覆盖用户已有标记）。
 ///
 /// 与 `ext_to_media_type` 放在同一张表旁边：扩展名口径只有这一处，
-/// 免得"哪些扩展名算文本"与"文本默认是书还是文档"各写一遍、日后漂移。
-pub fn default_file_subtype(media_type: MediaType, ext: &str) -> Option<FileSubtype> {
+/// 免得"哪些扩展名算文本"与"哪些默认带 book 标记"各写一遍、日后漂移。
+///
+/// **2026-10-10 口径（D102）**：标记是**可多值、与类目正交**的一维，因此返回**列表**：
+/// - `epub` → `[book]`（自带封面与元数据的电子书，默认打 book 标记）；
+/// - `txt` / `md` / `markdown` → **空**（默认不打标记；用户可自行打上 `book` / `manga`，
+///   打上之后与子类**交叉**——这正是"标记可交叉"的落点）。
+///
+/// **补默认值的条件**：只有当该文件**当前一个标记都没有**时才补（调用方判定），
+/// 否则用户手动清空 `book` 后会被重扫补回来。
+pub fn default_file_marks(media_type: MediaType, ext: &str) -> Vec<FileMark> {
     if media_type != MediaType::Text {
-        return None;
+        return Vec::new();
     }
-    match ext.to_ascii_lowercase().as_str() {
-        // 电子书：自带封面与元数据（`hp_book` 解析）。
-        "epub" => Some(FileSubtype::Book),
-        // 其余文本（txt / md / markdown）：面板用文件名渲染文字封面。
-        _ => Some(FileSubtype::Document),
-    }
+    default_book_mark_for_ext(ext).into_iter().collect()
 }
 
 /// 内容兜底：读取文件头 magic bytes 判定媒体类型（D11）。
@@ -165,24 +168,48 @@ mod tests {
     }
 
     #[test]
-    fn text_default_subtypes() {
-        // 唯一的默认子类型表：epub → book，其余文本 → document；
-        // 非文本类型一律没有子类型（子类型只在文本类上有意义）。
+    fn text_default_marks() {
+        // 唯一的默认标记表：只有 `epub` 默认打 book 标记；
+        // `txt` / `md` 默认**不打**（用户可自行打上任意标记，与子类交叉）；
+        // 非文本类型一律没有标记（标记只在文本类上有意义）。
         for (name, ext, want) in [
-            ("a.epub", "epub", Some(FileSubtype::Book)),
-            ("a.txt", "txt", Some(FileSubtype::Document)),
-            ("a.md", "md", Some(FileSubtype::Document)),
-            ("a.markdown", "markdown", Some(FileSubtype::Document)),
+            ("a.epub", "epub", vec!["book"]),
+            ("a.txt", "txt", vec![]),
+            ("a.md", "md", vec![]),
+            ("a.markdown", "markdown", vec![]),
         ] {
-            assert_eq!(
-                default_file_subtype(MediaType::Text, ext),
-                want,
-                "{name} 的默认子类型不符"
-            );
+            let got: Vec<String> = default_file_marks(MediaType::Text, ext)
+                .iter()
+                .map(|m| m.as_str().to_string())
+                .collect();
+            assert_eq!(got, want, "{name} 的默认标记不符");
         }
         for media_type in [MediaType::Image, MediaType::Video, MediaType::Audio] {
-            assert_eq!(default_file_subtype(media_type, "epub"), None);
+            assert!(default_file_marks(media_type, "epub").is_empty());
         }
+    }
+
+    #[test]
+    fn marks_are_multi_valued_and_orthogonal_to_the_category() {
+        // 用户口径（D102）："book 为标记，标记可以交叉，例子：漫画.zip 的类目为压缩包，
+        // 可以标记为 manga（漫画）"。因此：
+        // 1. 标记是**集合**——同一个文件可以同时带 book 与 manga；
+        // 2. 默认值只给 epub 一个 book，txt / md 默认**不打**任何标记（可后补）。
+        let book = FileMark::from_raw("book");
+        let manga = FileMark::from_raw("manga");
+        assert!(book.is_book());
+        assert!(!manga.is_book(), "manga 不是 book 标记");
+
+        // 一个文件的两个标记可以并存（这就是"可交叉"）。
+        let both = vec![book.clone(), manga.clone()];
+        assert_eq!(both.len(), 2);
+        assert!(both.iter().any(|m| m.is_book()));
+        assert!(both.iter().any(|m| m.as_str() == "manga"));
+
+        // 默认标记：epub → [book]；txt / md → 空（可被用户打上任意标记）。
+        assert_eq!(default_file_marks(MediaType::Text, "epub"), vec![book]);
+        assert!(default_file_marks(MediaType::Text, "txt").is_empty());
+        assert!(default_file_marks(MediaType::Text, "md").is_empty());
     }
 
     #[test]
@@ -190,8 +217,8 @@ mod tests {
         let epub = write_tmp("BOOK.EPUB", b"PK\x03\x04 fake epub");
         assert_eq!(detect_media_type(&epub), Some(MediaType::Text));
         assert_eq!(
-            default_file_subtype(MediaType::Text, "EPUB"),
-            Some(FileSubtype::Book)
+            default_file_marks(MediaType::Text, "EPUB"),
+            vec![FileMark::from_raw("book")]
         );
     }
 
