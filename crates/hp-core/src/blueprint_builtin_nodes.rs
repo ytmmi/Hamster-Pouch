@@ -78,7 +78,11 @@ pub const BUILTIN_NODE_SPECS: [BuiltinNodeSpec; 12] = [
         name_from_layer: false,
         provides_name: true,
         parents: &["layout_block", "group", "overlay"],
-        children: &["class"],
+        // 面板之下有**两条平行的轴**（D102）：类目（`class`）与**标记**（`mark`）。
+        // 两者都直接挂在面板下、受同一个 `has_class` 约束，因此**都必须**在这里——
+        // `can_contain` 只读父节点的 `children`，漏掉 `mark` 会让「面板 → 标记」
+        // 被判为非法边（与 TS `blueprintNodes.ts` 的 `control.children` 逐项一致）。
+        children: &["class", "mark"],
         events: &[],
     },
     BuiltinNodeSpec {

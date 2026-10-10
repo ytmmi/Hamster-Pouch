@@ -225,7 +225,12 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
       { name: "position", type: "position", note: "画布坐标（所有节点通用）" },
     ],
     parents: ["layout_block", "group", "overlay"],
-    children: ["class"],
+    // 面板之下有**两条平行的轴**（D102）：类目（`class`，按媒体类型分类）与
+    // **标记**（`mark`，与类目正交、可交叉）。两者都直接挂在面板下，受同一个
+    // `has_class` 约束，因此**都必须**出现在这里——漏掉 `mark` 会让
+    // 「面板 → 标记」被判为非法边（画布连线 `containmentAllows` 与 Rust
+    // `can_contain` 都只读**父节点的 children**，不读子节点的 parents）。
+    children: ["class", "mark"],
     events: [],
   },
   {

@@ -355,6 +355,66 @@ const hasEdge = (doc, from, to, kind) =>
   );
 
   /*
+   * **父子声明的双向对称性**（真实缺陷回归：面板连不上标记）。
+   *
+   * 根因：`mark` 声明了 `parents: ["control"]`，但 `control` 的 `children` 只有
+   * `["class"]`——**漏了 `mark`**。而画布连线（`containmentAllows`）与 Rust 校验
+   * （`can_contain`）都只读**父节点的 `children`**，不读子节点的 `parents`，
+   * 于是「面板 → 标记」被判为非法边，线上根本连不出来。
+   *
+   * 上一条断言查不出它：那条遍历的是 `CONTAINMENT`（由父节点的 `children` 派生），
+   * 而 `mark` 压根不在 `control.children` 里 → 这一对父子**从未被遍历到**，断言自然全绿。
+   * 因此必须**独立**地拿两侧声明互相比对，而不是只看一侧派生出的表。
+   */
+  const asymmetric = [];
+  for (const child of config.BLUEPRINT_NODE_TYPES) {
+    const spec = config.nodeSpecOrNull(child);
+    if (!spec) continue;
+    for (const parent of spec.parents) {
+      const parentSpec = config.nodeSpecOrNull(parent);
+      if (!parentSpec) {
+        asymmetric.push(`${child}.parents 含未注册类型 ${parent}`);
+        continue;
+      }
+      if (!parentSpec.children.includes(child)) {
+        asymmetric.push(
+          `${child}.parents 含 ${parent}，但 ${parent}.children 不含 ${child}（该边连不出来）`,
+        );
+      }
+    }
+  }
+  // 反向：父节点声明的每个子类型，也必须反过来声明该父（否则「能连」与「结构合法」不一致）。
+  for (const parent of config.BLUEPRINT_NODE_TYPES) {
+    const spec = config.nodeSpecOrNull(parent);
+    if (!spec) continue;
+    for (const child of spec.children) {
+      const childSpec = config.nodeSpecOrNull(child);
+      if (!childSpec) {
+        asymmetric.push(`${parent}.children 含未注册类型 ${child}`);
+        continue;
+      }
+      if (!childSpec.parents.includes(parent)) {
+        asymmetric.push(
+          `${parent}.children 含 ${child}，但 ${child}.parents 不含 ${parent}（引用方向不一致）`,
+        );
+      }
+    }
+  }
+  check(
+    "父子声明双向对称：children 与 parents 逐项互指（漏一侧会让该边静默连不出来）",
+    asymmetric.length === 0,
+    asymmetric.slice(0, 4).join("；") || "两侧声明逐项互指",
+  );
+
+  // 正向：`class` 与 `mark` 是面板下**两条平行的轴**，都必须能由面板连出。
+  check(
+    "面板下两条平行的轴都可连：control → class 与 control → mark 均为合法 contains",
+    ports.kindForEdge("control", "contains", "class") === "contains" &&
+      ports.kindForEdge("control", "contains", "mark") === "contains",
+    `class=${ports.kindForEdge("control", "contains", "class")} mark=${ports.kindForEdge("control", "contains", "mark")}`,
+  );
+
+  /*
    * 端口推导一致性（真实缺陷回归）：画布渲染连线时按
    * `portMap.get(`${key}::${side}::${portIdFor(type, side, kind)}`)` 找端口坐标，
    * 而 DOM 标记用 `PORT_DEFS` 里的 id。因此 `portIdFor` 返回的 id **必须**是该类型声明过的端口；
