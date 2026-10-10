@@ -217,7 +217,10 @@ apps/desktop/src/app_ui/
     useBlueprintLayerTools.ts  # 层工具接线（切层 / 新增 / 重命名 / 排序 / 删除 / 设为主界面 + 无根层派生）
     useBlueprintGraphEdits.ts  # 图编辑动作接线（新增节点 / 改字段 / 软删除 / 删边 / **连线原子落引用** / 一键整理）
     useBlueprintUnlinked.ts    # 未接通节点的面板侧派生（画布灰显与顶部提示用的 key 集合；随 refreshKey 重算）
-    blueprintNodeFactory.ts # 新节点工厂（**只追加自身**：不补最小链、不跨链路挂钩、**不产生任何边**；引用由显式上级推导、**兜底引用只在本层内找**；**所有类型都可随意创建**——`appendNode` 永不拒绝，子类/标记缺父时引用留空）
+    blueprintNodeFactory.ts # 新节点工厂（**只追加自身**：不补最小链、**不产生任何边、也不落定引用字段**；
+                            #   显式选中的上级只用于 ① key 命名 ② 缺省字段取值——D107/D109）
+    blueprintConnect.ts     # 连线落库纯函数（`connectPatch` / `applyConnect`）：**边 + 引用字段一次落好**
+                            #   （原子；三条正交轴按父类型分流；子类补缺省 format）——D103/D109
     blueprintPorts.ts       # 端口与边类型契约（**由 `packages/config` 的节点定义表投影**而来）：`portIdFor`（契约）/
                             #   `portIdForRender`（渲染兜底）/ `portDomId`（DOM 标记唯一拼法）/ `connectTargets`（可连端口清单）
     blueprintLabels.ts      # 节点本地化显示层（显示名/摘要/字段标签；画布与属性面板共用）

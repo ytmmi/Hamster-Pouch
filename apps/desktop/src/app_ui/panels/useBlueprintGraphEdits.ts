@@ -20,6 +20,7 @@ import {
 
 import { useApp } from "../core/AppContext";
 import { arrangeTree } from "./blueprintArrange";
+import { applyConnect } from "./blueprintConnect";
 import { softRemove, softRemoveMany } from "./blueprintDelete";
 import { ensureInterface } from "./blueprintLayers";
 import { appendNode, parentHintFor } from "./blueprintNodeFactory";
@@ -203,75 +204,27 @@ export function useBlueprintGraphEdits({
 
   /**
    * 连线后把**边**与**子节点的引用字段**在**一份文档**上原子落好（用户不手填 key）：
-   * 控件→类 写 `class.control`、类→对象 写 `object.class`、对象/类→操作 写 `event.target`、
-   * 组↔控件 写 `memberOf` 语义（组 contains 成员）、控件→类→对象的 `contains` 已是结构本身。
+   * 控件→类 写 `class.control`、类→对象 写 `object.class`、类→子类 写 `subclass.subclass`、
+   * 面板→标记 写 `mark.control`、对象/类/面板→操作 写 `event.target`…
+   *
+   * 判据与落库都在**纯模块** `blueprintConnect`（`applyConnect` / `connectPatch`），
+   * 因此"连线后该节点不再未接通"这类跨模块结论可以由 `pnpm check:blueprint-nodes` 断言。
    *
    * **为什么必须原子**：画布早前先 `onChange({...doc, edges})` 再回调 `onConnect`，而
    * `onConnect` 又从**同一份调用前的 `doc`** 派生新文档 → 后一次把刚加的边覆盖掉，
    * 表现为"连完线节点状态没变（仍灰显未接通），要刷新一下才对"（真实缺陷）。
    * 现在边与引用字段一次算完，节点状态**连线即刷新**。
+   *
+   * **为什么引用字段只在连线时落**（D109）：新增节点不再自动挂父级（那会让画布上
+   * 看不出绑定的节点"不灰显"）；拖一条线是**唯一的接线动作**，所以边与字段必须同时落好。
    */
   const onConnect = useCallback(
     (edge: { from: string; to: string; kind: BlueprintEdge["kind"] }) => {
-      const child = doc.nodes.find((n) => n.key === edge.to);
-      const parent = doc.nodes.find((n) => n.key === edge.from);
-      if (!child || !parent) {
-        return;
+      const { doc: next, edge: created } = applyConnect(doc, edge);
+      if (!created) {
+        return; // 重复边：文档未改动
       }
-      if (
-        doc.edges.some(
-          (e) => e.from === edge.from && e.to === edge.to && e.kind === edge.kind,
-        )
-      ) {
-        return;
-      }
-      const patch: Partial<BlueprintNode> = {};
-      if (child.type === "class" && parent.type === "control" && child.control !== parent.key) {
-        patch.control = parent.key;
-      } else if (child.type === "subclass" && parent.type === "class" && child.subclass !== parent.key) {
-        // 子类挂在类目下（同名不同义：子类节点上的 `subclass` 指所属**类目**）。
-        patch.subclass = parent.key;
-      } else if (child.type === "mark" && parent.type === "control" && child.control !== parent.key) {
-        // 标记与类目树平行，挂在**面板**下。
-        patch.control = parent.key;
-      } else if (child.type === "object" && parent.type === "class" && child.class !== parent.key) {
-        patch.class = parent.key;
-      } else if (
-        child.type === "object" &&
-        parent.type === "subclass" &&
-        child.subclass !== parent.key
-      ) {
-        patch.subclass = parent.key;
-      } else if (
-        child.type === "object" &&
-        parent.type === "mark" &&
-        child.mark_ref !== parent.key
-      ) {
-        patch.mark_ref = parent.key;
-      } else if (
-        child.type === "event" &&
-        (parent.type === "object" ||
-          parent.type === "class" ||
-          parent.type === "subclass" ||
-          parent.type === "mark" ||
-          parent.type === "control") &&
-        child.target !== parent.key
-      ) {
-        patch.target = parent.key;
-      } else if (child.type === "action" && child.target === undefined) {
-        const target = doc.nodes.find(
-          (n) => n.key === edge.from && (n.type === "control" || n.type === "group"),
-        );
-        if (target) {
-          patch.target = target.key;
-        }
-      }
-      const order = Math.max(0, ...doc.edges.map((ed) => ed.order)) + 1;
-      mutate({
-        ...doc,
-        nodes: doc.nodes.map((n) => (n.key === child.key ? { ...n, ...patch } : n)),
-        edges: [...doc.edges, { from: edge.from, to: edge.to, kind: edge.kind, order }],
-      });
+      mutate(next);
     },
     [doc, mutate],
   );

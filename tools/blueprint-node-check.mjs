@@ -165,29 +165,39 @@ const hasEdge = (doc, from, to, kind) =>
   writeFixture("append_event_not_attached", doc);
 }
 
-// ---- 3. 显式指定上级：只连上级（选中控件后新增类）----
+// ---- 3. 显式选中上级：**只借它命名与缺省取值**，引用字段仍然留空（D109）----
 {
   const doc0 = defaults();
   const hint = factory.parentHintFor("class", "c_media", doc0);
   const { doc, node } = factory.appendNode(doc0, "class", { x: 0, y: 0 }, hint);
   check(
-    "选中 c_media 后新增类：control 指向 c_media（显式上级）",
-    node.control === "c_media" && node.key === "c_media_image",
-    `key=${node.key} control=${node.control}`,
+    "选中 c_media 后新增类目：key 按选中上级命名（c_media_image），但 control **留空**（未接通灰显）",
+    node.control === undefined && node.key === "c_media_image",
+    `key=${node.key} control=${node.control ?? "(留空)"}`,
   );
-  writeFixture("append_class_with_parent", doc);
+  // 缺省字段仍按**选中的面板**取（图书预览下默认 text，而不是 image）
+  const bookPanel = doc0.nodes.find((n) => n.panel_id === "media");
+  const mediaHint = factory.parentHintFor("class", bookPanel.key, doc0);
+  const mediaClass = factory.appendNode(doc0, "class", { x: 0, y: 0 }, mediaHint).node;
+  check(
+    "选中 media 面板后新增类目：`media_type` 缺省仍按该面板取（image），与引用是否落定无关",
+    mediaClass.media_type === "image",
+    `media_type=${mediaClass.media_type}`,
+  );
+  writeFixture("append_class_unattached", doc);
 }
 
-// ---- 4. 未选中时新增"类"：可挂到已有控件（层级兜底是合理的）----
+// ---- 4. 未选中时新增"类目"：**不再同层兜底挂父级**（D109）----
+// 早前"未选中就挂到第一个能承载的面板下"会让新节点悄悄挂上一条**画布上看不见**的绑定
+// （字段有值 → 不灰显），与"没接线就该是灰色"的画布语言矛盾。现在一律留空。
 {
   const doc0 = defaults();
   const hint = factory.parentHintFor("class", null, doc0);
   const { node } = factory.appendNode(doc0, "class", { x: 0, y: 0 }, hint);
-  const holder = doc0.nodes.find((n) => n.key === node.control);
   check(
-    "未选中时新增类：挂到已有控件（不做跨链路挂钩）",
-    holder?.type === "control",
-    `control=${node.control}（${holder?.type ?? "?"}）`,
+    "未选中时新增类目：`parentHintFor` 返回 null、`control` 留空（不兜底挂到既有面板）",
+    hint === null && node.control === undefined,
+    `hint=${hint === null ? "null" : JSON.stringify(hint)} control=${node.control ?? "(留空)"}`,
   );
 }
 
@@ -926,22 +936,24 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
   writeFixture("arranged_tree", after);
 }
 
-// ---- 11. 所有节点都可随意创建；层级约束只体现在连线与引用上 ----
+// ---- 11. 所有节点都可随意创建；**引用一律留空**（连线是唯一的接线动作，D109）----
 //
 // 用户口径（2026-10-10，**更正**）：「子类节点可以随意创建，所有节点都可以随意创建，
 // 只规定连接方式和层级」。
 //
 // 因此：
 // - **创建一律放行**——任何类型、任何时机都能落下来，**永不拒绝**；
-// - 有可用结构父 → 自动挂上（显式选中优先，其次同层兜底复用既有父）；
-// - **没有 → 引用留空**（画布灰显「未接通」），由使用者拖线或属性面板补上；
+// - **落下来就是未接通**：引用字段**全部留空**（画布灰显「未接通」），
+//   由使用者在画布上拖一条线接上（`blueprintConnect.applyConnect` 落边 + 字段）；
 // - **层级约束**体现在 `containmentAllows`（非法父连不上）与后端 `can_contain` 上，
 //   **不是**创建许可。
 //
-// ⚠️ 本节此前断言的是"无父即拒绝新增"（`rejected: "mount-required"`）——那是把
-// "层级约束"误当成"创建许可"，已被用户口径推翻。
+// ⚠️ 本节此前断言过两代旧口径：①"无父即拒绝新增"（`rejected: "mount-required"`——
+// 把"层级约束"误当成"创建许可"）；②"有可用父级就顺手挂上（只写引用字段）"——
+// 后者会让新节点**画布上没线却不灰显**（用户 2026-10-10 反馈：
+// "类目、子类、标记、对象没有灰显"），现已统一为**留空**（D109）。
 {
-  // ① 子类：本层有 text 类目 → 自动挂上
+  // ① 子类：本层有 text 类目 → **也留空**（不再自动挂）
   {
     const doc0 = defaults();
     const kText = factory.appendNode(
@@ -959,13 +971,13 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
     };
     const r = factory.appendNode(doc, "subclass", { x: 100, y: 100 }, null, "l_main");
     check(
-      "随意创建：子类有可用类目时自动挂上（子类是类目的细分）",
+      "随意创建：子类即使有可用类目也**留空引用**（未接通灰显，等使用者拖线）",
       r.node.type === "subclass" &&
-        r.node.subclass === kText.node.key &&
-        r.node.format === "epub",
-      `subclass=${r.node.subclass} format=${r.node.format}`,
+        r.node.subclass === undefined &&
+        r.node.format === undefined,
+      `subclass=${r.node.subclass ?? "(留空)"} format=${r.node.format ?? "(留空)"}`,
     );
-    writeFixture("subclass_mounted_under_class", r.doc);
+    writeFixture("subclass_unattached", r.doc);
   }
 
   // ② 子类：本层**没有**类目 → **照常创建**，引用留空（未接通灰显）
@@ -983,8 +995,7 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
     writeFixture("subclass_without_class", r.doc);
   }
 
-  // ③ 子类：只有 image 类目（无子类取值域）→ 照常创建（挂上也不产出"必然非法"的引用：
-  //    这里仍会复用 image 类目，但**format 留空**——缺 format 是未接通软告警，允许保存）
+  // ③ 子类：只有 image 类目（无子类取值域）→ 照常创建，`format` 留空
   {
     const doc0 = defaults();
     const kImg = factory.appendNode(
@@ -1002,19 +1013,18 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
     );
   }
 
-  // ④ 标记：本层有面板 → 自动挂上
+  // ④ 标记：本层有面板 → **也留空**（不再自动挂）
   {
     const doc0 = defaults();
     const r = factory.appendNode(doc0, "mark", { x: 100, y: 100 }, null, "l_main");
-    const owner = r.doc.nodes.find((n) => n.key === r.node.control);
     check(
-      "随意创建：标记有可用面板时自动挂上（与类目平行、功能相似）",
+      "随意创建：标记即使有可用面板也**留空引用**（未接通灰显），默认 `mark` 取清单首项",
       r.node.type === "mark" &&
-        owner?.type === "control" &&
+        r.node.control === undefined &&
         r.node.mark === config.BLUEPRINT_BUILTIN_MARKS[0],
-      `control=${r.node.control}(${owner?.type ?? "?"}) mark=${r.node.mark}`,
+      `control=${r.node.control ?? "(留空)"} mark=${r.node.mark}`,
     );
-    writeFixture("mark_mounted_under_control", r.doc);
+    writeFixture("mark_unattached", r.doc);
   }
 
   // ⑤ 标记：层内没有面板 → 照常创建，引用留空
@@ -1061,6 +1071,134 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
       `class→subclass=${containment.kindForEdge("class", "contains", "subclass")} control→mark=${containment.kindForEdge("control", "contains", "mark")} control→subclass=${containment.kindForEdge("control", "contains", "subclass")} class→mark=${containment.kindForEdge("class", "contains", "mark")}`,
     );
   }
+}
+
+// ---- 11b. 引用型四类：**新增即未接通（灰显）、连线即恢复**（D109，用户反馈的修复点）----
+//
+// 用户原话（2026-10-10）："类目、子类、标记、对象没有灰显，修复"。
+// 根因：这四类靠**引用字段**表达从属，而工厂在"新增"时就把字段写好了（画布上却没有线），
+// 于是"未接通"判据不成立 → 不灰显。修法：字段改由**连线**落定（`blueprintConnect`），
+// 新增一律留空。这样"画布上没线 ⇔ 字段为空 ⇔ 运行期真的不生效 ⇔ 灰显"四者等价。
+{
+  const lint = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/blueprintLint.ts")).href
+  );
+  const connect = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintConnect.ts")).href
+  );
+
+  let doc = defaults();
+  const controlKey = "c_media";
+  const k = factory.appendNode(
+    doc,
+    "class",
+    { x: 0, y: 0 },
+    factory.parentHintFor("class", controlKey, doc, "l_main"),
+    "l_main",
+  );
+  doc = k.doc;
+  // 把它改成 text 类目，好让"子类"这一路也走到"有可用类目"的情形（最苛刻：能被挂却不挂）
+  doc = {
+    ...doc,
+    nodes: doc.nodes.map((n) => (n.key === k.node.key ? { ...n, media_type: "text" } : n)),
+  };
+  const s = factory.appendNode(
+    doc,
+    "subclass",
+    { x: 0, y: 0 },
+    factory.parentHintFor("subclass", k.node.key, doc, "l_main"),
+    "l_main",
+  );
+  doc = s.doc;
+  const m = factory.appendNode(
+    doc,
+    "mark",
+    { x: 0, y: 0 },
+    factory.parentHintFor("mark", controlKey, doc, "l_main"),
+    "l_main",
+  );
+  doc = m.doc;
+  const o = factory.appendNode(
+    doc,
+    "object",
+    { x: 0, y: 0 },
+    factory.parentHintFor("object", k.node.key, doc, "l_main"),
+    "l_main",
+  );
+  doc = o.doc;
+
+  const added = [k.node, s.node, m.node, o.node];
+  const unlinked = lint.analyzeUnlinked(doc);
+  check(
+    "四类新增即未接通：类目/子类/标记/对象 **全部灰显**（用户反馈的修复点）",
+    added.every((n) => Boolean(unlinked[n.key])),
+    added.map((n) => `${n.type}:${n.key}=${unlinked[n.key] ?? "（不灰显）"}`).join(", "),
+  );
+  check(
+    "四类新增即未接通：原因码正确（类目/标记 缺 control、子类/对象 缺结构父字段）",
+    unlinked[k.node.key] === "missing-control" &&
+      unlinked[m.node.key] === "missing-control" &&
+      unlinked[s.node.key] === "missing-class" &&
+      unlinked[o.node.key] === "missing-class",
+    `class=${unlinked[k.node.key]} subclass=${unlinked[s.node.key]} mark=${unlinked[m.node.key]} object=${unlinked[o.node.key]}`,
+  );
+  writeFixture("unattached_reference_types", doc);
+
+  // 四条线接上：面板→类目、类目→子类、面板→标记、类目→对象
+  const wiring = [
+    { from: controlKey, to: k.node.key, kind: "contains" },
+    { from: k.node.key, to: s.node.key, kind: "contains" },
+    { from: controlKey, to: m.node.key, kind: "contains" },
+    { from: k.node.key, to: o.node.key, kind: "contains" },
+  ];
+  let wired = doc;
+  for (const edge of wiring) {
+    wired = connect.applyConnect(wired, edge).doc;
+  }
+  const after = lint.analyzeUnlinked(wired);
+  check(
+    "连线即恢复：四条线接上后，这四类**都不再灰显**（字段由连线落定）",
+    added.every((n) => !after[n.key]),
+    `仍灰显=[${added.filter((n) => after[n.key]).map((n) => n.key).join(", ") || "无"}]`,
+  );
+  const byKey = new Map(wired.nodes.map((n) => [n.key, n]));
+  check(
+    "连线落字段：类目.control / 子类.subclass / 标记.control / 对象.class 都被写对（与父节点类型对齐）",
+    byKey.get(k.node.key).control === controlKey &&
+      byKey.get(s.node.key).subclass === k.node.key &&
+      byKey.get(m.node.key).control === controlKey &&
+      byKey.get(o.node.key).class === k.node.key,
+    `class.control=${byKey.get(k.node.key).control} subclass.subclass=${byKey.get(s.node.key).subclass} mark.control=${byKey.get(m.node.key).control} object.class=${byKey.get(o.node.key).class}`,
+  );
+  // 三条正交轴分流：对象挂到标记下时写的是 `mark_ref`（不是 `class`）
+  const objUnderMark = connect.applyConnect(doc, {
+    from: m.node.key,
+    to: o.node.key,
+    kind: "contains",
+  });
+  check(
+    "连线落字段：对象挂到**标记**下时写 `mark_ref`（三条正交轴按父节点类型分流）",
+    objUnderMark.patch.mark_ref === m.node.key &&
+      objUnderMark.doc.nodes.find((n) => n.key === o.node.key).mark_ref === m.node.key,
+    `patch=${JSON.stringify(objUnderMark.patch)}`,
+  );
+  // 去重：同一条线再连一次不改文档（与画布"亮绿圈"的判据同源）
+  const again = connect.applyConnect(wired, wiring[0]);
+  check(
+    "重复连线被去重（返回 edge=null 且文档对象未变）——与画布可连清单同判据",
+    again.edge === null && again.doc === wired,
+    `edge=${again.edge === null ? "null" : "重复"} docSame=${again.doc === wired}`,
+  );
+  // 两侧同口径：这四类在后端同样是"缺少必要引用"软告警（逐 key 对上）
+  const rust = rustWarnings(doc);
+  const mine = new Set(added.map((n) => n.key));
+  check(
+    "四类未接通在后端同口径：每条软告警都指向这四个 key 之一，且四个 key 都被报到",
+    rust !== null &&
+      added.every((n) => rust.some((w) => w.includes(n.key))) &&
+      rust.every((w) => [...mine].some((key) => w.includes(key))),
+    rust === null ? "Rust 输出解析失败" : `后端 ${rust.length} 条：${rust.map((w) => w.slice(0, 24)).join(" / ")}`,
+  );
 }
 
 // ---- 状态冲突规则的 TS/Rust 一致性（D66）----

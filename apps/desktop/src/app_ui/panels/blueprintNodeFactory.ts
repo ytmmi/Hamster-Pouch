@@ -1,5 +1,5 @@
 /**
- * 蓝图新节点工厂（RFC 0007 D31 / D51）：**本节点只定"类型 + 自身必备字段"，其余从上级推导**。
+ * 蓝图新节点工厂（RFC 0007 D31 / D51）：**本节点只定"类型 + 自身必备字段"**。
  *
  * 设计规则：
  * - **只追加自身（缺陷修复）**：一次"新增"只在画布上落下**使用者点选的那一个节点**，
@@ -11,12 +11,18 @@
  *   （操作/条件/状态补 `on`/`fires`、容器类型补 `contains`，类目/对象却只写字段），
  *   同一次点击在不同类型上表现不一致，且新节点落在视口中心、那条自动边横穿画布指向远处
  *   节点，看起来像"点一下多了一条线"。连线是使用者的显式动作：从输出端口拖到输入端口。
- * - **引用自动**：类节点的 `control`、对象节点的 `class` 等 key 型引用**不由用户填写**，
- *   从**显式选中的上级**推导（层级关系可在本层内兜底复用**既有**父节点）；
- *   **缺引用一律留空**（画布灰显「未接通」），由使用者拖线或在属性面板指定。
- *   引用字段与边是两层表达：字段说"我属于谁"（属性面板可见可改），边说"画布上连到谁"。
- * - **key 自动且可读**：由「上级 key + 自身类型标识」生成（如 `c_media` 下的图像类 →
- *   `c_media_image`，其下双击对象 → `c_media_image_dbl`），冲突才追加序号。
+ * - **引用字段也不在新增时落定（2026-10-10 用户口径，D109）**：早前"新增时顺手挂上"
+ *   （类目 → 面板、对象 → 类目、子类 → 类目、标记 → 面板）会把引用**字段**写进新节点，
+ *   而画布上**没有对应的线**——这些节点因此**不灰显**（字段有值＝未接通判据不成立），
+ *   与"没接线就该是灰色"的画布语言矛盾（用户反馈："类目、子类、标记、对象没有灰显"）。
+ *   ⚠️ 那层字段是**运行期真正认的绑定**（引擎按 `object.class` 等字段匹配），所以
+ *   "字段有值但不画线"必然导致画布与运行期口径分裂。现在统一为：
+ *   **连线是唯一的接线动作**——新增一律**留空引用**（画布灰显「未接通」），
+ *   使用者在画布上拖一条线，由 `blueprintConnect.applyConnect` 在同一份文档上
+ *   把**边 + 引用字段**一起落好。字段仍然"自动"（属性面板里只读展示、用户不手填），
+ *   只是触发时机从"新增"改成"连线"。
+ * - **key 自动且可读**：由**显式选中的上级** key + 自身类型标识生成（选中 `c_media` 后新增
+ *   类目 → `c_media_image`），冲突才追加序号；没选中就退回类型前缀 + 序号（`k_1`）。
  * - **层归属（D51）**：编辑器同一时刻只画**一个层**，因此新增节点一律归属**当前层**
  *   （由调用方传入 `layerKey`；缺省取文档第一个有效层）。
  *
@@ -27,12 +33,9 @@ import type { BlueprintGraph, BlueprintNode, BlueprintNodeType } from "@hamster-
 import {
   BLUEPRINT_BUILTIN_MARKS,
   defaultClassFieldsForPanel,
-  defaultSubclassFormatFor,
   effectiveLayers,
   mediaTypeHasSubclass,
-  nodeLayerKey,
   panelSpec,
-  structuralParentsOf,
 } from "@hamster-pouch/config";
 import type { PanelId } from "@hamster-pouch/config";
 import { PANEL_IDS } from "@hamster-pouch/config";
@@ -40,13 +43,16 @@ import { PANEL_IDS } from "@hamster-pouch/config";
 /**
  * 该上级**能否**承载这个新类型（RFC 0010 决策 4 / 面板标准第 5.1 节 / D102）。
  *
- * 两条收窄规则（都在编辑器侧拦，避免工厂产出必然被后端拒绝的文档）：
+ * 两条收窄规则（都在编辑器侧拦，避免把使用者挂到必然被后端拒绝的位置上）：
  * 1. **类目 / 标记**挂在面板下时，该面板必须 `has_class = true`（面板声明"有类目"）；
  * 2. **子类**挂在类目下时，该类目的媒体类型必须**有子类取值域**
  *    （当前只有 `text`；`image` 类目下建子类必然被校验拒绝）。
  *
  * 面板/类目当前无注册项或引用缺失时无从判定 → 放行，由蓝图侧按「未接通」处理
  * （缺失不得绑架用户数据）。
+ *
+ * 用途（D109 起**只剩一处**）：判断**使用者显式选中的**上级能不能当这个新节点的上级
+ * （决定 key 命名与缺省字段取自谁）。新增本身不再自动挂父级。
  */
 function parentAcceptsChild(
   doc: BlueprintGraph,
@@ -67,73 +73,6 @@ function parentAcceptsChild(
   return true;
 }
 
-/**
- * **有固定结构父的类型**（用户口径 2026-10-10）：
- * - **子类**是**类目的细分** → 结构父是类目（`class`）；
- * - **标记**与类目**平行、功能相似** → 结构父是面板（`control`）。
- *
- * ⚠️ **这不限制"能不能创建"**：所有类型都可随意创建（编辑器只规定**连接方式与层级**）。
- * 本清单只用于"新增时自动解析该挂到谁下面"——解析不到就**留空引用**（未接通灰显），
- * **不拒绝创建**。层级约束体现在**连线与引用**上（`kindForEdge` 判非法边、
- * 后端 `can_contain` 拒绝非法边），而不是创建许可。
- */
-export const MOUNT_REQUIRED_TYPES: readonly BlueprintNodeType[] = ["subclass", "mark"];
-
-/**
- * 该类型是否有**固定的结构父类型**（子类 → 类目；标记 → 面板）。
- *
- * 名字保留 `requires` 是为兼容既有引用；语义是"新增时需要一个挂载父**来解析**"，
- * **不是**"没有父就不许建"。
- */
-export function requiresMountParent(type: BlueprintNodeType): boolean {
-  return MOUNT_REQUIRED_TYPES.includes(type);
-}
-
-/** 该类型的**固定**结构父类型（子类 → `class`；标记 → `control`）；无则 `undefined`。 */
-export function mountParentTypeOf(type: BlueprintNodeType): BlueprintNodeType | undefined {
-  return requiresMountParent(type) ? structuralParentsOf(type)[0] : undefined;
-}
-
-/**
- * 在当前层内解析某类型**可用的挂载父节点** key：优先用**显式选中的**上级
- * （含沿上级链回溯），否则在同层内兜底复用**既有**父节点（只写引用字段，**不新建节点**）。
- *
- * 返回 `undefined` = 当前没有可用父级 → 调用方**留空引用**（未接通灰显），
- * **不是**拒绝创建。
- */
-export function resolveMountParent(
-  doc: BlueprintGraph,
-  type: BlueprintNodeType,
-  selectedKey: string | null,
-  layerKey?: string | null,
-): string | undefined {
-  const parentType = mountParentTypeOf(type);
-  if (!parentType) {
-    return undefined;
-  }
-  const hint = parentHintFor(type, selectedKey, doc, layerKey);
-  if (hint?.key && doc.nodes.some((n) => n.key === hint.key && n.type === parentType)) {
-    return hint.key;
-  }
-  const layer = layerKey?.trim() || undefined;
-  return firstAcceptingParent(doc, parentType, type, layer);
-}
-
-/** 在某层内找第一个**能承载**该新类型的上级（层缺省 = 不按层过滤）。 */
-function firstAcceptingParent(
-  doc: BlueprintGraph,
-  parentType: BlueprintNodeType,
-  childType: BlueprintNodeType,
-  layerKey?: string,
-): string | undefined {
-  return doc.nodes.find(
-    (n) =>
-      n.type === parentType &&
-      (!layerKey || nodeLayerKey(doc, n) === layerKey) &&
-      parentAcceptsChild(doc, n.key, childType),
-  )?.key;
-}
-
 /** 节点 key 前缀（独立节点，无上级时用）。 */
 export const TYPE_PREFIX: Record<string, string> = {
   interface: "ui",
@@ -150,30 +89,15 @@ export const TYPE_PREFIX: Record<string, string> = {
   action: "a",
 };
 
-/** 新增节点的**上级**：由使用者显式给出（选中某节点后新增，或在某节点上连线）。 */
+/** 新增节点的**上级**：由使用者**显式选中**给出（D84 / D109：不存在"兜底挂父级"）。 */
 export interface ParentHint {
   /** 上级节点 key。 */
   key: string;
   /**
-   * 是否"仅用给定上级"：为 true 时不做任何兜底复用——没有上级就新建一个最小上级链，
-   * 从而**不会**把新节点挂到别的既有节点上。
+   * 是否"使用者显式指定"：只有 `true` 才被工厂采纳——用于 key 命名与缺省字段取值。
+   * `false`/缺省 = 非显式（例如"同层里随便挑一个"），工厂**不予采纳**。
    */
   explicit?: boolean;
-}
-
-/**
- * 取**同层**第一个指定类型节点的 key（跨层引用会被校验以硬错误拒绝，RFC 0007 决策 6）。
- *
- * `layer` 为空 = 不限层（旧调用/单层兜底文档）；节点缺 `layer` 时按该层归属看待，
- * 与 `blueprintRuntime` 的当前层口径一致。
- */
-function firstOfInLayer(
-  nodes: BlueprintNode[],
-  type: BlueprintNodeType,
-  layer: string | undefined,
-): string | undefined {
-  const pool = layer ? nodes.filter((n) => (n.layer ?? layer) === layer) : nodes;
-  return pool.find((n) => n.type === type)?.key;
 }
 
 /** 全局唯一的 key：`base` 已被占用则追加 `_2`、`_3`… */
@@ -293,64 +217,63 @@ function createGroup(doc: BlueprintGraph, layer: string): { doc: BlueprintGraph;
   return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
-/** 建一个类目节点；`controlKey` 为空 = 引用留空（未接通，**不新建面板**）。
+/**
+ * 建一个类目节点（D109）：**引用一律留空**（`control` 由连线落定，见 `blueprintConnect`）。
  *
- * `media_type` 的缺省值按**所属面板**取（`defaultClassFieldsForPanel`）：
+ * `media_type` 的缺省值按**使用者显式选中的面板**取（`defaultClassFieldsForPanel`）：
  * 图书预览下新建的类目默认是**文本**类目，而不是"图像类目"——否则用户每次都要
- * 手动改下拉框才能得到想要的类目。 */
+ * 手动改下拉框才能得到想要的类目。
+ */
 function createClass(
   doc: BlueprintGraph,
-  controlKey: string | undefined,
   layer: string,
   parentKeyForName?: string,
   panelId?: string,
 ): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
-    key: nextNodeKey(doc.nodes, "class", parentKeyForName ?? controlKey),
+    key: nextNodeKey(doc.nodes, "class", parentKeyForName),
     type: "class",
     layer,
-    ...(controlKey ? { control: controlKey } : {}),
     ...defaultClassFieldsForPanel(panelId),
     position: tempPosition(doc),
   };
   return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
-/** 建一个**子类**节点（D102）：挂在类目下，`format` 取该类目分域的第一个取值。
+/**
+ * 建一个**子类**节点（D102 / D109）：**引用与 `format` 一律留空**。
  *
- * `subclass` 字段在子类节点上指**所属类目**（同名不同义，见节点定义表）。 */
+ * `subclass` 字段在子类节点上指**所属类目**（同名不同义，见节点定义表）；它只能由
+ * 连线落定——因此新增的子类必然灰显「未接通」，直到接上类目（那时 `format` 的可选域
+ * 由属性面板按所属类目给出）。
+ */
 function createSubclass(
   doc: BlueprintGraph,
-  classKey: string | undefined,
-  mediaType: string | undefined,
   layer: string,
   parentKeyForName?: string,
 ): { doc: BlueprintGraph; key: string } {
-  const format = defaultSubclassFormatFor(mediaType);
   const node: BlueprintNode = {
-    key: nextNodeKey(doc.nodes, "subclass", parentKeyForName ?? classKey),
+    key: nextNodeKey(doc.nodes, "subclass", parentKeyForName),
     type: "subclass",
     layer,
-    ...(classKey ? { subclass: classKey } : {}),
-    // 缺省给分域里第一个取值；该类目没有分域时留空（未接通软告警，可后补）。
-    ...(format ? { format } : {}),
     position: tempPosition(doc),
   };
   return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
-/** 建一个**标记**节点（D102）：与类目树平行，直接挂在面板下；`mark` 取清单第一个内置项。 */
+/**
+ * 建一个**标记**节点（D102 / D109）：与类目树平行、直接挂在面板下，
+ * `mark` 取清单第一个内置项；**`control` 引用留空**（由连线落定）。
+ */
 function createMark(
   doc: BlueprintGraph,
-  controlKey: string | undefined,
   layer: string,
   parentKeyForName?: string,
 ): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
-    key: nextNodeKey(doc.nodes, "mark", parentKeyForName ?? controlKey),
+    key: nextNodeKey(doc.nodes, "mark", parentKeyForName),
     type: "mark",
     layer,
-    ...(controlKey ? { control: controlKey } : {}),
     mark: BLUEPRINT_BUILTIN_MARKS[0],
     position: tempPosition(doc),
   };
@@ -358,22 +281,20 @@ function createMark(
 }
 
 /**
- * 建一个对象节点（默认双击）；`parentKey` 为空 = 引用留空（未接通，**不新建父节点**）。
+ * 建一个对象节点（默认双击；D109）：**三条正交轴的引用一律留空**。
  *
- * 结构父由 `parentField` 决定（三条正交轴之一）：`class` / `subclass` / `mark_ref`。
+ * 具体挂到 `class` / `subclass` / `mark_ref` 哪一条轴，由**连线**决定
+ * （`blueprintConnect.applyConnect` 按**父节点类型**分流写字段）。
  */
 function createObject(
   doc: BlueprintGraph,
-  parentKey: string | undefined,
-  parentField: "class" | "subclass" | "mark_ref",
   layer: string,
   parentKeyForName?: string,
 ): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
-    key: nextNodeKey(doc.nodes, "object", parentKeyForName ?? parentKey),
+    key: nextNodeKey(doc.nodes, "object", parentKeyForName),
     type: "object",
     layer,
-    ...(parentKey ? { [parentField]: parentKey } : {}),
     scope: "double_clicked",
     position: tempPosition(doc),
   };
@@ -426,50 +347,6 @@ function createAction(
   return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
-/**
- * 取"可作为 type 上级"的既有节点 key（**只在同一层内兜底**）。
- *
- * 只有**层级**关系允许兜底复用（类→控件、对象→类：这属于"放在哪个容器/父级下"，
- * 使用者心里有数）；**规则链**（操作/条件/状态）一律不兜底——否则新节点会被悄悄
- * 接到一条既有规则上，表现为"新增节点自动被连上线"。
- *
- * **子类与标记不在这里**：它们由 `resolveMountParent` 解析（同为"同层兜底复用既有父"），
- * 且多一道"解析不到就拒绝新增"的判定；两条路径分开是因为它们的失败语义不同
- * （类目/对象缺父可以留空未接通，子类/标记缺父必须拒绝）。
- */
-function fallbackParent(
-  doc: BlueprintGraph,
-  type: BlueprintNodeType,
-  layer: string,
-): string | undefined {
-  switch (type) {
-    case "class":
-      // 类目必须挂在**有类目**的面板下（RFC 0010 决策 4）：跳过错 `has_class = false`
-      // 的面板，避免工厂产出被后端拒绝的文档（编辑器职责，面板标准第 5.1 节）。
-      return firstAcceptingParent(doc, "control", "class", layer);
-    case "object":
-      // 本层内第一个结构父：优先类目（最常见的轴），没有再看子类/标记。
-      return (
-        firstOfInLayer(doc.nodes, "class", layer) ??
-        firstOfInLayer(doc.nodes, "subclass", layer) ??
-        firstOfInLayer(doc.nodes, "mark", layer)
-      );
-    default:
-      return undefined;
-  }
-}
-
-/** 由父节点 key 反推对象该写哪个引用字段（三条正交轴之一）。 */
-function inferObjectParentField(
-  doc: BlueprintGraph,
-  parentKey: string | undefined,
-): "class" | "subclass" | "mark_ref" {
-  const parent = parentKey ? doc.nodes.find((n) => n.key === parentKey) : undefined;
-  if (parent?.type === "subclass") return "subclass";
-  if (parent?.type === "mark") return "mark_ref";
-  return "class";
-}
-
 /** 一次"新增节点"的结果。 */
 export interface AppendNodeResult {
   /** 追加后的文档。 */
@@ -479,23 +356,22 @@ export interface AppendNodeResult {
 }
 
 /**
- * 构造并接入一个新节点：**只追加它自己**——不新建任何辅助节点，也**不产生任何边**。
+ * 构造并接入一个新节点：**只追加它自己**——不新建任何辅助节点、**不产生任何边**、
+ * 也**不落定任何引用字段**。
  *
  * **所有类型都可随意创建**（用户口径 2026-10-10）：编辑器**只规定连接方式与层级**，
- * 不限制"能不能建"。因此本函数**永不拒绝**——缺结构父时**引用留空**，节点在画布上
- * 灰显「未接通」，由使用者拖线或在属性面板补上（与 `class` / `object` 分支同一口径）。
+ * 不限制"能不能建"。因此本函数**永不拒绝**。
  *
- * **新增一律不连线**（用户口径 2026-10-10，D107；更正本函数早前的"选中上级即连一条边"）：
- * 返回值里的 `edges` **与传入文档逐项相同**——不论新增什么类型、不论选中了哪个节点，
- * 画布上都**不会**冒出使用者没拖过的线。理由是"自动连线"只覆盖**部分类型**
- * （操作/条件/状态会补 `on`/`fires`，容器类型会补 `contains`，而类目/对象只写引用字段），
- * 同一次点击在不同类型上表现不一致；且新节点落在**视口中心**，那条自动边会横穿画布
- * 指向一个远处的节点，看起来像"点一下多了条线"。连线是使用者的显式动作：从端口拖到端口。
+ * **新增一律不连线**（用户口径 2026-10-10，D107）：返回值里的 `edges` **与传入文档逐项相同**。
+ * **新增也不落定引用字段**（用户口径 2026-10-10，D109）：类目/子类/标记/对象新增后
+ * **引用留空 → 画布灰显「未接通」**，使用者在画布上拖一条线接上（`blueprintConnect`
+ * 会把**边 + 引用字段**一起落好）。
+ * 这样"未接通"与运行期口径**永远一致**：引擎认的就是那层字段，字段只在连线时产生，
+ * 因此"画布上没线"⇔"字段为空"⇔"运行期真的不生效"⇔"灰显"——四者等价。
  *
- * **仍然自动写引用字段**（画布上不可见的那层绑定）：类目 → 面板、对象 → 类目/子类/标记、
- * 子类 → 类目、标记 → 面板，优先取**显式选中**的上级，其次在**同层内**兜底复用**既有**父节点
- * （只写字段、不新建节点）；解析不到就**留空**。它与"边"是两层表达：字段说"我属于谁"
- * （属性面板可见、可手改），边说"画布上连到谁"（使用者拖出来）。
+ * `parent` = 使用者的**显式选中**上级（`explicit`），只用于两件事：
+ * ① key 命名（`c_media` 下新增类目 → `c_media_image`）；② 缺省字段取值
+ * （类目的 `media_type` 按选中面板取，图书预览下默认 `text`）。**不用于挂父级**。
  *
  * `layerKey` = 新增节点归属的层（D51；缺省取文档第一个有效层）。
  */
@@ -507,19 +383,12 @@ export function appendNode(
   layerKey?: string | null,
 ): AppendNodeResult {
   const layer = resolveLayer(doc, layerKey);
+  // **只认显式选中的上级**（`explicit`）且必须真实存在：它只影响命名与缺省取值。
   const hinted =
-    parent?.key && doc.nodes.some((n) => n.key === parent.key)
+    parent?.explicit && parent.key && doc.nodes.some((n) => n.key === parent.key)
       ? parent.key
       : undefined;
   const parentNode = hinted ? doc.nodes.find((n) => n.key === hinted) : undefined;
-
-  // **挂载父**（子类 → 类目；标记 → 面板）：优先显式选中的上级，其次同层内兜底复用
-  // **既有**父节点（只写引用字段，**不新建节点**）；解析不到就**留空引用**
-  // （未接通灰显）——创建一律放行，不因缺父而拒绝。
-  let mountParent: string | undefined;
-  if (requiresMountParent(type)) {
-    mountParent = resolveMountParent(doc, type, hinted ?? null, layer);
-  }
 
   let work = doc;
   let key: string;
@@ -538,56 +407,41 @@ export function appendNode(
       break;
     }
     case "class": {
-      // 上级只能来自**显式选中**的节点，或在**本层内**兜底复用**既有**面板（层级关系，
-      // 不跨链路挂钩）；没有可用上级就**留空引用**（画布灰显未接通），绝不新建面板补链。
-      // 只有面板能当类目的结构父——选中别的类型时不硬套（避免"引用类型不符"硬错误）。
-      const upstream = parentNode?.type === "control" ? hinted : undefined;
-      const controlKey = upstream ?? fallbackParent(work, "class", layer);
-      // 类目的媒体类型域由**所属面板**决定（`hasClass` 说有类目，缺省值看面板 id）。
-      const ownerPanelId = controlKey
-        ? work.nodes.find((n) => n.key === controlKey)?.panel_id
-        : undefined;
-      const created = createClass(work, controlKey, layer, upstream ?? controlKey, ownerPanelId);
+      // 类目的结构父是**面板**（`control ⊃ class`）。引用留空 —— 由使用者拖线落定（D109）。
+      // 选中面板时只借它两件事：key 命名（`c_media` → `c_media_image`）与
+      // `media_type` 的缺省值（图书预览下默认 `text`）。只有面板能当类目的结构父，
+      // 选中别的类型时不硬套（避免"引用类型不符"硬错误）。
+      const ownerControl = parentNode?.type === "control" ? parentNode : undefined;
+      const created = createClass(work, layer, ownerControl?.key, ownerControl?.panel_id);
       work = created.doc;
       key = created.key;
       break;
     }
     case "subclass": {
-      // 子类的结构父是**类目**（`class ⊃ subclass`）。父级由上面的 `resolveMountParent`
-      // 解析（显式选中优先，其次同层兜底复用既有类目）；**解析不到就留空引用**——
-      // 创建放行，节点灰显「未接通」，由使用者拖线补上。
-      const classKey = mountParent;
-      const ownerMedia = classKey
-        ? work.nodes.find((n) => n.key === classKey)?.media_type
-        : undefined;
-      const created = createSubclass(work, classKey, ownerMedia, layer, classKey);
+      // 子类的结构父是**类目**（`class ⊃ subclass`）。引用与 `format` 一律留空——
+      // 接上类目后 `format` 的可选域才由属性面板按该类目给出（D109）。
+      const ownerClass = parentNode?.type === "class" ? parentNode : undefined;
+      const created = createSubclass(work, layer, ownerClass?.key);
       work = created.doc;
       key = created.key;
       break;
     }
     case "mark": {
-      // 标记的结构父是**面板**（与类目树平行、功能相似）。同样**解析不到就留空引用**。
-      const controlKey = mountParent;
-      const created = createMark(work, controlKey, layer, controlKey);
+      // 标记的结构父是**面板**（与类目树平行、功能相似）。引用留空（D109）。
+      const ownerControl = parentNode?.type === "control" ? parentNode : undefined;
+      const created = createMark(work, layer, ownerControl?.key);
       work = created.doc;
       key = created.key;
       break;
     }
     case "object": {
-      // 结构父有**三条正交轴**：显式选中的是哪一条就挂哪一条（类目 / 子类 / 标记）。
-      // 没有可用上级就**留空引用**（画布灰显未接通），绝不新建父节点补链。
-      const axis: "class" | "subclass" | "mark_ref" | undefined =
-        parentNode?.type === "class"
-          ? "class"
-          : parentNode?.type === "subclass"
-            ? "subclass"
-            : parentNode?.type === "mark"
-              ? "mark_ref"
-              : undefined;
-      const upstream = axis ? hinted : undefined;
-      const parentKey = upstream ?? fallbackParent(work, "object", layer);
-      const parentField = axis ?? inferObjectParentField(work, parentKey);
-      const created = createObject(work, parentKey, parentField, layer, upstream ?? parentKey);
+      // 对象的**三条正交轴**（类目 / 子类 / 标记）选定哪一条由**连线**决定；
+      // 新增时全部留空（D109）。选中的是三条轴之一时，只借它命名。
+      const axisParent =
+        parentNode && ["class", "subclass", "mark"].includes(parentNode.type)
+          ? parentNode
+          : undefined;
+      const created = createObject(work, layer, axisParent?.key);
       work = created.doc;
       key = created.key;
       break;
@@ -655,12 +509,16 @@ export function appendNode(
   };
 }
 /**
- * 推断新增节点该用谁当"上级"（决定自动 key 与自动引用）：由**当前选中节点**沿上级链找
- * 第一个类型匹配的节点。返回 `explicit` 标记，表示"这是使用者表达过的意图"，
- * 工厂据此**不做**跨链路兜底复用。
+ * 推断新增节点该用谁当"上级"：由**当前选中节点**沿上级链找第一个类型匹配的节点，
+ * 返回 `{ key, explicit: true }`。
  *
- * `layerKey` = 当前层（D51）：未选中时的层内兜底只在该层里找，
- * 避免在多层文档里把新节点挂到别的层（跨层引用是硬错误，RFC 0007 决策 6）。
+ * **只认使用者的显式选中**（RFC 0007 决策 7 / D84；D109 起彻底不再"同层兜底复用既有父"）：
+ * 没有选中、或选中的链上没有匹配类型时返回 `null`。工厂据此：
+ * ① 让新节点落下来时**引用留空**（画布灰显「未接通」）；② 用这个 key 给新节点**命名**、
+ * 并取缺省字段（如类目的 `media_type` 按选中面板取）。
+ * 真正的接线由**画布连线**完成（`blueprintConnect.applyConnect` 落边 + 引用字段）。
+ *
+ * `layerKey` 保留在签名里供既有调用方使用（跨层引用是硬错误，RFC 0007 决策 6）。
  */
 export function parentHintFor(
   type: BlueprintNodeType,
@@ -668,31 +526,10 @@ export function parentHintFor(
   doc: BlueprintGraph,
   layerKey?: string | null,
 ): ParentHint | null {
+  void layerKey;
   if (!selectedKey) {
-    // 未选中：普通层级（类目/子类/标记/对象）可以兜底挂到已有父节点；规则链节点不兜底，
-    // 免得新节点被接到一条既有规则上。
-    const allowed: BlueprintNodeType[] =
-      type === "class"
-        ? ["control"]
-        : type === "mark"
-          ? ["control"]
-          : type === "subclass"
-            ? ["class"]
-            : type === "object"
-              ? ["class", "subclass", "mark"]
-              : [];
-    if (allowed.length === 0) {
-      return null;
-    }
-    // 三条轴按顺序找**能承载该类型**的第一个父节点（`parentAcceptsChild` 会跳过
-    // 无子类取值域的类目、无类目的面板等）。
-    const layer = layerKey?.trim() || undefined;
-    for (const parentType of allowed) {
-      const key = firstAcceptingParent(doc, parentType, type, layer);
-      if (key) {
-        return { key };
-      }
-    }
+    // 没选中 = 没有"显式指定的上级"。**不做任何同层兜底**：那会让新节点悄悄挂到
+    // 使用者没点过的父级上（D109），且画布上看不出这条绑定。
     return null;
   }
   const wanted: BlueprintNodeType[] =
