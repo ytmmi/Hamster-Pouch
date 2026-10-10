@@ -300,13 +300,16 @@
                 "nodes":[
                   {"key":"ui_main","type":"interface","layer":"l_main"},
                   {"key":"ui_edit","type":"interface","layer":"l_edit"},
+                  {"key":"blk","type":"layout_block","name":"栏","layer":"l_main"},
                   {"key":"c","type":"control","panel_id":"viewer","layer":"l_main"},
                   {"key":"e","type":"event","trigger":"click","layer":"l_main"},
                   {"key":"a","type":"action","op":"navigate","target":"ui_edit","layer":"l_main"}
                 ],
                 "edges":[
-                  {"from":"c","to":"e","kind":"on","order":1},
-                  {"from":"e","to":"a","kind":"fires","order":1}
+                  {"from":"ui_main","to":"blk","kind":"contains","order":1},
+                  {"from":"blk","to":"c","kind":"contains","order":2},
+                  {"from":"c","to":"e","kind":"on","order":3},
+                  {"from":"e","to":"a","kind":"fires","order":4}
                 ]}"#,
         )
         .unwrap();
@@ -497,6 +500,104 @@
                 .any(|w| w.contains("未连接到界面")),
             "断开界面连接应报未接通：{:?}",
             detached.warnings()
+        );
+    }
+
+    #[test]
+    fn warnings_report_missing_structural_parent() {
+        // 结构父缺失（D108）：`布局块 / 标签组 / 面板` 没有 `contains` 入边 = 不属于任何
+        // 页面/容器 → **未接通**（软告警，不阻塞保存）。它是「新增节点不再自动连线」之后
+        // "刚摆下还没接好"的可见形态，与前端 `blueprintLint` 同口径（由
+        // `pnpm check:blueprint-nodes` 的 TS↔Rust 一致性断言把两侧钉在一起）。
+        let orphan = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"blk","type":"layout_block","name":"栏","layer":"l_a"},
+                  {"key":"g","type":"group","mode":"exclusive","layer":"l_a"},
+                  {"key":"c","type":"control","panel_id":"tasks","layer":"l_a"}
+                ],
+                "edges":[]}"#,
+        )
+        .unwrap();
+        assert!(orphan.validate().is_empty(), "{:?}", orphan.validate());
+        let orphan_warnings = orphan.warnings();
+        let missing = orphan_warnings
+            .iter()
+            .filter(|w| w.contains("没有结构父"))
+            .count();
+        assert_eq!(
+            missing,
+            3,
+            "布局块/标签组/面板三个都应报结构父缺失（界面是层根，不报）：{:?}",
+            orphan_warnings
+        );
+
+        // 接好之后告警消失（界面 → 布局块 → 标签组/面板）
+        let wired = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"blk","type":"layout_block","name":"栏","layer":"l_a"},
+                  {"key":"g","type":"group","mode":"exclusive","layer":"l_a"},
+                  {"key":"c","type":"control","panel_id":"tasks","layer":"l_a"}
+                ],
+                "edges":[
+                  {"from":"ui","to":"blk","kind":"contains","order":1},
+                  {"from":"blk","to":"g","kind":"contains","order":2},
+                  {"from":"g","to":"c","kind":"contains","order":3}
+                ]}"#,
+        )
+        .unwrap();
+        assert!(
+            wired.warnings().is_empty(),
+            "接好结构父后不应再有未接通：{:?}",
+            wired.warnings()
+        );
+
+        // **兼容旧图**：面板用 `memberOf` 指向标签组（D59 之前的写法）也算接好了
+        let legacy = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"blk","type":"layout_block","name":"栏","layer":"l_a"},
+                  {"key":"g","type":"group","mode":"exclusive","layer":"l_a"},
+                  {"key":"c","type":"control","panel_id":"tasks","layer":"l_a"}
+                ],
+                "edges":[
+                  {"from":"ui","to":"blk","kind":"contains","order":1},
+                  {"from":"blk","to":"g","kind":"contains","order":2},
+                  {"from":"c","to":"g","kind":"memberOf","order":3}
+                ]}"#,
+        )
+        .unwrap();
+        assert!(
+            !legacy.warnings().iter().any(|w| w.contains("没有结构父")),
+            "`面板 --memberOf--> 标签组`（兼容旧图）也算接好：{:?}",
+            legacy.warnings()
+        );
+
+        // **悬空边不算接好**（与前端 `byKey.has(...)` 一致；悬空边本身是硬错误）
+        let dangling = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"A"}],
+                "nodes":[
+                  {"key":"c","type":"control","panel_id":"tasks","layer":"l_a"}
+                ],
+                "edges":[{"from":"gone","to":"c","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(!dangling.validate().is_empty(), "悬空边应是硬错误");
+        assert!(
+            dangling
+                .warnings()
+                .iter()
+                .any(|w| w.contains("没有结构父")),
+            "指向不存在节点的边不算结构父：{:?}",
+            dangling.warnings()
         );
     }
 

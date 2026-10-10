@@ -324,14 +324,18 @@
 
         let ok = BlueprintGraph::from_json(
             r#"{"schema_version":1,"nodes":[
+              {"key":"ui","type":"interface"},
+              {"key":"blk","type":"layout_block","name":"栏"},
               {"key":"c","type":"control","panel_id":"viewer"},
               {"key":"k","type":"class","control":"c","media_type":"image"},
               {"key":"o","type":"object","class":"k","scope":"double_clicked"},
               {"key":"e","type":"event","trigger":"double_click"},
               {"key":"a","type":"action","op":"show","target":"c"}
             ],"edges":[
-              {"from":"o","to":"e","kind":"on","order":1},
-              {"from":"e","to":"a","kind":"fires","order":2}
+              {"from":"ui","to":"blk","kind":"contains","order":1},
+              {"from":"blk","to":"c","kind":"contains","order":2},
+              {"from":"o","to":"e","kind":"on","order":3},
+              {"from":"e","to":"a","kind":"fires","order":4}
             ]}"#,
         )
         .unwrap();

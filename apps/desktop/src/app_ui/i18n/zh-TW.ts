@@ -515,6 +515,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.bladeRemovedUnlinked": "劃線刪除：{nodes} 個節點、{edges} 條連線；{count} 個關聯節點因引用斷開而暫未接通（灰色）",
   "blueprint.unlinkedTag": "未接通",
   "blueprint.unlinkedHint": "有 {count} 個節點暫未接通（灰色，不會生效）：接回引用後即恢復。",
+  "blueprint.connectHint": "從輸出埠拖出連線：可連線的埠亮綠圈、節點泛綠，就近吸附",
   "blueprint.bladeHint": "按住右鍵拖過連線/節點 = 刪除",
   "blueprint.autoTag": "自動",
   "blueprint.derivedEmpty": "未接通（連線後自動取得）",

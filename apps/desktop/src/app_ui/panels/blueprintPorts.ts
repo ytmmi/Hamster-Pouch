@@ -15,6 +15,7 @@ import {
   nodeSpecOrNull,
   resolveNodePorts,
   type BlueprintEdge,
+  type BlueprintNode,
   type BlueprintNodeType,
 } from "@hamster-pouch/config";
 
@@ -24,6 +25,21 @@ import type { Translate, TranslationKey } from "../i18n";
 export interface PortDef {
   id: string;
   side: "in" | "out";
+}
+
+/**
+ * 端口在画布 DOM 上的标记（`data-port` 属性值）：`${节点 key}::${侧}::${端口 id}`。
+ *
+ * **这是画布、端口测量与门禁共用的唯一拼法**：早前这段模板在画布与自检脚本里各写一遍，
+ * 一旦有一侧改了就出现"数据里有边、画布上找不到端口坐标"的静默丢线。凡是需要
+ * "某个端口在 DOM 里叫什么"，一律走本函数。
+ */
+export function portDomId(
+  key: string,
+  side: "in" | "out",
+  portId: string,
+): string {
+  return `${key}::${side}::${portId}`;
 }
 
 /** 输入端口 id：结构节点用 `contains`，面板/状态用 `in`，规则节点用各自的边名。 */
@@ -143,6 +159,90 @@ export function portIdFor(
   }
   // 输出侧：规则边用边类型同名端口（on/fires/guards/memberOf），结构边用 `contains`。
   return ports.some((p) => p.side === "out" && p.id === kind) ? kind : "";
+}
+
+/** 某侧声明过的端口 id（顺序 = 画布渲染顺序）。 */
+export function portIdsOn(type: BlueprintNodeType, side: "in" | "out"): string[] {
+  return portsOf(type)
+    .filter((p) => p.side === side)
+    .map((p) => p.id);
+}
+
+/**
+ * **渲染与测量用**的端口 id：先按边类型找同名端口（`portIdFor`），找不到就**回落**
+ * 到该侧声明的第一个端口。
+ *
+ * 为什么需要它（真实缺陷的根因类别）：`portIdFor` 是**契约函数**——"这条边该落在哪个
+ * 端口"说不清时**必须**返回空串，由调用方拒绝该操作（门禁断言它只返回声明过的端口）。
+ * 但**画布渲染**不能这么严格：库里已有的边（历史文档、JSON 手写、插件类型、
+ * 边类型与端口 id 不同名的自定义类型）一旦查不到端口，整条线就被 `return null` 静默丢掉，
+ * 表现为用户报的"连线成功后画布上没有线"。渲染侧的判据因此是"**能不能画出这条线**"，
+ * 而不是"这条边合不合规"：不合规的边由校验层拒绝保存，画布只负责如实画出来。
+ * 节点在该侧**没有任何端口**时（未注册类型 / 无端口类型）返回空串，由
+ * `blueprintGeometry.resolveEdgeAnchor` 回落到卡片锚点，仍然画得出来。
+ */
+export function portIdForRender(
+  type: BlueprintNodeType,
+  side: "in" | "out",
+  kind: BlueprintEdge["kind"],
+): string {
+  const exact = portIdFor(type, side, kind);
+  if (exact) {
+    return exact;
+  }
+  return portIdsOn(type, side)[0] ?? "";
+}
+
+/** 一次拖线可以落到的目标（**画布高亮与落点判定共用同一份清单**）。 */
+export interface ConnectTarget {
+  /** 目标节点 key。 */
+  key: string;
+  /** 目标节点的**输入端口 id**（DOM 标记见 `portDomId`）。 */
+  portId: string;
+  /** 这条连线会落成的边类型。 */
+  kind: BlueprintEdge["kind"];
+}
+
+/**
+ * 从某个**输出端口**拖出的线**可以落在哪些输入端口**上（纯函数）。
+ *
+ * 判据三条合一（与后端 `can_contain` / 规则边来源目标表同源）：
+ * ① `kindForEdge(源类型, 源端口, 目标类型)` 推得出边类型（层级/规则都合法）；
+ * ② 目标该侧**确实声明了**这个端口（否则画布上没有那个圆点，无从高亮/落点）；
+ * ③ 同 `(from, to, kind)` 的边**尚不存在**（去重，与 `onConnect` 的判据一致）。
+ *
+ * 同一份清单同时驱动两件事：拖拽时的**绿色高亮**（哪几个端口能连）与放开时的
+ * **落点判定**（就近吸附）。早前这两件事分属"DOM 命中"与"画布自己算"两套判据，
+ * 表现是"看着能连、放开却没连上"（拖到端口旁边的标签上就落空）。
+ */
+export function connectTargets(
+  from: BlueprintNode,
+  fromPort: string,
+  nodes: readonly BlueprintNode[],
+  edges: readonly BlueprintEdge[],
+): ConnectTarget[] {
+  if (!nodeHasPort(from.type, "out", fromPort)) {
+    return [];
+  }
+  const targets: ConnectTarget[] = [];
+  for (const node of nodes) {
+    if (node.key === from.key) {
+      continue;
+    }
+    const kind = kindForEdge(from.type, fromPort, node.type);
+    if (!kind) {
+      continue;
+    }
+    const portId = portIdFor(node.type, "in", kind);
+    if (!portId || !nodeHasPort(node.type, "in", portId)) {
+      continue;
+    }
+    if (edges.some((e) => e.from === from.key && e.to === node.key && e.kind === kind)) {
+      continue;
+    }
+    targets.push({ key: node.key, portId, kind });
+  }
+  return targets;
 }
 
 /**

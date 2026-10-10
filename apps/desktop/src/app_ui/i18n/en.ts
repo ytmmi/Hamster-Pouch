@@ -515,6 +515,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.bladeRemovedUnlinked": "Blade deleted {nodes} node(s) and {edges} edge(s); {count} related node(s) are now unlinked (shown gray)",
   "blueprint.unlinkedTag": "unlinked",
   "blueprint.unlinkedHint": "{count} node(s) are unlinked (gray, not effective): reconnect to restore.",
+  "blueprint.connectHint": "Drag from an output port: connectable ports glow green (nodes too) and snap to the nearest one",
   "blueprint.bladeHint": "Hold right button and drag over edges/nodes to delete",
   "blueprint.autoTag": "auto",
   "blueprint.derivedEmpty": "unlinked (filled automatically when connected)",

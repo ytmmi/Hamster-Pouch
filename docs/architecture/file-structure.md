@@ -113,7 +113,9 @@ apps/desktop/src/app_ui/
     blueprintLayout.ts    # 蓝图 → dockview 对账（**只对账当前层**；默认可见标签、组收起/展开与尺寸记忆）
     blueprintSync.ts      # 保存布局时把 dockview 结构增量同步进蓝图（D59）
     blueprintRevision.ts  # 跨窗口"已保存"令牌
-    blueprintLint.ts      # 由图结构派生「未接通」节点（画布灰显）
+    blueprintLint.ts      # 由图结构派生「未接通」节点（画布灰显）；含 D108 结构父缺失
+                          #   （布局块/标签组/面板 无 contains 入边）——与 hp-core
+                          #   `blueprint_warnings.rs` **两侧同口径**，由 check:blueprint-nodes 比对
     control/              # 控件标准的宿主侧（受控渲染；`docs/spec/control-standard.md`）
       ControlPanelView.tsx  # 面板级入口：解析 + 两级校验通过才渲染，失败降级为错误态
       ControlNodeView.tsx   # 单节点渲染（可见性求值 + 节点级错误边界 + 递归子节点）
@@ -204,7 +206,9 @@ apps/desktop/src/app_ui/
     BlueprintToolbar.tsx    # 编辑器工具条（名称/保存/一键整理/**刷新**/恢复内置默认/删除/视图切换）
     BlueprintPalette.tsx    # 节点添加面板（**所有类型都可随意创建**，无置灰；层级约束体现在连线上）
     BlueprintJsonView.tsx   # JSON 文本视图（直接改 JSON + 解析回文档）
-    BlueprintCanvas.tsx     # 节点画布（拖拽/连线/平移缩放/右键直线刀痕**批量删除**；**只渲染当前层**；挂右下角小地图）
+    BlueprintCanvas.tsx     # 节点画布（拖拽/连线/平移缩放/右键直线刀痕**批量删除**；**只渲染当前层**；挂右下角小地图；
+                            #   连线体验 D107：**几何命中**（连线 10px / 节点外扩 6px）+ **就近吸附**（端口 34px）+
+                            #   拖线时**绿圈高亮可连端口**；端点坐标**四级回落**→ 数据里有边就画得出线）
     BlueprintMinimap.tsx    # 小地图（缩略当前层节点/连线 + 视口指示框；拖动即把视口中心移到该处）
     BlueprintInspector.tsx  # 节点属性面板（浮层 visible/height/size/anchor/offset/shadow/radius/hide_label）
     BlueprintLayerBar.tsx   # 层工具条（切换/新增/重命名/删除/排序 + 无根层标记）
@@ -213,15 +217,17 @@ apps/desktop/src/app_ui/
     useBlueprintLayerTools.ts  # 层工具接线（切层 / 新增 / 重命名 / 排序 / 删除 / 设为主界面 + 无根层派生）
     useBlueprintGraphEdits.ts  # 图编辑动作接线（新增节点 / 改字段 / 软删除 / 删边 / **连线原子落引用** / 一键整理）
     useBlueprintUnlinked.ts    # 未接通节点的面板侧派生（画布灰显与顶部提示用的 key 集合；随 refreshKey 重算）
-    blueprintNodeFactory.ts # 新节点工厂（**只追加自身**：不补最小链、不跨链路挂钩；引用由显式上级推导、**兜底引用只在本层内找**；**所有类型都可随意创建**——`appendNode` 永不拒绝，子类/标记缺父时引用留空）
-    blueprintPorts.ts       # 端口与边类型契约（**由 `packages/config` 的节点定义表投影**而来）
+    blueprintNodeFactory.ts # 新节点工厂（**只追加自身**：不补最小链、不跨链路挂钩、**不产生任何边**；引用由显式上级推导、**兜底引用只在本层内找**；**所有类型都可随意创建**——`appendNode` 永不拒绝，子类/标记缺父时引用留空）
+    blueprintPorts.ts       # 端口与边类型契约（**由 `packages/config` 的节点定义表投影**而来）：`portIdFor`（契约）/
+                            #   `portIdForRender`（渲染兜底）/ `portDomId`（DOM 标记唯一拼法）/ `connectTargets`（可连端口清单）
     blueprintLabels.ts      # 节点本地化显示层（显示名/摘要/字段标签；画布与属性面板共用）
     blueprintNodeColors.ts  # 节点/边配色纯数据（画布与小地图共用同一份色板；未知/插件类型有中性兜底色）
     blueprintLayers.ts      # 层操作纯函数（新增层自带界面根/重命名唯一/排序/补根）
     blueprintDelete.ts      # 软删除（节点）+ 一次划线批量删除 `softRemoveMany`（原子）+ 层硬删除 removeLayer（D55）
     blueprintSlots.ts       # 画布槽位（就近空槽；**新增节点落位口径，不受"整理"的间距调整影响**）
     blueprintArrange.ts     # 「一键整理」纯算法（**起始节点位置不变**；间距 ≥ 卡片高 + 余量；落位避让孤立节点）
-    blueprintGeometry.ts    # 纯几何（视口换算/贝塞尔采样/刀痕命中）
+    blueprintGeometry.ts    # 纯几何（视口换算/贝塞尔采样/刀痕命中；D107 追加：端点**四级回落** `resolveEdgeAnchor`、
+                            #   `worldToCanvas`、点到折线/矩形距离、`nearestWithin`（就近吸附））
     blueprintMinimapGeometry.ts # 小地图纯几何（包围盒/等比缩放/坐标换算/视口矩形）
     blueprintStructure.ts   # 由当前布局生成结构骨架（单层）+ 跨窗口结构快照
     repoDisplay.ts          # 仓库面板的**当前仓库显示名**解析（纯函数：按 repoId 查名字，
@@ -369,7 +375,7 @@ HamsterPouch/
     issues/                   # **缺陷与已知问题登记**（编号 NNNN；准入判据见该目录 README：
                               #   违反已确认决策/已定稿规范，或造成数据损坏。「还没做」属 roadmap 不属此列）
   tools/                      # 开发脚本、校验脚本、迁移检查
-                              # 自检脚本（`pnpm check:*`）：蓝图 runtime/delete/engine/nodes/geometry/slots、
+                              # 自检脚本（`pnpm check:*`）：蓝图 runtime/delete/engine/nodes/**connect**/geometry/slots、
                               #   控件标准 `control-check.mjs`（Rust↔TS 注册表、渲染覆盖、文档一致性）、
                               #   **布局结构 `layout-check.mjs`**（grid.root 必须是 branch 等 dockview 不变量）、
                               #   行数与文档状态。节点/控件夹具目录**只由脚本产出**，不手工维护。

@@ -96,6 +96,107 @@ export function segmentHitsPolyline(
   return false;
 }
 
+/** 点到折线的最小距离（空折线 = `Infinity`）。 */
+export function pointToPolylineDistance(p: Point, polyline: readonly Point[]): number {
+  if (polyline.length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+  if (polyline.length === 1) {
+    return Math.hypot(p.x - polyline[0].x, p.y - polyline[0].y);
+  }
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i + 1 < polyline.length; i += 1) {
+    best = Math.min(best, pointToSegmentDistance(p, polyline[i], polyline[i + 1]));
+  }
+  return best;
+}
+
+/** 点到矩形的最小距离（矩形内 = 0）。 */
+export function pointToRectDistance(p: Point, rect: RectBox): number {
+  const dx = Math.max(rect.x - p.x, 0, p.x - (rect.x + rect.w));
+  const dy = Math.max(rect.y - p.y, 0, p.y - (rect.y + rect.h));
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * 半径内**最近**的一项（无 = `null`）。
+ *
+ * 判据是纯几何（点距），与 DOM 命中无关：端口只有 12–14 px，靠 `elementFromPoint`
+ * 要求指针精确压在那个圆点上，稍微偏到旁边的标签文字就落空（用户报的"看着能连、
+ * 放开却没连上"）。改成"**半径内就近吸附**"后，手感由半径这个**可调常数**决定，
+ * 而不是由 DOM 盒子的边界决定。距离相等时取列表靠前者（确定性，便于门禁断言）。
+ */
+export function nearestWithin<T>(
+  items: readonly { point: Point; value: T }[],
+  p: Point,
+  maxDistance: number,
+): { value: T; point: Point; distance: number } | null {
+  let best: { value: T; point: Point; distance: number } | null = null;
+  for (const item of items) {
+    const distance = Math.hypot(item.point.x - p.x, item.point.y - p.y);
+    if (distance > maxDistance) {
+      continue;
+    }
+    if (!best || distance < best.distance) {
+      best = { value: item.value, point: item.point, distance };
+    }
+  }
+  return best;
+}
+
+/** 世界坐标 ↔ 画布局部坐标的视口参数（与画布的 `translate/scale` 同源）。 */
+export interface CanvasView {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+/** 世界坐标 → 画布局部坐标（`view` 变换的正向；`toWorld` 的逆）。 */
+export function worldToCanvas(p: Point, view: CanvasView): Point {
+  const zoom = view.zoom || 1;
+  return { x: view.x + p.x * zoom, y: view.y + p.y * zoom };
+}
+
+/** 连线端点锚点的四级候选（按**可信度**从高到低）。 */
+export interface EdgeAnchorInput {
+  /** ① 端口元素量出的画布局部坐标（最准：含卡片实际高度与缩放）。 */
+  measured?: Point;
+  /** ② 端点所在节点卡片的量出矩形（端口此刻没量到时用）。 */
+  card?: RectBox;
+  /** ③ 该端口**相对卡片左上角**的偏移（上一次量到时记下的）。 */
+  offset?: Point;
+  /** ④ 节点世界坐标（连卡片都没量到时用；未布局的画布也能画对位置）。 */
+  world?: Point;
+  /** 端点在哪一侧（决定卡片兜底是左沿还是右沿）。 */
+  side: "in" | "out";
+  view: CanvasView;
+}
+
+/**
+ * 连线端点的画布坐标：**任何情况下只要节点还在画布上，就一定能算出一个点**。
+ *
+ * 这条是"数据里有边、画布上没线"的结构性修复：早前渲染侧只认①（`portMap` 查表），
+ * 查不到就 `return null` 把整条线丢掉——而查不到的原因有很多（端口未渲染、类型无注册项、
+ * 面板尚未布局量到 0、文档里的边引用了别的层的节点…），每一种都会表现成"线没了"。
+ * 现在逐级回落：端口测量 → 卡片 + 端口偏移 → 卡片边沿 → 节点世界坐标。
+ *
+ * 四级都拿不到（节点不在文档里）才返回 `null`。
+ */
+export function resolveEdgeAnchor(input: EdgeAnchorInput): Point | null {
+  const { measured, card, offset, world, side, view } = input;
+  if (measured) {
+    return measured;
+  }
+  if (card) {
+    const edgeX = side === "in" ? card.x : card.x + card.w;
+    return {
+      x: offset ? card.x + offset.x : edgeX,
+      y: card.y + (offset ? offset.y : card.h / 2),
+    };
+  }
+  return world ? worldToCanvas(world, view) : null;
+}
+
 /**
  * 画布视口中心对应的世界坐标（新增节点应落在这里——**渲染出来的可见区域**中间，
  * 而不是世界原点）。

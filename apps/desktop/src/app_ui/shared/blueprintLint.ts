@@ -20,6 +20,43 @@ import { isMarkRegistered, nodeSpecOrNull, panelSpec } from "@hamster-pouch/conf
 const CHAIN_TYPES: BlueprintNode["type"][] = ["event", "condition", "action"];
 
 /**
+ * **结构节点**：靠 `contains` 边确定"我属于哪个页面/容器"的节点
+ * （`界面 ⊃ 布局块/浮层`；`布局块/浮层 ⊃ 标签组/面板`；`标签组 ⊃ 面板`）。
+ *
+ * `interface` 不在其列——它是**层的根**，本来就没有父节点；它的"无根层"问题由
+ * 后端软告警按**层**报（D55），不由节点粒度重复报。
+ * `overlay` 也不在列——它有一条**更严**的同族判据（父必须是界面，见下），
+ * 放进来会重复标记。
+ */
+const STRUCTURAL_TYPES: BlueprintNode["type"][] = ["layout_block", "group", "control"];
+
+/**
+ * 该节点是否有**结构父**（`contains` 入边）。
+ *
+ * 面板另有一条**兼容旧图**的等价形式（D59）：`面板 --memberOf--> 标签组`——
+ * 旧图用 `memberOf` 表达"这个面板属于哪个组"，新图统一写 `组 --contains--> 面板`。
+ * 两者都算"接好了"，因此都放行（否则老蓝图会被整片标灰，而它们本来是能用的）。
+ */
+function hasStructuralParent(
+  node: BlueprintNode,
+  graph: BlueprintGraph,
+  byKey: ReadonlySet<string>,
+): boolean {
+  const attached = graph.edges.some(
+    (e) => e.kind === "contains" && e.to === node.key && byKey.has(e.from),
+  );
+  if (attached) {
+    return true;
+  }
+  if (node.type === "control") {
+    return graph.edges.some(
+      (e) => e.kind === "memberOf" && e.from === node.key && byKey.has(e.to),
+    );
+  }
+  return false;
+}
+
+/**
  * 该面板是否**有类目**（RFC 0010 决策 4 / 面板标准第 5.1 节）。
  *
  * 返回值语义：`true` / `false` = 有明确声明；`undefined` = 面板当前无注册项
@@ -70,6 +107,8 @@ function hasSource(node: BlueprintNode, graph: BlueprintGraph): boolean {
  * - 控件缺 `panel_id`、类缺 `control`、对象缺 `class`、状态缺 `target`；
  * - 引用指向**已不存在的节点**（删除关联节点后的常见状态）；
  * - 操作缺对象来源、条件/状态缺触发来源；
+ * - **结构节点（布局块/标签组/面板）没有结构父**（D108：新增不再自动连线之后，
+ *   它是"刚摆下还没接好"的可见形态；面板的兼容旧图形式 `memberOf` 也放行）；
  * - 节点类型**当前无注册项**（插件缺失，RFC 0010 决策 6）；
  * - 类目挂在**无类目**的面板下（`has_class = false`，RFC 0010 决策 4）。
  *
@@ -162,6 +201,16 @@ export function analyzeUnlinked(graph: BlueprintGraph): BlueprintUnlinkedMap {
         break;
       default:
         break;
+    }
+    // **结构父缺失**（D108，与后端 `blueprint_warnings::collect_issues` 逐项同口径）：
+    // 「新增不再自动连线」之后，新摆下的布局块/标签组/面板默认是断开的——它不与任何
+    // 页面/容器相连，套用布局时不会被对账到。把它归入同一种可见状态（灰显「未接通」），
+    // 使用者拖一条线接回去即恢复。
+    // 判据：`contains` 入边（父节点须存在）；面板另有兼容旧图的 `面板 --memberOf--> 标签组`。
+    // **放在 `switch` 之后**：`mark` 只记第一个原因，这样"面板缺 panel_id"等**既有原因**
+    // 不会被这条新口径顶掉（原因码只用于提示与自检，不落库）。
+    if (STRUCTURAL_TYPES.includes(node.type) && !hasStructuralParent(node, graph, byKey)) {
+      mark(node.key, "missing-parent");
     }
     if (CHAIN_TYPES.includes(node.type) && !hasSource(node, graph)) {
       mark(

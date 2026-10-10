@@ -534,6 +534,7 @@ export const zhCN = {
   "blueprint.bladeRemovedUnlinked": "划线删除：{nodes} 个节点、{edges} 条连线；{count} 个关联节点因引用断开而暂未接通（灰色）",
   "blueprint.unlinkedTag": "未接通",
   "blueprint.unlinkedHint": "有 {count} 个节点暂未接通（灰色，不会生效）：接回引用后即恢复。",
+  "blueprint.connectHint": "从输出端口拖出连线：可连接的端口亮绿圈、节点泛绿，就近吸附",
   "blueprint.bladeHint": "右键按住拖过连线/节点 = 删除",
   "blueprint.autoTag": "自动",
   "blueprint.derivedEmpty": "未接通（连线后自动获取）",

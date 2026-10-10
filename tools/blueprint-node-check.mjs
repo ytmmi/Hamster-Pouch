@@ -7,8 +7,11 @@
  * ② "点一个类型却连带冒出好几个节点"——根因是工厂为了给新节点补"最小合法链路"，顺手新建了
  *    面板/类目/对象/操作/状态（新增"状态"一次冒出 4 个辅助节点）。
  *
- * 现规则：新增节点**只追加自身**，只连使用者**显式指定**的上级；没有上级就**留空引用**
- * （画布灰显「未接通」），既不新建节点补链，也不挂到别的既有节点上。
+ * 现规则：新增节点**只追加自身**，且**绝不产生任何边**（2026-10-10 用户口径，D107——
+ * 早前"选中上级即顺手连一条边"只覆盖部分类型：操作/条件/状态补 `on`/`fires`、容器类型补
+ * `contains`，类目/对象却只写引用字段，同一次点击表现不一致）。只有**引用字段**仍从
+ * 显式指定的上级（或同层内既有父节点）推导；缺引用就**留空**（画布灰显「未接通」），
+ * 既不新建节点补链，也不挂到别的既有节点上。连线一律由使用者从端口拖出来。
  * 本脚本验证这些行为，并用 hp-core 真实校验器复核产出的文档（夹具见
  * crates/hp-store/tests/blueprint_factory/）。
  *
@@ -54,6 +57,36 @@ const rustErrorCount = (doc) => {
   }
   const plain = String(out).replace(/\u001b\[[0-9;]*m/g, "");
   return Number(/硬错误 \(([0-9]+)\)/.exec(plain)?.[1] ?? "-1");
+};
+
+/**
+ * 用 hp-core 真实校验器取**软告警（未接通）**消息清单（stdin 喂 JSON）。
+ *
+ * 解析失败返回 `null`（调用方据此判失败，而不是静默通过）——两侧一致性是**断言的目标**，
+ * 拿不到另一侧就等于门禁失效。定义在顶层：D108 的结构父缺失块与其它同口径块都要用它。
+ */
+const rustWarnings = (doc) => {
+  let out = "";
+  try {
+    out = execFileSync("cargo", ["run", "-q", "-p", "hp-core", "--example", "check-blueprint"], {
+      cwd: ROOT,
+      input: JSON.stringify(doc),
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  } catch (e) {
+    out = `${e?.stdout ?? ""}${e?.stderr ?? ""}`;
+  }
+  const plain = String(out).replace(/\u001b\[[0-9;]*m/g, "");
+  const block = /软告警\/未接通 \(([0-9]+)\):([\s\S]*)$/.exec(plain);
+  if (!block) {
+    return null;
+  }
+  return block[2]
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("W "))
+    .map((l) => l.slice(2).trim());
 };
 
 const results = [];
@@ -245,39 +278,50 @@ const hasEdge = (doc, from, to, kind) =>
   );
 }
 
-// ---- 5c. 浮层容器（D50 修订）：浮层可含面板控件/标签组，并带外观档位 ----
+// ---- 5c. 浮层容器（D50 修订 / D107）：新增只落节点本身，**不自动连线**（含容器归属） ----
+//
+// 用户口径（2026-10-10）：「修复部分节点添加时会自动连线」。早前"选中容器新增面板/标签组/
+// 浮层"会顺手补一条 `contains` 边（"落进该容器"），而"选中对象新增操作"也会补 `on` 边——
+// 同一次点击在不同类型上表现不一致，且新节点落在**视口中心**、那条自动边横穿画布指向
+// 远处的节点。现在**一律不连线**：新增只写引用字段（画布上不可见的那层绑定），
+// 连线一律由使用者从端口拖出来。
 {
   let doc = defaults(); // 内置默认：单层 l_main + 界面节点 ui
   const ui = doc.nodes.find((n) => n.type === "interface");
+  const edges0 = doc.edges.length;
 
-  // 选中界面 → 新增浮层：落进界面（contains）
+  // 选中界面 → 新增浮层：只追加浮层节点，**不连** `界面 contains 浮层`
   const ov = factory.appendNode(doc, "overlay", { x: 40, y: -130 }, { key: ui.key, explicit: true }, "l_main");
   doc = ov.doc;
   check(
-    "浮层：选中界面新增 → 界面 contains 浮层，且带层归属",
-    hasEdge(doc, ui.key, ov.node.key, "contains") && ov.node.layer === "l_main",
-    `edges=${doc.edges.length} overlay=${ov.node.key}`,
+    "浮层：选中界面新增 → 只追加自身（**不自动连 contains**），且带层归属",
+    doc.edges.length === edges0 &&
+      ov.node.type === "overlay" &&
+      ov.node.layer === "l_main",
+    `新增边=${doc.edges.length - edges0} 节点=${ov.node.key} layer=${ov.node.layer}`,
   );
 
-  // 选中浮层 → 新增面板控件：落进浮层（浮层是容器）
+  // 选中浮层 → 新增面板控件：同样只追加自身（容器归属由使用者拖线）
+  const edges1 = doc.edges.length;
   const ctl = factory.appendNode(doc, "control", { x: 40, y: 0 }, { key: ov.node.key, explicit: true }, "l_main");
   doc = ctl.doc;
   check(
-    "浮层是容器：选中浮层新增面板控件 → 浮层 contains 面板控件",
-    hasEdge(doc, ov.node.key, ctl.node.key, "contains") &&
+    "浮层是容器（选中浮层新增面板控件）：只追加自身、不自动连线，层归属不变",
+    doc.edges.length === edges1 &&
       ctl.node.layer === "l_main" &&
       doc.nodes.find((n) => n.key === ctl.node.key).type === "control",
-    `${ov.node.key} --contains--> ${ctl.node.key}`,
+    `新增边=${doc.edges.length - edges1} 节点=${ctl.node.key}`,
   );
 
-  // 选中浮层 → 新增标签组：也落进浮层（Q1=B：面板控件 + 标签组）
+  // 选中浮层 → 新增标签组：同样只追加自身，且默认互斥组
+  const edges2 = doc.edges.length;
   const grp = factory.appendNode(doc, "group", { x: 300, y: 0 }, { key: ov.node.key, explicit: true }, "l_main");
   doc = grp.doc;
   check(
-    "浮层是容器：选中浮层新增标签组 → 浮层 contains 标签组",
-    hasEdge(doc, ov.node.key, grp.node.key, "contains") &&
+    "浮层是容器（选中浮层新增标签组）：只追加自身、不自动连线，且默认互斥组",
+    doc.edges.length === edges2 &&
       doc.nodes.find((n) => n.key === grp.node.key).mode === "exclusive",
-    `${ov.node.key} --contains--> ${grp.node.key}`,
+    `新增边=${doc.edges.length - edges2} 节点=${grp.node.key} mode=${doc.nodes.find((n) => n.key === grp.node.key).mode}`,
   );
 
   // 外观档位 + 相对定位：写进浮层节点（D50 修订 / D44 token 档位）；已取消浮动控件绑定。
@@ -609,6 +653,50 @@ const hasEdge = (doc, from, to, kind) =>
     fresh.map((n) => `${n.key}:${n.layer ?? "(none)"}`).join(", "),
   );
   writeFixture("default_plus_new", doc);
+}
+
+// ---- 7b. **新增绝不自动连线**（2026-10-10 用户口径，D107）----
+//
+// 最强断言：12 种类型 × 默认蓝图里**每一个**已选中节点（含界面/布局块/浮层/标签组/
+// 面板/类目/对象/操作/条件/状态…）逐个新增，**边集必须逐项不变**（既不能多、也不能少）。
+// 这条覆盖了早前三种"自动连线"路径：`event` 补 `on`、`condition`/`action` 补 `fires`、
+// 容器类型补 `contains`——回退任一条即红。
+{
+  const doc0 = defaults();
+  const fingerprint = (d) => d.edges.map((e) => `${e.from}->${e.to}:${e.kind}`).join("|");
+  const before = fingerprint(doc0);
+  const offenders = [];
+  for (const type of config.BLUEPRINT_BUILTIN_NODE_TYPES) {
+    for (const selected of doc0.nodes.map((n) => n.key)) {
+      const hint = factory.parentHintFor(type, selected, doc0, "l_main");
+      const r = factory.appendNode(doc0, type, { x: 0, y: 0 }, hint, "l_main");
+      if (fingerprint(r.doc) !== before) {
+        offenders.push(`${type}（选中 ${selected}）`);
+      }
+    }
+  }
+  check(
+    `新增绝不自动连线：${config.BLUEPRINT_BUILTIN_NODE_TYPES.length} 种类型 × ${doc0.nodes.length} 个已选中节点，边集全部逐项不变`,
+    offenders.length === 0,
+    offenders.slice(0, 3).join("；") ||
+      `${config.BLUEPRINT_BUILTIN_NODE_TYPES.length} × ${doc0.nodes.length} 次新增未产生/删除任何边`,
+  );
+
+  // 显式指名两种"以前会连"的路径，读起来更直观（回退时一眼看出是哪条回来的）。
+  const blk = doc0.nodes.find((n) => n.type === "layout_block");
+  const ctl = factory.appendNode(doc0, "control", { x: 0, y: 0 }, { key: blk.key, explicit: true }, "l_main");
+  check(
+    "新增绝不自动连线（容器路径）：选中布局块新增面板 → 不产生 `布局块 contains 面板` 边",
+    !hasEdge(ctl.doc, blk.key, ctl.node.key, "contains"),
+    `${blk.key} --contains--> ${ctl.node.key} 未建立`,
+  );
+  const obj = doc0.nodes.find((n) => n.type === "object");
+  const evt = factory.appendNode(doc0, "event", { x: 0, y: 0 }, { key: obj.key, explicit: true }, "l_main");
+  check(
+    "新增绝不自动连线（规则路径）：选中对象新增操作 → 不产生 `对象 --on--> 操作` 边",
+    !hasEdge(evt.doc, obj.key, evt.node.key, "on"),
+    `${obj.key} --on--> ${evt.node.key} 未建立`,
+  );
 }
 
 console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", ")}`);
@@ -1337,6 +1425,114 @@ try {
     "RFC 0010：内置面板 has_class=false 却挂类目 → hp-core 报硬错误",
     hasClassErrors > 0,
     `硬错误 ${hasClassErrors} 条`,
+  );
+}
+
+// ---- 结构父缺失（D108）：前端 `blueprintLint` ↔ 后端 `blueprint_warnings` **同口径** ----
+//
+// 用户口径（2026-10-10，承接"新增节点不再自动连线"）：新摆下的**布局块/标签组/面板**
+// 不再有结构父，必须与"缺引用"一样**可见**（画布灰显「未接通」），而不是悄悄不生效。
+// 这条口径落在**两处**：前端 `analyzeUnlinked`（画布灰显与顶部提示）与后端
+// `blueprint_warnings::collect_issues`（保存时的软告警）。两处必须逐项同结论——
+// 因此这里用**同一批夹具**跑两侧（Rust 走真实校验器 `check-blueprint`），
+// 而不是各测各的。
+{
+  const lint = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/blueprintLint.ts")).href
+  );
+
+  /** 结构父缺失夹具：三种结构节点都没接线（界面是层根，不参与）。 */
+  const orphan = {
+    schema_version: 2,
+    layers: [{ key: "l_a", name: "A" }],
+    nodes: [
+      { key: "ui", type: "interface", layer: "l_a" },
+      { key: "blk", type: "layout_block", name: "栏", layer: "l_a" },
+      { key: "g", type: "group", mode: "exclusive", layer: "l_a" },
+      { key: "c", type: "control", panel_id: "tasks", layer: "l_a" },
+    ],
+    edges: [],
+  };
+  /** 全部接好：界面 → 布局块 → 标签组 → 面板。 */
+  const wired = {
+    ...orphan,
+    edges: [
+      { from: "ui", to: "blk", kind: "contains", order: 1 },
+      { from: "blk", to: "g", kind: "contains", order: 2 },
+      { from: "g", to: "c", kind: "contains", order: 3 },
+    ],
+  };
+  /** 兼容旧图：面板不写 contains，而用 `面板 --memberOf--> 标签组`（D59 之前的写法）。 */
+  const legacy = {
+    ...orphan,
+    edges: [
+      { from: "ui", to: "blk", kind: "contains", order: 1 },
+      { from: "blk", to: "g", kind: "contains", order: 2 },
+      { from: "c", to: "g", kind: "memberOf", order: 3 },
+    ],
+  };
+
+  const tsOrphan = lint.analyzeUnlinked(orphan);
+  const tsWired = lint.analyzeUnlinked(wired);
+  const tsLegacy = lint.analyzeUnlinked(legacy);
+  check(
+    "结构父缺失（前端）：未接父的 布局块/标签组/面板 标为未接通（原因 missing-parent），界面（层根）不标",
+    Object.keys(tsOrphan).sort().join(",") === "blk,c,g" &&
+      tsOrphan.blk === "missing-parent" &&
+      tsOrphan.g === "missing-parent" &&
+      tsOrphan.c === "missing-parent" &&
+      tsOrphan.ui === undefined,
+    `未接通=[${Object.keys(tsOrphan).map((k) => `${k}:${tsOrphan[k]}`).join(", ")}]`,
+  );
+  check(
+    "结构父缺失（前端）：接好之后未接通消失（界面→布局块→标签组→面板）",
+    Object.keys(tsWired).length === 0,
+    `未接通=[${Object.keys(tsWired).join(", ") || "无"}]`,
+  );
+  check(
+    "结构父缺失（前端）：`面板 --memberOf--> 标签组`（兼容旧图）也算接好",
+    Object.keys(tsLegacy).length === 0,
+    `未接通=[${Object.keys(tsLegacy).join(", ") || "无"}]`,
+  );
+
+  const rustOrphan = rustWarnings(orphan);
+  const rustWired = rustWarnings(wired);
+  const rustLegacy = rustWarnings(legacy);
+  check(
+    "结构父缺失（后端）：同一夹具报 3 条「没有结构父」软告警、接好后 0 条（memberOf 兼容同样 0 条）",
+    rustOrphan !== null &&
+      rustOrphan.filter((w) => w.includes("没有结构父")).length === 3 &&
+      rustWired !== null &&
+      rustWired.length === 0 &&
+      rustLegacy !== null &&
+      rustLegacy.length === 0,
+    `未接父=${rustOrphan === null ? "解析失败" : rustOrphan.length} 接好=${rustWired === null ? "解析失败" : rustWired.length} memberOf=${rustLegacy === null ? "解析失败" : rustLegacy.length}`,
+  );
+  // **两侧同结论**（这条才是"同步"的判据）：前端标了几个，后端就报几条。
+  const tsCount = (m) => Object.keys(m).length;
+  check(
+    "结构父缺失：前端与后端**逐项同结论**（3 个夹具：3 ≡ 3、0 ≡ 0、0 ≡ 0）",
+    rustOrphan !== null &&
+      rustWired !== null &&
+      rustLegacy !== null &&
+      tsCount(tsOrphan) === rustOrphan.length &&
+      tsCount(tsWired) === rustWired.length &&
+      tsCount(tsLegacy) === rustLegacy.length,
+    `前端=${tsCount(tsOrphan)}/${tsCount(tsWired)}/${tsCount(tsLegacy)} 后端=${rustOrphan?.length ?? "-"}/${rustWired?.length ?? "-"}/${rustLegacy?.length ?? "-"}`,
+  );
+  // 悬空边（父节点不存在）两侧都不算"接好"。
+  const dangling = {
+    ...orphan,
+    nodes: [{ key: "c", type: "control", panel_id: "tasks", layer: "l_a" }],
+    edges: [{ from: "gone", to: "c", kind: "contains", order: 1 }],
+  };
+  const rustDangling = rustWarnings(dangling);
+  check(
+    "结构父缺失：悬空边（指向不存在的节点）**不算**结构父——两侧同判",
+    lint.analyzeUnlinked(dangling).c === "missing-parent" &&
+      rustDangling !== null &&
+      rustDangling.some((w) => w.includes("没有结构父")),
+    `前端=${lint.analyzeUnlinked(dangling).c ?? "（未标记）"} 后端=${rustDangling?.some((w) => w.includes("没有结构父")) ?? "解析失败"}`,
   );
 }
 

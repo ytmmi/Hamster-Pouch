@@ -6,13 +6,15 @@
  *   **绝不连带生成任何辅助节点**。旧实现会给操作/条件/状态补一条
  *   「面板 → 类目 → 对象 → 操作 → 状态」的最小链（新增"状态"会连带冒出 4 个节点），
  *   表现为"点一个类型却出现好几个节点"——按用户反馈移除。
- * - **引用自动**：类节点的 `control`、对象节点的 `class`、操作的对象来源等 key 型引用
- *   **不由用户填写**，从**显式选中的上级**推导（层级关系可在本层内兜底复用**既有**父节点）；
- *   画布上连线也会自动落字段。
- * - **只认上级，不悄悄挂钩**：新增节点只会连到"上级"（使用者显式指定的父节点）。
- *   **既不会自动接到一条已存在的规则上，也不会为了"补链"新建节点**；缺的引用一律
- *   **留空**（画布灰显「未接通」），由使用者拖线或在属性面板指定——而不是自动猜。
- *   状态的 `target` 因此不再自动指向某个面板（按 RFC 0007 决策 7：只由属性面板指定）。
+ * - **绝不自动连线（2026-10-10 用户口径，D107）**：本文件**不产生任何边**——返回值里的
+ *   `edges` 与传入文档逐项相同。早前"选中上级后新增即顺手连一条边"只覆盖**部分类型**
+ *   （操作/条件/状态补 `on`/`fires`、容器类型补 `contains`，类目/对象却只写字段），
+ *   同一次点击在不同类型上表现不一致，且新节点落在视口中心、那条自动边横穿画布指向远处
+ *   节点，看起来像"点一下多了一条线"。连线是使用者的显式动作：从输出端口拖到输入端口。
+ * - **引用自动**：类节点的 `control`、对象节点的 `class` 等 key 型引用**不由用户填写**，
+ *   从**显式选中的上级**推导（层级关系可在本层内兜底复用**既有**父节点）；
+ *   **缺引用一律留空**（画布灰显「未接通」），由使用者拖线或在属性面板指定。
+ *   引用字段与边是两层表达：字段说"我属于谁"（属性面板可见可改），边说"画布上连到谁"。
  * - **key 自动且可读**：由「上级 key + 自身类型标识」生成（如 `c_media` 下的图像类 →
  *   `c_media_image`，其下双击对象 → `c_media_image_dbl`），冲突才追加序号。
  * - **层归属（D51）**：编辑器同一时刻只画**一个层**，因此新增节点一律归属**当前层**
@@ -24,7 +26,6 @@
 import type { BlueprintGraph, BlueprintNode, BlueprintNodeType } from "@hamster-pouch/config";
 import {
   BLUEPRINT_BUILTIN_MARKS,
-  BLUEPRINT_NODE_TYPES,
   defaultClassFieldsForPanel,
   defaultSubclassFormatFor,
   effectiveLayers,
@@ -380,60 +381,49 @@ function createObject(
 }
 
 /**
- * 建一个操作节点并（**仅当给出上级对象时**）连上 `objectKey`（对象 → 操作 的 on 边）。
+ * 建一个操作节点（**只建节点本身**，不产生任何边）。
  *
- * **不连带生成状态节点**：旧实现顺手补一个状态，让"新增操作"看起来像一次加了两个节点。
+ * **不再顺手连线**（2026-10-10 用户口径，D107）：早前给出上级对象时会同时补一条
+ * 对象 → 操作 的 `on` 边，表现为"点「操作」就自动冒出一条线"。连线一律由使用者在画布上
+ * 拖出来（或由属性面板指定字段）；缺来源的操作节点灰显「未接通」，接上即恢复。
  */
 function createEvent(
   doc: BlueprintGraph,
-  objectKey: string | undefined,
   layer: string,
   parentKeyForName?: string,
 ): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
-    key: nextNodeKey(doc.nodes, "event", parentKeyForName ?? objectKey),
+    key: nextNodeKey(doc.nodes, "event", parentKeyForName),
     type: "event",
     layer,
     trigger: "double_click",
     position: tempPosition(doc),
   };
-  const edges = objectKey
-    ? [
-        ...doc.edges,
-        { from: objectKey, to: node.key, kind: "on" as const, order: doc.edges.length + 1 },
-      ]
-    : doc.edges;
-  return { doc: { ...doc, nodes: [...doc.nodes, node], edges }, key: node.key };
+  return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
 /**
- * 建一个状态节点并（**仅当给出上级操作时**）连上 `eventKey`（操作 → 状态 的 fires 边）。
+ * 建一个状态节点（**只建节点本身**，不产生任何边）。
  *
  * `targetKey` 只在**使用者显式指定**时写入——不再自动指向"图里第一个面板"（RFC 0007 决策 7：
- * 状态的 `target` 由属性面板指定；缺引用按未接通灰显）。
+ * 状态的 `target` 由属性面板指定；缺引用按未接通灰显）。与操作节点同理，`fires` 边
+ * 一律由使用者拖线产生（D107）。
  */
 function createAction(
   doc: BlueprintGraph,
-  eventKey: string | undefined,
   targetKey: string | undefined,
   layer: string,
   parentKeyForName?: string,
 ): { doc: BlueprintGraph; key: string } {
   const node: BlueprintNode = {
-    key: nextNodeKey(doc.nodes, "action", parentKeyForName ?? eventKey),
+    key: nextNodeKey(doc.nodes, "action", parentKeyForName),
     type: "action",
     layer,
     op: "show",
     ...(targetKey ? { target: targetKey } : {}),
     position: tempPosition(doc),
   };
-  const edges = eventKey
-    ? [
-        ...doc.edges,
-        { from: eventKey, to: node.key, kind: "fires" as const, order: doc.edges.length + 1 },
-      ]
-    : doc.edges;
-  return { doc: { ...doc, nodes: [...doc.nodes, node], edges }, key: node.key };
+  return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
 }
 
 /**
@@ -480,38 +470,6 @@ function inferObjectParentField(
   return "class";
 }
 
-/**
- * 各类型的"容器上级"（显式选中这类上级时，新增节点落进它里面并自动连 `contains`）。
- *
- * **由节点定义表派生**（`packages/config` 的 `structuralParentsOf`，节点标准第 2 节）：
- * 结构父只有定义表一处声明，画布、解析层与工厂都读它，避免"工厂能挂但校验拒绝"的漂移。
- * 只认**使用者显式选中的上级**，没有上级就不连线（不跨链路挂钩）。
- */
-const PARENT_CONTAINERS: Partial<Record<BlueprintNodeType, BlueprintNodeType[]>> =
-  Object.fromEntries(
-    BLUEPRINT_NODE_TYPES.map((type) => [type, [...structuralParentsOf(type)]]).filter(
-      ([, parents]) => (parents as BlueprintNodeType[]).length > 0,
-    ),
-  ) as Partial<Record<BlueprintNodeType, BlueprintNodeType[]>>;
-
-/** 建立 `from --contains--> to` 边（已存在则不加）。 */
-function addContainsEdge(
-  doc: BlueprintGraph,
-  from: string,
-  to: string,
-): BlueprintGraph {
-  if (doc.edges.some((e) => e.from === from && e.to === to && e.kind === "contains")) {
-    return doc;
-  }
-  return {
-    ...doc,
-    edges: [
-      ...doc.edges,
-      { from, to, kind: "contains" as const, order: doc.edges.length + 1 },
-    ],
-  };
-}
-
 /** 一次"新增节点"的结果。 */
 export interface AppendNodeResult {
   /** 追加后的文档。 */
@@ -521,17 +479,23 @@ export interface AppendNodeResult {
 }
 
 /**
- * 构造并接入一个新节点：**只追加它自己**，不跨链路挂钩、也不新建任何辅助节点。
- * 返回值是追加后的文档（除显式连线外不再改动图）与新节点 key。
+ * 构造并接入一个新节点：**只追加它自己**——不新建任何辅助节点，也**不产生任何边**。
  *
  * **所有类型都可随意创建**（用户口径 2026-10-10）：编辑器**只规定连接方式与层级**，
  * 不限制"能不能建"。因此本函数**永不拒绝**——缺结构父时**引用留空**，节点在画布上
  * 灰显「未接通」，由使用者拖线或在属性面板补上（与 `class` / `object` 分支同一口径）。
  *
- * 早前版本对**子类 / 标记**做了"无父即拒绝新增"，那是把"层级约束"误当成"创建许可"：
- * 层级约束管的是**连线与引用的合法性**（拖线时 `kindForEdge` 判非法、后端
- * `can_contain` 拒绝非法边），不是"这个节点能不能被创建"。创建与连线是两件事，
- * 混在一起会让"先摆节点、后连线"这种正常搭图顺序被打断。
+ * **新增一律不连线**（用户口径 2026-10-10，D107；更正本函数早前的"选中上级即连一条边"）：
+ * 返回值里的 `edges` **与传入文档逐项相同**——不论新增什么类型、不论选中了哪个节点，
+ * 画布上都**不会**冒出使用者没拖过的线。理由是"自动连线"只覆盖**部分类型**
+ * （操作/条件/状态会补 `on`/`fires`，容器类型会补 `contains`，而类目/对象只写引用字段），
+ * 同一次点击在不同类型上表现不一致；且新节点落在**视口中心**，那条自动边会横穿画布
+ * 指向一个远处的节点，看起来像"点一下多了条线"。连线是使用者的显式动作：从端口拖到端口。
+ *
+ * **仍然自动写引用字段**（画布上不可见的那层绑定）：类目 → 面板、对象 → 类目/子类/标记、
+ * 子类 → 类目、标记 → 面板，优先取**显式选中**的上级，其次在**同层内**兜底复用**既有**父节点
+ * （只写字段、不新建节点）；解析不到就**留空**。它与"边"是两层表达：字段说"我属于谁"
+ * （属性面板可见、可手改），边说"画布上连到谁"（使用者拖出来）。
  *
  * `layerKey` = 新增节点归属的层（D51；缺省取文档第一个有效层）。
  */
@@ -547,12 +511,7 @@ export function appendNode(
     parent?.key && doc.nodes.some((n) => n.key === parent.key)
       ? parent.key
       : undefined;
-  // 显式指定的上级若是该类型的**容器**，新节点就落进它里面（界面/布局块/浮层/标签组）。
   const parentNode = hinted ? doc.nodes.find((n) => n.key === hinted) : undefined;
-  const container =
-    parentNode && (PARENT_CONTAINERS[type] ?? []).includes(parentNode.type)
-      ? parentNode.key
-      : undefined;
 
   // **挂载父**（子类 → 类目；标记 → 面板）：优先显式选中的上级，其次同层内兜底复用
   // **既有**父节点（只写引用字段，**不新建节点**）；解析不到就**留空引用**
@@ -570,19 +529,12 @@ export function appendNode(
       const created = createControl(work, layer);
       work = created.doc;
       key = created.key;
-      // D50 修订：浮层/布局块/标签组是容器，显式选中它新增面板控件即落进该容器。
-      if (container) {
-        work = addContainsEdge(work, container, key);
-      }
       break;
     }
     case "group": {
       const created = createGroup(work, layer);
       work = created.doc;
       key = created.key;
-      if (container) {
-        work = addContainsEdge(work, container, key);
-      }
       break;
     }
     case "class": {
@@ -641,19 +593,18 @@ export function appendNode(
       break;
     }
     case "event": {
-      // 上级 = 显式选中的对象（面板/类目/子类/标记也可，兼容旧图的 `target` 来源）；
-      // 没有上级就单独落一个操作节点（不再顺手补一个状态节点）。
+      // 只落一个操作节点（不补状态、不连 `on` 边）；key 仍按显式选中的上级取名。
       const upstream =
         parentNode && ["control", "class", "subclass", "mark", "object"].includes(parentNode.type)
           ? hinted
           : undefined;
-      const created = createEvent(work, upstream, layer, upstream);
+      const created = createEvent(work, layer, upstream);
       work = created.doc;
       key = created.key;
       break;
     }
     case "condition": {
-      // 上级 = 显式选中的操作/条件；没有上级也照样只落一个条件节点。
+      // 只落一个条件节点（不连 `fires` 边）。key 按显式选中的操作/条件取名。
       const upstream =
         parentNode && ["event", "condition"].includes(parentNode.type) ? hinted : undefined;
       const node: BlueprintNode = {
@@ -663,30 +614,16 @@ export function appendNode(
         expr: "media_type == image",
         position: tempPosition(work),
       };
-      work = {
-        ...work,
-        nodes: [...work.nodes, node],
-        edges: upstream
-          ? [
-              ...work.edges,
-              {
-                from: upstream,
-                to: node.key,
-                kind: "fires" as const,
-                order: work.edges.length + 1,
-              },
-            ]
-          : work.edges,
-      };
+      work = { ...work, nodes: [...work.nodes, node] };
       key = node.key;
       break;
     }
     case "action": {
-      // 上级 = 显式选中的操作/条件；没有上级就单独落一个状态节点。
-      // `target` 不再自动指向某个面板——由属性面板指定（缺引用灰显未接通）。
+      // 只落一个状态节点（不连 `fires` 边）；`target` 不再自动指向某个面板——
+      // 由属性面板指定（缺引用灰显未接通）。
       const upstream =
         parentNode && ["event", "condition"].includes(parentNode.type) ? hinted : undefined;
-      const created = createAction(work, upstream, undefined, layer, upstream);
+      const created = createAction(work, undefined, layer, upstream);
       work = created.doc;
       key = created.key;
       break;
@@ -704,10 +641,6 @@ export function appendNode(
       };
       work = { ...work, nodes: [...work.nodes, node] };
       key = node.key;
-      // 显式选中界面时新增布局块/浮层 → 落进该界面（contains）。
-      if (container) {
-        work = addContainsEdge(work, container, key);
-      }
       break;
     }
   }

@@ -2,12 +2,17 @@
 //!
 //! 软告警 = **不阻塞保存**的"暂时接不通"提示：必填引用缺失或指向已删除节点、
 //! 求值链缺触发来源、无根层（D55）、跳转失效（D55）、浮层未连接到界面（D50 修订）、
+//! **结构节点缺少结构父**（D108：`layout_block` / `group` / `control` 没有 `contains` 入边，
+//! 面板的兼容旧图形式 `memberOf` 也算接好）、
 //! **节点类型当前无注册项**（插件未安装 / 未启用 / 宿主 API 不兼容，RFC 0010 决策 6）。
 //!
 //! 设计意图：删除节点/断线后**不级联删除关联节点**，允许先保存中间状态；
 //! 不生效的部分由画布灰色呈现，用户接回去即恢复。
 //! 与之相对，**硬错误**（拒绝保存）在 `blueprint_validate.rs`，
 //! 二者口径必须一致：凡"引用存在但类型不符"一律是硬错误，不算未接通。
+//! **前端同口径**：`apps/desktop/src/app_ui/shared/blueprintLint.ts` 的 `analyzeUnlinked`
+//! 是同一套判定的前端副本（画布灰显与顶部提示用），两者由 `pnpm check:blueprint-nodes`
+//! 的"结构父缺失"断言块用**同一批夹具**跑两侧比对（逐项同结论），不得只改一侧。
 //!
 //! 「未知 `type`」的**分流**（RFC 0010 决策 6）：`type` 不合命名规则 → 硬错误
 //! （在 `blueprint_validate.rs`）；命名合法但当前无注册项 → **本文件的软告警**。
@@ -22,6 +27,28 @@ use crate::blueprint_types::{ActionOp, EdgeKind, NodeType};
 /// 收集全部未接通软告警（空 = 无告警）。
 pub(crate) fn collect(graph: &BlueprintGraph) -> Vec<String> {
     collect_with(graph, &NodeRegistry::builtin_only())
+}
+
+/// 该结构节点是否有**结构父**（与前端 `blueprintLint.hasStructuralParent` 同口径）。
+///
+/// - `contains` **入边**（父节点须存在）= 接好了；
+/// - 面板另有兼容旧图的 `memberOf` **出边**（`面板 → 标签组`，D59）= 也算接好了。
+///
+/// 悬空边（端点不存在）**不算**接好：它与前端 `byKey.has(...)` 的判定一致，
+/// 而悬空边本身是硬错误（`validate` 会拒绝保存）。
+fn has_structural_parent(graph: &BlueprintGraph, node: &BlueprintNode) -> bool {
+    let attached = graph.edges.iter().any(|e| {
+        e.edge_kind == EdgeKind::Contains && e.to == node.key && graph.node(&e.from).is_some()
+    });
+    if attached {
+        return true;
+    }
+    node.node_type == NodeType::Control
+        && graph.edges.iter().any(|e| {
+            e.edge_kind == EdgeKind::MemberOf
+                && e.from == node.key
+                && graph.node(&e.to).is_some()
+        })
 }
 
 /// 收集全部未接通软告警（带节点类型注册表）。
@@ -115,6 +142,24 @@ pub(crate) fn collect_issues(
         // 非宿主内置类型不参与求值链检查（也没有对应的字段口径）。
         if !node.node_type.is_builtin() {
             continue;
+        }
+        // **结构父缺失**（D108，与前端 `blueprintLint::analyzeUnlinked` 逐项同口径）：
+        // `layout_block` / `group` / `control` 靠 `contains` 边确定"我属于哪个页面/容器"；
+        // 没有入边 = 套用布局时不会被对账到（**未接通**，不阻塞保存）。
+        // 面板另有**兼容旧图**的等价形式 `面板 --memberOf--> 标签组`（D59），同样放行——
+        // 否则老蓝图会被整片标灰，而它们本来是能用的。
+        if matches!(
+            node.node_type,
+            NodeType::LayoutBlock | NodeType::Group | NodeType::Control
+        ) && !has_structural_parent(graph, node)
+        {
+            warnings.push((
+                format!(
+                    "节点 {key} 暂未接通：没有结构父（连线 父容器→该节点，如 界面→布局块、布局块/标签组→面板）",
+                    key = node.key
+                ),
+                SeverityLevel::Soft,
+            ));
         }
         match node.node_type {
             NodeType::Event => {
