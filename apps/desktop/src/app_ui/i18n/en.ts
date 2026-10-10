@@ -341,6 +341,7 @@ export const en: Record<keyof DictZhCN, string> = {
 
   "metadata.readFailed": "Failed to read metadata: {err}",
   "metadata.type": "Type",
+  "metadata.extension": "File extension",
   "metadata.size": "Size",
   "metadata.mtime": "Modified",
   "metadata.verifyStatus": "Verify status",

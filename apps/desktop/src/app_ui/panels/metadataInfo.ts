@@ -118,3 +118,19 @@ export function parseExifSummary(json: string | null | undefined): ExifSummary |
     dateTime: toText(root.dateTime),
   };
 }
+
+/**
+ * 相对路径 → **文件后缀**显示文本（小写、带前导点，如 `.png` / `.jpeg`）；没有后缀返回空串。
+ *
+ * 只读索引里既有的 `relative_path`（**不改后端**）。口径是"**最后一个点之后**的非空片段"：
+ * 目录名里的点不参与（`dir.v2/cover` 无后缀）、隐藏文件（`.gitignore`，点在首位）不算后缀、
+ * 结尾的点（`trailing.`）也不算。大小写归一化到小写（`IMG.JPG` → `.jpg`）。
+ *
+ * 面板把空串渲染成 `—`——"索引里没数据"与"面板坏了"必须看起来不一样（与其它行同款）。
+ */
+export function fileSuffix(relativePath: string): string {
+  const base = relativePath.split(/[\\/]/).pop() ?? relativePath;
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0 || dot === base.length - 1) return "";
+  return base.slice(dot).toLowerCase();
+}

@@ -340,6 +340,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
 
   "metadata.readFailed": "讀取中繼資料失敗：{err}",
   "metadata.type": "類型",
+  "metadata.extension": "檔案副檔名",
   "metadata.size": "大小",
   "metadata.mtime": "修改時間",
   "metadata.verifyStatus": "校驗狀態",

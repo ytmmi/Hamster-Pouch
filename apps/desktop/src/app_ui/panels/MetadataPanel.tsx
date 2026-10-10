@@ -19,6 +19,9 @@
  * | 视频 | 尺寸 / 时长 / 编码 / 码率 / 帧率 | 优先 `media_info_json`（ffprobe 原始 JSON）；索引里没有缓存时用前端 `<video>` 探测**兜底尺寸与时长**（编码 / 码率 / 帧率 DOM 拿不到，如实显示 `—`） |
  * | 音频 | 时长 | 索引里**没有**音频元数据（D11 占位行），只能前端 `preload="metadata"` 读一次 |
  *
+ * 「类型」下面是**文件后缀**（`.png`，小写带点；取索引里既有的 `relative_path`，**不改后端**）：
+ * 两者一起回答"这是什么文件"。无后缀（目录名里的点不算、隐藏文件不算）显示 `—`，与其它行同款。
+ *
  * 两坨原始 JSON（EXIF / 媒体信息）照旧原样展示：派生行是"看得懂的摘要"，原始 JSON 是
  * 不丢信息的底账。
  */
@@ -47,7 +50,7 @@ import {
 } from "../shared/format";
 import { useHostSettingValue } from "../shared/settingValue";
 import type { FileMetadataResult } from "../shared/types";
-import { parseExifSummary, parseMediaInfo } from "./metadataInfo";
+import { fileSuffix, parseExifSummary, parseMediaInfo } from "./metadataInfo";
 
 function pretty(json: string | null): string {
   if (!json) return "—";
@@ -207,6 +210,8 @@ export function MetadataPanel({ api: panelApi }: MetadataPanelProps = {}): JSX.E
     const isAudio = meta.media_type === "audio";
     const out: MetaRow[] = [
       { label: app.t("metadata.type"), value: meta.media_type },
+      // 文件后缀紧跟类型：两者一起回答"这是什么文件"（`.png`，取 `relative_path`，无后缀显示 `—`）。
+      { label: app.t("metadata.extension"), value: fileSuffix(meta.relative_path) || "—" },
       { label: app.t("metadata.size"), value: formatByteSize(meta.size, sizeUnit) },
       {
         label: app.t("metadata.mtime"),

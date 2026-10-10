@@ -354,6 +354,7 @@ export const zhCN = {
   // 元数据
   "metadata.readFailed": "读取元数据失败：{err}",
   "metadata.type": "类型",
+  "metadata.extension": "文件后缀",
   "metadata.size": "大小",
   "metadata.mtime": "修改时间",
   "metadata.verifyStatus": "校验状态",

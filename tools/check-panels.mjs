@@ -2027,6 +2027,29 @@ check(
     metadataInfo.parseExifSummary("") === null,
 );
 
+// 「文件后缀」是**纯解析**（取索引里既有的 `relative_path`，不改后端）：断言它的取值规则，
+// 再断言面板**真的**把它渲染在「类型」下面——**位置本身也是需求的一部分**，不能只断言"有这一行"。
+const metadataPanelCode = stripComments(metadataPanelSrc);
+check(
+  "文件后缀：小写带点（`.png`），只认最后一个点之后的非空片段，认不出返回空串",
+  metadataInfo.fileSuffix("photo.JPG") === ".jpg" &&
+    metadataInfo.fileSuffix("dir/cover.PNG") === ".png" &&
+    metadataInfo.fileSuffix("clip.jpeg") === ".jpeg" &&
+    metadataInfo.fileSuffix("dir.v2/cover") === "" &&
+    metadataInfo.fileSuffix("noext") === "" &&
+    // 隐藏文件（点在首位）与结尾的点都不是后缀。
+    metadataInfo.fileSuffix(".gitignore") === "" &&
+    metadataInfo.fileSuffix("trailing.") === "" &&
+    metadataInfo.fileSuffix("dir\\win\\a.TXT") === ".txt",
+);
+check(
+  "元数据面板在「类型」下面渲染「文件后缀」（无后缀显示 `—`）",
+  /fileSuffix\(meta\.relative_path\) \|\| "—"/.test(metadataPanelCode) &&
+    /label: app\.t\("metadata\.type"\), value: meta\.media_type \},\s*\{ label: app\.t\("metadata\.extension"\)/.test(
+      metadataPanelCode,
+    ),
+);
+
 check(
   "元数据面板消费三项宿主设置（体积按单位制、日期按格式 + 时间开关）",
   /useHostSettingValue\(SETTING_KEYS\.sizeUnit/.test(metadataPanelSrc) &&
