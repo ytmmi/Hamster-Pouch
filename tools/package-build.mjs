@@ -3,14 +3,29 @@
  * 打包：每次编译后生成「开发包」与「发布包」（按文件夹为单位，类似便携打包）。
  *
  * 结构（都在 `apps/desktop/src-tauri/target/release/` 下）：
- *   dev\dev-<YYYYMMDD-HHMMSS>\   开发包：hamster-pouch-desktop.exe + data\（含用户数据）。
+ *   dev\dev-<YYYYMMDD-HHMMSS>\   开发包：hamster-pouch-desktop.exe + data\（含用户数据）
+ *                                   + external-cli\ + plugins\system\。
  *                                   每次编译新建一个；命名按时间排序，一眼可辨先后。
  *   release\                     发布包：hamster-pouch-desktop.exe + data\system\（**系统数据库**，
  *                                   全局配置库随发布）+ data\plugins\（**系统插件** trust_level=system，
- *                                   含其自带数据库，随应用发布）；**不含用户数据**——user\repos\ 仓库库、
+ *                                   含其自带数据库，随应用发布）+ external-cli\ + plugins\system\；
+ *                                   **不含用户数据**——user\repos\ 仓库库、
  *                                   非系统插件、thumbnails\ 缓存、debug.log 一律不带，
  *                                   发布全局库的仓库注册表/按仓库授权清空、非系统插件注册删除
  *                                   （系统插件 source_ref 改写为包内路径）。
+ *
+ * **随包分发的两份运行时资产（D14 / 契约 §3.11）**：`external-cli\`（ffmpeg/ffprobe）与
+ * `plugins\system\`（`plugin.installBundled` 的来源）都放在 **exe 同级**，与仓库内布局
+ * 同构——这样 `commands/shared.rs` 的 `find_upwards` / `find_upwards_dir` 从 exe 目录
+ * 起步的第一跳就能命中，**包整夹搬走也仍然可用**（这正是此前"伪捆绑"的缺口：
+ * 产物里没有这两份资产，只靠包还躺在仓库树里才凑巧向上找到）。
+ *
+ * 体积与落盘策略：
+ *   - `external-cli\` 只带**运行时子集**（两个 exe + bin\ 下全部 DLL + LICENSE.txt，
+ *     约 168 MB）；`ffplay.exe`（交互式播放器，产品从不调用）与 `doc\` / `include\` /
+ *     `lib\` / `presets\`（开发期文档与链接库）不带。
+ *   - **dev 包用硬链接**（NTFS，零额外占用、瞬时完成；同卷实测可用，跨卷自动回退复制），
+ *     **release 包用真实复制**（可分发实体文件）。硬链接只是省盘，包内容完整可搬走。
  *
  * 数据来源：`target\release\data\`（编译目录下的活动数据：system\ 全局库 /
  * user\repos\ 仓库库 / plugins\ 插件 / thumbnails\ 缓存 / debug.log）。
@@ -24,7 +39,8 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { cp, link, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -59,6 +75,37 @@ const fmtMB = (b) => `${(b / 1024 / 1024).toFixed(2)} MB`;
 
 const BASE_DICT = join(ROOT, "tools", "tagdict", "output", "tag_lib_base.sqlite3");
 
+/** 随包分发的外部 CLI 目录（仓库内）与其在包内的相对位置。 */
+const EXTERNAL_CLI = join(ROOT, "external-cli");
+/** 随包分发的系统插件目录（仓库内）与其在包内的相对位置。 */
+const BUNDLED_PLUGINS = join(ROOT, "plugins", "system");
+
+/**
+ * `external-cli\ffmpeg\` 里**产品运行时不需要**的条目（相对 `ffmpeg\` 的路径）。
+ *
+ * 判据（每条都实测过，不是猜的）：
+ *   - `bin\ffplay.exe`：交互式播放器，全仓无任何调用方（播放器面板走 DOM `<video>`，
+ *     libmpv 路径已休眠）；去掉后 ffmpeg/ffprobe 的 `-version`、抽帧、libwebp 编码、
+ *     AVIF 编解码全部正常。
+ *   - `doc\` / `include\` / `lib\` / `presets\`：开发期文档、C 头文件、导入库与
+ *     预设文件。全仓无 `-fpre` / `-vpre` 调用，运行时不读它们。
+ *
+ * **`bin\` 下的 DLL 一个都不能省**：`ffmpeg.exe` / `ffprobe.exe` 是同一套构建的
+ * 薄壳，加载时按 PE 导入表静态绑定**全部** av* DLL。实测去掉 `avdevice-62.dll`
+ * 即 `exit -1073741515`（`0xC0000135` STATUS_DLL_NOT_FOUND）——**连 `-version` 都跑不起来**。
+ * 因此这里**只按名字排除明确不需要的条目**，绝不写"只保留某几个 DLL"的白名单：
+ * 上游升级 ffmpeg 时若新增 DLL，白名单会静默漏掉它，而黑名单不会。
+ */
+const FFMPEG_EXCLUDE = new Set([
+  "bin/ffplay.exe",
+  "doc",
+  "include",
+  "lib",
+  "presets",
+]);
+/** 自检时"不该出现"的包内路径（与 [`FFMPEG_EXCLUDE`] 对应，防止规则失效后静默通过）。 */
+const FFMPEG_MUST_BE_ABSENT = ["bin/ffplay.exe", "doc", "include", "lib", "presets"];
+
 /** 复制内置基底词库到 data/system/ 下（如果来源文件存在）。 */
 async function copyBaseDict(targetDataRoot) {
   try {
@@ -72,10 +119,173 @@ async function copyBaseDict(targetDataRoot) {
   return false;
 }
 
+/**
+ * 把一个文件放进包内：**先试硬链接，失败回退真实复制**。
+ *
+ * 硬链接与复制在"包能不能搬走"上**等价**：NTFS 硬链接是同一份数据的第二个目录项，
+ * 把包目录整夹拷到别处时，拷贝方读到的就是完整文件内容。它只省**本机**磁盘与时间。
+ * 跨卷（包与源不在同一卷）时 `link` 会 `EXDEV` 失败，此时回退复制。
+ *
+ * `allowLink=false` 时**强制真实复制**——release 包按既定口径要"可分发实体文件"，
+ * 不与仓库内源码共享数据块（否则原地保留时，源码侧任何改动都会连带改变包内容）。
+ */
+async function placeFile(src, dest, allowLink) {
+  await mkdir(dirname(dest), { recursive: true });
+  if (allowLink) {
+    try {
+      await link(src, dest);
+      return "link";
+    } catch { /* 跨卷或文件系统不支持：回退复制 */ }
+  }
+  await cp(src, dest);
+  return "copy";
+}
+
+/**
+ * 递归放置目录内容，跳过 `exclude` 里列出的条目，返回 `{ files, bytes, links }`。
+ *
+ * `exclude` 里的键是**相对源根**的 POSIX 风格路径（如 `bin/ffplay.exe`、`doc`）；
+ * 目录被排除时整棵子树都不复制。逐文件放置（而非整目录 `cp`）是为了让 dev 包能走
+ * 硬链接。`prefix` 是当前递归层相对源根的路径前缀，仅供匹配用。
+ */
+async function placeDir(src, dest, exclude = new Set(), prefix = "", allowLink = true) {
+  let files = 0;
+  let bytes = 0;
+  let links = 0;
+  const entries = await readdir(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const relKey = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (exclude.has(relKey)) continue;
+    const from = join(src, entry.name);
+    const to = join(dest, entry.name);
+    if (entry.isDirectory()) {
+      const sub = await placeDir(from, to, exclude, relKey, allowLink);
+      files += sub.files;
+      bytes += sub.bytes;
+      links += sub.links;
+    } else {
+      const how = await placeFile(from, to, allowLink);
+      files++;
+      bytes += (await stat(from)).size;
+      if (how === "link") links++;
+    }
+  }
+  return { files, bytes, links };
+}
+
+/**
+ * 随包分发的两份资产：`external-cli\`（ffmpeg 运行时子集）与 `plugins\system\`。
+ *
+ * 放在 exe 同级，与仓库内布局同构 ⇒ `find_upwards` / `find_upwards_dir` 从 exe 目录
+ * 起步第一跳即命中。`external-cli\mpv\` **不入包**：该目录本身不入库（体积 100 MB+，
+ * 见 `.gitignore`），且 libmpv 播放路径已休眠，需用时以 `HP_MPV_BIN` 指定。
+ */
+async function placeBundledRuntime(targetRoot, mode, allowLink) {
+  // release 目录不按时间戳（固定 `release\`），复用同一目录时会留下上一次的陈旧文件；
+  // 先清掉这两个子树的旧内容，保证产物是本次规则的确定性结果（dev 目录每次新建，无此问题）。
+  await rm(join(targetRoot, "external-cli"), { recursive: true, force: true });
+  await rm(join(targetRoot, "plugins", "system"), { recursive: true, force: true });
+  const external = await placeDir(join(EXTERNAL_CLI, "ffmpeg"), join(targetRoot, "external-cli", "ffmpeg"), FFMPEG_EXCLUDE, "", allowLink);
+  const plugins = await placeDir(BUNDLED_PLUGINS, join(targetRoot, "plugins", "system"), new Set(), "", allowLink);
+  console.log(
+    `[package-build]   随包资产(${mode}): external-cli\\ffmpeg\\ ${external.files} 文件 / ${fmtMB(external.bytes)}` +
+      `，plugins\\system\\ ${plugins.files} 文件 / ${fmtMB(plugins.bytes)}`,
+  );
+  return { external, plugins };
+}
+
+/**
+ * **fail-closed 自检**：断言包内两份资产真的可用，缺任何一项即失败。
+ *
+ * 为什么必须断言而不是"复制完就算了"：本脚本的整个存在理由就是"产物里要有它"。
+ * 若上游改了目录名、或子集规则漏掉了新依赖，静默产出一个"看起来打好了、运行时
+ * 却找不到 ffmpeg"的包，比直接失败糟得多——那正是本次修复前的状态。
+ * 这里断言的是**运行时的真实判据**：`find_upwards` 从 exe 目录第一跳能否命中。
+ */
+function verifyBundledRuntime(targetRoot, { allowLink }) {
+  const problems = [];
+  const mustExist = [
+    ["external-cli/ffmpeg/bin/ffmpeg.exe", "file"],
+    ["external-cli/ffmpeg/bin/ffprobe.exe", "file"],
+    ["external-cli/ffmpeg/LICENSE.txt", "file"],
+    ["external-cli/ffmpeg/bin/avcodec-62.dll", "file"],
+    ["external-cli/ffmpeg/bin/avdevice-62.dll", "file"],
+    ["external-cli/ffmpeg/bin/avfilter-11.dll", "file"],
+    ["external-cli/ffmpeg/bin/avformat-62.dll", "file"],
+    ["external-cli/ffmpeg/bin/avutil-60.dll", "file"],
+    ["external-cli/ffmpeg/bin/swresample-6.dll", "file"],
+    ["external-cli/ffmpeg/bin/swscale-9.dll", "file"],
+    ["plugins/system/palette/plugin.manifest", "file"],
+  ];
+  for (const [rel, kind] of mustExist) {
+    const p = join(targetRoot, ...rel.split("/"));
+    const st = statSync(p, { throwIfNoEntry: false });
+    const ok = kind === "file" ? Boolean(st?.isFile()) : Boolean(st?.isDirectory());
+    if (!ok) problems.push(`缺 ${rel}`);
+  }
+  // 排除项必须真的不在包里（否则"子集"名不副实，白占体积）。
+  for (const rel of FFMPEG_MUST_BE_ABSENT) {
+    const p = join(targetRoot, "external-cli", "ffmpeg", ...rel.split("/"));
+    if (existsSync(p)) problems.push(`不该带却带了 ${rel}`);
+  }
+  // 反向断言：bin\ 下源目录里的每个 DLL 都必须进包（防"白名单漏项"式回归）。
+  const binSrc = join(EXTERNAL_CLI, "ffmpeg", "bin");
+  const binDst = join(targetRoot, "external-cli", "ffmpeg", "bin");
+  if (existsSync(binSrc)) {
+    for (const name of readdirSync(binSrc)) {
+      if (FFMPEG_EXCLUDE.has(`bin/${name}`)) continue;
+      if (!existsSync(join(binDst, name))) problems.push(`bin\\ 下漏了 ${name}`);
+    }
+  }
+  // 落盘策略必须与包类型一致：dev 期望硬链接、release 期望真实复制。
+  // 断言"至少有一个链接"而非逐文件相等——跨卷时 link 会合法地回退成复制。
+  const linked = countHardLinks(join(targetRoot, "external-cli"));
+  if (allowLink && linked === 0) {
+    problems.push("dev 包期望硬链接，实测 0 个（是否与源不同卷？）");
+  }
+  if (!allowLink && linked > 0) {
+    problems.push(`release 包不应有硬链接，实测 ${linked} 个`);
+  }
+  if (problems.length > 0) {
+    console.error(`[package-build] 包内随包资产自检失败（${targetRoot}）：\n  ${problems.join("\n  ")}`);
+    process.exit(1);
+  }
+}
+
+/** 统计目录树里处于硬链接状态的文件数（`nlink > 1`）。 */
+function countHardLinks(dir) {
+  let n = 0;
+  const walk = (d) => {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else if (statSync(p, { throwIfNoEntry: false })?.nlink > 1) n++;
+    }
+  };
+  if (existsSync(dir)) walk(dir);
+  return n;
+}
+
 // 前置检查：必须有编译产物
 if (!(await stat(EXE).catch(() => null))?.isFile()) {
   console.error(`[package-build] 未找到编译产物: ${EXE}\n  请先运行 pnpm app:build`);
   process.exit(1);
+}
+
+// 前置检查：两份随包资产的**源**必须存在。缺了就直说缺什么，
+// 而不是让 placeDir 抛一个 ENOENT 栈（那会让人以为是脚本坏了）。
+for (const [label, p] of [
+  ["external-cli/ffmpeg/bin/ffmpeg.exe", join(EXTERNAL_CLI, "ffmpeg", "bin", "ffmpeg.exe")],
+  ["external-cli/ffmpeg/bin/ffprobe.exe", join(EXTERNAL_CLI, "ffmpeg", "bin", "ffprobe.exe")],
+  ["plugins/system", BUNDLED_PLUGINS],
+]) {
+  if (!existsSync(p)) {
+    console.error(
+      `[package-build] 缺少随包资产源: ${label}（${p}）\n` +
+        "  ffmpeg 随仓库分发（见根 README「外部依赖」）；plugins/system 是仓库内目录。请检查工作树是否完整。",
+    );
+    process.exit(1);
+  }
 }
 
 // ---- 1) 开发包：exe + 用户数据（每次编译新建一个，命名带时间戳）----
@@ -138,8 +348,15 @@ if (await stat(paletteSigSrc).catch(() => null)) {
   await cp(paletteSigSrc, join(paletteSigDst, "SHA256SUMS"));
   await cp(paletteSigSigSrc, join(paletteSigDst, "SHA256SUMS.sig"));
 }
+// 随包运行时资产：external-cli\（ffmpeg 运行时子集）+ plugins\system\（随包插件来源）。
+// 放在 exe 同级 —— 与仓库内布局同构，find_upwards 从 exe 目录第一跳即命中。
+// dev 包走硬链接（零额外占用），见 placeFile。
+const devBundled = await placeBundledRuntime(devDir, "硬链接优先", true);
+devSize += devBundled.external.bytes + devBundled.plugins.bytes;
+verifyBundledRuntime(devDir, { allowLink: true });
+
 console.log(`[package-build] 开发包: ${devDir}`);
-console.log(`[package-build]   内容: exe + data\\（用户数据） 共 ${fmtMB(devSize)}`);
+console.log(`[package-build]   内容: exe + data\\（用户数据）+ external-cli\\ + plugins\\system\\ 共 ${fmtMB(devSize)}`);
 
 // ---- 2) 发布包：exe + 系统数据库 + 系统插件（不含用户数据）----
 const relDir = join(BASE, "release");
@@ -220,10 +437,21 @@ if (dataStat?.isDirectory()) {
     console.log(`[package-build]   发布包附加: data\\system\\tag_lib_base.sqlite3（内置基底词库）`);
   }
 }
+// 随包运行时资产：与开发包同源同内容，但**真实复制**（release 是可分发实体，
+// 不依赖本机 NTFS 硬链接）。`plugins\system\` 与 `data\plugins\` 是两回事：
+// 后者是**已安装**的运行时插件目录，前者是 `plugin.installBundled` 的**随包来源**根。
+const relBundled = await placeBundledRuntime(relDir, "真实复制", false);
+verifyBundledRuntime(relDir, { allowLink: false });
+
 console.log(
   `[package-build] 发布包: ${join(relDir, "hamster-pouch-desktop.exe")} + data\\system\\（系统数据库）` +
-    (systemPlugins.length > 0 ? ` + data\\plugins\\（系统插件 ${systemPlugins.join(", ")}）` : ""),
+    (systemPlugins.length > 0 ? ` + data\\plugins\\（系统插件 ${systemPlugins.join(", ")}）` : "") +
+    ` + external-cli\\ffmpeg\\（${relBundled.external.files} 文件 / ${fmtMB(relBundled.external.bytes)}）` +
+    ` + plugins\\system\\（${relBundled.plugins.files} 文件）`,
 );
 console.log(
   "[package-build]   不含用户数据：user\\repos\\、非系统插件、thumbnails\\、debug.log 均不带；发布全局库仓库注册表与按仓库授权已清空",
+);
+console.log(
+  "[package-build]   两份资产都在 exe 同级，与仓库内布局同构 ⇒ 包整夹搬走后 find_upwards 仍命中（D14 真正成立）",
 );

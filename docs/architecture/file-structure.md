@@ -368,7 +368,13 @@ HamsterPouch/
       python-core/            # 待办：Python 核心 system 插件（提供 Python 环境，使 Python 插件可源码分发）
     examples/                 # 插件示例与接口夹具，不放核心逻辑
     # 插件分发与打包产物不入库：Rust 插件走 .zip 二进制包（RFC 0009）
-  external-cli/               # 外部 CLI 程序（ffmpeg 等编解码工具），随应用捆绑发布（D14）
+  external-cli/               # 外部 CLI 程序（ffmpeg 等编解码工具），随应用捆绑发布（D14）。
+                              #   **入包方式**：`tools/package-build.mjs` 复制到包内 exe 同级
+                              #   （dev 走 NTFS 硬链接省盘、release 真实复制），与仓库内布局
+                              #   同构 ⇒ 运行时 `find_upwards` 从 exe 目录第一跳命中，
+                              #   包整夹搬走仍可用。只带**运行时子集**（bin\ 全部 + LICENSE.txt），
+                              #   ffplay.exe / doc / include / lib / presets 不带。
+                              #   门禁：`pnpm check:bundled-runtime`
   docs/
     architecture/             # 文件架构、总体架构、决策清单
     rfc/                      # 决策记录（0001–0010；0010 = 面板与蓝图节点注册）

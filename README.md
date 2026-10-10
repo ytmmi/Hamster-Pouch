@@ -112,6 +112,22 @@ cargo test
 | `pnpm app:package` | 只打包不编译（使用现有编译产物） |
 | `pnpm clean` | 清理编译中间产物与最终产物（保留活动数据与依赖目录） |
 
+打包产物（都在 `apps/desktop/src-tauri/target/release/` 下）都是**自包含文件夹**：
+
+```text
+dev\dev-<时间戳>\   exe + data\（含用户数据）+ external-cli\ + plugins\system\ + plugins-dist\
+release\            exe + data\system\（系统库）+ data\plugins\（系统插件）+ external-cli\ + plugins\system\
+                    （不含用户数据）
+```
+
+- **随包运行时资产**：`external-cli\`（ffmpeg 运行时子集，约 168 MB）与 `plugins\system\`
+  都放在 **exe 同级**，与仓库内布局同构 ⇒ 运行时从 exe 目录**第一跳**即命中，
+  **整夹搬走仍可用**（D14 的"随应用捆绑发布"）。dev 包用 NTFS 硬链接（零额外磁盘占用），
+  release 包真实复制。回归门禁：`pnpm check:bundled-runtime`。
+- ffmpeg 只带**运行时子集**：`bin\` 下两个 exe + 全部 DLL + `LICENSE.txt`；
+  `ffplay.exe`、`doc\`、`include\`、`lib\`、`presets\` 不带（省约 31 MB）。
+  **`bin\` 下的 DLL 一个都不能省**（两个 exe 静态绑定全部 av* DLL）。
+
 ## 环境变量
 
 | 变量 | 作用 |
@@ -128,6 +144,7 @@ cargo test
 - `check:encoding` —— 文本文件必须 UTF-8 无 BOM、统一 LF
 - `check:commands` —— 命令 / 事件契约双向守护（前端封装与后端命令一致性）
 - `check:hidden-console` —— 外部子进程不得新建控制台窗口（GUI 桌面壳下的 cmd 弹窗，缺陷 0020）
+- `check:bundled-runtime` —— 随应用捆绑的 ffmpeg 运行时子集与 `plugins/system` 真的进包（D14）
 - `check:event-names` —— 事件名唯一收发口：逻辑名点分、线上名冒号分（Tauri 2 不接受点号，缺陷 0022）
 - `check:types` —— `hp-dto` 生成类型与 `packages/shared-types` 一致性
 - `check:panels` / `check:settings` / `check:layouts` —— 面板、设置项与布局结构完整性
@@ -144,8 +161,9 @@ cargo test
 
 ## 外部依赖
 
-- **ffmpeg**：`external-cli/ffmpeg/` 随仓库分发，无需额外下载
-- **mpv**（可选）：libmpv 播放路径需要 mpv Windows 构建（约 100MB+），请自行下载并放入 `external-cli/mpv/mpv.exe`，或通过环境变量 `HP_MPV_BIN` 指定路径；缺失 mpv 不影响现有播放功能
+- **ffmpeg**：`external-cli/ffmpeg/` 随仓库分发，无需额外下载；打包时复制到产物内
+  **exe 同级**（运行时子集，见「构建与打包」），因此打包产物不依赖仓库目录、可整夹搬走
+- **mpv**（可选）：libmpv 播放路径需要 mpv Windows 构建（约 100MB+），请自行下载并放入 `external-cli/mpv/mpv.exe`，或通过环境变量 `HP_MPV_BIN` 指定路径；缺失 mpv 不影响现有播放功能。**mpv 不随包分发**（该目录不入库，且播放器面板已改 DOM `<video>`，libmpv 路径休眠）
 
 ## 贡献
 

@@ -12,8 +12,11 @@
 - **幂等**：同版本目录已存在即复用（`alreadyInstalled`），不覆盖（RFC 0004 锁定版本）。
 - 目录里没有 `plugin.manifest` 的项按 `skipped` 跳过（如 `python-core/`），不影响其余插件。
 - 根目录解析：`HP_BUNDLED_PLUGINS_DIR` 优先，否则自工作目录 / 可执行文件目录向上查找 `plugins/system`。
-- **打包边界（未落地）**：`apps/desktop/src-tauri/tauri.conf.json` 目前**没有** `bundle.resources`，
-  打包产物里还不包含本目录；随应用分发需另补该声明（见 `docs/spec/commands-events.md` §3.11）。
+- **随包分发已落地**：`tools/package-build.mjs` 把本目录复制到**包内 exe 同级**的 `plugins\system\`
+  （开发包与发布包都带），与仓库内布局同构 ⇒ 上面那条"向上查找"从 exe 目录**第一跳**即命中，
+  包整夹搬走也仍然可用。`tauri.conf.json` 仍无 `bundle.resources`（本仓库走 `tauri build --no-bundle`
+  + 打包脚本的便携包形态，不走安装器），因此随包分发由打包脚本承担。
+  回归门禁：`pnpm check:bundled-runtime`。
 
 ## 内容
 
