@@ -131,13 +131,8 @@ export function BlueprintPanel(): JSX.Element {
                     t={app.t}
                   />
 
-                  {/* 节点添加面板（补充节点缺父级时置灰） */}
-                  <BlueprintPalette
-                    onAdd={edits.addNode}
-                    doc={state.doc}
-                    layerKey={state.layerKey}
-                    t={app.t}
-                  />
+                  {/* 节点添加面板（所有类型都可随意创建；层级约束体现在连线上） */}
+                  <BlueprintPalette onAdd={edits.addNode} t={app.t} />
 
                   {/* 画布 + 检查器 */}
                   <div className="bp-main">

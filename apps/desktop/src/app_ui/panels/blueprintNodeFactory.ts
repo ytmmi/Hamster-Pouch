@@ -67,53 +67,38 @@ function parentAcceptsChild(
 }
 
 /**
- * **必须挂载在结构父下的类型**（用户口径，2026-10-10）：
- * - **子类**是**类目的细分**，脱离类目就没有意义 → 必须有类目上级；
- * - **标记**与类目**平行、功能相似**（都挂在面板下、其下挂对象）→ 必须有面板上级。
+ * **有固定结构父的类型**（用户口径 2026-10-10）：
+ * - **子类**是**类目的细分** → 结构父是类目（`class`）；
+ * - **标记**与类目**平行、功能相似** → 结构父是面板（`control`）。
  *
- * 两者在功能链路里都是**补充节点**（不是必要节点）：可以有，也可以完全没有；
- * 但**一旦要有，就必须挂在它该挂的父级下**——因此编辑器在"新增"这一步就拦住
- * 无父的落点，而不是先落一个灰节点再让用户自己接线。
- *
- * 注意与"只追加自身"（缺陷 0023 / D84）不冲突：这里**不新建**父节点补链，
- * 只是**拒绝**在没有可用父级时新增——缺父时由用户先建/先选中父节点。
+ * ⚠️ **这不限制"能不能创建"**：所有类型都可随意创建（编辑器只规定**连接方式与层级**）。
+ * 本清单只用于"新增时自动解析该挂到谁下面"——解析不到就**留空引用**（未接通灰显），
+ * **不拒绝创建**。层级约束体现在**连线与引用**上（`kindForEdge` 判非法边、
+ * 后端 `can_contain` 拒绝非法边），而不是创建许可。
  */
 export const MOUNT_REQUIRED_TYPES: readonly BlueprintNodeType[] = ["subclass", "mark"];
 
-/** 该类型是否必须挂载在结构父下（子类 → 类目；标记 → 面板）。 */
+/**
+ * 该类型是否有**固定的结构父类型**（子类 → 类目；标记 → 面板）。
+ *
+ * 名字保留 `requires` 是为兼容既有引用；语义是"新增时需要一个挂载父**来解析**"，
+ * **不是**"没有父就不许建"。
+ */
 export function requiresMountParent(type: BlueprintNodeType): boolean {
   return MOUNT_REQUIRED_TYPES.includes(type);
 }
 
-/** 该类型的**唯一**结构父类型（子类 → `class`；标记 → `control`）；无要求返回 `undefined`。 */
+/** 该类型的**固定**结构父类型（子类 → `class`；标记 → `control`）；无则 `undefined`。 */
 export function mountParentTypeOf(type: BlueprintNodeType): BlueprintNodeType | undefined {
   return requiresMountParent(type) ? structuralParentsOf(type)[0] : undefined;
-}
-
-/**
- * 当前层内**没有可用挂载父节点**的类型集合（供调色板把按钮置灰并给出提示）。
- *
- * 与 `appendNode` 的拒绝判据同源（都走 `resolveMountParent`），因此"按钮可点"
- * 与"点了能落下去"不会互相矛盾。
- */
-export function unmountableTypes(
-  doc: BlueprintGraph,
-  layerKey?: string | null,
-): ReadonlySet<BlueprintNodeType> {
-  const blocked = new Set<BlueprintNodeType>();
-  for (const type of MOUNT_REQUIRED_TYPES) {
-    if (!resolveMountParent(doc, type, null, layerKey)) {
-      blocked.add(type);
-    }
-  }
-  return blocked;
 }
 
 /**
  * 在当前层内解析某类型**可用的挂载父节点** key：优先用**显式选中的**上级
  * （含沿上级链回溯），否则在同层内兜底复用**既有**父节点（只写引用字段，**不新建节点**）。
  *
- * 返回 `undefined` = 没有可用父级 → 调用方应**拒绝新增**（见 `requiresMountParent`）。
+ * 返回 `undefined` = 当前没有可用父级 → 调用方**留空引用**（未接通灰显），
+ * **不是**拒绝创建。
  */
 export function resolveMountParent(
   doc: BlueprintGraph,
@@ -529,28 +514,24 @@ function addContainsEdge(
 
 /** 一次"新增节点"的结果。 */
 export interface AppendNodeResult {
-  /** 追加后的文档；**被拒绝时原样返回入参文档**（不做任何改动）。 */
+  /** 追加后的文档。 */
   doc: BlueprintGraph;
-  /** 新节点；被拒绝时为 `null`。 */
-  node: BlueprintNode | null;
-  /**
-   * 被拒绝的原因（成功时为 `undefined`）：
-   * - `mount-required`：该类型**必须挂载**在结构父下（子类 → 类目；标记 → 面板），
-   *   而当前层内没有可用的父节点。
-   */
-  rejected?: "mount-required";
-  /** 被拒绝时缺的父类型（子类 → `class`；标记 → `control`）。 */
-  requiredParent?: BlueprintNodeType;
+  /** 新节点。 */
+  node: BlueprintNode;
 }
 
 /**
  * 构造并接入一个新节点：**只追加它自己**，不跨链路挂钩、也不新建任何辅助节点。
  * 返回值是追加后的文档（除显式连线外不再改动图）与新节点 key。
  *
- * **必须挂载的类型**（子类 / 标记，用户口径 2026-10-10）在没有可用结构父时**拒绝新增**
- * （`rejected: "mount-required"`，文档原样返回）：这两类在功能链路里是**补充节点**
- * （可以完全没有），但一旦要有就必须挂在它该挂的父级下——所以不落"无父的灰节点"，
- * 也不为了凑父级而新建节点。
+ * **所有类型都可随意创建**（用户口径 2026-10-10）：编辑器**只规定连接方式与层级**，
+ * 不限制"能不能建"。因此本函数**永不拒绝**——缺结构父时**引用留空**，节点在画布上
+ * 灰显「未接通」，由使用者拖线或在属性面板补上（与 `class` / `object` 分支同一口径）。
+ *
+ * 早前版本对**子类 / 标记**做了"无父即拒绝新增"，那是把"层级约束"误当成"创建许可"：
+ * 层级约束管的是**连线与引用的合法性**（拖线时 `kindForEdge` 判非法、后端
+ * `can_contain` 拒绝非法边），不是"这个节点能不能被创建"。创建与连线是两件事，
+ * 混在一起会让"先摆节点、后连线"这种正常搭图顺序被打断。
  *
  * `layerKey` = 新增节点归属的层（D51；缺省取文档第一个有效层）。
  */
@@ -573,14 +554,12 @@ export function appendNode(
       ? parentNode.key
       : undefined;
 
-  // **必须挂载**的类型：先解析挂载父（显式选中优先，其次同层兜底复用既有父节点）；
-  // 解析不到就拒绝新增（不落无父节点，也不新建父节点补链）。
+  // **挂载父**（子类 → 类目；标记 → 面板）：优先显式选中的上级，其次同层内兜底复用
+  // **既有**父节点（只写引用字段，**不新建节点**）；解析不到就**留空引用**
+  // （未接通灰显）——创建一律放行，不因缺父而拒绝。
   let mountParent: string | undefined;
   if (requiresMountParent(type)) {
     mountParent = resolveMountParent(doc, type, hinted ?? null, layer);
-    if (!mountParent) {
-      return { doc, node: null, rejected: "mount-required", requiredParent: mountParentTypeOf(type) };
-    }
   }
 
   let work = doc;
@@ -622,9 +601,9 @@ export function appendNode(
       break;
     }
     case "subclass": {
-      // **子类必须挂在类目下**（用户口径：子类是类目的细分）：父级已在上面解析并校验，
-      // 这里直接用它（`mountParent` 保证指向 `class`，且该类目**有子类取值域**——
-      // `image` 类目下建子类必然被校验拒绝，因此解析阶段就跳过它）。
+      // 子类的结构父是**类目**（`class ⊃ subclass`）。父级由上面的 `resolveMountParent`
+      // 解析（显式选中优先，其次同层兜底复用既有类目）；**解析不到就留空引用**——
+      // 创建放行，节点灰显「未接通」，由使用者拖线补上。
       const classKey = mountParent;
       const ownerMedia = classKey
         ? work.nodes.find((n) => n.key === classKey)?.media_type
@@ -635,8 +614,7 @@ export function appendNode(
       break;
     }
     case "mark": {
-      // **标记必须挂在面板下**（与类目树平行、功能相似，用户口径）：父级已解析并校验
-      // （受与类目**同一个** `hasClass` 约束）。
+      // 标记的结构父是**面板**（与类目树平行、功能相似）。同样**解析不到就留空引用**。
       const controlKey = mountParent;
       const created = createMark(work, controlKey, layer, controlKey);
       work = created.doc;

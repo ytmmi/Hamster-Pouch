@@ -202,7 +202,7 @@ apps/desktop/src/app_ui/
                             #   界面拼给下面四个区块组件；含当前层状态）
     BlueprintDocList.tsx    # 蓝图文档列表（新建/带结构创建开关/选中/设为默认/模板下拉）
     BlueprintToolbar.tsx    # 编辑器工具条（名称/保存/一键整理/**刷新**/恢复内置默认/删除/视图切换）
-    BlueprintPalette.tsx    # 节点添加面板（可新增的类型；**补充节点缺挂载父时置灰并说明原因**）
+    BlueprintPalette.tsx    # 节点添加面板（**所有类型都可随意创建**，无置灰；层级约束体现在连线上）
     BlueprintJsonView.tsx   # JSON 文本视图（直接改 JSON + 解析回文档）
     BlueprintCanvas.tsx     # 节点画布（拖拽/连线/平移缩放/右键直线刀痕**批量删除**；**只渲染当前层**；挂右下角小地图）
     BlueprintMinimap.tsx    # 小地图（缩略当前层节点/连线 + 视口指示框；拖动即把视口中心移到该处）
@@ -213,7 +213,7 @@ apps/desktop/src/app_ui/
     useBlueprintLayerTools.ts  # 层工具接线（切层 / 新增 / 重命名 / 排序 / 删除 / 设为主界面 + 无根层派生）
     useBlueprintGraphEdits.ts  # 图编辑动作接线（新增节点 / 改字段 / 软删除 / 删边 / **连线原子落引用** / 一键整理）
     useBlueprintUnlinked.ts    # 未接通节点的面板侧派生（画布灰显与顶部提示用的 key 集合；随 refreshKey 重算）
-    blueprintNodeFactory.ts # 新节点工厂（**只追加自身**：不补最小链、不跨链路挂钩；引用由显式上级推导、**兜底引用只在本层内找**；**补充节点（子类/标记）必须有挂载父，否则拒绝新增**）
+    blueprintNodeFactory.ts # 新节点工厂（**只追加自身**：不补最小链、不跨链路挂钩；引用由显式上级推导、**兜底引用只在本层内找**；**所有类型都可随意创建**——`appendNode` 永不拒绝，子类/标记缺父时引用留空）
     blueprintPorts.ts       # 端口与边类型契约（**由 `packages/config` 的节点定义表投影**而来）
     blueprintLabels.ts      # 节点本地化显示层（显示名/摘要/字段标签；画布与属性面板共用）
     blueprintNodeColors.ts  # 节点/边配色纯数据（画布与小地图共用同一份色板；未知/插件类型有中性兜底色）

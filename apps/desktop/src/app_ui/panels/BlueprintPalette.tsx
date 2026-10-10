@@ -4,19 +4,20 @@
  * 一个域：列出可新增的节点类型，点击即在当前层落一个新节点。
  * 类型清单与顺序就是画布上可搭出的节点种类（显示名走 `blueprintLabels` 的本地化层）。
  *
- * **补充节点的挂载约束**（用户口径 2026-10-10）：**子类**必须挂在类目下、
- * **标记**必须挂在面板下——两者都是功能链路的**补充节点**（可以完全没有），
- * 但一旦要有就必须挂在它该挂的父级下。当前层里没有可用父级时，对应按钮**置灰**
- * 并给出原因，而不是让用户点出一个"无父的灰节点"。
+ * **所有类型都可随意创建**（用户口径 2026-10-10）：编辑器只规定**连接方式与层级**，
+ * 不限制"能不能建"。因此这里**没有任何置灰**——缺结构父的节点照样能落下来，
+ * 在画布上灰显「未接通」，由使用者拖线或在属性面板补上。
+ *
+ * 早前版本曾把**子类 / 标记**在"层内无可用父级"时置灰（连创建都拦住），那是把
+ * "层级约束"误当成"创建许可"：层级约束管的是**连线与引用的合法性**，不是创建许可。
  *
  * 纯展示 + 回调：落点与引用推导在 `useBlueprintGraphEdits`（`blueprintNodeFactory`）。
  */
 
-import type { BlueprintGraph, BlueprintNodeType } from "@hamster-pouch/config";
+import type { BlueprintNodeType } from "@hamster-pouch/config";
 
-import type { Translate, TranslationKey } from "../i18n";
+import type { Translate } from "../i18n";
 import { nodeTypeLabel } from "./blueprintLabels";
-import { mountParentTypeOf, unmountableTypes } from "./blueprintNodeFactory";
 
 /** 可从调色板新增的节点类型（顺序即按钮顺序）。 */
 const PALETTE_TYPES: readonly BlueprintNodeType[] = [
@@ -37,44 +38,21 @@ const PALETTE_TYPES: readonly BlueprintNodeType[] = [
 
 export interface BlueprintPaletteProps {
   onAdd: (type: BlueprintNodeType) => void;
-  /** 当前文档与层：用于判定"补充节点"是否有可挂载的父级。 */
-  doc: BlueprintGraph;
-  layerKey: string | null;
   t: Translate;
 }
 
-export function BlueprintPalette({
-  onAdd,
-  doc,
-  layerKey,
-  t,
-}: BlueprintPaletteProps): JSX.Element {
-  const blocked = unmountableTypes(doc, layerKey);
+export function BlueprintPalette({ onAdd, t }: BlueprintPaletteProps): JSX.Element {
   return (
     <div className="bp-palette">
-      {PALETTE_TYPES.map((type) => {
-        const missingParent = blocked.has(type);
-        const parentType = mountParentTypeOf(type);
-        const title = missingParent
-          ? t("blueprint.mountRequired", {
-              type: nodeTypeLabel(type, t),
-              parent: parentType
-                ? t(`blueprint.type.${parentType}` as TranslationKey)
-                : "",
-            })
-          : undefined;
-        return (
-          <button
-            key={type}
-            className="bp-palette-btn"
-            disabled={missingParent}
-            title={title}
-            onClick={() => onAdd(type)}
-          >
-            {nodeTypeLabel(type, t)}
-          </button>
-        );
-      })}
+      {PALETTE_TYPES.map((type) => (
+        <button
+          key={type}
+          className="bp-palette-btn"
+          onClick={() => onAdd(type)}
+        >
+          {nodeTypeLabel(type, t)}
+        </button>
+      ))}
     </div>
   );
 }

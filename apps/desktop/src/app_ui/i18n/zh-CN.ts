@@ -595,7 +595,6 @@ export const zhCN = {
   "blueprint.refresh": "刷新",
   "blueprint.refreshHint": "重新对齐派生状态（未接通灰显 / 连线端口位置 / JSON 文本），不改动文档内容",
   "blueprint.refreshed": "已刷新节点状态与连线",
-  "blueprint.mountRequired": "无法新增「{type}」：{type} 必须挂载在「{parent}」下（它是补充节点，请先选中或新建一个「{parent}」）",
   "blueprint.defaultUpdated": "默认蓝图已更新为新版",
   "blueprint.tabTitle": "标签名",
   "blueprint.port.contains": "包含",

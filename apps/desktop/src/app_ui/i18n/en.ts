@@ -576,7 +576,6 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.refresh": "Refresh",
   "blueprint.refreshHint": "Re-align derived state (unlinked grey-out / port positions / JSON text) without changing the document",
   "blueprint.refreshed": "Node state and connections refreshed",
-  "blueprint.mountRequired": "Cannot add \"{type}\": {type} must be mounted under \"{parent}\" (it is a supplementary node — select or create a \"{parent}\" first)",
   "blueprint.defaultUpdated": "Default blueprint updated to the new version",
   "blueprint.tabTitle": "Tab title",
   "blueprint.port.contains": "Contains",

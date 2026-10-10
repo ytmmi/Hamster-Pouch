@@ -838,11 +838,20 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
   writeFixture("arranged_tree", after);
 }
 
-// ---- 11. 补充节点的挂载约束：子类必须挂类目、标记必须挂面板 ----
+// ---- 11. 所有节点都可随意创建；层级约束只体现在连线与引用上 ----
 //
-// 用户口径：「子类必须挂载在类目下，因为子类是类目的细分」「标记和类目平行，功能相似」
-// 「在蓝图功能链路中子类/标记不是必要节点，是补充节点」。
-// 因此：有可用父级 → 直接挂上；没有 → **拒绝新增**（不落无父的灰节点，也不代建父节点）。
+// 用户口径（2026-10-10，**更正**）：「子类节点可以随意创建，所有节点都可以随意创建，
+// 只规定连接方式和层级」。
+//
+// 因此：
+// - **创建一律放行**——任何类型、任何时机都能落下来，**永不拒绝**；
+// - 有可用结构父 → 自动挂上（显式选中优先，其次同层兜底复用既有父）；
+// - **没有 → 引用留空**（画布灰显「未接通」），由使用者拖线或属性面板补上；
+// - **层级约束**体现在 `containmentAllows`（非法父连不上）与后端 `can_contain` 上，
+//   **不是**创建许可。
+//
+// ⚠️ 本节此前断言的是"无父即拒绝新增"（`rejected: "mount-required"`）——那是把
+// "层级约束"误当成"创建许可"，已被用户口径推翻。
 {
   // ① 子类：本层有 text 类目 → 自动挂上
   {
@@ -862,31 +871,32 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
     };
     const r = factory.appendNode(doc, "subclass", { x: 100, y: 100 }, null, "l_main");
     check(
-      "挂载约束：子类自动挂在类目下（子类是类目的细分）",
-      r.rejected === undefined &&
-        r.node?.type === "subclass" &&
-        r.node?.subclass === kText.node.key &&
-        r.node?.format === "epub",
-      `subclass=${r.node?.subclass} format=${r.node?.format} rejected=${r.rejected ?? "(无)"}`,
+      "随意创建：子类有可用类目时自动挂上（子类是类目的细分）",
+      r.node.type === "subclass" &&
+        r.node.subclass === kText.node.key &&
+        r.node.format === "epub",
+      `subclass=${r.node.subclass} format=${r.node.format}`,
     );
     writeFixture("subclass_mounted_under_class", r.doc);
   }
 
-  // ② 子类：本层**没有**类目 → 拒绝新增（补充节点，不代建父级）
+  // ② 子类：本层**没有**类目 → **照常创建**，引用留空（未接通灰显）
   {
     const doc0 = config.makeEmptyBlueprint();
     const r = factory.appendNode(doc0, "subclass", { x: 0, y: 0 }, null, "l_main");
     check(
-      "挂载约束：层内无类目 → 子类**拒绝新增**（不落无父节点、不新建父级）",
-      r.rejected === "mount-required" &&
-        r.node === null &&
-        r.doc === doc0 &&
-        r.requiredParent === "class",
-      `rejected=${r.rejected} requiredParent=${r.requiredParent} 节点数=${r.doc.nodes.length}`,
+      "随意创建：层内无类目 → 子类**照常创建**（引用留空 = 未接通，不拒绝、不代建父级）",
+      r.node.type === "subclass" &&
+        r.node.subclass === undefined &&
+        r.doc.nodes.length === doc0.nodes.length + 1 &&
+        r.doc.edges.length === doc0.edges.length,
+      `节点数 ${doc0.nodes.length} → ${r.doc.nodes.length}；subclass=${r.node.subclass ?? "(留空)"}；新增边=${r.doc.edges.length - doc0.edges.length}`,
     );
+    writeFixture("subclass_without_class", r.doc);
   }
 
-  // ③ 子类：只有 image 类目（无子类取值域）→ 同样拒绝
+  // ③ 子类：只有 image 类目（无子类取值域）→ 照常创建（挂上也不产出"必然非法"的引用：
+  //    这里仍会复用 image 类目，但**format 留空**——缺 format 是未接通软告警，允许保存）
   {
     const doc0 = defaults();
     const kImg = factory.appendNode(
@@ -898,9 +908,9 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
     );
     const r = factory.appendNode(kImg.doc, "subclass", { x: 0, y: 0 }, null, "l_main");
     check(
-      "挂载约束：image 类目没有子类取值域 → 子类拒绝新增（不产出必然被校验拒绝的文档）",
-      r.rejected === "mount-required" && r.requiredParent === "class",
-      `rejected=${r.rejected} 现有类目 media_type=${kImg.node.media_type}`,
+      "随意创建：image 类目下也能建子类（format 留空 = 未接通软告警，不阻塞保存）",
+      r.node.type === "subclass" && r.node.format === undefined,
+      `format=${r.node.format ?? "(留空)"} media_type=${kImg.node.media_type}`,
     );
   }
 
@@ -908,42 +918,59 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
   {
     const doc0 = defaults();
     const r = factory.appendNode(doc0, "mark", { x: 100, y: 100 }, null, "l_main");
-    const owner = r.doc.nodes.find((n) => n.key === r.node?.control);
+    const owner = r.doc.nodes.find((n) => n.key === r.node.control);
     check(
-      "挂载约束：标记自动挂在面板下（与类目平行、功能相似）",
-      r.rejected === undefined &&
-        r.node?.type === "mark" &&
+      "随意创建：标记有可用面板时自动挂上（与类目平行、功能相似）",
+      r.node.type === "mark" &&
         owner?.type === "control" &&
-        r.node?.mark === config.BLUEPRINT_BUILTIN_MARKS[0],
-      `control=${r.node?.control}(${owner?.type ?? "?"}) mark=${r.node?.mark}`,
+        r.node.mark === config.BLUEPRINT_BUILTIN_MARKS[0],
+      `control=${r.node.control}(${owner?.type ?? "?"}) mark=${r.node.mark}`,
     );
     writeFixture("mark_mounted_under_control", r.doc);
   }
 
-  // ⑤ 标记：层内没有面板 → 拒绝新增
+  // ⑤ 标记：层内没有面板 → 照常创建，引用留空
   {
     const doc0 = config.makeEmptyBlueprint();
     const r = factory.appendNode(doc0, "mark", { x: 0, y: 0 }, null, "l_main");
     check(
-      "挂载约束：层内无面板 → 标记**拒绝新增**（不落无父节点）",
-      r.rejected === "mount-required" && r.node === null && r.requiredParent === "control",
-      `rejected=${r.rejected} requiredParent=${r.requiredParent}`,
+      "随意创建：层内无面板 → 标记**照常创建**（引用留空 = 未接通）",
+      r.node.type === "mark" &&
+        r.node.control === undefined &&
+        r.doc.nodes.length === doc0.nodes.length + 1,
+      `control=${r.node.control ?? "(留空)"} 节点数=${r.doc.nodes.length}`,
+    );
+    writeFixture("mark_without_control", r.doc);
+  }
+
+  // ⑥ **所有 12 种类型**在**空图**上都能创建（"随意创建"的最强断言：一个不落）
+  {
+    const types = config.BLUEPRINT_BUILTIN_NODE_TYPES;
+    const failed = [];
+    for (const type of types) {
+      // 每种类型都从空图起步（最苛刻：没有任何可复用的父级）
+      const r = factory.appendNode(config.makeEmptyBlueprint(), type, { x: 0, y: 0 }, null, "l_main");
+      if (!r.node || r.node.type !== type) failed.push(type);
+    }
+    check(
+      `随意创建：空图上 ${types.length} 种类型**全部**可创建（无任何前置条件）`,
+      failed.length === 0,
+      failed.length ? `失败类型=[${failed.join(", ")}]` : `${types.length} 种全部可创建`,
     );
   }
 
-  // ⑥ 调色板可用性判据与新增判据同源（按钮可点 == 点了能落下）
+  // ⑦ 层级约束**仍然生效**（只是体现在连线上，不在创建上）
   {
-    const empty = config.makeEmptyBlueprint();
-    const blockedEmpty = factory.unmountableTypes(empty, "l_main");
-    const withPanel = defaults();
-    const blockedFull = factory.unmountableTypes(withPanel, "l_main");
+    const containment = await import(
+      pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintPorts.ts")).href
+    );
     check(
-      "挂载约束：调色板置灰判据与新增判据同源（空图置灰两类；有面板的默认图只置灰子类）",
-      blockedEmpty.has("subclass") &&
-        blockedEmpty.has("mark") &&
-        !blockedFull.has("mark") &&
-        blockedFull.has("subclass"),
-      `空图=[${[...blockedEmpty].join(",")}] 默认图=[${[...blockedFull].join(",")}]`,
+      "随意创建≠随意连线：子类只能连到类目下、标记只能连到面板下（层级约束仍在）",
+      containment.kindForEdge("class", "contains", "subclass") === "contains" &&
+        containment.kindForEdge("control", "contains", "mark") === "contains" &&
+        containment.kindForEdge("control", "contains", "subclass") === null &&
+        containment.kindForEdge("class", "contains", "mark") === null,
+      `class→subclass=${containment.kindForEdge("class", "contains", "subclass")} control→mark=${containment.kindForEdge("control", "contains", "mark")} control→subclass=${containment.kindForEdge("control", "contains", "subclass")} class→mark=${containment.kindForEdge("class", "contains", "mark")}`,
     );
   }
 }

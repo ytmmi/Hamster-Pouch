@@ -19,7 +19,6 @@ import {
 } from "@hamster-pouch/config";
 
 import { useApp } from "../core/AppContext";
-import type { TranslationKey } from "../i18n";
 import { arrangeTree } from "./blueprintArrange";
 import { softRemove, softRemoveMany } from "./blueprintDelete";
 import { ensureInterface } from "./blueprintLayers";
@@ -87,7 +86,10 @@ export function useBlueprintGraphEdits({
       const center = viewCenter ?? canvasCenter(doc.nodes);
       const position = freeSlotPosition(doc.nodes, center);
       const hint = parentHintFor(type, selectedKey, doc, layerKey);
-      const { doc: next, node, rejected, requiredParent } = appendNode(
+      // **所有类型都可随意创建**（用户口径 2026-10-10）：编辑器只规定**连接方式与层级**，
+      // 不限制"能不能建"。缺结构父时引用**留空**（画布灰显「未接通」），由使用者拖线
+      // 或在属性面板补上——与 `class` / `object` 同一口径，也与 D84「只追加自身」一致。
+      const { doc: next, node } = appendNode(
         doc,
         type,
         position,
@@ -95,22 +97,6 @@ export function useBlueprintGraphEdits({
         // D51：新增节点归属**当前层**。
         layerKey,
       );
-      // **必须挂载的类型**（子类 → 类目；标记 → 面板）在层内没有可用父级时**拒绝新增**：
-      // 这两类是功能链路的**补充节点**，一旦要有就必须挂在该挂的父级下（用户口径 2026-10-10）。
-      // 这里只提示，不代建父节点（与"只追加自身"一致）。
-      if (rejected === "mount-required" || !node) {
-        const parentLabel = requiredParent
-          ? app.t(`blueprint.type.${requiredParent}` as TranslationKey)
-          : "";
-        app.status(
-          app.t("blueprint.mountRequired", {
-            type: app.t(`blueprint.type.${type}` as TranslationKey),
-            parent: parentLabel,
-          }),
-          "error",
-        );
-        return;
-      }
       mutate(next);
       setSelectedKey(node.key);
       app.status(
