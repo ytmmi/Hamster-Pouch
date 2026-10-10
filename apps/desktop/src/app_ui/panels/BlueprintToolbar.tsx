@@ -16,8 +16,13 @@ export interface BlueprintToolbarProps {
   viewMode: BlueprintViewMode;
   onNameChange: (value: string) => void;
   onSave: () => Promise<void>;
-  /** 一键整理：以选中节点为根树状展开。 */
+  /** 一键整理：以选中节点为起始节点树状展开（起始节点位置不变）。 */
   onArrange: () => void;
+  /**
+   * 刷新：重算派生状态（未接通灰显 / 端口测量 / JSON 文本），**不改文档**。
+   * 用于"连线后节点状态仍显示未接通"这类需要重新对齐的场合。
+   */
+  onRefresh: () => void;
   /** 恢复内置默认蓝图（替换当前选中蓝图的内容）。 */
   onRestore: () => Promise<void>;
   /** 删除当前选中蓝图。 */
@@ -34,6 +39,7 @@ export function BlueprintToolbar({
   onNameChange,
   onSave,
   onArrange,
+  onRefresh,
   onRestore,
   onRemove,
   onToggleView,
@@ -54,6 +60,9 @@ export function BlueprintToolbar({
         onClick={onArrange}
       >
         {t("blueprint.arrange")}
+      </button>
+      <button title={t("blueprint.refreshHint")} onClick={onRefresh}>
+        {t("blueprint.refresh")}
       </button>
       <button
         title={t("blueprint.restoreHint")}

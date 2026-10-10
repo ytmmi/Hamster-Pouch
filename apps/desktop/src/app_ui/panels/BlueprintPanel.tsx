@@ -42,12 +42,25 @@ export function BlueprintPanel(): JSX.Element {
     persistDoc: docs.persistDoc,
   });
   /** 未接通节点（派生）：画布灰显 + 顶部提示，不落库。 */
-  const unlinkedKeys = useBlueprintUnlinked(state.doc);
+  const unlinkedKeys = useBlueprintUnlinked(state.doc, state.refreshKey);
 
   const selectedNode = useMemo(
     () => state.doc.nodes.find((n) => n.key === state.selectedKey) ?? null,
     [state.doc.nodes, state.selectedKey],
   );
+
+  /**
+   * 工具栏「刷新」：重算派生状态并给一次反馈。
+   *
+   * 派生状态（未接通灰显、端口测量）本应随文档变化自动重算；这条按钮是**兜底**——
+   * 用户反馈"连线后节点仍显示未接通，刷新一下才对"（根因是连线时边与引用字段分成两次
+   * 编辑、后一次覆盖前一次，已在 `onConnect` 里改为一次原子编辑）。即便将来再出现
+   * 任何"状态没跟上"的情况，用户也有一个不改文档的显式手段。
+   */
+  const onRefresh = () => {
+    state.refresh();
+    app.status(app.t("blueprint.refreshed"), "ok");
+  };
 
   return (
     <div className="panel bp-panel">
@@ -86,6 +99,7 @@ export function BlueprintPanel(): JSX.Element {
                 onNameChange={state.setName}
                 onSave={docs.save}
                 onArrange={edits.onArrange}
+                onRefresh={onRefresh}
                 onRestore={docs.restoreBuiltin}
                 onRemove={docs.remove}
                 onToggleView={() =>
@@ -117,8 +131,13 @@ export function BlueprintPanel(): JSX.Element {
                     t={app.t}
                   />
 
-                  {/* 节点添加面板 */}
-                  <BlueprintPalette onAdd={edits.addNode} t={app.t} />
+                  {/* 节点添加面板（补充节点缺父级时置灰） */}
+                  <BlueprintPalette
+                    onAdd={edits.addNode}
+                    doc={state.doc}
+                    layerKey={state.layerKey}
+                    t={app.t}
+                  />
 
                   {/* 画布 + 检查器 */}
                   <div className="bp-main">
@@ -135,6 +154,7 @@ export function BlueprintPanel(): JSX.Element {
                       onSelect={state.setSelectedKey}
                       unlinked={unlinkedKeys}
                       layerKey={state.layerKey}
+                      refreshKey={state.refreshKey}
                       t={app.t}
                     />
                     <NodeInspector

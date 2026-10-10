@@ -696,6 +696,198 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
   );
 }
 
+// ---- 10. 「一键整理」：起始节点位置不变、上下间距足够、节点不重叠 ----
+//
+// 用户反馈三条：①整理后**选中的节点位置会回到原点**（旧实现把根固定落在 ORIGIN）；
+// ②整理后节点**拥挤、重叠**（旧行距 84 < 卡片高 110）；③间距只应在整理时放大。
+{
+  const arrange = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintArrange.ts")).href
+  );
+  const gaps = arrange.ARRANGE_GAPS;
+
+  // 造一棵深 3 层、同层多节点的树，起始节点故意放在远离原点处。
+  const rootPos = { x: 3000, y: 2200 };
+  const doc = {
+    schema_version: 2,
+    layers: [{ key: "l_main", name: "主界面" }],
+    nodes: [
+      { key: "n_root", type: "interface", layer: "l_main", position: rootPos },
+      { key: "n_a", type: "layout_block", layer: "l_main", name: "A", position: { x: 0, y: 0 } },
+      { key: "n_b", type: "layout_block", layer: "l_main", name: "B", position: { x: 0, y: 0 } },
+      { key: "n_c", type: "layout_block", layer: "l_main", name: "C", position: { x: 0, y: 0 } },
+      { key: "n_a1", type: "control", layer: "l_main", panel_id: "media", position: { x: 0, y: 0 } },
+      { key: "n_a2", type: "control", layer: "l_main", panel_id: "viewer", position: { x: 0, y: 0 } },
+      // 孤立节点：不参与整理，必须**保持原位**，且整理后的节点要避让它
+      { key: "n_iso", type: "control", layer: "l_main", panel_id: "tags", position: { x: 3300, y: 2200 } },
+    ],
+    edges: [
+      { from: "n_root", to: "n_a", kind: "contains", order: 1 },
+      { from: "n_root", to: "n_b", kind: "contains", order: 2 },
+      { from: "n_root", to: "n_c", kind: "contains", order: 3 },
+      { from: "n_a", to: "n_a1", kind: "contains", order: 4 },
+      { from: "n_a", to: "n_a2", kind: "contains", order: 5 },
+    ],
+  };
+  const after = arrange.arrangeTree(doc, "n_root");
+  const at = (d, key) => d.nodes.find((n) => n.key === key).position;
+
+  check(
+    "整理：起始节点位置不变（不再回到世界原点）",
+    at(after, "n_root").x === rootPos.x && at(after, "n_root").y === rootPos.y,
+    `root=${JSON.stringify(at(after, "n_root"))} 期望=${JSON.stringify(rootPos)}`,
+  );
+
+  // 同层相邻节点的 y 间距必须 ≥ 卡片高 + 余量（不拥挤）
+  const sameLayer = ["n_a", "n_b", "n_c"].map((k) => at(after, k)).sort((p, q) => p.y - q.y);
+  const minDy = Math.min(
+    ...sameLayer.slice(1).map((p, i) => p.y - sameLayer[i].y),
+  );
+  check(
+    "整理：同层节点上下间距 ≥ 卡片高 + 余量（不拥挤）",
+    minDy >= gaps.card.h + gaps.margin,
+    `最小间距=${minDy} 需要≥${gaps.card.h + gaps.margin}（V_GAP=${gaps.vertical}）`,
+  );
+
+  // 全图任意两节点不得重叠（按卡片尺寸判定）
+  const all = after.nodes.map((n) => ({ key: n.key, ...n.position }));
+  const overlaps = [];
+  for (let i = 0; i < all.length; i += 1) {
+    for (let j = i + 1; j < all.length; j += 1) {
+      const a = all[i];
+      const b = all[j];
+      if (
+        Math.abs(a.x - b.x) < gaps.card.w + gaps.margin &&
+        Math.abs(a.y - b.y) < gaps.card.h + gaps.margin
+      ) {
+        overlaps.push(`${a.key}~${b.key}`);
+      }
+    }
+  }
+  check(
+    "整理：全图节点互不重叠（含避让不参与整理的孤立节点）",
+    overlaps.length === 0,
+    overlaps.length ? `重叠=[${overlaps.join(", ")}]` : `${all.length} 个节点无重叠`,
+  );
+
+  check(
+    "整理：不参与整理的孤立节点保持原位",
+    at(after, "n_iso").x === 3300 && at(after, "n_iso").y === 2200,
+    JSON.stringify(at(after, "n_iso")),
+  );
+  writeFixture("arranged_tree", after);
+}
+
+// ---- 11. 补充节点的挂载约束：子类必须挂类目、标记必须挂面板 ----
+//
+// 用户口径：「子类必须挂载在类目下，因为子类是类目的细分」「标记和类目平行，功能相似」
+// 「在蓝图功能链路中子类/标记不是必要节点，是补充节点」。
+// 因此：有可用父级 → 直接挂上；没有 → **拒绝新增**（不落无父的灰节点，也不代建父节点）。
+{
+  // ① 子类：本层有 text 类目 → 自动挂上
+  {
+    const doc0 = defaults();
+    const kText = factory.appendNode(
+      doc0,
+      "class",
+      { x: 0, y: 0 },
+      { key: "c_media", explicit: true },
+      "l_main",
+    );
+    let doc = {
+      ...kText.doc,
+      nodes: kText.doc.nodes.map((n) =>
+        n.key === kText.node.key ? { ...n, media_type: "text" } : n,
+      ),
+    };
+    const r = factory.appendNode(doc, "subclass", { x: 100, y: 100 }, null, "l_main");
+    check(
+      "挂载约束：子类自动挂在类目下（子类是类目的细分）",
+      r.rejected === undefined &&
+        r.node?.type === "subclass" &&
+        r.node?.subclass === kText.node.key &&
+        r.node?.format === "epub",
+      `subclass=${r.node?.subclass} format=${r.node?.format} rejected=${r.rejected ?? "(无)"}`,
+    );
+    writeFixture("subclass_mounted_under_class", r.doc);
+  }
+
+  // ② 子类：本层**没有**类目 → 拒绝新增（补充节点，不代建父级）
+  {
+    const doc0 = config.makeEmptyBlueprint();
+    const r = factory.appendNode(doc0, "subclass", { x: 0, y: 0 }, null, "l_main");
+    check(
+      "挂载约束：层内无类目 → 子类**拒绝新增**（不落无父节点、不新建父级）",
+      r.rejected === "mount-required" &&
+        r.node === null &&
+        r.doc === doc0 &&
+        r.requiredParent === "class",
+      `rejected=${r.rejected} requiredParent=${r.requiredParent} 节点数=${r.doc.nodes.length}`,
+    );
+  }
+
+  // ③ 子类：只有 image 类目（无子类取值域）→ 同样拒绝
+  {
+    const doc0 = defaults();
+    const kImg = factory.appendNode(
+      doc0,
+      "class",
+      { x: 0, y: 0 },
+      { key: "c_media", explicit: true },
+      "l_main",
+    );
+    const r = factory.appendNode(kImg.doc, "subclass", { x: 0, y: 0 }, null, "l_main");
+    check(
+      "挂载约束：image 类目没有子类取值域 → 子类拒绝新增（不产出必然被校验拒绝的文档）",
+      r.rejected === "mount-required" && r.requiredParent === "class",
+      `rejected=${r.rejected} 现有类目 media_type=${kImg.node.media_type}`,
+    );
+  }
+
+  // ④ 标记：本层有面板 → 自动挂上
+  {
+    const doc0 = defaults();
+    const r = factory.appendNode(doc0, "mark", { x: 100, y: 100 }, null, "l_main");
+    const owner = r.doc.nodes.find((n) => n.key === r.node?.control);
+    check(
+      "挂载约束：标记自动挂在面板下（与类目平行、功能相似）",
+      r.rejected === undefined &&
+        r.node?.type === "mark" &&
+        owner?.type === "control" &&
+        r.node?.mark === config.BLUEPRINT_BUILTIN_MARKS[0],
+      `control=${r.node?.control}(${owner?.type ?? "?"}) mark=${r.node?.mark}`,
+    );
+    writeFixture("mark_mounted_under_control", r.doc);
+  }
+
+  // ⑤ 标记：层内没有面板 → 拒绝新增
+  {
+    const doc0 = config.makeEmptyBlueprint();
+    const r = factory.appendNode(doc0, "mark", { x: 0, y: 0 }, null, "l_main");
+    check(
+      "挂载约束：层内无面板 → 标记**拒绝新增**（不落无父节点）",
+      r.rejected === "mount-required" && r.node === null && r.requiredParent === "control",
+      `rejected=${r.rejected} requiredParent=${r.requiredParent}`,
+    );
+  }
+
+  // ⑥ 调色板可用性判据与新增判据同源（按钮可点 == 点了能落下）
+  {
+    const empty = config.makeEmptyBlueprint();
+    const blockedEmpty = factory.unmountableTypes(empty, "l_main");
+    const withPanel = defaults();
+    const blockedFull = factory.unmountableTypes(withPanel, "l_main");
+    check(
+      "挂载约束：调色板置灰判据与新增判据同源（空图置灰两类；有面板的默认图只置灰子类）",
+      blockedEmpty.has("subclass") &&
+        blockedEmpty.has("mark") &&
+        !blockedFull.has("mark") &&
+        blockedFull.has("subclass"),
+      `空图=[${[...blockedEmpty].join(",")}] 默认图=[${[...blockedFull].join(",")}]`,
+    );
+  }
+}
+
 // ---- 状态冲突规则的 TS/Rust 一致性（D66）----
 //
 // 前端 `findStateConflicts` 与后端 `blueprint_validate::find_state_conflicts` 必须同口径：

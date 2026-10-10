@@ -63,6 +63,16 @@ export interface BlueprintEditorState {
   mutate: (next: BlueprintGraph) => void;
   /** 把 JSON 文本解析回文档；解析失败只记错误，不动文档。 */
   syncFromJson: () => void;
+  /**
+   * 刷新计数：每点一次「刷新」+1。
+   *
+   * 用途（用户反馈「连线后节点状态为未接通，要刷新一下才对」）：把**派生状态**强制重算一次——
+   * 未接通灰显（`useBlueprintUnlinked`）、画布端口测量（`BlueprintCanvas`）与 JSON 文本
+   * 都以它为依赖，因此点一次就与文档重新对齐。它**不改文档**（不改图 = 不会丢用户编辑）。
+   */
+  refreshKey: number;
+  /** 刷新：重算派生状态并把 JSON 文本与文档重新对齐。 */
+  refresh: () => void;
 }
 
 export function useBlueprintEditorState(): BlueprintEditorState {
@@ -86,12 +96,23 @@ export function useBlueprintEditorState(): BlueprintEditorState {
    * 与运行时"当前层"（D54，按仓库持久化）同步：切层时一并套用该层布局。
    */
   const [layerKey, setLayerKey] = useState<string | null>(null);
+  /** 刷新计数：派生状态（未接通灰显/端口测量/JSON 文本）的重算触发点。 */
+  const [refreshKey, setRefreshKey] = useState(0);
 
   /** 统一变更文档并同步 JSON 文本。 */
   const mutate = useCallback((next: BlueprintGraph) => {
     setDoc(next);
     setJsonText(JSON.stringify(next, null, 2));
   }, []);
+
+  /**
+   * 刷新：不改文档，只把**派生状态**重算一次（并把 JSON 文本与当前文档重新对齐，
+   * 覆盖"用户在 JSON 视图里改了文本但没同步"的中间状态）。
+   */
+  const refresh = useCallback(() => {
+    setJsonText(JSON.stringify(doc, null, 2));
+    setRefreshKey((n) => n + 1);
+  }, [doc]);
 
   /** JSON 视图 → 文档：解析成功才替换文档（缺 `position` 的节点按槽位补齐），失败只记错误。 */
   const syncFromJson = useCallback(() => {
@@ -131,5 +152,7 @@ export function useBlueprintEditorState(): BlueprintEditorState {
     setLayerKey,
     mutate,
     syncFromJson,
+    refreshKey,
+    refresh,
   };
 }

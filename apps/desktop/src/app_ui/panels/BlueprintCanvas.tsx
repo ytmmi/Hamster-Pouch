@@ -76,6 +76,12 @@ export interface BlueprintCanvasProps {
    * （兼容单层兜底文档；编辑器始终传入当前层）。
    */
   layerKey?: string | null;
+  /**
+   * 刷新计数（工具栏「刷新」）：变化时强制重新测量端口位置。
+   * 端口测量依赖 DOM 布局，节点卡片高度会随摘要文案变化，重新量一次才能让
+   * 连线坐标与节点状态一起对齐（用户反馈的"连线后状态没刷新"）。
+   */
+  refreshKey?: number;
   t: Translate;
 }
 
@@ -111,6 +117,7 @@ export function BlueprintCanvas({
   onSelect,
   unlinked,
   layerKey,
+  refreshKey = 0,
   t,
 }: BlueprintCanvasProps): JSX.Element {
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -218,7 +225,7 @@ export function BlueprintCanvas({
 
   useLayoutEffect(() => {
     measurePorts();
-  }, [doc, view, selectedKey, measurePorts]);
+  }, [doc, view, selectedKey, refreshKey, measurePorts]);
 
   /**
    * 同步画布可见区域尺寸（小地图画视口指示框用）。
@@ -510,15 +517,21 @@ export function BlueprintCanvas({
                 (ed) => ed.from === tempEdge.fromKey && ed.to === toKey && ed.kind === kind,
               )
             ) {
-              const order =
-                Math.max(0, ...doc.edges.map((ed) => ed.order)) + 1;
-              const created = { from: tempEdge.fromKey, to: toKey, kind, order };
-              onChange({
-                ...doc,
-                edges: [...doc.edges, created],
-              });
-              // 连线同时把子节点的引用落好（用户不必手填 key）。
-              onConnect?.(created);
+              // **一次原子编辑**：边与子节点的引用字段由 `onConnect` 在**同一份文档**上落好。
+              // 早前这里先 `onChange({...doc, edges})` 再回调 `onConnect`，而后者又从同一份
+              // 调用前的 `doc` 派生 → 刚加的边被覆盖掉，表现为"连完线节点状态没刷新"
+              // （用户反馈：连线后节点状态为未接通，得手动刷新）。
+              if (onConnect) {
+                onConnect({ from: tempEdge.fromKey, to: toKey, kind });
+              } else {
+                // 兜底（未接 `onConnect` 时）：只落这条边，引用字段交由调用方后续处理。
+                // 保留它是因为 `onConnect` 是可选属性——缺了它不该变成"连线完全无效"。
+                const order = Math.max(0, ...doc.edges.map((ed) => ed.order)) + 1;
+                onChange({
+                  ...doc,
+                  edges: [...doc.edges, { from: tempEdge.fromKey, to: toKey, kind, order }],
+                });
+              }
             }
           }
         }

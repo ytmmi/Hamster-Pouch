@@ -462,6 +462,123 @@ function run(graph, layer, trigger, mediaType, context) {
   );
 }
 
+// ---- 子类优先（用户口径）：类目链路自动排除已被子类定义的情况 ----
+//
+// 口径原文：「子类是类目的细分，只负责一种情况，当有子类蓝图链路时，类目中无子类的链路
+// 就自动排除子类的情况，因为子类被定义了情况。在蓝图功能链路中子类不是必要节点，是补充节点。」
+//
+// 合成图：text 类目下有**两条**链——
+//   ① 类目链路：k_text → o_text → e_text → a_text（显示 metadata）
+//   ② 子类链路：k_text → k_txt(子类) → o_txt → e_txt → a_txt（显示 tags）
+// 期望：format=txt 只命中子类链路；format=epub（无对应子类）仍走类目链路。
+{
+  const graph = {
+    schema_version: 2,
+    layers: [{ key: "l_main", name: "主界面" }],
+    nodes: [
+      { key: "ui", type: "interface", layer: "l_main", position: { x: 0, y: 0 } },
+      { key: "blk", type: "layout_block", layer: "l_main", name: "区", position: { x: 0, y: 100 } },
+      { key: "c_book", type: "control", layer: "l_main", panel_id: "bookpreview", position: { x: 0, y: 200 } },
+      { key: "k_text", type: "class", layer: "l_main", control: "c_book", media_type: "text", position: { x: 200, y: 200 } },
+      // 子类：挂在 k_text 之下，认领 txt 这一种情况
+      { key: "k_txt", type: "subclass", layer: "l_main", subclass: "k_text", format: "txt", position: { x: 400, y: 200 } },
+      // ① 类目链路的对象（无子类的那条分支）
+      { key: "o_text", type: "object", layer: "l_main", class: "k_text", scope: "double_clicked", position: { x: 400, y: 300 } },
+      { key: "e_text", type: "event", layer: "l_main", trigger: "double_click", position: { x: 600, y: 300 } },
+      { key: "a_text", type: "action", layer: "l_main", op: "show", target: "c_book", position: { x: 800, y: 300 } },
+      // ② 子类链路的对象
+      { key: "o_txt", type: "object", layer: "l_main", subclass: "k_txt", scope: "double_clicked", position: { x: 400, y: 400 } },
+      { key: "e_txt", type: "event", layer: "l_main", trigger: "double_click", position: { x: 600, y: 400 } },
+      { key: "a_txt", type: "action", layer: "l_main", op: "show", target: "c_viewer", position: { x: 800, y: 400 } },
+      { key: "c_viewer", type: "control", layer: "l_main", panel_id: "viewer", position: { x: 1000, y: 400 } },
+    ],
+    edges: [
+      { from: "ui", to: "blk", kind: "contains", order: 1 },
+      { from: "blk", to: "c_book", kind: "contains", order: 2 },
+      { from: "c_book", to: "k_text", kind: "contains", order: 3 },
+      { from: "k_text", to: "k_txt", kind: "contains", order: 4 },
+      { from: "k_text", to: "o_text", kind: "contains", order: 5 },
+      { from: "k_txt", to: "o_txt", kind: "contains", order: 6 },
+      { from: "o_text", to: "e_text", kind: "on", order: 7 },
+      { from: "o_txt", to: "e_txt", kind: "on", order: 8 },
+      { from: "e_text", to: "a_text", kind: "fires", order: 9 },
+      { from: "e_txt", to: "a_txt", kind: "fires", order: 10 },
+    ],
+  };
+  // 上报时带上 format：txt 被 k_txt 子类认领 → 只走子类链路
+  const runFormat = (format) => {
+    const engine = new BlueprintEngine();
+    engine.setGraph(graph);
+    engine.setLayer("l_main");
+    const ops = [];
+    engine.setExecutor({
+      showPanel: (id) => ops.push(`show ${id}`),
+      hidePanel: (id) => ops.push(`hide ${id}`),
+      togglePanel: (id) => ops.push(`toggle ${id}`),
+      collapsePanels: () => undefined,
+      expandPanels: () => undefined,
+      playFile: () => undefined,
+      navigateLayer: (k) => ops.push(`navigate ${k}`),
+      applyOverlay: () => undefined,
+      showOverlayPanel: () => undefined,
+    });
+    engine.dispatch({
+      trigger: "double_click",
+      target: { mediaType: "text", fileId: "f1", format },
+    });
+    return ops;
+  };
+
+  const txtOps = runFormat("txt");
+  check(
+    "子类优先：txt 已被子类认领 → 类目链路被排除，只执行子类链路（show viewer）",
+    txtOps.includes("show viewer") && !txtOps.includes("show bookpreview"),
+    txtOps.join(" ; ") || "（无动作）",
+  );
+
+  const epubOps = runFormat("epub");
+  check(
+    "子类优先：epub 没有对应子类 → 类目链路照常执行（show bookpreview）",
+    epubOps.includes("show bookpreview") && !epubOps.includes("show viewer"),
+    epubOps.join(" ; ") || "（无动作）",
+  );
+
+  // 子类是**补充节点**：把它删掉后，同一份 txt 上报应回落到类目链路（不是"什么都不做"）。
+  {
+    const withoutSubclass = {
+      ...graph,
+      nodes: graph.nodes.filter((n) => n.key !== "k_txt" && n.key !== "o_txt" && n.key !== "e_txt" && n.key !== "a_txt"),
+      edges: graph.edges.filter(
+        (e) => !["k_txt", "o_txt", "e_txt", "a_txt"].includes(e.from) && !["k_txt", "o_txt", "e_txt", "a_txt"].includes(e.to),
+      ),
+    };
+    const engine = new BlueprintEngine();
+    engine.setGraph(withoutSubclass);
+    engine.setLayer("l_main");
+    const ops = [];
+    engine.setExecutor({
+      showPanel: (id) => ops.push(`show ${id}`),
+      hidePanel: () => undefined,
+      togglePanel: () => undefined,
+      collapsePanels: () => undefined,
+      expandPanels: () => undefined,
+      playFile: () => undefined,
+      navigateLayer: () => undefined,
+      applyOverlay: () => undefined,
+      showOverlayPanel: () => undefined,
+    });
+    engine.dispatch({
+      trigger: "double_click",
+      target: { mediaType: "text", fileId: "f1", format: "txt" },
+    });
+    check(
+      "子类是补充节点：移除子类后，同一 txt 上报回落到类目链路（不丢行为）",
+      ops.includes("show bookpreview"),
+      ops.join(" ; ") || "（无动作）",
+    );
+  }
+}
+
 // ---- 纯几何：hide_direction 邻居选择（与运行时共用同一实现） ----
 {
   const A = { id: "A", box: { left: 0, top: 0, width: 200, height: 400 } };

@@ -41,8 +41,8 @@
 | `group` | Group | 标签组 | 面板容器 | `mode` | `default_visible`、`hide_direction`、`position`、`name` | `layout_block`、`overlay` | `control` |
 | `control` | Panel | **面板** | 面板实例 | `panel_id` | `title_key`、`name` | `layout_block`、`group`、`overlay` | `class`、`mark` |
 | `class` | Category | **类目** | 面板内条目分类（按媒体类型） | `control`、`media_type` | `name` | `control` | `subclass`、`object` |
-| `subclass` | Subclass | **子类** | 类目之下的细分（如文本 → epub/txt/md） | `subclass`、`format` | `name` | `class` | `object` |
-| `mark` | Mark | **标记** | 与类目树**平行**的标记（book / manga …） | `control`、`mark` | `name` | `control` | `object` |
+| `subclass` | Subclass | **子类** | 类目之下的细分（如文本 → epub/txt/md） | `subclass`、`format` | `name` | `class`（**必须**） | `object` |
+| `mark` | Mark | **标记** | 与类目树**平行**的标记（book / manga …） | `control`、`mark` | `name` | `control`（**必须**） | `object` |
 | `object` | Object | 对象 | 条目实例（挂在**三条轴之一**下） | `scope` | `class` / `subclass` / `mark_ref`（三选一）、`name` | `class`、`subclass`、`mark` | — |
 | `event` | Event | 操作（事件） | 规则起点 | `trigger` | `target`、`name` | 无结构边 | — |
 | `condition` | Condition | 条件 | 规则中间 | `expr` | `name` | 无结构边 | — |
@@ -85,6 +85,38 @@
 - **标记挂在面板之下**（与类目树平行）：它**不属于任何类目**，因此**与类目正交**。
 - **`object` 的结构父是三者之一**（`class` / `subclass` / `mark_ref`，**互斥**）：
   一个对象要么描述"某类目里的条目"、要么"某子类里的条目"、要么"带某标记的条目"。
+
+**「补充节点」的挂载约束（2026-10-10 用户口径）**：
+
+> "子类必须挂载在类目下，因为子类是类目的细分"；"标记和类目平行，功能相似"；
+> "在蓝图功能链路中子类不是必要节点，是补充节点"。
+
+- **子类与标记是补充节点**：功能链路（对象 → 操作 → 状态）**不要求**它们存在；
+  一条链可以完全没有子类/标记节点。它们的价值是**把一种情况单独拎出来**。
+- **一旦要有，就必须挂在它该挂的父级下**：子类 → `class`（类目），标记 → `control`（面板）。
+  这条由**编辑器**在"新增"这一步强制（`blueprintNodeFactory` 的 `requiresMountParent` /
+  `resolveMountParent`）：层内没有可用父级时**拒绝新增**（`rejected: "mount-required"`，
+  文档原样返回），调色板对应按钮**置灰**并给出原因。
+  **不代建父节点**（与 §7「新增只追加自身」一致），也不落一个"无父的灰节点"。
+- **父子约束是硬性的**：`subclass` 的 `parents` 只有 `["class"]`、`mark` 只有 `["control"]`，
+  因此画布上也不可能把子类连到面板下、或把标记连到类目下（`containmentAllows` 直接拒绝）。
+
+**子类优先：类目链路自动排除已被子类定义的情况（2026-10-10 用户口径）**：
+
+> "类目可以 类目1-对象-操作-状态 和 类目1-子类1-操作-状态 一起，因为子类是子集，只负责
+> 一种情况，当有子类蓝图链路时，类目中无子类的链路就自动排除子类的情况，因为子类被定义了情况。"
+
+因此 `class` 节点的运行期匹配判据是**该类目减去已被子类认领的细分**：
+
+| 上报的 `format` | 该类目下有对应子类？ | 命中 |
+| --- | --- | --- |
+| `txt` | 有（`format = txt` 的子类挂在该类目下） | **只**走子类链路；类目链路被排除 |
+| `epub` | 没有 | 走类目链路（子类没定义这种情况，仍归类目） |
+| 未上报（非文本类） | — | 走类目链路 |
+
+实现：引擎 `subclassClaimsFormat`（`blueprintEngine.ts`）；判据是**结构从属**
+（子类的 `subclass` 字段或 `class --contains--> subclass` 边指向该类目）。
+两侧（TS 引擎 / 文档）口径一致，由 `pnpm check:blueprint-engine` 断言。
 
 **"标记可以交叉"的落点**：标记是**可多值**的集合（`file_marks` 表），一个文件可以**同时**
 带多个标记；且标记节点匹配时**只看标记、不看 `media_type`**——因此
@@ -298,7 +330,7 @@ has_tag == <tag_name>
    （清单可注册，未注册不等于非法）：都按未接通软告警处理 → 灰显「未接通」、**允许保存**，
    补上细分 / 注册清单后自动恢复（第 2.0.1 节）。
 
-**编辑器职责（后端不校验，避免耦合面板注册表）**：`panel_id` 是否在面板注册表内、`hide_direction: toward:<groupKey>` 引用的组是否存在、结构父唯一性、候选引用按**同层**过滤（`navigate` 例外）。
+**编辑器职责（后端不校验，避免耦合面板注册表）**：`panel_id` 是否在面板注册表内、`hide_direction: toward:<groupKey>` 引用的组是否存在、结构父唯一性、候选引用按**同层**过滤（`navigate` 例外）、**补充节点（子类/标记）必须有可用挂载父**（§2.0.1：无父即拒绝新增，后端不判"该不该建"）。
 
 ## 7. 命名与生成规范
 
@@ -314,7 +346,7 @@ has_tag == <tag_name>
 
 ## 10. 验证
 
-- **`pnpm check:blueprint-nodes`**（**59 项**）：结构层级/边类型一致性（`CONTAINMENT` ↔ `kindForEdge` ↔ `PORT_DEFS`，均由定义表派生）、节点工厂**只追加自身**（不连带补链、不跨链路挂钩）、上级推导、层归属、浮层容器与外观/定位/尺寸、层增删改名、结构骨架、状态冲突的 TS↔Rust 同结论，并用 hp-core 真实校验器复核全部夹具。
+- **`pnpm check:blueprint-nodes`**（**69 项**）：结构层级/边类型一致性（`CONTAINMENT` ↔ `kindForEdge` ↔ `PORT_DEFS`，均由定义表派生）、节点工厂**只追加自身**（不连带补链、不跨链路挂钩）、上级推导、层归属、浮层容器与外观/定位/尺寸、层增删改名、结构骨架、**「一键整理」几何**（起始节点位置不变、同层间距 ≥ 卡片高 + 余量、全图不重叠且避让孤立节点）、**补充节点挂载约束**（子类必须挂类目、标记必须挂面板；无父即拒绝新增；调色板置灰判据与新增判据同源）、状态冲突的 TS↔Rust 同结论，并用 hp-core 真实校验器复核全部夹具。
 - **`pnpm check:blueprint-minimap`**（**11 项**）：画布右下角小地图的纯几何——内容包围盒、等比缩放与留边、只缩小不放大、世界↔小地图往返、视口指示框随缩放变小且平移到图外仍留在框内、视口矩形与 `viewportCenterToWorld` 同源、空图不崩。
 - **RFC 0010 新增断言**：
   - 注册表声明参数完整性（第 2.3 节的必需项齐全；`ports` / `severity` / `evaluation_role` 缺省时推导结果与既有内置类型的现有行为**逐项相同**）。
@@ -325,7 +357,7 @@ has_tag == <tag_name>
 - **端口推导一致性（两条门禁，防"连线被静默丢弃"）**：
   - `portIdFor 只返回 PORT_DEFS 声明过的端口`：遍历全部已注册类型 × 2 侧 × 5 边类型。画布渲染连线时按 `portMap.get(`${key}::${side}::${portIdFor(type, side, kind)}`)` 找端口坐标，而 DOM 标记用 `PORT_DEFS` 里的 id —— 返回一个未声明的 id 会让查表落空、连线被 `return null` 丢掉。**真实回归**：输入侧曾被边类型名覆盖（`action.in.fires` 返回 `"fires"`，而操作节点的输入口实际是 `"in"`），导致「操作 → 状态」在画布上永远没有线；同一处错误还让"拖线到操作输入口"永远判不等（`in !== contains`），即用户反馈的"操作节点接不到触发节点"。
   - `每种规则边两端都能在画布上连出来（on/fires/guards/memberOf）`：遍历允许的端点组合。
-- 其余蓝图自检：`check:blueprint-engine`（求值/浮层/navigate/hide_direction）、`check:blueprint-delete`（软删除）、`check:blueprint-runtime`（装载/升级/回退/补种）、`check:blueprint-geometry`、`check:blueprint-slots`。
+- 其余蓝图自检：`check:blueprint-engine`（**43 项**：求值/浮层/navigate/hide_direction/**子类优先**）、`check:blueprint-delete`（软删除）、`check:blueprint-runtime`（装载/升级/回退/补种）、`check:blueprint-geometry`、`check:blueprint-slots`。
 - **解析层新增拦截**：字段用在**不支持它的节点类型**上即拒绝（由定义表驱动），与后端"引用存在但类型不符"的硬错误口径一致。
 - `cargo test --workspace`：存储往返、仓库隔离、默认蓝图、模板、validate 拒绝（悬空边/环/未知类型/key 重复/互斥组多默认可见/非法 `hide_direction`/状态冲突/主界面标记重复/类目挂无类目面板）。
 

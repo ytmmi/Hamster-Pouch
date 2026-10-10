@@ -270,7 +270,15 @@ export class BlueprintEngine {
       return node.panel_id === target.panelId;
     }
     if (node.type === "class") {
-      return node.media_type === target.mediaType;
+      if (node.media_type !== target.mediaType) {
+        return false;
+      }
+      // **子类优先（用户口径）**：子类是类目的**子集**，只负责一种情况。因此当该类目下
+      // 已经有覆盖该细分的子类节点时，**类目链路的无子类分支自动排除这一情况**——
+      // 否则同一份交互会同时命中「类目 → 对象 → 操作 → 状态」与
+      // 「类目 → 子类 → 对象 → 操作 → 状态」两条链，产生互相打架的状态。
+      // 未被任何子类覆盖的细分（或没有细分的条目）仍由类目链路负责。
+      return !this.subclassClaimsFormat(graph, node.key, target.format);
     }
     if (node.type === "subclass") {
       // 子类（D102）：命中判据是它自己的 `format` 与上报的细分一致；
@@ -307,6 +315,39 @@ export class BlueprintEngine {
       return this.objectNodeMatches(parent, target, scope, graph);
     }
     return false;
+  }
+
+  /**
+   * 该类目下是否有**子类节点**覆盖了上报的细分（`format`）。
+   *
+   * 用户口径：「子类是类目的细分，只负责一种情况，当有子类蓝图链路时，类目中无子类的
+   * 链路就自动排除子类的情况，因为子类被定义了情况」。因此类目链路的匹配判据是
+   * **该类目减去已被子类认领的细分**：`text` 类目下建了 `txt` 子类后，`txt` 条目
+   * 只走子类链路，类目链路上的规则不再对它生效；`epub` / `md`（没有对应子类）仍走类目链路。
+   *
+   * 判据是**结构从属**（子类的 `subclass` 字段或 `class --contains--> subclass` 边指向该类目），
+   * 与画布连线、属性面板的引用口径一致。
+   */
+  private subclassClaimsFormat(
+    graph: BlueprintGraph,
+    classKey: string,
+    format: string | undefined,
+  ): boolean {
+    if (!format) {
+      return false;
+    }
+    return graph.nodes.some((n) => {
+      if (n.type !== "subclass" || n.format !== format) {
+        return false;
+      }
+      if (n.subclass === classKey) {
+        return true;
+      }
+      // 结构从属也可以只由 `contains` 边表达（连线即写字段，但旧图/手工 JSON 可能只有边）。
+      return graph.edges.some(
+        (e) => e.kind === "contains" && e.from === classKey && e.to === n.key,
+      );
+    });
   }
 
   /** 沿 fires/guards 边求值（order 升序；条件为真才继续；visited 防环）。 */

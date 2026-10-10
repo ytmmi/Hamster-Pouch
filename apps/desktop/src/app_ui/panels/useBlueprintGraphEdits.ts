@@ -19,6 +19,7 @@ import {
 } from "@hamster-pouch/config";
 
 import { useApp } from "../core/AppContext";
+import type { TranslationKey } from "../i18n";
 import { arrangeTree } from "./blueprintArrange";
 import { softRemove, softRemoveMany } from "./blueprintDelete";
 import { ensureInterface } from "./blueprintLayers";
@@ -85,14 +86,31 @@ export function useBlueprintGraphEdits({
       // 视口中心（世界坐标）由画布上报；未上报前退回已有节点附近。
       const center = viewCenter ?? canvasCenter(doc.nodes);
       const position = freeSlotPosition(doc.nodes, center);
-      const { doc: next, node } = appendNode(
+      const hint = parentHintFor(type, selectedKey, doc, layerKey);
+      const { doc: next, node, rejected, requiredParent } = appendNode(
         doc,
         type,
         position,
-        parentHintFor(type, selectedKey, doc),
+        hint,
         // D51：新增节点归属**当前层**。
         layerKey,
       );
+      // **必须挂载的类型**（子类 → 类目；标记 → 面板）在层内没有可用父级时**拒绝新增**：
+      // 这两类是功能链路的**补充节点**，一旦要有就必须挂在该挂的父级下（用户口径 2026-10-10）。
+      // 这里只提示，不代建父节点（与"只追加自身"一致）。
+      if (rejected === "mount-required" || !node) {
+        const parentLabel = requiredParent
+          ? app.t(`blueprint.type.${requiredParent}` as TranslationKey)
+          : "";
+        app.status(
+          app.t("blueprint.mountRequired", {
+            type: app.t(`blueprint.type.${type}` as TranslationKey),
+            parent: parentLabel,
+          }),
+          "error",
+        );
+        return;
+      }
       mutate(next);
       setSelectedKey(node.key);
       app.status(
@@ -196,9 +214,14 @@ export function useBlueprintGraphEdits({
   );
 
   /**
-   * 连线后自动把**子节点的引用字段**落好（用户不手填 key）：
+   * 连线后把**边**与**子节点的引用字段**在**一份文档**上原子落好（用户不手填 key）：
    * 控件→类 写 `class.control`、类→对象 写 `object.class`、对象/类→操作 写 `event.target`、
    * 组↔控件 写 `memberOf` 语义（组 contains 成员）、控件→类→对象的 `contains` 已是结构本身。
+   *
+   * **为什么必须原子**：画布早前先 `onChange({...doc, edges})` 再回调 `onConnect`，而
+   * `onConnect` 又从**同一份调用前的 `doc`** 派生新文档 → 后一次把刚加的边覆盖掉，
+   * 表现为"连完线节点状态没变（仍灰显未接通），要刷新一下才对"（真实缺陷）。
+   * 现在边与引用字段一次算完，节点状态**连线即刷新**。
    */
   const onConnect = useCallback(
     (edge: { from: string; to: string; kind: BlueprintEdge["kind"] }) => {
@@ -207,14 +230,43 @@ export function useBlueprintGraphEdits({
       if (!child || !parent) {
         return;
       }
+      if (
+        doc.edges.some(
+          (e) => e.from === edge.from && e.to === edge.to && e.kind === edge.kind,
+        )
+      ) {
+        return;
+      }
       const patch: Partial<BlueprintNode> = {};
       if (child.type === "class" && parent.type === "control" && child.control !== parent.key) {
+        patch.control = parent.key;
+      } else if (child.type === "subclass" && parent.type === "class" && child.subclass !== parent.key) {
+        // 子类挂在类目下（同名不同义：子类节点上的 `subclass` 指所属**类目**）。
+        patch.subclass = parent.key;
+      } else if (child.type === "mark" && parent.type === "control" && child.control !== parent.key) {
+        // 标记与类目树平行，挂在**面板**下。
         patch.control = parent.key;
       } else if (child.type === "object" && parent.type === "class" && child.class !== parent.key) {
         patch.class = parent.key;
       } else if (
+        child.type === "object" &&
+        parent.type === "subclass" &&
+        child.subclass !== parent.key
+      ) {
+        patch.subclass = parent.key;
+      } else if (
+        child.type === "object" &&
+        parent.type === "mark" &&
+        child.mark_ref !== parent.key
+      ) {
+        patch.mark_ref = parent.key;
+      } else if (
         child.type === "event" &&
-        (parent.type === "object" || parent.type === "class" || parent.type === "control") &&
+        (parent.type === "object" ||
+          parent.type === "class" ||
+          parent.type === "subclass" ||
+          parent.type === "mark" ||
+          parent.type === "control") &&
         child.target !== parent.key
       ) {
         patch.target = parent.key;
@@ -226,12 +278,12 @@ export function useBlueprintGraphEdits({
           patch.target = target.key;
         }
       }
-      if (Object.keys(patch).length > 0) {
-        mutate({
-          ...doc,
-          nodes: doc.nodes.map((n) => (n.key === child.key ? { ...n, ...patch } : n)),
-        });
-      }
+      const order = Math.max(0, ...doc.edges.map((ed) => ed.order)) + 1;
+      mutate({
+        ...doc,
+        nodes: doc.nodes.map((n) => (n.key === child.key ? { ...n, ...patch } : n)),
+        edges: [...doc.edges, { from: edge.from, to: edge.to, kind: edge.kind, order }],
+      });
     },
     [doc, mutate],
   );
