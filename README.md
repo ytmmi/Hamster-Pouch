@@ -127,6 +127,10 @@ release\            exe + data\system\（系统库）+ data\plugins\（系统插
 - ffmpeg 只带**运行时子集**：`bin\` 下两个 exe + 全部 DLL + `LICENSE.txt`；
   `ffplay.exe`、`doc\`、`include\`、`lib\`、`presets\` 不带（省约 31 MB）。
   **`bin\` 下的 DLL 一个都不能省**（两个 exe 静态绑定全部 av* DLL）。
+- **mpv 是可选资产**（约 119 MB）：**存在则入包、缺失则跳过并说明**。
+  因为 `external-cli/mpv/` **不入 git 库**，新克隆里必然没有它——做成硬失败会让
+  `pnpm app:build` 在新克隆上直接断掉。**"不入库"与"能否进构建包"是两件事**：
+  打包脚本从本地磁盘复制、不读 git，所以本机有 mpv 时它就会进包。
 
 ## 环境变量
 
@@ -163,7 +167,11 @@ release\            exe + data\system\（系统库）+ data\plugins\（系统插
 
 - **ffmpeg**：`external-cli/ffmpeg/` 随仓库分发，无需额外下载；打包时复制到产物内
   **exe 同级**（运行时子集，见「构建与打包」），因此打包产物不依赖仓库目录、可整夹搬走
-- **mpv**（可选）：libmpv 播放路径需要 mpv Windows 构建（约 100MB+），请自行下载并放入 `external-cli/mpv/mpv.exe`，或通过环境变量 `HP_MPV_BIN` 指定路径；缺失 mpv 不影响现有播放功能。**mpv 不随包分发**（该目录不入库，且播放器面板已改 DOM `<video>`，libmpv 路径休眠）
+- **mpv**（可选）：libmpv 播放路径需要 mpv Windows 构建（约 100MB+），请自行下载并放入 `external-cli/mpv/mpv.exe`，或通过环境变量 `HP_MPV_BIN` 指定路径；缺失 mpv 不影响现有播放功能。
+  **本目录不入 git 库**（100 MB+ 二进制不进版本库），但**只要本机存在就会随包分发**——
+  打包脚本从本地磁盘复制，与入库与否无关（见「构建与打包」）。
+  注：播放器面板已改 DOM `<video>`、libmpv 路径休眠（`docs/rfc/0005-media-capabilities.md`），
+  当前产品界面不调用 mpv。
 
 ## 贡献
 

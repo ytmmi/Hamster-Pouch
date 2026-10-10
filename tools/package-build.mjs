@@ -14,16 +14,21 @@
  *                                   发布全局库的仓库注册表/按仓库授权清空、非系统插件注册删除
  *                                   （系统插件 source_ref 改写为包内路径）。
  *
- * **随包分发的两份运行时资产（D14 / 契约 §3.11）**：`external-cli\`（ffmpeg/ffprobe）与
- * `plugins\system\`（`plugin.installBundled` 的来源）都放在 **exe 同级**，与仓库内布局
- * 同构——这样 `commands/shared.rs` 的 `find_upwards` / `find_upwards_dir` 从 exe 目录
- * 起步的第一跳就能命中，**包整夹搬走也仍然可用**（这正是此前"伪捆绑"的缺口：
- * 产物里没有这两份资产，只靠包还躺在仓库树里才凑巧向上找到）。
+ * **随包分发的运行时资产（D14 / 契约 §3.11）**：`external-cli\`（ffmpeg 运行时子集 +
+ * 可选 mpv）与 `plugins\system\`（`plugin.installBundled` 的来源）都放在 **exe 同级**，
+ * 与仓库内布局同构——这样 `commands/shared.rs` 的 `find_upwards` / `find_upwards_dir`
+ * 从 exe 目录起步的第一跳就能命中，**包整夹搬走也仍然可用**（这正是此前"伪捆绑"的缺口：
+ * 产物里没有这些资产，只靠包还躺在仓库树里才凑巧向上找到）。
+ *
+ * **"不入 git 库"与"能否进构建包"是两件事**：本脚本从**本地磁盘**复制，不读 git。
+ *   - `external-cli\ffmpeg\` **已入库**（224 个文件）⇒ 任何完整工作树都有 ⇒ 必需项。
+ *   - `external-cli\mpv\` **不入库**（`.gitignore` 忽略，100 MB+ 二进制不进版本库）
+ *     ⇒ 新克隆必然没有 ⇒ **可选项**，存在则入包、缺失则跳过（否则新克隆上打包直接断掉）。
  *
  * 体积与落盘策略：
- *   - `external-cli\` 只带**运行时子集**（两个 exe + bin\ 下全部 DLL + LICENSE.txt，
+ *   - `external-cli\ffmpeg\` 只带**运行时子集**（两个 exe + bin\ 下全部 DLL + LICENSE.txt，
  *     约 168 MB）；`ffplay.exe`（交互式播放器，产品从不调用）与 `doc\` / `include\` /
- *     `lib\` / `presets\`（开发期文档与链接库）不带。
+ *     `lib\` / `presets\`（开发期文档与链接库）不带。mpv 不做裁剪（见 placeBundledRuntime）。
  *   - **dev 包用硬链接**（NTFS，零额外占用、瞬时完成；同卷实测可用，跨卷自动回退复制），
  *     **release 包用真实复制**（可分发实体文件）。硬链接只是省盘，包内容完整可搬走。
  *
@@ -79,6 +84,8 @@ const BASE_DICT = join(ROOT, "tools", "tagdict", "output", "tag_lib_base.sqlite3
 const EXTERNAL_CLI = join(ROOT, "external-cli");
 /** 随包分发的系统插件目录（仓库内）与其在包内的相对位置。 */
 const BUNDLED_PLUGINS = join(ROOT, "plugins", "system");
+/** libmpv 播放器（可选资产，见 [`placeBundledRuntime`] 的 mpv 说明）。 */
+const MPV_DIR = join(EXTERNAL_CLI, "mpv");
 
 /**
  * `external-cli\ffmpeg\` 里**产品运行时不需要**的条目（相对 `ffmpeg\` 的路径）。
@@ -174,24 +181,48 @@ async function placeDir(src, dest, exclude = new Set(), prefix = "", allowLink =
 }
 
 /**
- * 随包分发的两份资产：`external-cli\`（ffmpeg 运行时子集）与 `plugins\system\`。
+ * 随包分发的运行时资产：`external-cli\`（ffmpeg 运行时子集 + 可选 mpv）与 `plugins\system\`。
  *
  * 放在 exe 同级，与仓库内布局同构 ⇒ `find_upwards` / `find_upwards_dir` 从 exe 目录
- * 起步第一跳即命中。`external-cli\mpv\` **不入包**：该目录本身不入库（体积 100 MB+，
- * 见 `.gitignore`），且 libmpv 播放路径已休眠，需用时以 `HP_MPV_BIN` 指定。
+ * 起步第一跳即命中，包整夹搬走仍可用。
+ *
+ * **ffmpeg 与 mpv 的"缺失"语义刻意不同**（两者是不同的事）：
+ *   - **ffmpeg 是必需项**：它随仓库入库（`git ls-files external-cli/ffmpeg` 有 224 个文件），
+ *     任何完整工作树里都必然存在。缺了就是工作树坏了 ⇒ 由调用方的前置检查**硬失败**。
+ *   - **mpv 是可选项**：`external-cli/mpv/` **不入库**（`.gitignore` 忽略，100 MB+ 二进制
+ *     不进版本库），因此**新克隆里必然没有它**。若做成硬失败，新克隆上 `pnpm app:build`
+ *     会直接断掉。故这里按"**存在则入包、缺失则跳过并说明**"处理。
+ *
+ * 注意：**"不入 git 库"与"能否进构建包"是两件事**。本脚本从**本地磁盘**复制，
+ * 不读 git —— mpv 只要在本机存在，就能进包；入库与否只决定新克隆是否自带源文件。
+ *
+ * mpv 不做裁剪（整目录原样入包，119.05 MB）：`mpv.exe` 的 IPC 能启动**不证明**视频渲染
+ * 不需要 `d3dcompiler_43.dll`（D3D11 输出编译 shader 用它），证据不足就不裁。
  */
 async function placeBundledRuntime(targetRoot, mode, allowLink) {
   // release 目录不按时间戳（固定 `release\`），复用同一目录时会留下上一次的陈旧文件；
-  // 先清掉这两个子树的旧内容，保证产物是本次规则的确定性结果（dev 目录每次新建，无此问题）。
+  // 先清掉这些子树的旧内容，保证产物是本次规则的确定性结果（dev 目录每次新建，无此问题）。
   await rm(join(targetRoot, "external-cli"), { recursive: true, force: true });
   await rm(join(targetRoot, "plugins", "system"), { recursive: true, force: true });
   const external = await placeDir(join(EXTERNAL_CLI, "ffmpeg"), join(targetRoot, "external-cli", "ffmpeg"), FFMPEG_EXCLUDE, "", allowLink);
   const plugins = await placeDir(BUNDLED_PLUGINS, join(targetRoot, "plugins", "system"), new Set(), "", allowLink);
+
+  // mpv：可选资产（见上方说明）。整目录原样复制，不设排除项。
+  const mpvSourceExists = existsSync(join(MPV_DIR, "mpv.exe"));
+  let mpv = { present: false, files: 0, bytes: 0 };
+  if (mpvSourceExists) {
+    const placed = await placeDir(MPV_DIR, join(targetRoot, "external-cli", "mpv"), new Set(), "", allowLink);
+    mpv = { present: true, files: placed.files, bytes: placed.bytes };
+  }
+
   console.log(
     `[package-build]   随包资产(${mode}): external-cli\\ffmpeg\\ ${external.files} 文件 / ${fmtMB(external.bytes)}` +
-      `，plugins\\system\\ ${plugins.files} 文件 / ${fmtMB(plugins.bytes)}`,
+      `，plugins\\system\\ ${plugins.files} 文件 / ${fmtMB(plugins.bytes)}` +
+      (mpv.present
+        ? `，external-cli\\mpv\\ ${mpv.files} 文件 / ${fmtMB(mpv.bytes)}`
+        : "，external-cli\\mpv\\ 跳过（本机无 mpv.exe：该目录不入库，见 README「外部依赖」）"),
   );
-  return { external, plugins };
+  return { external, plugins, mpv };
 }
 
 /**
@@ -202,7 +233,7 @@ async function placeBundledRuntime(targetRoot, mode, allowLink) {
  * 却找不到 ffmpeg"的包，比直接失败糟得多——那正是本次修复前的状态。
  * 这里断言的是**运行时的真实判据**：`find_upwards` 从 exe 目录第一跳能否命中。
  */
-function verifyBundledRuntime(targetRoot, { allowLink }) {
+function verifyBundledRuntime(targetRoot, { allowLink, mpvExpected }) {
   const problems = [];
   const mustExist = [
     ["external-cli/ffmpeg/bin/ffmpeg.exe", "file"],
@@ -222,6 +253,12 @@ function verifyBundledRuntime(targetRoot, { allowLink }) {
     const st = statSync(p, { throwIfNoEntry: false });
     const ok = kind === "file" ? Boolean(st?.isFile()) : Boolean(st?.isDirectory());
     if (!ok) problems.push(`缺 ${rel}`);
+  }
+  // mpv 是可选项：**源在就必须进包**（防"复制逻辑静默漏掉"），源不在则不要求包里有。
+  // 不写成"包里必须有 mpv"：新克隆没有该目录，那样会让 app:build 在新克隆上断掉。
+  if (mpvExpected) {
+    const st = statSync(join(targetRoot, "external-cli", "mpv", "mpv.exe"), { throwIfNoEntry: false });
+    if (!st?.isFile()) problems.push("本机有 mpv 源，但包里没有 external-cli\\mpv\\mpv.exe");
   }
   // 排除项必须真的不在包里（否则"子集"名不副实，白占体积）。
   for (const rel of FFMPEG_MUST_BE_ABSENT) {
@@ -272,8 +309,10 @@ if (!(await stat(EXE).catch(() => null))?.isFile()) {
   process.exit(1);
 }
 
-// 前置检查：两份随包资产的**源**必须存在。缺了就直说缺什么，
+// 前置检查：**必需**随包资产的源必须存在。缺了就直说缺什么，
 // 而不是让 placeDir 抛一个 ENOENT 栈（那会让人以为是脚本坏了）。
+// 注意这里**只列必需项**（ffmpeg 入库、plugins/system 在仓库内）；
+// mpv 是可选资产（目录不入库），缺失属正常，不进本清单——见 placeBundledRuntime。
 for (const [label, p] of [
   ["external-cli/ffmpeg/bin/ffmpeg.exe", join(EXTERNAL_CLI, "ffmpeg", "bin", "ffmpeg.exe")],
   ["external-cli/ffmpeg/bin/ffprobe.exe", join(EXTERNAL_CLI, "ffmpeg", "bin", "ffprobe.exe")],
@@ -348,15 +387,17 @@ if (await stat(paletteSigSrc).catch(() => null)) {
   await cp(paletteSigSrc, join(paletteSigDst, "SHA256SUMS"));
   await cp(paletteSigSigSrc, join(paletteSigDst, "SHA256SUMS.sig"));
 }
-// 随包运行时资产：external-cli\（ffmpeg 运行时子集）+ plugins\system\（随包插件来源）。
+// 随包运行时资产：external-cli\（ffmpeg 运行时子集 + 可选 mpv）+ plugins\system\（随包插件来源）。
 // 放在 exe 同级 —— 与仓库内布局同构，find_upwards 从 exe 目录第一跳即命中。
 // dev 包走硬链接（零额外占用），见 placeFile。
 const devBundled = await placeBundledRuntime(devDir, "硬链接优先", true);
-devSize += devBundled.external.bytes + devBundled.plugins.bytes;
-verifyBundledRuntime(devDir, { allowLink: true });
+devSize += devBundled.external.bytes + devBundled.plugins.bytes + devBundled.mpv.bytes;
+verifyBundledRuntime(devDir, { allowLink: true, mpvExpected: devBundled.mpv.present });
 
 console.log(`[package-build] 开发包: ${devDir}`);
-console.log(`[package-build]   内容: exe + data\\（用户数据）+ external-cli\\ + plugins\\system\\ 共 ${fmtMB(devSize)}`);
+console.log(
+  `[package-build]   内容: exe + data\\（用户数据）+ external-cli\\ + plugins\\system\\ 共 ${fmtMB(devSize)}`,
+);
 
 // ---- 2) 发布包：exe + 系统数据库 + 系统插件（不含用户数据）----
 const relDir = join(BASE, "release");
@@ -441,17 +482,18 @@ if (dataStat?.isDirectory()) {
 // 不依赖本机 NTFS 硬链接）。`plugins\system\` 与 `data\plugins\` 是两回事：
 // 后者是**已安装**的运行时插件目录，前者是 `plugin.installBundled` 的**随包来源**根。
 const relBundled = await placeBundledRuntime(relDir, "真实复制", false);
-verifyBundledRuntime(relDir, { allowLink: false });
+verifyBundledRuntime(relDir, { allowLink: false, mpvExpected: relBundled.mpv.present });
 
 console.log(
   `[package-build] 发布包: ${join(relDir, "hamster-pouch-desktop.exe")} + data\\system\\（系统数据库）` +
     (systemPlugins.length > 0 ? ` + data\\plugins\\（系统插件 ${systemPlugins.join(", ")}）` : "") +
     ` + external-cli\\ffmpeg\\（${relBundled.external.files} 文件 / ${fmtMB(relBundled.external.bytes)}）` +
+    (relBundled.mpv.present ? ` + external-cli\\mpv\\（${relBundled.mpv.files} 文件 / ${fmtMB(relBundled.mpv.bytes)}）` : "") +
     ` + plugins\\system\\（${relBundled.plugins.files} 文件）`,
 );
 console.log(
   "[package-build]   不含用户数据：user\\repos\\、非系统插件、thumbnails\\、debug.log 均不带；发布全局库仓库注册表与按仓库授权已清空",
 );
 console.log(
-  "[package-build]   两份资产都在 exe 同级，与仓库内布局同构 ⇒ 包整夹搬走后 find_upwards 仍命中（D14 真正成立）",
+  "[package-build]   资产都在 exe 同级，与仓库内布局同构 ⇒ 包整夹搬走后 find_upwards 仍命中（D14 真正成立）",
 );

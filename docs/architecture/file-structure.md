@@ -372,8 +372,11 @@ HamsterPouch/
                               #   **入包方式**：`tools/package-build.mjs` 复制到包内 exe 同级
                               #   （dev 走 NTFS 硬链接省盘、release 真实复制），与仓库内布局
                               #   同构 ⇒ 运行时 `find_upwards` 从 exe 目录第一跳命中，
-                              #   包整夹搬走仍可用。只带**运行时子集**（bin\ 全部 + LICENSE.txt），
+                              #   包整夹搬走仍可用。
+                              #   ffmpeg 只带**运行时子集**（bin\ 全部 + LICENSE.txt），
                               #   ffplay.exe / doc / include / lib / presets 不带。
+                              #   mpv 是**可选**资产（目录不入库 ⇒ 新克隆没有）：
+                              #   存在则入包、缺失则跳过，不裁剪。
                               #   门禁：`pnpm check:bundled-runtime`
   docs/
     architecture/             # 文件架构、总体架构、决策清单

@@ -7,11 +7,13 @@
 // 视频缩略图、ffprobe 元数据、AVIF/HEIC 兜底解码全部静默降级。
 //
 // 本门禁把"进包"从**事后观察**变成**事前断言**。它检查三件事：
-//   A. `tools/package-build.mjs` 仍在把两份资产放进包（且位置在 exe 同级）；
+//   A. `tools/package-build.mjs` 仍在把资产放进包（且位置在 exe 同级）；
 //   B. ffmpeg 的**运行时子集**规则仍然自洽——bin\ 下除显式排除项外一个都不能少
 //      （DLL 是 PE 导入表静态绑定的，少一个连 `-version` 都跑不起来）；
 //   C. 被排除的条目**确实不被产品引用**（ffplay / presets 等），
-//      排除项一旦被代码引用，本门禁变红。
+//      排除项一旦被代码引用，本门禁变红；
+//   D. mpv 是**可选**资产：**不入库**故新克隆没有它，打包脚本必须"存在则入包、
+//      缺失则跳过"——门禁断言这条语义没被改成硬失败（否则新克隆上打包会断）。
 //
 // 用法：pnpm check:bundled-runtime
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -39,8 +41,7 @@ check(
 check(
   "external-cli 与 plugins/system 都放在包根（exe 同级，find_upwards 第一跳即命中）",
   pkgText.includes('"external-cli", "ffmpeg"') && pkgText.includes('"plugins", "system"'),
-);
-check(
+);check(
   "打包脚本带 fail-closed 自检（verifyBundledRuntime）",
   pkgText.includes("verifyBundledRuntime("),
 );
@@ -157,6 +158,45 @@ check(
   "plugins/system 存在且含 palette/plugin.manifest（installBundled 的来源）",
   existsSync(join(BUNDLED_PLUGINS, "palette", "plugin.manifest")),
 );
+
+// ───────── E. mpv 是可选资产：存在则入包、缺失则跳过（不得改成硬失败）─────────
+// 为什么断言"可选"语义：`external-cli/mpv/` **不入库**（100 MB+ 二进制不进版本库），
+// 所以**新克隆里必然没有它**。若有人把 mpv 加进打包脚本的前置必需清单（硬失败），
+// 新克隆上 `pnpm app:build` 会直接断掉——这是个只在别人机器上炸的缺陷。
+const MPV_DIR = join(ROOT, "external-cli", "mpv");
+const mpvSourcePresent = existsSync(join(MPV_DIR, "mpv.exe"));
+
+check(
+  "打包脚本把 mpv 作为可选资产处理（存在则入包）",
+  pkgText.includes('join(targetRoot, "external-cli", "mpv")') ||
+    pkgText.includes('"external-cli", "mpv"'),
+);
+check(
+  "mpv 缺失时不进必需项清单（新克隆上打包不会断）",
+  // 必需项清单是那个 for 循环里的数组；mpv 路径不得出现在其中。
+  !/\[\s*"external-cli\/ffmpeg[\s\S]*?"external-cli\/mpv[\s\S]*?\]\s*\)\s*\{\s*if \(!existsSync/.test(pkgText),
+);
+check(
+  "自检按 mpvExpected 判定（源在才要求包内有），而非无条件要求",
+  // 必须断言**值来自"源是否存在"**（`<x>.mpv.present`），而不是只查字面量出现：
+  // 把 `mpvExpected: x.mpv.present` 改成 `mpvExpected: true` 会让"新克隆上硬要求包内有 mpv"
+  // 重新成立，而只查 `includes("mpvExpected")` 抓不到（首版就是这样，回退实测 MISSED）。
+  /mpvExpected:\s*\w+\.mpv\.present/.test(pkgText),
+  mpvSourcePresent ? "本机有 mpv 源" : "本机无 mpv 源（新克隆形态）",
+);
+check(
+  "mpv 不做裁剪（不设排除项，整目录入包）",
+  // mpv 的 placeDir 调用必须用空 Set 作排除项——裁剪需实测依据，不能顺手排除。
+  /placeDir\(MPV_DIR, join\(targetRoot, "external-cli", "mpv"\), new Set\(\)/.test(pkgText),
+);
+if (mpvSourcePresent) {
+  const mpvFiles = readdirSync(MPV_DIR);
+  check(
+    "本机 mpv 源含 mpv.exe 与 d3dcompiler_43.dll（D3D 输出编译 shader 需要）",
+    mpvFiles.includes("mpv.exe") && mpvFiles.includes("d3dcompiler_43.dll"),
+    mpvFiles.join(", "),
+  );
+}
 
 // ───────── 汇总 ─────────
 const failed = results.filter((r) => !r.ok);
