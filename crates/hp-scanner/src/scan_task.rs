@@ -125,10 +125,14 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
             thumb_status: Some(ThumbStatus::NotGenerated),
             ..Computed::default()
         },
-        // 文本（2026-10）：**照算内容哈希**（移动识别/去重与图片同口径），
-        // 但不产出感知哈希 / 缩略图 / 调色板 / 媒体信息——文本没有视觉本体，
-        // 封面由 `hp_book` 在面板取数时按需解析（不进索引，见 book.meta）。
-        MediaType::Text => {
+        // 文本（2026-10）与 PDF（2026-10-11）：**照算内容哈希**（移动识别/去重与图片
+        // 同口径），但不产出感知哈希 / 缩略图 / 调色板 / 媒体信息——两者都不进索引期
+        // 的派生数据。封面与正文由 `hp_book` / `hp_pdf` 在**面板取数时**按需解析，
+        // 走 `book.meta` / `book.content` 的按内容哈希磁盘缓存（不进索引）。
+        //
+        // 两者合在一个分支里，是因为入库口径**逐条相同**；分成两个 arm 写两遍
+        // 一模一样的代码，只会在下次改动时漏掉其中一个。
+        MediaType::Text | MediaType::Pdf => {
             let Ok(content) = hash_file(&prepared.path) else {
                 return Computed {
                     unreadable: true,

@@ -1,0 +1,49 @@
+[package]
+name = "hp-pdf"
+version.workspace = true
+edition.workspace = true
+
+# PDF 的**封面（首页栅格化）**、**逐页正文栅格化**与**元数据**。
+#
+# ## 为什么用 `hayro` 而不是 pdfium / mupdf
+#
+# 项目约束是 D20「依赖与构建链本地化」：凡能部署在项目内的一律项目内化。
+# `pdfium-render` 需要在**运行期**加载 `pdfium.dll`（一个几 MB 的原生库，要么随包分发、
+# 要么指望用户机器上有），`mupdf` 是 AGPL 且同样要 C 构建链——两者都把一个外部
+# 二进制/系统库变成运行期前提。`hayro` 是**纯 Rust、零 C 依赖**的实现：
+# - `#![forbid(unsafe_code)]`（见其 crate 文档），符合本项目对解析器的安全口径；
+# - 许可 **Apache-2.0 OR MIT**（与本项目其它依赖一致）；
+# - 随 crate 附带 14 个标准字体的**宽松许可替代品**（`embed-fonts`，约 240 KB），
+#   因此不需要用户机器上装字体，中文/日文 PDF 实测渲染正确。
+#
+# ## 实测（本项目真机语料，2026-10-11）
+#
+# | 样本 | 页数 | 首页 800px 栅格化 |
+# | --- | --- | --- |
+# | 简历（WPS 导出，含中文） | 2 | 20 ms |
+# | 日语四级准考证（iTextSharp） | 1 | 38 ms |
+# | 钢琴谱（含五线谱与密集符号） | 7 | 30 ms |
+# | 成果展示册（143 MB，Photoshop 导出） | 54 | 122 ms |
+#
+# ## 已知边界（如实记录，不假装）
+#
+# - **不支持加密 / 带密码的 PDF**（hayro 的能力边界）：这类文件按"解析失败"降级为
+#   **文字封面**（图书预览）与**空正文**（查看器），不是错误态——与"坏书降级"同口径；
+# - 混合模式 / 隔离组 / 挖空组等高级合成特性支持不完整（hayro 自述）；
+# - **不引入 `image` 之外的图像依赖**：栅格化结果由 `image` crate 编成 JPEG。
+#
+# 依赖方向：`hp-pdf -> hp-core`（只用 `HpError` / `HpResult`），与
+# `docs/architecture/file-structure.md` 的允许方向一致。本 crate **不碰数据库、
+# 不认识 `file_id`、不决定封面存到哪**——那些属于桥接层（`commands/book.rs`）
+# 与 `hp_media::ThumbnailCache`。
+[dependencies]
+hp-core = { path = "../hp-core" }
+# PDF 栅格化（纯 Rust）。默认特性 `embed-fonts` + `embed-cmaps` **必须保留**：
+# 关掉它们，14 个标准字体与 CJK 的 CMap 就没人提供，中文 PDF 会整页变成豆腐块。
+# `simd` 特性关掉：它只是栅格化的加速档，开启会拉进 `fearless_simd` 的平台分支。
+hayro = { version = "0.8", default-features = false, features = ["embed-fonts", "embed-cmaps"] }
+# 栅格化结果是 RGBA，编成 JPEG 交给前端 `<img>`（与 hp-media 同一套编码器与质量）。
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
+[dev-dependencies]
+tempfile = "3"

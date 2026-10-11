@@ -450,16 +450,16 @@ check(
 
 // ---- 面板接线 ----
 check(
-  "文本类走正文阅读区：判据用 `media_type === \"text\"`（**不按扩展名**，免得与扫描器两份口径）",
-  /media_type === "text"/.test(viewerReaderFamilySrc) &&
-    /isTextMedia\(file\)/.test(viewerPanelSrc) &&
+  "「书」走正文阅读区：判据用**媒体类型**（text / pdf，**不按扩展名**，免得与扫描器两份口径）",
+  /media_type === "text" \|\| file\?\.media_type === "pdf"/.test(viewerPanelSrc) &&
+    /isBookMedia\(file\)/.test(viewerPanelSrc) &&
     /<ViewerReader \/>/.test(viewerPanelSrc) &&
-    // 反向：面板里不得再列一遍文本扩展名（第二份口径必然与 hp-scanner 漂移）。
-    !/\.(epub|txt|markdown)\b/.test(viewerPanelSrc.replace(/^[\s\S]*?\*\//, "")),
+    // 反向：面板里不得再列一遍书的扩展名（第二份口径必然与 hp-scanner 漂移）。
+    !/\.(epub|txt|markdown|pdf)\b/.test(viewerPanelSrc.replace(/^[\s\S]*?\*\//, "")),
 );
 check(
-  "文本类**不取** file.path / preview.get（正文由 book.content 提供，取图那一步是白跑）",
-  /if \(!app\.repoId \|\| !selected \|\| isTextMedia\(selected\)\) return;/.test(viewerPanelSrc),
+  "「书」**不取** file.path / preview.get（正文由 book.content 提供，取图那一步是白跑）",
+  /if \(!app\.repoId \|\| !selected \|\| isBookMedia\(selected\)\) return;/.test(viewerPanelSrc),
 );
 check(
   "阅读区按宽度下发分栏与字号（CSS 变量），且**自己滚**（范围为查看器面板大小）",
@@ -3127,24 +3127,45 @@ check(
     bookView.bookDisplayName(".hidden") === ".hidden",
 );
 check(
-  "usesEmbeddedCover：book 标记优先，标记缺失的旧行按扩展名兜底",
+  "usesEmbeddedCover：book 标记优先，标记缺失的旧行按扩展名兜底（**epub 与 pdf 都算**）",
   bookView.usesEmbeddedCover({ marks: ["book"], relative_path: "x.txt" }) === true &&
     // 标记是**集合**：带别的标记（如 manga）不等于带 book。
     bookView.usesEmbeddedCover({ marks: ["manga"], relative_path: "x.epub" }) === false &&
-    // 迁移 0010 之前的存量行（标记为空）：epub 仍按内嵌封面处理，txt 不走。
+    // 迁移 0010 之前的存量行（标记为空）：epub / pdf 仍按"取封面"处理，txt 不走。
     bookView.usesEmbeddedCover({ marks: [], relative_path: "x.epub" }) === true &&
     bookView.usesEmbeddedCover({ marks: [], relative_path: "x.EPUB" }) === true &&
+    // **PDF 的封面 = 第一页**（用户口径 2026-10-11）：旧行同样要兜底到"取封面"，
+    // 否则存量 PDF 在重扫前会全部退化成文字封面——那正是用户要消除的现象。
+    bookView.usesEmbeddedCover({ marks: [], relative_path: "x.pdf" }) === true &&
+    bookView.usesEmbeddedCover({ marks: [], relative_path: "x.PDF" }) === true &&
+    bookView.usesEmbeddedCover({ marks: ["book"], relative_path: "x.pdf" }) === true &&
     bookView.usesEmbeddedCover({ marks: [], relative_path: "x.txt" }) === false,
 );
+// ==================== PDF 支持（2026-10-11 用户口径）====================
+//
+// 用户原话："1、图书预览增加 pdf 支持，封面为 pdf 第一页。2、查看器增加 pdf 支持。"
+//
+// 这一段的守护重点是四件**看不见就必然是缺陷**的事：
+// 1. **PDF 是独立类目**，不是文本类的一种（它是二进制容器，编码判定 / 字符分页
+//    那一套对它完全不适用；并进 text 会让那个类目变成一句谎话）；
+// 2. **封面 = 第一页**：带 book 标记才去 `book.meta`，后端用 `hp-pdf` 栅格化；
+// 3. **PDF 没有子类**（只有一种格式），但**有** book 标记；
+// 4. 查看器里 PDF **逐页栅格化**、**恒单栏**（整页位图不该被断成两栏）。
+//
+// 断言放在**文件末尾**（见「PDF 支持（断言）」段）：那里 `coreSourceSrc` /
+// `scannerMediaTypeSrc` 等源码常量已经声明，不会踩 `const` 的 TDZ 陷阱。
 
 // ==================== 三轴模型：类目 / 子类 / 标记（D102）====================
 check(
-  "类目取值域含 text；子类取值域按类目分域（text → epub / txt / md）",
-  eqList([...config.BLUEPRINT_MEDIA_TYPES], ["image", "video", "audio", "text"]) &&
+  "类目取值域含 text 与 pdf；子类取值域按类目分域（text → epub / txt / md，pdf 无子类）",
+  eqList([...config.BLUEPRINT_MEDIA_TYPES], ["image", "video", "audio", "text", "pdf"]) &&
     eqList([...config.subclassFormatsFor("text")], ["epub", "txt", "md"]) &&
     // 其余媒体类型**没有**子类取值域（该类目下不能建子类）。
+    // `pdf` 尤其重要：它只有一种格式，再分一层没有语义（2026-10-11）。
     config.subclassFormatsFor("image").length === 0 &&
+    config.subclassFormatsFor("pdf").length === 0 &&
     config.mediaTypeHasSubclass("text") === true &&
+    config.mediaTypeHasSubclass("pdf") === false &&
     config.mediaTypeHasSubclass("image") === false,
 );
 check(
@@ -3306,8 +3327,11 @@ check(
     /foreground\s*&&/.test(bookFamilySrc),
 );
 check(
-  "取数只按仓库 / 源 / 目录过滤 `mediaTypes: ['text']`（不按相册：相册成员分页只认三种媒体字面量）",
-  /mediaTypes:\s*\["text"\]/.test(bookFamilySrc) &&
+  "取数只按仓库 / 源 / 目录过滤「书」的两个类目（不按相册：相册成员分页只认三种媒体字面量）",
+  // 2026-10-11：PDF 与文本类**同在图书预览**（用户口径"图书预览增加 pdf 支持"），
+  // 因此过滤集合是两个类目，不是 `["text"]` 一个。
+  /mediaTypes:\s*\[\.\.\.BOOK_MEDIA_TYPES\]/.test(bookFamilySrc) &&
+    /const BOOK_MEDIA_TYPES = \["text", "pdf"\] as const/.test(bookFamilySrc) &&
     !/albumId/.test(bookFamilySrc) &&
     // 反向：不得再出现旧的单值拼法（媒体类型过滤已改为集合，D95）。
     !/mediaType:\s*"text"/.test(bookFamilySrc),
@@ -3642,12 +3666,159 @@ check(
     ),
 );
 check(
-  "Rust：相册属性一律不含文本类（`Multimedia` 是三种媒体，不是「索引里的一切」）",
-  // 否则跟随源相册会把文本文件**写成成员**，而 `query_album_members_page` 只认三个
+  "Rust：相册属性一律不含「书」（文本类 + PDF；`Multimedia` 是三种媒体，不是「索引里的一切」）",
+  // 否则跟随源相册会把文本 / PDF 文件**写成成员**，而 `query_album_members_page` 只认三个
   // 媒体字面量、永远列不出它们——表现为"有成员但看不见"。
-  /if file_type == MediaType::Text \{\s*\n\s*return false;/.test(
+  //
+  // 判据用 `MediaType::is_book()`（**唯一**定义在 `source.rs`）而不是逐个列
+  // `Text | Pdf`：相册的排除集就是"图书预览的收录集"，两处必须是同一件事——
+  // 下次再新增"书"类型时，只要它进了 `is_book()`，相册这一侧自动跟上。
+  /if file_type\.is_book\(\) \{\s*\n\s*return false;/.test(
     readFileSync(join(ROOT, "crates/hp-core/src/album.rs"), "utf8"),
-  ),
+  ) &&
+    // 正向锚点：`is_book` 必须真的把 text 与 pdf 都算进去。
+    (() => {
+      const source = readFileSync(join(ROOT, "crates/hp-core/src/source.rs"), "utf8");
+      return /pub fn is_book\(&self\) -> bool \{\s*\n\s*matches!\(self, MediaType::Text \| MediaType::Pdf\)/.test(
+        source,
+      );
+    })(),
+);
+
+// ==================== PDF 支持（断言）====================
+//
+// 口径与「用户原话」见上面 `usesEmbeddedCover` 之后那一段说明；
+// 断言放在这里，是因为下面这几条要读的源码常量（`coreSourceSrc` /
+// `scannerMediaTypeSrc` / `scannerScanTaskSrc` / `coreFileSrc`）在上文才声明。
+const coreAlbumSrc = readFileSync(join(ROOT, "crates/hp-core/src/album.rs"), "utf8");
+check(
+  "Rust：`pdf` 是**独立媒体类型**（不是并进 text），且 `is_book()` 是「书」的唯一判据",
+  /MediaType::Pdf => "pdf"/.test(coreSourceSrc) &&
+    /"pdf" => Some\(MediaType::Pdf\)/.test(coreSourceSrc) &&
+    /matches!\(self, MediaType::Text \| MediaType::Pdf\)/.test(coreSourceSrc) &&
+    // 相册与图书预览必须共用同一条判据（两处各写一遍必然漂移）。
+    /if file_type\.is_book\(\)/.test(coreAlbumSrc),
+);
+check(
+  "Rust：PDF **走内容兜底**（`%PDF-` magic bytes），与文本类**刻意相反**",
+  // 这是 D11「扩展名优先 + 内容兜底」里内容兜底该发挥作用的地方：
+  // 改名的 PDF（`a.dat`）也能正确入库。而 txt / md 没有 magic bytes，
+  // 任何"看着像文本"的兜底都会把未知二进制吸进索引。
+  /b"%PDF-"[\s\S]{0,40}MediaType::Pdf/.test(scannerMediaTypeSrc) &&
+    /"pdf" => Some\(MediaType::Pdf\)/.test(scannerMediaTypeSrc),
+);
+check(
+  "Rust：`pdf` 与文本类**入库口径相同**（照算内容哈希、不产出索引期派生数据）",
+  // 合成一个 arm 写两遍一模一样的代码，只会在下次改动时漏掉其中一个。
+  /MediaType::Text \| MediaType::Pdf => \{/.test(
+    readFileSync(join(ROOT, "crates/hp-scanner/src/scan_task.rs"), "utf8"),
+  ) &&
+    // 缩略图：PDF 的封面走 `book.meta` 的磁盘缓存，索引期**不**产出缩略图。
+    /MediaType::Text \| MediaType::Pdf => false/.test(
+      readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"), "utf8"),
+    ) &&
+    // 缩略图格式表：文本与 PDF 都没有缩略图（`hp-media`）。
+    /MediaType::Audio \| MediaType::Text \| MediaType::Pdf => None/.test(
+      readFileSync(join(ROOT, "crates/hp-media/src/cache.rs"), "utf8"),
+    ),
+);
+check(
+  "Rust：`pdf` 默认带 **book 标记**（决定封面来源），且 hp-core 与面板侧的兜底清单一致",
+  // 后端：唯一来源是 `default_book_mark_for_ext`。
+  /eq_ignore_ascii_case\("epub"\) \|\| ext\.eq_ignore_ascii_case\("pdf"\)/.test(coreFileSrc) &&
+    // 前端：旧行兜底的扩展名清单必须与后端**逐项一致**，否则"还没重扫"期间
+    // 面板会与后端给出不同的封面来源。
+    /DEFAULT_BOOK_MARK_EXTS = \["epub", "pdf"\] as const/.test(bookViewSrc),
+);
+check(
+  "Rust：桥接层按**媒体类型**分流到 PDF 解析器（不是按扩展名猜），且封面落盘复用同一条路径",
+  (() => {
+    const bridge = readFileSync(
+      join(ROOT, "apps/desktop/src-tauri/src/commands/book.rs"),
+      "utf8",
+    );
+    return (
+      // book.meta：PDF → `hp_pdf` 栅格化第一页；文本类 → `hp_book` 解 OPF。
+      /MediaType::Pdf => parse_pdf_and_cache/.test(bridge) &&
+        /hp_pdf::read_pdf_meta/.test(bridge) &&
+        // 封面与 EPUB **共用** `path_for_book_cover`（前端因此只有一条渲染路径）。
+        /path_for_book_cover\(hash, cover\.ext\)/.test(bridge) &&
+        // 解析放阻塞线程（栅格化实测 20–122 ms，不能占 IPC 线程）。
+        /spawn_blocking/.test(bridge)
+    );
+  })(),
+);
+check(
+  "Rust：`book.content` 的 PDF 分支**逐页栅格化**，游标是**页码**（与 epub 同形）",
+  (() => {
+    const bridge = readFileSync(
+      join(ROOT, "apps/desktop/src-tauri/src/commands/book.rs"),
+      "utf8",
+    );
+    return (
+      // **按媒体类型分流，不按扩展名**：扫描器对 PDF 做了 `%PDF-` 内容兜底，
+      // 因此扩展名被改掉的 PDF（`a.dat`）也会入库为 `media_type = pdf`；
+      // 按扩展名分流会把它当 GBK 文本解码（满屏乱码）。
+      /fn read_page_by_media_type\(/.test(bridge) &&
+        /if media_type == MediaType::Pdf \{\s*\n\s*return read_pdf_page/.test(bridge) &&
+        /read_page_by_media_type\(media_type, &src_path, &ext, offset, &cache, &hash\)/.test(
+          bridge,
+        ) &&
+        /fn read_pdf_page\(/.test(bridge) &&
+        /hp_pdf::render_page_jpeg/.test(bridge) &&
+        /hp_pdf::PDF_PAGE_WIDTH/.test(bridge) &&
+        // 分页形态与 epub 一致：前端只有一套翻页与进度提示。
+        /section_count: Some\(total\)/.test(bridge) &&
+        /format: "pdf"\.into\(\)/.test(bridge) &&
+        // 反向：不得再出现"按扩展名分流到 pdf"的写法（那正是本缺口）。
+        !/"pdf" => read_pdf_page/.test(bridge)
+    );
+  })(),
+);
+check(
+  "PDF 渲染是**纯 Rust**（D20：不引入 pdfium / mupdf 那类运行期原生库）",
+  (() => {
+    const cargo = readFileSync(join(ROOT, "crates/hp-pdf/Cargo.toml"), "utf8");
+    // 反面断言先剥 `#` 注释：Cargo.toml 的模块文档**引用**了 pdfium / mupdf
+    // 说明"为什么不用它们"，全文匹配会把注释当依赖（与 `stripComments` 同一条处置）。
+    const deps = cargo
+      .split("\n")
+      .map((line) => line.replace(/#.*$/, ""))
+      .join("\n");
+    return (
+      /hayro = \{ version = "0\.8"/.test(deps) &&
+        // 关掉 simd（只是加速档，开启会拉进 fearless_simd 的平台分支）。
+        /default-features = false/.test(deps) &&
+        // **必须**保留 embed-fonts + embed-cmaps：关掉它们，14 个标准字体与 CJK 的
+        // CMap 就没人提供，中文 PDF 会整页变成豆腐块（实测语料全是中文）。
+        /"embed-fonts"/.test(deps) &&
+        /"embed-cmaps"/.test(deps) &&
+        // 反向：不得出现原生 PDF 库。
+        !/pdfium|mupdf/.test(deps)
+    );
+  })(),
+);
+check(
+  "前端：PDF 在阅读区**恒单栏**（整页位图不该被断成两栏），且逐页纵向堆叠",
+  // 面板侧：`--vr-columns` 对 PDF 钉成 1。
+  /isPdf \? 1 : readerColumns\(width\)/.test(viewerReaderSrc) &&
+    // CSS 侧再钉一道：免得将来有人只改了一处。
+    /\.vr-content\.vr-pdf\s*\{[^}]*column-count:\s*1/.test(stylesSource) &&
+    // 页面图按整宽显示、**不设** `max-height`（整页就是内容本体，
+    // 限制高度会让用户每页都要放大才能读——那是 `.vr-image` 给插图定的 70vh）。
+    /\.vr-pdf \.vr-image\s*\{[^}]*max-height:\s*none/.test(stylesSource) &&
+    /\.vr-pdf \.vr-image\s*\{[^}]*width:\s*100%/.test(stylesSource),
+);
+check(
+  "前端：查看器按 `format === \"pdf\"` 分流，进度提示用**页**而不是**章**",
+  /first\?\.format === "pdf"/.test(viewerReaderSrc) &&
+    /isPdf/.test(viewerReaderSrc) &&
+    // 两者共用 `section` 游标，但文案不能混（"第 3 / 54 章"对一份展板 PDF 是错的）。
+    /viewer\.pageOf/.test(viewerReaderSrc) &&
+    /viewer\.pageOf/.test(
+      readFileSync(join(ROOT, "apps/desktop/src/app_ui/i18n/zh-CN.ts"), "utf8"),
+    ) &&
+    /viewer\.pageOf/.test(readFileSync(join(ROOT, "apps/desktop/src/app_ui/i18n/en.ts"), "utf8")),
 );
 
 // ============================== 汇总 ==============================

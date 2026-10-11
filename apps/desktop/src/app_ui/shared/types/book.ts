@@ -1,8 +1,9 @@
 /**
- * 图书（文本类文件）类型：`book.meta` 与 `book.content` 的参数与返回体。
+ * 图书（"书"类文件）类型：`book.meta` 与 `book.content` 的参数与返回体。
  *
- * `book.meta` 服务**图书预览面板**（EPUB 的作者 / 简介 / 内嵌封面），
- * `book.content` 服务**查看器**（txt / epub 的正文开头）。
+ * `book.meta` 服务**图书预览面板**（EPUB 的作者 / 简介 / 内嵌封面；
+ * **PDF 的作者 / 主题 / 第一页封面**），`book.content` 服务**查看器**
+ * （txt / md / epub 的正文开头；PDF 的**逐页栅格化**）。
  * 两者都**不进索引**——封面是二进制、简介与正文是长文本，塞进 `files` 行会让
  * 每次文件查询都背上几十 KB 的负载，而列表只用得到"有没有封面"。
  */
@@ -15,14 +16,19 @@ export interface BookMetaArgs {
 
 /** `book.meta` 返回体（三项都可为 `null`）。 */
 export interface BookMetaResult {
-  /** EPUB `<dc:creator>`；无则 `null`。 */
+  /** EPUB `<dc:creator>` / PDF `/Author`；无则 `null`。 */
   author: string | null;
-  /** EPUB `<dc:description>`；无则 `null`。 */
+  /** EPUB `<dc:description>` / PDF `/Subject`；无则 `null`。 */
   description: string | null;
   /**
    * **已落盘**的封面绝对路径（供 `convertFileSrc`）；无封面则 `null`。
    *
-   * `null` 不是错误：`txt` / `md` 本来就没有封面，面板用文件名渲染文字封面。
+   * - EPUB：内嵌封面，**原格式不转码**；
+   * - **PDF：第一页栅格化后的 JPEG**（`hp-pdf`，`ext` 恒为 `jpg`）——
+   *   两者落到**同一个**缓存路径，因此前端只有一条渲染路径。
+   *
+   * `null` 不是错误：`txt` / `md` 本来就没有封面，打不开的 PDF 也没有，
+   * 面板用文件名渲染文字封面。
    */
   cover_path: string | null;
 }
@@ -31,7 +37,7 @@ export interface BookMetaResult {
 export interface BookContentArgs {
   repoId: string;
   fileId: string;
-  /** 游标：纯文本是**字符偏移**、epub 是**章节序号**；缺省 `undefined` = 从头。 */
+  /** 游标：纯文本是**字符偏移**、epub / pdf 是**序号**（章节 / 页码）；缺省 `undefined` = 从头。 */
   cursor?: string | null;
 }
 
@@ -123,23 +129,23 @@ export interface BookBlockItem {
 /** `book.content` 返回体：查看器要显示的正文**一页**。 */
 export interface BookContentResult {
   /**
-   * 书的格式：`text`（纯文本）/ `markdown`（渲染后的 md）/ `epub`；
-   * 空串 = 不是可看的文本类。
+   * 书的格式：`text`（纯文本）/ `markdown`（渲染后的 md）/ `epub` / **`pdf`**
+   * （一页 = 一张整页位图）；空串 = 不是可看的"书"。
    */
   format: string;
-  /** 纯文本的**编码名**（`UTF-8` / `GBK` / …）；epub 为 `null`。 */
+  /** 纯文本的**编码名**（`UTF-8` / `GBK` / …）；epub / pdf 为 `null`。 */
   encoding: string | null;
-  /** 纯文本页的内容；epub 为 `null`。 */
+  /** 纯文本页的内容；epub / pdf 为 `null`。 */
   text: string | null;
-  /** epub 章节的块；纯文本为 `null`。 */
+  /** epub 章节的块 / **pdf 整页位图的块**；纯文本为 `null`。 */
   blocks: BookBlockItem[] | null;
   /** 下一页游标；`null` = 没有更多（**到末尾不是错误**）。 */
   next_cursor: string | null;
-  /** 本页序号（0 起；纯文本恒为 0，epub 是章节序号）。 */
+  /** 本页序号（0 起；纯文本恒为 0，epub 是章节序号，**pdf 是页码**）。 */
   section: number;
-  /** epub 的章节总数；纯文本为 `null`。 */
+  /** epub 的章节总数 / **pdf 的页数**；纯文本与 markdown 为 `null`。 */
   section_count: number | null;
-  /** 本页标题（epub 的章节标题；纯文本为 `null`）。 */
+  /** 本页标题（epub 的章节标题；纯文本 / pdf 为 `null`）。 */
   title: string | null;
   /** 内容是否因**上限**被截断（面板据此提示"仅显示开头"）。 */
   capped: boolean;

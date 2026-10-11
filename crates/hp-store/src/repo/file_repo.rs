@@ -16,7 +16,7 @@ pub const FILE_QUERY_MAX_LIMIT: i64 = 1000;
 ///
 /// `media_types` 是**集合**而不是单个取值（2026-10-08 用户口径：「媒体预览不包含 text 类型，
 /// text 类型在图书预览显示」）：面板的类型域本来就是"一组"——媒体预览的「全部」指的是
-/// **图片 / 视频 / 音频这三个**（不是"索引里的一切"），图书预览指的是**文本**这一个。
+/// **图片 / 视频 / 音频这三个**（不是"索引里的一切"），图书预览指的是**文本 + PDF**。
 /// 用单值表达不出前者，"全部"就只能落到"不筛"上，于是文本类会漏进媒体预览。
 /// **空切片 = 不筛**（没有限定，返回全部）。
 #[derive(Debug, Clone, Default)]
@@ -294,35 +294,37 @@ impl RepoDb {
             .dir_prefix
             .filter(|p| !p.trim().is_empty())
             .map(|p| format!("{}/%", escape_like(p.trim_matches('/'))));
-        // 媒体类型集合 → **四个固定旗标**（与 `query_album_members_page` 同一手法）：
+        // 媒体类型集合 → **五个固定旗标**（与 `query_album_members_page` 同一手法）：
         // 这样 SQL 是静态的、参数个数固定，不必按集合长度拼 `IN (...)` 并把游标参数的
         // 编号整体挪位（`?N` 是手写的，动态长度会让人算错）。
         let want_image = filter.media_types.contains(&MediaType::Image) as i64;
         let want_video = filter.media_types.contains(&MediaType::Video) as i64;
         let want_audio = filter.media_types.contains(&MediaType::Audio) as i64;
         let want_text = filter.media_types.contains(&MediaType::Text) as i64;
+        let want_pdf = filter.media_types.contains(&MediaType::Pdf) as i64;
         // 键集谓词：`(relative_path, source_id, id) > (游标三元组)`，展开写以避开行值比较的方言差异。
         let after = cursor.map(|_| {
-            "(f.relative_path > ?9
-              OR (f.relative_path = ?9
-                  AND (f.source_id > ?10
-                       OR (f.source_id = ?10 AND f.id > ?11))))"
+            "(f.relative_path > ?10
+              OR (f.relative_path = ?10
+                  AND (f.source_id > ?11
+                       OR (f.source_id = ?11 AND f.id > ?12))))"
         });
         let sql = format!(
             "SELECT {FILE_COLUMNS_F}
              FROM files f JOIN sources s ON s.id = f.source_id
              WHERE s.repo_id = ?1
                AND s.mounted = 1
-               AND ((?2 = 0 AND ?3 = 0 AND ?4 = 0 AND ?5 = 0)
+               AND ((?2 = 0 AND ?3 = 0 AND ?4 = 0 AND ?5 = 0 AND ?6 = 0)
                     OR (?2 = 1 AND f.media_type = 'image')
                     OR (?3 = 1 AND f.media_type = 'video')
                     OR (?4 = 1 AND f.media_type = 'audio')
-                    OR (?5 = 1 AND f.media_type = 'text'))
-               AND (?6 IS NULL OR f.source_id = ?6)
-               AND (?7 IS NULL OR f.relative_path LIKE ?7 ESCAPE '\\')
-               AND (?8 = 0 OR {after})
+                    OR (?5 = 1 AND f.media_type = 'text')
+                    OR (?6 = 1 AND f.media_type = 'pdf'))
+               AND (?7 IS NULL OR f.source_id = ?7)
+               AND (?8 IS NULL OR f.relative_path LIKE ?8 ESCAPE '\\')
+               AND (?9 = 0 OR {after})
              ORDER BY f.relative_path, f.source_id, f.id
-             LIMIT ?12",
+             LIMIT ?13",
             after = after.unwrap_or("1 = 1")
         );
         let mut stmt = self
@@ -338,6 +340,7 @@ impl RepoDb {
                     want_video,
                     want_audio,
                     want_text,
+                    want_pdf,
                     filter.source_id,
                     dir_pattern,
                     if cursor.is_empty() { 0 } else { 1 },

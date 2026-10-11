@@ -217,7 +217,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "book.authorLabel": "Author: ",
   "book.descLabel": "Description: ",
   "book.count": "{n} books",
-  "book.empty": "No books to preview under the current source (txt / md / epub)",
+  "book.empty": "No books to preview under the current source (txt / md / epub / pdf)",
   "book.loadFailed": "Failed to load books: {err}",
   // Cover override (context menu; user ruling 2026-10-09)
   "book.cover.title": "Change cover",
@@ -357,10 +357,13 @@ export const en: Record<keyof DictZhCN, string> = {
   "viewer.previewFailed": "Preview failed: {err}",
   "viewer.unavailable": "Preview unavailable",
   "viewer.settings.infoBarEnabled": "Show the info bar",
-  // Text reading area (txt / md / epub, 2026-10-09)
+  // Text reading area (txt / md / epub / pdf, 2026-10-09; PDF added 2026-10-11)
   "viewer.noContent": "This file has no readable text",
   "viewer.encoding": "Text encoding: {enc}",
   "viewer.sectionOf": "Section {n} of {total}",
+  // PDF counts **pages**, not chapters: both share the `section` cursor, but the
+  // wording must not be mixed ("Section 3 of 54" is wrong for a poster PDF).
+  "viewer.pageOf": "Page {n} of {total}",
   "viewer.imageUnavailable": "Illustration unavailable",
   "viewer.endOfPreview": "— start of the book shown —",
 

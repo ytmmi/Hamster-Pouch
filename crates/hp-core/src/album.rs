@@ -101,13 +101,17 @@ impl AlbumMediaType {
 
     /// 本相册属性是否包含给定文件媒体类型（D10）。
     ///
-    /// **相册一律不含文本类**（2026-10-08 用户口径「媒体预览不包含 text 类型，text 类型在
-    /// 图书预览显示」）：`Multimedia` 的含义是"图像 + 视频 + 音频"，不是"索引里的一切"。
-    /// 这一条必须与 `query_album_members_page`（只认三个媒体字面量）保持一致——
-    /// 否则 `multimedia` 的跟随源相册会把文本文件**写成成员**，而成员分页永远列不出它们，
-    /// 表现为"有成员但看不见"，卸载源的影响评估也会多算。
+    /// **相册一律不含"书"**（2026-10-08 用户口径「媒体预览不包含 text 类型，text 类型在
+    /// 图书预览显示」；2026-10-11 PDF 沿同一条口径）：`Multimedia` 的含义是
+    /// "图像 + 视频 + 音频"，不是"索引里的一切"。这一条必须与
+    /// `query_album_members_page`（只认三个媒体字面量）保持一致——
+    /// 否则 `multimedia` 的跟随源相册会把文本 / PDF 文件**写成成员**，
+    /// 而成员分页永远列不出它们，表现为"有成员但看不见"，卸载源的影响评估也会多算。
+    ///
+    /// 判据用 [`MediaType::is_book`] 而不是逐个列 `Text | Pdf`：相册的排除集
+    /// 就是"图书预览的那些"，两处必须是同一件事。
     pub fn contains(&self, file_type: MediaType) -> bool {
-        if file_type == MediaType::Text {
+        if file_type.is_book() {
             return false;
         }
         match self {
@@ -249,7 +253,6 @@ mod tests {
         assert!(AlbumMediaType::Multimedia.contains(MediaType::Image));
         assert!(AlbumMediaType::Multimedia.contains(MediaType::Video));
         assert!(AlbumMediaType::Multimedia.contains(MediaType::Audio));
-
         assert!(AlbumMediaType::Image.contains(MediaType::Image));
         assert!(!AlbumMediaType::Image.contains(MediaType::Video));
         assert!(!AlbumMediaType::Image.contains(MediaType::Audio));
@@ -263,21 +266,38 @@ mod tests {
         assert!(!AlbumMediaType::Audio.contains(MediaType::Video));
     }
 
-    /// **相册不含文本类**（D95）：`Multimedia` 是"图像 + 视频 + 音频"，不是"索引里的一切"。
+    /// **相册不含"书"**（D95；PDF 于 2026-10-11 沿同一条口径）：
+    /// `Multimedia` 是"图像 + 视频 + 音频"，不是"索引里的一切"。
     /// 这条与 `query_album_members_page` 的三个媒体字面量必须一致——否则 `multimedia`
-    /// 的跟随源相册会把文本文件写成成员，而成员分页永远列不出它们（"有成员但看不见"）。
+    /// 的跟随源相册会把文本 / PDF 文件写成成员，而成员分页永远列不出它们
+    /// （"有成员但看不见"）。
     #[test]
-    fn album_media_type_never_contains_text() {
+    fn album_media_type_never_contains_books() {
         for album_type in [
             AlbumMediaType::Image,
             AlbumMediaType::Video,
             AlbumMediaType::Audio,
             AlbumMediaType::Multimedia,
         ] {
-            assert!(
-                !album_type.contains(MediaType::Text),
-                "{album_type:?} 不应包含文本类（图书预览才是它的落点）"
-            );
+            for book in [MediaType::Text, MediaType::Pdf] {
+                assert!(
+                    !album_type.contains(book),
+                    "{album_type:?} 不应包含 {book:?}（图书预览才是它的落点）"
+                );
+            }
+        }
+    }
+
+    /// 相册的排除集**就是**图书预览的收录集：两者必须是同一件事
+    /// （`MediaType::is_book` 是唯一判据，见它的文档）。
+    #[test]
+    fn album_exclusion_matches_the_book_category() {
+        assert!(MediaType::Text.is_book());
+        assert!(MediaType::Pdf.is_book());
+        // 反向：媒体预览的三个类型不是"书"（相册收它们）。
+        for media in [MediaType::Image, MediaType::Video, MediaType::Audio] {
+            assert!(!media.is_book(), "{media:?} 不是书，相册应当收它");
+            assert!(AlbumMediaType::Multimedia.contains(media));
         }
     }
 

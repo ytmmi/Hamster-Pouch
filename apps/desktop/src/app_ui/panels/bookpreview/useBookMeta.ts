@@ -1,10 +1,13 @@
 /**
- * 单本书的元数据读取（面板侧）：**只有需要内嵌封面的书才会发命令**。
+ * 单本书的元数据读取（面板侧）：**只有需要封面的书才会发命令**。
  *
- * 判定走纯函数 `usesEmbeddedCover`（子类型 `book` / 旧行按扩展名兜底）；
+ * 判定走纯函数 `usesEmbeddedCover`（book 标记 / 旧行按扩展名兜底——`epub` 与 `pdf` 都算）；
  * `txt` / `md` 直接返回 `null`，一个 IPC 都不发。命令的结果由
  * `bookMetaCache` 做进程级缓存与 in-flight 去重，因此"卡片模式 + 封面模式"
  * 同时显示同一本书时也只取一次。
+ *
+ * **PDF 走这条**：它的封面是第一页栅格化出来的（后端 `hp-pdf`），
+ * 对前端而言与 EPUB 的内嵌封面没有区别。
  */
 
 import { useEffect, useState } from "react";
@@ -13,7 +16,7 @@ import type { FileItem } from "../../shared/types";
 import { loadBookMeta, type BookDisplayMeta } from "./bookMetaCache";
 import { usesEmbeddedCover } from "./bookPreviewView";
 
-/** 读取并缓存一本书的展示用元数据；不需要内嵌封面时恒为 `null`。 */
+/** 读取并缓存一本书的展示用元数据；不需要封面时恒为 `null`。 */
 export function useBookMeta(repoId: string | null, item: FileItem): BookDisplayMeta | null {
   const [meta, setMeta] = useState<BookDisplayMeta | null>(null);
   const wants = usesEmbeddedCover(item);

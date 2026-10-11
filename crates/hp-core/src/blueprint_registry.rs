@@ -101,8 +101,9 @@ pub struct PanelFact {
 /// 逐项对齐，由 `pnpm check:panels` 断言）。
 ///
 /// 有类目的内置面板：**媒体预览**（`media`，图像 / 视频 / 音频）与
-/// **图书预览**（`bookpreview`，文本类的 epub / txt / md 三个格式 + book 标记，
-/// 2026-10-10 用户口径）；其余没有条目分类。内置面板都没收窄 `mount`（三项全开）。
+/// **图书预览**（`bookpreview`，文本类的 epub / txt / md 三个子类 + **PDF** +
+/// book 标记，2026-10-10 用户口径、2026-10-11 加入 PDF）；其余没有条目分类。
+/// 内置面板都没收窄 `mount`（三项全开）。
 pub const BUILTIN_PANEL_FACTS: [(&str, bool); 15] = [
     ("repo", false),
     ("sources", false),

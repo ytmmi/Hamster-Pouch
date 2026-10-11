@@ -2020,6 +2020,40 @@ button.danger {
   margin: 8px 0;
 }
 
+/* --- PDF 阅读（2026-10-11）---
+
+   PDF 的每一"页"是一张**整页位图**（后端 `hp-pdf` 栅格化，见 `commands/book.rs`），
+   不是文本流。因此与 EPUB 的章节插图有两条**必须**的区别：
+
+   1. **恒单栏**：把整页位图塞进 `column-count` 只会让一页被拦腰断成两栏
+      ——既不是原貌，也不是连续文本。面板侧已把 `--vr-columns` 钉成 1
+      （`ViewerReader` 的 `isPdf ? 1 : readerColumns(width)`），这里再钉一道，
+      免得将来有人只改了一处。
+   2. **页面图按整宽显示、不设 `max-height`**：`.vr-image` 的 `max-height: 70vh`
+      是给 EPUB 的**插图**用的（插图是正文的陪衬，不该占满一屏）。而 PDF 的一页
+      **就是**内容本体，限制高度会让用户每页都要放大才能读——它的高度天然等于
+      "宽度 ÷ 页面宽高比"，让浏览器按宽度算即可。
+
+   `break-inside: avoid` 仍然要（`column-count: 1` 下无实际作用，但它是"这一页不该
+   被切开"的显式声明，与上面两条同源）。 */
+.vr-content.vr-pdf {
+  column-count: 1;
+  /* 页面图并排时的纵向间距由下面的 margin 给，这里不额外加 gap。 */
+}
+
+.vr-pdf .vr-image {
+  width: 100%;
+  max-width: 100%;
+  /* 覆盖 `.vr-image` 的 70vh 上限：整页就是内容本体（见上面的说明）。 */
+  max-height: none;
+  height: auto;
+  margin: 0 auto 12px;
+  /* 页面位图是**有边框的纸**：给一条细边，免得白底页面在浅色主题下"浮"在背景里。 */
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: #ffffff;
+}
+
 .vr-more {
   font-size: 11px;
   text-align: center;

@@ -27,16 +27,22 @@ impl ThumbFormat {
         }
     }
 
-    /// 某媒体类型的缩略图格式；音频与文本不生成缩略图，返回 `None`。
+    /// 某媒体类型的缩略图格式；音频、文本与 PDF 不生成缩略图，返回 `None`。
     ///
-    /// 文本（`text`）的"封面"不是缩略图：`epub` 的内嵌封面由 `hp_book` 解析后
-    /// 按原格式落到 [`ThumbnailCache::path_for_book_cover`]，`txt` 根本没有封面
-    /// （前端用文件名渲染文字封面）。因此这里恒为 `None`，别把两件事混起来。
+    /// 文本（`text`）与 PDF（`pdf`）的"封面"都**不是**缩略图：
+    /// - `epub` 的内嵌封面由 `hp_book` 解析后按原格式落到
+    ///   [`ThumbnailCache::path_for_book_cover`]；`txt` 根本没有封面
+    ///   （前端用文件名渲染文字封面）；
+    /// - PDF 的封面是**第一页栅格化**出来的，由 `hp_pdf` 编码成 JPEG 后落到**同一个**
+    ///   `path_for_book_cover`（`ext = "jpg"`）——它同样是"书的封面"，
+    ///   不该另立一个缓存路径。
+    ///
+    /// 因此这里恒为 `None`，别把两件事混起来。
     pub fn for_media_type(media_type: MediaType) -> Option<Self> {
         match media_type {
             MediaType::Image => Some(ThumbFormat::Webp),
             MediaType::Video => Some(ThumbFormat::Jpeg),
-            MediaType::Audio | MediaType::Text => None,
+            MediaType::Audio | MediaType::Text | MediaType::Pdf => None,
         }
     }
 }

@@ -216,7 +216,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "book.authorLabel": "作者：",
   "book.descLabel": "簡介：",
   "book.count": "共 {n} 本",
-  "book.empty": "目前來源下沒有可預覽的圖書（支援 txt / md / epub）",
+  "book.empty": "目前來源下沒有可預覽的圖書（支援 txt / md / epub / pdf）",
   "book.loadFailed": "圖書清單載入失敗：{err}",
   // 封面覆蓋（右鍵選單；使用者口徑 2026-10-09）
   "book.cover.title": "更換封面",
@@ -356,10 +356,12 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "viewer.previewFailed": "預覽失敗：{err}",
   "viewer.unavailable": "預覽不可用",
   "viewer.settings.infoBarEnabled": "顯示基礎資訊列",
-  // 正文閱讀區（txt / md / epub，2026-10-09）
+  // 正文閱讀區（txt / md / epub / pdf，2026-10-09；PDF 於 2026-10-11）
   "viewer.noContent": "該檔案沒有可顯示的正文",
   "viewer.encoding": "文字編碼：{enc}",
   "viewer.sectionOf": "第 {n} / {total} 章",
+  // PDF 的單位是**頁**而不是**章**：兩者共用 section 游標，但文案不能混。
+  "viewer.pageOf": "第 {n} / {total} 頁",
   "viewer.imageUnavailable": "插圖不可用",
   "viewer.endOfPreview": "— 已顯示開頭內容 —",
 

@@ -213,7 +213,7 @@ export const zhCN = {
   "source.copiedAsAlbum": "已复制为相册：{name}",
   "source.copyAsAlbumFailed": "复制为相册失败：{err}",
 
-  // 图书预览面板（文本类文件：txt / md / epub）
+  // 图书预览面板（"书"：txt / md / epub / pdf）
   "book.settings.view": "视图",
   "book.settings.view.card": "卡片模式",
   "book.settings.view.list": "列表模式",
@@ -223,7 +223,7 @@ export const zhCN = {
   "book.authorLabel": "作者：",
   "book.descLabel": "简介：",
   "book.count": "共 {n} 本",
-  "book.empty": "当前来源下没有可预览的图书（支持 txt / md / epub）",
+  "book.empty": "当前来源下没有可预览的图书（支持 txt / md / epub / pdf）",
   "book.loadFailed": "图书列表加载失败：{err}",
   // 封面覆盖（右键菜单；用户口径 2026-10-09："txt 右键可以更换封面颜色或自定义图片"）
   "book.cover.title": "更换封面",
@@ -371,10 +371,13 @@ export const zhCN = {
   "viewer.previewFailed": "预览失败：{err}",
   "viewer.unavailable": "预览不可用",
   "viewer.settings.infoBarEnabled": "显示基础信息栏",
-  // 正文阅读区（txt / md / epub，2026-10-09）
+  // 正文阅读区（txt / md / epub / pdf，2026-10-09；PDF 于 2026-10-11）
   "viewer.noContent": "该文件没有可显示的正文",
   "viewer.encoding": "文本编码：{enc}",
   "viewer.sectionOf": "第 {n} / {total} 章",
+  // PDF 的单位是**页**而不是**章**：两者共用 section 游标，但文案不能混
+  //（"第 3 / 54 章"对一份展板 PDF 是错的）。
+  "viewer.pageOf": "第 {n} / {total} 页",
   "viewer.imageUnavailable": "插图不可用",
   "viewer.endOfPreview": "— 已显示开头内容 —",
 

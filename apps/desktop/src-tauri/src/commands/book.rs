@@ -150,6 +150,47 @@ pub(crate) fn parse_and_cache(
     Ok(record)
 }
 
+/// 解析一个 **PDF** 并把结果写进缓存（与 [`parse_and_cache`] 同形，只是解析器不同）。
+///
+/// **封面 = 第一页**（用户口径 2026-10-11）：由 `hp_pdf` 栅格化后编成 JPEG，
+/// 落到与 EPUB 封面**同一个** `path_for_book_cover`（`ext = "jpg"`）——
+/// 两者都是"书的封面"，共用一个缓存路径才能让前端只有一条渲染路径。
+///
+/// 成本比 EPUB 高（实测 20–122 ms @800px，要真的把一页画出来），因此这条缓存
+/// 不是可选项：没有它，卡片网格里每滚动一次就要重画一遍。
+pub(crate) fn parse_pdf_and_cache(
+    source_path: &Path,
+    cache: &hp_media::ThumbnailCache,
+    hash: &str,
+) -> HpResult<BookMetaCache> {
+    let meta = match hp_pdf::read_pdf_meta(source_path) {
+        Ok(meta) => meta,
+        // 打不开（损坏 / 加密）= 没有元数据（不向上抛：面板回落文字封面即可）。
+        Err(_) => hp_pdf::PdfMeta::default(),
+    };
+
+    cache.ensure_dir_for(hash)?;
+
+    let cover_ext = match &meta.cover {
+        Some(cover) => {
+            let path = cache.path_for_book_cover(hash, cover.ext);
+            write_atomic(&path, &cover.bytes)?;
+            Some(cover.ext.to_string())
+        }
+        None => None,
+    };
+
+    let record = BookMetaCache {
+        author: meta.author,
+        description: meta.description,
+        cover_ext,
+    };
+    if let Ok(json) = serde_json::to_vec(&record) {
+        let _ = write_atomic(&cache.path_for_book_meta(hash), &json);
+    }
+    Ok(record)
+}
+
 /// `book.meta`：按 `file_id` 返回作者 / 简介 / 封面路径（带磁盘缓存）。
 ///
 /// 非文本文件、无内容哈希、无元数据一律返回空结果而**不是**错误——
@@ -179,8 +220,12 @@ pub(crate) async fn book_meta(
             )
         };
 
-        // 只有文本类可能带元数据；其余类型直接空结果（不是错误）。
-        if media_type != MediaType::Text {
+        // 只有"书"（文本类 + PDF）可能带元数据；其余类型直接空结果（不是错误）。
+        //
+        // 判据用 `MediaType::is_book()` 而不是 `== Text`：PDF 是**独立类目**，
+        // 但它与文本类在这一处的行为完全一致（都要作者 / 简介 / 封面）。
+        // 分成两个条件写会让下次新增"书"类型时漏掉一个。
+        if !media_type.is_book() {
             return Ok(BookMetaResult {
                 author: None,
                 description: None,
@@ -208,8 +253,11 @@ pub(crate) async fn book_meta(
         let hash_for_task = hash.clone();
         let cache_for_task = cache.clone();
         let src_for_task = src_path.clone();
-        let record = tauri::async_runtime::spawn_blocking(move || {
-            parse_and_cache(&src_for_task, &cache_for_task, &hash_for_task)
+        let record = tauri::async_runtime::spawn_blocking(move || match media_type {
+            // PDF：封面 = 第一页栅格化（`hp-pdf`）。
+            MediaType::Pdf => parse_pdf_and_cache(&src_for_task, &cache_for_task, &hash_for_task),
+            // 文本类：EPUB 解 OPF 取内嵌封面；txt / md 本来就没有元数据。
+            _ => parse_and_cache(&src_for_task, &cache_for_task, &hash_for_task),
         })
         .await
         .map_err(|e| HpError::Io(format!("图书解析线程异常: {e}")))??;
@@ -412,7 +460,42 @@ fn convert(
         .collect()
 }
 
-/// `book.content`：读取查看器要显示的**一页正文**（`txt` / `md` / `epub`）。
+/// 选正文读取器：**按媒体类型分流，不按扩展名**。
+///
+/// ## 为什么不能按扩展名分流（2026-10-11 修的真实缺口）
+///
+/// `hp-scanner` 对 PDF **做了内容兜底**（`%PDF-` magic bytes），因此一个扩展名被改掉的
+/// PDF（`a.dat`）会被正确入库为 `media_type = pdf`。此时若这里按扩展名分流，
+/// `a.dat` 会掉进 `_ => read_text_page` 分支——**把一份 PDF 当 GBK 文本解码**，
+/// 用户看到的是满屏乱码而不是页面。判据必须与"入库判据"同源：
+/// 媒体类型是扫描期给出的**唯一**权威，扩展名只是它的一种来源。
+///
+/// `ext` 仍然需要：它区分 `md` / `markdown`（同一媒体类型下的两种写法）
+/// 与 `txt`（**其余文本一律按纯文本读**，这是刻意的兜底——认不出的文本扩展名
+/// 按纯文本显示，比报错更符合"显示开头内容"的预期）。
+fn read_page_by_media_type(
+    media_type: MediaType,
+    src_path: &Path,
+    ext: &str,
+    offset: u32,
+    cache: &hp_media::ThumbnailCache,
+    hash: &str,
+) -> HpResult<BookContentResult> {
+    // PDF 先判**媒体类型**：`%PDF-` 兜底认出来的 PDF 可能带任意扩展名。
+    if media_type == MediaType::Pdf {
+        return read_pdf_page(src_path, offset, cache, hash);
+    }
+    match ext {
+        "epub" => read_epub_page(src_path, offset, cache, hash),
+        // `md` / `markdown`：**渲染**成类型化块（与 epub 同一套块模型，
+        // 因此前端只有一份渲染器）。
+        "md" | "markdown" => read_markdown_page(src_path, offset, cache, hash),
+        // 其余文本（`txt` 与认不出的文本扩展名）：纯文本通路。
+        _ => read_text_page(src_path, offset),
+    }
+}
+
+/// `book.content`：读取查看器要显示的**一页正文**（`txt` / `md` / `epub` / `pdf`）。
 ///
 /// 用户口径（2026-10-09）：查看器新增 txt 与 epub 两种查看，**显示开头内容**、
 /// 范围为查看器面板大小；"固定上限 + 面板内滚动看更多，滚动时按需缓存"。
@@ -447,8 +530,8 @@ pub(crate) async fn book_content(
             )
         };
 
-        // 非文本类没有"正文"可看：空结果（不是错误）。
-        if media_type != MediaType::Text {
+        // 非"书"（文本类 + PDF）没有"正文"可看：空结果（不是错误）。
+        if !media_type.is_book() {
             return Ok(empty_content());
         }
         let Some(hash) = content_hash else {
@@ -462,15 +545,10 @@ pub(crate) async fn book_content(
             .unwrap_or("")
             .to_ascii_lowercase();
 
-        // 整本读盘 / 解压放在阻塞线程（大 epub 与 24 MB 的 txt 都不能占着 IPC 线程）。
+        // 整本读盘 / 解压放在阻塞线程（大 epub 与 24 MB 的 txt 都不能占着 IPC 线程；
+        // PDF 还要真的把一页画出来，实测 25–156 ms，更不能占 IPC 线程）。
         let read = tauri::async_runtime::spawn_blocking(move || {
-            match ext.as_str() {
-                "epub" => read_epub_page(&src_path, offset, &cache, &hash),
-                // `md` / `markdown`：**渲染**成类型化块（与 epub 同一套块模型，
-                // 因此前端只有一份渲染器）。
-                "md" | "markdown" => read_markdown_page(&src_path, offset, &cache, &hash),
-                _ => read_text_page(&src_path, offset),
-            }
+            read_page_by_media_type(media_type, &src_path, &ext, offset, &cache, &hash)
         })
         .await
         .map_err(|e| HpError::Io(format!("正文读取线程异常: {e}")))??;
@@ -563,6 +641,99 @@ pub(crate) fn read_markdown_page(
         title: None,
         // 还有下一页、或解码时被上限截断，都算"仅显示开头"。
         capped: decoded.capped || end < total,
+    })
+}
+
+/// PDF 一页：**栅格化**第 `page` 页并落盘，返回一个 `image` 块。
+///
+/// ## 为什么返回"一个图片块"而不是"一页文字"
+///
+/// PDF 是**版式描述**而不是文本流：分栏、表格、五线谱、图片、公式的位置与字形都由
+/// 内容流里的绘制指令给出，文字只是其中一类。抽文字会丢掉版式（表格散架、乐谱全丢），
+/// 因此用户口径（2026-10-11）是"**逐页栅格化为图片，滚动看后续页**"——
+/// 所见即 PDF 原貌。
+///
+/// ## 复用既有的块模型与分页口径
+///
+/// 返回的是 `BookBlock::Image`，与 EPUB 的章节插图**同一个块种类**，
+/// 因此前端渲染器（`BookBlocks.tsx`）一行都不用改就能显示它。
+/// 游标同样是**页序号**（与 epub 的章节序号同形），前端沿用 `section` /
+/// `section_count` 做进度提示——PDF 不需要另一套翻页口径。
+///
+/// ## 落盘命名
+///
+/// `<hash>.book-<页码>-0.jpg`（复用 `path_for_book_content_image`，`section` 传页码）。
+/// 与 EPUB 的章节插图**同分片、同命名规则**，因此第二次翻到同一页直接命中缓存——
+/// 这是必需的：一页栅格化实测 25–156 ms，不缓存的话往回翻一次就要重画。
+/// 图片序号恒为 `0`（一页只有一个整页位图）。
+pub(crate) fn read_pdf_page(
+    src_path: &Path,
+    page: u32,
+    cache: &hp_media::ThumbnailCache,
+    hash: &str,
+) -> HpResult<BookContentResult> {
+    // 打开失败（损坏 / 加密）= 没有正文（**不是错误**）：查看器显示占位。
+    let Some(pdf) = hp_pdf::open_pdf_file(src_path)? else {
+        return Ok(empty_content());
+    };
+    let total = hp_pdf::page_count(&pdf) as u32;
+    if total == 0 {
+        return Ok(empty_content());
+    }
+    // 游标越界（写坏 / 文件变小）→ 回落**最后一页**而不是报错：
+    // 与 `parse_cursor` 的"翻页游标不该成为新的错误来源"同一条口径。
+    let index = page.min(total - 1) as usize;
+
+    let path = cache.path_for_book_content_image(hash, index as u32, 0, hp_pdf::PDF_COVER_EXT);
+    if !path.exists() {
+        let Some(jpeg) = hp_pdf::render_page_jpeg(&pdf, index, hp_pdf::PDF_PAGE_WIDTH) else {
+            // 单页渲染失败不该让整个查看器变成错误态：这一页给一个空块。
+            return Ok(BookContentResult {
+                format: "pdf".into(),
+                encoding: None,
+                text: None,
+                blocks: Some(Vec::new()),
+                next_cursor: None,
+                section: index as u32,
+                section_count: Some(total),
+                title: None,
+                capped: false,
+            });
+        };
+        cache.ensure_dir_for(hash)?;
+        write_atomic(&path, &jpeg)?;
+    }
+
+    let block = BookBlockItem {
+        kind: "image".into(),
+        level: None,
+        spans: None,
+        path: Some(path.to_string_lossy().to_string()),
+        lang: None,
+        text: None,
+        blocks: None,
+        quote_kind: None,
+        ordered: None,
+        start: None,
+        list_items: None,
+        align: None,
+        head: None,
+        rows: None,
+        label: None,
+        definitions: None,
+    };
+
+    Ok(BookContentResult {
+        format: "pdf".into(),
+        encoding: None,
+        text: None,
+        blocks: Some(vec![block]),
+        next_cursor: (index as u32 + 1 < total).then(|| (index as u32 + 1).to_string()),
+        section: index as u32,
+        section_count: Some(total),
+        title: None,
+        // 还有下一页 = "仅显示开头"（用户口径：只显示开头的内容）。
+        capped: index as u32 + 1 < total,
     })
 }
 

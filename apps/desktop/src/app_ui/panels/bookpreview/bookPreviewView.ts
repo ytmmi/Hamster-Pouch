@@ -144,13 +144,25 @@ export function extensionOf(relativePath: string): string {
 const BOOK_MARK_NAME = "book";
 
 /**
+ * 默认带 book 标记的扩展名（与 `hp-core` 的 `default_book_mark_for_ext` **逐项一致**）。
+ *
+ * `epub` 与 `pdf` 都算：判据是"它是不是一本**自带封面与元数据、按书阅读**的容器"，
+ * 而不是"它是不是电子书格式"。两者在面板侧的行为完全一致——封面都走 `book.meta`
+ * （`epub` 取内嵌封面、`pdf` 取第一页栅格化），都没有内嵌封面时回落文字封面。
+ *
+ * 这份清单只在**旧索引行兜底**时用到（见 {@link fileBookMark}）：迁移 0010 之前的行
+ * 没有标记，只能按扩展名猜。正常路径读的是库里的标记集合。
+ */
+const DEFAULT_BOOK_MARK_EXTS = ["epub", "pdf"] as const;
+
+/**
  * 该文件是否带 **book 标记**（D102：标记是**可多值**的集合，这里是"含不含 book"）。
  *
  * 它是**标记**而不是"子类型"：与**类目**（`media_type`）正交，且一个文件可以同时带
  * 多个标记（`book` + `manga`）。因此判据是 `marks.includes("book")`，不是"等于某个值"。
  *
  * **旧索引行兜底**：迁移 0010 之前入库的行没有标记（`marks` 为空），若只认标记，
- * 存量 EPUB 在重扫前会全部退化成文字封面。这类行按扩展名兜底，
+ * 存量 EPUB / PDF 在重扫前会全部退化成文字封面。这类行按扩展名兜底，
  * 让"还没重扫"与"面板坏了"看起来不一样。
  */
 export function fileBookMark(item: {
@@ -158,14 +170,20 @@ export function fileBookMark(item: {
   relative_path: string;
 }): boolean {
   if (item.marks.length > 0) return item.marks.includes(BOOK_MARK_NAME);
-  return extensionOf(item.relative_path) === "epub";
+  return DEFAULT_BOOK_MARK_EXTS.includes(
+    extensionOf(item.relative_path) as (typeof DEFAULT_BOOK_MARK_EXTS)[number],
+  );
 }
 
 /**
- * 该条目是否要用**内嵌封面**（= 要去 `book.meta` 取图）。
+ * 该条目是否要用**内嵌 / 渲染出来的封面**（= 要去 `book.meta` 取图）。
  *
  * 判据就是 book 标记（见 {@link fileBookMark}）；单列一个名字是为了让封面来源
- * 的调用点读起来是"要不要内嵌封面"，而不是"它是不是书"。
+ * 的调用点读起来是"要不要取封面"，而不是"它是不是书"。
+ *
+ * **PDF 也走这条**：它的封面是第一页栅格化出来的（后端 `hp-pdf`），
+ * 对前端而言与 EPUB 的内嵌封面**没有任何区别**——都是一张落到盘上的图。
+ * 用户口径（2026-10-11）："封面为 pdf 第一页"。
  */
 export function usesEmbeddedCover(item: {
   marks: string[];
@@ -179,6 +197,10 @@ export function usesEmbeddedCover(item: {
  *
  * 扩展名（`markdown` → `md`）归一化到子类取值域；**认不出的扩展名返回空串**
  * （没有子类能表达它，蓝图侧按未接通处理）。非文本类返回空串。
+ *
+ * **PDF 返回空串**：它是**自己的类目**（`media_type === "pdf"`），其下**没有子类**
+ * ——PDF 只有一种格式，再分一层没有语义（与 `hp-core` 的 `subclass_formats_for("pdf")`
+ * 返回空表是同一件事）。因此 PDF 条目在蓝图里靠**类目**（pdf）+ **标记**（book）命中。
  *
  * 子类与标记是**两条正交的轴**：本函数只管子类，标记由 {@link fileMarks} 给出。
  */

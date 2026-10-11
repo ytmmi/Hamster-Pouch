@@ -158,18 +158,23 @@ CREATE INDEX idx_sources_repo ON sources(repo_id);
 
 ```sql
 -- 字段覆盖 RFC 0001 数据约束：身份=内容哈希；size/mtime/路径只用于变更发现
--- media_type 判定：扩展名优先 + 内容兜底（D11）；**文本类只认扩展名**（txt/md/markdown/epub）
+-- media_type 判定：扩展名优先 + 内容兜底（D11）；**文本类只认扩展名**（txt/md/markdown/epub），
+--   **PDF 认扩展名 + `%PDF-` 内容兜底**（2026-10-11 / D110：PDF 有可靠的 magic bytes，
+--   改名的 PDF 也能入库；文本类没有，只能认扩展名，否则未知二进制会被吸进索引）
 -- 音频占位行（D11）：media_type=audio，content_hash/perceptual_hash 为 NULL，
 --   无缩略图，后续开放音频索引时原位升级
 -- 文本（2026-10）：media_type=text，**算内容哈希**（移动识别/去重与图片同口径），
 --   但不产出 perceptual_hash / 缩略图 / media_info_json（文本没有视觉本体）
+-- PDF（2026-10-11 / D110）：media_type=pdf，**与文本同一档入库口径**（照算内容哈希、
+--   不产出索引期派生数据）。封面（第一页栅格化）与逐页正文走 `book.meta` / `book.content`
+--   的按内容哈希磁盘缓存，**不进索引**
 -- 视频（D14-D16）：全量媒体信息由 ffprobe 探测后缓存（存储形式见实现期开放点），
 --   首帧缩略图扫描时由 ffmpeg 生成，thumb_status 标记是否已生成
 CREATE TABLE files (
   id                        TEXT PRIMARY KEY,  -- 稳定文件 ID
   source_id                 TEXT NOT NULL,
   relative_path             TEXT NOT NULL,
-  media_type                TEXT NOT NULL,     -- image|video|audio|text
+  media_type                TEXT NOT NULL,     -- image|video|audio|text|pdf
   subtype                   TEXT,              -- **已废弃（D102）**：标记改存 file_marks 一对多表；本列新代码不读不写，仅为 forward-only 保留
   content_hash              TEXT,              -- 音频占位行可空
   content_hash_algo         TEXT,              -- 如 BLAKE3/SHA-256
@@ -552,4 +557,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blueprints_default
 - `filter_json` 的具体 DSL 范围。
 - `undo_json` 的撤销范围与交互方式。
 - 缩略图缓存位置与清理策略（缓存不属于核心 schema，另行处理）。
-- 后续新增媒体类型枚举值时的迁移方式（`media_type` 已存文本、**没有 CHECK 约束**，扩展无需改列结构，仅需数据回填规则）。**已落地一例**：`text`（2026-10，迁移 `repo/0008` 只加 `subtype` 列，`media_type` 取值本身不需要迁移）。
+- 后续新增媒体类型枚举值时的迁移方式（`media_type` 已存文本、**没有 CHECK 约束**，扩展无需改列结构，仅需数据回填规则）。**已落地两例**：`text`（2026-10，迁移 `repo/0008` 只加 `subtype` 列，`media_type` 取值本身不需要迁移）；**`pdf`（2026-10-11 / D110）——这一例连迁移都不需要**：`media_type` 是裸 TEXT 列、没有 CHECK 约束，新增取值只是扫描器扩展名表加一行 + 默认标记表加一条，**不动任何列结构、不加迁移文件**。这正是第 6 节"后续新增媒体类型枚举值无需改列结构"这条开放点的第二次落地，也说明该口径是可复用的。

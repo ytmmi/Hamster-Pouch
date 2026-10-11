@@ -613,7 +613,8 @@ export const BLUEPRINT_STRUCTURAL_CHILD_TYPES: readonly BlueprintNodeType[] = ST
  * 本表说"挂上去默认是哪个类型域"。两处的面板集合必须一致（都由 `pnpm check:panels` 断言）。
  *
  * 取值域不必穷举该面板支持的所有类型——`media` 的类目类型域就是
- * `image` / `video` / `audio` / `text` 里的前三个，`bookpreview` 只用 `text`。
+ * `image` / `video` / `audio` / `text` / `pdf` 里的前三个，`bookpreview` 默认 `text`
+ * （它同时收 `pdf`，只是"新建类目"的缺省值只能有一个，取更常见的那个）。
  */
 export const PANEL_CLASS_MEDIA_TYPES: Readonly<Record<string, BlueprintMediaType>> = {
   media: "image",
@@ -624,7 +625,7 @@ export const PANEL_CLASS_MEDIA_TYPES: Readonly<Record<string, BlueprintMediaType
  * 某面板下新增类目时的**缺省 `media_type`**。
  *
  * - `media`（默认未登记的面板）→ `image`（与既有行为一致，零回归）；
- * - `bookpreview` → `text`（图书预览收的是文本类文件）。
+ * - `bookpreview` → `text`（图书预览收的是文本类与 PDF，缺省给更常见的文本）。
  *
  * 类目**只**有 `media_type`（细分是 `subclass` 节点的事，见 `defaultSubclassFieldsFor`）。
  */

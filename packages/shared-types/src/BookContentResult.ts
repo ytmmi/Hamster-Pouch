@@ -4,46 +4,52 @@ import type { BookBlockItem } from "./BookBlockItem";
 /**
  * `book.content` 返回：查看器要显示的正文**一页**。
  *
- * 三种文件走同一个返回体（用户 2026-10-09 口径：txt 与 epub 都在查看器里看；
- * 2026-10-10 追加 md 的**渲染**）：
+ * 四种文件走同一个返回体（用户 2026-10-09 口径：txt 与 epub 都在查看器里看；
+ * 2026-10-10 追加 md 的**渲染**；2026-10-11 追加 PDF 的**栅格化**）：
  * - `txt`：一页就是一段连续文本（`text` 非空、`blocks` 为空）；
  * - `md` / `markdown`：一页是**渲染后**的块（`blocks` 非空、`text` 为空）；
- * - `epub`：一页就是**一个章节**的块（`blocks` 非空、`text` 为空）。
+ * - `epub`：一页就是**一个章节**的块（`blocks` 非空、`text` 为空）；
+ * - `pdf`：一页就是**一张整页位图**（`blocks` 是**单个** `image` 块，
+ *   `path` 指向已落盘的栅格化 JPEG）——PDF 是版式描述而非文本流，
+ *   抽文字会丢掉分栏 / 表格 / 乐谱，因此所见即原貌（见 `hp-pdf` 的模块文档）。
+ *
+ * **`section` 对四种格式含义一致**（"第几段 / 第几章 / 第几页"），
+ * 因此前端只有一套分页与进度提示；只有 `format` 决定怎么渲染它。
  */
 export type BookContentResult = { 
 /**
- * 书的格式：`text`（纯文本）、`markdown`（渲染后的 md）或 `epub`。
+ * 书的格式：`text`（纯文本）、`markdown`（渲染后的 md）、`epub` 或 `pdf`。
  */
 format: string, 
 /**
- * 纯文本的**编码名**（`UTF-8` / `GBK` / `UTF-16LE` …）；epub 为 `null`。
+ * 纯文本的**编码名**（`UTF-8` / `GBK` / `UTF-16LE` …）；epub / pdf 为 `null`。
  *
  * 面板据此提示"这是 GBK 文件"，也让"读出来是乱码"这件事可被用户判断。
  */
 encoding: string | null, 
 /**
- * 纯文本页的内容；epub 为 `null`。
+ * 纯文本页的内容；epub / pdf 为 `null`。
  */
 text: string | null, 
 /**
- * epub 章节的块；纯文本为 `null`。
+ * epub 章节的块 / pdf 整页位图的块；纯文本为 `null`。
  */
 blocks: Array<BookBlockItem> | null, 
 /**
- * 下一页游标（纯文本 = 下一个**字符偏移**；epub = 下一个**章节序号**）；
+ * 下一页游标（纯文本 = 下一个**字符偏移**；epub / pdf = 下一个**序号**）；
  * `null` = 没有更多（**到末尾不是错误**）。
  */
 next_cursor: string | null, 
 /**
- * 本页序号（0 起；纯文本恒为 0，epub 是章节序号）。
+ * 本页序号（0 起；纯文本恒为 0，epub 是章节序号，pdf 是**页码**）。
  */
 section: number, 
 /**
- * epub 的章节总数；纯文本为 `null`。
+ * epub 的章节总数 / pdf 的**页数**；纯文本与 markdown 为 `null`。
  */
 section_count: number | null, 
 /**
- * 本页标题（epub 的章节标题；纯文本为 `null`）。
+ * 本页标题（epub 的章节标题；纯文本 / pdf 为 `null`）。
  */
 title: string | null, 
 /**

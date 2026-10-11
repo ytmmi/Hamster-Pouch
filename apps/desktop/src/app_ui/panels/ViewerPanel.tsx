@@ -1,5 +1,5 @@
 /**
- * 查看器面板（`panel.viewer`）— 大图 / 视频 / 音频 / **文本类（txt / md / epub）**预览。
+ * 查看器面板（`panel.viewer`）— 大图 / 视频 / 音频 / **"书"（txt / md / epub / pdf）**预览。
  *
  * 面板设置（「全部设置 → 面板 → 查看器」，声明在 `packages/config/src/panels.ts`）：
  * - `infoBarEnabled`：**顶部基础信息栏**（`relative_path` + 媒体类型 · 体积）是否显示；
@@ -7,14 +7,18 @@
  *
  * 设置的读取与热加载走 `shared/settingValue.ts`（四条独立触发源），本文件只消费结果。
  *
- * ## 文本类：正文阅读区（2026-10-09）
+ * ## "书"：正文阅读区（2026-10-09；PDF 于 2026-10-11）
  *
- * `txt` / `md` / `epub` 不再落到"空舞台 + 占位提示"，而是交给 `panels/viewer/ViewerReader`：
- * 显示书的**开头内容**、范围为**面板大小**、滚动看更多时**按需取下一页**。
- * epub 按面板宽度**纯自动**单栏 / 双栏（用户口径"默认为单栏"，且不做设置项）。
+ * `txt` / `md` / `epub` / `pdf` 不再落到"空舞台 + 占位提示"，而是交给
+ * `panels/viewer/ViewerReader`：显示书的**开头内容**、范围为**面板大小**、
+ * 滚动看更多时**按需取下一页**。
+ * - 文本类（`txt` / `md` / `epub`）：epub 按面板宽度**纯自动**单栏 / 双栏
+ *   （用户口径"默认为单栏"，且不做设置项）；
+ * - **PDF**：后端把每一页**栅格化**成整页位图（`hp-pdf`），阅读区逐页纵向堆叠、
+ *   **恒单栏**（整页位图不该被断成两栏）——用户口径："逐页栅格化为图片，滚动看后续页"。
  *
  * 分文件（单文件 ≤ 1200 行）：`viewer/ViewerReader.tsx` 阅读区装配、
- * `viewer/BookBlocks.tsx` EPUB 块渲染（**不注入 HTML**）、
+ * `viewer/BookBlocks.tsx` EPUB / Markdown / **PDF** 块渲染（**不注入 HTML**）、
  * `viewer/useViewerBookContent.ts` 分页取数、`viewer/viewerReaderView.ts` 纯逻辑。
  */
 
@@ -33,15 +37,18 @@ import { ViewerReader } from "./viewer/ViewerReader";
 const VIEWER_PANEL_ID = "viewer";
 
 /**
- * 是否走**正文阅读区**：文本类文件（`txt` / `md` / `epub`）走阅读器，
+ * 是否走**正文阅读区**：`txt` / `md` / `epub` / **`pdf`** 走阅读器，
  * 其余走既有的图像 / 视频 / 音频舞台。
  *
- * 判据用 `media_type === "text"` 而不是按扩展名：媒体类型由扫描期的扩展名表给出
+ * 判据用**媒体类型**而不是按扩展名：媒体类型由扫描期的扩展名表给出
  * （`hp-scanner` 的 `ext_to_media_type`），**只有一处**口径；在面板里再列一遍扩展名
  * 就是第二份口径，迟早与扫描器漂移（`md` / `markdown` 这类就很容易漏）。
+ *
+ * PDF 与文本类**合在一条判据里**：对查看器而言两者的行为一致（都要 `book.content`
+ * 分页取正文、都不取 `file.path`），差别只在阅读区内部怎么渲染（`format` 决定）。
  */
-function isTextMedia(file: { media_type: string } | null): boolean {
-  return file?.media_type === "text";
+function isBookMedia(file: { media_type: string } | null): boolean {
+  return file?.media_type === "text" || file?.media_type === "pdf";
 }
 
 export interface ViewerPanelProps {
@@ -62,18 +69,18 @@ export function ViewerPanel({ api: panelApi }: ViewerPanelProps = {}): JSX.Eleme
 
   const file = app.selectedFile;
   /**
-   * 文本类走**正文阅读区**，不取 `file.path` / 预览 URL：
+   * "书"走**正文阅读区**，不取 `file.path` / 预览 URL：
    * 正文由 `book.content` 提供，阅读区自己按游标分页（见 `ViewerReader`）。
    */
-  const textMode = isTextMedia(file);
+  const bookMode = isBookMedia(file);
 
   useEffect(() => {
     let cancelled = false;
     setUrl(null);
     setFailed(false);
     const selected = app.selectedFile;
-    // 文本类没有"取图"这一步：直接跳过（否则会白发一次 file.path / preview.get）。
-    if (!app.repoId || !selected || isTextMedia(selected)) return;
+    // "书"没有"取图"这一步：直接跳过（否则会白发一次 file.path / preview.get）。
+    if (!app.repoId || !selected || isBookMedia(selected)) return;
     void (async () => {
       try {
         // Chromium 可解的格式（AVIF/JPEG/PNG/WebP…）加载原图（全分辨率）；
@@ -114,8 +121,8 @@ export function ViewerPanel({ api: panelApi }: ViewerPanelProps = {}): JSX.Eleme
               </span>
             </div>
           )}
-          {/* 文本类：正文阅读区（txt / md / epub），按面板大小显示开头、滚动按需取下一页。 */}
-          {textMode ? (
+          {/* "书"：正文阅读区（txt / md / epub / pdf），按面板大小显示开头、滚动按需取下一页。 */}
+          {bookMode ? (
             <ViewerReader />
           ) : (
             <div className="viewer-stage">

@@ -1,5 +1,5 @@
 /**
- * 查看器：**正文阅读区**（`txt` / `md` / `epub`）。
+ * 查看器：**正文阅读区**（`txt` / `md` / `epub` / `pdf`）。
  *
  * ## 布局与自适应（用户 2026-10-09 口径）
  *
@@ -9,6 +9,14 @@
  * - 字号也随宽度给一档（`readerFontSize`）；
  * - 分栏用 CSS `column-count`：内容是**文本流**，交给浏览器断栏最省事，
  *   也天然支持"一栏读满再读下一栏"。
+ *
+ * ## PDF：不分栏（2026-10-11）
+ *
+ * PDF 的每一"页"是一张**整页位图**（后端栅格化，见 `commands/book.rs` 的
+ * `read_pdf_page`），不是文本流。把它塞进 `column-count` 只会让一页被拦腰断成两栏，
+ * 读起来既不是原貌也不是连续文本。因此 PDF **恒单栏**（`--vr-columns: 1`，
+ * 由 `.vr-content.vr-pdf` 在 CSS 侧钉死），逐页纵向堆叠、滚动看后续页
+ * （用户口径："逐页栅格化为图片，滚动看后续页"）。
  *
  * ## 滚动与按需取数
  *
@@ -51,7 +59,24 @@ export function ViewerReader(): JSX.Element {
     return () => observer.disconnect();
   }, []);
 
-  const columns = readerColumns(width);
+  const first = pages[0];
+  const isText = first?.format === "text";
+  const isEpub = first?.format === "epub";
+  /** Markdown 与 epub 一样走**块渲染**（后端产出的是同一套块）。 */
+  const isBlocked = isEpub || first?.format === "markdown";
+  /**
+   * PDF 也走**块渲染**（后端把一页栅格化成一张 `image` 块，与 EPUB 的章节插图
+   * 是同一个块种类），因此渲染器一行都不用改。差别只在**布局**：
+   * PDF 不分栏、页面图按整宽显示（见文件头）。
+   */
+  const isPdf = first?.format === "pdf";
+
+  /**
+   * 分栏数：PDF **恒单栏**（整页位图不该被断成两栏）。
+   *
+   * 字号仍随宽度给一档——它不影响图片，但下面 `.vr-meta` 的进度提示要用。
+   */
+  const columns = isPdf ? 1 : readerColumns(width);
   const fontSize = readerFontSize(width);
 
   const style = useMemo(
@@ -88,12 +113,7 @@ export function ViewerReader(): JSX.Element {
     }
   }, [pages, hasMore, loading, columns, loadMore]);
 
-  const first = pages[0];
-  const isText = first?.format === "text";
-  const isEpub = first?.format === "epub";
-  /** Markdown 与 epub 一样走**块渲染**（后端产出的是同一套块）。 */
-  const isBlocked = isEpub || first?.format === "markdown";
-  const imageOnly = isBlocked && first.blocks ? isImageOnly(first.blocks) : false;
+  const imageOnly = (isBlocked || isPdf) && first?.blocks ? isImageOnly(first.blocks) : false;
 
   return (
     <div
@@ -107,14 +127,14 @@ export function ViewerReader(): JSX.Element {
       {!error && !first && loading && (
         <span className="placeholder">{app.t("common.loading")}</span>
       )}
-      {/* 非文本类 / 无内容哈希：空结果（不是错误），给出明确占位。 */}
+      {/* 非"书" / 无内容哈希 / 打不开的 PDF：空结果（不是错误），给出明确占位。 */}
       {!error && !first && !loading && (
         <span className="placeholder">{app.t("viewer.noContent")}</span>
       )}
 
       {first && (
         <>
-          {/* 章节进度（epub）：让"只显示开头"这件事对用户可见。 */}
+          {/* 章节进度（epub）/ **页进度**（pdf）：让"只显示开头"这件事对用户可见。 */}
           {isEpub && first.section_count !== null && (
             <div className="vr-meta dim">
               {app.t("viewer.sectionOf", {
@@ -124,6 +144,14 @@ export function ViewerReader(): JSX.Element {
               {first.title ? ` · ${first.title}` : ""}
             </div>
           )}
+          {isPdf && first.section_count !== null && (
+            <div className="vr-meta dim">
+              {app.t("viewer.pageOf", {
+                n: first.section + 1,
+                total: first.section_count,
+              })}
+            </div>
+          )}
           {/* 纯文本 / Markdown 的编码提示：让"读出来是乱码"这件事可被用户判断。 */}
           {(isText || isBlocked) && first.encoding && first.encoding !== "UTF-8" && (
             <div className="vr-meta dim">
@@ -131,7 +159,9 @@ export function ViewerReader(): JSX.Element {
             </div>
           )}
 
-          <div className={`vr-content${imageOnly ? " vr-image-only" : ""}`}>
+          <div
+            className={`vr-content${imageOnly ? " vr-image-only" : ""}${isPdf ? " vr-pdf" : ""}`}
+          >
             {pages.map((page, index) =>
               page.format === "text" ? (
                 <p key={index} className="vr-text">

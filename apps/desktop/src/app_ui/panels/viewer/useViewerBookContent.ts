@@ -12,6 +12,10 @@
  *
  * **不缓存已渲染的页**：用户明确说"字符缓存不需要大"——已取回的页就在 state 里
  * 参与渲染，不需要另立一份缓存。这也让"切书"变成一次简单的 state 重置。
+ *
+ * **PDF 的"页"是整页位图**（后端栅格化，一页一个 `image` 块）：本钩子对它与文本类
+ * **完全同形**——同样的游标、同样的"滚到底再取下一页"。位图本身的落盘缓存由**后端**
+ * 按内容哈希负责（`<hash>.book-<页码>-0.jpg`），前端这一层不需要区别对待。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -75,7 +79,7 @@ export function useViewerBookContent(): ViewerBookContent {
       try {
         const page = await api.bookContent({ repoId, fileId, cursor });
         if (generationRef.current !== generation) return;
-        // 空页（非文本类 / 无内容哈希）不追加：否则会往列表里塞一个空对象。
+        // 空页（非"书" / 无内容哈希 / 打不开的 PDF）不追加：否则会往列表里塞一个空对象。
         if (!page.format) return;
         setPages((prev) => [...prev, page]);
         setError(null);

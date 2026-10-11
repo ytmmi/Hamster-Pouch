@@ -56,9 +56,12 @@ fn generate_thumbnail(
             None => false,
         },
         MediaType::Audio => false,
-        // 文本没有视觉本体：`epub` 的内嵌封面走 `book.meta`（`hp_book` 解析 +
-        // 原格式落盘），`txt` 由前端用文件名渲染文字封面。这里恒为"没有缩略图"。
-        MediaType::Text => false,
+        // 文本与 PDF 没有索引期的缩略图：
+        // - 文本：`epub` 的内嵌封面走 `book.meta`（`hp_book` 解析 + 原格式落盘），
+        //   `txt` 由前端用文件名渲染文字封面；
+        // - PDF：封面是**第一页栅格化**出来的（`hp_pdf`），同样走 `book.meta` 的磁盘缓存。
+        // 两者在这里恒为"没有缩略图"。
+        MediaType::Text | MediaType::Pdf => false,
     }
 }
 
@@ -123,9 +126,10 @@ pub(crate) fn file_metadata(
 #[derive(serde::Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FileQueryFilterArgs {
-    /// 只返回这些媒体类型（`image` / `video` / `audio` / `text`）；缺省或空数组 = 不筛。
+    /// 只返回这些媒体类型（`image` / `video` / `audio` / `text` / `pdf`）；缺省或空数组 = 不筛。
     ///
-    /// **集合语义**（D95）：媒体预览的「全部」= 图片/视频/音频这三个，图书预览 = 文本这一个。
+    /// **集合语义**（D95）：媒体预览的「全部」= 图片/视频/音频这三个，
+    /// 图书预览 = 文本 + PDF 这两个。
     /// 取值不在闭集内一律 `validation`（歧义即拒绝，不静默回落"不筛"）。
     media_types: Option<Vec<String>>,
     source_id: Option<String>,

@@ -2,14 +2,14 @@
  * 图书预览面板：**取数与条目解析**。
  *
  * 与媒体预览面板（`mediaPreviewData.ts`）的差别只有一处，其余口径完全一致：
- * - 过滤条件写死 `mediaTypes: ['text']`（面板看的就是文本类文件：`txt` / `md` / `epub`），
- *   按**当前仓库 + 当前源 + 当前目录**取——**媒体预览则显式只要三种媒体类型**，
+ * - 过滤条件写死 `mediaTypes: ['text', 'pdf']`（面板看的就是"书"：`txt` / `md` / `epub`
+ *   与 `pdf`），按**当前仓库 + 当前源 + 当前目录**取——**媒体预览则显式只要三种媒体类型**，
  *   两边各取所需、互不重叠（2026-10-08 用户口径「媒体预览不包含 text 类型，
- *   text 类型在图书预览显示」）；
+ *   text 类型在图书预览显示」；2026-10-11 PDF 沿同一条口径落进图书预览）；
  * - **不按相册取**：相册的成员分页 SQL 只认 `image` / `video` / `audio` 三个字面量
- *   （`hp-store` 的 `query_album_members_page`），文本类进不了相册成员列表。
- *   因此在相册被选中时，本面板仍按源/目录列文本文件——而不是显示一个空列表，
- *   把"相册不支持文本"伪装成"这里没有书"。
+ *   （`hp-store` 的 `query_album_members_page`），文本类与 PDF 进不了相册成员列表。
+ *   因此在相册被选中时，本面板仍按源/目录列"书"——而不是显示一个空列表，
+ *   把"相册不支持书"伪装成"这里没有书"。
  *
  * 游标翻页复用**同一份**纯逻辑（`mediaPreviewPaging.drainPages`）：首屏第一页到手即渲染，
  * 其余页后台继续翻（严格前进 + 页数上限两道循环安全闸门都在这份实现里，不重写第二套）。
@@ -23,8 +23,17 @@ import { useApp } from "../../core/AppContext";
 import type { FileItem } from "../../shared/types";
 import { drainPages } from "../mediaPreviewPaging";
 
-/** 每页条数（文本库比图库小得多，页大小取整百即可）。 */
+/** 每页条数（"书"库比图库小得多，页大小取整百即可）。 */
 const BOOK_PREVIEW_PAGE_LIMIT = 200;
+
+/**
+ * 本面板收录的**类目**（`media_type`）——"书"就是这两个。
+ *
+ * 与 `hp-core` 的 `MediaType::is_book()` **逐项一致**：后端那个谓词还管着相册的排除集
+ * （相册不含"书"），两边必须是同一件事。写成常量而不是内联字面量，是为了让
+ * "图书预览收录哪些类目"只有一处定义。
+ */
+const BOOK_MEDIA_TYPES = ["text", "pdf"] as const;
 
 /** 面板当前这一批取数结果。 */
 export interface BookPreviewData {
@@ -35,7 +44,7 @@ export interface BookPreviewData {
 }
 
 /**
- * 取回文本类文件列表。
+ * 取回"书"列表（文本类 + PDF）。
  *
  * 依赖只看"看的是哪个来源"这四个值，**不看 `app` 整个对象**——`app` 在每次选中变化时
  * 都会换身份，把它放进依赖会让"点一下别人"就重跑整轮翻页（`mediaPreviewData.ts` 的
@@ -66,7 +75,7 @@ export function useBookPreviewData(): BookPreviewData {
             api.fileQuery({
               repoId,
               filter: {
-                mediaTypes: ["text"],
+                mediaTypes: [...BOOK_MEDIA_TYPES],
                 sourceId: sourceId ?? undefined,
                 dirPrefix: dirPath ?? undefined,
               },

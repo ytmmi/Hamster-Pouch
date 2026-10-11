@@ -89,7 +89,8 @@ crates/hp-store/src/
     plugin_catalog.rs   # 「扩展」菜单的目录通道（plugin.panelCatalog：面板 + 无面板的数据扩展）
     plugin_panel_data.rs # 面板 bind 的受控取数通道（plugin.panelData）
     blueprint.rs        # 蓝图命令桥接（含 blueprint.changed 广播）
-    book.rs             # 图书元数据桥接（book.meta：EPUB 作者/简介/内嵌封面，磁盘缓存）
+    book.rs             # 图书元数据桥接（book.meta：EPUB 作者/简介/内嵌封面、**PDF 第一页封面**；
+                        #   book.content：txt/md/epub 正文 + **PDF 逐页栅格化**；磁盘缓存按内容哈希失效）
     ai.rs fsops.rs      # AI 打标桥接 / 文件操作桥接
 
 apps/desktop/src/app_ui/
@@ -137,15 +138,20 @@ apps/desktop/src/app_ui/
                       #   （key+decoding=sync）；解码期间保留上一张画面——首帧不可能"半新半旧"（0026/0027/0028）
                       #   预加载：取哪些邻居在 viewerPreload（前台才取 / 大图不解码 / 同张只预热一次），
                       #   取图策略与缓存收敛在 shared/imageUrl.ts（HEIC 预览与当前图共用一份）
-    ViewerPanel.tsx   # 查看器（大图/视频/音频预览 + **文本类正文阅读**；**顶部基础信息栏**
+    ViewerPanel.tsx   # 查看器（大图/视频/音频预览 + **"书"正文阅读**；**顶部基础信息栏**
                       #   由面板设置 infoBarEnabled 控制）
-                      #   文本类（media_type=text，txt/md/epub）交 panels/viewer/ 阅读区渲染，
-                      #   判据用媒体类型而不是扩展名（免得与扫描器两份口径）
-    viewer/           # 查看器的正文阅读区（2026-10-09 txt/epub；2026-10-10 追加 md 渲染）
+                      #   "书"（media_type = text 或 pdf）交 panels/viewer/ 阅读区渲染，
+                      #   判据用媒体类型而不是扩展名（免得与扫描器两份口径）；
+                      #   PDF 与文本类**合在一条判据里**（两者都要 book.content、都不取 file.path，
+                      #   差别只在阅读区内部按 format 渲染）
+    viewer/           # 查看器的正文阅读区（2026-10-09 txt/epub；2026-10-10 追加 md 渲染；
+                      #   2026-10-11 追加 **pdf 逐页栅格化**）
                       #   ViewerReader.tsx 阅读区装配（按宽度下发分栏/字号 CSS 变量；自己滚；
-                      #     按 format 分流：text 走 <p>、markdown/epub 走块渲染器）
-                      #   BookBlocks.tsx **块渲染（EPUB 与 Markdown 共用）**（**不注入 HTML**：
-                      #     用 React 元素渲染后端给的纯数据块；容器块递归 + 深度护栏；
+                      #     按 format 分流：text 走 <p>、markdown/epub/**pdf** 走块渲染器；
+                      #     **PDF 恒单栏**——整页位图不该被 column-count 断成两栏）
+                      #   BookBlocks.tsx **块渲染（EPUB / Markdown / PDF 共用）**（**不注入 HTML**：
+                      #     用 React 元素渲染后端给的纯数据块；PDF 的一页就是一个 image 块，
+                      #     因此渲染器一行都不用改；容器块递归 + 深度护栏；
                       #     行内样式按 STYLE_ORDER 固定顺序套元素；行内 code 的类名是
                       #     vr-code-inline 而不是 vr-code——后者是代码**块**的类名）
                       #   useViewerBookContent.ts 分页取数（滚动到底部附近才取下一页；
@@ -153,25 +159,30 @@ apps/desktop/src/app_ui/
                       #   viewerReaderView.ts 纯逻辑（分栏阈值/字号/是否该取下一页；零依赖，
                       #     门禁直接 import。**注意**：不能叫 viewerReader.ts——与
                       #     ViewerReader.tsx 在 Windows 上大小写不敏感地撞名，tsc 报 TS1261）
-    bookpreview/      # 图书预览（panel.bookpreview；文本类文件 txt/md/epub；**has_class = true**，
+    bookpreview/      # 图书预览（panel.bookpreview；**"书" = 文本类 txt/md/epub + pdf**；
+                      #   **has_class = true**，
                       #   三轴模型见 blueprintValues.ts 的 BLUEPRINT_SUBCLASS_FORMATS /
-                      #   BLUEPRINT_BUILTIN_MARKS，D102）
+                      #   BLUEPRINT_BUILTIN_MARKS，D102；PDF 是**独立类目**且**无子类**，D110）
                       #   BookPreviewPanel.tsx 主面板（工具条 + 三种视图容器 + 封面宽度滑条
                       #     + 右键菜单装配：复用 ../mediaPreviewMenu 与 ../mediaPreviewActions，
-                      #     删除动作 `albumScoped: false`——文本类进不了相册成员列表；
+                      #     删除动作 `albumScoped: false`——"书"进不了相册成员列表；
                       #     另上报 click/double_click 蓝图事件，带三轴 mediaType + format + marks）
                       #   BookCard.tsx 卡片模式单元（封面在上 + 文件名在下；文件名悬停滚轮横滚；
                       #     选中/右键/双击回传面板：selected + onSelect + onDoubleClick + onContextMenu）
                       #   BookListRow.tsx 列表模式单元（封面在左 + 文件名/作者/简介，右栏填充剩余）
                       #   BookCoverCell.tsx 封面模式单元（一行多本；右栏固定为封面宽度 × 2）
                       #   BookRowInfo.tsx 列表/封面共用信息三行（作者：/简介：，简介溢出齐平封面底）
-                      #   BookCoverArt.tsx 封面画面（文字封面打底 + 内嵌封面盖上，失败自然回落）
+                      #   BookCoverArt.tsx 封面画面（文字封面打底 + 封面盖上，失败自然回落；
+                      #     EPUB 的内嵌封面与 **PDF 第一页的栅格化结果**走同一条渲染路径）
                       #   BookTextCover.tsx 文字封面（底色由作品名派生，同名恒同色）
                       #   bookPreviewView.ts 取值域与纯函数（零依赖，门禁直接 import；
-                      #     fileFormat / fileBookMark / fileMarks / bookDispatchTarget —— 三轴正交）
-                      #   bookPreviewData.ts 取数（file.query 过滤 mediaTypes:['text']；不按相册）
+                      #     fileFormat / fileBookMark / fileMarks / bookDispatchTarget —— 三轴正交；
+                      #     DEFAULT_BOOK_MARK_EXTS = ["epub","pdf"] 与 hp-core 的默认标记表逐项一致）
+                      #   bookPreviewData.ts 取数（file.query 过滤 mediaTypes:['text','pdf']；
+                      #     BOOK_MEDIA_TYPES 与 hp-core 的 MediaType::is_book() 逐项一致；不按相册）
                       #   bookMetaCache.ts 元数据缓存（结果缓存 + in-flight 去重）
-                      #   useBookMeta.ts 单本读取（只对需要内嵌封面的书发 book.meta）
+                      #   useBookMeta.ts 单本读取（只对需要封面的书发 book.meta——
+                      #     epub 取内嵌封面、pdf 取第一页栅格化）
                       #   --- 封面覆盖（用户口径 2026-10-09："txt 右键可以更换封面颜色或自定义图片"）---
                       #   bookCoverCache.ts 覆盖的批量缓存（按 **id 粒度**记账：翻页时 id 变多，
                       #     按仓库整体去重会让新一页的封面永远取不到）+ 版本号订阅
@@ -325,8 +336,7 @@ HamsterPouch/
     hp-plugin-host/           # 插件生命周期、权限、宿主 API
     hp-ai/                    # AI 打标接口抽象、任务队列、结果回写边界
     hp-media/                 # 媒体子进程管理、播放控制、ffprobe 元数据、ffmpeg 抽帧宿主
-    hp-book/                  # 电子书元数据 / 封面 / **正文**解析（EPUB = ZIP + OPF；txt/md 需判编码）
-                              #   自实现最小 ZIP 读取器（zip.rs）+ 极简 XML 取值（xml.rs）+
+    hp-book/                  # 电子书元数据 / 封面 / **正文**解析（EPUB = ZIP + OPF；txt/md 需判编码）                              #   自实现最小 ZIP 读取器（zip.rs）+ 极简 XML 取值（xml.rs）+
                               #   EPUB 元数据解析（epub.rs）+ 封面格式判定（cover.rs）+ 格式分发（meta.rs）；
                               #   **正文（2026-10-09 txt/epub；2026-10-10 追加 md 渲染，D100）**：
                               #   block.rs **共用的块模型**（BookBlock / BookSpan / SpanStyle / ColumnAlign；
@@ -342,6 +352,20 @@ HamsterPouch/
                               #   **正文不是 HTML**：渲染它要么 dangerouslySetInnerHTML（不接受）要么白名单，
                               #   白名单做在解析侧；**不引入 `zip` crate**（D20 依赖本地化），
                               #   解压走已在依赖树里的 flate2
+    hp-pdf/                   # PDF 的**封面（首页栅格化）/ 逐页栅格化 / 元数据**（2026-10-11 / D110）
+                              #   lib.rs 模块文档与公开出口、open.rs 打开与**降级口径**（坏文件 / 加密 →
+                              #     None 而不是 Err；只有读盘失败是 Err）、
+                              #   render.rs 缩放口径（目标像素宽 + **只夹 4 倍上限**，大页面照常缩小）、
+                              #     白底渲染（PDF 页面没有底色，透明背景在深色主题下会变成黑底黑字）、
+                              #     解预乘（hayro 的 Pixmap 是预乘 RGBA，编码前统一还原）、
+                              #   encode.rs RGBA → JPEG（质量 90，阅读用图；与 hp-media 的降级路径同款）、
+                              #   meta.rs 作者 / 主题（PDFDocEncoding / UTF-16 BOM）+ **封面 = 第一页**
+                              #   **纯 Rust（D20）**：用 `hayro` 0.8（forbid(unsafe_code)、Apache-2.0 OR MIT、
+                              #     随 crate 附带 14 个标准字体的宽松许可替代品），**不引入 pdfium / mupdf**
+                              #     ——那两个都要运行期原生库。特性 embed-fonts + embed-cmaps **必须保留**
+                              #     （关掉它们中文 PDF 会整页变成豆腐块），simd 关掉（只是加速档）
+                              #   **与 hp-book 分开成 crate**：两者没有任何共用逻辑（一个是文本流白名单
+                              #     转换、一个是光栅化器），合并只会让 hp-book 平白背上 hayro 那棵依赖树
     hp-dto/                   # 跨层 DTO（前端 shared-types 由这些类型生成；`src/lib.rs` 按域分组、
                               #   `src/bin/generate.rs` 负责导出）。桥接层必须直接用这里的类型
     # hp-core/examples/check-blueprint.rs：蓝图体检小工具（stdin 读 JSON，打印解析/硬错误/软告警），
@@ -412,6 +436,7 @@ crates/hp-* -> hp-core
 hp-scanner/hp-album/hp-ai -> hp-store
 hp-media -> hp-store（元数据/抽帧结果缓存）+ hp-core（媒体任务模型）
 hp-book -> hp-core（只用 HpError/HpResult；纯文件格式解析，不碰数据库、不碰 Tauri）
+hp-pdf -> hp-core（同上；纯 PDF 栅格化与元数据，**不依赖 hp-book**——两者没有共用逻辑）
 hp-plugin-host -> hp-core + hp-store 的稳定接口
 hp-fsops -> hp-core + hp-store
 hp-dto -> hp-core（跨层 DTO；由 ts-rs 生成 packages/shared-types）

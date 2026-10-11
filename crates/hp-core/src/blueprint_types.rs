@@ -145,13 +145,18 @@ impl fmt::Display for NodeType {
 
 /// 类目节点 `media_type` 的**取值域**（与 TS `BLUEPRINT_MEDIA_TYPES` 逐项一致）。
 ///
-/// `text` 于 2026-10 加入（与扫描器 `MediaType::Text` 同源，D93）。
-pub const CLASS_MEDIA_TYPES: [&str; 4] = ["image", "video", "audio", "text"];
+/// `text` 于 2026-10 加入（与扫描器 `MediaType::Text` 同源，D93）；
+/// `pdf` 于 2026-10-11 加入（与扫描器 `MediaType::Pdf` 同源）——PDF 是**独立的类目**
+/// 而不是 `text` 的一种：它是二进制容器，编码判定 / 字符分页那一套对它不适用。
+pub const CLASS_MEDIA_TYPES: [&str; 5] = ["image", "video", "audio", "text", "pdf"];
 
 /// **子类取值域**（`subclass` 节点的 `format` 字段，D102）——**按类目的媒体类型分域**。
 ///
 /// 目前只有 `text` 有分域（`epub` / `txt` / `md`）；其余媒体类型没有子类取值域，
 /// 即"该类目下不能建子类"。与 TS `BLUEPRINT_SUBCLASS_FORMATS` 逐项一致。
+///
+/// **`pdf` 刻意不在表里**：PDF 只有一种格式，再分一层没有语义。
+/// 这是"留空 = 该类目下不能建子类"的又一处落点，与 `image` / `video` / `audio` 同理。
 pub const SUBCLASS_FORMATS_TEXT: [&str; 3] = ["epub", "txt", "md"];
 
 /// 某类目媒体类型允许的子类取值域（空 = 该类目下不能建子类）。

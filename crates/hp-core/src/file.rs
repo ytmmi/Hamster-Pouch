@@ -139,11 +139,19 @@ impl FileMark {
     }
 }
 
-/// 扫描期的**默认标记**：`epub` → `book`，其余文本 → **无标记**。
+/// 扫描期的**默认标记**：`epub` / `pdf` → `book`，其余（`txt` / `md` / …）→ **无标记**。
+///
+/// **为什么 `pdf` 也算 book**（2026-10-11）：判据是"它是不是一本**自带封面与元数据、
+/// 按书阅读**的容器"，而不是"它是不是电子书格式"。PDF 与 EPUB 在这条判据上完全一致
+/// ——封面是第一页（`hp-pdf` 栅格化）、元数据来自文档信息字典。
+///
+/// 这条默认值决定**封面来源**：带 book 标记才去 `book.meta` 取封面
+/// （`bookPreviewView.usesEmbeddedCover`）。若 PDF 默认不带标记，所有 PDF 都会退化成
+/// 文字封面——那正是用户要消除的现象（"封面为 pdf 第一页"）。
 ///
 /// 唯一来源就是这里（与 `hp-scanner` 的扩展名表放在一起调用），避免两处口径漂移。
 pub fn default_book_mark_for_ext(ext: &str) -> Option<FileMark> {
-    if ext.eq_ignore_ascii_case("epub") {
+    if ext.eq_ignore_ascii_case("epub") || ext.eq_ignore_ascii_case("pdf") {
         Some(FileMark::from_raw(crate::blueprint_types::BOOK_MARK))
     } else {
         None

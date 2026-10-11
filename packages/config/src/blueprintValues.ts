@@ -116,9 +116,14 @@ export type BlueprintEdgeKind = (typeof BLUEPRINT_EDGE_KINDS)[number];
  *
  * `text` 于 2026-10 加入（与扫描器 `MediaType::Text` 同源，D93）：文本类条目
  * （`txt` / `md` / `markdown` / `epub`）此前**没有任何类目能表达**，图书预览面板
- * 因此无法挂类目。取值域与 `hp-core` 的 `blueprint_validate` 逐项对齐。
+ * 因此无法挂类目。
+ *
+ * `pdf` 于 2026-10-11 加入（与扫描器 `MediaType::Pdf` 同源）：PDF 是**独立的类目**
+ * 而不是 `text` 的一种——它是二进制容器（`%PDF-` magic bytes），
+ * 编码判定 / 按字符分页那一整套对它不适用，并进 `text` 会让那个类目变成一句谎话。
+ * 取值域与 `hp-core` 的 `CLASS_MEDIA_TYPES` 逐项对齐。
  */
-export const BLUEPRINT_MEDIA_TYPES = ["image", "video", "audio", "text"] as const;
+export const BLUEPRINT_MEDIA_TYPES = ["image", "video", "audio", "text", "pdf"] as const;
 export type BlueprintMediaType = (typeof BLUEPRINT_MEDIA_TYPES)[number];
 
 /**
@@ -126,8 +131,9 @@ export type BlueprintMediaType = (typeof BLUEPRINT_MEDIA_TYPES)[number];
  *
  * 子类挂在**类目**之下，因此它的取值域由**所属类目的媒体类型**决定：
  * - `text` 类目 → `epub` / `txt` / `md`（三个文本格式，既是扩展名也是子类名）；
- * - 其余媒体类型（`image` / `video` / `audio`）当前**没有**子类取值域
- *   （它们的细分需求还没出现；留空的含义是"该类目下不能建子类"，不是"还没填"）。
+ * - 其余媒体类型（`image` / `video` / `audio` / **`pdf`**）当前**没有**子类取值域
+ *   （`pdf` 只有一种格式，再分一层没有语义；留空的含义是"该类目下不能建子类"，
+ *   不是"还没填"）。
  *
  * `book` **不在**这里——它是**标记**（见 [`BLUEPRINT_MARK_KINDS`]），
  * 与子类是**两条正交的轴**：一个 `txt` 子类下的文件可以**同时**带 `book` 标记。
@@ -163,7 +169,7 @@ export function mediaTypeHasSubclass(mediaType: string): boolean {
  * 由 [`registerBlueprintMarks`] 登记；未注册的取值按「未接通」处理（与节点类型同口径）。
  */
 export const BLUEPRINT_BUILTIN_MARKS = [
-  /** 电子书标记（`epub` 默认带它；`txt` / `md` 可由用户打上）。 */
+  /** 电子书 / PDF 标记（`epub` 与 `pdf` 默认带它；`txt` / `md` 可由用户打上）。 */
   "book",
   /** 漫画标记（用户口径的例子：`漫画.zip` 可标为 `manga`，据此走漫画阅读器蓝图）。 */
   "manga",

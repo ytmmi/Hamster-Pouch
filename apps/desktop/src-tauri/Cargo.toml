@@ -27,6 +27,9 @@ hp-scanner = { path = "../../../crates/hp-scanner" }
 hp-media = { path = "../../../crates/hp-media" }
 # 电子书（EPUB）元数据与封面解析：`book.meta` 命令用（`crates/hp-book`）。
 hp-book = { path = "../../../crates/hp-book" }
+# PDF 的首页封面 / 逐页栅格化 / 元数据：`book.meta` 与 `book.content` 用（`crates/hp-pdf`）。
+# 纯 Rust 实现（`hayro`），不引入 pdfium / mupdf 那类运行期原生库（D20）。
+hp-pdf = { path = "../../../crates/hp-pdf" }
 hp-album = { path = "../../../crates/hp-album" }
 hp-fsops = { path = "../../../crates/hp-fsops" }
 hp-plugin-host = { path = "../../../crates/hp-plugin-host" }
