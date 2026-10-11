@@ -67,8 +67,9 @@ const FFMPEG_DECODE_BOUND: u32 = 256;
 ///
 /// 这是"自带解码"的入口；**扫描路径不该用它**——那里已经为感知哈希解码过一次，
 /// 应当复用同一张已解码图像走 [`extract_palette_from_image`]（大图重采样是主要成本，
-/// 见 `docs/issues/0018`）。AVIF/HEIC 家族进程内解码失败时回退捆绑 ffmpeg 有界解码
-/// （`src/decode.rs`）；既有格式的输出与旧实现逐位相同。
+/// 见 `docs/issues/0018`）。解码统一走 [`crate::decode::decode_image_fallback`]：
+/// AVIF/HEIC 家族与**进程内无解码器**的格式（JPEG 2000 / JPEG XL / PSD / PCX…，
+/// 2026-10-11 / D111）经捆绑 ffmpeg 有界解码；既有格式的输出与旧实现逐位相同。
 pub fn extract_palette(
     path: &Path,
     max_colors: usize,

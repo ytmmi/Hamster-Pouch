@@ -14,8 +14,12 @@
  *
  * | 格式 | 取图方式 | 理由 |
  * | --- | --- | --- |
- * | HEIC / HEIF | 后端 `preview.get`（**全分辨率** JPEG） | WebView2/Chromium 无法原生解码 |
- * | 其余（JPEG/PNG/WebP/AVIF/GIF/BMP…） | `file.path` 直接加载**原图** | 零转码，且能 100% 检视细节 |
+ * | Chromium **原生可渲染**（JPEG/PNG/APNG/GIF/WebP/AVIF/BMP/ICO/SVG） | `file.path` 直接加载**原图** | 零转码，且能 100% 检视细节 |
+ * | 其余图片（HEIC/HEIF、TIFF、JPEG 2000、JPEG XL、PSD、PCX、TGA、DDS、EXR、QOI、PNM 家族…） | 后端 `preview.get`（**全分辨率** JPEG） | WebView2/Chromium 渲染不了 |
+ *
+ * **判据是白名单取反**（2026-10-11 起，见 `previewUrl.ts` 的 `needsPreview`）：
+ * 只列 Chromium 画得了的格式，其余默认走预览——新格式漏项时失败方向是"多一次后端转码"，
+ * 而不是"画出一片坏图"。
  *
  * ## 缓存口径
  *
@@ -75,7 +79,7 @@ export function resolveImageUrlOutcome(
   const inflight = imagePromiseCache.get(fileId);
   if (inflight) return inflight;
 
-  // HEIC/HEIF 复用 `previewUrl.ts` 的缓存与去重（两个入口必须命中**同一份**缓存，
+  // 需要后端预览的格式复用 `previewUrl.ts` 的缓存与去重（两个入口必须命中**同一份**缓存，
   // 否则预加载与当前图会各生成一次，后端白做一遍全分辨率解码）。
   const promise: Promise<ImageUrlOutcome> = (
     needsPreview(relativePath)

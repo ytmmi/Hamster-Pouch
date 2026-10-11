@@ -1,5 +1,5 @@
-//! 缩略图生成：ffmpeg 首帧抽帧（D16，视频）+ 图片进程内缩放（AVIF/HEIC 家族回退
-//! 捆绑 ffmpeg 有界解码，见 `docs/issues/0018` §7 P1-D）。
+//! 缩略图生成：ffmpeg 首帧抽帧（D16，视频）+ 图片进程内缩放（进程内**无解码器**的格式
+//! 与 AVIF/HEIC 家族回退 ffmpeg 有界解码，2026-10-11 起；见 `docs/issues/0018` §7 P1-D）。
 //!
 //! **落盘格式按媒体类型分流**（用户 2026-10-08 口径：「同像素和质量的情况下，选择
 //! 体积更小的格式」）：
@@ -361,8 +361,9 @@ fn generate_preview_via_image(
 /// - 其它（如 `.jpg`）→ 进程内 JPEG，沿用 `image` crate 的默认质量 75。
 ///
 /// 解码优先走进程内 `image` crate（jpg/png 等既有格式输出与旧实现**逐位相同**）；
-/// AVIF/HEIC 家族进程内失败时回退**捆绑 ffmpeg 有界解码**（`src/decode.rs`，输出已
-/// 缩到 ≤ `max_dim`，ffmpeg 默认应用旋转元数据）。小图不放大；读取 / 解码 / 写入失败
+/// 进程内**没有解码器**的格式（JPEG 2000 / JPEG XL / PSD / PCX…）与 AVIF/HEIC 家族
+/// 进程内失败时回退**捆绑 ffmpeg 有界解码**（`src/decode.rs`，输出已缩到 ≤ `max_dim`，
+/// ffmpeg 默认应用旋转元数据）。小图不放大；读取 / 解码 / 写入失败
 /// 返回 `HpError::Io`（调用方可降级为占位）。
 ///
 /// **WebP 失败时降级为 JPEG 同路径落盘**：两级 WebP 编码都不可用（特性关闭且无 ffmpeg /
@@ -431,6 +432,9 @@ fn write_jpeg(img: &image::DynamicImage, output: &Path) -> HpResult<()> {
 /// 解码图片源文件：进程内路径（EXIF 方向 + 解码，输出与旧实现逐位相同）；
 /// 失败时若属 AVIF/HEIC 家族且 ffmpeg 可用，回退 ffmpeg 有界解码（见模块文档）。
 ///
+/// **进程内没有解码器的格式直接走 ffmpeg**（2026-10-11，判据 [`crate::decode::needs_ffmpeg_decode`]）：
+/// 对它们试 `into_decoder()` 是必然失败的无效动作（`image` crate 连格式都认不出）。
+///
 /// `into_decoder()` 与 `DynamicImage::from_decoder` **两处都可能是失败点**：
 /// 未编译解码器时（如 AVIF 无 `avif-native`）前者报 `Unsupported`，文件损坏时后者报错，
 /// 两处都要进兜底分支。
@@ -445,6 +449,24 @@ fn decode_thumbnail_src(
     // 首次进入即注册 libheif hooks（幂等）：heic/heif/avif 可进程内解码，
     // 失败才落 ffmpeg 兜底（见 `decode` 模块文档）。
     crate::decode::ensure_libheif_hooks();
+
+    // 进程内**根本没有**解码器（JPEG 2000 / JPEG XL / PSD / PCX…）→ 直接 ffmpeg 有界，
+    // 不白试一次必然失败的 `ImageReader`。
+    if crate::decode::is_ffmpeg_only_image(src) {
+        let Some(bin) = ffmpeg_bin else {
+            return Err(HpError::Io(format!(
+                "解码图片失败 {}: 该格式需要捆绑 ffmpeg（进程内无解码器）",
+                src.display()
+            )));
+        };
+        return crate::decode::decode_image_with_ffmpeg(src, bin, max_dim, timeout).map_err(|fe| {
+            HpError::Io(format!(
+                "解码图片失败 {}: 进程内无解码器，ffmpeg 兜底: {fe}",
+                src.display()
+            ))
+        });
+    }
+
     // **尺寸分流**（有界请求 + AVIF/HEIC 超大图 + 有 ffmpeg）：直接 ffmpeg 有界，
     // 跳过进程内全分辨率解码（实测大图快 3.4×，见 `decode::LIBHEIF_FULL_RES_MAX_MP`）。
     if max_dim < u32::MAX && crate::decode::is_avif_family(src) {
@@ -481,8 +503,10 @@ fn decode_thumbnail_src(
     }
 }
 
-/// 进程内解码失败后的兜底：仅 AVIF/HEIC 家族且 ffmpeg 可用时走 ffmpeg 有界解码；
+/// 进程内解码失败后的兜底：AVIF/HEIC 家族且 ffmpeg 可用时走 ffmpeg 有界解码；
 /// 其余情况原样返回进程内错误（既有格式口径不变）。
+///
+/// **进程内无解码器的格式不会走到这里**——它们在上面就被直接送往 ffmpeg 了。
 fn fallback_decode(
     src: &Path,
     ffmpeg_bin: Option<&Path>,
@@ -491,7 +515,7 @@ fn fallback_decode(
     cause: &str,
     step: &str,
 ) -> HpResult<image::DynamicImage> {
-    if crate::decode::is_avif_family(src) {
+    if crate::decode::needs_ffmpeg_decode(src) {
         if let Some(bin) = ffmpeg_bin {
             return crate::decode::decode_image_with_ffmpeg(src, bin, max_dim, timeout).map_err(
                 |fe| HpError::Io(format!("{step}: {cause}；ffmpeg 兜底: {fe}")),
@@ -594,6 +618,118 @@ mod tests {
         buf
     }
 
+    /// 端到端：**进程内无解码器**的格式经 ffmpeg 兜底生成缩略图（2026-10-11 / D111）。
+    ///
+    /// 用 JPEG 2000 作代表。这条断言补的是"解码测试覆盖不到的那一半"——
+    /// 网格与胶片栏真正消费的是**缩略图**（`thumb.get` → `generate_image_thumbnail`），
+    /// 只测 `decode_image_fallback` 不能证明这条链路通（`decode_thumbnail_src`
+    /// 有它自己的分支）。依赖捆绑 ffmpeg，缺失即跳过。
+    #[test]
+    fn ffmpeg_only_format_thumbnail_falls_back_to_bundled_ffmpeg() {
+        let Some(ffmpeg) = bundled_ffmpeg() else {
+            eprintln!("跳过：未找到 external-cli/ffmpeg");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("hp-thumb-jp2-{}", nanos()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let src = dir.join("sample.jp2");
+        let out = dir.join("out.webp");
+        let status = crate::process::hidden_command(&ffmpeg)
+            .args([
+                "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                "color=c=red:s=800x600", "-frames:v", "1", "-c:v", "jpeg2000",
+            ])
+            .arg(&src)
+            .status()
+            .expect("启动 ffmpeg 失败");
+        assert!(status.success(), "生成 JPEG 2000 样本失败");
+        // 前提校验：进程内确实解不了，否则本用例测不到兜底路径。
+        assert!(image::open(&src).is_err(), "JPEG 2000 不应能进程内解码");
+
+        generate_image_thumbnail(&src, &out, 320, Some(&ffmpeg), Duration::from_secs(30))
+            .expect("JPEG 2000 缩略图应生成成功");
+        // 产物是 WebP（图片缩略图的既定口径，D90/D91），且能解回、尺寸正确。
+        let head = magic(&out);
+        assert_eq!(&head[0..4], b"RIFF", "缩略图应为 WebP，实际 {head:?}");
+        assert_eq!(&head[8..12], b"WEBP", "缩略图应为 WebP，实际 {head:?}");
+        let thumb = image::open(&out).expect("读取缩略图失败");
+        // 800×600 → 长边 320：宽 320、高 240；纯红角像素保留。
+        assert_eq!((thumb.width(), thumb.height()), (320, 240));
+        let rgb = thumb.to_rgb8();
+        let px = *rgb.get_pixel(0, 0);
+        assert!(
+            px[0] > 200 && px[1] < 60 && px[2] < 60,
+            "角像素应为红色，实际 {px:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 无 ffmpeg 时，进程内无解码器的格式要给出**点明原因**的错误（不是 panic / 空图）。
+    #[test]
+    fn ffmpeg_only_format_thumbnail_without_ffmpeg_reports_clear_error() {
+        let dir = std::env::temp_dir().join(format!("hp-thumb-jp2-noff-{}", nanos()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let src = dir.join("x.jp2");
+        let out = dir.join("out.webp");
+        std::fs::write(&src, b"\x00\x00\x00\x0cjP  \r\n\x87\nfake").expect("写入失败");
+
+        let err = generate_image_thumbnail(&src, &out, 320, None, Duration::from_secs(5))
+            .expect_err("无 ffmpeg 时该格式应报错");
+        assert!(
+            format!("{err}").contains("ffmpeg"),
+            "错误信息应点明需要 ffmpeg，实际：{err}"
+        );
+        assert!(!out.exists(), "失败时不得留下半成品缩略图");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 端到端：**进程内无解码器**的格式经 `generate_image_preview` 出**全分辨率 JPEG**。
+    ///
+    /// 这条覆盖的是**图像查看器的主路径**（`preview.get` → `generate_image_preview`）：
+    /// 前端白名单取反后，新格式全部走预览，因此这条链路才是用户点开图时真正走的那条。
+    /// 与缩略图不同，预览**不缩放**（要能 100% 检视细节）。
+    #[test]
+    fn ffmpeg_only_format_preview_is_full_resolution_jpeg() {
+        let Some(ffmpeg) = bundled_ffmpeg() else {
+            eprintln!("跳过：未找到 external-cli/ffmpeg");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("hp-preview-jp2-{}", nanos()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let src = dir.join("sample.jp2");
+        let out = dir.join("preview.jpg");
+        let status = crate::process::hidden_command(&ffmpeg)
+            .args([
+                "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                "color=c=0x3355aa:s=800x600", "-frames:v", "1", "-c:v", "jpeg2000",
+            ])
+            .arg(&src)
+            .status()
+            .expect("启动 ffmpeg 失败");
+        assert!(status.success(), "生成 JPEG 2000 样本失败");
+
+        generate_image_preview(&src, &out, Some(&ffmpeg), Duration::from_secs(30))
+            .expect("JPEG 2000 预览应生成成功");
+        assert_eq!(&magic(&out)[0..3], &[0xFF, 0xD8, 0xFF], "预览应为 JPEG");
+        let img = image::open(&out).expect("读取预览失败");
+        // **不缩放**：800×600 原样（用户 2026-10-06 裁定不要 2048 有界预览）。
+        assert_eq!(
+            (img.width(), img.height()),
+            (800, 600),
+            "预览必须是原始分辨率（不缩放）"
+        );
+        let rgb = img.to_rgb8();
+        let px = *rgb.get_pixel(0, 0);
+        let close = |a: u8, b: u8| a.abs_diff(b) <= 12;
+        assert!(
+            close(px[0], 0x33) && close(px[1], 0x55) && close(px[2], 0xaa),
+            "角像素应为 #3355aa 附近，实际 {px:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     /// `.webp` 目标 + 有 ffmpeg：应落盘**真正的有损 WebP**（RIFF....WEBP），且能解回。
     ///
     /// 这条断言钉住的是"用户口径"本身：图片缩略图必须是 WebP。若哪天退回 JPEG，

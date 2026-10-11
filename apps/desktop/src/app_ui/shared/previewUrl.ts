@@ -9,26 +9,58 @@
  *
  * ## 什么时候用预览而不是原图（`needsPreview`）
  *
- * WebView2（Chromium）原生可解 AVIF / JPEG / PNG / WebP / GIF / BMP，查看器直接
- * 加载**原图**（`file.path` + `convertFileSrc`，零转码）；HEIC/HEIF 无法原生解码，
- * 必须走后端预览。判断只看扩展名（`heic` / `heif`），大小写不敏感。
+ * 判据是**白名单取反**：只列出 WebView2（Chromium）**原生渲染得了**的格式，
+ * 其余一律走后端预览。取反而不是列黑名单，是**故意的失败方向**——
+ * 新格式默认落到"多一次后端转码"，而不是"画出一个坏图占位"。
  *
- * 缓存是**进程级模块级**的：文件内容变更后旧预览仍会命中，直到重新分析
- * （`file.reanalyze`）刷新后端缓存——与媒体预览面板既有行为一致。
+ * > **2026-10-11 改白名单取反**：此前是黑名单（只列 `heic` / `heif`）。扩容图片格式
+ * > 后黑名单会**静默漏项**：扫描器新收的 `jp2` / `jxl` / `psd` / `pcx` / `tga` /
+ * > `dds` / `exr` / `qoi` / `pnm` 家族等 Chromium 一律渲染不了，漏一个就是一片坏图；
+ * > 而白名单漏一个只是"本来能直接显示的格式多走一次后端"，两者代价不对称。
+ * > 白名单本身很小且**极稳定**（Chromium 支持的图片格式多年未变），维护成本更低。
+ *
+ * `tiff` / `tif` 同样在这里（Chromium 不支持 TIFF）：此前靠"先加载原图 → `onError`
+ * 回退预览"兜底，现在直接走预览，省掉一次必然失败的加载。
+ *
+ * 判断只看扩展名，大小写不敏感。
  */
 
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "./api";
 
-/** 需要后端有界预览的扩展名（Chromium `<img>` 无法原生解码的图片）。 */
-const PREVIEW_EXTS = ["heic", "heif"];
+/**
+ * Chromium `<img>` **原生渲染得了**的图片扩展名（白名单）。
+ *
+ * 只收实测能在 WebView2 里直接显示的格式：JPEG / PNG（含 APNG）/ GIF / WebP /
+ * AVIF / BMP / ICO / SVG。**其余一律走后端预览**——包括 TIFF、HEIC/HEIF，
+ * 以及 `hp-scanner` 2026-10-11 新收的 JPEG 2000 / JPEG XL / PSD / PCX / SGI /
+ * Sun Raster / DPX / FITS / WBMP / XBM / XPM / JPEG-LS / PFM / DIB / TGA / DDS /
+ * EXR / HDR / QOI / farbfeld / Netpbm 家族。
+ */
+const NATIVE_RENDER_EXTS = [
+  "jpg",
+  "jpeg",
+  "jfif",
+  "png",
+  "apng",
+  "gif",
+  "webp",
+  "avif",
+  "bmp",
+  "ico",
+  "svg",
+];
 
-/** 该文件是否必须走有界预览（按 `relative_path` 扩展名判定，大小写不敏感）。 */
+/**
+ * 该文件是否必须走后端预览（按 `relative_path` 扩展名判定，大小写不敏感）。
+ *
+ * **取反口径**：不在白名单里（含没有扩展名）→ 需要预览。
+ */
 export function needsPreview(relativePath: string): boolean {
   const dot = relativePath.lastIndexOf(".");
-  if (dot < 0) return false;
-  return PREVIEW_EXTS.includes(relativePath.slice(dot + 1).toLowerCase());
+  if (dot < 0) return true;
+  return !NATIVE_RENDER_EXTS.includes(relativePath.slice(dot + 1).toLowerCase());
 }
 
 /** 已解析的预览 URL；`null` = 后端明确不可用（生成失败 / 非图片）。 */

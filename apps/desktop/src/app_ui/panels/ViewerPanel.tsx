@@ -84,10 +84,16 @@ export function ViewerPanel({ api: panelApi }: ViewerPanelProps = {}): JSX.Eleme
     void (async () => {
       try {
         // Chromium 可解的格式（AVIF/JPEG/PNG/WebP…）加载原图（全分辨率）；
-        // HEIC/HEIF 走后端**有界预览**（`preview.get`，缺陷 0019）。
-        const path = needsPreview(selected.relative_path)
-          ? await api.previewGet({ repoId: app.repoId!, fileId: selected.id })
-          : await api.filePath({ repoId: app.repoId!, fileId: selected.id });
+        // 其余图片走后端**全分辨率预览**（`preview.get`，缺陷 0019；2026-10-11 起
+        // 判据是白名单取反，见 `shared/previewUrl.ts`）。
+        //
+        // **必须限定图片**：`needsPreview` 的口径是"Chromium 画不了这张图"，
+        // 对视频/音频没有意义——`preview.get` 对非图片一律返回 `null`，
+        // 拿它去判视频会把"能播的视频"变成"不可用"。
+        const path =
+          selected.media_type === "image" && needsPreview(selected.relative_path)
+            ? await api.previewGet({ repoId: app.repoId!, fileId: selected.id })
+            : await api.filePath({ repoId: app.repoId!, fileId: selected.id });
         if (!cancelled) {
           if (path) {
             setUrl(convertFileSrc(path));

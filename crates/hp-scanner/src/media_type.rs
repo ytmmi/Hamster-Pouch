@@ -15,9 +15,29 @@ use hp_core::{default_book_mark_for_ext, FileMark, MediaType};
 /// 这正是 D11"扩展名优先 + 内容兜底"里"内容兜底"该发挥作用的地方。
 fn ext_to_media_type(ext: &str) -> Option<MediaType> {
     match ext.to_ascii_lowercase().as_str() {
-        // 图片
-        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "tiff" | "tif" | "avif" | "heic"
-        | "heif" | "ico" | "svg" => Some(MediaType::Image),
+        // 图片。
+        //
+        // **2026-10-11 扩容**（用户要求"将 ffmpeg 支持的进行实现"）：此前只收 13 个格式，
+        // 而捆绑 ffmpeg 实测还能解一批常见与长尾格式——它们**既不入库也没有解码路径**，
+        // 于是"能解却看不到"。扩容依据是 `docs/rfc/0005` 的「图片格式支持边界」，
+        // 逐个格式**端到端实测**（`ffmpeg -decoders` 有解码器 **且** 走本项目**完全相同**的
+        // `-frames:v 1 -vf scale=… -f image2pipe -vcodec png -` 管线能出图）。
+        //
+        // 两条**判据分层**（不是"ffmpeg 能解就加"，那样会把坏文件报错变成抢救成功）：
+        // - **进程内能解**（`image` crate 自带解码器）→ 只进本表，走进程内路径：
+        //   `tga` / `dds` / `exr` / `hdr` / `qoi` / `ff` / `pnm` 家族；
+        // - **进程内无解码器** → 进本表 **且** 进 `hp-media` 的
+        //   `FFMPEG_ONLY_IMAGE_EXTS`（两处必须同时命中，否则"入库了但解不开"）。
+        "jpg" | "jpeg" | "jfif" | "png" | "apng" | "gif" | "bmp" | "webp" | "tiff"
+        | "tif" | "avif" | "heic" | "heif" | "ico" | "svg"
+        // 进程内可解、2026-10-11 新收
+        | "tga" | "dds" | "exr" | "hdr" | "qoi" | "ff" | "pnm" | "pam" | "ppm" | "pgm"
+        | "pbm"
+        // 进程内无解码器、必须走 ffmpeg 兜底（2026-10-11 新收）
+        // 注意 `dib` 属本组：`image` crate **不认** `.dib`（实测报
+        // "extension not recognized"），它是 DIB 裸数据、无 BMP 文件头。
+        | "jp2" | "j2k" | "jpf" | "jpx" | "jxl" | "psd" | "pcx" | "sgi" | "ras" | "dpx"
+        | "fits" | "wbmp" | "xbm" | "xpm" | "jls" | "pfm" | "dib" => Some(MediaType::Image),
         // 视频
         "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "m4v" | "mpg" | "mpeg" | "ts"
         | "3gp" => Some(MediaType::Video),
@@ -76,16 +96,88 @@ fn sniff_media_type(path: &Path) -> Option<MediaType> {
 
     // 图片
     if b.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        return Some(MediaType::Image); // JPEG
+        return Some(MediaType::Image); // JPEG（也覆盖 JPEG-LS：`FF D8 FF F7`）
     }
     if b.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
-        return Some(MediaType::Image); // PNG
+        return Some(MediaType::Image); // PNG（也覆盖 APNG：同一容器）
     }
     if b.starts_with(b"GIF8") {
         return Some(MediaType::Image);
     }
     if b.starts_with(b"BM") {
         return Some(MediaType::Image); // BMP
+    }
+
+    // 2026-10-11 扩容的图片格式中**magic bytes 足够可靠**的那批（D11 的内容兜底）。
+    //
+    // **只收"长且互不重叠"的签名**，刻意**不收**签名过弱的格式——`wbmp`（`00 00`
+    // 两字节）、`dib`（4 字节的头部长度，`28 00 00 00` 之类在任意二进制里都常见）、
+    // `tga`（签名在**文件尾** `TRUEVISION-XFILE`，本函数只读头部 16 字节）、
+    // `pcx`（`0A` + 版本 + 编码，前两字节与普通二进制无法区分）。
+    // 给它们做兜底会把**未知二进制吸进索引**，正是 D11「未知类型不索引」要防的事；
+    // 这些格式仍可靠**扩展名**正常入库，只是改名的文件认不出。
+    if b.starts_with(b"8BPS") {
+        return Some(MediaType::Image); // Photoshop PSD
+    }
+    if b.starts_with(b"DDS ") {
+        return Some(MediaType::Image); // DirectDraw Surface
+    }
+    if b.starts_with(&[0x76, 0x2F, 0x31, 0x01]) {
+        return Some(MediaType::Image); // OpenEXR
+    }
+    if b.starts_with(b"qoif") {
+        return Some(MediaType::Image); // QOI
+    }
+    if b.starts_with(b"farbfeld") {
+        return Some(MediaType::Image); // farbfeld
+    }
+    if b.starts_with(b"#?RADIANCE") || b.starts_with(b"#?RGBE") {
+        return Some(MediaType::Image); // Radiance HDR
+    }
+    if b.starts_with(&[0x59, 0xA6, 0x6A, 0x95]) {
+        return Some(MediaType::Image); // Sun Raster
+    }
+    // SGI RGB：magic `01 DA` + storage(0/1) + BPC(1/2)。只判前两字节太弱（1/65536），
+    // 因此**连第 4 字节一起判**（BPC 只能是 1 或 2），把约束收到 3 字节。
+    if b.starts_with(&[0x01, 0xDA]) && (b[3] == 1 || b[3] == 2) {
+        return Some(MediaType::Image); // SGI RGB
+    }
+    if b.starts_with(b"SDPX") || b.starts_with(b"XPDS") {
+        return Some(MediaType::Image); // DPX
+    }
+    if b.starts_with(b"SIMPLE  = ") {
+        return Some(MediaType::Image); // FITS
+    }
+    if b.starts_with(b"/* XPM */") {
+        return Some(MediaType::Image); // XPM（文本签名，够长且唯一）
+    }
+    // JPEG 2000 家族：签名盒 `00 00 00 0C 6A 50 20 20 0D 0A 87 0A`（12 字节，全在头部）。
+    // **必须排在下面的 ISO BMFF `ftyp` 判定之前**：两者都是"盒子"结构，
+    // 但 JP2 的第 4–8 字节是 `jP  ` 而不是 `ftyp`，判据互不重叠。
+    if b.starts_with(&[
+        0x00, 0x00, 0x00, 0x0C, 0x6A, 0x50, 0x20, 0x20, 0x0D, 0x0A, 0x87, 0x0A,
+    ]) {
+        return Some(MediaType::Image); // JPEG 2000（jp2 / jpx）
+    }
+    // JPEG XL：裸码流签名 `FF 0A`，或容器盒 `00 00 00 0C 4A 58 4C 20`（`JXL `）。
+    if b.starts_with(&[0xFF, 0x0A]) {
+        return Some(MediaType::Image);
+    }
+    if b.starts_with(&[0x00, 0x00, 0x00, 0x0C, 0x4A, 0x58, 0x4C, 0x20]) {
+        return Some(MediaType::Image);
+    }
+    // Netpbm 家族（`P1`–`P7`）。**必须再要求第 3 字节是空白**：真实的 Netpbm 头是
+    // "magic + 空白 + 宽 高 …"，只判 `P` + 数字会让任意以 `P1` 开头的未知文件被吸进索引。
+    if b.len() >= 3
+        && b[0] == b'P'
+        && (b'1'..=b'7').contains(&b[1])
+        && (b[2] == b' ' || b[2] == b'\t' || b[2] == b'\n' || b[2] == b'\r')
+    {
+        return Some(MediaType::Image); // pnm / pam / ppm / pgm / pbm
+    }
+    // Portable FloatMap（`PF` / `Pf` + 换行）。
+    if b.starts_with(b"PF\n") || b.starts_with(b"Pf\n") {
+        return Some(MediaType::Image);
     }
 
     // RIFF 容器（WebP 图片 / AVI 视频 / WAV 音频）
@@ -290,5 +382,103 @@ mod tests {
     fn uppercase_extension_normalized() {
         let jpg = write_tmp("PHOTO.JPG", &[0xFF, 0xD8, 0xFF, 0xE0]);
         assert_eq!(detect_media_type(&jpg), Some(MediaType::Image));
+    }
+
+    /// 2026-10-11 扩容：新收的图片扩展名都必须判为 `image`（用户要求
+    /// "将 ffmpeg 支持的进行实现"）。**逐项列出**而不是抽几个代表——
+    /// 漏一项的表现就是"这个格式怎么扫都看不到"，而它不会让任何别的断言变红。
+    #[test]
+    fn expanded_image_extensions_are_all_indexed() {
+        // 进程内可解的那批（只需进扩展名表）。
+        for ext in [
+            "tga", "dds", "exr", "hdr", "qoi", "ff", "pnm", "pam", "ppm", "pgm", "pbm", "apng",
+            "jfif",
+        ] {
+            let p = write_tmp(&format!("a.{ext}"), b"not really an image");
+            assert_eq!(
+                detect_media_type(&p),
+                Some(MediaType::Image),
+                "{ext} 应判为图片（扩展名优先）"
+            );
+        }
+        // 进程内无解码器、必须走 ffmpeg 兜底的那批。
+        for ext in [
+            "jp2", "j2k", "jpf", "jpx", "jxl", "psd", "pcx", "sgi", "ras", "dpx", "fits", "wbmp",
+            "xbm", "xpm", "jls", "pfm", "dib",
+        ] {
+            let p = write_tmp(&format!("a.{ext}"), b"not really an image");
+            assert_eq!(
+                detect_media_type(&p),
+                Some(MediaType::Image),
+                "{ext} 应判为图片（扩展名优先）"
+            );
+        }
+        // 大写同样归一化。
+        let upper = write_tmp("A.JP2", b"x");
+        assert_eq!(detect_media_type(&upper), Some(MediaType::Image));
+    }
+
+    /// 扩容格式的**内容兜底**：签名可靠的能在改名后仍被认出；
+    /// 签名过弱的（tga / pcx / wbmp / dib）**刻意不做兜底**——见 `sniff_media_type` 的说明。
+    #[test]
+    fn expanded_image_magic_bytes_sniffed_only_when_reliable() {
+        // 可靠签名 → 无扩展名也认得出。
+        for (name, bytes) in [
+            ("psd", b"8BPS\x00\x01\x00\x00\x00\x00\x00\x00".to_vec()),
+            ("dds", b"DDS \x7c\x00\x00\x00\x10\x00\x00\x00".to_vec()),
+            ("exr", vec![0x76, 0x2F, 0x31, 0x01, 0x02, 0x00, 0x00, 0x00]),
+            ("qoi", b"qoif\x00\x00\x00\x40\x00\x00\x00\x30".to_vec()),
+            ("farbfeld", b"farbfeld\x00\x00\x00\x40\x00\x00\x00\x30".to_vec()),
+            ("hdr", b"#?RADIANCE\nSOFTWARE=x\n".to_vec()),
+            ("ras", vec![0x59, 0xA6, 0x6A, 0x95, 0, 0, 0, 64]),
+            ("sgi", vec![0x01, 0xDA, 0x01, 0x01, 0x00, 0x03, 0x00, 0x40]),
+            ("dpx", b"SDPX\x80\x06\x00\x00V1.0".to_vec()),
+            ("fits", b"SIMPLE  =                    T".to_vec()),
+            ("xpm", b"/* XPM */\nstatic char *x[] = {".to_vec()),
+            (
+                "jp2",
+                vec![
+                    0x00, 0x00, 0x00, 0x0C, 0x6A, 0x50, 0x20, 0x20, 0x0D, 0x0A, 0x87, 0x0A,
+                ],
+            ),
+            ("jxl", vec![0xFF, 0x0A, 0xCB, 0x06, 0x00, 0x13, 0x88, 0x02]),
+            ("ppm", b"P6\n64 48\n255\n".to_vec()),
+            ("pam", b"P7\nWIDTH 64\n".to_vec()),
+            ("pfm", b"PF\n64 48\n1.0\n".to_vec()),
+        ] {
+            let p = write_tmp("renamed-noext", &bytes);
+            assert_eq!(
+                detect_media_type(&p),
+                Some(MediaType::Image),
+                "{name} 的 magic bytes 应能在无扩展名时认出"
+            );
+        }
+
+        // 签名过弱 → **不得**兜底（否则未知二进制会被吸进索引，D11 失守）。
+        // 这些都是"看着像图片头、但不足以判定"的字节串。
+        for (name, bytes) in [
+            ("wbmp（00 00 两字节太弱）", vec![0x00, 0x00, 0x40, 0x30, 0x22, 0x22]),
+            ("pcx（0A 05 太弱）", vec![0x0A, 0x05, 0x01, 0x08, 0x00, 0x00]),
+            ("dib（28 00 00 00 是通用长度前缀）", vec![0x28, 0x00, 0x00, 0x00, 0x40, 0x00]),
+            ("tga 头部（无签名）", vec![0x00, 0x00, 0x0A, 0x00, 0x00, 0x00]),
+            ("随机二进制", vec![0x9E, 0x37, 0x11, 0xCD, 0x44, 0x02]),
+        ] {
+            let p = write_tmp("unknown-noext", &bytes);
+            assert_eq!(
+                detect_media_type(&p),
+                None,
+                "{name} 不该被内容兜底吸进索引（未知类型不索引）"
+            );
+        }
+    }
+
+    /// Netpbm 兜底必须要求第 3 字节是**空白**：否则任意 `P` + 数字开头的未知文件都会被吸进索引。
+    #[test]
+    fn pnm_sniff_requires_whitespace_after_magic() {
+        let real = write_tmp("noext", b"P6\n64 48\n255\n");
+        assert_eq!(detect_media_type(&real), Some(MediaType::Image));
+        // 反向：`P1` 后紧跟非空白 → 不是 Netpbm 头，不得兜底。
+        let fake = write_tmp("noext2", b"P1X-not-a-pnm-header");
+        assert_eq!(detect_media_type(&fake), None);
     }
 }

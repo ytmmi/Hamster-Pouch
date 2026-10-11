@@ -2357,6 +2357,109 @@ check(
     !/api\.filePath\(/.test(imageViewerPanelSrc) &&
     !/convertFileSrc/.test(imageViewerPanelSrc),
 );
+
+// === 图片格式扩容的**跨语言一致性**（2026-10-11） ===
+//
+// 三个模块各持一份图片扩展名清单，**任一不一致都表现为静默的功能缺失**：
+// - `hp-scanner/media_type.rs` 决定**入不入库**（漏项 → 扫描时直接跳过，用户看不到）；
+// - `hp-media/decode.rs` 的 `FFMPEG_ONLY_IMAGE_EXTS` 决定**解不解得开**
+//   （入库了但没进这张表 → 缩略图/查看器显示"不可用"）；
+// - `app_ui/shared/previewUrl.ts` 的白名单决定**走原图还是走后端预览**
+//   （该预览的格式走了原图 → Chromium 画不出，一片坏图）。
+//
+// 三者是**同一件事的三个切面**，靠人同步必然漂移，因此在这里逐项对账。
+const scannerSrcForFormats = readFileSync(
+  join(ROOT, "crates/hp-scanner/src/media_type.rs"),
+  "utf8",
+);
+const decodeSrcForFormats = readFileSync(join(ROOT, "crates/hp-media/src/decode.rs"), "utf8");
+const previewUrlSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/previewUrl.ts"),
+  "utf8",
+);
+
+/** 从 Rust 源码里取某个 `const NAME: [&str; N] = [ ... ];` 的字符串字面量集合。 */
+function rustStrArray(src, name) {
+  const m = new RegExp(`const ${name}\\s*:[^=]*=\\s*\\[([\\s\\S]*?)\\];`).exec(src);
+  if (!m) return null;
+  return new Set([...m[1].matchAll(/"([a-z0-9]+)"/g)].map((x) => x[1]));
+}
+
+/** 从 TS 源码里取某个 `const NAME = [ ... ];` 的字符串字面量集合。 */
+function tsStrArray(src, name) {
+  const m = new RegExp(`const ${name}\\s*=\\s*\\[([\\s\\S]*?)\\];`).exec(src);
+  if (!m) return null;
+  return new Set([...m[1].matchAll(/"([a-z0-9]+)"/g)].map((x) => x[1]));
+}
+
+const ffmpegOnly = rustStrArray(decodeSrcForFormats, "FFMPEG_ONLY_IMAGE_EXTS");
+const nativeRender = tsStrArray(previewUrlSrc, "NATIVE_RENDER_EXTS");
+const scannerExts = (() => {
+  const m = /fn ext_to_media_type[\s\S]*?=> Some\(MediaType::Image\)/.exec(scannerSrcForFormats);
+  if (!m) return null;
+  return new Set([...m[0].matchAll(/"([a-z0-9]+)"/g)].map((x) => x[1]));
+})();
+
+check(
+  "图片格式三份清单都能解析（scanner 扩展名表 / ffmpeg-only 表 / 前端原生渲染白名单）",
+  scannerExts !== null &&
+    ffmpegOnly !== null &&
+    nativeRender !== null &&
+    scannerExts.size > 30 &&
+    ffmpegOnly.size === 17 &&
+    nativeRender.size === 11,
+  `scanner=${scannerExts?.size} ffmpegOnly=${ffmpegOnly?.size} native=${nativeRender?.size}`,
+);
+
+// 正向：ffmpeg-only 的每个扩展名都必须**同时**在扫描器扩展名表里。
+// 只进 decode 表不进 scanner 表 = 解码能力白做（文件根本不入库）。
+check(
+  "ffmpeg-only 表 ⊆ 扫描器图片扩展名表（否则解码能力白做：文件不入库）",
+  ffmpegOnly !== null &&
+    scannerExts !== null &&
+    [...ffmpegOnly].every((e) => scannerExts.has(e)),
+  `差集=${[...(ffmpegOnly ?? [])].filter((e) => !(scannerExts ?? new Set()).has(e)).join(",")}`,
+);
+
+// 反向：**进程内能解**的格式不得出现在 ffmpeg-only 表里。
+// 划错了会改变既有行为（坏文件从"报错"变成"被 ffmpeg 抢救成功"），
+// 并让扫描期 dHash / 调色板缓存不再与旧实现可比。
+const IN_PROCESS_CAPABLE = [
+  "jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif", "avif", "heic", "heif",
+  "ico", "svg", "tga", "dds", "exr", "hdr", "qoi", "ff", "pnm", "pam", "ppm", "pgm", "pbm",
+];
+check(
+  "进程内可解的格式不得进 ffmpeg-only 表（否则坏文件会被 ffmpeg 抢救、缓存口径变更）",
+  ffmpegOnly !== null && IN_PROCESS_CAPABLE.every((e) => !ffmpegOnly.has(e)),
+  `误收=${IN_PROCESS_CAPABLE.filter((e) => (ffmpegOnly ?? new Set()).has(e)).join(",")}`,
+);
+
+// 前端白名单与 scanner 表**不得重叠**：白名单里的格式必须都是扫描器认得的图片。
+check(
+  "前端原生渲染白名单 ⊆ 扫描器图片扩展名表",
+  nativeRender !== null &&
+    scannerExts !== null &&
+    [...nativeRender].every((e) => scannerExts.has(e)),
+  `差集=${[...(nativeRender ?? [])].filter((e) => !(scannerExts ?? new Set()).has(e)).join(",")}`,
+);
+
+// 前端取反口径必须真的取反：漏一个 `!` 就会把"Chromium 画不了"当成"能画"。
+check(
+  "needsPreview 是白名单取反（失败方向 = 多一次后端转码，而不是画坏图）",
+  /return\s+!NATIVE_RENDER_EXTS\.includes\(/.test(previewUrlSrc) &&
+    // 没有扩展名也当"需要预览"（新格式/无后缀默认安全侧）。
+    /if \(dot < 0\) return true;/.test(previewUrlSrc),
+);
+
+// `needsPreview` 只回答"Chromium 画不了这张图"，对视频/音频无意义：
+// `preview.get` 对非图片返回 null，拿它判视频会把能播的视频变成"不可用"。
+check(
+  "查看器只在图片分支消费 needsPreview（否则视频/音频会被误送去 preview.get）",
+  /selected\.media_type === "image" && needsPreview\(selected\.relative_path\)/.test(
+    readFileSync(join(ROOT, "apps/desktop/src/app_ui/panels/ViewerPanel.tsx"), "utf8"),
+  ),
+);
+
 check(
   "预加载纯逻辑模块无 React / Tauri 依赖（门禁可直接 import）",
   !/from "react"/.test(

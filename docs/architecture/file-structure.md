@@ -336,6 +336,12 @@ HamsterPouch/
     hp-plugin-host/           # 插件生命周期、权限、宿主 API
     hp-ai/                    # AI 打标接口抽象、任务队列、结果回写边界
     hp-media/                 # 媒体子进程管理、播放控制、ffprobe 元数据、ffmpeg 抽帧宿主
+                              #   decode.rs 图片解码层：进程内 `image` 优先；**进程内无解码器**的
+                              #     格式（FFMPEG_ONLY_IMAGE_EXTS：JPEG 2000 / JPEG XL / PSD / PCX /
+                              #     SGI / Sun Raster / DPX / FITS / WBMP / XBM / XPM / JPEG-LS / PFM /
+                              #     DIB，2026-10-11 / D111）与 AVIF/HEIC 家族走捆绑 ffmpeg 有界解码；
+                              #     判据 `needs_ffmpeg_decode` 是**唯一**入口（三处解码点共用）
+                              #   thumbnail.rs 图片缩略图（WebP 三级降级）+ 视频首帧（JPEG）
     hp-book/                  # 电子书元数据 / 封面 / **正文**解析（EPUB = ZIP + OPF；txt/md 需判编码）                              #   自实现最小 ZIP 读取器（zip.rs）+ 极简 XML 取值（xml.rs）+
                               #   EPUB 元数据解析（epub.rs）+ 封面格式判定（cover.rs）+ 格式分发（meta.rs）；
                               #   **正文（2026-10-09 txt/epub；2026-10-10 追加 md 渲染，D100）**：
