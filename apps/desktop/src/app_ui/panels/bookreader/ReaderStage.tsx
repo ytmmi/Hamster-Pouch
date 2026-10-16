@@ -27,18 +27,21 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent, UIEvent, WheelEvent } from "react";
+import type { CSSProperties, KeyboardEvent, UIEvent } from "react";
 
 import type { Translate } from "../../i18n";
 import type { BookContentResult } from "../../shared/types";
 import { BookBlocks } from "../viewer/BookBlocks";
 import {
+  accumulateWheelStep,
   clampReaderPage,
+  normalizeWheelDelta,
   readerColumnsPerScreen,
-  readerPageCount,
-  readerPageWidth,
+  readerPagination,
   shouldLoadMorePages,
   READER_COLUMN_GAP,
+  READER_WHEEL_STEP_PX,
+  type ReaderPagination,
 } from "./readerView";
 import type { ReaderSettings } from "./useReaderSettings";
 
@@ -70,10 +73,19 @@ export function ReaderStage({
   const flowRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
   const [page, setPage] = useState(0);
-  const [pageCount, setPageCount] = useState(1);
+  /** 分页几何（栏宽 / 栏数 / 页数 / 步进）：一次测量、一处算术。 */
+  const [pagination, setPagination] = useState<ReaderPagination>({
+    columnWidth: 0,
+    columnCount: 1,
+    pageCount: 1,
+    pitch: 1,
+  });
+  /** 滚轮增量的**累积器**（见 `accumulateWheelStep`：一次物理滚动 ≠ 一个事件）。 */
+  const wheelAccumRef = useRef(0);
 
   const columns = readerColumnsPerScreen(settings.viewMode);
   const paged = settings.viewMode !== "scroll";
+  const pageCount = pagination.pageCount;
 
   /** 面板可用宽度（分页栏宽按它算）；`ResizeObserver` 跟随面板尺寸变化。 */
   useEffect(() => {
@@ -86,30 +98,28 @@ export function ReaderStage({
     return () => observer.disconnect();
   }, []);
 
-  const pageWidth = readerPageWidth(width, columns, READER_COLUMN_GAP);
-
   /**
-   * 分页模式的页数：**内容流的总宽**决定。
+   * 分页几何重算：**内容流的总宽**（`scrollWidth`）决定栏数与页数。
    *
-   * 依赖 `pages` 与 `pageWidth`：取回新的一页、或面板变宽（栏宽变化）都要重算。
+   * 依赖 `pages` / `width` / `columns`：取回新的一页、面板变宽、切换单双页都要重算。
    * 用 `requestAnimationFrame` 等一次布局——多栏排版是同步发生的，
    * 但 React 提交后立刻读 `scrollWidth` 会读到**上一帧**的宽度。
    */
   useEffect(() => {
     if (!paged) {
-      setPageCount(1);
+      setPagination({ columnWidth: 0, columnCount: 1, pageCount: 1, pitch: 1 });
       setPage(0);
       return;
     }
     const el = flowRef.current;
     if (!el) return;
     const frame = requestAnimationFrame(() => {
-      const next = readerPageCount(el.scrollWidth, pageWidth, READER_COLUMN_GAP);
-      setPageCount(next);
-      setPage((current) => clampReaderPage(current, next));
+      const next = readerPagination(el.scrollWidth, width, columns, READER_COLUMN_GAP);
+      setPagination(next);
+      setPage((current) => clampReaderPage(current, next.pageCount));
     });
     return () => cancelAnimationFrame(frame);
-  }, [paged, pages, pageWidth]);
+  }, [paged, pages, width, columns]);
 
   /** 滚动模式：滚到接近底部 → 取下一页。 */
   const handleScroll = useCallback(
@@ -141,16 +151,51 @@ export function ReaderStage({
     [onNeedMore, pageCount],
   );
 
-  const handleWheel = useCallback(
-    (e: WheelEvent<HTMLDivElement>) => {
-      if (!paged) return;
+  /**
+   * 分页模式的滚轮翻页（**原生监听器 + `{ passive: false }`**）。
+   *
+   * 为什么不能用 React 的 `onWheel`：React 在根节点上把 `wheel` 注册成
+   * **passive** 监听器，`preventDefault()` 会被忽略——浏览器的原生滚动照常发生，
+   * 于是"分页"退化成"普通滚动"（用户 2026-10-16 实测反馈："单页和双页滚轮滚动一次
+   * 应该是一页，现在的方式和普通滚动无区别"）。本项目已在
+   * `panels/bookpreview/BookCard.tsx` 记录过同一个坑，这里沿用同一条处置。
+   *
+   * 累积口径见 `accumulateWheelStep`：一次物理滚动（鼠标一格 / 触控板一滑）
+   * 算"一次"，翻**一页**；`preventDefault()` 同时掐掉原生滚动，两者缺一不可。
+   */
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el || !paged) return;
+    const onWheel = (event: WheelEvent) => {
       // 只认主要方向（触控板横滑与竖滚都可能出现；取绝对值大的那个）。
-      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      const raw =
+        Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+      const delta = normalizeWheelDelta(raw, event.deltaMode);
       if (delta === 0) return;
-      flipTo(delta > 0 ? page + 1 : page - 1);
-    },
-    [flipTo, page, paged],
-  );
+      // 先拦下原生滚动：否则内容会在平移的同时被浏览器滚走。
+      event.preventDefault();
+      const { accumulated, step } = accumulateWheelStep(
+        wheelAccumRef.current,
+        delta,
+        READER_WHEEL_STEP_PX,
+      );
+      wheelAccumRef.current = accumulated;
+      if (step === 0) return;
+      // 用函数式更新读**最新**页码：滚轮事件在 effect 之外，闭包里的 `page` 会过期。
+      setPage((current) => {
+        const next = clampReaderPage(current + step, pageCount);
+        if (next >= pageCount - 1) onNeedMore();
+        return next;
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [paged, pageCount, onNeedMore]);
+
+  /** 换页 / 换书 / 切换翻页方式：清掉滚轮累积，免得"上一次的半格"带到下一页。 */
+  useEffect(() => {
+    wheelAccumRef.current = 0;
+  }, [paged, pageCount, settings.viewMode]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLDivElement>) => {
@@ -188,10 +233,9 @@ export function ReaderStage({
         "--br-max-width": `${settings.pageWidth}%`,
         "--br-columns": String(columns),
         "--br-column-gap": `${READER_COLUMN_GAP}px`,
-        "--br-page-width": `${pageWidth}px`,
         "--br-brightness": String(settings.brightness / 100),
       }) as CSSProperties,
-    [columns, pageWidth, settings],
+    [columns, settings],
   );
 
   const className = [
@@ -210,7 +254,6 @@ export function ReaderStage({
       ref={hostRef}
       tabIndex={0}
       onScroll={paged ? undefined : handleScroll}
-      onWheel={paged ? handleWheel : undefined}
       onKeyDown={handleKeyDown}
     >
       {error && <span className="placeholder">{error}</span>}
@@ -225,7 +268,13 @@ export function ReaderStage({
         <div
           className="br-flow"
           ref={flowRef}
-          style={paged ? { transform: `translateX(-${page * (pageWidth + READER_COLUMN_GAP)}px)` } : undefined}
+          style={
+            paged
+              ? // 平移**一屏**（`pitch` = 屏内栏数 × 列距），不是"一栏"——
+                // 双页模式下按一栏平移会让正文在屏幕里横向漂半格。
+                { transform: `translateX(-${page * pagination.pitch}px)` }
+              : undefined
+          }
         >
           <div className="vr-content br-content">
             {pages.map((item, index) =>

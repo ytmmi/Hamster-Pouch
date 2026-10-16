@@ -17,13 +17,12 @@
  * └ 当前进度 x.xx%            页数 a/b            章节数 c/d                            ┘
  * ```
  *
- * 右上角的**「更多」图标**（2×2 四个圆角方块）展开**内置面板菜单**：
- * 目录 / 书签 / 笔记 / 高亮 / 阅读选项——点一下开，再点一下合；
- * 点菜单外或按 Esc 同样收起（`ReaderMoreMenu`）。
+ * 右上角的**「更多」图标**（2×2 四个圆角方块）直接开合左右两栏：
+ * 左侧默认显示目录（栏内可切换书签 / 笔记 / 高亮），右侧显示阅读选项；不弹出第二层项目菜单。
  *
  * ## 状态归属
  *
- * 本文件只持有**界面开关**（左右栏是否展开、当前标签、菜单是否打开、是否全屏）
+ * 本文件只持有**界面状态**（左右栏是否展开、当前标签、是否全屏）
  * 与会话计时；阅读选项在 `useReaderSettings`（落库），正文与目录在 `useReaderBook`。
  * 跳章用 `key={cursor}` **重新挂载阅读区**（滚动位置与当前页天然回到开头，
  * 不必在 effect 里与渲染竞态）。
@@ -33,9 +32,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useApp } from "../../core/AppContext";
 import type { PanelRenderCtx } from "../../core/panelRegistry";
-import type { TranslationKey } from "../../i18n";
 import { ReaderFooter } from "./ReaderFooter";
-import { ReaderMoreMenu, type ReaderMenuEntry } from "./ReaderMoreMenu";
+import { ReaderMoreMenu } from "./ReaderMoreMenu";
 import { ReaderOptionsRail } from "./ReaderOptionsRail";
 import { ReaderTocRail } from "./ReaderTocRail";
 import { ReaderStage } from "./ReaderStage";
@@ -154,10 +152,9 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
   const annotations = useReaderAnnotations();
 
   const rootRef = useRef<HTMLDivElement | null>(null);
-  /** 左侧内置面板当前标签（`null` = 收起）。 */
-  const [leftTab, setLeftTab] = useState<ReaderTab | null>(null);
-  const [rightOpen, setRightOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  /** 左侧内置面板当前标签。两栏统一开合，默认展示目录与阅读选项。 */
+  const [leftTab, setLeftTab] = useState<ReaderTab>("toc");
+  const [railsOpen, setRailsOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
 
   /** 本次阅读开始时刻（换书即重新计时）——参考图的"本次阅读时间 N 分钟"。 */
@@ -167,11 +164,11 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
   const file = app.selectedFile;
   const fileId = file?.id ?? null;
 
-  // 换书：会话计时归零，并把两侧栏恢复成默认（不继承上一本的阅读状态）。
+  // 换书：会话计时归零，并恢复左栏目录标签（两栏开合状态保持为当前视图设置）。
   useEffect(() => {
     sessionStartRef.current = Date.now();
     setClock(Date.now());
-    setMenuOpen(false);
+    setLeftTab("toc");
   }, [fileId]);
 
   // 阅读时长每一分钟刷新一次（30s 一跳，保证跨分钟时最多晚 30s 更新）。
@@ -274,29 +271,10 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
     };
   }, [book.cursor, chapterTitle, first, progress]);
 
-  // ==================== 「更多」菜单 ====================
-
-  const toggleTab = useCallback((tab: ReaderTab) => {
-    setLeftTab((current) => (current === tab ? null : tab));
-    setMenuOpen(false);
+  // 「更多」只有一个入口：直接同时开合目录/批注栏与阅读选项栏。
+  const toggleRails = useCallback(() => {
+    setRailsOpen((open) => !open);
   }, []);
-
-  const menuEntries: ReaderMenuEntry[] = [
-    ...(["toc", "bookmarks", "notes", "highlights"] as const).map((tab) => ({
-      id: tab,
-      label: t(`bookreader.tab.${tab}` as TranslationKey),
-      active: leftTab === tab,
-      onPick: () => toggleTab(tab),
-    })),    {
-      id: "options",
-      label: t("bookreader.options"),
-      active: rightOpen,
-      onPick: () => {
-        setRightOpen((open) => !open);
-        setMenuOpen(false);
-      },
-    },
-  ];
 
   const emptyText = !file
     ? t("common.noSelection")
@@ -306,7 +284,7 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
 
   return (
     <div className="panel br-root" ref={rootRef}>
-      {/* 顶部：退出阅读 / 章节标题 / 阅读时长 / 书签 / 全屏 / 更多 */}
+      {/* 顶部：退出阅读 / 章节标题 / 阅读时长 / 全屏 / 更多 */}
       <div className="br-top">
         <button type="button" className="br-btn" onClick={exitReading}>
           {t("bookreader.exit")}
@@ -330,22 +308,20 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
           {fullscreen ? t("bookreader.exitFullscreen") : t("bookreader.fullscreen")}
         </button>
         <ReaderMoreMenu
-          open={menuOpen}
-          anyActive={leftTab !== null || rightOpen}
-          entries={menuEntries}
-          onToggle={() => setMenuOpen((open) => !open)}
-          onClose={() => setMenuOpen(false)}
+          expanded={railsOpen}
+          anyActive={railsOpen}
+          onToggle={toggleRails}
           t={t}
         />
       </div>
 
       {/* 主体：左栏（目录等）/ 阅读区 / 右栏（阅读选项） */}
       <div className="br-body">
-        {leftTab !== null && (
+        {railsOpen && (
           <ReaderTocRail
             tab={leftTab}
-            onTabChange={(tab) => setLeftTab(isReaderTab(tab) ? tab : null)}
-            onClose={() => setLeftTab(null)}
+            onTabChange={(tab) => setLeftTab(isReaderTab(tab) ? tab : "toc")}
+            onClose={() => setRailsOpen(false)}
             toc={book.toc}
             tocLoading={book.loading && book.toc.length === 0}
             cursor={book.cursor}
@@ -369,8 +345,8 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
           t={t}
         />
 
-        {rightOpen && (
-          <ReaderOptionsRail handle={handle} onClose={() => setRightOpen(false)} t={t} />
+        {railsOpen && (
+          <ReaderOptionsRail handle={handle} onClose={() => setRailsOpen(false)} t={t} />
         )}
       </div>
 

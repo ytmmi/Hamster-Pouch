@@ -176,7 +176,11 @@ apps/desktop/src/app_ui/
                       #   ReaderMoreMenu.tsx **四方块矢量图标 + 内置面板菜单**
                       #     （目录 / 书签 / 笔记 / 高亮 / 阅读选项；再点 / 点外面 / Esc 三种关闭）
                       #   ReaderStage.tsx 阅读区（scroll / page / spread 三种翻页方式；
-                      #     分页用 CSS 多栏 + translateX；跳章由面板的 key 重挂载重置）
+                      #     分页用 CSS **column-count** 多栏 + translateX；跳章由面板的 key 重挂载重置；
+                      #     分页滚轮用**原生 addEventListener("wheel", …, {passive:false})**
+                      #     ——React 的 onWheel 是 passive，preventDefault 无效 ⇒ 会退化成普通滚动
+                      #     （同 bookpreview/BookCard.tsx 记录的坑）；滚轮按**增量累积**折算
+                      #     "一次滚动 = 一页"，几何一律出自 readerView.readerPagination）
                       #   ReaderTocRail.tsx 左侧四个标签页（目录跳转直接用 book.toc 的游标；
                       #     书签 / 笔记 / 高亮三个标签页共用一份批注列表——顶部"在当前位置留一条"，
                       #     高亮的原文取浏览器选区、划不到用当前页开头兜底）
@@ -187,7 +191,8 @@ apps/desktop/src/app_ui/
                       #     写入后本地广播，同窗口即时生效）
                       #   useReaderAnnotations.ts 批注（书签 / 笔记 / 高亮）取数与增删；
                       #     新增后**回读列表**（id / created_at 由后端生成）
-                      #   readerView.ts 取值域与纯逻辑（零依赖，门禁直接 import）
+                      #   readerView.ts 取值域与纯逻辑（零依赖，门禁直接 import；
+                      #     含分页几何 readerPagination / 滚轮累积 accumulateWheelStep）
     bookpreview/      # 图书预览（panel.bookpreview；**"书" = 文本类 txt/md/epub + pdf**；
                       #   **has_class = true**，
                       #   三轴模型见 blueprintValues.ts 的 BLUEPRINT_SUBCLASS_FORMATS /

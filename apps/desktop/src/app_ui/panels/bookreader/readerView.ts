@@ -207,19 +207,58 @@ export function estimateReadMinutes(chars: number): number | null {
 }
 
 /**
- * 分页模式下的总页数。
+ * 分页模式下的**完整几何**（一页 = 一屏 = `columns` 栏）。
  *
- * 判据是**内容流的总宽**：分页用 CSS 多栏实现（固定高度 → 浏览器按栏宽横向排版），
- * 因此 `scrollWidth / (栏宽 + 栏间距)` 就是页数。返回至少 1 页
- * （内容比一屏还短时仍然是"第 1 页"）。
+ * ## 为什么要有这一个函数
+ *
+ * 分页的三件事——每栏多宽、共几页、每次平移多少——**必须出自同一份算术**。
+ * 之前它们分散在三处（`readerPageWidth` / `readerPageCount` / JSX 里的
+ * `page * (pageWidth + gap)`），于是"双页"模式下页数与步进都按**单栏**算：
+ * 一次滚轮只挪一栏（正文在屏幕里横向漂半格），页数也翻倍。用户实测反馈
+ * "单页和双页滚轮滚动一次应该是一页，现在的方式和普通滚动无区别"正是这一处。
+ *
+ * ## 几何推导（分页用 `column-count`，列数固定）
+ *
+ * 设容器可用宽 `W`、屏内栏数 `N`、栏间距 `g`：
+ * - 浏览器把宽度**等分**：`colW = (W - (N-1)g) / N`（= [`readerPageWidth`]）；
+ * - 内容排成 `C` 栏，总宽 `scrollWidth = C·colW + (C-1)·g`；
+ * - 反解栏数：`C = (scrollWidth + g) / (colW + g)`；
+ * - 一屏看 `N` 栏 ⇒ 页数 `= ceil(C / N)`；
+ * - 第 k 屏的左边缘 = `k · N · (colW + g)` ⇒ 步进 `pitch = N·(colW + g)`。
+ *
+ * 注意 `N = 1` 时 `pitch = W + g`（**含**栏间距）：下一栏的起点就是
+ * "容器宽 + 一个间距"，不是"容器宽"——少了这个 `g`，翻几页就会露出半栏。
  */
-export function readerPageCount(
+export interface ReaderPagination {
+  /** 单栏宽度（= 浏览器等分出来的实际栏宽）。 */
+  columnWidth: number;
+  /** 内容一共排成多少栏。 */
+  columnCount: number;
+  /** 一共多少页（一页 = `columns` 栏）。 */
+  pageCount: number;
+  /** 每次翻页 `translateX` 平移的像素（= 一屏 + 屏间的一个栏间距）。 */
+  pitch: number;
+}
+
+export function readerPagination(
   scrollWidth: number,
-  pageWidth: number,
+  containerWidth: number,
+  columns: 1 | 2,
   gap: number = READER_COLUMN_GAP,
-): number {
-  if (!Number.isFinite(scrollWidth) || !Number.isFinite(pageWidth) || pageWidth <= 0) return 1;
-  return Math.max(1, Math.round(scrollWidth / (pageWidth + gap)));
+): ReaderPagination {
+  const columnWidth = readerPageWidth(containerWidth, columns, gap);
+  const pitch = columnWidth + gap;
+  // 空内容 / 尚未测量：给"1 栏 1 页"，避免 0 页让翻页按钮直接失效。
+  if (!Number.isFinite(scrollWidth) || scrollWidth <= 0 || columnWidth <= 0) {
+    return { columnWidth, columnCount: 1, pageCount: 1, pitch: pitch > 0 ? pitch : 1 };
+  }
+  const columnCount = Math.max(1, Math.round((scrollWidth + gap) / pitch));
+  return {
+    columnWidth,
+    columnCount,
+    pageCount: Math.max(1, Math.ceil(columnCount / columns)),
+    pitch,
+  };
 }
 
 /** 翻页夹紧：不越界、不回到负数（滚轮连滚也不会翻出内容之外）。 */
@@ -267,4 +306,80 @@ export function shouldLoadMorePages(
   if (!hasMore) return false;
   if (viewMode !== "scroll") return atLastPage;
   return scrollTop + clientHeight >= scrollHeight - threshold;
+}
+
+// ============================== 分页模式：滚轮翻页 ==============================
+
+/**
+ * "滚了一次"的**像素当量**阈值。
+ *
+ * 为什么需要累积而不是"一个事件翻一页"（用户 2026-10-16 实测反馈：
+ * "单页和双页滚轮滚动一次应该是一页，现在的方式和普通滚动无区别"）：
+ * **一次物理滚动不等于一个 `wheel` 事件**。鼠标滚轮一格通常给 100–120（`deltaMode=0`），
+ * 但高精度触控板/平滑滚动会把它拆成几十个 3–10 的小事件；反过来，
+ * 有些设备一次给 300+。按"事件数"翻页就会出现两种都错的表现：
+ * 触控板轻轻一滑翻十几页（看起来像连续滚动），而大增量设备一格翻三页。
+ *
+ * 因此口径是**按增量累积**：累积到本阈值算"滚了一次"，翻**一页**并把累积清零
+ * （不是把超出的量折成多页——那又变回"一次滚动翻好几页"）。
+ */
+export const READER_WHEEL_STEP_PX = 60;
+
+/** `deltaMode = 1`（按行）时一行折算的像素当量。 */
+export const READER_WHEEL_LINE_PX = 16;
+
+/** `deltaMode = 2`（按页）时一页折算的像素当量（远大于阈值 ⇒ 一次即翻页）。 */
+export const READER_WHEEL_PAGE_PX = 400;
+
+/**
+ * 把一次 `wheel` 事件的增量归一化成**像素当量**。
+ *
+ * `deltaMode` 三档的含义（DOM 规范）：0 = 像素、1 = 行、2 = 页。
+ * 不归一化就会按设备产生数量级差异：Firefox 在部分配置下给 `deltaMode = 1`、
+ * 一次只报 3（"3 行"），不折算的话永远攒不到阈值 ⇒ 滚轮像失灵。
+ */
+export function normalizeWheelDelta(deltaY: number, deltaMode: number): number {
+  if (!Number.isFinite(deltaY) || deltaY === 0) return 0;
+  if (deltaMode === 1) return deltaY * READER_WHEEL_LINE_PX;
+  if (deltaMode === 2) return deltaY * READER_WHEEL_PAGE_PX;
+  return deltaY;
+}
+
+/**
+ * 累积滚轮增量 → 决定这一次是否翻页（**每次最多翻一页**）。
+ *
+ * 返回剩余累积量：未到阈值时留着（触控板的小增量因此能攒成一次翻页），
+ * 到阈值即**清零**并把超出的部分一并丢掉——这是"一次滚动 = 一页"的关键：
+ * 若改成"除以阈值取整"，一格 300 的鼠标就会一次翻 5 页。
+ */
+export function accumulateWheelStep(
+  accumulated: number,
+  delta: number,
+  threshold: number = READER_WHEEL_STEP_PX,
+): { accumulated: number; step: -1 | 0 | 1 } {
+  const next = accumulated + delta;
+  if (next >= threshold) return { accumulated: 0, step: 1 };
+  if (next <= -threshold) return { accumulated: 0, step: -1 };
+  return { accumulated: next, step: 0 };
+}
+
+/**
+ * 分页模式下"一页"的**实际列距**（= 栏宽 + 栏间距）。
+ *
+ * 这是 `translateX` 每一步要平移的距离。它必须与浏览器**真实的**列距逐像素一致，
+ * 否则翻几页之后正文就会错位（露出半栏）。
+ *
+ * 之所以能保证一致：分页用 `column-count`（**不是** `column-width`）——
+ * 列数固定时浏览器把可用宽度**等分**，每栏宽恰好是 [`readerPageWidth`] 算出的值；
+ * 而 `column-width` 只是"建议值"，浏览器会按容器宽度把栏拉宽到放得下，
+ * 实际列距与算出来的对不上（这正是"翻页后错位"的根因）。
+ *
+ * **注意这是"一栏"的步进**；翻页要平移**一屏**，用 [`readerPagination`] 的 `pitch`。
+ */
+export function readerPagePitch(
+  containerWidth: number,
+  columns: 1 | 2,
+  gap: number = READER_COLUMN_GAP,
+): number {
+  return readerPageWidth(containerWidth, columns, gap) + gap;
 }

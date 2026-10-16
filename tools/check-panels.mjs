@@ -4122,6 +4122,131 @@ check(
     !/^\s*import\s/m.test(readerViewSrc),
 );
 
+// ==================== 用户实测反馈的四项修复（2026-10-16）====================
+//
+// 这四条都是"代码看起来对、真机上就是不对"的缺陷，因此断言必须钉住
+// **行为与机制**，不能只钉"某个符号出现过"（那条教训在批注校验上已经吃过一次）。
+
+// 复用文件开头已读入的 `stylesSource`（第 88 行），不重复读同一份文件。
+
+check(
+  "① 左右两栏**浮在正文之上**（绝对定位），不是并排挤压正文",
+  (() => {
+    // 并排三栏会改变正文宽度 ⇒ 分栏重算、当前页漂移；用户只开个目录看一眼，
+    // 正文却跟着跳。因此两栏必须是定位容器里的绝对定位浮层。
+    const body = stylesSource.match(/\.br-body\s*\{[^}]*\}/)?.[0] ?? "";
+    const rail = stylesSource.match(/\.br-rail\s*\{[^}]*\}/)?.[0] ?? "";
+    const left = stylesSource.match(/\.br-rail-left\s*\{[^}]*\}/)?.[0] ?? "";
+    const right = stylesSource.match(/\.br-rail-right\s*\{[^}]*\}/)?.[0] ?? "";
+    return (
+      /position:\s*relative/.test(body) &&
+      /position:\s*absolute/.test(rail) &&
+      /z-index:\s*\d+/.test(rail) &&
+      /left:\s*0/.test(left) &&
+      /right:\s*0/.test(right) &&
+      // 反向：不得再有"占布局宽度"的写法（flex-shrink: 0 + 固定 width 就是并排）。
+      !/flex-shrink:\s*0/.test(rail)
+    );
+  })(),
+);
+
+check(
+  "② 目录当前章 / ⑤ 选中档位**不得**用 `color: var(--accent)`（浅色主题下是白色 → 白字白底）",
+  (() => {
+    // 这是"看得见"的问题：浅色主题 `--accent: #ffffff`，与深色文字互换后选中项直接消失
+    // （用户实测："选择某章节后文字变白/消失"、"被选择的按钮文字是白色，看不清"）。
+    // 正确做法是项目既有的"选中"约定：`--active-bg` 实心底 + `--active-fg` 反色前景。
+    const tocActive = stylesSource.match(/\.br-toc-item-active\s*\{[^}]*\}/)?.[0] ?? "";
+    const choiceActive = stylesSource.match(/\.br-choice-item-active\s*\{[^}]*\}/)?.[0] ?? "";
+    return (
+      /background:\s*var\(--active-bg\)/.test(tocActive) &&
+      /color:\s*var\(--active-fg\)/.test(tocActive) &&
+      /background:\s*var\(--active-bg\)/.test(choiceActive) &&
+      /color:\s*var\(--active-fg\)/.test(choiceActive) &&
+      // 反向：这两处不得出现 `color: var(--accent)`（注释里提到它不算——先剥注释）。
+      !/color:\s*var\(--accent\)/.test(stripComments(tocActive)) &&
+      !/color:\s*var\(--accent\)/.test(stripComments(choiceActive))
+    );
+  })(),
+);
+
+check(
+  "③ 分页滚轮翻页用**原生监听器 + passive:false**（React onWheel 是 passive，preventDefault 无效）",
+  (() => {
+    // 项目已在 `bookpreview/BookCard.tsx` 记录过这个坑：React 在根节点把 wheel
+    // 注册成 passive，`preventDefault()` 被忽略 ⇒ 原生滚动照常发生，
+    // "分页"退化成"普通滚动"（用户实测："现在的方式和普通滚动无区别"）。
+    const stage = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderStage.tsx"),
+      "utf8",
+    );
+    return (
+      /addEventListener\("wheel",\s*onWheel,\s*\{\s*passive:\s*false\s*\}\)/.test(stage) &&
+      /removeEventListener\("wheel",\s*onWheel\)/.test(stage) &&
+      /event\.preventDefault\(\)/.test(stage) &&
+      // 反向：不得再用 React 的 `onWheel=`（那正是失效的写法）。
+      !/onWheel=\{/.test(stage)
+    );
+  })(),
+);
+
+check(
+  "③ 滚轮按**增量累积**折算「一次滚动 = 一页」（一次物理滚动 ≠ 一个 wheel 事件）",
+  (() => {
+    // 触控板会把一次滑动拆成几十个小事件；按"事件数"翻页会一滑翻十几页。
+    // 而按"除以阈值取整"又会让一格 300 的鼠标一次翻 5 页。
+    // 正确口径：累积到阈值即翻**一页**并清零（超出的部分丢掉）。
+    const step = readerView.accumulateWheelStep(0, 10, 60);
+    const one = readerView.accumulateWheelStep(50, 20, 60);
+    const big = readerView.accumulateWheelStep(0, 300, 60);
+    const back = readerView.accumulateWheelStep(0, -60, 60);
+    const hold = readerView.accumulateWheelStep(0, 30, 60);
+    return (
+      step.step === 0 &&
+      step.accumulated === 10 &&
+      one.step === 1 &&
+      one.accumulated === 0 &&
+      // 一次大增量**只翻一页**（不是 5 页），且累积清零。
+      big.step === 1 &&
+      big.accumulated === 0 &&
+      back.step === -1 &&
+      hold.step === 0 &&
+      hold.accumulated === 30 &&
+      // `deltaMode` 归一化：按行的 3 必须折算成 48（否则永远攒不到阈值 = 滚轮失灵）。
+      readerView.normalizeWheelDelta(3, 1) === 48 &&
+      readerView.normalizeWheelDelta(1, 2) === 400 &&
+      readerView.normalizeWheelDelta(120, 0) === 120
+    );
+  })(),
+  `big=${JSON.stringify(readerView.accumulateWheelStep(0, 300, 60))} line3=${readerView.normalizeWheelDelta(3, 1)}`,
+);
+
+check(
+  "③ 分页几何**一处算术**：页数与步进都按「一屏 N 栏」算（双页不得按单栏翻）",
+  (() => {
+    // 之前页数与 `translateX` 步进都按**单栏**算，于是双页模式一次只挪一栏
+    // （正文在屏幕里横向漂半格）、页数还翻倍。
+    const single = readerView.readerPagination(3000, 600, 1, 32);
+    const spread = readerView.readerPagination(3000, 600, 2, 32);
+    return (
+      // 单栏：栏宽 600、步进 600+32=632。
+      single.columnWidth === 600 &&
+      single.pitch === 632 &&
+      single.pageCount === Math.ceil(single.columnCount / 1) &&
+      // 双页：栏宽 (600-32)/2 = 284、步进 284+32 = 316 = **一屏两栏**的一半宽度
+      //（一屏 = 2×284+32 = 600 = 容器宽，因此每屏正好推进 600+32=632 的总距？——
+      //  不：一屏占 2 栏，步进 = 2×316 = 632，与单栏模式的 632 相同，这是对的：
+      //  两种模式一屏都覆盖 600px 内容宽 + 32px 间距）。
+      spread.columnWidth === 284 &&
+      spread.pitch === 316 &&
+      spread.pageCount === Math.ceil(spread.columnCount / 2) &&
+      // 关键：双页的页数**约为**单栏的一半（一屏两栏），不是与单栏相等。
+      spread.pageCount <= single.pageCount
+    );
+  })(),
+  `single=${JSON.stringify(readerView.readerPagination(3000, 600, 1, 32))} spread=${JSON.stringify(readerView.readerPagination(3000, 600, 2, 32))}`,
+);
+
 check(
   "「更多」图标是**矢量**：`<svg>` + 四个 `<rect>`（不得用文字 / 图片 / 字体图标代替）",
   /export function MoreGridIcon/.test(moreMenuSrc) &&
@@ -4133,13 +4258,19 @@ check(
 );
 
 check(
-  "「更多」菜单展开的是**内置面板**（目录 / 书签 / 笔记 / 高亮 / 阅读选项），且三项关闭方式齐备",
-  /bookreader\.tab\.\$\{tab\}/.test(readerPanelSrc) &&
-    /bookreader\.options/.test(readerPanelSrc) &&
-    // 再点图标 / 点菜单外 / Esc 三种关闭方式（缺一都会让用户觉得"点不掉"）。
-    /onToggle=/.test(readerPanelSrc) &&
-    /document\.addEventListener\("mousedown"/.test(moreMenuSrc) &&
-    /e\.key === "Escape"/.test(moreMenuSrc),
+  "「更多」按钮直接同时开合左右两栏，不弹出目录 / 书签 / 笔记 / 高亮 / 阅读选项菜单",
+  /const \[leftTab, setLeftTab\] = useState<ReaderTab>\("toc"\)/.test(readerPanelSrc) &&
+    /const \[railsOpen, setRailsOpen\] = useState\(false\)/.test(readerPanelSrc) &&
+    /const toggleRails = useCallback\(\(\) => \{\s*setRailsOpen\(\(open\) => !open\)/.test(readerPanelSrc) &&
+    /expanded=\{railsOpen\}/.test(readerPanelSrc) &&
+    // 同一个 railsOpen 条件挂载左右栏；左栏默认目录，右栏阅读选项。
+    /\{railsOpen && \(\s*<ReaderTocRail/.test(readerPanelSrc) &&
+    /\{railsOpen && \(\s*<ReaderOptionsRail/.test(readerPanelSrc) &&
+    /tab=\{leftTab\}/.test(readerPanelSrc) &&
+    /aria-expanded=\{expanded\}/.test(moreMenuSrc) &&
+    // 不应再有弹出菜单、菜单项或第二层开合状态。
+    !/role="menu"|role="menuitemcheckbox"|br-more-menu|ReaderMenuEntry/.test(moreMenuSrc) &&
+    !/menuOpen|menuEntries|rightOpen/.test(readerPanelSrc),
 );
 
 check(

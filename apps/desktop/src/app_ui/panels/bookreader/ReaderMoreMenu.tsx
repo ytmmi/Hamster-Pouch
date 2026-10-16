@@ -1,45 +1,18 @@
 /**
- * 图书阅读器右上角的**「更多」图标 + 内置面板菜单**。
+ * 图书阅读器右上角的**「更多」图标**。
  *
- * ## 图标
- *
- * 矢量图标（`currentColor` 填充，随主题变色）：**2×2 的四个圆角方块**——
- * 用户口径里的"4 个正方形或 3 个正方形一个圆形组成的矢量图标"取前一种。
- * 不用字体图标 / 图片：图标必须随主题与禁用态变色，且不该多一次资源请求。
- *
- * ## 菜单
- *
- * 点击展开**阅读器的内置面板**（目录 / 书签 / 笔记 / 高亮 / 阅读选项）。
- * 每一项是一次**开合切换**：已展开的项带勾选态，再点一次收起。
- * 左右两侧的栏因此有两个入口（图标菜单 + 栏内标签页），
- * 两个入口读的是同一份状态（`BookReaderPanel` 持有）。
- *
- * 关闭方式三选一（缺一都会让用户觉得"点不掉"）：再点图标 / 点菜单外 / Esc。
+ * 点击直接开合左右两栏：左侧默认显示目录（栏内可切换书签 / 笔记 / 高亮），
+ * 右侧显示阅读选项。这里不再弹出第二层项目菜单。
  */
-
-import { useEffect, useRef } from "react";
 
 import type { Translate } from "../../i18n";
 
-/** 菜单项（内置面板）。 */
-export interface ReaderMenuEntry {
-  /** 稳定 id（目录 / 书签 / 笔记 / 高亮 / 阅读选项）。 */
-  id: string;
-  /** 展示文案（已翻译）。 */
-  label: string;
-  /** 当前是否已展开。 */
-  active: boolean;
-  /** 点击行为（切换该项）。 */
-  onPick: () => void;
-}
-
 export interface ReaderMoreMenuProps {
-  open: boolean;
-  /** 是否有任何内置面板处于展开态（决定图标是否高亮）。 */
+  /** 当前左右两栏是否都已展开（用于按钮的 aria-expanded）。 */
+  expanded: boolean;
+  /** 是否有任一内置栏展开（决定图标是否高亮）。 */
   anyActive: boolean;
-  entries: ReaderMenuEntry[];
   onToggle: () => void;
-  onClose: () => void;
   t: Translate;
 }
 
@@ -67,62 +40,23 @@ export function MoreGridIcon(): JSX.Element {
 }
 
 export function ReaderMoreMenu({
-  open,
+  expanded,
   anyActive,
-  entries,
   onToggle,
-  onClose,
   t,
 }: ReaderMoreMenuProps): JSX.Element {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  // 点菜单**外面**收起。用 `mousedown` 而不是 `click`：拖选正文时松手不该留下菜单。
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open, onClose]);
-
   return (
-    <div className="br-more" ref={rootRef}>
+    <div className="br-more">
       <button
         type="button"
         className={`br-btn br-more-btn${anyActive ? " br-more-btn-active" : ""}`}
         aria-label={t("bookreader.more")}
-        aria-expanded={open}
-        aria-haspopup="menu"
+        aria-expanded={expanded}
         title={t("bookreader.more")}
         onClick={onToggle}
       >
         <MoreGridIcon />
       </button>
-      {open && (
-        <div className="br-more-menu" role="menu">
-          {entries.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              role="menuitemcheckbox"
-              aria-checked={entry.active}
-              className={`br-more-item${entry.active ? " br-more-item-active" : ""}`}
-              onClick={entry.onPick}
-            >
-              <span className="br-more-check">{entry.active ? "✓" : ""}</span>
-              <span>{entry.label}</span>
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
