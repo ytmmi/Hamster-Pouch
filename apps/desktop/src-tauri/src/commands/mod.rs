@@ -23,6 +23,9 @@ pub(crate) mod plugin_control_event;
 pub(crate) mod plugin_lifecycle;
 pub(crate) mod plugin_panel_data;
 pub(crate) mod rating;
+// 阅读批注（书签 / 笔记 / 高亮）：`reader.*` 与 `book.*` 分开命名——前者是
+// "读者留下的东西"（会写库、按仓库隔离），后者是"从文件里读出的内容属性"。
+pub(crate) mod reader;
 pub(crate) mod repo;
 pub(crate) mod shared;
 pub(crate) mod source;

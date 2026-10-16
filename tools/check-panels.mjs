@@ -4248,6 +4248,65 @@ check(
   })(),
 );
 
+check(
+  "Rust：阅读批注（书签 / 笔记 / 高亮）落库——迁移 0011 + 三种形态共用一张表 + 写库前校验",
+  (() => {
+    const sql = readFileSync(
+      join(ROOT, "crates/hp-store/migrations/repo/0011_reader_annotations.sql"),
+      "utf8",
+    );
+    const repoDb = readFileSync(join(ROOT, "crates/hp-store/src/repo/repo_db.rs"), "utf8");
+    const repo = readFileSync(
+      join(ROOT, "crates/hp-store/src/repo/annotation_repo.rs"),
+      "utf8",
+    );
+    const core = readFileSync(join(ROOT, "crates/hp-core/src/annotation.rs"), "utf8");
+    return (
+      // 迁移必须**登记进执行器**，否则表根本不会建（"写了 SQL 但没接上"）。
+      /0011_reader_annotations\.sql/.test(repoDb) &&
+      /CREATE TABLE reader_annotations/.test(sql) &&
+      // 外键级联 + 按 file_id 存（与 file_covers / ratings 同一口径）。
+      /REFERENCES files\(id\) ON DELETE CASCADE/.test(sql) &&
+      // 三种形态一张表、由 kind 区分。
+      /kind\s+TEXT NOT NULL,\s*-- bookmark\|note\|highlight/.test(sql) &&
+      // 写库前校验（不接受"库里存了什么就是什么"）。
+      // **钉调用点而不是符号名**：只断言 `validate_annotation_content` 出现过，
+      // 会被 import 那一行满足（实测：把调用改成 `if false {` 仍然全绿）。
+      /if let Err\(reason\) = validate_annotation_content\(kind, cursor, excerpt, note\) \{/.test(
+        repo,
+      ) &&
+      // 未知 kind 的行**跳过**而不是退化成某一种（猜错会把书签显示成空白笔记）。
+      /AnnotationKind::from_str\(&kind\) else \{\s*\n\s*return Err\(rusqlite::Error::QueryReturnedNoRows\)/.test(
+        repo,
+      ) &&
+      // 领域侧：书签不需要正文、笔记 / 高亮必须有内容。
+      /pub fn requires_content\(self\) -> bool/.test(core) &&
+      // 外键级联有测试钉住（文件删了批注必须跟着消失）。
+      /fn delete_is_idempotent_and_cascades_with_the_file/.test(
+        readFileSync(join(ROOT, "crates/hp-store/tests/m7_reader_annotations.rs"), "utf8"),
+      )
+    );
+  })(),
+);
+
+check(
+  "Rust：卸载源时必须清掉**标记与阅读批注**（DERIVED_TABLES 与清点成对维护）",
+  (() => {
+    const purge = readFileSync(join(ROOT, "crates/hp-store/src/repo/purge_repo.rs"), "utf8");
+    return (
+      // 两张表都带 ON DELETE CASCADE，但**显式登记**才能不依赖 foreign_keys 开关。
+      /"file_marks",/.test(purge) &&
+      /"reader_annotations",/.test(purge) &&
+      // 清点与清理必须成对：少一项只会让进度条总数偏小（不报错，因此更要有断言）。
+      /marks: count\("file_marks"\)\?/.test(purge) &&
+      /annotations: count\("reader_annotations"\)\?/.test(purge) &&
+      /self\.marks\s*\n?\s*\+ self\.annotations/.test(purge) &&
+      /"file_marks" => removed\.marks = n/.test(purge) &&
+      /"reader_annotations" => removed\.annotations = n/.test(purge)
+    );
+  })(),
+);
+
 // ============================== 汇总 ==============================
 
 const passed = results.filter((r) => r.ok).length;

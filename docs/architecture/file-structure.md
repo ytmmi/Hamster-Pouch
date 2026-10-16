@@ -96,6 +96,11 @@ crates/hp-store/src/
                         #   + **整本正文解码与单本缓存**（纯文本 64 MiB 上限，键含 content_hash；
                         #   book.content 的纯文本路径也复用这份缓存——上限由调用方给，
                         #   查看器仍用 2 MiB）。拆出来是因为 book.rs 已越过 1200 行红线
+    reader.rs           # 阅读批注桥接（reader.annotations / addAnnotation / deleteAnnotation，
+                        #   2026-10-16，D113）。**与 book.* 分开命名**：book.* 是"从**文件**里读出
+                        #   内容属性"（只认 file_id、不写任何东西），批注是"**读者**留下的东西"
+                        #   （写库、按仓库隔离、同一本书换个副本不跟过去）。位置游标与 book.content
+                        #   同语义，桥接层不做数值校验（越界由 book.content 兜底）
     ai.rs fsops.rs      # AI 打标桥接 / 文件操作桥接
 
 apps/desktop/src/app_ui/
@@ -172,12 +177,16 @@ apps/desktop/src/app_ui/
                       #     （目录 / 书签 / 笔记 / 高亮 / 阅读选项；再点 / 点外面 / Esc 三种关闭）
                       #   ReaderStage.tsx 阅读区（scroll / page / spread 三种翻页方式；
                       #     分页用 CSS 多栏 + translateX；跳章由面板的 key 重挂载重置）
-                      #   ReaderTocRail.tsx 左侧四个标签页（目录跳转直接用 book.toc 的游标）
+                      #   ReaderTocRail.tsx 左侧四个标签页（目录跳转直接用 book.toc 的游标；
+                      #     书签 / 笔记 / 高亮三个标签页共用一份批注列表——顶部"在当前位置留一条"，
+                      #     高亮的原文取浏览器选区、划不到用当前页开头兜底）
                       #   ReaderOptionsRail.tsx 右侧「阅读选项」（12 项面板设置的可视化控件）
                       #   ReaderFooter.tsx 底部进度（当前进度 / 页数 / 章节数；算不出来显示 —）
                       #   useReaderBook.ts 目录 + 正文取数（跳转 = 新世代，丢弃在飞的旧响应）
                       #   useReaderSettings.ts 12 项面板设置（panel.bookreader.*；
                       #     写入后本地广播，同窗口即时生效）
+                      #   useReaderAnnotations.ts 批注（书签 / 笔记 / 高亮）取数与增删；
+                      #     新增后**回读列表**（id / created_at 由后端生成）
                       #   readerView.ts 取值域与纯逻辑（零依赖，门禁直接 import）
     bookpreview/      # 图书预览（panel.bookpreview；**"书" = 文本类 txt/md/epub + pdf**；
                       #   **has_class = true**，

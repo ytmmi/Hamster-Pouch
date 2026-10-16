@@ -228,6 +228,11 @@ fn main() {
             commands::book::book_cover,
             commands::book::book_set_cover,
             commands::book::book_clear_cover,
+            // 阅读批注（书签 / 笔记 / 高亮，D113）：列 / 增 / 删。
+            // 与 `book.*` 分开命名——前者是"读者留下的东西"（写库、按仓库隔离）。
+            commands::reader::reader_annotations,
+            commands::reader::reader_add_annotation,
+            commands::reader::reader_delete_annotation,
             commands::fsops::fsops_copy,
             commands::fsops::fsops_move,
             commands::plugin::plugin_list,

@@ -404,7 +404,17 @@ export const zhCN = {
   "bookreader.tab.highlights": "高亮",
   "bookreader.tocEmpty": "这本书没有目录",
   "bookreader.tocUntitled": "第 {n} 节",
-  "bookreader.annotationsSoon": "书签 / 笔记 / 高亮尚未实现（本轮只落目录与阅读选项）",
+  // 阅读批注（书签 / 笔记 / 高亮；落库到仓库库的 reader_annotations，迁移 0011）
+  "bookreader.annotation.addBookmark": "在此处添加书签",
+  "bookreader.annotation.addNote": "保存笔记",
+  "bookreader.annotation.addHighlight": "添加高亮",
+  "bookreader.annotation.notePlaceholder": "写下这一处的想法…",
+  "bookreader.annotation.highlightPlaceholder": "为这段高亮加一句批注（可留空）",
+  "bookreader.annotation.emptyBookmarks": "这本书还没有书签",
+  "bookreader.annotation.emptyNotes": "这本书还没有笔记",
+  "bookreader.annotation.emptyHighlights": "这本书还没有高亮",
+  "bookreader.annotation.jump": "跳到这一处",
+  "bookreader.annotation.untitled": "（未命名位置）",
   // 右侧「阅读选项」栏
   "bookreader.options": "阅读选项",
   "bookreader.optionReset": "恢复默认",

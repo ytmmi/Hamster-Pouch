@@ -39,6 +39,7 @@ import { ReaderMoreMenu, type ReaderMenuEntry } from "./ReaderMoreMenu";
 import { ReaderOptionsRail } from "./ReaderOptionsRail";
 import { ReaderTocRail } from "./ReaderTocRail";
 import { ReaderStage } from "./ReaderStage";
+import { useReaderAnnotations } from "./useReaderAnnotations";
 import { useReaderBook } from "./useReaderBook";
 import { useReaderSettings } from "./useReaderSettings";
 import {
@@ -62,6 +63,14 @@ export interface BookReaderPanelProps {
    */
   api?: PanelRenderCtx["api"];
 }
+
+/**
+ * 高亮兜底原文的长度（字符）。
+ *
+ * 取 200 的理由：一条高亮的 `excerpt` 是"我当时划的这句话"——用户没划字时，
+ * 拿当前页开头一小段作为锚点比"整页正文"更接近高亮的语义（列表里也不会撑成一大坨）。
+ */
+const ANNOTATION_FALLBACK_EXCERPT_CHARS = 200;
 
 /** 一页正文的字符数（估算"读完本页约需几分钟"）。 */
 function countPageChars(page: BookContentResult | undefined): number {
@@ -104,12 +113,45 @@ function countBlockChars(blocks: BookBlockItem[]): number {
   return total;
 }
 
+/**
+ * 把一页的块拼成纯文本（高亮兜底原文用）。
+ *
+ * 与 `countBlockChars` 同一套遍历：块模型的容器种类多（列表 / 引用 / 脚注 / 定义列表），
+ * 只取 `spans` 会漏掉列表与引用里的正文——那正是小说里最常划的部分。
+ */
+function collectBlockText(blocks: BookBlockItem[]): string {
+  const parts: string[] = [];
+  const walk = (list: BookBlockItem[]): void => {
+    for (const block of list) {
+      if (block.text) parts.push(block.text);
+      if (block.spans) for (const span of block.spans) parts.push(span.text);
+      if (block.head) for (const cell of block.head) for (const span of cell) parts.push(span.text);
+      if (block.rows) {
+        for (const row of block.rows) {
+          for (const cell of row.cells) for (const span of cell) parts.push(span.text);
+        }
+      }
+      if (block.list_items) for (const item of block.list_items) walk(item.blocks);
+      if (block.blocks) walk(block.blocks);
+      if (block.definitions) {
+        for (const definition of block.definitions) {
+          for (const span of definition.term) parts.push(span.text);
+          for (const group of definition.definitions) walk(group);
+        }
+      }
+    }
+  };
+  walk(blocks);
+  return parts.join("\n");
+}
+
 export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): JSX.Element {
   const app = useApp();
   const t = app.t;
   const handle = useReaderSettings(panelApi);
   const settings = handle.settings;
   const book = useReaderBook();
+  const annotations = useReaderAnnotations();
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   /** 左侧内置面板当前标签（`null` = 收起）。 */
@@ -216,6 +258,22 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
   const sessionMinutes = Math.max(0, Math.floor((clock - sessionStartRef.current) / 60_000));
   const pageMinutes = estimateReadMinutes(countPageChars(first));
 
+  /**
+   * 新建批注时的位置信息（当前阅读位置）。
+   *
+   * `fallbackExcerpt` = **当前页正文的开头**（前 200 字符）：用户没划字就点高亮时用它，
+   * 于是仍然得到一条有意义的高亮，而不是一条被后端拒掉的空记录。
+   */
+  const annotationPosition = useMemo(() => {
+    const text = first?.text ?? collectBlockText(first?.blocks ?? []);
+    return {
+      cursor: book.cursor ?? "0",
+      progress: progress === null ? 0 : Math.round(progress * 10_000),
+      title: chapterTitle ?? "",
+      fallbackExcerpt: text.slice(0, ANNOTATION_FALLBACK_EXCERPT_CHARS),
+    };
+  }, [book.cursor, chapterTitle, first, progress]);
+
   // ==================== 「更多」菜单 ====================
 
   const toggleTab = useCallback((tab: ReaderTab) => {
@@ -229,8 +287,7 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
       label: t(`bookreader.tab.${tab}` as TranslationKey),
       active: leftTab === tab,
       onPick: () => toggleTab(tab),
-    })),
-    {
+    })),    {
       id: "options",
       label: t("bookreader.options"),
       active: rightOpen,
@@ -293,6 +350,8 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
             tocLoading={book.loading && book.toc.length === 0}
             cursor={book.cursor}
             onJump={book.jumpTo}
+            annotations={annotations}
+            currentPosition={annotationPosition}
             t={t}
           />
         )}

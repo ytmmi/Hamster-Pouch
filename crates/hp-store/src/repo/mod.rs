@@ -2,6 +2,7 @@
 
 mod ai_undo_repo;
 mod album_repo;
+mod annotation_repo;
 mod blueprint_repo;
 mod color_repo;
 mod cover_repo;

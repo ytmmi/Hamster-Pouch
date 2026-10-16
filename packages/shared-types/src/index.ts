@@ -32,3 +32,4 @@ export type { BookCoverResult } from "./BookCoverResult";
 export type { BookCoverItem } from "./BookCoverItem";
 export type { BookTocItem } from "./BookTocItem";
 export type { BookTocResult } from "./BookTocResult";
+export type { ReaderAnnotationItem } from "./ReaderAnnotationItem";

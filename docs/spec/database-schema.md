@@ -385,6 +385,68 @@ CREATE TABLE file_covers (
 > 卸载源的逐表清理清单（`purge_repo.rs` 的 `DERIVED_TABLES`）也显式登记了本表——
 > 不依赖 `foreign_keys` 开关是否恰好打开，也便于清点。
 
+### 4.5.2 阅读批注 `reader_annotations`（迁移 repo/0011）
+
+```sql
+-- 用户口径（2026-10-16，D113）：图书阅读器的左侧栏有「书签 / 笔记 / 高亮」三个标签页，
+-- 且裁决为**落库**（"重启后仍在"）。
+CREATE TABLE reader_annotations (
+  id         TEXT PRIMARY KEY,          -- UUID
+  file_id    TEXT NOT NULL,
+  kind       TEXT NOT NULL,             -- bookmark|note|highlight
+  cursor     TEXT NOT NULL,             -- 与 book.content 的游标同语义
+  progress   INTEGER NOT NULL DEFAULT 0,-- 保存时的进度（0–10000，两位小数百分比）
+  title      TEXT NOT NULL DEFAULT '',  -- 位置标题（章节名 / 目录项）
+  excerpt    TEXT NOT NULL DEFAULT '',  -- 高亮的选中原文（只读快照）
+  note       TEXT NOT NULL DEFAULT '',  -- 读者写的备注 / 笔记正文
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_reader_annotations_file ON reader_annotations(file_id, kind);
+CREATE INDEX idx_reader_annotations_kind ON reader_annotations(kind);
+```
+
+> **为什么三者是同一张表**：它们是**同一件事的三种形态**——"读者在书里的某个位置留下的
+> 东西"。三张表会让"这一章我留了什么"变成三次查询 + 三份几乎相同的读写代码，而三者的差别
+> 只有 `kind`（有没有备注、有没有选中文字），字段本身高度重合。用 `kind` 区分，一条记录
+> 只表达一种（与 `file_covers` 的 `kind` 同一处置）。
+>
+> **`kind` 与内容的对应**（写库前由 `hp_core::validate_annotation_content` 校验）：
+> `bookmark` 只记位置（`excerpt` / `note` 都为空）；`note` = 位置 + 读者写的话；
+> `highlight` = 位置 + **选中的原文**（`note` 可选）。**书签不需要正文，笔记 / 高亮至少要
+> 有一项非空**——一条没有文字的高亮在列表里就是一行空白，用户会以为没存上。
+> **未知 `kind` 的行在读取时被跳过**（`row_to_annotation` 返回 `QueryReturnedNoRows`），
+> **不退化成某一种**：猜错会把书签显示成一条空白笔记。
+>
+> **位置口径（`cursor`）**：与 `book.content` 的游标**同语义**（epub = 章节序号、
+> 纯文本 = **字符偏移**、md = 顶层块序号），也就是 `book.toc` 的 `TocEntry::cursor` 那一套。
+> 因此"点书签跳回去"就是把这里的值**原样**交给 `book.content`，不需要任何换算（D113 ④：
+> 两套坐标一旦漂移，界面表现是"点第三章跳到第五章"而两边各自的测试全绿）。
+> 存 TEXT 而不是 INTEGER 是刻意的：把"游标是字符串"这个契约写进列类型，可以避免将来某种
+> 格式换成非数字游标时被迫改表。**越界游标由 `book.content` 兜底**（回落第一页 / 最后一页），
+> 桥接层不做数值校验——"翻页游标不该成为新的错误来源"是既有口径。
+>
+> **`progress` 为什么冗余存一份**：书签列表要显示"这本书读到哪儿了"，而按 `cursor` 反推
+> 进度需要**知道全书总量**（要再读一次 `book.toc`）。冗余一个整数列换"列表直接可读"，
+> 且它只是显示用、**不影响跳转**（跳转恒用 `cursor`）。用整数（0–10000 = 两位小数百分比）
+> 而不是 REAL：百分比只到两位小数，整数比较不受浮点误差影响；读取时越界值**夹紧**
+> 而不是让整行读不出来（它只用于展示）。
+>
+> **`excerpt` 与 `note` 为什么分两列**：`excerpt` 是**选中的原文**（只读快照），`note` 是
+> **读者写的话**。合成一列就无法区分"这段是原文"与"这段是我写的"——而两者在界面上的排版
+> 完全不同（原文引用块 vs 我的批注）。**`excerpt` 冗余存原文快照是刻意的**：正文可能因为
+> 换编码 / 换版本而变，但"我当时划的是这句话"是读者的记录，不该跟着正文漂移。
+>
+> **为什么按 `file_id` 存而不是内容哈希**：这是**读者在某个条目上的批注**，不是内容的属性
+> （与 `file_covers` / `ratings` / `file_marks` 同一口径）。`file_id` 在重扫时**保持不变**
+> （`hp-scanner` 的 `write_one` 复用既有 id），因此重扫 / 重新分析都不会让批注丢失。
+>
+> **外键 `ON DELETE CASCADE`**：文件行被删除（回收站 / 卸载源）时批注随之消失，不留孤儿
+> （由 `m7_reader_annotations.rs` 的 `delete_is_idempotent_and_cascades_with_the_file` 钉住）。
+>
+> **没有"更新"命令**是刻意的：批注是**留痕**，改一条旧笔记会让"我当时怎么想的"变得不可信
+> ——要改就删了重写（与"标签是活的、批注是历史"同一思路）。
+
 ### 4.6 相册（与 RFC 0002 数据模型草案一致）
 
 ```sql
@@ -536,7 +598,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blueprints_default
 ## 5. 迁移策略
 
 - 三库**共用同一个版本追踪机制**：`PRAGMA user_version`。读：`crates/hp-store/src/migrate.rs:12`；版本号以"迁移数组下标 + 1"推导（`migrate.rs:16`）；每次未执行版本单开事务执行后写回（`migrate.rs:23`）。三库分别在 `crates/hp-store/src/repo/repo_db.rs:71`、`crates/hp-store/src/global/global_db.rs:65`、`crates/hp-store/src/dict/dict_db.rs:41` 调用同一个 `migrate::apply`。
-  - **当前仓库库版本 = 10**（`0010` 为 `file_marks` 一对多标记表 + 存量搬迁；`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列（**已废弃**）；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
+  - **当前仓库库版本 = 11**（`0011` 为 `reader_annotations` 阅读批注表（书签 / 笔记 / 高亮，D113）；`0010` 为 `file_marks` 一对多标记表 + 存量搬迁；`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列（**已废弃**）；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
   - **当前全局配置库版本 = 4**（`global/0001_init` … `global/0004_layout_layers`，见 `crates/hp-store/src/global/global_db.rs:15`-`18` 的四个 `include_str!`）；全局库内**没有**镜像表（7 张表里没有 `global_meta`）。
   - **当前词库版本 = 1**（`dict_db.rs:19`）；`dict_meta`（`dict/0001:6-9`）是数据元信息 K/V，**不是** schema 版本。
 - **`repo_meta.schema_version` 是**镜像键**，每次打开仓库库都按权威值回写**（2026-09 修复缺陷 0006）：`repo_db.rs:86`-`89`（`sync_schema_version_meta`）在 `repo_db.rs:78`-`79`（`open_inner` 汇总点，`migrate::apply` 与蓝图文档迁移之后）执行，**新建与打开两条路径共用这一处**，因此升级过的库不再与 `user_version` 分叉。回写**不能**下沉到 `migrate::apply`（`migrate.rs:10`）：那个执行器由仓库库/全局库/词库共用，且全局库与词库**没有** `repo_meta`。**版本判断一律以 `PRAGMA user_version` 为准**，不要读镜像键（该键仍无读取方）。

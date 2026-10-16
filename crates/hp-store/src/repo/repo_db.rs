@@ -20,6 +20,8 @@ const REPO_MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/repo/0008_text_subtype.sql"),
     include_str!("../../migrations/repo/0009_file_covers.sql"),
     include_str!("../../migrations/repo/0010_file_marks.sql"),
+    // 阅读批注（书签 / 笔记 / 高亮）：2026-10-16，D113。
+    include_str!("../../migrations/repo/0011_reader_annotations.sql"),
 ];
 
 /// 仓库库句柄。

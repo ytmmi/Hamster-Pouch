@@ -18,11 +18,18 @@
  * 本文件只负责渲染与交互。
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import type { Translate } from "../../i18n";
-import type { BookTocItem } from "../../shared/types";
-import { currentTocIndex, READER_TABS, tocIndent, tocTitleOrNull, type ReaderTab } from "./readerView";
+import type { BookTocItem, ReaderAnnotationItem, ReaderAnnotationKind } from "../../shared/types";
+import {
+  currentTocIndex,
+  READER_TABS,
+  tocIndent,
+  tocTitleOrNull,
+  type ReaderTab,
+} from "./readerView";
+import type { AnnotationDraft, ReaderAnnotationsHandle } from "./useReaderAnnotations";
 
 export interface ReaderTocRailProps {
   tab: ReaderTab;
@@ -35,6 +42,20 @@ export interface ReaderTocRailProps {
   /** 当前页起点游标（用于高亮当前章）。 */
   cursor: string | null;
   onJump: (cursor: string) => void;
+  /** 批注的取数与增删（书签 / 笔记 / 高亮三个标签页共用）。 */
+  annotations: ReaderAnnotationsHandle;
+  /**
+   * 新建批注时的位置信息（当前阅读位置）。
+   *
+   * `fallbackExcerpt` 是"没划字时用的原文"：当前页正文的开头（面板从已取回的第一页取）。
+   * 有它，"没划字就点高亮"仍然得到一条有意义的高亮，而不是一条被后端拒掉的空记录。
+   */
+  currentPosition: {
+    cursor: string;
+    progress: number;
+    title: string;
+    fallbackExcerpt: string;
+  };
   t: Translate;
 }
 
@@ -46,6 +67,13 @@ const TAB_LABEL_KEYS = {
   highlights: "bookreader.tab.highlights",
 } as const;
 
+/** 标签页 → 批注种类（目录页不是批注）。 */
+const TAB_ANNOTATION_KIND: Record<Exclude<ReaderTab, "toc">, ReaderAnnotationKind> = {
+  bookmarks: "bookmark",
+  notes: "note",
+  highlights: "highlight",
+};
+
 export function ReaderTocRail({
   tab,
   onTabChange,
@@ -54,6 +82,8 @@ export function ReaderTocRail({
   tocLoading,
   cursor,
   onJump,
+  annotations,
+  currentPosition,
   t,
 }: ReaderTocRailProps): JSX.Element {
   const activeIndex = useMemo(() => currentTocIndex(toc, cursor), [toc, cursor]);
@@ -94,7 +124,15 @@ export function ReaderTocRail({
             t={t}
           />
         )}
-        {tab !== "toc" && <span className="br-rail-empty dim">{t("bookreader.annotationsSoon")}</span>}
+        {tab !== "toc" && (
+          <AnnotationList
+            kind={TAB_ANNOTATION_KIND[tab]}
+            annotations={annotations}
+            currentPosition={currentPosition}
+            onJump={onJump}
+            t={t}
+          />
+        )}
       </div>
     </aside>
   );
@@ -140,5 +178,166 @@ function TocList({
         );
       })}
     </ul>
+  );
+}
+
+/**
+ * 批注列表（书签 / 笔记 / 高亮三个标签页共用）。
+ *
+ * ## 顶部是"在当前位置留一条"
+ *
+ * 三个标签页的差别只有 `kind` 与输入区：
+ * - **书签**：一键即存（没有输入——它只有位置）；
+ * - **笔记**：一个多行输入 + 保存；
+ * - **高亮**：选中原文 + 可选的批注。**原文快照来自哪里**：浏览器选区
+ *   （`window.getSelection()`，用户真的划了字）优先，划不到就退回**当前页的正文开头**
+ *   （面板把已取回第一页的文本传进来）——这样"没划字就点高亮"仍然得到一条有意义的高亮，
+ *   而不是一条空记录（后端也会拒绝空高亮）。
+ *
+ * ## 为什么没有"编辑"
+ *
+ * 批注是**留痕**：改一条旧笔记会让"我当时怎么想的"变得不可信。要改就删了重写
+ * （删除是幂等的，界面上就是一行 × ）。这与"标签是活的、批注是历史"同一思路。
+ */
+function AnnotationList({
+  kind,
+  annotations,
+  currentPosition,
+  onJump,
+  t,
+}: {
+  kind: ReaderAnnotationKind;
+  annotations: ReaderAnnotationsHandle;
+  currentPosition: {
+    cursor: string;
+    progress: number;
+    title: string;
+    fallbackExcerpt: string;
+  };
+  onJump: (cursor: string) => void;
+  t: Translate;
+}): JSX.Element {
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const items = annotations.items.filter((item) => item.kind === kind);
+
+  /**
+   * 高亮的"选中原文"：**浏览器选区优先，划不到就用当前页开头兜底**。
+   *
+   * 兜底是必需的：后端拒绝空高亮（一条没有原文的高亮在列表里就是一行空白），
+   * 而用户"没划字直接点高亮"是完全正常的操作顺序。
+   */
+  const highlightExcerpt = (): string => {
+    const selected =
+      typeof window === "undefined"
+        ? ""
+        : (window.getSelection()?.toString() ?? "").trim();
+    return selected.length > 0 ? selected : currentPosition.fallbackExcerpt.trim();
+  };
+
+  const save = async (): Promise<void> => {
+    if (saving) return;
+    const text = draft.trim();
+    // 笔记必须有正文；书签不需要任何输入；高亮的原文由选区 / 兜底提供。
+    if (kind === "note" && text.length === 0) return;
+    const excerpt = kind === "highlight" ? highlightExcerpt() : "";
+    if (kind === "highlight" && excerpt.length === 0 && text.length === 0) return;
+    setSaving(true);
+    const ok = await annotations.add({
+      kind,
+      cursor: currentPosition.cursor,
+      progress: currentPosition.progress,
+      title: currentPosition.title,
+      excerpt,
+      // 高亮：输入框里的是**批注**（可空）；笔记：输入框里的是**正文**。
+      note: kind === "bookmark" ? "" : text,
+    });
+    setSaving(false);
+    if (ok) setDraft("");
+  };
+
+  return (
+    <div className="br-annotations">
+      {/* 在当前位置留一条 */}
+      <div className="br-annotation-new">
+        {kind !== "bookmark" && (
+          <textarea
+            className="br-annotation-input"
+            value={draft}
+            rows={2}
+            placeholder={
+              kind === "note"
+                ? t("bookreader.annotation.notePlaceholder")
+                : t("bookreader.annotation.highlightPlaceholder")
+            }
+            onChange={(e) => setDraft(e.target.value)}
+          />
+        )}
+        <button
+          type="button"
+          className="br-btn br-annotation-add"
+          disabled={
+            saving ||
+            (kind === "note" && draft.trim().length === 0) ||
+            (kind === "highlight" &&
+              draft.trim().length === 0 &&
+              currentPosition.fallbackExcerpt.trim().length === 0)
+          }
+          onClick={() => void save()}
+        >
+          {saving
+            ? t("common.loading")
+            : kind === "bookmark"
+              ? t("bookreader.annotation.addBookmark")
+              : kind === "note"
+                ? t("bookreader.annotation.addNote")
+                : t("bookreader.annotation.addHighlight")}
+        </button>
+      </div>
+
+      {annotations.error && <span className="br-rail-empty dim">{annotations.error}</span>}
+      {items.length === 0 && !annotations.loading && (
+        <span className="br-rail-empty dim">
+          {kind === "bookmark"
+            ? t("bookreader.annotation.emptyBookmarks")
+            : kind === "note"
+              ? t("bookreader.annotation.emptyNotes")
+              : t("bookreader.annotation.emptyHighlights")}
+        </span>
+      )}
+
+      <ul className="br-annotation-list">
+        {items.map((item) => (
+          <li key={item.id} className="br-annotation-item">
+            <div className="br-annotation-head">
+              <button
+                type="button"
+                className="br-annotation-jump"
+                onClick={() => onJump(item.cursor)}
+                title={t("bookreader.annotation.jump")}
+              >
+                {tocTitleOrNull(item.title) ?? t("bookreader.annotation.untitled")}
+              </button>
+              <span className="dim br-annotation-percent">
+                {(item.progress / 100).toFixed(2)}%
+              </span>
+              <button
+                type="button"
+                className="br-annotation-delete"
+                onClick={() => void annotations.remove(item.id)}
+                aria-label={t("common.remove")}
+                title={t("common.remove")}
+              >
+                ×
+              </button>
+            </div>
+            {item.excerpt.length > 0 && (
+              <blockquote className="br-annotation-excerpt">{item.excerpt}</blockquote>
+            )}
+            {item.note.length > 0 && <p className="br-annotation-note">{item.note}</p>}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

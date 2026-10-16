@@ -427,3 +427,28 @@ pub struct BookTocResult {
     /// `None`（而不是 `0`）表示"后端说不出来"：界面显示 `—`，不假装 0%。
     pub total: Option<u32>,
 }
+
+/// `reader.annotations` 返回元素：一条**阅读批注**（书签 / 笔记 / 高亮）。
+///
+/// 三者是同一件事的三种形态（见 `hp_core::annotation` 的模块文档），因此共用一个 DTO、
+/// 由 `kind` 区分。`cursor` 与 `book.content` 的游标**同语义**——"点批注跳回去"就是把它
+/// 原样交给 `book.content`，前端不做换算（与 `book.toc` 的目录项同一条口径）。
+#[derive(Serialize, TS, Debug, Clone)]
+pub struct ReaderAnnotationItem {
+    /// 主键（UUID；删除时用它）。
+    pub id: String,
+    /// `bookmark` / `note` / `highlight`。
+    pub kind: String,
+    /// 位置游标（与 `book.content` 同语义）。
+    pub cursor: String,
+    /// 保存时的阅读进度（0–10000，两位小数百分比）；仅供列表展示。
+    pub progress: u32,
+    /// 位置标题（章节名 / 目录项）；空串 = 取不到标题。
+    pub title: String,
+    /// 高亮的选中原文**快照**；空串 = 没有（书签 / 笔记）。
+    pub excerpt: String,
+    /// 读者写的备注 / 笔记正文；空串 = 没有。
+    pub note: String,
+    /// 创建时间（ISO 8601）。
+    pub created_at: String,
+}

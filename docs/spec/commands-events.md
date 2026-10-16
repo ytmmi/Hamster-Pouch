@@ -216,8 +216,26 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 | `book.meta` | 读取一本书的作者 / 简介 / 封面路径（EPUB 内嵌封面 / **PDF 第一页**） | `{ repoId, fileId }` | `{ ok, data: { author, description, cover_path } }` | **已包装** | 代码 `commands/book.rs` 的 `book_meta`。**新增命令一律直接按新口径落地**（D76 §2.1）。只有**"书"**（`MediaType::is_book()` = `text` 或 `pdf`）且能拿到内容哈希时才有内容；其余类型返回三个 `null`（**不是错误**）。`cover_path` 是**已落盘**的封面绝对路径（供前端 `convertFileSrc`），`null` = 这本书没有封面（`txt` / `md` 本来就没有；epub 里也确实有没封面的书；**PDF 打不开时也没有**）。**两种封面形态共用一条缓存路径**（`<hash>.cover.<ext>`）：`epub` 走 `hp-book`（自实现最小 ZIP + OPF）取**内嵌封面、原格式不转码**；**`pdf` 走 `hp-pdf` 把第一页栅格化成 JPEG**（用户口径"封面为 pdf 第一页"，实测 20–122 ms）。解析 / 栅格化在**阻塞线程**里跑；结果按**内容哈希**缓存到缩略图缓存目录（外加 `<hash>.bookmeta.json` 存作者 / 简介 / 封面扩展名），因此同一本书只解一次。**解析失败降级为"没有元数据"而不是 `io` 错误**——一本书打不开不该让整个图书预览面板变成错误态。**PDF 的元数据如实记录**：`author` 来自 `/Author`、`description` 来自 `/Subject`；实测 11 份真实 PDF 里只有 1 份带前者、0 份带后者（PDF 不是电子书，多数生成器不写这两个字段），面板按既定口径渲染 `—`。`/Title` **刻意不读**（与 EPUB 侧同口径：内嵌标题与文件名常不一致）。前端 `api/book.ts`，消费方 `panels/bookpreview/` |
 | `book.toc` | 读取一本书的**目录**（**图书阅读器**的章节栏；点一下即跳章） | `{ repoId, fileId }` | `{ ok, data: { format, entries: [{ title, level, cursor }], total } }` | **已包装** | 代码 `commands/book_reader.rs` 的 `book_toc`（2026-10-16，用户口径"构建面板『图书阅读器』……点击可以展开目录等"）。来源：`epub` 取 `nav`（EPUB3）→ NCX（EPUB2）→ 各章 `<title>` 兜底；`md` / `markdown` 取**顶层标题块**；**纯文本按内置小说章节规则识别**（用户口径"txt 文件使用内置规则识别创建目录（针对小说的优化）"——`第<数字><章回节篇卷…>`、`Chapter 12` / `Part 2` / `Prologue`、`楔子 / 序章 / 番外 / 后记`，另有"行不超 60 字 / 不以句读收尾 / 『第 + 数字』后必须紧跟章节量词"三条防误判约束）；**`pdf` 没有目录**（版式描述里没有章节语义）→ 空数组。**`entries[].cursor` 与 `book.content` 的 `cursor` 同语义**（epub = 章节序号、纯文本 = **字符偏移**、md = 顶层块序号），因此"跳章"就是把该值原样回传给 `book.content`——前端**不做任何换算**（这条游标往返由 `book_tests.rs` 的用例钉住）。`level` 是层级（1 = 顶层；EPUB 取自 nav / NCX 嵌套、md 用标题层级、纯文本按卷/部/集分组）；`title` **可能是空串**（EPUB 缺 `<title>`），此时前端按 i18n 显示序号（后端不内联用户可见文案）。`total` 是全书总单位数（纯文本 = 字符数、md = 顶层块数；`epub` / `pdf` 为 `null`，它们的进度用 `book.content` 的 `section` / `section_count`），阅读器据此算进度；`null` 表示"算不出来"（界面显示 `—`，不假装 0%）。**纯文本与目录都必须覆盖全书**，因此这条命令与 `book.content` 共用 `book_reader.rs` 的**整本解码 + 单本缓存**（字节上限 64 MiB，键含 `content_hash`；D113）。空目录 / 非"书" / 无内容哈希 / 读不出目录 → **空数组而不是错误**（与 `book.meta` / `book.content` 同口径）。前端 `api/book.ts` 的 `bookToc`，消费方 `panels/bookreader/` |
 
-### 3.4 `album.*`
+### 3.3.2 `reader.*`（阅读批注：书签 / 笔记 / 高亮；2026-10 新增）
 
+> **为什么与 `book.*` 分开命名**：`book.*` 是"从**文件**里读出东西"（元数据 / 正文 / 目录）
+> ——那些都是**内容的属性**，命令只认 `file_id` 且**不写任何东西**。批注是"**读者**留下的
+> 东西"：会写库、按仓库隔离、与文件内容无关（同一本书换个副本，批注不跟过去）。
+> 两者是不同的域，因此分命名空间（`domain.action` 口径）。
+>
+> 位置口径与 `book.*` **共用同一个游标**：`cursor` 与 `book.content` 同语义
+> （epub = 章节序号、纯文本 = **字符偏移**、md = 顶层块序号），由前端原样带来
+> （来自 `book.toc` 或当前页的 `next_cursor`）。桥接层**不做数值校验**——越界游标由
+> `book.content` 按"回落第一页 / 最后一页"兜底（既有的"翻页游标不该成为新的错误来源"口径）。
+> 存储见 `docs/spec/database-schema.md` 第 4.5.2 节与迁移 **0011**。
+
+| 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
+| --- | --- | --- | --- | --- | --- |
+| `reader.annotations` | 列出某文件的**全部阅读批注**（书签 / 笔记 / 高亮） | `{ repoId, fileId }` | `{ ok, data: [{ id, kind, cursor, progress, title, excerpt, note, created_at }] }` | **已包装** | 代码 `commands/reader.rs` 的 `reader_annotations`（2026-10-16，D113）。**按创建时间升序**（读者留痕的先后顺序）——不按位置：`cursor` 是 TEXT（三种格式语义不同），字典序会把"第 10 章"排在"第 2 章"前面。`kind` 为 `bookmark` / `note` / `highlight`（**未知取值的那一行被跳过**，不退化成某一种——猜错会把书签显示成空白笔记）。`progress` 是**保存时**的阅读进度（0–10000 = 两位小数百分比），**仅供列表展示**，不参与跳转（跳转恒用 `cursor`）；它冗余存一份是因为按 `cursor` 反推进度需要知道全书总量（要再读一次 `book.toc`）。文件不存在 → `not_found`；**空数组不是错误**。前端 `api/book.ts` 的 `readerAnnotations`，消费方 `panels/bookreader/` |
+| `reader.addAnnotation` | 新建一条阅读批注 | `{ repoId, fileId, kind, cursor, progress, title, excerpt, note }` | `{ ok, data: { id, kind, cursor, progress, title, excerpt, note, created_at } }` | **已包装** | 代码 `commands/reader.rs` 的 `reader_add_annotation`。`id`（UUID）与 `created_at` 由**后端**生成，因此前端**新增后回读列表**而不是本地拼装（拼假的 id 会让紧接着的删除失败）。**内容校验在仓储侧**（`hp_core::validate_annotation_content`）：① 种类与内容必须匹配——**书签不需要正文**（它只有位置），**笔记 / 高亮至少要有一项非空**（一条没有文字的高亮在列表里就是一行空白，用户会以为没存上）；② **游标非空**（没有位置的批注跳不回去，等于一条坏记录）；③ 文本不超 `ANNOTATION_TEXT_MAX_CHARS`（20000 字符，防"整章正文被当 excerpt 传进来"）。违约 → `validation`（**不是静默写一条坏记录**）。`excerpt` 是**选中的原文快照**（冗余存原文是刻意的：正文可能因换编码 / 换版本而变，但"我当时划的是这句话"是读者的记录，不该跟着正文漂移）；`note` 是读者写的话——**分两列**，合成一列就无法区分"这段是原文"与"这段是我写的"，而两者在界面上的排版完全不同（原文引用块 vs 我的批注）。前端 `api/book.ts` 的 `readerAddAnnotation` |
+| `reader.deleteAnnotation` | 删除一条阅读批注 | `{ repoId, annotationId }` | `{ ok, data: null }` | **已包装** | 代码 `commands/reader.rs` 的 `reader_delete_annotation`。**幂等**：删一个不存在的 id 也成功（用户在列表里连点两下删除不该报错，与 `file.setMarks` 的"增删各自幂等"同一口径）。**不按 `file_id` 限定**：主键 `id` 已经全局唯一，多带一个条件只会让"删别的书的批注"从"找不到"变成"静默无操作"（更难排查）。**没有"编辑"命令**是刻意的：批注是**留痕**，改一条旧笔记会让"我当时怎么想的"变得不可信——要改就删了重写（与"标签是活的、批注是历史"同一思路）。前端 `api/book.ts` 的 `readerDeleteAnnotation` |
+
+### 3.4 `album.*`
 | 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
 | --- | --- | --- | --- | --- | --- |
 | `album.create` | 创建相册 | `{ repoId, name, kind, mediaType?, parentAlbumId?, sourceId?, fileIds? }` | `{ ok, data: { albumId } }` | **已包装** | 代码 `commands/album.rs` 的 `album_create`；**D76 批次 `album` 已迁移**（2026-09）。线上 `data` 是 `{ album_id }`（蛇形）；另接受 `syncMode` / `includeSubsources` / `filterJson`。空名 / 未知 `kind` / 跟随源缺 `sourceId` → `validation` |

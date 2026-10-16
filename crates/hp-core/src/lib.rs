@@ -3,6 +3,7 @@
 
 pub mod ai;
 pub mod album;
+pub mod annotation;
 pub mod blueprint;
 pub mod blueprint_migrate;
 mod blueprint_builtin_nodes;
@@ -43,6 +44,10 @@ pub use ai::{
 pub use album::{
     AddedBy, Album, AlbumId, AlbumKind, AlbumMediaType, AlbumMember, AlbumSyncRule, AlbumSyncState,
     SyncMode,
+};
+pub use annotation::{
+    progress_to_stored, validate_annotation_content, AnnotationKind, ReaderAnnotation,
+    ANNOTATION_PROGRESS_MAX, ANNOTATION_TEXT_MAX_CHARS,
 };
 pub use blueprint::{
     is_valid_class_media_type, media_type_has_subclass, subclass_formats_for, ActionOp, AnchorAxis,

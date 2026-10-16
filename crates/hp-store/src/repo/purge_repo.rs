@@ -53,6 +53,10 @@ pub struct SourceDataCounts {
     pub color_refs: u64,
     /// 封面覆盖数（用户自设的封面颜色 / 图片，迁移 0009）。
     pub covers: u64,
+    /// 文件标记数（`book` / `manga` …，迁移 0010；**2026-10-16 补登清点**）。
+    pub marks: u64,
+    /// 阅读批注数（书签 / 笔记 / 高亮，迁移 0011；D113）。
+    pub annotations: u64,
     /// AI 覆盖撤销记录条数。
     pub ai_undo: u64,
     /// 因该源被卸载而改为普通（fixed）的跟随相册数。
@@ -63,8 +67,19 @@ pub struct SourceDataCounts {
 
 impl SourceDataCounts {
     /// 需要逐行清理的派生数据条数（不含 `files`、同步规则与子源）。
+    ///
+    /// **每往 [`DERIVED_TABLES`] 加一张表，这里必须同步加上它的计数**：
+    /// 少一项不会报错，只会让卸载进度条的"总数"偏小、进度提前跑到 100%
+    /// （清点与清理的口径因此必须成对维护）。
     pub fn derived_total(&self) -> u64 {
-        self.album_members + self.tags + self.ratings + self.color_refs + self.covers + self.ai_undo
+        self.album_members
+            + self.tags
+            + self.ratings
+            + self.color_refs
+            + self.covers
+            + self.marks
+            + self.annotations
+            + self.ai_undo
     }
 }
 
@@ -99,13 +114,25 @@ pub enum PurgePhase {
 /// **新增引用 `files(id)` 的表必须登记在这里**：卸载源要把它清干净，
 /// 漏一张就会留下指向已删文件的孤儿行（`file_covers` 虽带 `ON DELETE CASCADE`，
 /// 但这里显式列出——不依赖 `foreign_keys` 开关是否恰好打开，也便于清点）。
+///
+/// **2026-10-16 补登两张漏掉的表**（本次一并修掉的真实缺口）：
+/// - `file_marks`（迁移 0010，D102）：标记是"用户在条目上的选择"，带
+///   `ON DELETE CASCADE`，但**它此前不在这张清单里**——卸载源时 `DELETE FROM files`
+///   之后的级联是否真的发生，取决于 `foreign_keys` pragma 是否恰好打开。
+///   显式登记把这件事从"依赖开关"变成"确定发生"。
+/// - `reader_annotations`（迁移 0011，D113）：同一条口径（书签 / 笔记 / 高亮）。
+///
+/// 两张表都按 `file_id` 关联，因此可以直接走下面统一的
+/// `DELETE FROM {table} WHERE file_id IN (SELECT id FROM files WHERE source_id = ?1)`。
 const DERIVED_TABLES: &[&str] = &[
     "album_member",
     "file_tags",
     "file_auto_tags",
+    "file_marks",
     "ratings",
     "color_refs",
     "file_covers",
+    "reader_annotations",
     "ai_tag_undo",
 ];
 
@@ -134,6 +161,8 @@ impl RepoDb {
             ratings: count("ratings")?,
             color_refs: count("color_refs")?,
             covers: count("file_covers")?,
+            marks: count("file_marks")?,
+            annotations: count("reader_annotations")?,
             ai_undo: count("ai_tag_undo")?,
             sync_albums: scalar("SELECT COUNT(*) FROM album_sync_rule WHERE source_id = ?1")?,
             child_sources: scalar("SELECT COUNT(*) FROM sources WHERE parent_source_id = ?1")?,
@@ -237,6 +266,9 @@ impl RepoDb {
                 "ratings" => removed.ratings = n,
                 "color_refs" => removed.color_refs = n,
                 "file_covers" => removed.covers = n,
+                // 标记与阅读批注：本次一并补登（见 `DERIVED_TABLES` 的说明）。
+                "file_marks" => removed.marks = n,
+                "reader_annotations" => removed.annotations = n,
                 "ai_tag_undo" => removed.ai_undo = n,
                 _ => {}
             }

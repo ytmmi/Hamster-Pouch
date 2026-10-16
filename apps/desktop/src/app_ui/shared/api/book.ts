@@ -23,6 +23,8 @@ import type {
   BookSetCoverArgs,
   BookTocArgs,
   BookTocResult,
+  ReaderAddAnnotationArgs,
+  ReaderAnnotationItem,
 } from "../types";
 import { unwrapApi, type ApiResponse } from "./response";
 
@@ -72,6 +74,50 @@ export function bookToc(args: BookTocArgs): Promise<BookTocResult> {
   return invoke<ApiResponse<BookTocResult>>("book_toc", {
     repoId: args.repoId,
     fileId: args.fileId,
+  }).then(unwrapApi);
+}
+
+/**
+ * 列出某文件的**全部阅读批注**（书签 / 笔记 / 高亮）。
+ *
+ * 按**创建时间**升序（读者留痕的先后顺序）。**空数组不是错误**：没留过批注是正常状态。
+ */
+export function readerAnnotations(
+  repoId: string,
+  fileId: string,
+): Promise<ReaderAnnotationItem[]> {
+  return invoke<ApiResponse<ReaderAnnotationItem[]>>("reader_annotations", {
+    repoId,
+    fileId,
+  }).then(unwrapApi);
+}
+
+/**
+ * 新建一条阅读批注。
+ *
+ * 内容校验在**后端**（种类与内容必须匹配：书签不需要正文、笔记 / 高亮至少要有一项非空；
+ * 游标非空；文本不超上限），违约抛 `validation`。
+ */
+export function readerAddAnnotation(
+  args: ReaderAddAnnotationArgs,
+): Promise<ReaderAnnotationItem> {
+  return invoke<ApiResponse<ReaderAnnotationItem>>("reader_add_annotation", {
+    repoId: args.repoId,
+    fileId: args.fileId,
+    kind: args.kind,
+    cursor: args.cursor,
+    progress: args.progress,
+    title: args.title,
+    excerpt: args.excerpt,
+    note: args.note,
+  }).then(unwrapApi);
+}
+
+/** 删除一条阅读批注（**幂等**：删不存在的 id 也成功）。 */
+export function readerDeleteAnnotation(repoId: string, annotationId: string): Promise<void> {
+  return invoke<ApiResponse<void>>("reader_delete_annotation", {
+    repoId,
+    annotationId,
   }).then(unwrapApi);
 }
 
