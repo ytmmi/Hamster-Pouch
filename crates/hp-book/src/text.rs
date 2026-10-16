@@ -181,8 +181,30 @@ pub struct DecodedText {
 
 /// 解码文件开头（字节上限 → 解码 → 字符上限），见模块文档的"分页口径"。
 pub fn decode_head(bytes: &[u8], max_chars: usize) -> DecodedText {
-    let truncated_bytes = bytes.len() > TEXT_VIEW_MAX_BYTES;
-    let head = &bytes[..bytes.len().min(TEXT_VIEW_MAX_BYTES)];
+    decode_head_limited(bytes, max_chars, TEXT_VIEW_MAX_BYTES)
+}
+
+/// 与 [`decode_head`] **同一条解码路径**，但字节上限由调用方给出。
+///
+/// 为什么需要它（2026-10-16，图书阅读器）：查看器的口径是"只显示开头内容"，
+/// 2 MiB 的字节上限正合适；而阅读器的**目录跳转**必须能读到全书——一本 24 MB 的
+/// txt 小说，第 800 章落在 2 MiB 之外，按 `TEXT_VIEW_MAX_BYTES` 截断就永远读不到。
+/// 上限本身**不取消**（那是"畸形巨文件不该拖垮进程"的那道闸），只是改由调用方
+/// 按场景给出（阅读器用 `commands/book.rs` 的 `READER_MAX_BYTES`）。
+///
+/// `bytes` 若已被调用方按自己的上限截断过，就直接传截断后的切片——
+/// 本函数按 `bytes.len() > max_bytes` 判"是否截断"，两者口径一致。
+pub fn decode_head_limited(bytes: &[u8], max_chars: usize, max_bytes: usize) -> DecodedText {
+    let truncated_bytes = bytes.len() > max_bytes;
+    decode_head_flagged(&bytes[..bytes.len().min(max_bytes)], max_chars, truncated_bytes)
+}
+
+/// 解码本体：`head` 是**已经切好**的字节，`truncated_bytes` 是"上游还丢了内容"这个事实。
+///
+/// 拆成独立函数的原因：文件路径（[`decode_file_limited`]）与内存路径（[`decode_head`]）
+/// 对"有没有被截断"的判据不同（前者靠"多读一个字节有没有读到"），
+/// 而**解码、丢尾替换字符、字符上限**这三步必须逐字相同。
+fn decode_head_flagged(head: &[u8], max_chars: usize, truncated_bytes: bool) -> DecodedText {
     let encoding = detect_encoding(head);
 
     let (cow, _actual, _had_errors) = encoding.0.decode(head);
@@ -237,9 +259,24 @@ pub fn page_at(text: &str, offset: usize, page_chars: usize) -> TextPage {
 
 /// 从文件读开头并解码（读盘失败是 `io` 错误）。
 pub fn decode_file_head(path: &Path, max_chars: usize) -> HpResult<DecodedText> {
-    let bytes = std::fs::read(path)
+    decode_file_limited(path, max_chars, TEXT_VIEW_MAX_BYTES)
+}
+
+/// 从文件读并解码，**字节上限由调用方给出**（阅读器整本解码用，见 [`decode_head_limited`]）。
+///
+/// 先按 `max_bytes + 1` 读：多读的那一个字节就是"文件比上限大"的**证据**——
+/// 只读 `max_bytes` 的话，一个恰好等于上限的文件与一个更大的文件会被判成同一种，
+/// `capped` 于是说谎。
+pub fn decode_file_limited(path: &Path, max_chars: usize, max_bytes: usize) -> HpResult<DecodedText> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(path)
         .map_err(|e| HpError::Io(format!("读取文本文件失败 {}: {e}", path.display())))?;
-    Ok(decode_head(&bytes, max_chars))
+    let mut bytes = Vec::new();
+    file.take(max_bytes as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| HpError::Io(format!("读取文本文件失败 {}: {e}", path.display())))?;
+    Ok(decode_head_limited(&bytes, max_chars, max_bytes))
 }
 
 #[cfg(test)]
@@ -365,5 +402,41 @@ mod tests {
         let page = page_at("汉字正文", 1, 2);
         assert_eq!(page.text, "字正");
         assert_eq!(page.next_offset, Some(3));
+    }
+
+    /// **阅读器整本解码的回归**（2026-10-16）：字节上限由调用方给出，且
+    /// "恰好等于上限"与"超出上限"必须能被区分开（`capped` 全是靠它说真话）。
+    #[test]
+    fn decode_file_limited_honours_the_caller_byte_cap() {
+        let dir = tempfile::tempdir().expect("创建临时目录失败");
+        let path = dir.path().join("novel.txt");
+        std::fs::write(&path, "正文".repeat(100)).expect("写入失败");
+
+        // 上限远大于文件：全文都在，且没有被标记为截断。
+        let full = decode_file_limited(&path, usize::MAX, 1024).expect("解码失败");
+        assert_eq!(full.text.chars().count(), 200);
+        assert!(!full.capped);
+
+        // 上限**恰好**等于文件长度（"正文" × 100 = 600 字节）：仍算"读全了"
+        // （不多读一个字节就分不出"恰好"与"更大"这两种情况）。
+        let exact = decode_file_limited(&path, usize::MAX, 600).expect("解码失败");
+        assert_eq!(exact.text.chars().count(), 200);
+        assert!(!exact.capped, "恰好等于上限不算截断");
+
+        // 上限小于文件：如实标记截断，且不越过上限。
+        let capped = decode_file_limited(&path, usize::MAX, 40).expect("解码失败");
+        assert!(capped.capped);
+        assert!(capped.text.chars().count() <= 20);
+    }
+
+    #[test]
+    fn decode_file_limited_does_not_leave_a_truncation_artifact() {
+        let dir = tempfile::tempdir().expect("创建临时目录失败");
+        let path = dir.path().join("cut.txt");
+        // 每个汉字 3 字节：上限 10 会切在第四个汉字中间。
+        std::fs::write(&path, "汉".repeat(8)).expect("写入失败");
+        let decoded = decode_file_limited(&path, usize::MAX, 10).expect("解码失败");
+        assert!(decoded.capped);
+        assert!(!decoded.text.ends_with('\u{FFFD}'), "截断产生的替换字符应被丢掉");
     }
 }

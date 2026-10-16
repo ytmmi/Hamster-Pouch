@@ -255,6 +255,8 @@ mod tests {
             ffmpeg_bin: Arc::new(None),
             ffprobe_bin: Arc::new(None),
             thumb_cache: Arc::new(ThumbnailCache::new(std::path::PathBuf::from("Z:/none"))),
+            // 阅读器的单本正文缓存：本模块的用例不涉及正文读取，空缓存即可。
+            book_text: Arc::new(Mutex::new(None)),
             media: Arc::new(Mutex::new(None)),
             media_embed: Arc::new(Mutex::new(None)),
             plugin_root: Arc::new(std::path::PathBuf::from("Z:/none")),

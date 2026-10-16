@@ -9,9 +9,25 @@ mod tests {
         read_cache, read_epub_page, read_markdown_page, read_text_page, write_atomic,
         BookMetaCache, MARKDOWN_PAGE_BLOCKS,
     };
-    use hp_core::HpError;
+    // 阅读器一侧的取数拆在 `book_reader.rs`（目录 + 整本缓存）：测试仍集中在本文件。
+    use crate::commands::book_reader::{
+        read_toc_by_media_type, ReaderCtx, ReaderTextCache,
+    };
+    use hp_core::{HpError, MediaType};
     use hp_dto::BookSpanItem;
     use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    /// 阅读器的单本正文缓存（每个用例一份空缓存；缓存行为由 `book.rs` 的接线保证）。
+    fn empty_text_cache() -> Mutex<Option<ReaderTextCache>> {
+        Mutex::new(None)
+    }
+
+    /// 读一页纯文本（测试夹具：固定缓存键，避免每个用例都拼一遍）。
+    fn read_text_page_for_test(path: &Path, offset: u32) -> hp_core::HpResult<hp_dto::BookContentResult> {
+        let cache = empty_text_cache();
+        read_text_page(path, offset, &cache, "test|book|hash")
+    }
 
     /// 测试夹具：把一组行内片段拼回纯文字（断言只关心文字，不关心样式）。
     fn span_text(spans: &Option<Vec<BookSpanItem>>) -> String {
@@ -147,7 +163,7 @@ mod tests {
         let text = "字".repeat(total);
         std::fs::write(&path, text.as_bytes()).expect("写入失败");
 
-        let first = read_text_page(&path, 0).expect("读取失败");
+        let first = read_text_page_for_test(&path, 0).expect("读取失败");
         assert_eq!(first.format, "text");
         assert_eq!(first.encoding.as_deref(), Some("UTF-8"));
         assert_eq!(
@@ -160,7 +176,7 @@ mod tests {
         );
         assert!(first.capped, "还有下一页 → 应标记「仅显示开头」");
 
-        let second = read_text_page(&path, hp_book::TEXT_PAGE_CHARS as u32).expect("读取失败");
+        let second = read_text_page_for_test(&path, hp_book::TEXT_PAGE_CHARS as u32).expect("读取失败");
         assert_eq!(second.text.as_deref().unwrap().chars().count(), 50);
         assert_eq!(second.next_cursor, None, "末页没有下一页");
     }
@@ -176,7 +192,7 @@ mod tests {
             181, 218, 210, 187, 213, 194, 32, 201, 189, 177, 223, 208, 161, 180, 229, 161, 163,
         ];
         std::fs::write(&path, GBK).expect("写入失败");
-        let page = read_text_page(&path, 0).expect("读取失败");
+        let page = read_text_page_for_test(&path, 0).expect("读取失败");
         assert_eq!(
             page.encoding.as_deref(),
             Some("GBK"),
@@ -508,5 +524,129 @@ mod tests {
         out.extend_from_slice(&central_offset.to_le_bytes());
         out.extend_from_slice(&0u16.to_le_bytes());
         out
+    }
+
+    // ---- book.toc：阅读器目录（2026-10-16）----
+
+    /// 目录游标必须**就是**正文游标：拿目录给的 cursor 去取正文，第一页要从那一章开始。
+    ///
+    /// 这条是"目录跳转"能不能用的**唯一**判据——两套坐标一旦漂移，
+    /// 界面上表现为"点第三章跳到第五章"，而两边各自的单元测试都会是绿的。
+    #[test]
+    fn txt_toc_cursor_round_trips_into_content() {
+        let dir = temp_dir();
+        let path = dir.join("novel.txt");
+        let text = "第一章 山边小村\n他抬起头，望向远处。\n第二章 青牛镇\n镇上人来人往。\n第三章 七玄门\n";
+        std::fs::write(&path, text.as_bytes()).expect("写入失败");
+
+        let cache = empty_text_cache();
+        let thumb = hp_media::ThumbnailCache::new(dir.join("cache"));
+        let ctx = ReaderCtx {
+            cache: &thumb,
+            text_cache: &cache,
+            hash: "hash",
+            text_key: "repo|file|hash",
+        };
+        let toc = read_toc_by_media_type(MediaType::Text, &path, "txt", &ctx).expect("读目录失败");
+        assert_eq!(toc.format, "text");
+        let titles: Vec<&str> = toc.entries.iter().map(|e| e.title.as_str()).collect();
+        assert_eq!(titles, vec!["第一章 山边小村", "第二章 青牛镇", "第三章 七玄门"]);
+        // 总字符数 = 全书字符数（进度条按 `cursor / total` 算，口径与 cursor 一致）。
+        assert_eq!(toc.total, Some(text.chars().count() as u32));
+
+        // 跳到第二章：正文第一页必须以第二章开头。
+        let cursor = toc.entries[1].cursor.parse::<u32>().expect("游标是字符偏移");
+        let page = read_text_page(&path, cursor, &cache, "repo|file|hash").expect("读取失败");
+        let body = page.text.unwrap_or_default();
+        assert!(
+            body.starts_with("第二章 青牛镇"),
+            "目录游标与正文游标必须同口径，实得：{}",
+            body.chars().take(12).collect::<String>()
+        );
+    }
+
+    /// 阅读器的整本解码：**同一把键命中缓存**（盘上换了内容也仍读缓存，
+    /// 直到键变化），换键则重新解码——这正是"翻页不再重解"的机制。
+    #[test]
+    fn reader_text_cache_reuses_the_decoded_book_until_the_key_changes() {
+        let dir = temp_dir();
+        let path = dir.join("cached.txt");
+        std::fs::write(&path, "第一章 甲\n".as_bytes()).expect("写入失败");
+
+        let cache = empty_text_cache();
+        let first = read_text_page(&path, 0, &cache, "k1").expect("读取失败");
+        assert!(first.text.unwrap_or_default().contains('甲'));
+
+        // 盘上换内容但**键不变**（同一本书的同一次解码）→ 仍走缓存。
+        std::fs::write(&path, "第二章 乙\n".as_bytes()).expect("写入失败");
+        let cached = read_text_page(&path, 0, &cache, "k1").expect("读取失败");
+        assert!(
+            cached.text.unwrap_or_default().contains('甲'),
+            "键不变时必须命中缓存（否则每翻一页都会重解整本）"
+        );
+
+        // 键变化（换书 / 换内容哈希）→ 重新解码。
+        let refreshed = read_text_page(&path, 0, &cache, "k2").expect("读取失败");
+        assert!(refreshed.text.unwrap_or_default().contains('乙'));
+    }
+
+    /// EPUB 的目录走 nav；PDF **没有**目录结构（空目录不是错误）。
+    #[test]
+    fn epub_toc_is_read_and_pdf_has_no_toc() {
+        let dir = temp_dir();
+        let epub = dir.join("toc.epub");
+        let container = r#"<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"#;
+        let opf = r#"<package><metadata/><manifest>
+            <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+            <item id="a" href="Text/a.xhtml" media-type="application/xhtml+xml"/>
+            <item id="b" href="Text/b.xhtml" media-type="application/xhtml+xml"/>
+          </manifest><spine><itemref idref="a"/><itemref idref="b"/></spine></package>"#;
+        let nav = r#"<nav><ol>
+            <li><a href="Text/a.xhtml">序章</a></li>
+            <li><a href="Text/b.xhtml">第一章</a></li>
+          </ol></nav>"#;
+        std::fs::write(
+            &epub,
+            test_zip(&[
+                ("META-INF/container.xml", container.as_bytes()),
+                ("OEBPS/content.opf", opf.as_bytes()),
+                ("OEBPS/nav.xhtml", nav.as_bytes()),
+                ("OEBPS/Text/a.xhtml", b"<html><body><p>a</p></body></html>"),
+                ("OEBPS/Text/b.xhtml", b"<html><body><p>b</p></body></html>"),
+            ]),
+        )
+        .expect("写入失败");
+
+        let cache = empty_text_cache();
+        let thumb = hp_media::ThumbnailCache::new(dir.join("cache"));
+        let ctx = ReaderCtx {
+            cache: &thumb,
+            text_cache: &cache,
+            hash: "hash",
+            text_key: "repo|file|hash",
+        };
+        let toc = read_toc_by_media_type(MediaType::Text, &epub, "epub", &ctx).expect("读目录失败");
+        assert_eq!(toc.format, "epub");
+        let got: Vec<(String, String)> = toc
+            .entries
+            .iter()
+            .map(|e| (e.title.clone(), e.cursor.clone()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("序章".to_string(), "0".to_string()),
+                ("第一章".to_string(), "1".to_string())
+            ]
+        );
+
+        // PDF：版式描述里没有章节语义 → 空目录（阅读器只显示正文）。
+        let pdf = dir.join("a.pdf");
+        std::fs::write(&pdf, b"%PDF-1.4\n").expect("写入失败");
+        let pdf_toc =
+            read_toc_by_media_type(MediaType::Pdf, &pdf, "pdf", &ctx).expect("PDF 目录不该报错");
+        assert_eq!(pdf_toc.format, "pdf");
+        assert!(pdf_toc.entries.is_empty());
+        assert_eq!(pdf_toc.total, None, "PDF 的进度不由目录接口给");
     }
 }

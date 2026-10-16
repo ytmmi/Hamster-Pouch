@@ -8,7 +8,7 @@
 
 | 术语 | 指代 | 谁可注册 | 枚举 / 落点 |
 | --- | --- | --- | --- |
-| **面板（Panel）** | dockview 承载单元：仓库、源、相册、媒体预览、图书预览、查看器、图像查看器、元数据、标签/评分、tag表、色彩参考、媒体播放器、任务、插件、蓝图 | **宿主内置 15 个 + 插件可注册** | 蓝图节点枚举 `control`（**不变**）；`PANEL_IDS` / `panel_layouts` 表 |
+| **面板（Panel）** | dockview 承载单元：仓库、源、相册、媒体预览、图书预览、查看器、**图书阅读器**、图像查看器、元数据、标签/评分、tag表、色彩参考、媒体播放器、任务、插件、蓝图 | **宿主内置 16 个 + 插件可注册** | 蓝图节点枚举 `control`（**不变**）；`PANEL_IDS` / `panel_layouts` 表 |
 | **控件（Control）** | 面板**内部**的标准 UI 单元（26 种） | **仅宿主**（D62） | 控件 schema 的 `kind` |
 | **类目（Category）** | 面板内部条目分类（原显示名「类」） | 宿主 | 蓝图节点枚举 `class`（**不变**） |
 
@@ -42,7 +42,7 @@
 
 | 关注点 | 权威实现 | 说明 |
 | --- | --- | --- |
-| 面板注册表（内置 15） | `packages/config/src/panels.ts`（`PANEL_IDS` / `PANEL_TITLES`） | 当前为常量清单，实现时升级为注册表 |
+| 面板注册表（内置 16） | `packages/config/src/panels.ts`（`PANEL_IDS` / `PANEL_TITLES`） | 当前为常量清单，实现时升级为注册表 |
 | 面板 → 组件映射 | `apps/desktop/src/app_ui/core/panelRegistry.tsx`（`PANEL_DEFS` / `DOCK_COMPONENTS`） | 插件面板需要动态注册路径 |
 | 面板注册的 manifest 侧 | `crates/hp-core/src/plugin_contribution.rs`（`ContributionKind::Panel`） | 声明参数扩展见 `docs/spec/plugin-standard.md` 第 4 节 |
 | 面板校验 | `crates/hp-core/src/plugin_validate.rs`（`PluginManifest::validate`；清单结构在 `plugin.rs`） | 硬错误清单见本文第 7 节 |
@@ -56,7 +56,7 @@
 | `category` | 中文 | 含义 | 内置成员 |
 | --- | --- | --- | --- |
 | `source` | 仓库与源 | 仓库、源、相册的归属与组织 | `repo`、`sources`、`albums` |
-| `media` | 媒体与查看 | 看/听媒体本体 | `media`、`bookpreview`、`viewer`、`imageviewer`、`player`、`color` |
+| `media` | 媒体与查看 | 看/听媒体本体 | `media`、`bookpreview`、`viewer`、`bookreader`、`imageviewer`、`player`、`color` |
 | `info` | 信息与元数据 | 描述与检索 | `metadata`、`tags`、`tagtable` |
 | `system` | 系统与插件 | 应用自身与扩展 | `tasks`、`plugins`、`blueprint` |
 | `other` | 其它 | **兜底分类**：未归类或插件自带分类 | 未分类的插件面板 |
@@ -107,7 +107,7 @@
 | --- | --- | --- |
 | `media`（媒体预览） | **`true`** | 内部有 图像 / 视频 / 音频 三个类目 |
 | `bookpreview`（图书预览） | **`true`** | 内部有**文本**类目；其下按子类细分（epub / txt / md），另有与类目树**平行**的**标记**（book / manga …） |
-| 其余 13 个（含 `imageviewer`） | `false` | 无条目分类 |
+| 其余 14 个（含 `viewer`、**`bookreader`**、`imageviewer`） | `false` | 无条目分类；**图书阅读器**只"读一本书"，不按条目分类（挑书在图书预览里做） |
 
 > **`bookpreview` 的类目（2026-10-10 用户口径 / D102）**：本面板下挂一个**文本**类目
 > （`media_type = text`），其下再分**子类**（`subclass`：epub / txt / md）；与类目树**平行**
@@ -126,7 +126,7 @@
 
   | 面板来源 | `has_class` 可否变化 | `panel → class` 边 | 理由 |
   | --- | --- | --- | --- |
-  | **宿主内置**（15 个） | **固定不变** | **硬错误**（拒绝保存） | 宿主声明是不变量，出现即是构造错误（同"引用存在但类型不符"） |
+  | **宿主内置**（16 个） | **固定不变** | **硬错误**（拒绝保存） | 宿主声明是不变量，出现即是构造错误（同"引用存在但类型不符"） |
   | **插件注册** | **随插件版本可变** | **未接通软告警**（灰显、「允许保存」，插件恢复后自动恢复） | 插件升级把 `has_class` 从 `true` 改成 `false` 时，不能把用户既有文档变成"保存失败"（与 RFC 0010 决策 6 同口径） |
 
 - 编辑器职责：**禁止**在 `has_class = false` 的面板下新建类目节点，属性面板不把类目列入该面板的候选（与结构父唯一性同属编辑器责任）。
@@ -135,7 +135,7 @@
 
 声明"该面板在蓝图里由哪种节点承载"，让**面板注册表与蓝图节点注册表互相对得上**：
 
-- 内置 15 个面板的 `blueprint_node` 均为 `control`（当前唯一承载面板的节点类型）。
+- 内置 16 个面板的 `blueprint_node` 均为 `control`（当前唯一承载面板的节点类型）。
 - 取值必须命中**已注册的蓝图节点类型**（`docs/spec/blueprint-node-standard.md`）；未命中即硬错误。
 - 该字段是**反向映射**的权威：蓝图侧 `control` 节点的 `panel_id` 是正向引用，两侧一致性由门禁断言（第 8 节）。
 - 若某节点类型声明自己**可承载面板**，它就必须在蓝图中允许 `panel_id` 字段；否则注册表不一致。
@@ -319,8 +319,17 @@
     - `pnpm check:panels` 断言：Rust 侧 `text` 与**标记**取值域齐备、文本类**不参与内容兜底**、迁移 **0010** 建多值标记表且只搬 `book`、已登记进 `REPO_MIGRATIONS`、`0001_init.sql` **不得**被改（forward-only）。
     - **类目 / 子类 / 标记（2026-10-10，D102）**：本面板的 `has_class` 由 `false` 改为 `true`——此前为 `false` 正是因为"文本类没有任何类目能表达"（`media_type` 只有 image/video/audio）。本面板下挂**文本**类目 → 其下分**子类**（epub / txt / md）；与类目树**平行**地可挂**标记**（book / manga …）。三轴的取值域与匹配口径见 `docs/spec/blueprint-node-standard.md` 第 2.0.1 节与 §5.1。
 
+17. **图书阅读器（`bookreader`，2026-10-16 用户立项）**：宿主内置的**第 16 个**面板，`has_class = false`（只"读一本书"，挑书在图书预览里做），`category = media`，`blueprint_node = control`，`defaultSize = 900×700`（阅读需要行宽，窄面板下页宽/字号都退化成摆设）。它补齐的是 D98/D110 明确**留空**的那部分（"完整的阅读器：目录跳转、书签、字号 / 分栏的用户设置项"）。
+    - **分工**：查看器（`viewer`）的口径仍是"显示**开头**内容、范围为面板大小、滚动看更多"；阅读器复用**同一套**正文命令与块渲染（`book.content` + `BookBlocks.tsx`），另加目录（`book.toc`）与阅读选项。两者共用 `book.content` 的分页实现——**纯文本改用"整本解码 + 单本缓存"**（字节上限 2 MiB → 64 MiB，`commands/book_reader.rs`），否则第 800 章落在 2 MiB 之外、目录跳过去是一片空白（详见 D113）。
+    - **界面**（用户给了参考图，逐块对应）：顶栏 = 退出阅读 / 章节标题 · 文件名 / 本次阅读时间 / 读完本页约需 N 分钟 / 全屏模式 / **「更多」图标**；主体 = 左侧内置面板（目录 / 书签 / 笔记 / 高亮）+ 阅读区 + 右侧「阅读选项」；底栏 = 当前进度 / 页数 / 章节数。**右上角的「更多」图标**是 2×2 四个圆角方块的**矢量**图标（`ReaderMoreMenu.tsx` 的 `MoreGridIcon`，`currentColor` 填充），点击展开**内置面板菜单**（目录 / 书签 / 笔记 / 高亮 / 阅读选项），每一项是**开合切换**且带勾选态；再点图标 / 点菜单外 / Esc 三种方式关闭。左右两栏因此有两个入口（图标菜单 + 栏内标签页），读的是同一份状态。
+    - **阅读选项 = 12 项面板设置**（`viewMode` / `bg` / `text` / `fontSize` / `lineHeight` / `pageMargin` / `pageWidth` / `letterSpacing` / `paragraphSpacing` / `brightness` / `fontFamily` / `textAlign`）：**不新增库表**，全部落 `app_settings` 的 `panel.bookreader.<key>`（第 5.3 节），因此关掉面板再打开仍在，且「全部设置 → 面板 → 图书阅读器」能改同一批值；读取与热加载走 `shared/settingValue.ts` 的四条触发源，写入后**本地广播**（同窗口即时生效，不等 IPC 往返）。取值域的唯一权威是 `panels/bookreader/readerView.ts`（零依赖纯逻辑），声明层候选与之**逐项一致**（`pnpm check:panels` 断言）；数值项范围**只由面板夹紧**（`clampReaderNumber`，声明层没有 min/max）——字号 12–48、行距 100–240（百分比，170 = 1.7 倍）、页边距 0–80、页宽 30–100（占面板宽度百分比）、字间距 0–20、段间距 0–100、亮度 30–100。**背景/文字颜色是封闭预设**（各 6 / 5 档，面板按预设套 CSS 类）——面板设置的值是标量，任意色值要另立一套校验与回退，而阅读背景真正需要的是"几档对比度"。**字体只用系统字体栈**（D20：不捆绑字体文件、不把字体目录变成运行期前提）。
+    - **目录（`book.toc`）**：游标**与 `book.content` 同语义**（epub = 章节序号、纯文本 = **字符偏移**、md = 顶层块序号），因此"跳章"就是把目录项的 `cursor` 原样交给 `book.content`——前端**不做任何换算**，避免两套坐标漂移（这条由 `book_tests.rs` 的**往返**用例钉住：拿目录给的游标取正文，第一页必须以那一章开头）。来源：EPUB 的 `nav`（EPUB3）→ NCX（EPUB2）→ 各章 `<title>` 兜底；Markdown 的顶层标题块；**纯文本按内置小说章节规则识别**（用户 2026-10-16 口径："txt 文件使用内置规则识别创建目录（针对小说的优化）"）——`第<数字><章回节篇卷…>`（阿拉伯 / 全角 / 汉字数字）、`Chapter 12` / `Part 2` / `Prologue`、`楔子 / 序章 / 番外 / 后记` 三类写法，并有三条防误判约束（行不超过 60 字、不以句读收尾、"第 + 数字"后必须紧跟章节量词——`第二天早上…` 不认）；`level` = 卷/部/集 分组层级；**PDF 没有目录**（版式描述里没有章节语义）→ 空目录、阅读器只显示正文与页码。
+    - **翻页方式**（`viewMode`）：`scroll`（缺省，连续滚动，滚到接近底部取下一页）/ `page` / `spread`（整页翻页，单页 / 双页）。分页用 **CSS 多栏**实现（`column-width` = 一页宽 + 固定高度 ⇒ 浏览器把内容横向排成若干栏，翻页 = `translateX` 平移一栏），而不是"把滚动条切成一段段"（后者会在段落中间断开）。分页模式没有"滚到底"这个信号，因此"还要不要取下一页"的判据是**已经在最后一页**（`shouldLoadMorePages`）。跳章用 `key={游标}` **重新挂载阅读区**：滚动位置与当前页一起回到开头，不必与渲染竞态。
+    - **已验证的边界（如实记录）**：① **书签 / 笔记 / 高亮三个标签页**本轮只给空态（存储与交互属下一阶段）；② **繁简转换不做**（项目内没有简繁转换表，要引入一份映射数据），参考图里的那一行**不假装存在**；③ **PDF 的目录为空**（无章节语义）；④ 纯文本超过 64 MiB 时如实降级为"仅载入到这里"（`capped`，不是错误）；⑤ **未真机验收**：分页模式的多栏观感（不同字号下的断栏位置）、配色预设的实际对比度、全屏模式在 WebView2 下的行为都只过了代码层与纯函数层断言，需要眼睛看。
+    - `pnpm check:panels` 断言（新增一段）：注册表条目 + 标题键 + `has_class = false` + `defaultSize`、12 项设置的 kind / 候选 / 缺省与 `readerView.ts` 逐项一致、面板走 `useReaderSettings` / `useReaderBook` 且把 dockview API 传下去、`MoreGridIcon` 是**矢量**（`<svg>` + 四个 `rect`，不得用文字/图片代替）、目录点击调 `bookToc` 给的 `cursor` 而不是自己算、`readerView.ts` **零依赖**（无 React / Tauri / 任何 import）、`book_reader.rs` 的 `book_toc` 按**媒体类型**分流并返回 `ApiAsync`、整本缓存的键含 `content_hash`。
+
 - **`cargo test -p hp-core`**：面板声明的硬错误清单、命名空间规则、`settings.kind` 白名单、`has_class = false` 的类目拒绝、`mount.overlay_content = false` 的浮层拒绝。
-- **回归**：内置 15 个面板的声明必须能通过校验且与现状一致（**零行为变化**）；插件面板缺失时蓝图可保存且灰显「未接通」。
+- **回归**：内置 16 个面板的声明必须能通过校验且与现状一致（**零行为变化**）；插件面板缺失时蓝图可保存且灰显「未接通」。
 - `pnpm typecheck` / `pnpm build` / `check-line-count` / `check-doc-status` 通过。
 
 ## 9. 落地顺序（强制）

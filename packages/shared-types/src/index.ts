@@ -30,3 +30,5 @@ export type { BookDefinitionItem } from "./BookDefinitionItem";
 export type { BookContentResult } from "./BookContentResult";
 export type { BookCoverResult } from "./BookCoverResult";
 export type { BookCoverItem } from "./BookCoverItem";
+export type { BookTocItem } from "./BookTocItem";
+export type { BookTocResult } from "./BookTocResult";

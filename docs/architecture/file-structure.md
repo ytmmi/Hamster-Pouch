@@ -91,6 +91,11 @@ crates/hp-store/src/
     blueprint.rs        # 蓝图命令桥接（含 blueprint.changed 广播）
     book.rs             # 图书元数据桥接（book.meta：EPUB 作者/简介/内嵌封面、**PDF 第一页封面**；
                         #   book.content：txt/md/epub 正文 + **PDF 逐页栅格化**；磁盘缓存按内容哈希失效）
+    book_reader.rs      # 图书阅读器一侧的取数（2026-10-16，D113）：book.toc 目录
+                        #   （EPUB nav/NCX、txt 小说章节规则、md 标题；PDF 无目录）
+                        #   + **整本正文解码与单本缓存**（纯文本 64 MiB 上限，键含 content_hash；
+                        #   book.content 的纯文本路径也复用这份缓存——上限由调用方给，
+                        #   查看器仍用 2 MiB）。拆出来是因为 book.rs 已越过 1200 行红线
     ai.rs fsops.rs      # AI 打标桥接 / 文件操作桥接
 
 apps/desktop/src/app_ui/
@@ -159,6 +164,21 @@ apps/desktop/src/app_ui/
                       #   viewerReaderView.ts 纯逻辑（分栏阈值/字号/是否该取下一页；零依赖，
                       #     门禁直接 import。**注意**：不能叫 viewerReader.ts——与
                       #     ViewerReader.tsx 在 Windows 上大小写不敏感地撞名，tsc 报 TS1261）
+    bookreader/       # 图书阅读器（panel.bookreader，2026-10-16，D113；**has_class = false**——
+                      #   只"读一本书"，挑书在图书预览里做）
+                      #   BookReaderPanel.tsx 主面板（顶栏 = 退出阅读 / 章节标题 / 会话时长 /
+                      #     全屏 / **「更多」矢量图标**；主体 = 左栏 + 阅读区 + 右栏；底栏 = 进度）
+                      #   ReaderMoreMenu.tsx **四方块矢量图标 + 内置面板菜单**
+                      #     （目录 / 书签 / 笔记 / 高亮 / 阅读选项；再点 / 点外面 / Esc 三种关闭）
+                      #   ReaderStage.tsx 阅读区（scroll / page / spread 三种翻页方式；
+                      #     分页用 CSS 多栏 + translateX；跳章由面板的 key 重挂载重置）
+                      #   ReaderTocRail.tsx 左侧四个标签页（目录跳转直接用 book.toc 的游标）
+                      #   ReaderOptionsRail.tsx 右侧「阅读选项」（12 项面板设置的可视化控件）
+                      #   ReaderFooter.tsx 底部进度（当前进度 / 页数 / 章节数；算不出来显示 —）
+                      #   useReaderBook.ts 目录 + 正文取数（跳转 = 新世代，丢弃在飞的旧响应）
+                      #   useReaderSettings.ts 12 项面板设置（panel.bookreader.*；
+                      #     写入后本地广播，同窗口即时生效）
+                      #   readerView.ts 取值域与纯逻辑（零依赖，门禁直接 import）
     bookpreview/      # 图书预览（panel.bookpreview；**"书" = 文本类 txt/md/epub + pdf**；
                       #   **has_class = true**，
                       #   三轴模型见 blueprintValues.ts 的 BLUEPRINT_SUBCLASS_FORMATS /
@@ -352,8 +372,16 @@ HamsterPouch/
                               #   thumbnail.rs 图片缩略图（WebP 三级降级）+ 视频首帧（JPEG）；
                               #     `generate_image_preview` 的 **SVG 分流必须在 ffmpeg 快路径之前**
                               #     （生产恒传 Some(ffmpeg)，顺序反了 = SVGZ 在查看器里一片空白）
-    hp-book/                  # 电子书元数据 / 封面 / **正文**解析（EPUB = ZIP + OPF；txt/md 需判编码）                              #   自实现最小 ZIP 读取器（zip.rs）+ 极简 XML 取值（xml.rs）+
+    hp-book/                  # 电子书元数据 / 封面 / **正文 + 目录**解析（EPUB = ZIP + OPF；txt/md 需判编码）
+                              #   自实现最小 ZIP 读取器（zip.rs）+ 极简 XML 取值（xml.rs）+
                               #   EPUB 元数据解析（epub.rs）+ 封面格式判定（cover.rs）+ 格式分发（meta.rs）；
+                              #   **目录（2026-10-16，D113）**：toc.rs —— EPUB 的 nav（EPUB3）→
+                              #     NCX（EPUB2）→ 各章 `<title>` 兜底；**纯文本的小说章节规则**
+                              #     （`第<数字><章回节篇卷…>` / 英文章节 / 楔子序章番外；另有
+                              #     "不超 60 字 / 不以句读收尾 / 第+数字后必跟量词"三条防误判约束）；
+                              #     Markdown 的顶层标题块。游标与 `book.content` **同语义**
+                              #     （字符偏移 / 章节序号 / 块序号），`read_epub_toc` / `text_toc` /
+                              #     `markdown_toc` 与 `hp_book::TocEntry`；
                               #   **正文（2026-10-09 txt/epub；2026-10-10 追加 md 渲染，D100）**：
                               #   block.rs **共用的块模型**（BookBlock / BookSpan / SpanStyle / ColumnAlign；
                               #     EPUB 与 Markdown 都产出它 ⇒ 前端只有一份渲染器）、

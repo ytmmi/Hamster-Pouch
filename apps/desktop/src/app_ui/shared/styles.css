@@ -2228,6 +2228,530 @@ button.danger {
   text-decoration: line-through;
 }
 
+/* ===== 图书阅读器（`panel.bookreader`，2026-10-16）=====
+
+   阅读选项的 12 项全部落到 CSS 变量上（`BookReaderPanel` 在根元素上设值），
+   因此"改字号 / 行距 / 配色"不会触发 React 重排，只改一个自定义属性。
+   背景与文字颜色是**封闭预设**：每个预设一个类，对比度由预设保证，
+   不让用户配出"白底白字"。
+
+   阅读区复用查看器的 `.vr-*` 块样式（`BookBlocks` 是同一个渲染器）：
+   这里只覆盖"正文的排版口径"（字号 / 行高 / 字间距 / 段间距 / 对齐 / 亮度）。 */
+
+.br-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* 阅读区自己撑满，工具栏与进度条不参与滚动。 */
+  overflow: hidden;
+}
+
+.br-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.br-top-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.br-top-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.br-btn {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-2);
+  color: var(--fg);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.br-btn:hover:not(:disabled) {
+  border-color: var(--hover-border);
+}
+
+.br-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- 「更多」图标与菜单 ---- */
+
+.br-more {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.br-more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 6px;
+}
+
+.br-more-btn-active {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.br-more-icon {
+  fill: currentColor;
+  display: block;
+}
+
+.br-more-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  min-width: 148px;
+  padding: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.br-more-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.br-more-item:hover {
+  background: var(--sel-bg);
+}
+
+.br-more-item-active {
+  color: var(--accent);
+}
+
+.br-more-check {
+  width: 10px;
+  display: inline-block;
+}
+
+/* ---- 主体三栏 ---- */
+
+.br-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.br-rail {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-2);
+}
+
+.br-rail-left {
+  border-right: 1px solid var(--border);
+}
+
+.br-rail-right {
+  border-left: 1px solid var(--border);
+  width: 240px;
+}
+
+.br-rail-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.br-rail-title {
+  flex: 1;
+  font-size: 11px;
+  padding-left: 4px;
+}
+
+.br-rail-tab {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.br-rail-tab-active {
+  color: var(--fg);
+  border-bottom-color: var(--accent-border);
+}
+
+.br-rail-close {
+  margin-left: auto;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.br-rail-close:hover {
+  color: var(--fg);
+}
+
+.br-rail-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px;
+}
+
+.br-rail-empty {
+  display: block;
+  font-size: 11px;
+  padding: 8px 6px;
+}
+
+/* ---- 目录 ---- */
+
+.br-toc {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.br-toc-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.br-toc-item:hover {
+  background: var(--sel-bg);
+}
+
+.br-toc-item-active {
+  background: var(--sel-bg);
+  color: var(--accent);
+  border-left: 2px solid var(--accent-border);
+}
+
+/* ---- 阅读选项 ---- */
+
+.br-opt {
+  margin: 0 0 8px;
+}
+
+.br-opt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--fg-dim);
+  margin-bottom: 2px;
+}
+
+.br-opt-value {
+  font: inherit;
+  font-size: 11px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.br-opt input[type="range"] {
+  width: 100%;
+}
+
+.br-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.br-choice-item {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-3);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.br-choice-item-active {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.br-choice-swatch .br-choice-item {
+  width: 24px;
+  height: 18px;
+  padding: 0;
+}
+
+/* 背景 / 文字颜色预设：色值只在这里出现一次（面板按预设 id 套类名）。 */
+.br-swatch-paper {
+  background: #ffffff;
+}
+.br-swatch-sepia {
+  background: #f4ecd8;
+}
+.br-swatch-green {
+  background: #cce8cf;
+}
+.br-swatch-gray {
+  background: #e9e9e9;
+}
+.br-swatch-dark {
+  background: #2b2f33;
+}
+.br-swatch-black {
+  background: #000000;
+}
+.br-swatch-text-auto {
+  background: linear-gradient(135deg, #ffffff 50%, #333333 50%);
+}
+.br-swatch-text-ink {
+  background: #1a1a1a;
+}
+.br-swatch-text-gray {
+  background: #555555;
+}
+.br-swatch-text-sepia {
+  background: #6b4f2a;
+}
+.br-swatch-text-white {
+  background: #ffffff;
+  border-color: var(--fg-dim);
+}
+
+.br-opt-reset-all {
+  width: 100%;
+}
+
+/* ---- 阅读区 ---- */
+
+.br-stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  padding: var(--br-page-margin, 24px);
+  /* 屏幕亮度：只作用于阅读区（不把工具栏与面板标题一起压暗）。 */
+  filter: brightness(var(--br-brightness, 1));
+  outline: none;
+  overscroll-behavior: contain;
+}
+
+.br-stage-scroll {
+  overflow: auto;
+}
+
+.br-stage-paged {
+  overflow: hidden;
+}
+
+.br-flow {
+  /* 栏宽上限：`--br-max-width` 是"占面板宽度的百分比"，居中显示。 */
+  max-width: var(--br-max-width, 100%);
+  margin: 0 auto;
+  transition: transform 0.18s ease;
+}
+
+.br-stage-paged .br-flow {
+  height: 100%;
+  max-width: none;
+  /* 分页：固定高度 + 固定栏宽 ⇒ 浏览器把内容横向排成若干栏，翻页 = 平移一栏。 */
+  column-width: var(--br-page-width, 400px);
+  column-gap: var(--br-column-gap, 32px);
+  column-fill: auto;
+  will-change: transform;
+}
+
+.br-content {
+  /* 阅读器用自己的字号/行距（查看器那套是按面板宽度自适应的）。 */
+  column-count: 1;
+  font-size: var(--br-font-size, 20px);
+  line-height: var(--br-line-height, 1.7);
+  letter-spacing: var(--br-letter-spacing, 0);
+  overflow-wrap: break-word;
+}
+
+.br-stage-paged .br-content {
+  height: 100%;
+}
+
+.br-content .vr-paragraph,
+.br-content .vr-heading,
+.br-content .vr-list,
+.br-content .vr-quote {
+  margin-bottom: var(--br-paragraph-spacing, 12px);
+}
+
+/* 文字对齐（`default` = 不动，交给格式自己的排版） */
+.br-align-justify .br-content {
+  text-align: justify;
+}
+.br-align-start .br-content {
+  text-align: start;
+}
+.br-align-center .br-content {
+  text-align: center;
+}
+
+/* 字体：只用系统字体栈（不捆绑字体文件，D20）。 */
+.br-font-system .br-content {
+  font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.br-font-serif .br-content {
+  font-family: "Songti SC", SimSun, "Noto Serif CJK SC", serif;
+}
+.br-font-sans .br-content {
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+}
+.br-font-kai .br-content {
+  font-family: KaiTi, STKaiti, "Kaiti SC", serif;
+}
+.br-font-mono .br-content {
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+}
+
+/* 背景与文字颜色预设（成对出现，保证对比度）。 */
+.br-bg-paper {
+  background: #ffffff;
+  color: #1a1a1a;
+}
+.br-bg-sepia {
+  background: #f4ecd8;
+  color: #4a3b28;
+}
+.br-bg-green {
+  background: #cce8cf;
+  color: #1f3a24;
+}
+.br-bg-gray {
+  background: #e9e9e9;
+  color: #23272b;
+}
+.br-bg-dark {
+  background: #2b2f33;
+  color: #dfe3e6;
+}
+.br-bg-black {
+  background: #000000;
+  color: #cfd3d6;
+}
+
+/* 文字颜色预设覆盖背景类给的颜色（`auto` 不设规则 = 跟随背景）。 */
+.br-text-ink .br-content {
+  color: #1a1a1a;
+}
+.br-text-gray .br-content {
+  color: #555555;
+}
+.br-text-sepia .br-content {
+  color: #6b4f2a;
+}
+.br-text-white .br-content {
+  color: #ffffff;
+}
+
+.br-content .vr-image {
+  /* 阅读器的正文图片按栏宽自适应（查看器的 70vh 上限在分页模式下会顶破一页）。 */
+  max-height: none;
+}
+
+.br-pager {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  opacity: 0.9;
+}
+
+/* ---- 底部进度 ---- */
+
+.br-footer {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 3px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.br-footer-item {
+  color: var(--fg-dim);
+  display: inline-flex;
+  gap: 4px;
+}
+
+.br-footer-item b {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.br-footer-note {
+  margin-left: auto;
+}
+
 /* ===== 黑暗模式（深色） ===== */
 
 .app-root.theme-dark {

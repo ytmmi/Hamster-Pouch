@@ -2,7 +2,7 @@
  * 面板注册表（RFC 0010 决策 4 / `docs/spec/panel-standard.md`）。
  *
  * 「面板」是 dockview 承载单元与功能边界（蓝图节点枚举 `control`），**可注册**：
- * 宿主内置 15 个 + 插件注册项（`plugin.<plugin_id>.<local_id>`）。它与「控件」
+ * 宿主内置 16 个 + 插件注册项（`plugin.<plugin_id>.<local_id>`）。它与「控件」
  * （面板**内部**的 26 种宿主 UI 单元，`docs/spec/control-standard.md`）**不是一回事**。
  *
  * 声明是**纯数据**：不含代码、样式、像素布局或任意表达式；`origin` 由宿主按实际安装方式
@@ -114,7 +114,7 @@ export interface PanelSpec {
   category: PanelCategory;
   /** **有无类目**：该面板能否挂「类目」节点（第 5.1 节）。 */
   hasClass: boolean;
-  /** 该面板在蓝图里由哪种节点承载（内置 15 个均为 `control`）。 */
+  /** 该面板在蓝图里由哪种节点承载（内置 16 个均为 `control`）。 */
   blueprintNode: string;
   /** 面板自身设置项（供「全部设置 → 面板」按面板分节渲染）。 */
   settings?: readonly PanelSettingDecl[];
@@ -151,7 +151,7 @@ export function isValidPanelId(id: string): boolean {
   return isBareId(id) || isPluginNamespacedId(id);
 }
 
-// ============================== 内置 15 个面板 ==============================
+// ============================== 内置 16 个面板 ==============================
 
 /** 宿主内置面板 id（封闭清单）。 */
 export const BUILTIN_PANEL_IDS = [
@@ -161,6 +161,7 @@ export const BUILTIN_PANEL_IDS = [
   "media",
   "bookpreview",
   "viewer",
+  "bookreader",
   "imageviewer",
   "metadata",
   "tags",
@@ -180,7 +181,7 @@ export type PanelId = BuiltinPanelId | `plugin.${string}`;
 const SYSTEM_ORIGIN: PanelOrigin = { kind: "system" };
 
 /**
- * 宿主内置 15 个面板的声明（顺序即 `PANEL_IDS` 顺序）。
+ * 宿主内置 16 个面板的声明（顺序即 `PANEL_IDS` 顺序）。
  *
  * `has_class` 如实反映当前默认蓝图：**媒体预览（`media`）与图书预览（`bookpreview`）
  * 有类目**（前者图像 / 视频 / 音频，后者文本类的 epub / txt / md + book 标记），
@@ -312,6 +313,138 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
     ],
   },
   {
+    id: "bookreader",
+    titleKey: "panel.bookreader",
+    category: "media",
+    // **无类目**：阅读器不按条目分类（与 `viewer` 同款）；读者挑书在图书预览里做。
+    hasClass: false,
+    blueprintNode: "control",
+    origin: SYSTEM_ORIGIN,
+    // 首次打开的建议尺寸：比查看器大一些——阅读需要行宽，窄面板下"页宽/字号"都退化成摆设。
+    defaultSize: { width: 900, height: 700 },
+    // 面板设置（第 5.3 节）：**阅读选项**的 12 项（用户 2026-10-16 口径，逐项对应参考图）。
+    // 取值域与 `panels/bookreader/readerView.ts` 的枚举**逐项对齐**（`pnpm check:panels` 断言）；
+    // 数值项的范围由面板夹紧（声明层没有 min/max，与 `media.imageSize` 同一处置）。
+    // `divider_before` 把它们分成四组（翻页 / 配色 / 排版 / 字体与对齐），组间在「全部设置」里画横线。
+    settings: [
+      {
+        key: "viewMode",
+        kind: "select",
+        title_key: "bookreader.option.viewMode",
+        // 缺省**连续滚动**：与查看器的既有观感一致（分页是增强，不是默认）。
+        default: "scroll",
+        options: [
+          { value: "scroll", title_key: "bookreader.option.viewMode.scroll" },
+          { value: "page", title_key: "bookreader.option.viewMode.page" },
+          { value: "spread", title_key: "bookreader.option.viewMode.spread" },
+        ],
+      },
+      {
+        // 背景预设（封闭清单：面板按预设套 CSS 类，不落任意色值）。
+        key: "bg",
+        kind: "select",
+        title_key: "bookreader.option.bg",
+        default: "paper",
+        divider_before: true,
+        options: [
+          { value: "paper", title_key: "bookreader.option.bg.paper" },
+          { value: "sepia", title_key: "bookreader.option.bg.sepia" },
+          { value: "green", title_key: "bookreader.option.bg.green" },
+          { value: "gray", title_key: "bookreader.option.bg.gray" },
+          { value: "dark", title_key: "bookreader.option.bg.dark" },
+          { value: "black", title_key: "bookreader.option.bg.black" },
+        ],
+      },
+      {
+        // 文字颜色预设；`auto` = 跟随背景（默认，保证对比度）。
+        key: "text",
+        kind: "select",
+        title_key: "bookreader.option.text",
+        default: "auto",
+        options: [
+          { value: "auto", title_key: "bookreader.option.text.auto" },
+          { value: "ink", title_key: "bookreader.option.text.ink" },
+          { value: "gray", title_key: "bookreader.option.text.gray" },
+          { value: "sepia", title_key: "bookreader.option.text.sepia" },
+          { value: "white", title_key: "bookreader.option.text.white" },
+        ],
+      },
+      {
+        // 字号（px）：12–48，范围由面板夹紧（`readerView.READER_FONT_SIZE`）。
+        key: "fontSize",
+        kind: "numberInput",
+        title_key: "bookreader.option.fontSize",
+        default: 20,
+        divider_before: true,
+      },
+      {
+        // 行间距按**百分比**存（170 = 1.7 倍）：行高是字号的比例，百分比是唯一的无量纲写法。
+        key: "lineHeight",
+        kind: "numberInput",
+        title_key: "bookreader.option.lineHeight",
+        default: 170,
+      },
+      {
+        key: "pageMargin",
+        kind: "slider",
+        title_key: "bookreader.option.pageMargin",
+        default: 24,
+      },
+      {
+        // 正文栏最大宽度占面板宽度的百分比（100 = 铺满）。
+        key: "pageWidth",
+        kind: "slider",
+        title_key: "bookreader.option.pageWidth",
+        default: 100,
+      },
+      {
+        key: "letterSpacing",
+        kind: "slider",
+        title_key: "bookreader.option.letterSpacing",
+        default: 0,
+      },
+      {
+        key: "paragraphSpacing",
+        kind: "slider",
+        title_key: "bookreader.option.paragraphSpacing",
+        default: 12,
+      },
+      {
+        key: "brightness",
+        kind: "slider",
+        title_key: "bookreader.option.brightness",
+        default: 100,
+      },
+      {
+        // 字体：**只用系统字体栈**（D20：不把字体目录变成运行期前提，也不捆绑字体文件）。
+        key: "fontFamily",
+        kind: "select",
+        title_key: "bookreader.option.fontFamily",
+        default: "system",
+        divider_before: true,
+        options: [
+          { value: "system", title_key: "bookreader.option.fontFamily.system" },
+          { value: "serif", title_key: "bookreader.option.fontFamily.serif" },
+          { value: "sans", title_key: "bookreader.option.fontFamily.sans" },
+          { value: "kai", title_key: "bookreader.option.fontFamily.kai" },
+          { value: "mono", title_key: "bookreader.option.fontFamily.mono" },
+        ],
+      },
+      {
+        key: "textAlign",
+        kind: "select",
+        title_key: "bookreader.option.textAlign",
+        default: "default",
+        options: [
+          { value: "default", title_key: "bookreader.option.textAlign.default" },
+          { value: "justify", title_key: "bookreader.option.textAlign.justify" },
+          { value: "start", title_key: "bookreader.option.textAlign.start" },
+          { value: "center", title_key: "bookreader.option.textAlign.center" },
+        ],
+      },
+    ],
+  },
+  {
     id: "imageviewer",
     titleKey: "panel.imageviewer",
     category: "media",
@@ -395,7 +528,14 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
       },
     ],
   },
-  { id: "metadata", titleKey: "panel.metadata", category: "info", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
+  {
+    id: "metadata",
+    titleKey: "panel.metadata",
+    category: "info",
+    hasClass: false,
+    blueprintNode: "control",
+    origin: SYSTEM_ORIGIN,
+  },
   { id: "tags", titleKey: "panel.tags", category: "info", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "tagtable", titleKey: "panel.tagtable", category: "info", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   {
@@ -427,7 +567,7 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
   { id: "blueprint", titleKey: "panel.blueprint", category: "system", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
 ];
 
-/** 规范面板 ID 列表（内置 15 个；插件面板不进这张常量表，走运行时注册表）。 */
+/** 规范面板 ID 列表（内置 16 个；插件面板不进这张常量表，走运行时注册表）。 */
 export const PANEL_IDS: readonly PanelId[] = BUILTIN_PANEL_IDS;
 
 /** 面板 ID → 标题翻译键（内置；插件面板用 `panelTitleKeyOf`）。 */
@@ -488,7 +628,7 @@ export function unregisterPluginPanels(pluginId?: string): void {
   bumpPanels();
 }
 
-/** 全部已注册面板（内置 15 个 + 插件项）。 */
+/** 全部已注册面板（内置 16 个 + 插件项）。 */
 export function allPanels(): readonly PanelSpec[] {
   return pluginPanels.length === 0 ? BUILTIN_PANEL_SPECS : [...BUILTIN_PANEL_SPECS, ...pluginPanels];
 }

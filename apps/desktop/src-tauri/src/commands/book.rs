@@ -34,6 +34,7 @@
 //! 而封面是"这本书的属性"，不该因为用户整理文件就变成坏图。
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use hp_core::{HpError, HpResult, MediaType};
 use hp_dto::{
@@ -46,6 +47,10 @@ use tauri::State;
 use crate::commands::shared::{
     api_async, api_from_hp, lock_repo, open_repo, open_repo_mut, resolve_file_path, ApiAsync,
 };
+// 阅读器一侧的取数（目录 + 整本正文缓存）拆在 `book_reader.rs`：`book.rs` 已经承担
+// 元数据 / 正文分页 / 封面覆盖三件事，再加这两件会越过"单文件 ≤ 1200 行"的红线。
+// 正文分页复用那里的**整本缓存**（见 `book_reader.rs` 的模块文档）。
+use crate::commands::book_reader::{reader_text_key, with_reader_text, ReaderCtx, ReaderTextCache};
 use crate::AppState;
 
 /// `book.meta` 返回体。
@@ -478,20 +483,19 @@ fn read_page_by_media_type(
     src_path: &Path,
     ext: &str,
     offset: u32,
-    cache: &hp_media::ThumbnailCache,
-    hash: &str,
+    ctx: &ReaderCtx<'_>,
 ) -> HpResult<BookContentResult> {
     // PDF 先判**媒体类型**：`%PDF-` 兜底认出来的 PDF 可能带任意扩展名。
     if media_type == MediaType::Pdf {
-        return read_pdf_page(src_path, offset, cache, hash);
+        return read_pdf_page(src_path, offset, ctx.cache, ctx.hash);
     }
     match ext {
-        "epub" => read_epub_page(src_path, offset, cache, hash),
+        "epub" => read_epub_page(src_path, offset, ctx.cache, ctx.hash),
         // `md` / `markdown`：**渲染**成类型化块（与 epub 同一套块模型，
         // 因此前端只有一份渲染器）。
-        "md" | "markdown" => read_markdown_page(src_path, offset, cache, hash),
-        // 其余文本（`txt` 与认不出的文本扩展名）：纯文本通路。
-        _ => read_text_page(src_path, offset),
+        "md" | "markdown" => read_markdown_page(src_path, offset, ctx.cache, ctx.hash),
+        // 其余文本（`txt` 与认不出的文本扩展名）：纯文本通路（**整本**解码 + 缓存）。
+        _ => read_text_page(src_path, offset, ctx.text_cache, ctx.text_key),
     }
 }
 
@@ -515,18 +519,21 @@ pub(crate) async fn book_content(
 
     let outcome = async {
         // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard。
-        let (src_path, media_type, content_hash, cache) = {
+        let (src_path, media_type, content_hash, cache, text_cache, text_key) = {
             let guard = lock_repo(&state)?;
             let db = open_repo(&guard)?;
             let file = db
                 .get_file(&file_id)?
                 .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
             let src_path = resolve_file_path(db, &file)?;
+            let text_key = reader_text_key(&repo_id, &file_id, file.content_hash.as_deref());
             (
                 src_path,
                 file.media_type,
                 file.content_hash,
                 (*state.thumb_cache).clone(),
+                state.book_text.clone(),
+                text_key,
             )
         };
 
@@ -547,8 +554,15 @@ pub(crate) async fn book_content(
 
         // 整本读盘 / 解压放在阻塞线程（大 epub 与 24 MB 的 txt 都不能占着 IPC 线程；
         // PDF 还要真的把一页画出来，实测 25–156 ms，更不能占 IPC 线程）。
+        // `ReaderCtx` 在闭包内构造，理由见 `book_toc` 的同款注释。
         let read = tauri::async_runtime::spawn_blocking(move || {
-            read_page_by_media_type(media_type, &src_path, &ext, offset, &cache, &hash)
+            let ctx = ReaderCtx {
+                cache: &cache,
+                text_cache: &text_cache,
+                hash: &hash,
+                text_key: &text_key,
+            };
+            read_page_by_media_type(media_type, &src_path, &ext, offset, &ctx)
         })
         .await
         .map_err(|e| HpError::Io(format!("正文读取线程异常: {e}")))??;
@@ -574,26 +588,39 @@ fn empty_content() -> BookContentResult {
     }
 }
 
-/// 纯文本一页：判编码 → 解码开头 → 按字符偏移切页。
-pub(crate) fn read_text_page(src_path: &Path, offset: u32) -> HpResult<BookContentResult> {
-    // 解码到「偏移 + 一页 **+ 1**」为止：多要一个字符才判得出"本页之后还有内容"。
-    // 只解码到 `offset + 一页` 的话，`page_at` 看到的正好是末尾，
-    // `next_offset` 恒为 `None`——"还有下一页"这件事就永远发现不了。
-    let want = offset as usize + hp_book::TEXT_PAGE_CHARS + 1;
-    let decoded = hp_book::decode_file_head(src_path, want)?;
-    let page = hp_book::page_at(&decoded.text, offset as usize, hp_book::TEXT_PAGE_CHARS);
-    Ok(BookContentResult {
-        format: "text".into(),
-        encoding: Some(decoded.encoding.name().to_string()),
-        text: Some(page.text),
-        blocks: None,
-        next_cursor: page.next_offset.map(|n| n.to_string()),
-        section: 0,
-        section_count: None,
-        title: None,
-        // 本页之后还有内容、或解码时就被上限截断，都算"仅显示开头"。
-        capped: decoded.capped || page.next_offset.is_some(),
-    })
+/// 纯文本一页：**整本**解码（带单本缓存）→ 按字符偏移切页。
+///
+/// **与查看器共用同一条实现**（2026-10-16）：`book.content` 对纯文本只回一页，
+/// 因此查看器与阅读器的差别只在"怎么请求"，不在"怎么切页"。字节上限由
+/// [`READER_MAX_BYTES`] 给出并带缓存——查看器因此也顺带受益：能继续往下翻，
+/// 且第一页之后不再重复解码。
+pub(crate) fn read_text_page(
+    src_path: &Path,
+    offset: u32,
+    text_cache: &Mutex<Option<ReaderTextCache>>,
+    text_key: &str,
+) -> HpResult<BookContentResult> {
+    // 切页在**闭包内**完成：不把整本正文拷出缓存（一本 24 MB 的 txt 拷一次就是 24 MB）。
+    with_reader_text(
+        text_cache,
+        text_key,
+        src_path,
+        |text, encoding, byte_capped| {
+            let page = hp_book::page_at(text, offset as usize, hp_book::TEXT_PAGE_CHARS);
+            BookContentResult {
+                format: "text".into(),
+                encoding: Some(encoding.to_string()),
+                text: Some(page.text),
+                blocks: None,
+                next_cursor: page.next_offset.map(|n| n.to_string()),
+                section: 0,
+                section_count: None,
+                title: None,
+                // 本页之后还有内容、或解码时就被上限截断，都算"仅显示开头"。
+                capped: byte_capped || page.next_offset.is_some(),
+            }
+        },
+    )
 }
 
 /// Markdown 一页：解码 → 解析成类型化块 → 按**块**切页。

@@ -120,8 +120,8 @@ check(
   titleMismatch.map((s) => `${s.id}: ${config.PANEL_TITLES[s.id]} != ${s.titleKey}`).join(" | "),
 );
 check(
-  "内置面板恰好 15 个",
-  builtinIds.length === 15,
+  "内置面板恰好 16 个",
+  builtinIds.length === 16,
   `实际 ${builtinIds.length}`,
 );
 
@@ -168,7 +168,7 @@ for (const spec of config.BUILTIN_PANEL_SPECS) {
 check(
   "control.panel_id ↔ 面板注册表 blueprint_node 双向一致",
   carrierProblems.length === 0,
-  carrierProblems.join(" | ") || "15 个面板全部指向 control，且 control 允许 panel_id",
+  carrierProblems.join(" | ") || "16 个面板全部指向 control，且 control 允许 panel_id",
 );
 
 // 面板设置里 `select` 必须有候选（否则「全部设置」渲染不出、后端也拒写）。
@@ -2943,7 +2943,7 @@ const afterRegister = config.allPanels().map((p) => p.id);
 const registeredOk =
   afterRegister.includes(pluginPanelId) &&
   config.panelTitleKeyOf(pluginPanelId) === "plugin.palette.panel" &&
-  // 组件表的**动态注册路径**：面板项清单由注册表派生（不是写死的 15 项），
+  // 组件表的**动态注册路径**：面板项清单由注册表派生（不是写死的 16 项），
   // dockview 组件表也走订阅版（插件注册/卸载后重建）。
   /pluginRegisteredPanels\(\)/.test(registrySource) &&
   /export function useDockComponents/.test(registrySource) &&
@@ -2958,7 +2958,7 @@ config.unregisterPluginPanels("dev.hamsterpouch.palette");
 const afterUnregister = config.allPanels().map((p) => p.id);
 check(
   "插件卸载后注册项消失（节点与边由蓝图侧按「未接通」保留，不在此删除用户数据）",
-  !afterUnregister.includes(pluginPanelId) && afterUnregister.length === 15,
+  !afterUnregister.includes(pluginPanelId) && afterUnregister.length === 16,
   `panels=${afterUnregister.length}`,
 );
 
@@ -3960,9 +3960,9 @@ check(
       // 按扩展名分流会把它当 GBK 文本解码（满屏乱码）。
       /fn read_page_by_media_type\(/.test(bridge) &&
         /if media_type == MediaType::Pdf \{\s*\n\s*return read_pdf_page/.test(bridge) &&
-        /read_page_by_media_type\(media_type, &src_path, &ext, offset, &cache, &hash\)/.test(
-          bridge,
-        ) &&
+        // 调用点把 `ReaderCtx`（正文缓存 + 落盘缓存）整体传下去：2026-10-16 起
+        // 阅读器的整本缓存与查看器共用同一条分页实现。
+        /read_page_by_media_type\(media_type, &src_path, &ext, offset, &ctx\)/.test(bridge) &&
         /fn read_pdf_page\(/.test(bridge) &&
         /hp_pdf::render_page_jpeg/.test(bridge) &&
         /hp_pdf::PDF_PAGE_WIDTH/.test(bridge) &&
@@ -4018,6 +4018,234 @@ check(
       readFileSync(join(ROOT, "apps/desktop/src/app_ui/i18n/zh-CN.ts"), "utf8"),
     ) &&
     /viewer\.pageOf/.test(readFileSync(join(ROOT, "apps/desktop/src/app_ui/i18n/en.ts"), "utf8")),
+);
+
+// ============================== 图书阅读器（`panel.bookreader`，2026-10-16）==============================
+//
+// 面板按"单文件 ≤ 1200 行"分文件，断言读**整个家族**（与 `MEDIA_FAMILY_FILES` /
+// `BOOK_FAMILY_FILES` 同口径：**新增文件必须手动登记**，否则断言形同虚设）。
+
+const READER_FAMILY_FILES = [
+  "apps/desktop/src/app_ui/panels/bookreader/BookReaderPanel.tsx",
+  "apps/desktop/src/app_ui/panels/bookreader/ReaderStage.tsx",
+  "apps/desktop/src/app_ui/panels/bookreader/ReaderTocRail.tsx",
+  "apps/desktop/src/app_ui/panels/bookreader/ReaderOptionsRail.tsx",
+  "apps/desktop/src/app_ui/panels/bookreader/ReaderFooter.tsx",
+  "apps/desktop/src/app_ui/panels/bookreader/ReaderMoreMenu.tsx",
+  "apps/desktop/src/app_ui/panels/bookreader/useReaderBook.ts",
+  "apps/desktop/src/app_ui/panels/bookreader/useReaderSettings.ts",
+  "apps/desktop/src/app_ui/panels/bookreader/readerView.ts",
+];
+const readerFamilySrc = READER_FAMILY_FILES.map((p) => readFileSync(join(ROOT, p), "utf8")).join(
+  "\n",
+);
+const readerViewSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/readerView.ts"),
+  "utf8",
+);
+const readerPanelSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/BookReaderPanel.tsx"),
+  "utf8",
+);
+const moreMenuSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderMoreMenu.tsx"),
+  "utf8",
+);
+const bookReaderRust = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/book_reader.rs"),
+  "utf8",
+);
+
+const readerView = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/readerView.ts")).href
+);
+const readerSpec = config.panelSpec("bookreader");
+
+check(
+  "注册表：bookreader 是内置面板（media / 无类目 / control），且声明了 12 项阅读选项",
+  readerSpec !== undefined &&
+    readerSpec.category === "media" &&
+    readerSpec.hasClass === false &&
+    readerSpec.blueprintNode === "control" &&
+    readerSpec.titleKey === "panel.bookreader" &&
+    (readerSpec.settings ?? []).length === 12 &&
+    readerSpec.defaultSize?.width === 900 &&
+    readerSpec.defaultSize?.height === 700,
+  `decls=${(readerSpec?.settings ?? []).map((s) => s.key).join(",") || "（无）"}`,
+);
+
+/** 声明里的 select 候选（缺项给空数组）。 */
+const readerOptions = (key) =>
+  (readerSpec?.settings?.find((s) => s.key === key)?.options ?? []).map((o) => o.value);
+
+check(
+  "bookreader 的 select 候选 ↔ readerView 的枚举逐项一致（翻页 / 背景 / 文字色 / 字体 / 对齐）",
+  eqList(readerOptions("viewMode"), [...readerView.READER_VIEW_MODES]) &&
+    eqList(readerOptions("bg"), [...readerView.READER_BG_PRESETS]) &&
+    eqList(readerOptions("text"), [...readerView.READER_TEXT_PRESETS]) &&
+    eqList(readerOptions("fontFamily"), [...readerView.READER_FONT_FAMILIES]) &&
+    eqList(readerOptions("textAlign"), [...readerView.READER_TEXT_ALIGNS]),
+  `viewMode=${readerOptions("viewMode").join(",")} bg=${readerOptions("bg").join(",")}`,
+);
+
+check(
+  "bookreader 的数值项缺省 ↔ readerView 的范围常量逐项一致（且缺省落在范围内）",
+  (() => {
+    const pairs = [
+      ["fontSize", readerView.READER_FONT_SIZE],
+      ["lineHeight", readerView.READER_LINE_HEIGHT],
+      ["pageMargin", readerView.READER_PAGE_MARGIN],
+      ["pageWidth", readerView.READER_PAGE_WIDTH],
+      ["letterSpacing", readerView.READER_LETTER_SPACING],
+      ["paragraphSpacing", readerView.READER_PARAGRAPH_SPACING],
+      ["brightness", readerView.READER_BRIGHTNESS],
+    ];
+    return pairs.every(([key, range]) => {
+      const decl = readerSpec?.settings?.find((s) => s.key === key);
+      return (
+        decl?.default === range.default &&
+        range.min <= range.default &&
+        range.default <= range.max
+      );
+    });
+  })(),
+  `defaults=${(readerSpec?.settings ?? [])
+    .filter((s) => typeof s.default === "number")
+    .map((s) => `${s.key}:${s.default}`)
+    .join(" ")}`,
+);
+
+check(
+  "readerView 是**零依赖纯逻辑**（无 React / Tauri / 任何 import）——门禁才能直接 import 驱动它",
+  !/from\s+"react"/.test(readerViewSrc) &&
+    !/@tauri-apps/.test(readerViewSrc) &&
+    !/^\s*import\s/m.test(readerViewSrc),
+);
+
+check(
+  "「更多」图标是**矢量**：`<svg>` + 四个 `<rect>`（不得用文字 / 图片 / 字体图标代替）",
+  /export function MoreGridIcon/.test(moreMenuSrc) &&
+    /<svg/.test(moreMenuSrc) &&
+    ([...moreMenuSrc.matchAll(/<rect\b/g)].length === 4) &&
+    // 颜色必须跟随主题（`currentColor`），否则深色主题下图标会消失。
+    /currentColor/.test(readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/styles.css"), "utf8")),
+  `rect=${[...moreMenuSrc.matchAll(/<rect\b/g)].length}`,
+);
+
+check(
+  "「更多」菜单展开的是**内置面板**（目录 / 书签 / 笔记 / 高亮 / 阅读选项），且三项关闭方式齐备",
+  /bookreader\.tab\.\$\{tab\}/.test(readerPanelSrc) &&
+    /bookreader\.options/.test(readerPanelSrc) &&
+    // 再点图标 / 点菜单外 / Esc 三种关闭方式（缺一都会让用户觉得"点不掉"）。
+    /onToggle=/.test(readerPanelSrc) &&
+    /document\.addEventListener\("mousedown"/.test(moreMenuSrc) &&
+    /e\.key === "Escape"/.test(moreMenuSrc),
+);
+
+check(
+  "目录跳转**直接用 `book.toc` 给的游标**（前端不换算——两套坐标漂移会让「点第三章跳到第五章」）",
+  /onJump=\{book\.jumpTo\}/.test(readerPanelSrc) &&
+    /onJump\(entry\.cursor\)/.test(
+      readFileSync(join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderTocRail.tsx"), "utf8"),
+    ) &&
+    /api\.bookToc\(\{ repoId, fileId \}\)/.test(
+      readFileSync(join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/useReaderBook.ts"), "utf8"),
+    ) &&
+    // 反向：目录项游标不得被前端"再加工"（`Number(...)` 只允许出现在**比较**用途）。
+    !/cursor:\s*String\(/.test(readerFamilySrc),
+);
+
+check(
+  "面板接线：走 useReaderSettings / useReaderBook，并把 dockview API 传下去（退出阅读 + 设置热加载）",
+  /useReaderSettings\(panelApi\)/.test(readerPanelSrc) &&
+    /useReaderBook\(\)/.test(readerPanelSrc) &&
+    /panelApi\?\.close\(\)/.test(readerPanelSrc) &&
+    /\{ id: "bookreader", titleKey: "panel\.bookreader", render: \(ctx\) => <BookReaderPanel api=\{ctx\.api\} \/> \}/.test(
+      registrySource,
+    ),
+);
+
+check(
+  "跳章用 `key={游标}` 重新挂载阅读区（滚动位置与当前页一起回到开头，不与渲染竞态）",
+  /key=\{`\$\{fileId \?\? "-"\}:\$\{book\.cursor \?\? "start"\}`\}/.test(readerPanelSrc),
+);
+
+check(
+  "阅读选项是**面板设置**（不新增库表）：12 项都经 setting.set 落 `panel.bookreader.*` 并本地广播",
+  /panelSettingStorageKey\(READER_PANEL_ID, key\)/.test(
+    readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/useReaderSettings.ts"),
+      "utf8",
+    ),
+  ) &&
+    /api\s*\.settingSet\(/.test(
+      readFileSync(
+        join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/useReaderSettings.ts"),
+        "utf8",
+      ),
+    ) &&
+    /publishSettingChanged\(storageKey\)/.test(
+      readFileSync(
+        join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/useReaderSettings.ts"),
+        "utf8",
+      ),
+    ) &&
+    // Rust 侧设置镜像必须同步（否则 `setting.set` 直接拒写，面板上"改了没反应"）。
+    /id: "viewMode"/.test(
+      readFileSync(join(ROOT, "crates/hp-core/src/setting_registry.rs"), "utf8"),
+    ) &&
+    /owner_id: Some\("bookreader"\)/.test(
+      readFileSync(join(ROOT, "crates/hp-core/src/setting_registry.rs"), "utf8"),
+    ),
+);
+
+check(
+  "Rust：`book.toc` 按**媒体类型**分流、返回 `ApiAsync`，且纯文本走整本解码（目录必须覆盖全书）",
+  /pub\(crate\) async fn book_toc\(/.test(bookReaderRust) &&
+    /-> ApiAsync<BookTocResult>/.test(bookReaderRust) &&
+    // PDF 与 epub / md 一样按媒体类型先判，不按扩展名猜。
+    /if media_type == MediaType::Pdf/.test(bookReaderRust) &&
+    /hp_book::read_epub_toc\(/.test(bookReaderRust) &&
+    /hp_book::text_toc\(/.test(bookReaderRust) &&
+    /hp_book::markdown_toc\(/.test(bookReaderRust) &&
+    // 纯文本目录必须基于**整本**（64 MiB 上限 + 单本缓存），否则第 800 章不在目录里。
+    /READER_MAX_BYTES/.test(bookReaderRust) &&
+    /with_reader_text\(/.test(bookReaderRust) &&
+    /fn reader_text_key\(repo_id: &str, file_id: &str, hash: Option<&str>\)/.test(bookReaderRust) &&
+    // 缓存键必须含内容哈希（换内容即失效）。
+    /format!\("\{repo_id\}\|\{file_id\}\|\{\}", hash\.unwrap_or\("-"\)\)/.test(bookReaderRust),
+);
+
+check(
+  "Rust：`hp-book` 的目录解析覆盖 nav / NCX / 兜底与小说章节规则（每条都有单元测试）",
+  (() => {
+    const toc = readFileSync(join(ROOT, "crates/hp-book/src/toc.rs"), "utf8");
+    return (
+      /pub fn read_epub_toc\(/.test(toc) &&
+      /fn nav_entries\(/.test(toc) &&
+      /fn ncx_entries\(/.test(toc) &&
+      /fn spine_titles\(/.test(toc) &&
+      /pub fn text_toc\(/.test(toc) &&
+      /pub fn markdown_toc\(/.test(toc) &&
+      // 防误判的三条约束 + 三类写法都要有测试钉住。
+      /fn txt_prose_that_merely_mentions_chapters_is_not_a_heading/.test(toc) &&
+      /fn txt_volumes_group_chapters_one_level_deeper/.test(toc) &&
+      /fn txt_special_and_english_headings_are_recognized/.test(toc)
+    );
+  })(),
+);
+
+check(
+  "Rust：整本解码的字节上限由调用方给出（阅读器 64 MiB / 查看器沿用 2 MiB），且「恰好等于上限」不算截断",
+  (() => {
+    const text = readFileSync(join(ROOT, "crates/hp-book/src/text.rs"), "utf8");
+    return (
+      /pub fn decode_head_limited\(/.test(text) &&
+      /pub fn decode_file_limited\(/.test(text) &&
+      /pub fn decode_file_head\(/.test(text) &&
+      /fn decode_file_limited_honours_the_caller_byte_cap/.test(text)
+    );
+  })(),
 );
 
 // ============================== 汇总 ==============================

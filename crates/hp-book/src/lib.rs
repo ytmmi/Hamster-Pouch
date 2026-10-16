@@ -30,6 +30,7 @@ mod markdown;
 mod markdown_tests;
 mod meta;
 mod text;
+mod toc;
 mod xml;
 mod zip;
 
@@ -44,9 +45,10 @@ pub use inline::spans_from_html;
 pub use markdown::{blocks_from_markdown, MarkdownRead};
 pub use meta::{read_book_meta, BookMeta};
 pub use text::{
-    decode_file_head, decode_head, detect_encoding, is_strict_utf8, is_utf8_but_maybe_truncated,
-    page_at, trim_to_char_boundary, DecodedText, TextEncoding, TextPage, TEXT_PAGE_CHARS,
-    TEXT_VIEW_MAX_BYTES,
+    decode_file_head, decode_file_limited, decode_head, decode_head_limited, detect_encoding,
+    is_strict_utf8, is_utf8_but_maybe_truncated, page_at, trim_to_char_boundary, DecodedText,
+    TextEncoding, TextPage, TEXT_PAGE_CHARS, TEXT_VIEW_MAX_BYTES,
 };
+pub use toc::{markdown_toc, read_epub_toc, text_toc, TocEntry, TOC_MAX_ENTRIES};
 pub use xml::{decode_xml_bytes, percent_decode, resolve_zip_path};
 pub use zip::{ZipArchive, ZipEntry};

@@ -311,6 +311,124 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &[],
         requires_capability: None,
     },
+    // 图书阅读器（`panel.bookreader.*`）：**阅读选项**的 12 项（2026-10-16）。
+    // 候选与 `packages/config/src/panels.ts` 的 `bookreader.settings`、
+    // `apps/desktop/src/app_ui/panels/bookreader/readerView.ts` 的枚举三方一致
+    // （由 `pnpm check:panels` / `check:settings` 断言）。
+    // 数值项的范围由面板夹紧（声明层没有 min/max），因此这里只镜像 kind。
+    SettingDeclFact {
+        // 翻页方式：连续滚动 / 单页 / 双页。
+        id: "viewMode",
+        owner_kind: "panel",
+        owner_id: Some("bookreader"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["scroll", "page", "spread"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        // 背景预设（封闭清单：面板按预设套 CSS 类，不落任意色值）。
+        id: "bg",
+        owner_kind: "panel",
+        owner_id: Some("bookreader"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["paper", "sepia", "green", "gray", "dark", "black"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        // 文字颜色预设；`auto` = 跟随背景。
+        id: "text",
+        owner_kind: "panel",
+        owner_id: Some("bookreader"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["auto", "ink", "gray", "sepia", "white"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "fontSize",
+        owner_kind: "panel",
+        owner_id: Some("bookreader"),
+        kind: "numberInput",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        // 行间距按**百分比**存（170 = 1.7 倍）。
+        id: "lineHeight",
+        owner_kind: "panel",
+        owner_id: Some("bookreader"),
+        kind: "numberInput",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "pageMargin",
+        owner_kind: "panel",
+        owner_id: Some("bookreader"),
+        kind: "slider",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "pageWidth",
+        owner_kind: "panel",
+        owner_id: Some("bookreader"),
+        kind: "slider",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "letterSpacing",
+        owner_kind: "panel",
+        owner_id: Some("bookreader"),
+        kind: "slider",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "paragraphSpacing",
+        owner_kind: "panel",
+        owner_id: Some("bookreader"),
+        kind: "slider",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "brightness",
+        owner_kind: "panel",
+        owner_id: Some("bookreader"),
+        kind: "slider",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        // 字体（只用系统字体栈；不捆绑字体文件）。
+        id: "fontFamily",
+        owner_kind: "panel",
+        owner_id: Some("bookreader"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["system", "serif", "sans", "kai", "mono"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "textAlign",
+        owner_kind: "panel",
+        owner_id: Some("bookreader"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["default", "justify", "start", "center"],
+        requires_capability: None,
+    },
 ];
 
 /// 按**落库键**查宿主/面板声明（插件项走 manifest 反查，不在此列）。

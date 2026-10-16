@@ -42,6 +42,11 @@ pub(crate) struct AppState {
     pub(crate) ffmpeg_bin: Arc<Option<PathBuf>>,
     pub(crate) ffprobe_bin: Arc<Option<PathBuf>>,
     pub(crate) thumb_cache: Arc<ThumbnailCache>,
+    /// 图书阅读器的**单本纯文本解码缓存**（2026-10-16）。
+    ///
+    /// 一本 24 MB 的 txt 整本解码约几百毫秒，而"翻一页"和"列目录"都要读同一份正文；
+    /// 没有它，阅读器每翻一页都要重解一遍整本。只留一本（阅读器一次只读一本书）。
+    pub(crate) book_text: Arc<Mutex<Option<commands::book_reader::ReaderTextCache>>>,
     /// 媒体子进程（libmpv，单实例常驻，D14）。
     ///
     /// **休眠（2026-09）**：libmpv 播放路径已退役（播放器改走 DOM `<video>`，缺陷
@@ -92,6 +97,7 @@ fn make_state() -> AppState {
         ffmpeg_bin: Arc::new(external_bin("ffmpeg")),
         ffprobe_bin: Arc::new(external_bin("ffprobe")),
         thumb_cache: Arc::new(ThumbnailCache::new(thumb_root)),
+        book_text: Arc::new(Mutex::new(None)),
         media: Arc::new(Mutex::new(None)),
         media_embed: Arc::new(Mutex::new(None)),
         plugin_root: Arc::new(plugin_root),
@@ -213,6 +219,9 @@ fn main() {
             // 查看器的正文取数：txt/md（判编码后按字符分页）与 epub（按章节分页，
             // 章节 XHTML 由 hp-book 转成类型化块——**不返回 HTML**）。
             commands::book::book_content,
+            // 图书阅读器的目录取数（EPUB nav/NCX；txt 内置小说章节规则；md 顶层标题；
+            // pdf 无目录）。游标与 `book_content` 同语义，因此"跳章"就是换一个 cursor。
+            commands::book_reader::book_toc,
             // 封面覆盖（用户口径"txt 右键可以更换封面颜色或自定义图片"）：
             // 批量读（面板一页一次）/ 单读 / 设（颜色或图片）/ 清除（回默认封面）。
             commands::book::book_covers,

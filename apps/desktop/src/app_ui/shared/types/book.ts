@@ -180,3 +180,50 @@ export interface BookCoverItem {
   /** `color` 为 `#rrggbb`；`image` 为**已落盘**的绝对路径。 */
   value: string;
 }
+
+/** `book.toc` 命令参数。 */
+export interface BookTocArgs {
+  repoId: string;
+  fileId: string;
+}
+
+/**
+ * `book.toc` 返回元素：目录的**一项**（图书阅读器的目录栏）。
+ *
+ * `cursor` **就是**随后要传给 `book.content` 的游标——两种格式各自的语义见
+ * [`BookContentArgs.cursor`]：epub 是章节序号、txt 是**字符偏移**、md 是顶层块序号。
+ * "目录跳转"因此只是"把这一项原样交给 `book.content`"，前端不做任何换算。
+ */
+export interface BookTocItem {
+  /**
+   * 章节标题。
+   *
+   * **可能是空串**：EPUB 缺 `<title>` 或那个 `<title>` 不是章节名时如实留空，
+   * 此时界面按 i18n 显示序号（后端不内联用户可见文案）。
+   */
+  title: string;
+  /** 层级（1 = 顶层）；EPUB 取自 nav / NCX 嵌套，Markdown 用标题层级，txt 按「卷」分组。 */
+  level: number;
+  /** 跳转游标（与 `book.content` 的 `cursor` 同语义）。 */
+  cursor: string;
+}
+
+/** `book.toc` 返回：一本书的目录。 */
+export interface BookTocResult {
+  /** `text` / `markdown` / `epub` / `pdf`；空串 = 不是可读的"书"。 */
+  format: string;
+  /**
+   * 目录项（按书内顺序；**可能为空** = 这本书没有目录）。
+   *
+   * 空数组**不是错误**：PDF 里没有章节语义，损坏的书也读不出目录——
+   * 阅读器此时只显示正文，目录栏给空态。
+   */
+  entries: BookTocItem[];
+  /**
+   * **全书总单位数**，供阅读器算进度（`当前游标 / total`）。
+   *
+   * 纯文本 = 字符数、Markdown = 顶层块数；`epub` / `pdf` 为 `null`
+   * （它们的进度用 `BookContentResult` 的 `section` / `section_count`）。
+   */
+  total: number | null;
+}

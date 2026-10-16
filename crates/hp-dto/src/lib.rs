@@ -385,3 +385,45 @@ pub struct BookCoverItem {
     /// `color` 为 `#rrggbb`；`image` 为**已落盘**的绝对路径（供 `convertFileSrc`）。
     pub value: String,
 }
+
+/// `book.toc` 返回元素：目录的**一项**。
+///
+/// 三种格式走同一个返回体（EPUB 取 nav / NCX，纯文本按**内置小说章节规则**识别，
+/// Markdown 取顶层标题）——阅读器因此只有一套目录渲染与跳转。
+#[derive(Serialize, TS, Debug, Clone)]
+pub struct BookTocItem {
+    /// 章节标题。
+    ///
+    /// **可能是空串**：EPUB 缺 `<title>`、或那个 `<title>` 不是章节名时如实留空；
+    /// 前端按 i18n 显示序号（后端不内联用户可见文案）。
+    pub title: String,
+    /// 层级（1 = 顶层）；EPUB 取自 nav / NCX 的嵌套深度，Markdown 用标题层级，
+    /// 纯文本按「卷 / 部 / 集」分组。
+    pub level: u32,
+    /// 跳转游标：**与 `book.content` 的 `cursor` 同语义**
+    /// （epub = 章节序号；txt = 字符偏移；md = 顶层块序号）。
+    /// 阅读器把它原样回传给 `book.content` 即完成跳转。
+    pub cursor: String,
+}
+
+/// `book.toc` 返回：一本书的目录。
+#[derive(Serialize, TS, Debug)]
+pub struct BookTocResult {
+    /// 书的格式：`text` / `markdown` / `epub` / `pdf`；空串 = 不是可读的"书"
+    /// （与 [`BookContentResult::format`] 同口径）。
+    pub format: String,
+    /// 目录项（按书内顺序；可能为空 = 这本书没有目录）。
+    ///
+    /// **空数组不是错误**：PDF 没有目录结构、损坏的书也读不出目录，
+    /// 阅读器此时只显示正文（目录栏给空态）。
+    pub entries: Vec<BookTocItem>,
+    /// **全书总单位数**，供阅读器算进度（`当前游标 / total`）。
+    ///
+    /// - 纯文本 = **字符数**（与 `cursor` 同为字符口径）；
+    /// - Markdown = **顶层块数**（游标是块序号）；
+    /// - `epub` / `pdf` = `None`：它们的进度用 `BookContentResult` 的
+    ///   `section` / `section_count`（章节 / 页码），不由目录接口给。
+    ///
+    /// `None`（而不是 `0`）表示"后端说不出来"：界面显示 `—`，不假装 0%。
+    pub total: Option<u32>,
+}

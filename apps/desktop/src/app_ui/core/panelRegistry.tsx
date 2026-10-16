@@ -1,7 +1,7 @@
 /**
  * 面板注册表 — 面板 id / 标题 / 渲染函数，供 dockview 与菜单共用。
  *
- * **内置 15 个面板**的组件表在 `PANEL_DEFS`（行为与 RFC 0010 之前完全一致）；
+ * **内置 16 个面板**的组件表在 `PANEL_DEFS`（行为与 RFC 0010 之前完全一致）；
  * **插件注册的面板**（`docs/spec/panel-standard.md`）走 `allPanelDefs()` 的动态路径：
  * 宿主按注册表里的声明生成面板项，内部 UI 仍由控件 schema 与宿主白名单决定
  * （`docs/spec/control-standard.md`），插件不得创建自由 React 组件（D44/RFC 0010 决策 2）。
@@ -21,6 +21,7 @@ import type { Translate, TranslationKey } from "../i18n";
 import { AlbumPanel } from "../panels/AlbumPanel";
 import { BlueprintPanel } from "../panels/BlueprintPanel";
 import { BookPreviewPanel } from "../panels/bookpreview/BookPreviewPanel";
+import { BookReaderPanel } from "../panels/bookreader/BookReaderPanel";
 import { ColorPanel } from "../panels/ColorPanel";
 import { ImageViewerPanel } from "../panels/imageviewer/ImageViewerPanel";
 import { MediaPlayerPanel } from "../panels/MediaPlayerPanel";
@@ -53,7 +54,7 @@ export interface PanelDef {
   render: (ctx: PanelRenderCtx) => JSX.Element;
 }
 
-/** 宿主内置 15 个面板（顺序与 `PANEL_IDS` 一致）。 */
+/** 宿主内置 16 个面板（顺序与 `PANEL_IDS` 一致）。 */
 export const PANEL_DEFS: PanelDef[] = [
   { id: "repo", titleKey: "panel.repo", render: () => <RepoPanel /> },
   { id: "sources", titleKey: "panel.sources", render: () => <SourcePanel /> },
@@ -66,6 +67,9 @@ export const PANEL_DEFS: PanelDef[] = [
   { id: "bookpreview", titleKey: "panel.bookpreview", render: (ctx) => <BookPreviewPanel api={ctx.api} /> },
   // 查看器持有面板设置（`viewer.infoBarEnabled`），需要激活状态才凑齐四条热加载触发源。
   { id: "viewer", titleKey: "panel.viewer", render: (ctx) => <ViewerPanel api={ctx.api} /> },
+  // 图书阅读器持有面板设置（`bookreader.*` 的 12 项阅读选项）：既需要激活状态凑齐
+  // 四条热加载触发源，也需要面板 API 实现「退出阅读」（关闭本面板）。
+  { id: "bookreader", titleKey: "panel.bookreader", render: (ctx) => <BookReaderPanel api={ctx.api} /> },
   { id: "imageviewer", titleKey: "panel.imageviewer", render: (ctx) => <ImageViewerPanel api={ctx.api} /> },
   // 元数据面板消费宿主设置（体积单位 / 日期格式），同样需要激活状态凑齐四条热加载触发源。
   { id: "metadata", titleKey: "panel.metadata", render: (ctx) => <MetadataPanel api={ctx.api} /> },
@@ -94,7 +98,7 @@ function pluginPanelDef(spec: PanelSpec): PanelDef {
   };
 }
 
-/** 全部面板项（内置 15 个 + 当前已注册的插件面板）。 */
+/** 全部面板项（内置 16 个 + 当前已注册的插件面板）。 */
 export function allPanelDefs(): PanelDef[] {
   const pluginSpecs = pluginRegisteredPanels();
   return pluginSpecs.length === 0
@@ -126,7 +130,7 @@ export function panelRender(id: string, ctx: PanelRenderCtx): JSX.Element | null
   return def ? def.render(ctx) : null;
 }
 
-/** dockview 组件表（内置 15 个；与 `PANEL_DEFS` 一一对应）。 */
+/** dockview 组件表（内置 16 个；与 `PANEL_DEFS` 一一对应）。 */
 export const DOCK_COMPONENTS: Record<string, FC<IDockviewPanelProps>> = buildComponents(
   PANEL_DEFS,
 );

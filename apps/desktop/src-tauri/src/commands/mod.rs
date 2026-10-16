@@ -4,6 +4,9 @@ pub(crate) mod ai;
 pub(crate) mod album;
 pub(crate) mod blueprint;
 pub(crate) mod book;
+// 图书阅读器一侧的取数（`book.toc` 目录 + 整本正文缓存）：`book.rs` 已承担
+// 元数据 / 正文分页 / 封面覆盖三件事，加上这两件会越过"单文件 ≤ 1200 行"的红线。
+pub(crate) mod book_reader;
 // `book.rs` 的测试独立成文件（`book.rs` 要守住"单文件 ≤ 1200 行"）。
 #[cfg(test)]
 pub(crate) mod book_tests;

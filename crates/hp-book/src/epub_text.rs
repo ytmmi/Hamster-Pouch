@@ -262,7 +262,7 @@ pub fn blocks_from_xhtml(xhtml: &str, chapter_path: &str, archive: &ZipArchive) 
 ///
 /// 只做一层配对（不递归）：标题里不会再套标题。找不到配对结束标签时返回 `None`
 /// （调用方保持原游标，按普通文字继续处理）。
-fn element_inner_text(xhtml: &str, from: usize, name: &str) -> Option<(String, usize)> {
+pub(crate) fn element_inner_text(xhtml: &str, from: usize, name: &str) -> Option<(String, usize)> {
     let closing = format!("</{name}");
     let lower = xhtml[from..].to_ascii_lowercase();
     let rel = lower.find(&closing)?;
@@ -271,8 +271,21 @@ fn element_inner_text(xhtml: &str, from: usize, name: &str) -> Option<(String, u
     Some((xhtml[from..end_start].to_string(), end_gt))
 }
 
+/// 读出章节清单（spine 顺序）、各章路径，以及 OPF 的路径与文本。
+///
+/// OPF 文本一并返回：**目录解析**（`toc.rs` 的 nav / NCX 查找）要用同一份 manifest，
+/// 各读一遍包会让"两处 OPF 口径"迟早漂移。
+pub(crate) struct SpineRead {
+    /// OPF 在包内的路径（相对 href 的解析基准）。
+    pub(crate) opf_path: String,
+    /// OPF 文本。
+    pub(crate) opf: String,
+    /// spine 顺序的章节路径。
+    pub(crate) paths: Vec<String>,
+}
+
 /// 读出章节清单（spine 顺序）与各章路径。
-fn read_spine(archive: &ZipArchive) -> HpResult<Option<(String, Vec<String>)>> {
+pub(crate) fn read_spine(archive: &ZipArchive) -> HpResult<Option<SpineRead>> {
     let Some((opf_path, opf)) = crate::epub::read_opf(archive)? else {
         return Ok(None);
     };
@@ -294,7 +307,11 @@ fn read_spine(archive: &ZipArchive) -> HpResult<Option<(String, Vec<String>)>> {
             paths.push(resolve_zip_path(&opf_path, href));
         }
     }
-    Ok(Some((opf_path, paths)))
+    Ok(Some(SpineRead {
+        opf_path,
+        opf,
+        paths,
+    }))
 }
 
 /// 读一章正文（含章节清单与标题）。
@@ -302,12 +319,13 @@ fn read_spine(archive: &ZipArchive) -> HpResult<Option<(String, Vec<String>)>> {
 /// `section` 越界时按**最后一章**处理（前端滚到底再请求一次不该变成错误态）。
 pub fn read_epub_section(path: &Path, section: u32) -> HpResult<EpubSectionRead> {
     let archive = ZipArchive::open(path)?;
-    let Some((_opf_path, paths)) = read_spine(&archive)? else {
+    let Some(spine) = read_spine(&archive)? else {
         return Err(HpError::Io(format!(
             "EPUB 缺少 OPF 清单：{}",
             path.display()
         )));
     };
+    let paths = spine.paths;
     if paths.is_empty() {
         return Err(HpError::Io(format!(
             "EPUB 的 spine 为空（没有可读章节）：{}",

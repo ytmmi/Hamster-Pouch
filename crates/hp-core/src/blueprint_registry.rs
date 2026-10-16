@@ -102,15 +102,19 @@ pub struct PanelFact {
 ///
 /// 有类目的内置面板：**媒体预览**（`media`，图像 / 视频 / 音频）与
 /// **图书预览**（`bookpreview`，文本类的 epub / txt / md 三个子类 + **PDF** +
-/// book 标记，2026-10-10 用户口径、2026-10-11 加入 PDF）；其余没有条目分类。
+/// book 标记，2026-10-10 用户口径、2026-10-11 加入 PDF）；其余没有条目分类
+/// （2026-10-16 新增的**图书阅读器** `bookreader` 同样没有：它只读书，不分类）。
 /// 内置面板都没收窄 `mount`（三项全开）。
-pub const BUILTIN_PANEL_FACTS: [(&str, bool); 15] = [
+pub const BUILTIN_PANEL_FACTS: [(&str, bool); 16] = [
     ("repo", false),
     ("sources", false),
     ("albums", false),
     ("media", true),
     ("bookpreview", true),
     ("viewer", false),
+    // 图书阅读器（2026-10-16）：完整阅读一本"书"（目录跳转 + 阅读选项）。
+    // **无类目**：它不按条目分类（与 `viewer` 同款），挑书在图书预览里做。
+    ("bookreader", false),
     ("imageviewer", false),
     ("metadata", false),
     ("tags", false),
@@ -125,7 +129,7 @@ pub const BUILTIN_PANEL_FACTS: [(&str, bool); 15] = [
 /// 节点类型注册表：宿主内置 10 种 + 宿主注入的插件注册项 + 面板事实（`has_class`）。
 ///
 /// `builtin_only()` 是 hp-core 的默认形态（crate 不持有"当前有哪些插件"这类宿主状态），
-/// 但它**包含宿主内置 14 个面板的 `has_class` 事实**——那是宿主内置声明，与
+/// 但它**包含宿主内置 16 个面板的 `has_class` 事实**——那是宿主内置声明，与
 /// [`BUILTIN_NODE_SPECS`] 同属编译期常量，不依赖插件。
 /// 命令桥接层再按插件注册表补上插件节点类型与插件面板事实。
 #[derive(Debug, Clone, Default)]
@@ -151,7 +155,7 @@ impl NodeRegistry {
         }
     }
 
-    /// 补上插件注册的面板事实（宿主注入；内置 14 个恒在）。
+    /// 补上插件注册的面板事实（宿主注入；内置 16 个恒在）。
     pub fn with_plugin_panels(mut self, panels: Vec<PanelFact>) -> Self {
         self.plugin_panels = panels;
         self

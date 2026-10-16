@@ -6,7 +6,9 @@
  * - `bookMeta` 的调用方是**图书预览面板**（`panels/bookpreview/`）。只有带 **book 标记**
  *   的条目需要调用它——`epub` 取内嵌封面、**`pdf` 取第一页栅格化**；
  *   `txt` / `md` 没有元数据，面板直接用文件名渲染文字封面（省一次后端往返）；
- * - `bookContent` 的调用方是**查看器面板**（`panels/ViewerPanel.tsx`），按游标分页取正文。
+ * - `bookContent` 的调用方是**查看器面板**（`panels/ViewerPanel.tsx`）与
+ *   **图书阅读器面板**（`panels/bookreader/`），按游标分页取正文；
+ * - `bookToc` 的调用方是**图书阅读器面板**，取章节清单（游标与 `bookContent` 同语义）。
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -19,6 +21,8 @@ import type {
   BookMetaArgs,
   BookMetaResult,
   BookSetCoverArgs,
+  BookTocArgs,
+  BookTocResult,
 } from "../types";
 import { unwrapApi, type ApiResponse } from "./response";
 
@@ -50,6 +54,24 @@ export function bookContent(args: BookContentArgs): Promise<BookContentResult> {
     repoId: args.repoId,
     fileId: args.fileId,
     cursor: args.cursor ?? null,
+  }).then(unwrapApi);
+}
+
+/**
+ * 读取一本书的**目录**（图书阅读器的章节栏）。
+ *
+ * 各格式的来源：`epub` 取 nav（EPUB3）→ NCX（EPUB2）→ 各章 `<title>` 兜底；
+ * `txt` 按**内置小说章节规则**识别标题行；`md` 取顶层标题块；`pdf` **没有目录**。
+ *
+ * 返回项里的 `cursor` **与 `bookContent` 的 cursor 同语义**，"目录跳转"就是把它
+ * 原样传回去——前端不做换算（这是两处游标不漂移的唯一保证）。
+ *
+ * 空目录**不是错误**（PDF / 损坏的书）：调用方给空态即可。
+ */
+export function bookToc(args: BookTocArgs): Promise<BookTocResult> {
+  return invoke<ApiResponse<BookTocResult>>("book_toc", {
+    repoId: args.repoId,
+    fileId: args.fileId,
   }).then(unwrapApi);
 }
 
