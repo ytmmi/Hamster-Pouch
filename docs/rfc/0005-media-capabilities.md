@@ -91,15 +91,24 @@
 > （`crates/hp-media/src/decode.rs` 的 `decode_image_with_ffmpeg`；缩略图 / 调色板 /
 > 感知哈希走有界 `max_dim`，查看器预览走不缩放的 `u32::MAX`。）
 
-### 1. 支持矩阵（三档，按**解码路径**分而不是按"能不能看"分）
+### 1. 支持矩阵（**四档**，按**解码路径**分而不是按"能不能看"分）
 
 | 档 | 格式 | 解码路径 |
 | --- | --- | --- |
 | **进程内**（`image` crate 自带解码器） | jpg / jpeg / jfif / png / apng / gif / bmp / webp / tiff / tif / ico / **tga / dds / exr / hdr / qoi / ff（farbfeld）/ pnm / pam / ppm / pgm / pbm** | `image::open`，**不碰 ffmpeg** |
 | **进程内 + 兜底**（libheif） | avif / heic / heif | 进程内 libheif（libde265 / aom）；超大图或有界请求走 ffmpeg（尺寸分流，≤ 16 MP 进程内） |
+| **进程内栅格化**（`resvg`，D112） | **svg / svgz** | `hp_media::svg` 进程内栅格化（`resvg` + `tiny-skia`），**不碰 ffmpeg**——ffmpeg 对它只有解复用器、没有解码器 |
 | **仅 ffmpeg**（进程内无解码器） | jp2 / j2k / jpf / jpx（JPEG 2000）、jxl（JPEG XL）、psd、pcx、sgi、ras（Sun Raster）、dpx、fits、wbmp、xbm、xpm、jls（JPEG-LS）、pfm、**dib** | `FFMPEG_ONLY_IMAGE_EXTS`，直接走 ffmpeg 有界解码 |
 
-**加粗的是 2026-10-11 新收的格式**（此前 13 个 → 现 **43 个**扩展名）。
+**加粗的是 2026-10-11 新收的格式**（此前 13 个 → 2026-10-11 **43** 个 → 2026-10-16 加 `svgz` 后 **44 个**扩展名）。
+
+**为什么 SVG 要单立一档而不是并进任何一档**（D112）：它三个"都不是"——
+不是"进程内 `image` 能解"（`image` 没有 SVG 解码器），不是"仅 ffmpeg"（ffmpeg 对 SVG
+**没有解码器**，`svg_pipe` 只是解复用器），也不是 libheif 家族。它是**矢量**，
+必须进程内栅格化（`resvg`），且**必须绕过 ffmpeg 快路径**：
+`preview.get` 在生产里恒传 `Some(ffmpeg)`，"有 ffmpeg 就交给 ffmpeg"的写法会让
+SVG 永远走不到栅格化器 —— 表现为 **SVGZ 在查看器里一片空白**
+（`svg` 走 Chromium 原生渲染，看不出问题）。由 `svg_preview_ignores_ffmpeg_fast_path` 钉住。
 
 **"仅 ffmpeg"这一档存在的意义**：这些格式此前**既不入库、也没有解码路径**，
 于是"捆绑 ffmpeg 明明能解，用户却看不到"。两件事必须**同时**做，缺一即为静默失败：
@@ -139,24 +148,46 @@ Netpbm（`P1`–`P7` **且第 3 字节是空白**）、PFM（`PF\n` / `Pf\n`）�
 以下格式**捆绑 ffmpeg 没有解码器**（`-decoders` 查无、或实测解不出），因此本应用
 **不索引、不显示**。若要支持，必须引入新解码依赖（属新决策，不在本次范围）：
 
-| 类别 | 扩展名 | 说明 |
-| --- | --- | --- |
-| **相机 RAW** | `dng` `cr2` `cr3` `nef` `arw` `orf` `rw2` `raf` `pef` `sr2` | ffmpeg **无任何 RAW 静态图解码器**（`-decoders` 里没有 dng / cr2 / …）。需 `rawspeed` / `libraw` 一类库 |
-| **JPEG XR** | `jxr` `wdp` `hdp` | ffmpeg 无解码器；Windows 有系统 codec 但不可依赖（同缺陷 0019 对 WIC 的裁决） |
-| **SVG** | `svg` `svgz` | **有 `svg_pipe` 解复用器、但没有任何 SVG 解码器**——`-loglevel debug` 实测报 `parser not found for codec svg` / `unspecified size`，产物是**空文件**。**注意这正是"读 `-demuxers` 会误判"的反例**：`svg` 在解复用器清单里出现，按清单判定会得出"支持"的错误结论。SVG 的**查看器显示不受影响**（Chromium 原生渲染，走原图路径），缺的只是**缩略图 / 调色板 / 感知哈希** |
-| **XCF / EPS / WMF / EMF** | `xcf` `eps` `wmf` `emf` | ffmpeg 无解码器；且多为矢量 / 分层工程格式，不是位图 |
-| **JBIG / JBIG2** | `jbig` `jbig2` | ffmpeg 无解码器（常见于扫描件 PDF 内部，但那是 PDF 渲染的事，与图片管线无关） |
-| **Apple 图标** | `icns` | ffmpeg 无解码器（`ico` **支持**，走进程内 `image` crate） |
-| **WebP 2** | `webp2` | 实验格式，无解码器 |
+**当前缺口统计（2026-10-16 复核）：6 类 / 21 个扩展名。**
+
+| 类别 | 扩展名 | 个数 | 说明 |
+| --- | --- | --- | --- |
+| **相机 RAW** | `dng` `cr2` `cr3` `nef` `arw` `orf` `rw2` `raf` `pef` `sr2` | 10 | ffmpeg **无任何 RAW 静态图解码器**（`-decoders` 里没有 dng / cr2 / …）。需 `rawspeed` / `libraw` 一类库 |
+| **JPEG XR** | `jxr` `wdp` `hdp` | 3 | ffmpeg 无解码器；Windows 有系统 codec 但不可依赖（同缺陷 0019 对 WIC 的裁决） |
+| **矢量 / 分层工程** | `xcf` `eps` `wmf` `emf` | 4 | ffmpeg 无解码器；且多为矢量 / 分层工程格式，不是位图 |
+| **JBIG / JBIG2** | `jbig` `jbig2` | 2 | ffmpeg 无解码器（常见于扫描件 PDF 内部，但那是 PDF 渲染的事，与图片管线无关） |
+| **Apple 图标** | `icns` | 1 | ffmpeg 无解码器（`ico` **支持**，走进程内 `image` crate） |
+| **WebP 2** | `webp2` | 1 | 实验格式，无解码器 |
+
+> **SVG 已于 2026-10-16 移出本表**（D112）：它此前是这张表里唯一
+> "ffmpeg 不解、但也进不了进程内"的格式；现在由 `resvg` 进程内栅格化接管。
+> 这个位置值得留意——**它是本表里唯一一个被"补上"而不是"等新依赖"的缺口**，
+> 因为矢量栅格化有纯 Rust 实现（`resvg`），而 RAW / JPEG XR 没有。
+>
+> **本表的判定方式**：逐个扩展名查捆绑 ffmpeg 的 `-decoders`（**并核对解复用器**，
+> 防 `svg_pipe` 那类**假阳性**——它在解复用器清单里，却没有任何解码器）。
+> 2026-10-16 复核命令与结论：
+> `ffmpeg -hide_banner -decoders`（561 个解码器）中，上表 21 个扩展名**一个都没有**
+> 对应解码器；`-demuxers` 里也没有它们的条目。
+> 注意 **JPEG XL 的解码器名为 `libjxl`**（不是 `jxl`）、**farbfeld 走进程内**
+> （`image` crate，不在 ffmpeg 表里）——按扩展名直接 grep 会误判这两个为"不支持"。
 
 > **不登记但同样不支持**：动画 / 多帧序列的容器变体（如动画 HEIC 序列）。
 > `preview.get` 与缩略图都只取**单帧**，这是既有口径而非本次缺口。
 
-### 5. 前端取图：白名单取反（2026-10-11）
+### 5. 前端取图：白名单取反（2026-10-11，2026-10-16 补 SVG/SVGZ 之分）
 
 `app_ui/shared/previewUrl.ts` 的 `needsPreview` 由**黑名单**（只列 `heic` / `heif`）
 改为**白名单取反**（只列 Chromium 原生渲染得了的 11 个扩展名，其余全走
 后端 `preview.get`）。
+
+⚠️ **`svg` 在白名单里、`svgz` 刻意不在**（D112）：两者都是矢量，但 Chromium 的
+`<img src>` 只认 `image/svg+xml` 的**未压缩**形式（直接解析 XML）；`svgz` 是 **gzip 流**，
+浏览器拿到的是二进制而**不是 XML** → 画不出来。所以 `svgz` 必须走后端
+（`preview.get` 解压 + 栅格化成 JPEG）。
+**这条正是"白名单取反"的失败方向在起作用**：漏了它只是"多走一次后端"，
+而不是"画出一片空白"——但**后端那一侧必须真的解得开**（见 §1 的 D112 说明：
+`preview.get` 走 ffmpeg 快路径的话，`svgz` 就是一片空白）。
 
 理由是不对称的失败代价：扩容后黑名单会**静默漏项**——新收的 `jp2` / `jxl` / `psd` /
 `pcx` / `tga` / `dds` / `exr` / `qoi` / `pnm` 家族 Chromium 一律渲染不了，
@@ -200,17 +231,26 @@ Netpbm（`P1`–`P7` **且第 3 字节是空白**）、PFM（`PF\n` / `Pf\n`）�
 
 > 完整的判定依据与实测矩阵见上文「图片格式支持边界」；这里只列**结论**，便于查阅。
 > 这些格式**不索引、不显示**，且**不是本次能修的**——要支持必须引入新的解码依赖。
+>
+> **当前合计：6 类 / 21 个扩展名**（2026-10-16，D112 落地后复核）。对照：
+> 已支持 **44 个**扩展名（进程内 22 + libheif 3 + `resvg` 2 + 仅 ffmpeg 17）。
 
-| 缺口 | 扩展名 | 阻塞点 |
-| --- | --- | --- |
-| 相机 RAW | `dng` `cr2` `cr3` `nef` `arw` `orf` `rw2` `raf` `pef` `sr2` | 捆绑 ffmpeg **没有任何 RAW 静态图解码器** |
-| JPEG XR | `jxr` `wdp` `hdp` | ffmpeg 无解码器；Windows 系统 codec 不可依赖（同 0019 对 WIC 的裁决） |
-| SVG 的**缩略图 / 调色板 / 感知哈希** | `svg` `svgz` | ffmpeg **有解复用器、无解码器**（产物为空）。**查看器显示不受影响**（Chromium 原生渲染） |
-| 矢量 / 分层工程格式 | `xcf` `eps` `wmf` `emf` | ffmpeg 无解码器，且本身不是位图 |
-| 扫描件二值压缩 | `jbig` `jbig2` | ffmpeg 无解码器 |
-| Apple 图标 | `icns` | ffmpeg 无解码器（`ico` 支持） |
-| WebP 2 | `webp2` | 实验格式，无解码器 |
+| 缺口 | 扩展名 | 个数 | 阻塞点 |
+| --- | --- | --- | --- |
+| 相机 RAW | `dng` `cr2` `cr3` `nef` `arw` `orf` `rw2` `raf` `pef` `sr2` | 10 | 捆绑 ffmpeg **没有任何 RAW 静态图解码器** |
+| JPEG XR | `jxr` `wdp` `hdp` | 3 | ffmpeg 无解码器；Windows 系统 codec 不可依赖（同 0019 对 WIC 的裁决） |
+| 矢量 / 分层工程格式 | `xcf` `eps` `wmf` `emf` | 4 | ffmpeg 无解码器，且本身不是位图 |
+| 扫描件二值压缩 | `jbig` `jbig2` | 2 | ffmpeg 无解码器 |
+| Apple 图标 | `icns` | 1 | ffmpeg 无解码器（`ico` 支持） |
+| WebP 2 | `webp2` | 1 | 实验格式，无解码器 |
+
+> **SVG / SVGZ 已从此表移除**（D112，2026-10-16）：它曾以"**缩略图 / 调色板 / 感知哈希**
+> 缺失（查看器显示不受影响）"的形式登记在这里，现已由进程内 `resvg` 栅格化补齐，
+> 四项派生数据（缩略图 / 调色板 / 感知哈希 / 全分辨率预览）与位图同口径。
+> **查看器显示**本就由 Chromium 原生渲染 `svg`；`svgz` 则走后端预览
+> （白名单取反，见 §5 与 `previewUrl.ts`）。
 
 > **判定方法本身值得记住**：不能只看 `ffmpeg -demuxers` / `-decoders` 的清单就下结论。
-> `svg` 同时是**假阳性**（在解复用器清单里 → 误判"支持"）与**假阴性**的来源，
+> `svg` 是**假阳性**（在解复用器清单里 → 误判"支持"）的来源，
+> 而按扩展名 grep 又会把 **JPEG XL（解码器名 `libjxl`）** 误判成"不支持"，
 > 唯一可靠的判据是**按本项目真实管线跑一遍**并检查产物。

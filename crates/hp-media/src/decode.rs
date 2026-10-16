@@ -207,13 +207,21 @@ pub(crate) fn decode_image_with_ffmpeg(
 
 /// 解码图片文件：进程内 `image::open` 优先；进程内**没有解码器**的格式走 ffmpeg。
 ///
-/// ## 三类格式，三条路径（判据见 [`is_ffmpeg_only_image`] / [`is_avif_family`]）
+/// ## 四类格式，四条路径（判据见 [`is_ffmpeg_only_image`] / [`is_avif_family`] / [`is_svg`]）
 ///
 /// | 格式 | 路径 | 理由 |
 /// | --- | --- | --- |
+/// | svg / svgz | **进程内 `resvg` 栅格化** | 矢量；ffmpeg **无 SVG 解码器**（有解复用器 `svg_pipe` 但 `-decoders` 查无），`image::open` 也无解码器 |
 /// | jpg/png/webp/gif/bmp/tiff/tga/dds/exr/hdr/qoi/ff/pnm… | **只走进程内**，成功或失败都原样返回 | 结果与旧实现**逐位相同**，扫描期 dHash / 调色板缓存可比性不受影响 |
 /// | avif/heic/heif | 进程内（libheif）优先，失败或有界超大图时 ffmpeg | 尺寸分流，见 [`LIBHEIF_FULL_RES_MAX_MP`] |
 /// | dpx/fits/jls/jp2/jxl/pcx/pfm/ras/sgi/wbmp/xbm/xpm/psd/dib | **直接走 ffmpeg** | `image` crate 没有解码器，试进程内是必然失败的无效动作 |
+///
+/// **SVG 独立成一类**（D111 的第四档，D112 新增）：它既不是"进程内能解"（`image::open`
+/// 返回 `Unsupported`），也**不能**走 ffmpeg 兜底——ffmpeg 对 SVG 是**假阳性**：
+/// `-demuxers` 里有 `svg_pipe`，但按本项目真实管线跑一遍报
+/// `Decoding requested, but no decoder found for: svg`、产物**空文件**。
+/// 因此给它加 ffmpeg 兜底只会得到一个**必然失败的子进程**，这是 `docs/rfc/0005` §4
+/// 记录的教科书反例。
 ///
 /// **为什么第二、三类不给第一类"也加兜底"**：那会把"坏文件报错"变成"坏文件被 ffmpeg
 /// 抢救成功"，属**行为变更**（由 `non_avif_failure_is_not_swallowed_by_ffmpeg` 钉住）。
@@ -228,6 +236,11 @@ pub fn decode_image_fallback(
     // 首次进入即注册 libheif hooks（幂等）：`image::open` 随之可进程内解
     // heic/heif/avif；既有格式不受影响。
     ensure_libheif_hooks();
+
+    // 第四类（D112）：SVG / SVGZ 走进程内栅格化，与 ffmpeg 无关。
+    if crate::svg::is_svg(src) {
+        return crate::svg::rasterize_svg(src, max_dim);
+    }
 
     // 第三类：进程内**根本没有**解码器 → 直接 ffmpeg，不白试一次必然失败的 `image::open`。
     if is_ffmpeg_only_image(src) {
@@ -448,12 +461,14 @@ mod tests {
     ///
     /// 划错了会改变既有行为（坏文件从"报错"变成"被 ffmpeg 抢救"），
     /// 且会让扫描期的 dHash / 调色板缓存不再与旧实现可比。
+    /// **SVG 也在此列**（D112）：它进程内可解（`resvg`），且 ffmpeg **解不了**——
+    /// 给它 ffmpeg 兜底只会得到一个必然失败的子进程。
     #[test]
     fn in_process_capable_formats_are_not_marked_ffmpeg_only() {
         for ext in [
             "jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif", "avif", "heic", "heif",
-            "ico", "svg", "tga", "dds", "exr", "hdr", "qoi", "ff", "pnm", "pam", "ppm", "pgm",
-            "pbm",
+            "ico", "svg", "svgz", "tga", "dds", "exr", "hdr", "qoi", "ff", "pnm", "pam", "ppm",
+            "pgm", "pbm",
         ] {
             let p = Path::new("x").with_extension(ext);
             assert!(
@@ -461,6 +476,10 @@ mod tests {
                 "{ext} 进程内可解，不得划进 ffmpeg-only 表"
             );
         }
+        // 反向：SVG / SVGZ **必须**走进程内栅格化路径（不是 ffmpeg）。
+        assert!(crate::svg::is_svg(Path::new("a.svg")));
+        assert!(crate::svg::is_svg(Path::new("a.SVGZ")));
+        assert!(!crate::svg::is_svg(Path::new("a.png")));
         for ext in [
             "jp2", "jxl", "psd", "pcx", "sgi", "ras", "dpx", "fits", "wbmp", "xbm", "xpm", "dib",
         ] {

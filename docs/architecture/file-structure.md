@@ -341,7 +341,17 @@ HamsterPouch/
                               #     SGI / Sun Raster / DPX / FITS / WBMP / XBM / XPM / JPEG-LS / PFM /
                               #     DIB，2026-10-11 / D111）与 AVIF/HEIC 家族走捆绑 ffmpeg 有界解码；
                               #     判据 `needs_ffmpeg_decode` 是**唯一**入口（三处解码点共用）
-                              #   thumbnail.rs 图片缩略图（WebP 三级降级）+ 视频首帧（JPEG）
+                              #   svg.rs SVG / SVGZ **进程内栅格化**（2026-10-16 / D112）：`resvg`
+                              #     （纯 Rust：`usvg` 解析 + `tiny-skia` 光栅，不开 `system-fonts`）
+                              #     —— ffmpeg 对 SVG **有解复用器 `svg_pipe`、无解码器**，因此
+                              #     `svg` / `svgz` **不进** `FFMPEG_ONLY_IMAGE_EXTS`，走独立第四档；
+                              #     `svgz` 由 `usvg` 按 **gzip 魔数**（1F 8B）解压，与后缀无关；
+                              #     画布有**像素上限 100 MP**（`Pixmap::new` 是 `vec![0; w*h*4]`
+                              #     且**没有可失败分配**，无上限时畸形自声明尺寸会让进程 abort）；
+                              #     尺寸取 `width`/`height`/`viewBox`，全缺时按 CSS 默认 300×300
+                              #   thumbnail.rs 图片缩略图（WebP 三级降级）+ 视频首帧（JPEG）；
+                              #     `generate_image_preview` 的 **SVG 分流必须在 ffmpeg 快路径之前**
+                              #     （生产恒传 Some(ffmpeg)，顺序反了 = SVGZ 在查看器里一片空白）
     hp-book/                  # 电子书元数据 / 封面 / **正文**解析（EPUB = ZIP + OPF；txt/md 需判编码）                              #   自实现最小 ZIP 读取器（zip.rs）+ 极简 XML 取值（xml.rs）+
                               #   EPUB 元数据解析（epub.rs）+ 封面格式判定（cover.rs）+ 格式分发（meta.rs）；
                               #   **正文（2026-10-09 txt/epub；2026-10-10 追加 md 渲染，D100）**：

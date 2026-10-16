@@ -128,7 +128,19 @@ export function BookCoverMenu({
         multiple: false,
         directory: false,
         title: t("book.cover.pickImage"),
-        filters: [{ name: t("book.cover.imageFilter"), extensions: ["jpg", "jpeg", "png", "gif", "webp", "bmp"] }],
+        // 与后端 `COVER_IMAGE_EXTS`（`commands/book.rs`）**对账**，由 `check:panels` 断言。
+        // 后端按 **magic bytes** 认格式（只看内容、不看后缀），所以这里多列 `jpeg`
+        // 不影响落库扩展名（`.jpeg` 内容仍归一成 `jpg`）。
+        // **`svg` 必须在这里**（D112）：后端本来就把 svg 当合法封面（`hp-book` 的
+        // `detect_image_ext` 认 `<svg`），漏在对话框里就是"能力有、用户够不着"。
+        // **`svgz` 刻意不列**：gzip 流不是文本，Chromium 的 `<img>` 画不出来，
+        // 后端 `detect_image_ext` 也认不出（会给出明确报错而不是坏图）。
+        filters: [
+          {
+            name: t("book.cover.imageFilter"),
+            extensions: ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"],
+          },
+        ],
       });
       if (typeof picked === "string" && picked) {
         onClose();

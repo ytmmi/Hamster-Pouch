@@ -282,18 +282,35 @@ fn encode_webp_via_ffmpeg(
 /// 生成**全分辨率** JPEG 预览（`preview.get` 命令，供 Chromium 无法原生解码的
 /// HEIC/HEIF 查看器使用，缺陷 0019）。
 ///
+/// - **SVG / SVGZ**：进程内 `resvg` 栅格化 → JPEG 质量 90（见下）；
 /// - 有 ffmpeg：**ffmpeg 直出 JPEG**（`-q:v 2`，单趟解码 + 编码，libjpeg 级质量 ≈90；
 ///   无中间像素往返，102 MP 也只需数秒）——查看器要能 100% 检视细节；
 /// - 无 ffmpeg（测试夹具等）：进程内解码（仅可解格式）→ JPEG 质量 90。
 ///
 /// **不缩放**：用户 2026-10-06 裁定（不要 2048 有界预览），预览尺寸 = 原始分辨率。
 /// 代价是首次生成耗时与缓存体积按原始分辨率走，之后缓存命中即显示。
+///
+/// ## 为什么 SVG 要在这里就分流（D112）
+///
+/// `generate_preview_via_ffmpeg` 是"一条管线直出 JPEG"的快路径，而**捆绑 ffmpeg 对
+/// SVG 没有解码器**（只有解复用器 `svg_pipe`，见 `docs/rfc/0005` §4）——让它去解 SVG
+/// 是**必然失败**，表现为 `preview.get` 返回 `null`、查看器里"该文件不可用"。
+///
+/// 这一支**必须在 ffmpeg 快路径之前**：生产环境 `preview.get` 传的
+/// `state.ffmpeg_bin` **总是 `Some`**（捆绑 ffmpeg 随包分发），因此
+/// "有 ffmpeg 就交给 ffmpeg"的写法会让 SVG **永远**走不到进程内栅格化。
+/// 两侧后果不对称：`svg` 走原图（Chromium 原生渲染）看不出问题，
+/// 而 `svgz` **必须**走后端预览 —— 漏掉这一支就是"SVGZ 一片空白"。
+/// 由 `svg_preview_ignores_ffmpeg_fast_path` 钉住（传一个**不存在**的 ffmpeg 路径）。
 pub fn generate_image_preview(
     src: &Path,
     output_jpg: &Path,
     ffmpeg_bin: Option<&Path>,
     timeout: Duration,
 ) -> HpResult<()> {
+    if crate::svg::is_svg(src) {
+        return generate_preview_via_image(src, output_jpg, timeout);
+    }
     if let Some(bin) = ffmpeg_bin {
         return generate_preview_via_ffmpeg(src, output_jpg, bin, timeout);
     }
@@ -449,6 +466,12 @@ fn decode_thumbnail_src(
     // 首次进入即注册 libheif hooks（幂等）：heic/heif/avif 可进程内解码，
     // 失败才落 ffmpeg 兜底（见 `decode` 模块文档）。
     crate::decode::ensure_libheif_hooks();
+
+    // SVG / SVGZ（D112）：进程内 `resvg` 栅格化。**不碰 ffmpeg**——ffmpeg 对 SVG
+    // 只有解复用器、没有解码器（`docs/rfc/0005` §4），试它必然失败。
+    if crate::svg::is_svg(src) {
+        return crate::svg::rasterize_svg(src, max_dim);
+    }
 
     // 进程内**根本没有**解码器（JPEG 2000 / JPEG XL / PSD / PCX…）→ 直接 ffmpeg 有界，
     // 不白试一次必然失败的 `ImageReader`。
@@ -665,7 +688,139 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 无 ffmpeg 时，进程内无解码器的格式要给出**点明原因**的错误（不是 panic / 空图）。
+    /// 端到端：SVG 经**进程内 `resvg`** 生成缩略图（D112）。
+    ///
+    /// 这条断言钉住的是"SVG 不只进了扩展名表，而是真的有缩略图"——
+    /// SVG 此前**既不走 ffmpeg、也不走 `image::open`**，两处都必然失败，
+    /// 表现为网格里没有格子。**不依赖 ffmpeg**（证明它确实绕开了 ffmpeg 兜底）。
+    #[test]
+    fn svg_thumbnail_via_in_process_resvg() {
+        let dir = std::env::temp_dir().join(format!("hp-thumb-svg-{}", nanos()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let src = dir.join("sample.svg");
+        std::fs::write(
+            &src,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"><rect width="800" height="600" fill="#3355aa"/></svg>"##,
+        )
+        .expect("写入 SVG 失败");
+        // 前提校验：`image::open` 解不了 SVG，ffmpeg 也没有 SVG 解码器——
+        // 因此本用例走的必然是**新加的第三条路径**（进程内栅格化）。
+        assert!(image::open(&src).is_err(), "SVG 不应能被 image::open 解码");
+
+        let out = dir.join("out.webp");
+        generate_image_thumbnail(&src, &out, 320, None, Duration::from_secs(30))
+            .expect("SVG 缩略图应生成成功（不依赖 ffmpeg）");
+        let head = magic(&out);
+        assert_eq!(&head[8..12], b"WEBP", "缩略图应为 WebP，实际 {head:?}");
+        let thumb = image::open(&out).expect("读取缩略图失败");
+        assert_eq!((thumb.width(), thumb.height()), (320, 240), "800×600 → 长边 320");
+        let rgb = thumb.to_rgb8();
+        let px = *rgb.get_pixel(0, 0);
+        let close = |a: u8, b: u8| a.abs_diff(b) <= 12;
+        assert!(
+            close(px[0], 0x33) && close(px[1], 0x55) && close(px[2], 0xaa),
+            "角像素应为 #3355aa，实际 {px:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 端到端：**SVGZ（gzip）** 同样能出缩略图——按魔数解压，不靠后缀。
+    #[test]
+    fn svgz_thumbnail_via_magic_bytes() {
+        let dir = std::env::temp_dir().join(format!("hp-thumb-svgz-{}", nanos()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let src = dir.join("sample.svgz");
+        // 真实 gzip 压缩（与 `usvg` 的 `svgz` 解码器同源同后端）。
+        {
+            use std::io::Write as _;
+            let f = std::fs::File::create(&src).expect("创建文件失败");
+            let mut gz = flate2::write::GzEncoder::new(f, flate2::Compression::default());
+            gz.write_all(
+                br##"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300"><rect width="400" height="300" fill="#cc3333"/></svg>"##,
+            )
+            .expect("gzip 写入失败");
+            gz.finish().expect("gzip 完成失败");
+        }
+
+        let out = dir.join("out.webp");
+        generate_image_thumbnail(&src, &out, 160, None, Duration::from_secs(30))
+            .expect("SVGZ 缩略图应生成成功");
+        let thumb = image::open(&out).expect("读取缩略图失败");
+        assert_eq!((thumb.width(), thumb.height()), (160, 120));
+        let rgb = thumb.to_rgb8();
+        let px = *rgb.get_pixel(0, 0);
+        let close = |a: u8, b: u8| a.abs_diff(b) <= 12;
+        assert!(
+            close(px[0], 0xcc) && close(px[1], 0x33) && close(px[2], 0x33),
+            "角像素应为 #cc3333，实际 {px:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **全分辨率预览**（缺陷 0019 口径）：SVG 走 `generate_image_preview` 必须出 JPEG。
+    #[test]
+    fn svg_preview_produces_full_size_jpeg() {
+        let dir = std::env::temp_dir().join(format!("hp-prev-svg-{}", nanos()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let src = dir.join("sample.svg");
+        std::fs::write(
+            &src,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><rect width="640" height="480" fill="#227744"/></svg>"##,
+        )
+        .expect("写入 SVG 失败");
+
+        let out = dir.join("preview.jpg");
+        generate_image_preview(&src, &out, None, Duration::from_secs(30))
+            .expect("SVG 预览应生成成功");
+        let head = magic(&out);
+        assert_eq!(&head[0..3], &[0xFF, 0xD8, 0xFF], "预览应为 JPEG，实际 {head:?}");
+        let img = image::open(&out).expect("读取预览失败");
+        assert_eq!((img.width(), img.height()), (640, 480), "预览不缩放");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **生产口径**：`preview.get` 总是传**真实的捆绑 ffmpeg**，而 SVG 必须**绕开**它。
+    ///
+    /// 上一条用例传的是 `None`（无 ffmpeg 的测试夹具口径），那条路径在**生产里永远不走**
+    /// ——`preview_get` 传的 `state.ffmpeg_bin` 随包分发、恒为 `Some`。因此若
+    /// `generate_image_preview` 按"有 ffmpeg 就交给 ffmpeg"写，SVG 会**必然失败**
+    /// （ffmpeg 只有 `svg_pipe` 解复用器、没有解码器），表现为
+    /// **SVGZ 在查看器里一片空白**——而 `svg` 走原图（Chromium 原生渲染），
+    /// 所以这个缺陷只在 svgz 上显形，极易漏掉。
+    ///
+    /// 这里传一个**根本不存在**的 ffmpeg 路径：只要实现还偷偷走 ffmpeg，就必然报
+    /// "启动 ffmpeg 失败"；成功即证明走了进程内 `resvg`。
+    #[test]
+    fn svg_preview_ignores_ffmpeg_fast_path() {
+        let dir = std::env::temp_dir().join(format!("hp-prev-svgz-ff-{}", nanos()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let src = dir.join("sample.svgz");
+        {
+            // 真实 gzip 压缩（`.svgz` 是 Chromium **画不了**的那一半，必须走后端预览）。
+            use std::io::Write as _;
+            let f = std::fs::File::create(&src).expect("创建文件失败");
+            let mut gz = flate2::write::GzEncoder::new(f, flate2::Compression::default());
+            gz.write_all(
+                br##"<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240"><rect width="320" height="240" fill="#227744"/></svg>"##,
+            )
+            .expect("gzip 写入失败");
+            gz.finish().expect("gzip 完成失败");
+        }
+
+        let bogus = dir.join("no-such-ffmpeg.exe");
+        let out = dir.join("preview.jpg");
+        generate_image_preview(&src, &out, Some(&bogus), Duration::from_secs(30))
+            .expect("SVGZ 预览必须绕开 ffmpeg 快路径（传的是不存在的 ffmpeg）");
+        assert_eq!(&magic(&out)[0..3], &[0xFF, 0xD8, 0xFF], "预览应为 JPEG");
+        let img = image::open(&out).expect("读取预览失败");
+        assert_eq!(
+            (img.width(), img.height()),
+            (320, 240),
+            "SVGZ 预览 = SVG 自声明尺寸（不缩放）"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn ffmpeg_only_format_thumbnail_without_ffmpeg_reports_clear_error() {
         let dir = std::env::temp_dir().join(format!("hp-thumb-jp2-noff-{}", nanos()));

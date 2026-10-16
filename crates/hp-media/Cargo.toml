@@ -30,11 +30,25 @@ libheif-rs = { version = "3", features = ["image"], optional = true }
 # 进程内 WebP 编码（D91）。MIT；`vendor/` 内含 libwebp C 源码，构建期由 `cc` 编译，
 # 不依赖系统库、不联网（D20）。默认特性 `parallel` 让 `cc` 并行编译这 176 个 .c。
 libwebp-sys = { version = "0.14", optional = true }
+# SVG / SVGZ **进程内栅格化**（D112）。
+# `svgz`：纯 Rust gzip（`flate2` 的 `rust_backend`），SVGZ 解压由 `usvg::Tree::from_data`
+#   按**魔数**自动处理——不靠 `.svgz` 后缀，改名文件照样能解。
+# `text`：启用文字解析（harfrust 排版）；**刻意不开 `system-fonts` / `memmap-fonts`**
+#   ——不扫系统字体目录、不要求用户装字体（D20：不把用户环境变成运行期前提，
+#   与 `hp-pdf` 的 `hayro` 不引入 pdfium 同一条判据）。
+# `raster-images`：SVG 里 `<image>` 嵌入位图的解码（gif/webp/jpeg），缺它则外链图留空。
+resvg = { version = "0.48.1", default-features = false, features = ["text", "svgz", "raster-images"] }
 
 # 仅 Windows：mpv 的 IPC 命名管道**只有一个句柄**可用，且**同步句柄上的阻塞读会挡住写**
 # （实测：第二次 open 直接 ERROR_PIPE_BUSY；同句柄读线程阻塞时写不出去）。
 # 因此读取必须先 `PeekNamedPipe` 探明可读字节数、只读已就绪的部分，绝不阻塞。
 # 版本与 tauri 2.11 / src-tauri 使用的 windows 0.61 对齐。
+[dev-dependencies]
+# 只在测试里用来**生产真实 gzip 样本**（与 `usvg` 的 `svgz` 解码器同源同后端，
+# 保证"造出来的一定能被解"）；不进生产依赖树。
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+tempfile = "3"
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
   "Win32_Foundation",

@@ -16,6 +16,7 @@ mod palette;
 mod player;
 mod probe;
 mod process;
+mod svg;
 mod thumbnail;
 
 pub use cache::{ThumbFormat, ThumbnailCache};
@@ -27,6 +28,7 @@ pub use palette::{
 };
 pub use player::{MediaProcess, DEFAULT_PIPE_PATH};
 pub use probe::{probe, MediaProbe};
+pub use svg::{is_svg, rasterize_svg, SVG_EXTS};
 pub use thumbnail::{
     extract_thumbnail, generate_image_preview, generate_image_thumbnail, IMAGE_THUMB_MAX_DIM,
     IMAGE_THUMB_WEBP_QUALITY,

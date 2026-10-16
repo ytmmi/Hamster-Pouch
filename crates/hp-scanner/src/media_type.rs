@@ -29,7 +29,12 @@ fn ext_to_media_type(ext: &str) -> Option<MediaType> {
         // - **进程内无解码器** → 进本表 **且** 进 `hp-media` 的
         //   `FFMPEG_ONLY_IMAGE_EXTS`（两处必须同时命中，否则"入库了但解不开"）。
         "jpg" | "jpeg" | "jfif" | "png" | "apng" | "gif" | "bmp" | "webp" | "tiff"
-        | "tif" | "avif" | "heic" | "heif" | "ico" | "svg"
+        | "tif" | "avif" | "heic" | "heif" | "ico"
+        // SVG / SVGZ（D112）：**矢量**，进程内 `resvg` 栅格化（`hp-media::svg`）。
+        // 捆绑 ffmpeg 对 SVG 只有解复用器 `svg_pipe`、**没有解码器**（实测
+        // `no decoder found for: svg`），因此**不**进 `FFMPEG_ONLY_IMAGE_EXTS`——
+        // 那张表的语义是"只能靠 ffmpeg"，而 SVG 恰恰是"ffmpeg 解不了、只能进程内解"。
+        | "svg" | "svgz"
         // 进程内可解、2026-10-11 新收
         | "tga" | "dds" | "exr" | "hdr" | "qoi" | "ff" | "pnm" | "pam" | "ppm" | "pgm"
         | "pbm"
@@ -392,7 +397,7 @@ mod tests {
         // 进程内可解的那批（只需进扩展名表）。
         for ext in [
             "tga", "dds", "exr", "hdr", "qoi", "ff", "pnm", "pam", "ppm", "pgm", "pbm", "apng",
-            "jfif",
+            "jfif", "svg", "svgz",
         ] {
             let p = write_tmp(&format!("a.{ext}"), b"not really an image");
             assert_eq!(
@@ -470,6 +475,20 @@ mod tests {
                 "{name} 不该被内容兜底吸进索引（未知类型不索引）"
             );
         }
+    }
+
+    /// 内容兜底：SVG **没有** magic bytes 判据——`<svg` 会被未知二进制吸进索引。
+    /// 因此 SVG / SVGZ **只认扩展名**（与 `txt` / `md` 同一档口径），改名后认不出是**已知边界**。
+    #[test]
+    fn svg_is_extension_only_no_content_fallback() {
+        let svg = write_tmp("icon.svg", b"<svg xmlns='http://www.w3.org/2000/svg'></svg>");
+        assert_eq!(detect_media_type(&svg), Some(MediaType::Image));
+        // 反向：同样内容但**没有扩展名** → 未知类型，不索引。
+        let noext = write_tmp("renamed-svg", b"<svg xmlns='http://www.w3.org/2000/svg'></svg>");
+        assert_eq!(detect_media_type(&noext), None, "SVG 无扩展名时不该被吸进索引");
+        // 反向：SVGZ 是 gzip，但同样只认扩展名（gzip 不是 SVG 专属魔数）。
+        let svgz = write_tmp("icon.svgz", &[0x1F, 0x8B, 0x08, 0x00]);
+        assert_eq!(detect_media_type(&svgz), Some(MediaType::Image));
     }
 
     /// Netpbm 兜底必须要求第 3 字节是**空白**：否则任意 `P` + 数字开头的未知文件都会被吸进索引。

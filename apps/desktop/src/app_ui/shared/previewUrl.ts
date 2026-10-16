@@ -33,10 +33,16 @@ import * as api from "./api";
  * Chromium `<img>` **原生渲染得了**的图片扩展名（白名单）。
  *
  * 只收实测能在 WebView2 里直接显示的格式：JPEG / PNG（含 APNG）/ GIF / WebP /
- * AVIF / BMP / ICO / SVG。**其余一律走后端预览**——包括 TIFF、HEIC/HEIF，
- * 以及 `hp-scanner` 2026-10-11 新收的 JPEG 2000 / JPEG XL / PSD / PCX / SGI /
- * Sun Raster / DPX / FITS / WBMP / XBM / XPM / JPEG-LS / PFM / DIB / TGA / DDS /
- * EXR / HDR / QOI / farbfeld / Netpbm 家族。
+ * AVIF / BMP / ICO / SVG。**其余一律走后端预览**——包括 **SVGZ**（gzip 压缩的
+ * SVG，Chromium **不**原生渲染，后端 `preview.get` 会解压 + 栅格化成 JPEG）、
+ * TIFF、HEIC/HEIF，以及 `hp-scanner` 2026-10-11 新收的 JPEG 2000 / JPEG XL / PSD /
+ * PCX / SGI / Sun Raster / DPX / FITS / WBMP / XBM / XPM / JPEG-LS / PFM / DIB / TGA /
+ * DDS / EXR / HDR / QOI / farbfeld / Netpbm 家族。
+ *
+ * > **SVG 与 SVGZ 必须分开**（D112）：两者都是矢量，但 Chromium 只认 `image/svg+xml`
+ * > 的**未压缩**形式（`<img src>` 直接解析 XML）。`svgz` 是 gzip 流，浏览器拿到的是
+ * > 二进制而非 XML → 画不出来。因此 `svg` 进白名单、`svgz` 不进——
+ * > 漏一个方向就会变成"SVGZ 一片空白"（白名单取反的失败方向是"多走一次后端"）。
  */
 const NATIVE_RENDER_EXTS = [
   "jpg",

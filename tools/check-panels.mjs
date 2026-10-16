@@ -2426,7 +2426,7 @@ check(
 // 并让扫描期 dHash / 调色板缓存不再与旧实现可比。
 const IN_PROCESS_CAPABLE = [
   "jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif", "avif", "heic", "heif",
-  "ico", "svg", "tga", "dds", "exr", "hdr", "qoi", "ff", "pnm", "pam", "ppm", "pgm", "pbm",
+  "ico", "svg", "svgz", "tga", "dds", "exr", "hdr", "qoi", "ff", "pnm", "pam", "ppm", "pgm", "pbm",
 ];
 check(
   "进程内可解的格式不得进 ffmpeg-only 表（否则坏文件会被 ffmpeg 抢救、缓存口径变更）",
@@ -2458,6 +2458,102 @@ check(
   /selected\.media_type === "image" && needsPreview\(selected\.relative_path\)/.test(
     readFileSync(join(ROOT, "apps/desktop/src/app_ui/panels/ViewerPanel.tsx"), "utf8"),
   ),
+);
+
+// ==================== SVG / SVGZ 的跨语言对账（D112，2026-10-16） ====================
+//
+// SVG 与前几档**都不同**：它是**矢量**，ffmpeg 对它**有解复用器（`svg_pipe`）、
+// 没有解码器**——这正是 D111 记下的假阳性反例。因此三条不变量都必须钉住，
+// 且**每一条破了都是静默失效**（没有报错、只是功能没了或白耗）：
+// - 误收进 ffmpeg-only 表 → 每个 SVG 都白起一个**必然失败**的子进程；
+// - 漏出扫描器扩展名表 → 文件根本不入库；
+// - `svgz` 混进前端原生渲染白名单 → 查看器画**一片空白**（gzip 流不是 XML）。
+// 外加依赖侧：`resvg` 必须仍是**纯 Rust + 不开系统字体**（D20 的"不把用户环境
+// 变成运行期前提"，与 D110 不引 pdfium 同一条判据）。
+const svgSrcForFormats = readFileSync(join(ROOT, "crates/hp-media/src/svg.rs"), "utf8");
+const thumbnailSrcForFormats = readFileSync(
+  join(ROOT, "crates/hp-media/src/thumbnail.rs"),
+  "utf8",
+);
+const hpMediaCargoSrc = readFileSync(join(ROOT, "crates/hp-media/Cargo.toml"), "utf8");
+const svgExts = rustStrArray(svgSrcForFormats, "SVG_EXTS");
+
+check(
+  "Rust：SVG / SVGZ 在扫描器扩展名表（入库）且**不在** ffmpeg-only 表（ffmpeg 对它无解码器）",
+  svgExts !== null &&
+    svgExts.size === 2 &&
+    scannerExts !== null &&
+    [...svgExts].every((e) => scannerExts.has(e)) &&
+    ffmpegOnly !== null &&
+    [...svgExts].every((e) => !ffmpegOnly.has(e)),
+  `svgExts=${[...(svgExts ?? [])].join(",")} 未入库=${[...(svgExts ?? [])]
+    .filter((e) => !(scannerExts ?? new Set()).has(e))
+    .join(",")} 误收=${[...(svgExts ?? [])]
+    .filter((e) => (ffmpegOnly ?? new Set()).has(e))
+    .join(",")}`,
+);
+
+check(
+  "前端：`svg` 进原生渲染白名单、`svgz` 刻意不进（gzip 流 Chromium 画不出来，必须走 preview.get）",
+  nativeRender !== null && nativeRender.has("svg") && !nativeRender.has("svgz"),
+  `svg=${nativeRender?.has("svg")} svgz=${nativeRender?.has("svgz")}`,
+);
+
+// 顺序不变量：生产 `preview.get` 传的 ffmpeg **恒为 Some**（随包分发），
+// 所以"svg 分流"必须在 ffmpeg 快路径**之前**——反了就是 SVGZ 一片空白。
+check(
+  "Rust：`generate_image_preview` 的 SVG 分流在 ffmpeg 快路径**之前**（顺序反了 = SVGZ 一片空白）",
+  (() => {
+    const at = thumbnailSrcForFormats.indexOf("pub fn generate_image_preview(");
+    if (at < 0) return false;
+    const body = thumbnailSrcForFormats.slice(at, at + 800);
+    const svgAt = body.indexOf("crate::svg::is_svg(src)");
+    const ffAt = body.indexOf("generate_preview_via_ffmpeg(src, output_jpg, bin, timeout)");
+    return svgAt >= 0 && ffAt >= 0 && svgAt < ffAt;
+  })(),
+);
+
+check(
+  "依赖：SVG 栅格化是纯 Rust 且**不开** system-fonts / memmap-fonts（D20：不把用户字体目录变成运行期前提）",
+  /resvg\s*=\s*\{[^}]*default-features\s*=\s*false/.test(hpMediaCargoSrc) &&
+    /resvg\s*=\s*\{[^}]*features\s*=\s*\[[^\]]*"svgz"/.test(hpMediaCargoSrc) &&
+    !/resvg\s*=\s*\{[^}]*"system-fonts"/.test(hpMediaCargoSrc) &&
+    !/resvg\s*=\s*\{[^}]*"memmap-fonts"/.test(hpMediaCargoSrc),
+);
+
+// 封面自选图片：后端 `COVER_IMAGE_EXTS` 是**存得下**的格式，对话框是**够得着**的格式。
+// 两者不一致就是"能力有、用户够不着"（`svg` 正是这样漏掉的，见 D112）。
+// 注意方向：后端**按 magic bytes 归一**扩展名（`.jpeg` 内容存成 `jpg`），
+// 所以对话框多一个 `jpeg` 是对的，不算不对称。
+const coverMenuSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/bookpreview/BookCoverMenu.tsx"),
+  "utf8",
+);
+const coverStoreExts = rustStrArray(
+  readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/book.rs"), "utf8"),
+  "COVER_IMAGE_EXTS",
+);
+const coverFilterExts = (() => {
+  const m = /extensions:\s*\[([^\]]*)\]/.exec(coverMenuSrc);
+  if (!m) return null;
+  return new Set([...m[1].matchAll(/"([a-z0-9]+)"/g)].map((x) => x[1]));
+})();
+check(
+  "封面：对话框能挑到后端**存得下**的每一种格式（含 `svg`），且 `jpeg` 也在（`.jpeg` 文件很常见，后端按 magic bytes 归一成 `jpg`）",
+  coverFilterExts !== null &&
+    coverStoreExts !== null &&
+    coverStoreExts.size > 0 &&
+    [...coverStoreExts].every((e) => coverFilterExts.has(e)) &&
+    // `jpg` 有两个常见后缀：少了 `jpeg`，用户就挑不到 `.jpeg` 文件。
+    (!coverStoreExts.has("jpg") || coverFilterExts.has("jpeg")),
+  `后端=${[...(coverStoreExts ?? [])].join(
+    ",",
+  )} 对话框=${[...(coverFilterExts ?? [])].join(",")} 缺=${[
+    ...(coverStoreExts ?? []),
+    ...((coverStoreExts ?? new Set()).has("jpg") ? ["jpeg"] : []),
+  ]
+    .filter((e) => !(coverFilterExts ?? new Set()).has(e))
+    .join(",")}`,
 );
 
 check(
