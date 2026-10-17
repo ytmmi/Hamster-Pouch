@@ -22,12 +22,28 @@ import { readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 
-const REPO_DB =
-  "apps/desktop/src-tauri/target/release/dev/dev-20261005-225353/data/user/repos/00c37ce8-8464-4808-8c51-c9af38e86516.sqlite3";
-const SOURCE_ROOT = "F:\\billfish资源库\\图片";
-/** 标记：本脚本写入的行都挂在这个 source_id 下，便于精确清理。 */
-const SOURCE_ID = "perf-real-source-0001";
-const REPO_ID = "c07f28d2-57dc-4d73-a9e5-3d943fa9e4f2";
+/**
+ * 目标仓库库路径：默认是**活动数据源**（`target\release\data\`），而不是某个
+ * 开发包的时间戳目录——`tools/package-build.mjs` 每次编译都新建 `dev\dev-<时间戳>\`，
+ * 旧的会被 `pnpm clean` 清掉，写死时间戳必然在下一次编译后失效。
+ * 需要往某个具体开发包里写时用 `--db=<路径>` 显式指定。
+ */
+function defaultRepoDb() {
+  const reposDir = join("apps/desktop/src-tauri/target/release/data", "user", "repos");
+  let names = [];
+  try {
+    names = readdirSync(reposDir).filter((n) => n.endsWith(".sqlite3"));
+  } catch {
+    /* 目录不存在则在下面报错 */
+  }
+  if (names.length === 0) {
+    console.error(`找不到仓库库：${reposDir}\n先跑一次应用（或 pnpm app:build）以生成活动数据源。`);
+    process.exit(2);
+  }
+  names.sort();
+  if (names.length > 1) console.warn(`[prepare] ${reposDir} 下有 ${names.length} 个仓库库，取字典序最后一个：${names[names.length - 1]}`);
+  return join(reposDir, names[names.length - 1]);
+}
 
 const args = new Map();
 for (const raw of process.argv.slice(2)) {
@@ -35,6 +51,11 @@ for (const raw of process.argv.slice(2)) {
   if (m) args.set(m[1], m[2] ?? "true");
 }
 const LIMIT = Number(args.get("limit") ?? 5000);
+const REPO_DB = args.get("db") ?? defaultRepoDb();
+const SOURCE_ROOT = args.get("source") ?? "F:\\billfish资源库\\图片";
+/** 标记：本脚本写入的行都挂在这个 source_id 下，便于精确清理。 */
+const SOURCE_ID = "perf-real-source-0001";
+const REPO_ID = "c07f28d2-57dc-4d73-a9e5-3d943fa9e4f2";
 
 /**
  * 可解码的图片扩展名（与 `media_type.rs` 的判定一致，但排除 avif/heic/heif——
@@ -77,9 +98,9 @@ const db = new DatabaseSync(REPO_DB);
 if (args.has("clean")) {
   const before = db.prepare("SELECT COUNT(*) AS n FROM files WHERE source_id = ?").get(SOURCE_ID).n;
   db.prepare("DELETE FROM files WHERE source_id = ?").run(SOURCE_ID);
-  db.prepare("DELETE FROM sources WHERE id = ?").run(SOURCE_ID);
+  const removedSources = db.prepare("DELETE FROM sources WHERE id = ?").run(SOURCE_ID).changes;
   const after = db.prepare("SELECT COUNT(*) AS n FROM files WHERE source_id = ?").get(SOURCE_ID).n;
-  console.log(`[clean] 删除 files ${before} 行、sources 1 行；剩余 ${after}`);
+  console.log(`[clean] 删除 files ${before} 行、sources ${removedSources} 行；剩余 ${after}`);
   const total = db.prepare("SELECT COUNT(*) AS n FROM files").get().n;
   console.log(`[clean] 库内 files 总数 = ${total}`);
   process.exit(0);

@@ -38,6 +38,31 @@
  * plugin_registry.source_ref）改写为**包内**绝对路径——每个开发包自包含、
  * 可整夹带走；发布包只保留系统数据库。
  *
+ * ## 反向同步（运行某个开发包后，把包内新数据收回活动数据源）
+ *
+ * 数据流是**双向**的：本脚本把活动数据源**复制**进 `dev-<时间戳>\`，而用户接着运行
+ * 那个包、在里面改数据（蓝图 / 布局 / 批注 / 缩略图缓存），于是**包内数据反过来新于**
+ * 活动数据源。下一次编译又从活动数据源复制 —— 不先收回就会被旧数据覆盖。
+ * 用户口径："以 `<包>\data\` 内的数据为最新开发数据"。
+ *
+ * 步骤（`dev-<时间戳>` 替换为实际包名）：
+ *
+ * 1. **先退出应用**（WAL 模式下运行中复制会拿到不一致的 <db>/<db>-wal/<db>-shm 组合）；
+ * 2. **备份**现有活动数据源到 `backups/appdata/appdata-devdata-before-<时间戳>-<备份时间戳>\`（可回退）；
+ * 3. 把包内两个库**复制到临时目录**后 `PRAGMA wal_checkpoint(TRUNCATE)` + `integrity_check`
+ *    （不就地 checkpoint：`dev\` 下的包是历史证据，保持原样）；
+ * 4. **反向改写**第 37 行那两处包内路径（`repos.repo_db_path`、`plugin_registry.source_ref`）
+ *    回活动数据源路径，并**全库扫描**确认无 `dev-2026` 残留；
+ * 5. 装回活动数据源（清掉旧 `-wal`/`-shm`，避免旧 WAL 与新主库配对），
+ *    `thumbnails\` 与 `debug.log` 同口径覆盖；
+ * 6. 复核：非库文件**逐文件哈希**与包内一致、两个库 `integrity_check` 均 ok；
+ * 7. 按项目流程快照：`pnpm data:sync`。
+ *
+ * **判据是"包内确实新于活动数据源"，不是"包比源新"**（时间戳只说明构建先后）：
+ * 逐项比 `repo_meta.schema_version` / `PRAGMA user_version`、蓝图字节数与节点数、
+ * 缩略图文件集包含关系、布局 `updated_at`。实测记录见 `docs/issues/README.md` 第 21 轮状态段
+ * （`dev-20261017-150402`：schema 10→11、蓝图 42→43 节点、缩略图 1254→1417 文件）。
+ *
  * 用法：
  *   node tools/package-build.mjs      # 或 pnpm app:package
  *   （`pnpm app:build` 成功后会顺带执行本脚本，即「每次编译新建一个」）

@@ -20,24 +20,61 @@
  *
  * ```bash
  * node tools/real-machine-verify.mjs --view=adaptive --port=9223
+ * node tools/real-machine-verify.mjs --app=dev-20261017-150402   # 复现历史构建
  * ```
+ *
+ * 默认驱动 `target/release/dev/` 下**最新的**开发包（不写死时间戳，见 resolveAppDir）。
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
-const APP_DIR = join(ROOT, "apps/desktop/src-tauri/target/release/dev/dev-20261005-225353");
-const EXE = join(APP_DIR, "hamster-pouch-desktop.exe");
+const DEV_ROOT = join(ROOT, "apps/desktop/src-tauri/target/release/dev");
 
 const args = new Map();
 for (const raw of process.argv.slice(2)) {
   const m = /^--([^=]+)(?:=(.*))?$/.exec(raw);
   if (m) args.set(m[1], m[2] ?? "true");
 }
+
+/**
+ * 解析要驱动的开发包目录。
+ *
+ * **为什么不写死时间戳**：`tools/package-build.mjs` 每次编译都新建一个
+ * `dev\dev-<时间戳>\`，旧的会被 `pnpm clean` 清掉——写死某一个路径必然在下一次
+ * 编译后指向不存在的目录。因此默认取**名字排序最后**的那个（时间戳字典序即先后）。
+ * 需要复现历史结果时用 `--app=dev-<时间戳>` 显式指定（或设环境变量 `HP_DEV_APP_DIR`）。
+ */
+function resolveAppDir() {
+  const explicit = args.get("app") ?? process.env.HP_DEV_APP_DIR;
+  if (explicit) {
+    // 允许只给包名（`dev-...`）或给完整/相对路径。
+    return explicit.includes("/") || explicit.includes("\\")
+      ? resolve(ROOT, explicit)
+      : join(DEV_ROOT, explicit);
+  }
+  let names = [];
+  try {
+    names = readdirSync(DEV_ROOT, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name.startsWith("dev-"))
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    /* 目录不存在则下面按"找不到 app"报错 */
+  }
+  if (names.length === 0) {
+    console.error(`找不到开发包目录：${DEV_ROOT}\n先跑 pnpm app:build`);
+    process.exit(2);
+  }
+  return join(DEV_ROOT, names[names.length - 1]);
+}
+
+const APP_DIR = resolveAppDir();
+const EXE = join(APP_DIR, "hamster-pouch-desktop.exe");
 const PORT = Number(args.get("port") ?? 9223);
 const VIEW = args.get("view") ?? "adaptive";
 const OUT = args.get("out") ?? null;
