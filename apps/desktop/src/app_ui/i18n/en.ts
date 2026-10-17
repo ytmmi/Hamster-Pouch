@@ -369,7 +369,6 @@ export const en: Record<keyof DictZhCN, string> = {
   "viewer.endOfPreview": "— start of the book shown —",
 
   // Book reader (2026-10-16): full reading (TOC jumps + reading options + footer progress)
-  "bookreader.exit": "Exit reading",
   "bookreader.notBook": "Select a book (txt / md / epub / pdf) to start reading",
   "bookreader.noContent": "This book has no readable content",
   "bookreader.fullscreen": "Fullscreen",
@@ -420,6 +419,9 @@ export const en: Record<keyof DictZhCN, string> = {
   "bookreader.option.text.gray": "Dark gray",
   "bookreader.option.text.sepia": "Sepia brown",
   "bookreader.option.text.white": "White",
+  "bookreader.option.simulatedPageBackground": "Simulated page background (book shadow)",
+  "bookreader.switchOn": "On",
+  "bookreader.switchOff": "Off",
   "bookreader.option.fontSize": "Font size",
   "bookreader.option.lineHeight": "Line spacing",
   "bookreader.option.pageMargin": "Page margin",

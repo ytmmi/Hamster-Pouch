@@ -1,8 +1,8 @@
 /**
  * 图书阅读器：**右侧「阅读选项」栏**。
  *
- * 12 项与参考图逐项对应：翻页方式 / 背景颜色 / 文字颜色 / 字体大小 / 页边距 /
- * 字间距 / 段落间距 / 页面宽度 / 屏幕亮度 / 字体 / 行间距 / 文字对齐。
+ * 13 项与参考图逐项对应：翻页方式 / 背景颜色 / 文字颜色 / **仿真背景（图书阴影）** /
+ * 字体大小 / 页边距 / 字间距 / 段落间距 / 页面宽度 / 屏幕亮度 / 字体 / 行间距 / 文字对齐。
  *
  * ## 每一项都是**面板设置**的写入
  *
@@ -19,7 +19,10 @@
  * 属未排期项，**不做假开关**。
  */
 
+import type { ThemeName } from "@hamster-pouch/ui";
+
 import type { TranslationKey, Translate } from "../../i18n";
+import { SwitchToggle } from "../../shared/SwitchToggle";
 import type { ReaderSettings, ReaderSettingsHandle } from "./useReaderSettings";
 import {
   READER_BG_PRESETS,
@@ -39,6 +42,12 @@ import {
 export interface ReaderOptionsRailProps {
   handle: ReaderSettingsHandle;
   onClose: () => void;
+  /** 当前主题（胶囊开关按主题取 token 表取色）。 */
+  theme: ThemeName;
+  /** 当前是否全屏（决定动作文案）。 */
+  fullscreen: boolean;
+  /** 切换全屏（用户 2026-10-18 口径："全屏模式放入更多选项内"）。 */
+  onToggleFullscreen: () => void;
   t: Translate;
 }
 
@@ -84,6 +93,45 @@ function NumberRow({
         aria-label={label}
         onChange={(e) => onChange(Number(e.target.value))}
       />
+    </div>
+  );
+}
+
+/** 一行布尔开关（胶囊开关；形态与「全部设置」里同一种，不另立一套外观）。 */
+function SwitchRow({
+  label,
+  checked,
+  theme,
+  onChange,
+  t,
+}: {
+  label: string;
+  checked: boolean;
+  theme: ThemeName;
+  onChange: (next: boolean) => void;
+  t: Translate;
+}): JSX.Element {
+  return (
+    <div className="br-opt">
+      <div className="br-opt-head">
+        <span>{label}</span>
+        <button
+          type="button"
+          className="br-opt-value"
+          onClick={() => onChange(!checked)}
+          title={t("bookreader.optionReset")}
+        >
+          {checked ? t("bookreader.switchOn") : t("bookreader.switchOff")}
+        </button>
+      </div>
+      <div className="br-opt-switch">
+        <SwitchToggle
+          checked={checked}
+          theme={theme}
+          onChange={onChange}
+          label={label}
+        />
+      </div>
     </div>
   );
 }
@@ -135,6 +183,9 @@ function ChoiceRow<T extends string>({
 export function ReaderOptionsRail({
   handle,
   onClose,
+  theme,
+  fullscreen,
+  onToggleFullscreen,
   t,
 }: ReaderOptionsRailProps): JSX.Element {
   const { settings, update, reset } = handle;
@@ -155,6 +206,22 @@ export function ReaderOptionsRail({
       </div>
 
       <div className="br-rail-body">
+        {/*
+          动作区（用户 2026-10-18 口径："**删除退出阅读按钮，全屏模式放入更多选项内**"）。
+          顶栏因此不再有这两个按钮，但它们的能力必须留在这里——删掉入口不等于删掉能力。
+          放在**最上面**：它们是"离开阅读这一行为"的动作，与下面的取值项不是一类。
+        */}
+        <div className="br-opt br-opt-actions">
+          <button
+            type="button"
+            className="br-btn br-opt-action"
+            onClick={onToggleFullscreen}
+            aria-pressed={fullscreen}
+          >
+            {fullscreen ? t("bookreader.exitFullscreen") : t("bookreader.fullscreen")}
+          </button>
+        </div>
+
         {/* 翻页方式：滚动 / 单页 / 双页（参考图顶部的三个视图图标）。 */}
         <div className="br-opt">
           <div className="br-opt-head">
@@ -197,6 +264,14 @@ export function ReaderOptionsRail({
             label: t(`bookreader.option.text.${preset}` as TranslationKey),
             className: `br-swatch br-swatch-text-${preset}`,
           }))}
+        />
+
+        <SwitchRow
+          label={t("bookreader.option.simulatedPageBackground")}
+          checked={settings.simulatedPageBackground}
+          theme={theme}
+          onChange={(v) => update("simulatedPageBackground", v)}
+          t={t}
         />
 
         <NumberRow
@@ -283,7 +358,7 @@ export function ReaderOptionsRail({
           }))}
         />
 
-        {/* 重置本栏全部选项（12 项逐个删除键 = 回到声明缺省）。 */}
+        {/* 重置本栏全部选项（逐项删除键 = 回到声明缺省）。 */}
         <div className="br-opt">
           <button
             type="button"
@@ -295,6 +370,7 @@ export function ReaderOptionsRail({
                 "viewMode",
                 "bg",
                 "text",
+                "simulatedPageBackground",
                 "fontSize",
                 "lineHeight",
                 "pageMargin",

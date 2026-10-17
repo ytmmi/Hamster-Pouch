@@ -311,7 +311,8 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &[],
         requires_capability: None,
     },
-    // 图书阅读器（`panel.bookreader.*`）：**阅读选项**的 12 项（2026-10-16）。
+    // 图书阅读器（`panel.bookreader.*`）：**阅读选项**的 13 项（2026-10-16 立项的 12 项 +
+    // 2026-10-17 追加的「仿真背景（图书阴影）」开关，D116）。
     // 候选与 `packages/config/src/panels.ts` 的 `bookreader.settings`、
     // `apps/desktop/src/app_ui/panels/bookreader/readerView.ts` 的枚举三方一致
     // （由 `pnpm check:panels` / `check:settings` 断言）。
@@ -344,6 +345,17 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
         kind: "select",
         scope: SettingScope::App,
         options: &["auto", "ink", "gray", "sepia", "white"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        // 「仿真背景（图书阴影）」开关（2026-10-17，D116）：分页模式下把正文画成纸页。
+        // `switch` 无候选（布尔值按 kind 校验），缺省 `true` 只在前端 `panels.ts` 声明。
+        id: "simulatedPageBackground",
+        owner_kind: "panel",
+        owner_id: Some("bookreader"),
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
         requires_capability: None,
     },
     SettingDeclFact {

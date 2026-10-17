@@ -2327,12 +2327,22 @@ button.danger {
   overflow: hidden;
 }
 
+/* 顶栏 / 底栏**自然融入背景**（用户 2026-10-18 口径："上下两栏要自然融合……自然融入背景，
+   就如上图图1参考所示"）。
+
+   参考图 1 里顶栏与底栏是**同一片底色**、没有一条横线把它们切开；只有文字是浅灰的。
+   因此这里去掉 `border-bottom` / `border-top` 两条硬边，改为**transparent 背景**
+   （透出阅读区的底色），文字用 `--fg-dim`。这样"章节标题 / 进度"读起来像**浮在纸面上
+   的一行注释**，而不是被装进两个工具条。
+
+   **不跟着 `filter: brightness()` 走**：亮度只作用在阅读区（`.br-stage`），
+   顶底栏在它外面——这是有意的，进度读数不该随亮度一起变暗。 */
 .br-top {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
+  background: transparent;
   flex-shrink: 0;
 }
 
@@ -2748,6 +2758,12 @@ button.danger {
   width: 100%;
 }
 
+/* 布尔项那一行的开关容器：胶囊开关靠左，与上面的滑条同一列宽。 */
+.br-opt-switch {
+  display: flex;
+  padding: 2px 0;
+}
+
 /* ---- 阅读区 ---- */
 
 .br-stage {
@@ -2755,7 +2771,6 @@ button.danger {
   min-width: 0;
   min-height: 0;
   position: relative;
-  padding: var(--br-page-margin, 24px);
   /* 屏幕亮度：只作用于阅读区（不把工具栏与面板标题一起压暗）。 */
   filter: brightness(var(--br-brightness, 1));
   outline: none;
@@ -2764,42 +2779,210 @@ button.danger {
   width: 100%;
 }
 
+/* 滚动模式：正文直接铺在阅读区里，「页边距」就是阅读区的内边距。 */
 .br-stage-scroll {
   overflow: auto;
+  padding: var(--br-page-margin, 24px);
 }
 
+/* 分页模式：内边距是**桌面留白**（固定的小留白），「页边距」搬进了纸张内部
+   （`.br-paper` 的 padding）。这样"书页大一点、桌面露出少一点"与
+   "正文离纸边远一点"变成**两个独立的数**——此前它们共用一个 `--br-page-margin`，
+   于是把正文推离纸边就必然同时把纸张缩小一圈。
+   纵向全屏时为 0（纸张铺满上下，用户 2026-10-18 裁决 B）。 */
 .br-stage-paged {
+  overflow: hidden;
+  padding: var(--br-desk-y, 8px) var(--br-desk-x, 8px);
+}
+
+/* ===== 分页模式的纸张与仿真背景（2026-10-17 / 2026-10-18 修订）=====
+
+   用户口径："翻页方式为单页和双页时，单页应为一个居中容器，双页应为一对居中的容器，
+   并且都是跟随自适应大小的。" + 增加仿真背景（图书阴影）与开关；
+   2026-10-18 追加三项修订：**桌面留白更小**（书页更大）、**正文离纸边更远**、
+   **翻页是刷新而不是滑动**，以及"上下两栏自然融入背景"。
+
+   结构与几何见 `ReaderStage.tsx` 文件头：`.br-stage` → `.br-paper`（居中）→
+   `.br-face-layer`（纸页层）＋ `.br-flow`（多栏正文）。
+   几何数值全部来自 `readerView.ts` 的 `readerPagedLayout`（一项算术、四处消费）。
+
+   **三件事各自一个数（本轮的关键简化）**：
+   | 量 | 谁定 |
+   | --- | --- |
+   | 纸张外面的桌面留白 | `--br-desk-x` / `--br-desk-y`（**固定小留白**，不再跟页边距联动）|
+   | 正文到纸边的距离 | `--br-page-margin`（`pagedLayout.margin`，纸张的 `padding`）|
+   | 一张纸多宽 | `--br-face-w`（= `paperWidth / columns`，等分铺满）|
+
+   **一处实测教训（投影画在哪）**：`.br-paper` 必须是 `overflow: hidden`（否则
+   翻页时屏幕外的栏会外泄），而它同时把**子元素**（`.br-face`）的外投影整条裁掉——
+   单页模式下纸页宽恰好等于纸张宽，投影**一点都看不见**。因此：**外投影画在
+   `.br-paper` 自己身上**（`box-shadow` 画在盒子之外，不受自身裁剪），
+   **书脊缝用 `inset`**（画在纸页内部，不受裁剪）。 */
+
+/* 纸张：**居中**摆放在阅读区里（`margin: 0 auto` = 用户口径的"居中容器"）。
+   `padding` = 「页边距」（正文到纸边的距离）；宽高由面板算出（"跟随自适应大小"）。
+   它是分页的**裁剪视口**：`overflow: hidden` 让屏幕外的栏不外泄（翻页靠 `translateX`）。 */
+.br-paper {
+  position: relative;
+  width: var(--br-paper-w, 100%);
+  height: var(--br-paper-h, 100%);
+  margin: 0 auto;
+  padding: var(--br-page-margin, 24px);
   overflow: hidden;
 }
 
-.br-flow {
-  /* 栏宽上限：`--br-max-width` 是"占面板宽度的百分比"，居中显示。 */
-  max-width: var(--br-max-width, 100%);
-  margin: 0 auto;
-  transition: transform 0.18s ease;
+/* **图书阴影画在纸张本身上**（`box-shadow` 画在盒子**之外**，不受自身
+   `overflow: hidden` 裁剪）。
+   为什么不画在 `.br-face`（纸页）上：纸页是纸张的**子元素**，而纸张的
+   `overflow: hidden` 会把子元素的投影**整条裁掉**——实测单页模式下纸页宽
+   恰好等于纸张宽，投影因此一点都看不见（"仿真背景（图书阴影）"只剩桌面、
+   没有了阴影）；双页模式下也只剩中间那道书脊缝。
+   画在纸张上则 `N` 张纸合成的那一块整体有投影，与"这是一叠纸"的观感一致。 */
+.br-stage-paged.br-simulated .br-paper {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    0 4px 12px rgba(0, 0, 0, 0.18);
 }
 
+/* 深色主题：同样的 alpha 在深底上几乎看不见，另给一组更重的投影
+   （与图书预览 `.bp-art` 的深色处置同一条理由）。 */
+.app-root.theme-dark .br-stage-paged.br-simulated .br-paper {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 5px 16px rgba(0, 0, 0, 0.45);
+}
+
+/* "桌面"：**仿真背景开启时**纸张之外那圈更深的底色（用户口径：仿真背景 = 书页 + 阴影）。
+   画在**阅读区**上（`.br-stage-paged.br-simulated`）而不是纸张上：纸张居中、四周留白
+   宽度不定，只有铺在阅读区上才是一整张"桌"。纸色（`--br-paper`）与桌色（`--br-desk`）
+   都由**背景预设**给出（`.br-bg-*` 类），因此换背景色时纸张与桌面一起变。
+   关掉开关即不生效——那时阅读区就是预设底色，没有"桌面"这一层。 */
+.br-stage-paged.br-simulated {
+  background: var(--br-desk, rgba(0, 0, 0, 0.06));
+}
+
+/* 正文多栏流：`padding` 已由纸张给（正文因此离纸边一个「页边距」）；
+   `column-count` 固定列数 ⇒ 浏览器**等分**宽度，翻页步进才能与真实列距逐像素一致。 */
 .br-stage-paged .br-flow {
   height: 100%;
   max-width: none;
-  /* 分页：固定高度 + **固定列数** ⇒ 浏览器把内容横向排成若干栏，翻页 = 平移一栏。
-     这里必须用 `column-count` 而**不是** `column-width`：列数固定时浏览器把可用宽度
-     **等分**，每栏宽恰好等于面板侧算出的 `readerPageWidth`，于是"平移一栏"
-     （`readerPagePitch`）与真实列距逐像素一致；`column-width` 只是建议值，
-     浏览器会按容器把栏拉宽，实际列距与算出来的对不上 ⇒ 翻几页就错位。 */
   column-count: var(--br-columns, 1);
   column-gap: var(--br-column-gap, 32px);
   column-fill: auto;
   will-change: transform;
 }
 
-.br-content {
+/* 纸页：**一张纸**（宽 = `paperWidth / columns`），N 张并排恰好铺满纸张（双页相贴无缝）。
+   为什么单独一层而不是"给每栏上背景"：CSS 多栏无法给单栏上背景——
+   `column-*` 只作用在一个盒子的**内容**上，因此用绝对定位的纸页层来表达。
+   纸页层在**正文之下**（正文栏是 `.br-flow` 的子内容，绘制在其后），
+   因此正文照旧压在纸上，两张纸之间也不会挡住字。
+
+   `pointer-events: none`：纸页层纯粹是视觉，不能拦住"点击正文收起两栏"与划词。 */
+.br-face-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  display: flex;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.br-face {
+  width: var(--br-face-w, 100%);
+  height: 100%;
+  flex: none;
+  /* 纸色取自**背景预设**（`--br-paper`，由 `.br-bg-*` 类给出）——不另立一套配色，
+     否则用户在「阅读选项」里换背景色，分页模式的纸还是旧颜色。 */
+  background: var(--br-paper, #ffffff);
+}
+
+/* 仿真背景**关闭**时：没有桌面、没有纸页、没有投影——只有居中的正文栏。
+   纸页层整个不显示（它是纸的视觉，留着只会给正文垫一块与背景同色的底，
+   在窄面板下反而干扰"这是一张纸"的判断）。 */
+.br-stage-paged:not(.br-simulated) .br-face-layer {
+  display: none;
+}
+
+/* 书脊缝（**仅双页**）：一对相贴的纸页在接缝处各画一道**内侧**阴影，
+   读起来才像"一本书摊开"而不是"两张并排的卡片"。
+   这里给每张纸页画一道靠接缝一侧的内阴影，左右页方向相反。
+   单页模式没有接缝（只有一张纸），因此不画。
+
+   为什么书脊缝用 `inset` 而**不是**外投影：纸页是纸张的子元素，
+   而纸张的 `overflow: hidden` 会把外投影裁掉（见 `.br-paper` 的说明）；
+   `inset` 阴影画在纸页**内部**，不受裁剪影响，因此是这里唯一可见的画法。 */
+.br-stage-paged.br-simulated.br-spread .br-face:first-child {
+  box-shadow: inset calc(var(--br-spine, 12px) * -1) 0 var(--br-spine, 12px)
+    calc(var(--br-spine, 12px) * -1) rgba(0, 0, 0, 0.13);
+}
+
+.br-stage-paged.br-simulated.br-spread .br-face:last-child {
+  box-shadow: inset var(--br-spine, 12px) 0 var(--br-spine, 12px)
+    calc(var(--br-spine, 12px) * -1) rgba(0, 0, 0, 0.13);
+}
+
+/* 深色主题：同样的 alpha 在深底上几乎看不见，书脊缝另给一档更重的。 */
+.app-root.theme-dark .br-stage-paged.br-simulated.br-spread .br-face:first-child {
+  box-shadow: inset calc(var(--br-spine, 12px) * -1) 0 var(--br-spine, 12px)
+    calc(var(--br-spine, 12px) * -1) rgba(0, 0, 0, 0.5);
+}
+
+.app-root.theme-dark .br-stage-paged.br-simulated.br-spread .br-face:last-child {
+  box-shadow: inset var(--br-spine, 12px) 0 var(--br-spine, 12px)
+    calc(var(--br-spine, 12px) * -1) rgba(0, 0, 0, 0.5);
+}
+
+.br-flow {
+  /* 栏宽上限：`--br-max-width` 是"占面板宽度的百分比"，居中显示（**滚动模式**用）。 */
+  max-width: var(--br-max-width, 100%);
+  margin: 0 auto;
+}
+
+/* **翻页是刷新，不是滑动**（用户 2026-10-18 口径："进入单、双页模式，默认不是滑动切换
+   正文，而是刷新切换正文，这样更符合直觉"）。
+   分页模式的平移**不加过渡**：一次翻页 = 直接换到下一屏。带 0.18s 过渡时，
+   正文会横向滑过去——那是"连续滚动"的观感，与"翻到下一页"的直觉相反。
+   滚动模式没有 transform，这条对它无影响。 */
+.br-stage-paged .br-flow {
+  transition: none;
+}
+
+/* 正文内容层**不再自己分栏**（分栏由外层 `.br-flow` 负责）。
+   为什么必须显式关掉：`.vr-content` 带着查看器的 `column-count` / `column-gap: 32px`，
+   而阅读器的 `.br-flow` 也有 `column-count` / `column-gap`（= 2×页边距）。
+   两层多栏叠加时，**内层**按自己的 32px 间距把内容切成 394+32 的节拍，
+   与外层的 394+48 对不上——纸页（按外层算）因此与正文栏**错位 16px**。
+   实测：`.br-content` 的 `column-gap` = 32px、`column-count` = 1，
+   而 `.br-flow` 是 48px / 2（`tools/reader-colprobe.mjs` 量出）。
+   关掉内层多栏后，分栏只发生在外层一次，栏与纸页就逐像素对齐。 */
+.br-stage-paged .br-content {
+  height: 100%;
+  column-count: auto;
+  column-gap: normal;
+}
+
+/* ===== EPUB 段落排印（2026-10-18，参考 Readium CSS / foliate-js 的默认样式）=====
   /* 阅读器用自己的字号/行距（查看器那套是按面板宽度自适应的）。 */
-  column-count: 1;
   font-size: var(--br-font-size, 20px);
   line-height: var(--br-line-height, 1.7);
   letter-spacing: var(--br-letter-spacing, 0);
   overflow-wrap: break-word;
+  /* CJK 断行口径（Readium CSS 的 `:lang(ja/zh/ko)` 同款）：按"严格"规则断行，
+     避免标点跑到行首、也避免行尾出现孤立标点。 */
+  line-break: strict;
+}
+
+.br-content {
+  /* 阅读器用自己的字号/行距（查看器那套是按面板宽度自适应的）。 */
+  font-size: var(--br-font-size, 20px);
+  line-height: var(--br-line-height, 1.7);
+  letter-spacing: var(--br-letter-spacing, 0);
+  overflow-wrap: break-word;
+  /* CJK 断行口径（Readium CSS 的 `:lang(ja/zh/ko)` 同款）：按"严格"规则断行，
+     避免标点跑到行首、也避免行尾出现孤立标点。 */
+  line-break: strict;
 }
 
 /* 一页正文的包裹层（`data-page-index` 挂在它上面，供阅读区探测"当前是第几页"）。
@@ -2816,15 +2999,83 @@ button.danger {
   margin-bottom: 0;
 }
 
-.br-stage-paged .br-content {
-  height: 100%;
+/* ===== EPUB 段落排印（2026-10-18，参考 Readium CSS / foliate-js 的默认样式）=====
+
+   用户口径："**解析 epub 排版要正确，去参考开源的 epub 的解析器和阅读器的实现**"。
+
+   两条最要紧的默认值取自 **Readium CSS**（`research/readium/`）：
+
+   1. **段落之间不留间距**：`--RS__paraSpacing: 0`，`p { margin: 0 }`。
+      中英文书刊都用"首行缩进"分段；再叠一段间距就是**双重分隔**，
+      读起来段落之间空太多（参考图里段与段是紧挨着的）。
+   2. **首行缩进按语言**：`--RS__paraIndent: 1em`，`:root:lang(zh) { 2em }`。
+      方块字"空两格"、拉丁文 1em（`--br-para-indent` 由面板按正文语言档给出）。
+
+   还有两条同源的细节：
+   - **紧跟标题 / 分隔线的第一段不缩进**（Readium：`h1 + p … { text-indent: 0 }`；
+     foliate-js：`:not(p) + p, p:first-child { text-indent: 0 }`）——
+     标题下方那一行再缩进两格会显得"没对齐"；
+   - **`<br>`/ 诗句这类行内换行的段落不缩进**：它们靠换行表达结构，
+     首行缩进会盖掉结构本身（`research/foliate-js/fb2.js` 的 `.poem p { text-indent: 0 }`）。
+
+   容器的间距（引用 / 列表 / 代码 / 表格）仍由下面的 `--br-paragraph-spacing` 给，
+   默认 0（见 `readerView.READER_PARAGRAPH_SPACING`）——滑块可以加，但默认不空。 */
+.br-content .vr-paragraph {
+  /* 首行缩进：中文 2em / 拉丁 1em（面板按正文语言档下发）。 */
+  text-indent: var(--br-para-indent, 2em);
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
-.br-content .vr-paragraph,
+/* 标题 / 分隔线**之后**的第一段不缩进（Readium 与 foliate 同款口径）。 */
+.br-content .vr-heading + .vr-paragraph,
+.br-content .vr-rule + .vr-paragraph,
+.br-content .vr-quote > .vr-paragraph:first-child,
+.br-content .vr-li > .vr-paragraph:first-child {
+  text-indent: 0;
+}
+
+/* 段落内的行内元素不继承缩进（Readium：`p * { text-indent: 0 }`）——
+   否则段落里第一个 `<span>`（样式片段 / 链接）会各自再缩进一次。 */
+.br-content .vr-paragraph * {
+  text-indent: 0;
+}
+
+/* 容器块（引用 / 列表 / 代码 / 表格）之间的间距：由「段落间距」设置给，默认 0。 */
 .br-content .vr-heading,
 .br-content .vr-list,
-.br-content .vr-quote {
-  margin-bottom: var(--br-paragraph-spacing, 12px);
+.br-content .vr-quote,
+.br-content .vr-code,
+.br-content .vr-table,
+.br-content .vr-footnote,
+.br-content .vr-definitions {
+  margin-bottom: var(--br-paragraph-spacing, 0px);
+}
+
+/* 标题：Readium CSS 的 typeScale 1.125 口径 —— 每一级 = 上一级 × 1.125，
+   因此相对正文依次是 1.42em / 1.27em / 1.125em / 1em。
+
+   注意**渲染元素是 h2–h4**（`BookBlocks.tsx` 把书的 h1–h6 收敛到 h2–h4：
+   `level = min(4, max(2, level + 1))`）——书的 `h1`（章节标题）渲染成 `<h2>`，
+   因此最大的字号挂在 `.vr-heading` 的 `h2` 上，而不是 `h1`（那永远不会出现）。
+   中文书刊惯例是**居中**（`ReadiumCSS-default-cjk-horizontal.css` 的 h1–h3 `text-align: center`），
+   这里统一居中——正文块模型不带语言标记，居中在两种语言下都读得通
+   （拉丁书的章节标题也常居中）。 */
+.br-content h2.vr-heading {
+  font-size: 1.42em;
+}
+.br-content h3.vr-heading {
+  font-size: 1.27em;
+}
+.br-content h4.vr-heading {
+  font-size: 1.125em;
+}
+
+.br-content .vr-heading {
+  margin-top: calc(var(--br-paragraph-spacing, 0px) + 0.8em);
+  line-height: 1.35;
+  text-indent: 0;
+  text-align: center;
 }
 
 /* 文字对齐（`default` = 不动，交给格式自己的排版） */
@@ -2855,30 +3106,49 @@ button.danger {
   font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
 }
 
-/* 背景与文字颜色预设（成对出现，保证对比度）。 */
+/* 背景与文字颜色预设（成对出现，保证对比度）。
+
+   `--br-paper` / `--br-desk` 是**仿真背景（图书阴影）**的两个色（同一预设的纸色与桌面色，
+   2026-10-17）：纸色就是这一档的阅读底色，桌面色是它**压暗一档**的结果
+   （用 `color-mix` 而不是再写一个硬编码色值——桌面是"这张纸下面那张桌"，
+   两者必须是从同一个底色推出来的，另写一个数就会在换预设时漂移）。
+   `color-mix` 在 WebView2（Chromium 111+）可用；不可用时 `background` 里的
+   `var(--br-paper)` / `var(--br-desk)` 兜底值仍给出可读的纸与桌。 */
 .br-bg-paper {
   background: #ffffff;
   color: #1a1a1a;
+  --br-paper: #ffffff;
+  --br-desk: #e4e7ea;
 }
 .br-bg-sepia {
   background: #f4ecd8;
   color: #4a3b28;
+  --br-paper: #f4ecd8;
+  --br-desk: #ded3b8;
 }
 .br-bg-green {
   background: #cce8cf;
   color: #1f3a24;
+  --br-paper: #cce8cf;
+  --br-desk: #b3d3b7;
 }
 .br-bg-gray {
   background: #e9e9e9;
   color: #23272b;
+  --br-paper: #e9e9e9;
+  --br-desk: #cdcdcd;
 }
 .br-bg-dark {
   background: #2b2f33;
   color: #dfe3e6;
+  --br-paper: #383d42;
+  --br-desk: #1e2124;
 }
 .br-bg-black {
   background: #000000;
   color: #cfd3d6;
+  --br-paper: #15181a;
+  --br-desk: #000000;
 }
 
 /* 文字颜色预设覆盖背景类给的颜色（`auto` 不设规则 = 跟随背景）。 */
@@ -2900,29 +3170,31 @@ button.danger {
   max-height: none;
 }
 
-.br-pager {
-  position: absolute;
-  right: 10px;
-  bottom: 8px;
+/* 注：右下角那个悬浮翻页器（`.br-pager`，`‹ N / M ›`）**已删除**——
+   用户 2026-10-18 口径"取消右下角擅自添加的悬浮计数"。
+   页码信息仍在底栏的「章节数」里（`1 / 14` 是章节计数，不是页数）。 */
+
+/* 选项栏里的**动作区**（全屏；用户 2026-10-18："全屏模式放入更多选项内"）。 */
+.br-opt-actions {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 2px 6px;
-  opacity: 0.9;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.br-opt-action {
+  width: 100%;
+  text-align: center;
 }
 
 /* ---- 底部进度 ---- */
 
+/* 与顶栏同款：**透明背景、无横线**，自然融入阅读区底色（见 `.br-top` 的说明）。 */
 .br-footer {
   display: flex;
   align-items: center;
   gap: 18px;
   padding: 3px 10px;
-  border-top: 1px solid var(--border);
+  background: transparent;
   font-size: 11px;
   flex-shrink: 0;
 }

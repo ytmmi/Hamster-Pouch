@@ -41,6 +41,7 @@ import { useReaderAnnotations } from "./useReaderAnnotations";
 import { useReaderBook } from "./useReaderBook";
 import { useReaderBookIdentity } from "./useReaderBookIdentity";
 import { useReaderSettings } from "./useReaderSettings";
+import { collectBlockText } from "./bookText";
 import {
   currentTocIndex,
   estimateReadMinutes,
@@ -117,34 +118,10 @@ function countBlockChars(blocks: BookBlockItem[]): number {
 /**
  * 把一页的块拼成纯文本（高亮兜底原文用）。
  *
- * 与 `countBlockChars` 同一套遍历：块模型的容器种类多（列表 / 引用 / 脚注 / 定义列表），
- * 只取 `spans` 会漏掉列表与引用里的正文——那正是小说里最常划的部分。
+ * 实现抽到 `bookText.ts`：那个遍历有**两个消费方**（本面板的高亮兜底 +
+ * 阅读区判正文语言档的首行缩进），而两者分属不同组件——放在这里会让
+ * `ReaderStage` 反向 import 本文件形成**循环依赖**，复制一份又会漂移。
  */
-function collectBlockText(blocks: BookBlockItem[]): string {
-  const parts: string[] = [];
-  const walk = (list: BookBlockItem[]): void => {
-    for (const block of list) {
-      if (block.text) parts.push(block.text);
-      if (block.spans) for (const span of block.spans) parts.push(span.text);
-      if (block.head) for (const cell of block.head) for (const span of cell) parts.push(span.text);
-      if (block.rows) {
-        for (const row of block.rows) {
-          for (const cell of row.cells) for (const span of cell) parts.push(span.text);
-        }
-      }
-      if (block.list_items) for (const item of block.list_items) walk(item.blocks);
-      if (block.blocks) walk(block.blocks);
-      if (block.definitions) {
-        for (const definition of block.definitions) {
-          for (const span of definition.term) parts.push(span.text);
-          for (const group of definition.definitions) walk(group);
-        }
-      }
-    }
-  };
-  walk(blocks);
-  return parts.join("\n");
-}
 
 export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): JSX.Element {
   const app = useApp();
@@ -211,15 +188,6 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
       app.status(t("bookreader.fullscreenFailed"), "error");
     });
   }, [app, t]);
-
-  /** 「退出阅读」：全屏时先退出全屏，否则关闭面板（没有面板 API 时无事可做）。 */
-  const exitReading = useCallback(() => {
-    if (document.fullscreenElement) {
-      void document.exitFullscreen().catch(() => undefined);
-      return;
-    }
-    panelApi?.close();
-  }, [panelApi]);
 
   const isBook = isBookMediaType(file?.media_type);
   const first = book.pages[0];
@@ -381,11 +349,15 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
 
   return (
     <div className="panel br-root" ref={rootRef}>
-      {/* 顶部：退出阅读 / 章节标题 / 阅读时长 / 全屏 / 更多 */}
+      {/*
+        顶部条：章节标题 / 阅读时长 / 「更多」。
+        用户 2026-10-18 口径："**删除退出阅读按钮，全屏模式放入更多选项内**"
+        ——因此顶栏不再有「退出阅读」与「全屏模式」两个按钮：
+        退出阅读在**全屏时**仍有意义（先退出全屏），但它已并入「更多」栏的动作区；
+        全屏是**阅读选项**里的一行动作（见 `ReaderOptionsRail`）。
+        顶栏只留"我在读哪一章 / 读了多久"与「更多」。
+      */}
       <div className="br-top">
-        <button type="button" className="br-btn" onClick={exitReading}>
-          {t("bookreader.exit")}
-        </button>
         <div className="br-top-title">
           <b>{chapterTitle ?? file?.relative_path ?? ""}</b>
           {chapterTitle && <span className="dim"> · {file?.relative_path}</span>}
@@ -396,14 +368,6 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
             <span>{t("bookreader.pageTime", { min: pageMinutes })}</span>
           )}
         </div>
-        <button
-          type="button"
-          className="br-btn"
-          disabled={!isBook}
-          onClick={toggleFullscreen}
-        >
-          {fullscreen ? t("bookreader.exitFullscreen") : t("bookreader.fullscreen")}
-        </button>
         <ReaderMoreMenu
           expanded={railsOpen}
           anyActive={railsOpen}
@@ -447,6 +411,8 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
           hasMore={book.hasMore}
           onNeedMore={book.loadMore}
           emptyText={emptyText}
+          // 全屏：纸张纵向铺满（不露桌面），见 D116 的 2026-10-18 裁决 B。
+          fullscreen={fullscreen}
           // 两栏收起时不传回调：收起是幂等的空操作，但"点击正文有副作用"这件事
           // 不该在两栏没开时也成立（结构性保证，不靠回调里再判一次）。
           onBodyClick={railsOpen ? collapseRails : undefined}
@@ -455,7 +421,14 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
         />
 
         {railsOpen && (
-          <ReaderOptionsRail handle={handle} onClose={() => setRailsOpen(false)} t={t} />
+          <ReaderOptionsRail
+            handle={handle}
+            onClose={() => setRailsOpen(false)}
+            theme={app.theme}
+            fullscreen={fullscreen}
+            onToggleFullscreen={toggleFullscreen}
+            t={t}
+          />
         )}
       </div>
 

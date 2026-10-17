@@ -51,15 +51,124 @@ export const READER_PAGE_MARGIN = { min: 0, max: 80, default: 24 } as const;
 /** 正文栏最大宽度**占面板宽度的百分比**（100 = 铺满；<100 时两侧留白更多）。 */
 export const READER_PAGE_WIDTH = { min: 30, max: 100, default: 100 } as const;
 export const READER_LETTER_SPACING = { min: 0, max: 20, default: 0 } as const;
-export const READER_PARAGRAPH_SPACING = { min: 0, max: 100, default: 12 } as const;
+/**
+ * 段落间距（px）。
+ *
+ * **缺省 0**（2026-10-18 改为 0，原为 12）：中文 / 英文书刊都用**首行缩进**分段，
+ * 再叠一段间距就是双重分隔。参考实现：Readium CSS 的 `--RS__paraSpacing: 0`。
+ * 容器块（引用 / 列表 / 代码 / 表格）的间距也读它，因此 0 时它们靠自身的内边距分隔。
+ */
+export const READER_PARAGRAPH_SPACING = { min: 0, max: 100, default: 0 } as const;
 /** 屏幕亮度（百分比）→ CSS `filter: brightness()`；下限 30% 防止调到看不见。 */
 export const READER_BRIGHTNESS = { min: 30, max: 100, default: 100 } as const;
 
-/** 双页模式的栏间距（px；与「页边距」不是一个东西：那是正文内边距）。 */
-export const READER_COLUMN_GAP = 32;
+/**
+ * 纸张外的**桌面**留白（px，单侧）——分页模式下纸张与阅读区边缘的距离。
+ *
+ * 用户 2026-10-18 口径："**书页大一点，底下的'桌面'露出的占比少一点**"。
+ * 此前这份留白实际等于「页边距」设置（默认 24px，环绕纸张一圈 48px），
+ * 于是纸张比可用区小一圈、四周都是桌面。现在桌面是**固定的小留白**，
+ * 「页边距」改为纸张**内部**的正文外边距（见 [`readerPagedLayout`]），两件事不再共用一个数。
+ */
+export const READER_DESK_PADDING = 8;
+
+/**
+ * 全屏时**纵向**的桌面留白（px）——用户 2026-10-18 裁决 **B**：
+ * "让纸张铺满上下（全屏时不露桌面）"。
+ *
+ * 只改纵向：横向仍保留一个薄桌面（[`READER_DESK_PADDING`]），
+ * 于是全屏时书页上下是纸色、左右是桌面色，与窗口模式同源。
+ */
+export const READER_DESK_PADDING_FULLSCREEN_Y = 0;
+
+/**
+ * 一栏正文的**最小可读宽**（px）：夹紧「页边距」时用。
+ *
+ * 页边距现在直接决定纸张内的正文外边距，若它大到把一栏挤得比这还窄，
+ * 正文会变成一行一个字。夹紧保证任何设置下都还读得下去。
+ */
+export const READER_MIN_COLUMN_WIDTH = 48;
+
+/** 书脊缝的绘制宽度（px，单侧）：双页相贴处那道内侧阴影的尺寸。 */
+export const READER_SPINE_SHADOW_PX = 12;
 
 /** 估算阅读速度（字/分钟）：中文默读的常用量级，用于"读完本章约需 N 分钟"。 */
 export const READER_CHARS_PER_MINUTE = 400;
+
+// ============================== 正文字体排印（EPUB 排版口径）==============================
+
+/**
+ * **段落首行缩进**（em）：按语言分档，取自 Readium CSS 的默认样式表。
+ *
+ * > `--RS__paraIndent: 1em;`（拉丁）
+ * > `:root:lang(zh) { --RS__paraIndent: 2em; }`（中日韩方块字）
+ *
+ * 为什么中文是 **2em**：方块字一个字符就是一个字宽，"空两格"是中文书刊的行文约定；
+ * 拉丁文按词排版，`1em` 已经足够把首行与后续行区分开。
+ * 参考实现：Readium CSS（<https://github.com/readium/css>）的
+ * `ReadiumCSS-default-cjk-horizontal.css`。**不随仓库携带副本**（第三方样式表，
+ * 体积与许可都不适合入库），这里直接写出用到的原值，出处给上游地址可查。
+ */
+export const READER_PARA_INDENT_EM = { cjk: 2, latin: 1 } as const;
+
+/**
+ * 正文语言档：`cjk`（方块字）与 `latin`。
+ *
+ * 阅读器不解析书里的 `xml:lang`（我们的块模型是纯文本，没有语言字段），
+ * 因此**按正文自身的字符构成判定**（见 [`readerBodyProfile`]）：正文里方块字
+ * 占可视字符的多数就是 `cjk`，否则 `latin`。这个判据比"读标签属性"更稳——
+ * 实测语料里有书的 `xml:lang` 是 `zh-CN`、正文却大段日文汉字，
+ * 而两种语言的首行缩进口径**一致**（都是 2em），所以按内容判定即可。
+ */
+export type ReaderBodyProfile = "cjk" | "latin";
+
+/**
+ * 判断一组正文文字属于哪种语言档。
+ *
+ * 判据是**方块字（CJK 统一表意文字 + 假名 + 谚文）占比**：
+ * - 总可视字符不足 [`READER_PROFILE_MIN_CHARS`]（章节开头的一行短标题）时**沿用**
+ *   `fallback`——单看一行「序章」判不出整本书的语言，而章节之间必须用**同一档**，
+ *   否则同一本书的缩进会在章与章之间跳变；
+ * - 方块字占比 ≥ [`READER_PROFILE_CJK_RATIO`] 判 `cjk`。
+ *
+ * 纯函数（零依赖）：门禁按行为直接驱动它。
+ */
+export const READER_PROFILE_MIN_CHARS = 24;
+export const READER_PROFILE_CJK_RATIO = 0.3;
+
+export function readerBodyProfile(
+  text: string,
+  fallback: ReaderBodyProfile = "latin",
+): ReaderBodyProfile {
+  let visible = 0;
+  let cjk = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    // 空白与不可见控制字符不参与判定（它们与语言无关）。
+    if (ch === " " || ch === "\n" || ch === "\t" || ch === "\r") continue;
+    visible += 1;
+    if (isCjkCodePoint(code)) cjk += 1;
+  }
+  if (visible < READER_PROFILE_MIN_CHARS) return fallback;
+  return cjk / visible >= READER_PROFILE_CJK_RATIO ? "cjk" : "latin";
+}
+
+/**
+ * 是否方块字码位。覆盖 Readium CSS 的 i18n 名单里的东亚三语：
+ * 汉字（含扩展 A）、假名、谚文、全角标点与 CJK 符号。
+ * 范围取 Unicode 官方区块（标准依据，不是"看着像"）。
+ */
+function isCjkCodePoint(code: number): boolean {
+  return (
+    (code >= 0x3040 && code <= 0x30ff) || // 平假名 / 片假名
+    (code >= 0x3400 && code <= 0x4dbf) || // 汉字扩展 A
+    (code >= 0x4e00 && code <= 0x9fff) || // 汉字基本区
+    (code >= 0xf900 && code <= 0xfaff) || // 汉字兼容区
+    (code >= 0xac00 && code <= 0xd7af) || // 谚文音节
+    (code >= 0x3000 && code <= 0x303f) || // CJK 符号与标点
+    (code >= 0xff00 && code <= 0xffef) // 全角形式
+  );
+}
 
 /** 把任意输入夹进 `[min, max]`（非有限数回落缺省）。 */
 export function clampReaderNumber(
@@ -330,28 +439,171 @@ export function estimateReadMinutes(chars: number): number | null {
   return Math.max(1, Math.ceil(chars / READER_CHARS_PER_MINUTE));
 }
 
+// ============================== 分页模式的纸张几何 ==============================
+
 /**
- * 分页模式下的**完整几何**（一页 = 一屏 = `columns` 栏）。
+ * 分页模式（单页 / 双页）的**纸张几何**——"纸张多宽、每张纸多宽、每栏多宽"的唯一一份算术。
  *
- * ## 为什么要有这一个函数
+ * ## 界面形状（用户 2026-10-17 口径 + 2026-10-18 三项修订）
  *
- * 分页的三件事——每栏多宽、共几页、每次平移多少——**必须出自同一份算术**。
- * 之前它们分散在三处（`readerPageWidth` / `readerPageCount` / JSX 里的
- * `page * (pageWidth + gap)`），于是"双页"模式下页数与步进都按**单栏**算：
- * 一次滚轮只挪一栏（正文在屏幕里横向漂半格），页数也翻倍。用户实测反馈
- * "单页和双页滚轮滚动一次应该是一页，现在的方式和普通滚动无区别"正是这一处。
+ * > "单页应为一个居中容器，双页应为一对居中的容器，并且都是跟随自适应大小的。"
+ * > 2026-10-18："**书页大一点，底下的『桌面』露出的占比少一点**"
+ * > + "**正文外边距大一点，当前正文和书页边缘太近了**"。
  *
- * ## 几何推导（分页用 `column-count`，列数固定）
+ * 分页模式的可视结构是**一张纸**，居中摆放在阅读区里：
+ * - **单页**：一张纸（`N = 1` 栏）；
+ * - **双页**：两张纸**相贴**（书脊处无缝），合成一张更宽的纸（`N = 2` 栏）。
  *
- * 设容器可用宽 `W`、屏内栏数 `N`、栏间距 `g`：
- * - 浏览器把宽度**等分**：`colW = (W - (N-1)g) / N`（= [`readerPageWidth`]）；
- * - 内容排成 `C` 栏，总宽 `scrollWidth = C·colW + (C-1)·g`；
- * - 反解栏数：`C = (scrollWidth + g) / (colW + g)`；
- * - 一屏看 `N` 栏 ⇒ 页数 `= ceil(C / N)`；
- * - 第 k 屏的左边缘 = `k · N · (colW + g)` ⇒ 步进 `pitch = N·(colW + g)`。
+ * ## 三个量各自唯一（本轮最重要的一步简化）
  *
- * 注意 `N = 1` 时 `pitch = W + g`（**含**栏间距）：下一栏的起点就是
- * "容器宽 + 一个间距"，不是"容器宽"——少了这个 `g`，翻几页就会露出半栏。
+ * | 量 | 含义 | 由谁定 |
+ * | --- | --- | --- |
+ * | `paperWidth` | 整张纸（= 一屏）的宽 | 可用宽 × 「页面宽度」 |
+ * | `faceWidth` | **一张纸**的绘制宽 | `paperWidth / N`（**逐像素等分**） |
+ * | `margin` | 正文到纸边的距离 | 「页边距」设置 |
+ *
+ * **纸页不再需要"外扩一个 inset"**：`N` 张纸按 `paperWidth / N` **等分铺满**纸张，
+ * 相邻两张天然无缝（相贴）——"一对相贴的居中容器"因此是**切分**出来的，
+ * 而不是靠"各外扩半个栏间距"凑出来的。上一版用 `inset` 凑相贴，多了一个
+ * 必须与栏间距联动的常数（改一个忘一个就裂缝），这一版把它整个去掉。
+ *
+ * ## 书脊缝为什么等于 `2 × 页边距`
+ *
+ * 正文在纸里按 `N` 栏排布，栏间距 `g` 落在两张纸的**接缝**上。要让每一栏都
+ * **在它自己的那张纸里居中**，可以精确解出 `g = 2·margin`：
+ *
+ * ```
+ * 纸内正文宽 W_c = paperWidth - 2·margin
+ * 栏宽      c   = (W_c - (N-1)·g) / N
+ * 第 i 栏起点 = margin + i·(c + g)，其中心 = margin + i·(c+g) + c/2
+ * 第 i 张纸中心 = (i + 0.5)·paperWidth/N
+ * 令两者相等 ⇒ 2·margin·(N-1) = (N-1)·g ⇒ g = 2·margin
+ * ```
+ *
+ * 这个 `g = 2·margin` **正是实体书的接缝**：左页的右边距 + 右页的左边距
+ * （两侧各留一个页边距）相叠就是书脊处的空隙。它不是"为了好算"凑的常数，
+ * 而是"每栏在自己的纸上居中"这一条几何要求的解。
+ *
+ * **副产品**：一屏（`N` 栏 + `N-1` 个间距）恰好等于 `W_c`，于是
+ * `screenPitch = W_c + g = paperWidth`——**翻一页正好推进一张纸的宽**，干净。
+ *
+ * ## "跟随自适应大小"是重排不是缩放
+ *
+ * `availableWidth` / `availableHeight` 是阅读区**去掉桌面留白**后的可用空间；
+ * 纸张宽 = 可用宽 ×「页面宽度」、高 = 可用高（全屏时纵向桌面为 0 ⇒ 纸铺满上下）。
+ * 面板一大，纸就一大、栏宽变大、**正文按新栏宽重排**（`ResizeObserver` 驱动）。
+ */
+export interface ReaderPagedLayout {
+  /** 整张纸（也就是分页模式的裁剪视口）= **一屏**宽。 */
+  paperWidth: number;
+  /** **一张纸**的绘制宽 = `paperWidth / columns`（`N` 张逐像素铺满，无缝相贴）。 */
+  faceWidth: number;
+  /** 纸内正文宽（`paperWidth - 2·margin`）。 */
+  contentWidth: number;
+  /** 单栏宽（= 浏览器等分出来的实际栏宽，可为小数）。 */
+  columnWidth: number;
+  /** 栏间距 = **书脊缝** = `2·margin`（见上文推导）。 */
+  gap: number;
+  /** 正文到纸边的距离（「页边距」）。 */
+  margin: number;
+  /** 纸高（= 可用高，"跟随自适应"；全屏时铺满上下）。 */
+  height: number;
+  /** 每屏显示的栏数（单页 1 / 双页 2）。 */
+  columns: 1 | 2;
+}
+
+export function readerPagedLayout(input: {
+  availableWidth: number;
+  availableHeight: number;
+  /** 「页面宽度」设置（占可用宽度的百分比，30–100）。 */
+  pageWidthPercent: number;
+  /** 「页边距」设置（px，0–80）：正文到纸边的距离。 */
+  pageMargin: number;
+  columns: 1 | 2;
+}): ReaderPagedLayout {  const columns = input.columns;
+  const availableWidth = Number.isFinite(input.availableWidth)
+    ? Math.max(0, input.availableWidth)
+    : 0;
+  const availableHeight = Number.isFinite(input.availableHeight)
+    ? Math.max(0, input.availableHeight)
+    : 0;
+  // 百分比夹进 30–100（声明层没有 min/max，夹紧只在面板侧做，与 `clampReaderNumber` 同口径）。
+  const percent = Number.isFinite(input.pageWidthPercent)
+    ? Math.min(100, Math.max(READER_PAGE_WIDTH.min, input.pageWidthPercent))
+    : READER_PAGE_WIDTH.default;
+  // 纸张宽：可用宽 × 百分比，并**不得**超过可用宽（否则会顶出阅读区）。
+  const paperWidth = Math.max(
+    1,
+    Math.floor(Math.min(availableWidth, (availableWidth * percent) / 100)),
+  );
+  /**
+   * 页边距**按可用空间夹紧**：设置上限是 80px，但窄面板里 80px 的双页边距
+   * 会把一栏挤到负宽。夹紧保证任何组合下每栏都至少 [`READER_MIN_COLUMN_WIDTH`]，
+   * 代入 `gap = 2·margin` 后整套几何**塌缩成一个极简形式**：
+   *
+   * ```
+   * usable      = contentWidth - gap·(N-1) = paperWidth - 2·margin·N
+   * columnWidth = usable / N               = paperWidth/N - 2·margin
+   *             = faceWidth - 2·margin      （因为 faceWidth = paperWidth/N）
+   * ```
+   *
+   * 也就是说：**栏宽 = 一张纸的宽 - 两侧页边距**。这条等式让"夹紧"也变得直接：
+   * 要保持栏宽 ≥ `READER_MIN_COLUMN_WIDTH`，只需 `margin ≤ (faceWidth - MIN) / 2`。
+   */
+  const requested = Number.isFinite(input.pageMargin)
+    ? Math.min(READER_PAGE_MARGIN.max, Math.max(READER_PAGE_MARGIN.min, input.pageMargin))
+    : READER_PAGE_MARGIN.default;
+  /*
+   * 页边距**按可读性夹紧**（上限 80px 在窄面板 + 双页下会吃掉大半张纸）。
+   *
+   * 为什么上限是 `(faceWidth - MIN)/2` 而不是 `(paperWidth - N·MIN)/2`：
+   * 由上一条等式 `columnWidth = faceWidth - 2·margin`，约束是
+   * `faceWidth - 2·margin ≥ MIN`，解出 `margin ≤ (faceWidth - MIN)/2`。
+   * （写成 `(paperWidth - N·MIN)/2` 会**放大 N 倍**——双页时夹得太松，
+   * 实测 320px 面板 / 页边距 80 会算出栏宽 1px，正文变成一行一个字。）
+   */
+  const faceWidth = paperWidth / columns;
+  const marginLimit = Math.max(0, (faceWidth - READER_MIN_COLUMN_WIDTH) / 2);
+  const margin = Math.max(0, Math.min(requested, marginLimit));
+  // 纸内正文宽 = 纸宽 - 两侧页边距。
+  const contentWidth = Math.max(1, paperWidth - margin * 2);
+  // 栏间距 = 2·margin（书脊缝；见文件头的推导）。单页用不到它（只有一栏）。
+  const gap = margin * 2;
+  /*
+   * 栏宽取**精确值**（不取整）：浏览器用 `column-count` 分栏时是把宽度**等分**的，
+   * 小数位不丢。这里若取整，纸页的绘制宽就会与真实栏宽差一个像素，
+   * 双页相贴处会露出 1–2px 的底（同一类"算出来的几何 ≠ 真实绘制几何"，
+   * 与缺陷 0027 同源）。`readerPageWidth` 的取整只服务栏数估算（要 round，差 1px 无影响）。
+   */
+  const usable = contentWidth - gap * (columns - 1);
+  const columnWidth = usable > 0 ? usable / columns : 1;
+  return {
+    paperWidth,
+    // 等分铺满：双页的 `faceWidth * 2` 恰等于 `paperWidth`（逐像素无缝）。
+    faceWidth,
+    contentWidth,
+    columnWidth,
+    gap,
+    margin,
+    // 高度跟随可用高；未测量时给 1，避免 0 高让分栏退化。
+    height: Math.max(1, Math.floor(availableHeight)),
+    columns,
+  };
+}
+
+/**
+ * 分页模式下的**翻页算术**（内容排成多少栏 / 一共几页 / 每次平移多少）。
+ *
+ * ## 步进 = **整张纸的宽**（`screenPitch = contentWidth + gap`，恒等于 `paperWidth`）
+ *
+ * 旧实现把 `pitch` 定义成**一栏**的列距（`columnWidth + gap`），而 JSX 里又拿它当
+ * **一屏**用（`translateX(-page · pitch)`）——单页模式两者恰好相等（`N = 1`）**掩盖了它**，
+ * 双页模式下页面只推进半屏，正文在两屏之间**重叠一栏**。
+ *
+ * 现在的口径由 [`readerPagedLayout`] 的几何直接给出：屏内 `N` 栏 + `N-1` 个间距
+ * 恰好铺满纸内正文宽 `W_c`，因此下一屏第一栏的起点就在 `W_c + g = paperWidth`——
+ * 与浏览器等分产生的小数栏宽**无关**，不需要任何"逐像素凑"。
+ * 传 `contentWidth`（= `paperWidth - 2·margin`）与 `gap`（= `2·margin`）即可。
  */
 export interface ReaderPagination {
   /** 单栏宽度（= 浏览器等分出来的实际栏宽）。 */
@@ -360,28 +612,36 @@ export interface ReaderPagination {
   columnCount: number;
   /** 一共多少页（一页 = `columns` 栏）。 */
   pageCount: number;
-  /** 每次翻页 `translateX` 平移的像素（= 一屏 + 屏间的一个栏间距）。 */
-  pitch: number;
+  /** 每次翻页 `translateX` 平移的像素（= **整张纸** = `contentWidth + gap`）。 */
+  screenPitch: number;
 }
 
 export function readerPagination(
   scrollWidth: number,
-  containerWidth: number,
+  /** 纸内正文宽（`paperWidth - 2·margin`）。 */
+  contentWidth: number,
   columns: 1 | 2,
-  gap: number = READER_COLUMN_GAP,
+  /** 栏间距（= 书脊缝 = `2·margin`）。 */
+  gap: number,
 ): ReaderPagination {
-  const columnWidth = readerPageWidth(containerWidth, columns, gap);
-  const pitch = columnWidth + gap;
+  const columnWidth = readerPageWidth(contentWidth, columns, gap);
+  const perColumn = columnWidth + gap;
+  const screenPitch = contentWidth + gap;
   // 空内容 / 尚未测量：给"1 栏 1 页"，避免 0 页让翻页按钮直接失效。
-  if (!Number.isFinite(scrollWidth) || scrollWidth <= 0 || columnWidth <= 0) {
-    return { columnWidth, columnCount: 1, pageCount: 1, pitch: pitch > 0 ? pitch : 1 };
+  if (!Number.isFinite(scrollWidth) || scrollWidth <= 0 || columnWidth <= 0 || perColumn <= 0) {
+    return {
+      columnWidth,
+      columnCount: 1,
+      pageCount: 1,
+      screenPitch: screenPitch > 0 ? screenPitch : 1,
+    };
   }
-  const columnCount = Math.max(1, Math.round((scrollWidth + gap) / pitch));
+  const columnCount = Math.max(1, Math.round((scrollWidth + gap) / perColumn));
   return {
     columnWidth,
     columnCount,
     pageCount: Math.max(1, Math.ceil(columnCount / columns)),
-    pitch,
+    screenPitch,
   };
 }
 
@@ -397,17 +657,19 @@ export function readerColumnsPerScreen(viewMode: ReaderViewMode): 1 | 2 {
 }
 
 /**
- * 单栏宽度：面板可用宽度按屏内栏数等分（并扣掉栏间距）。
+ * 单栏宽度：纸内正文宽按屏内栏数等分（并扣掉栏间距）。
  *
- * 分页模式下这一栏就是"一页"；滚动模式下不调用它（正文按面板宽度自适应）。
+ * 分页模式下这一栏就是"一页正文"；滚动模式下不调用它（正文按面板宽度自适应）。
+ * 取**整**只服务栏数估算（`readerPagination` 要 round，差 1px 无影响）；
+ * 真实绘制用的精确栏宽由 [`readerPagedLayout`] 给出。
  */
 export function readerPageWidth(
-  containerWidth: number,
+  contentWidth: number,
   columns: 1 | 2,
-  gap: number = READER_COLUMN_GAP,
+  gap: number,
 ): number {
-  if (!Number.isFinite(containerWidth) || containerWidth <= 0) return 0;
-  const usable = containerWidth - gap * (columns - 1);
+  if (!Number.isFinite(contentWidth) || contentWidth <= 0) return 0;
+  const usable = contentWidth - gap * (columns - 1);
   return Math.max(1, Math.floor(usable / columns));
 }
 
@@ -480,7 +742,12 @@ export function isInteractiveTarget(
   return target.closest(INTERACTIVE_SELECTOR) !== null;
 }
 
-/** 正文里算作"可交互"的元素（与 `BookBlocks` / `br-pager` 实际渲染的标签一致）。 */
+/**
+ * 正文里算作"可交互"的元素（与 `BookBlocks` 实际渲染的标签一致）。
+ *
+ * 翻页按钮已随悬浮翻页器一并删除（用户 2026-10-18），但 `button` 仍在名单里：
+ * 正文本身可能带链接 / 表单类元素，且注释块里也可能出现按钮。
+ */
 const INTERACTIVE_SELECTOR = "button, a, input, textarea, select, label";
 
 // ============================== 分页模式：滚轮翻页 ==============================
@@ -539,22 +806,18 @@ export function accumulateWheelStep(
 }
 
 /**
- * 分页模式下"一页"的**实际列距**（= 栏宽 + 栏间距）。
+ * **一张纸**的翻页步进（= 纸内正文宽 + 栏间距 = `paperWidth`）。
  *
- * 这是 `translateX` 每一步要平移的距离。它必须与浏览器**真实的**列距逐像素一致，
- * 否则翻几页之后正文就会错位（露出半栏）。
+ * `translateX` 每一步要平移的距离。它必须与浏览器**真实的**分栏结果逐像素一致，
+ * 否则翻几页之后正文就会错位（露出半栏）。之所以能保证一致：分页用
+ * `column-count`（**不是** `column-width`）——列数固定时浏览器把可用宽度**等分**；
+ * 而 `column-width` 只是"建议值"，浏览器会按容器宽度把栏拉宽到放得下。
  *
- * 之所以能保证一致：分页用 `column-count`（**不是** `column-width`）——
- * 列数固定时浏览器把可用宽度**等分**，每栏宽恰好是 [`readerPageWidth`] 算出的值；
- * 而 `column-width` 只是"建议值"，浏览器会按容器宽度把栏拉宽到放得下，
- * 实际列距与算出来的对不上（这正是"翻页后错位"的根因）。
- *
- * **注意这是"一栏"的步进**；翻页要平移**一屏**，用 [`readerPagination`] 的 `pitch`。
+ * **与栏宽的小数位无关**：屏内 `N` 栏 + `N-1` 个间距恰好铺满纸内正文宽，
+ * 因此下一屏第一栏的起点恒为 `contentWidth + gap`（见 [`readerPagination`]）。
+ * 这也是"翻一页正好推进一张纸"的算术——不再需要单独的"屏宽"概念。
  */
-export function readerPagePitch(
-  containerWidth: number,
-  columns: 1 | 2,
-  gap: number = READER_COLUMN_GAP,
-): number {
-  return readerPageWidth(containerWidth, columns, gap) + gap;
+export function readerScreenPitch(contentWidth: number, gap: number): number {
+  if (!Number.isFinite(contentWidth) || contentWidth <= 0) return 1;
+  return contentWidth + gap;
 }

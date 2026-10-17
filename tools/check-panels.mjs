@@ -4186,6 +4186,8 @@ const READER_FAMILY_FILES = [
   "apps/desktop/src/app_ui/panels/bookreader/useReaderBookIdentity.ts",
   "apps/desktop/src/app_ui/panels/bookreader/useReaderSettings.ts",
   "apps/desktop/src/app_ui/panels/bookreader/readerView.ts",
+  // 正文块文本遍历（两个消费方共用；2026-10-18 抽出以免循环依赖）。
+  "apps/desktop/src/app_ui/panels/bookreader/bookText.ts",
 ];
 const readerFamilySrc = READER_FAMILY_FILES.map((p) => readFileSync(join(ROOT, p), "utf8")).join(
   "\n",
@@ -4213,13 +4215,13 @@ const readerView = await import(
 const readerSpec = config.panelSpec("bookreader");
 
 check(
-  "注册表：bookreader 是内置面板（media / 无类目 / control），且声明了 12 项阅读选项",
+  "注册表：bookreader 是内置面板（media / 无类目 / control），且声明了 13 项阅读选项",
   readerSpec !== undefined &&
     readerSpec.category === "media" &&
     readerSpec.hasClass === false &&
     readerSpec.blueprintNode === "control" &&
     readerSpec.titleKey === "panel.bookreader" &&
-    (readerSpec.settings ?? []).length === 12 &&
+    (readerSpec.settings ?? []).length === 13 &&
     readerSpec.defaultSize?.width === 900 &&
     readerSpec.defaultSize?.height === 700,
   `decls=${(readerSpec?.settings ?? []).map((s) => s.key).join(",") || "（无）"}`,
@@ -4373,29 +4375,330 @@ check(
 );
 
 check(
-  "③ 分页几何**一处算术**：页数与步进都按「一屏 N 栏」算（双页不得按单栏翻）",
+  "③ 分页几何**一处算术**：页数与步进都按「一张纸」算（双页不得按单栏翻）",
   (() => {
-    // 之前页数与 `translateX` 步进都按**单栏**算，于是双页模式一次只挪一栏
-    // （正文在屏幕里横向漂半格）、页数还翻倍。
+    // 旧实现把 `pitch` 定义成**一栏**的列距（`columnWidth + gap`），而 JSX 又拿它当
+    // **一屏 / 一张纸**用（`translateX(-page · pitch)`）。单页模式两者恰好相等（N=1）
+    // **掩盖了它**；双页模式下页面只推进半屏，正文在两屏之间**重叠一栏**。
+    // 现在口径是 `screenPitch = 纸内正文宽 + 栏间距`（恒等于 `paperWidth`）。
+    // 参数：纸内正文宽 600、栏间距 32（= 2×页边距 16）。
     const single = readerView.readerPagination(3000, 600, 1, 32);
     const spread = readerView.readerPagination(3000, 600, 2, 32);
     return (
       // 单栏：栏宽 600、步进 600+32=632。
       single.columnWidth === 600 &&
-      single.pitch === 632 &&
+      single.screenPitch === 632 &&
       single.pageCount === Math.ceil(single.columnCount / 1) &&
-      // 双页：栏宽 (600-32)/2 = 284、步进 284+32 = 316 = **一屏两栏**的一半宽度
-      //（一屏 = 2×284+32 = 600 = 容器宽，因此每屏正好推进 600+32=632 的总距？——
-      //  不：一屏占 2 栏，步进 = 2×316 = 632，与单栏模式的 632 相同，这是对的：
-      //  两种模式一屏都覆盖 600px 内容宽 + 32px 间距）。
+      // 双页：栏宽 (600-32)/2 = 284、步进仍是 600+32 = 632（**不是** 316）。
       spread.columnWidth === 284 &&
-      spread.pitch === 316 &&
+      spread.screenPitch === 632 &&
       spread.pageCount === Math.ceil(spread.columnCount / 2) &&
-      // 关键：双页的页数**约为**单栏的一半（一屏两栏），不是与单栏相等。
-      spread.pageCount <= single.pageCount
+      // 关键：双页的页数**约为**单栏的一半（一张纸两栏），不是与单栏相等。
+      spread.pageCount <= single.pageCount &&
+      // 反向：步进**不得**退回"一栏"（= 一张纸只挪半张、两屏重叠一栏）。
+      spread.screenPitch !== spread.columnWidth + 32 &&
+      readerView.readerScreenPitch(600, 32) === 632
     );
   })(),
   `single=${JSON.stringify(readerView.readerPagination(3000, 600, 1, 32))} spread=${JSON.stringify(readerView.readerPagination(3000, 600, 2, 32))}`,
+);
+
+// ============ 分页纸张几何 + 仿真背景 + 2026-10-18 五项修订 ============
+//
+// 用户口径（2026-10-17）："单页应为一个居中容器，双页应为一对居中的容器，
+// 并且都是跟随自适应大小的。" + 仿真背景（图书阴影）与开关。
+// 用户口径（2026-10-18）：① 书页大一点、桌面露出少一点；② 正文外边距大一点；
+// ③ 单/双页默认**刷新切换**而不是滑动；⑤ 全屏时纸张铺满上下（裁决 B）。
+//
+// 这一组的断言钉四件事：
+// ① **纸张等分**——双页是"一对**相贴**的纸页"（`N` 张按 `paperWidth / N` 逐像素铺满）；
+// ② **书脊缝 = 2×页边距**——每栏因此**恰好居中**在它自己的纸上（几何精确解）；
+// ③ **桌面留白与「页边距」互不联动**（两个独立的数，2026-10-18 ①② 同时成立的前提）；
+// ④ **纸张宽高跟随可用空间**（"跟随自适应大小"），且纸宽不得超出可用宽。
+
+check(
+  "分页纸张：`N` 张纸按 `paperWidth / N` **等分铺满**；且 `纸宽 = 栏宽 + 2×页边距`（恒等式）",
+  (() => {
+    // 2026-10-18 修订：纸页不再"各外扩半个栏间距"凑相贴，而是**切分**纸张——
+    // `faceWidth = paperWidth / N`，两张相加恰好等于纸宽（逐像素无缝）。
+    //
+    // 代入 `gap = 2·margin` 后可证明一个**更强的恒等式**：
+    //   columnWidth = faceWidth - 2·margin  ⇒  faceWidth = columnWidth + 2·margin
+    // 它把"一张纸"讲清楚了：**纸 = 栏 + 两侧页边距**。旧版把 paperWidth 与栏宽
+    // 用 `inset` 间接联系，改一个常数就会破坏这条关系（所以旧版要额外钉等式）；
+    // 新版它是**算出来的**，天然成立。
+    const spread = readerView.readerPagedLayout({
+      availableWidth: 900,
+      availableHeight: 600,
+      pageWidthPercent: 100,
+      pageMargin: 24,
+      columns: 2,
+    });
+    const single = readerView.readerPagedLayout({
+      availableWidth: 900,
+      availableHeight: 600,
+      pageWidthPercent: 100,
+      pageMargin: 24,
+      columns: 1,
+    });
+    return (
+      Math.abs(spread.faceWidth * 2 - spread.paperWidth) < 0.01 &&
+      Math.abs(single.faceWidth - single.paperWidth) < 0.01 &&
+      // 恒等式：纸宽 = 栏宽 + 2×页边距（**精确**，不是近似）。
+      Math.abs(spread.faceWidth - (spread.columnWidth + 2 * spread.margin)) < 0.01 &&
+      Math.abs(single.faceWidth - (single.columnWidth + 2 * single.margin)) < 0.01
+    );
+  })(),
+  `face=${readerView.readerPagedLayout({ availableWidth: 900, availableHeight: 600, pageWidthPercent: 100, pageMargin: 24, columns: 2 }).faceWidth}`,
+);
+
+check(
+  "分页书脊缝 = **2×页边距** ⇒ 每栏**恰好居中**在它自己的纸上（几何精确解）",
+  (() => {
+    // 推导见 `readerPagedLayout` 文件头：第 i 栏中心与第 i 张纸中心相等 ⇔ g = 2·margin。
+    const l = readerView.readerPagedLayout({
+      availableWidth: 900,
+      availableHeight: 600,
+      pageWidthPercent: 100,
+      pageMargin: 24,
+      columns: 2,
+    });
+    const faceCenters = [0, 1].map((i) => (i + 0.5) * l.faceWidth);
+    const colCenters = [0, 1].map(
+      (i) => l.margin + i * (l.columnWidth + l.gap) + l.columnWidth / 2,
+    );
+    return (
+      l.gap === l.margin * 2 &&
+      faceCenters.every((c, i) => Math.abs(c - colCenters[i]) <= 0.01) &&
+      // 反向：书脊缝**不得**等于其它量（那些都会让栏与纸错位）。
+      l.gap !== l.margin &&
+      l.gap !== l.columnWidth
+    );
+  })(),
+  (() => {
+    const l = readerView.readerPagedLayout({
+      availableWidth: 900,
+      availableHeight: 600,
+      pageWidthPercent: 100,
+      pageMargin: 24,
+      columns: 2,
+    });
+    return `gap=${l.gap} margin=${l.margin} colW=${l.columnWidth.toFixed(1)} faceW=${l.faceWidth}`;
+  })(),
+);
+
+check(
+  "分页纸张：**桌面留白与「页边距」互不联动**（改页边距不动纸张宽，只改正文离纸边）",
+  (() => {
+    // 【I1】"书页大一点、桌面露出少一点"【I2】"正文外边距大一点"能**同时**成立的前提：
+    // 桌面留白（CSS 的 `--br-desk-*`）与「页边距」（纸张 `padding`）是两个独立的数。
+    // 旧实现两者共用一个 `--br-page-margin`，于是"把正文推离纸边"必然"把纸缩小一圈"。
+    const thin = readerView.readerPagedLayout({
+      availableWidth: 900,
+      availableHeight: 600,
+      pageWidthPercent: 100,
+      pageMargin: 8,
+      columns: 2,
+    });
+    const wide = readerView.readerPagedLayout({
+      availableWidth: 900,
+      availableHeight: 600,
+      pageWidthPercent: 100,
+      pageMargin: 60,
+      columns: 2,
+    });
+    return (
+      // 纸张宽**完全不变**（页边距不再缩小纸张）。
+      Math.abs(thin.paperWidth - wide.paperWidth) < 0.01 &&
+      // 但栏宽**变了**（页边距把正文推离纸边）。
+      wide.columnWidth < thin.columnWidth &&
+      wide.margin > thin.margin
+    );
+  })(),
+  `paper 8→${readerView.readerPagedLayout({ availableWidth: 900, availableHeight: 600, pageWidthPercent: 100, pageMargin: 8, columns: 2 }).paperWidth} / 60→${readerView.readerPagedLayout({ availableWidth: 900, availableHeight: 600, pageWidthPercent: 100, pageMargin: 60, columns: 2 }).paperWidth}`,
+);
+
+check(
+  "分页纸张：书脊缝**跟随** 2×页边距（拖「页边距」时栏与纸始终居中，不出现错位）",
+  (() => {
+    // "每栏在自己纸上居中"的**稳定性**：页边距一变，书脊缝必须同步变。
+    // 旧实现的 `inset` 与栏间距是两个独立常数，正是"改了页边距就错位"的隐患。
+    return [0, 8, 24, 40, 60, 80].every((m) => {
+      const l = readerView.readerPagedLayout({
+        availableWidth: 900,
+        availableHeight: 600,
+        pageWidthPercent: 100,
+        pageMargin: m,
+        columns: 2,
+      });
+      const faceCenters = [0, 1].map((i) => (i + 0.5) * l.faceWidth);
+      const colCenters = [0, 1].map(
+        (i) => l.margin + i * (l.columnWidth + l.gap) + l.columnWidth / 2,
+      );
+      return (
+        l.gap === l.margin * 2 && faceCenters.every((c, i) => Math.abs(c - colCenters[i]) <= 0.01)
+      );
+    });
+  })(),
+  `测试页边距 ${[0, 8, 24, 40, 60, 80].join("/")} 全部居中`,
+);
+
+check(
+  "【I2】页边距**按可读性夹紧**：窄面板 + 大页边距也不得把栏宽挤到 <48px",
+  (() => {
+    // 「页边距」上限 80px，而窄面板（如 320px 宽双页）下 80×2 已吃掉半张纸。
+    // 夹紧保证每栏至少 `READER_MIN_COLUMN_WIDTH`，否则正文会变成一行一个字。
+    //
+    // 上限是 `(faceWidth - MIN)/2`：由恒等式 `columnWidth = faceWidth - 2·margin`
+    // 解出（**不是** `(paperWidth - N·MIN)/2`——那样会放大 N 倍、夹得太松）。
+    const tiny = readerView.readerPagedLayout({
+      availableWidth: 320,
+      availableHeight: 240,
+      pageWidthPercent: 100,
+      pageMargin: 80,
+      columns: 2,
+    });
+    return (
+      tiny.margin < 80 &&
+      tiny.margin >= 0 &&
+      tiny.columnWidth >= readerView.READER_MIN_COLUMN_WIDTH - 0.01 &&
+      tiny.paperWidth > 0
+    );
+  })(),
+  (() => {
+    const t = readerView.readerPagedLayout({
+      availableWidth: 320,
+      availableHeight: 240,
+      pageWidthPercent: 100,
+      pageMargin: 80,
+      columns: 2,
+    });
+    return `320px 双页 / 页边距 80 → 夹紧为 margin=${t.margin} colW=${t.columnWidth.toFixed(1)}`;
+  })(),
+);
+
+// ============ EPUB 正文排印（2026-10-18，参考 Readium CSS / foliate-js）============
+//
+// 用户口径："**解析 epub 排版要正确，去参考开源的 epub 的解析器和阅读器的实现**"。
+//
+// 判据来自 **Readium CSS**（<https://github.com/readium/css>）的
+// `ReadiumCSS-default-cjk-horizontal.css` / `-default.css`（第三方样式表，不随仓库
+// 携带副本；用到的原值直接写在下面，出处给上游地址可查）：
+//   --RS__paraIndent: 1em;  :root:lang(zh) { --RS__paraIndent: 2em; }
+//   --RS__paraSpacing: 0;   p { margin: 0; text-indent: var(--RS__paraIndent) }
+//   body { text-align: justify; text-justify: inter-character }
+//   h1 + p, ... { text-indent: 0 }
+// 与 **foliate-js**（<https://github.com/johnfactotum/foliate-js>）的 `fb2.js`：
+//   `:not(p) + p, p:first-child { text-indent: 0 }`
+
+check(
+  "EPUB 排印：**段落间距缺省 0**（中英文书刊都用首行缩进分段，不叠一段间距）",
+  (() => {
+    const decl = readerSpec?.settings?.find((s) => s.key === "paragraphSpacing");
+    const constRange = readerView.READER_PARAGRAPH_SPACING;
+    // 声明缺省与取值域同源（`check:panels` 的另一条已逐项比对，这里单独钉"是 0"）。
+    return decl?.default === 0 && constRange.default === 0 && constRange.min === 0;
+  })(),
+  `decl=${readerSpec?.settings?.find((s) => s.key === "paragraphSpacing")?.default} range=${JSON.stringify(readerView.READER_PARAGRAPH_SPACING)}`,
+);
+
+check(
+  "EPUB 排印：首行缩进**按语言分档**（中文 2em / 拉丁 1em，Readium CSS 口径）",
+  (() => {
+    const em = readerView.READER_PARA_INDENT_EM;
+    const css = readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/styles.css"), "utf8");
+    return (
+      em.cjk === 2 &&
+      em.latin === 1 &&
+      // CSS 真的消费了面板下发的变量。
+      /text-indent:\s*var\(--br-para-indent/.test(css) &&
+      // 紧跟标题 / 分隔线的第一段不缩进（Readium 与 foliate 同款）。
+      /\.vr-heading\s*\+\s*\.vr-paragraph/.test(css) &&
+      // 段落内的行内元素不继承缩进（Readium：`p * { text-indent: 0 }`）。
+      /\.vr-paragraph \*\s*\{[^}]*text-indent:\s*0/.test(css)
+    );
+  })(),
+  `cjk=${readerView.READER_PARA_INDENT_EM.cjk}em latin=${readerView.READER_PARA_INDENT_EM.latin}em`,
+);
+
+check(
+  "EPUB 排印：正文语言档按**字符构成**判定（纯函数，门禁直接驱动）",
+  (() => {
+    const probe = readerView.readerBodyProfile;
+    if (typeof probe !== "function") return false;
+    const zh = "这是一段中文正文，用来判断语言档。".repeat(3);
+    const en = "This is an English paragraph used to detect the profile. ".repeat(3);
+    return (
+      probe(zh) === "cjk" &&
+      probe(en) === "latin" &&
+      // 样本不足（章节开头一行短标题）时**沿用**上一档——否则同一本书会章章跳变。
+      probe("序章", "cjk") === "cjk" &&
+      probe("Prologue", "latin") === "latin" &&
+      // 空串沿用上一档（不抛错）。
+      probe("", "cjk") === "cjk" &&
+      // 中英混排以方块字占比为准（≥30% 判 cjk）。
+      probe("这是一本 English book 混排。".repeat(3)) === "cjk"
+    );
+  })(),
+  `zh=${readerView.readerBodyProfile("这是一段中文正文，用来判断语言档。".repeat(3))} en=${readerView.readerBodyProfile("This is an English paragraph used to detect the profile. ".repeat(3))}`,
+);
+
+check(
+  "EPUB 排印：语言档判定**必须把块渲染的正文算进来**（否则中文 EPUB 永远判成 latin）",
+  (() => {
+    // 实测发现的一处疏漏：`txt` 的内容在 `item.text`，而 `epub` / `md` 的内容在
+    // `item.blocks`（`text` 恒为 null）。只收集 `text` 时，一本中文 EPUB 的
+    // 首行缩进会永远停在 1em（拉丁档），而中文书刊的口径是 2em。
+    const stage = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderStage.tsx"),
+      "utf8",
+    );
+    const code = stripComments(stage);
+    const helper = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/bookText.ts"),
+      "utf8",
+    );
+    return (
+      /item\.blocks\) sample \+= collectBlockText\(item\.blocks\)/.test(code) &&
+      // 遍历必须递归（列表 / 引用 / 脚注里的正文也算）。
+      /if \(block\.list_items\) for \(const item of block\.list_items\) walk\(item\.blocks\)/.test(
+        helper,
+      ) &&
+      // 反向：不得只收集 `text`（那正是这条断言要防的写法）。
+      !/bodyProfile[\s\S]{0,400}?\bonlyText\b/.test(code)
+    );
+  })(),
+);
+
+check(
+  "EPUB 排印：块文本遍历**单一实现**（两个消费方共用，不复制第二份）",
+  (() => {
+    // 抽成 `bookText.ts` 的理由：`BookReaderPanel` 已 import `ReaderStage`，
+    // 若把遍历留在任一个组件里，另一个 import 它就成**循环依赖**；复制一份又漂移。
+    const text = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/bookText.ts"),
+      "utf8",
+    );
+    const panel = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/BookReaderPanel.tsx"),
+      "utf8",
+    );
+    const stage = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderStage.tsx"),
+      "utf8",
+    );
+    return (
+      /export function collectBlockText/.test(text) &&
+      // 两个消费方都从 `bookText` 取（不是各自实现）。
+      /import \{ collectBlockText \} from "\.\/bookText"/.test(panel) &&
+      /import \{ collectBlockText \} from "\.\/bookText"/.test(stage) &&
+      // 反向：两处都不得再有第二份实现（函数名重复定义）。
+      (panel.match(/function collectBlockText/g) ?? []).length === 0 &&
+      (stage.match(/function collectBlockText/g) ?? []).length === 0 &&
+      // 反向：`ReaderStage` 不得 import `BookReaderPanel`（那会成环）。
+      !/from "\.\/BookReaderPanel"/.test(stage)
+    );
+  })(),
 );
 
 check(
@@ -4438,13 +4741,15 @@ check(
 );
 
 check(
-  "面板接线：走 useReaderSettings / useReaderBook，并把 dockview API 传下去（退出阅读 + 设置热加载）",
+  "面板接线：走 useReaderSettings / useReaderBook，并把 dockview API 传下去（设置热加载）",
   /useReaderSettings\(panelApi\)/.test(readerPanelSrc) &&
     /useReaderBook\(\)/.test(readerPanelSrc) &&
-    /panelApi\?\.close\(\)/.test(readerPanelSrc) &&
     /\{ id: "bookreader", titleKey: "panel\.bookreader", render: \(ctx\) => <BookReaderPanel api=\{ctx\.api\} \/> \}/.test(
       registrySource,
-    ),
+    ) &&
+    // 反向：用户 2026-10-18 口径"**删除退出阅读按钮**"——面板里不再有那条关闭逻辑。
+    !/exitReading/.test(readerPanelSrc) &&
+    !/panelApi\?\.close\(\)/.test(readerPanelSrc),
 );
 
 check(
@@ -4895,18 +5200,39 @@ check(
       /closest\?\.\("\[data-page-index\]"\)/.test(code) &&
       // 上报的是"第几页 + 页内比例"。
       /onPositionChange\(\{ visibleIndex, offsetInPage \}\)/.test(code) &&
-      // **探测点用内容框 `flowRef` 而不是舞台 `hostRef`**：舞台带
-      // `padding: var(--br-page-margin)`（上限 80px），以舞台左上角往里取点，
-      // 页边距 > 该偏移时点会落进内边距，`closest` 得到 null → 章号退回第 1 章。
+      // **探测点的基准**：分页模式必须以**纸张 `paperRef`**为基准，不能以内容框
+      // `flowRef` 为基准——分页的平移就挂在 `.br-flow` 自己身上，`flowRect.left`
+      // 随翻页一直往左跑，第 1 屏起探测点就**跑出视口**（实测 -812px），
+      // `elementFromPoint` 返回 null → `closest` 得到 null → 章号退回第 1 章。
+      // 纸张是**视口**、不参与平移，因此取点是稳定的固定位置。
       //
-      // 钉**取值来源**（`flow.getBoundingClientRect()`），不只钉变量名：
-      // 实测把这一行换成 `host.getBoundingClientRect()` 时，只检查
-      // `flowRef.current` / `flowRect.left` 字面写法的断言**仍然全绿**——变量名没变、
-      // 变的是它装了什么。因此这里必须比对"从谁身上量的"。
+      // 钉**取值来源**，不只钉变量名（项目记过教训：把一行换成 `host.getBoundingClientRect()`
+      // 时，只检查变量名字面写法的断言仍然全绿——变量名没变、变的是它装了什么）。
       /const flowRect = flow\.getBoundingClientRect\(\);/.test(code) &&
       !/const flowRect = host\.getBoundingClientRect\(\);/.test(code) &&
-      /flowRect\.left \+ Math\.min\(flowRect\.width \/ 2, 40\)/.test(code) &&
-      /Math\.max\(hostRect\.top \+ 2, flowRect\.top \+ 2\)/.test(code) &&
+      /const basis = paged && paperRef\.current \? paperRef\.current\.getBoundingClientRect\(\) : flowRect;/.test(
+        code,
+      ) &&
+      /basis\.left \+ pagedLayout\.margin \+ 4/.test(code) &&
+      /Math\.max\(hostRect\.top \+ 2, basis\.top \+ 2\)/.test(code) &&
+      // 纸张必须真的挂上了 ref（否则 `paperRef.current` 恒为 null、退回被平移的内容框）。
+      /className="br-paper"\s+ref=\{paperRef\}/.test(code) &&
+      // **页内比例的分母必须是"这一项的宽"**（`.br-page` 的并集盒 = 该项总内容宽）：
+      // 消费方 `readerPositionFromPage` 算 `item.start + offset × item.span`，
+      // 两边都必须是"项的百分比"才能相乘。
+      //
+      // 钉住这条是因为**实测踩过一次**：把分母换成"屏内栏数 ÷ 屏宽"（语义 = 读到屏内第几栏）
+      // 在项短于一屏时看着也对，项一跨栏就**饱和**——实测三屏得 0 / 2.078 / 4.156，
+      // `clamp01` 压成 1，于是**第一屏翻页后进度直接跳到项尾**
+      // （`tools/reader-probe-verify.mjs` 逐屏量出）。
+      /const viewportLeft =\s*\n?\s*\(paperRef\.current\?\.getBoundingClientRect\(\)\.left \?\? 0\) \+ pagedLayout\.margin;/.test(
+        code,
+      ) &&
+      /pageRect\.width > 0 \? \(viewportLeft - pageRect\.left\) \/ pageRect\.width : 0/.test(code) &&
+      // **反向**：不得把页内比例换算成"屏内第几栏"（会饱和到 1）。
+      !/\* columns\) \/ screenWidth/.test(code) &&
+      // **反向**：分页模式不得再以被平移的内容框为基准取点。
+      !/flowRect\.left \+ Math\.min\(flowRect\.width \/ 2, 40\)/.test(code) &&
       // **反向**：不得再回到"整段像素比例"那套（它与章数不成比例，正是乱跳的根因）。
       !/reportFraction\(readerScrollFraction/.test(code) &&
       !/readerScrollFraction\(/.test(code) &&

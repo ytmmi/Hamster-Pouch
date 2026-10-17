@@ -322,7 +322,8 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
     origin: SYSTEM_ORIGIN,
     // 首次打开的建议尺寸：比查看器大一些——阅读需要行宽，窄面板下"页宽/字号"都退化成摆设。
     defaultSize: { width: 900, height: 700 },
-    // 面板设置（第 5.3 节）：**阅读选项**的 12 项（用户 2026-10-16 口径，逐项对应参考图）。
+    // 面板设置（第 5.3 节）：**阅读选项**的 13 项（用户 2026-10-16 口径，逐项对应参考图；
+    // 2026-10-17 追加「仿真背景（图书阴影）」开关，见 D116）。
     // 取值域与 `panels/bookreader/readerView.ts` 的枚举**逐项对齐**（`pnpm check:panels` 断言）；
     // 数值项的范围由面板夹紧（声明层没有 min/max，与 `media.imageSize` 同一处置）。
     // `divider_before` 把它们分成四组（翻页 / 配色 / 排版 / 字体与对齐），组间在「全部设置」里画横线。
@@ -370,6 +371,16 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
         ],
       },
       {
+        // 「仿真背景（图书阴影）」：分页模式下把正文画成纸页（纸色 + 投影 + 双页书脊缝），
+        // 纸张之外是加深的"桌面"。缺省 `true` = 本项是新增的**增强**（不是把既有分页观感
+        // 改成"没有纸"）；关掉即朴素分页观感（只有居中的正文栏）。
+        // 只在**单页 / 双页**生效——滚动模式的正文高度随内容增长，没有"一页纸"可言（D116）。
+        key: "simulatedPageBackground",
+        kind: "switch",
+        title_key: "bookreader.option.simulatedPageBackground",
+        default: true,
+      },
+      {
         // 字号（px）：12–48，范围由面板夹紧（`readerView.READER_FONT_SIZE`）。
         key: "fontSize",
         kind: "numberInput",
@@ -407,7 +418,9 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
         key: "paragraphSpacing",
         kind: "slider",
         title_key: "bookreader.option.paragraphSpacing",
-        default: 12,
+        // **缺省 0**（2026-10-18 由 12 改为 0）：中文 / 英文书刊都用**首行缩进**分段，
+        // 再叠一段间距就是双重分隔。参考实现：Readium CSS 的 `--RS__paraSpacing: 0`。
+        default: 0,
       },
       {
         key: "brightness",

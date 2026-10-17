@@ -367,7 +367,6 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "viewer.endOfPreview": "— 已顯示開頭內容 —",
 
   // 圖書閱讀器（2026-10-16）：完整閱讀一本書（目錄跳轉 + 閱讀選項 + 底部進度）
-  "bookreader.exit": "退出閱讀",
   "bookreader.notBook": "請選擇一本書（txt / md / epub / pdf）開始閱讀",
   "bookreader.noContent": "這本書沒有可顯示的正文",
   "bookreader.fullscreen": "全螢幕模式",
@@ -418,6 +417,9 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "bookreader.option.text.gray": "深灰",
   "bookreader.option.text.sepia": "棕褐",
   "bookreader.option.text.white": "白色",
+  "bookreader.option.simulatedPageBackground": "模擬背景（圖書陰影）",
+  "bookreader.switchOn": "已開啟",
+  "bookreader.switchOff": "已關閉",
   "bookreader.option.fontSize": "字體大小",
   "bookreader.option.lineHeight": "行間距",
   "bookreader.option.pageMargin": "頁邊距",

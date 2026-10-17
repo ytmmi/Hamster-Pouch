@@ -189,13 +189,18 @@ apps/desktop/src/app_ui/
                       #     （目录 / 书签 / 笔记 / 高亮 / 阅读选项；再点 / 点外面 / Esc 三种关闭）
                       #   ReaderStage.tsx 阅读区（scroll / page / spread 三种翻页方式；
                       #     分页用 CSS **column-count** 多栏 + translateX；跳章由面板的 key 重挂载重置；
+                      #     **分页纸张（D116）**：.br-paper（居中）→ .br-face-layer（N 张纸页，
+                      #     在正文之下、pointer-events none）→ .br-flow（正文栏四周内缩一个
+                      #     纸边）+ .br-flow 整屏平移；仿真背景类 br-simulated / br-spread
+                      #     （只对分页生效；书脊缝仅双页）；纸张宽高/纸边/纸宽全部来自
+                      #     readerView.readerPagedLayout 的 CSS 变量；
                       #     点击正文收起左右两栏——判据在 readerView.bodyClickHidesRails
                       #     （点链接 / 分页按钮 / 划词时不收起），面板只在两栏展开时才传回调；
                       #     位置探测：每页带 data-page-index，用 elementFromPoint +
                       #     closest("[data-page-index]") 认出**当前真正显示的是第几页**
                       #     （滚动取纵向比例、分页取横向比例），上报 { visibleIndex, offsetInPage }
                       #     （经 fractionWorthReporting 节流）；三个触发点 = scroll 事件 +
-                      #     requestAnimationFrame([pages, paged, page, pageCount, width]) 的
+                      #     requestAnimationFrame([pages, paged, page, pageCount, size]) 的
                       #     effect（加载 / 翻页 / 变宽都不产生事件）+ key 重挂载后一次
                       #     探测点取**内容框 .br-flow**（不是舞台 .br-stage——它带 page-margin
                       #     内边距，上限 80px，取舞台会落进 padding 导致 closest 得到 null、章号退回第 1 章）
@@ -216,7 +221,10 @@ apps/desktop/src/app_ui/
                       #   useReaderBookIdentity.ts 栏头的取数（D114）：usesEmbeddedCover
                       #     判据（txt / md 一次 IPC 都不发）+ loadBookMeta + 封面覆盖
                       #     共用 bookpreview 那份模块级缓存
-                      #   ReaderOptionsRail.tsx 右侧「阅读选项」（12 项面板设置的可视化控件）
+                      #   ReaderOptionsRail.tsx 右侧「阅读选项」（13 项面板设置的可视化控件；
+                      #     布尔项用共享的胶囊开关 SwitchToggle，不出现原生复选框；
+                      #     顶部**动作行** = 全屏切换——用户 2026-10-18："删除退出阅读按钮，
+                      #     全屏模式放入更多选项内"，顶栏因此只剩章节标题与「更多」，D116-R2 ⑦）
                       #   ReaderFooter.tsx 底部进度（当前进度 00.00% / **本章进度 00.0%** /
                       #     章节数 1 / 14；算不出来显示 —，本章进度在无目录时整项不显示；
                       #     **页数一格已删除**——纯文本的页数只是按 2 万字符折算的估算值）
@@ -226,18 +234,34 @@ apps/desktop/src/app_ui/
                       #     跳转目标 / **loadMore 不变**）。用 cursor 当段起点会让读完整本书
                       #     位置仍在开头（章节数恒为 1）；让 fetchPage 回写 cursor 会让
                       #     key 每页变、阅读区反复重挂载。
-                      #   useReaderSettings.ts 12 项面板设置（panel.bookreader.*；
+                      #   useReaderSettings.ts 13 项面板设置（panel.bookreader.*；
                       #     写入后本地广播，同窗口即时生效）
                       #   useReaderAnnotations.ts 批注（书签 / 笔记 / 高亮）取数与增删；
                       #     新增后**回读列表**（id / created_at 由后端生成）
                       #   readerView.ts 取值域与纯逻辑（零依赖，门禁直接 import；
-                      #     含分页几何 readerPagination / 滚轮累积 accumulateWheelStep /
+                      #     含**分页纸张几何 readerPagedLayout**（单页 = 一张居中纸、双页 =
+                      #     一对相贴的纸；纸页按 paperWidth/N **等分**；书脊缝 = 2×页边距 ⇒
+                      #     每栏在自己纸上居中；桌面留白与「页边距」解耦，D116-R2）
+                      #     / 翻页算术 readerPagination（步进 = 一张纸的宽 contentWidth + gap，
+                      #     不是一栏——旧实现按一栏推进，双页下两屏会**重叠一栏**）
+                      #     / **EPUB 排印 readerBodyProfile**（按字符构成判 cjk/latin ⇒
+                      #     首行缩进 2em/1em；样本不足沿用上一档）与 READER_PARA_INDENT_EM
+                      #     / 滚轮累积 accumulateWheelStep /
                       #     **章节判定 currentTocIndex** + **精确页区间 readerPageCursors**
                       #     + **单页内插值 readerPositionFromPage** + 本章进度
                       #     readerChapterProgress + 上报节流 fractionWorthReporting。
                       #     已删除 readerProgress / readerScrollFraction / readerPageFraction /
                       #     readerLoadedUnits / readerPageUnits / pageAtPixels —— 它们都在做
                       #     **跨页比例乘法**，而那正是"章节数乱跳"的根因）
+                      #   bookText.ts 正文块文本遍历（零依赖纯函数，两个消费方共用：
+                      #     面板的高亮兜底原文 + 阅读区判语言档。抽到中立文件是为避免
+                      #     **循环依赖**——BookReaderPanel 已 import ReaderStage，
+                      #     反向 import 会成环；复制一份又会漂移，D116-R2 ⑩b）
+                      #   tools/reader-layout-verify.mjs（D116）无头 Edge + 真实 styles.css
+                      #     量纸张布局（纸居中 / 双页缝隙 0px / 等分铺满 / 正文离纸边 =
+                      #     页边距设置 / 改页边距纸张宽不变 / 三档面板重排 / 翻页无过渡）
+                      #   tools/reader-typography-verify.mjs（D116-R2）判语言档实证
+                      #     （旧口径只收集 text ⇒ 中文 EPUB 判 latin；新口径算块文本 ⇒ cjk）
     bookpreview/      # 图书预览（panel.bookpreview；**"书" = 文本类 txt/md/epub + pdf**；
                       #   **has_class = true**，
                       #   三轴模型见 blueprintValues.ts 的 BLUEPRINT_SUBCLASS_FORMATS /

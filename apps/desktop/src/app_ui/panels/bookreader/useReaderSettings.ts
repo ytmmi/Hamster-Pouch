@@ -85,6 +85,14 @@ export interface ReaderSettings {
   text: ReaderTextPreset;
   /** 屏幕亮度（百分比，30–100）。 */
   brightness: number;
+  /**
+   * 「仿真背景（图书阴影）」：分页模式下把正文画成**纸页**（纸色 + 投影 + 双页书脊缝，
+   * 纸张外是加深的桌面）。缺省 `true`；关掉即朴素分页观感（只有居中的正文栏）。
+   *
+   * 只在**单页 / 双页**生效：滚动模式的正文高度随内容增长，没有"一页纸"可言
+   * （给整段套一张纸，投影会随滚动内容一起滚走），因此它保持现状。
+   */
+  simulatedPageBackground: boolean;
 }
 
 /** 阅读选项的读写句柄。 */
@@ -110,6 +118,16 @@ function enumParser<T extends string>(
   return (raw: unknown) => (isValid(raw) ? raw : fallback);
 }
 
+/** 布尔项（`switch`）的解析器：`"true"` / `true` 皆为真，其余回落**声明缺省**。 */
+function switchParser(fallback: boolean): (raw: unknown) => boolean {
+  return (raw: unknown) => {
+    if (typeof raw === "boolean") return raw;
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return fallback;
+  };
+}
+
 /**
  * 读取全部阅读选项。
  *
@@ -129,6 +147,11 @@ export function useReaderSettings(panelApi?: PanelRenderCtx["api"]): ReaderSetti
   const bg = usePanelSettingValue(READER_PANEL_ID, "bg", panelApi);
   const text = usePanelSettingValue(READER_PANEL_ID, "text", panelApi);
   const brightness = usePanelSettingValue(READER_PANEL_ID, "brightness", panelApi);
+  const simulatedPageBackground = usePanelSettingValue(
+    READER_PANEL_ID,
+    "simulatedPageBackground",
+    panelApi,
+  );
 
   const settings: ReaderSettings = {
     viewMode: enumParser(isReaderViewMode, READER_VIEW_MODES[0])(viewMode),
@@ -143,6 +166,9 @@ export function useReaderSettings(panelApi?: PanelRenderCtx["api"]): ReaderSetti
     bg: enumParser(isReaderBgPreset, READER_BG_PRESETS[0])(bg),
     text: enumParser(isReaderTextPreset, READER_TEXT_PRESETS[0])(text),
     brightness: numberParser(READER_BRIGHTNESS)(brightness),
+    // 缺省 `true`（= 与 D113 的观感一致的方向：仿真背景是本轮新增的**增强**，
+    // 不是把旧观感改成"没有纸"）。
+    simulatedPageBackground: switchParser(true)(simulatedPageBackground),
   };
 
   const update = <K extends keyof ReaderSettings>(key: K, value: ReaderSettings[K]): void => {

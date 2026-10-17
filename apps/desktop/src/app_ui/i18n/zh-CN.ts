@@ -383,7 +383,6 @@ export const zhCN = {
   "viewer.endOfPreview": "— 已显示开头内容 —",
 
   // 图书阅读器（2026-10-16）：完整阅读一本书（目录跳转 + 阅读选项 + 底部进度）
-  "bookreader.exit": "退出阅读",
   "bookreader.notBook": "请选择一本书（txt / md / epub / pdf）开始阅读",
   "bookreader.noContent": "这本书没有可显示的正文",
   "bookreader.fullscreen": "全屏模式",
@@ -437,6 +436,9 @@ export const zhCN = {
   "bookreader.option.text.gray": "深灰",
   "bookreader.option.text.sepia": "棕褐",
   "bookreader.option.text.white": "白色",
+  "bookreader.option.simulatedPageBackground": "仿真背景（图书阴影）",
+  "bookreader.switchOn": "已开启",
+  "bookreader.switchOff": "已关闭",
   "bookreader.option.fontSize": "字体大小",
   "bookreader.option.lineHeight": "行间距",
   "bookreader.option.pageMargin": "页边距",
