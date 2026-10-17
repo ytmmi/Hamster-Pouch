@@ -292,7 +292,6 @@ export const zhCN = {
   "media.waveUnavailable": "波形不可用",
   "media.noPath": "无路径",
   "media.unavailable": "不可用",
-  "media.audioReadFailed": "读取音频失败：{status}",
   "media.viewThumb": "预览图",
   "media.viewName": "文件名",
   "media.filter.all": "全部",
@@ -367,6 +366,7 @@ export const zhCN = {
   "metadata.codec": "编码",
   "metadata.bitrate": "码率",
   "metadata.frameRate": "帧率",
+  "metadata.sampleRate": "采样率",
 
   // 查看器
   "viewer.previewFailed": "预览失败：{err}",

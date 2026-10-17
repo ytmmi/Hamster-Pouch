@@ -46,6 +46,137 @@ fn options(ffmpeg: PathBuf, ffprobe: PathBuf, cache: hp_media::ThumbnailCache) -
     }
 }
 
+/// 用捆绑 ffmpeg 生成一段确定性测试音频（前半正弦、后半静音）。
+///
+/// 前半有声 / 后半无声是**有意的**：它让"波形图真的按时间画了"这件事可断言。
+fn make_audio(ffmpeg: &Path, path: &Path) {
+    let out = std::process::Command::new(ffmpeg)
+        .args([
+            "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+            "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono:d=2",
+            "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1[a]",
+            "-map", "[a]", "-c:a", "libmp3lame", "-b:a", "128k",
+        ])
+        .arg(path)
+        .output()
+        .expect("启动 ffmpeg 失败");
+    assert!(
+        out.status.success(),
+        "生成测试音频失败: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// **端到端：音频走完整链路**（2026-10-17 / D115）。
+///
+/// 这条覆盖的是"从磁盘上的一个 mp3，到索引里一行完整记录、再到缓存里一张波形 PNG"。
+/// 单元测试各自绿**不等于**这条路通：`scan_task` 算哈希与元数据、`scanner` 写行、
+/// `thumb.get` 的音频分流调 `generate_waveform`——三条链路各自有分支，
+/// 只有端到端跑一次才知道它们接得上。
+///
+/// 依赖仓库内捆绑的 ffmpeg；缺失时跳过（与视频用例同款，不把 CI 卡在外部依赖上）。
+#[test]
+fn audio_source_scans_fully_and_yields_a_waveform_png() {
+    let Some((ffmpeg, ffprobe)) = bundled_bins() else {
+        eprintln!("跳过：未找到 external-cli/ffmpeg");
+        return;
+    };
+
+    let tmp = tempfile::tempdir().expect("创建临时目录失败");
+    let src_dir = tmp.path().join("audio");
+    std::fs::create_dir_all(&src_dir).expect("创建媒体源目录失败");
+    let audio_path = src_dir.join("song.mp3");
+    make_audio(&ffmpeg, &audio_path);
+
+    let mut db = RepoDb::create(tmp.path().join("repo.sqlite3"), "测试仓库").expect("创建仓库失败");
+    let source = db
+        .mount_source("test-repo", src_dir.to_str().unwrap(), None, None)
+        .expect("挂载媒体源失败");
+
+    let cache = hp_media::ThumbnailCache::new(tmp.path().join("thumbs"));
+    let scanner = Scanner::new();
+    let opts = options(ffmpeg.clone(), ffprobe, cache.clone());
+    let mut progress = |_p: &ScanProgress| {};
+    let outcome = scanner
+        .scan_source(&mut db, &source, &opts, &mut progress)
+        .expect("扫描失败");
+    assert_eq!(outcome.indexed, 1, "音频应被索引");
+
+    // ① 索引行：**不再是占位行**（D115）——有内容哈希、`ok` 状态、ffprobe 元数据；
+    //    感知哈希仍为空（音频没有视觉本体）。
+    let row = db
+        .get_file_by_path(source.id.as_str(), "song.mp3")
+        .expect("查询失败")
+        .expect("音频应已索引");
+    assert!(
+        row.content_hash.is_some(),
+        "音频升级后应有内容哈希（D115 取代 D11 占位行）"
+    );
+    assert_eq!(row.verify_status, hp_core::VerifyStatus::Ok, "状态应为 ok");
+    assert!(
+        row.perceptual_hash.is_none(),
+        "音频没有视觉本体，不该有感知哈希"
+    );
+    let info = row
+        .media_info_json
+        .as_deref()
+        .expect("音频应有 ffprobe 元数据（D115）");
+    assert!(
+        info.contains("duration"),
+        "元数据里应有时长，实际：{info}"
+    );
+    assert!(
+        info.contains("\"codec_type\": \"audio\"") || info.contains("\"codec_type\":\"audio\""),
+        "元数据里应有音频流，实际：{info}"
+    );
+
+    // ② 波形图：走**生产代码路径**（`thumb.get` → `generate_thumbnail` 的音频分流 =
+    //    `generate_waveform`），按内容哈希落到缩略图缓存；PNG 魔数 + 能解回、尺寸等于约定值。
+    //
+    //    **分片目录由调用方先建**：这是本 crate 的既有约定（`ThumbnailCache::ensure_dir_for`
+    //    就是给调用方用的），`extract_thumbnail` / `generate_image_thumbnail` /
+    //    `generate_image_preview` 四个生成函数**都**如此——生产侧的 `thumb_get`
+    //    在分派之前就为**所有**媒体类型建好了它。因此这里照做，不另立第五种约定。
+    //    （这条由本用例第一版实测发现：不建目录时 ffmpeg 报 "Could not open file"，
+    //    说明"生成函数自己建目录"从来不是本 crate 的契约。）
+    let hash = row.content_hash.clone().expect("应有哈希");
+    let wave_path = cache.path_for_audio(&hash);
+    assert!(
+        !wave_path.exists(),
+        "前提校验：扫描期**不该**生成波形图（按需生成，与视频首帧同款）——\
+         若它在扫描期就出现，说明有第二条生成路径"
+    );
+    cache.ensure_dir_for(&hash).expect("建分片目录失败");
+    hp_media::generate_waveform(
+        &audio_path,
+        &wave_path,
+        hp_media::WAVE_SIZE,
+        &ffmpeg,
+        Duration::from_secs(30),
+    )
+    .unwrap_or_else(|e| panic!("波形图应生成成功，实际失败：{e}"));
+    assert!(wave_path.exists(), "波形图应落盘");
+
+    let mut head = [0u8; 8];
+    {
+        use std::io::Read;
+        std::fs::File::open(&wave_path)
+            .expect("打开波形图失败")
+            .read_exact(&mut head)
+            .expect("读取波形图失败");
+    }
+    assert_eq!(head, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "应为 PNG");
+    let img = image::open(&wave_path).expect("读取波形图失败");
+    assert_eq!(
+        (img.width(), img.height()),
+        hp_media::WAVE_SIZE,
+        "波形尺寸应等于唯一尺寸常量（三处共用同一张）"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 #[test]
 fn video_source_scans_with_thumbnail_and_progress_reaches_total() {
     let Some((ffmpeg, ffprobe)) = bundled_bins() else {

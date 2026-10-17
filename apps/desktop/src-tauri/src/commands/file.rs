@@ -23,8 +23,12 @@ use crate::AppState;
 
 /// 后台线程按需生成缩略图（缓存未命中时才调用；不阻塞 IPC 线程）。
 ///
-/// `out` 的扩展名决定图片缩略图的落盘格式（`.webp` = 有损 WebP，见
-/// `hp_media::ThumbFormat`）：调用方用 `ThumbnailCache::path_for_format` 按媒体类型取。
+/// `out` 的扩展名决定落盘格式（见 `hp_media::ThumbFormat`）：调用方用
+/// `ThumbnailCache::path_for_format` 按媒体类型取。
+///
+/// **音频生成的是波形图**（2026-10-17 / D115）：音频不再有"内容缩略图"，
+/// 它在网格那一格显示的是 `ffmpeg showwavespic` 画出的波形 PNG。
+/// 与视频首帧同款——**按需生成**，扫描期不出来（免得给全库音频白做一次 ffmpeg）。
 fn generate_thumbnail(
     cache: hp_media::ThumbnailCache,
     hash: String,
@@ -55,7 +59,20 @@ fn generate_thumbnail(
             .is_ok(),
             None => false,
         },
-        MediaType::Audio => false,
+        // 音频：波形图（PNG）。**必须有 ffmpeg**——波形由 `showwavespic` 画，
+        // 进程内没有等价实现（Web Audio 是浏览器侧的 API，Rust 侧不可用）。
+        // 缺 ffmpeg 时返回 false，前端降级为"波形不可用"占位（不阻塞取数）。
+        MediaType::Audio => match ffmpeg {
+            Some(bin) => hp_media::generate_waveform(
+                &src_path,
+                &out,
+                hp_media::WAVE_SIZE,
+                &bin,
+                std::time::Duration::from_secs(30),
+            )
+            .is_ok(),
+            None => false,
+        },
         // 文本与 PDF 没有索引期的缩略图：
         // - 文本：`epub` 的内嵌封面走 `book.meta`（`hp_book` 解析 + 原格式落盘），
         //   `txt` 由前端用文件名渲染文字封面；
@@ -216,8 +233,9 @@ pub(crate) fn file_path(
 
 /// thumb.get：按需生成并返回文件缩略图绝对路径（供前端 `convertFileSrc` 预览）。
 ///
-/// 图片用 image crate 缩放，视频复用 ffmpeg 抽帧；命中缓存直接返回。
-/// 无内容哈希 / 生成失败 / 不支持的媒体类型返回 `None`（前端降级为占位）。
+/// 图片用 image crate 缩放，视频复用 ffmpeg 抽帧，**音频用 ffmpeg 画波形图**（D115）；
+/// 命中缓存直接返回。无内容哈希 / 生成失败 / 不支持的媒体类型返回 `None`
+/// （前端降级为占位）。
 #[tauri::command]
 pub(crate) async fn thumb_get(
     repo_id: String,

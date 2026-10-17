@@ -38,7 +38,7 @@ fn scan(db: &mut RepoDb, source: &Source, full: bool) -> hp_core::HpResult<hp_sc
 }
 
 #[test]
-fn scan_indexes_image_skips_unknown_and_audio_placeholder() {
+fn scan_indexes_image_audio_and_text_with_hashes() {
     let tmp = tempfile::tempdir().expect("创建临时目录失败");
     let (mut db, source) = setup(&tmp);
     let dir = Path::new(&source.local_path);
@@ -64,14 +64,23 @@ fn scan_indexes_image_skips_unknown_and_audio_placeholder() {
     assert!(img.perceptual_hash.is_some(), "图片应有感知哈希");
     assert_eq!(img.verify_status, VerifyStatus::Ok);
 
-    // 音频：占位行，无哈希（D11）
+    // 音频（2026-10-17 / D115）：**不再是占位行**——照算内容哈希（移动识别/去重
+    // 与图片同口径），校验状态 `ok`；感知哈希仍为空（音频没有视觉本体）。
+    // 这条断言是"占位行升级"的第一手证据：旧口径下 `content_hash` 必为 NULL。
     let audio = db
         .get_file_by_path(source.id.as_str(), "song.mp3")
         .expect("查询音频失败")
-        .expect("音频应落占位行");
+        .expect("音频应已索引");
     assert_eq!(audio.media_type, MediaType::Audio);
-    assert!(audio.content_hash.is_none(), "音频占位行不应有内容哈希");
-    assert_eq!(audio.verify_status, VerifyStatus::Placeholder);
+    assert!(
+        audio.content_hash.is_some(),
+        "音频升级后应有内容哈希（D115 取代 D11 占位行）"
+    );
+    assert!(
+        audio.perceptual_hash.is_none(),
+        "音频没有视觉本体，不应有感知哈希"
+    );
+    assert_eq!(audio.verify_status, VerifyStatus::Ok);
 
     // 文本（2026-10 / D93）：**算内容哈希**（移动识别与去重），但不产出视觉派生。
     // **标记（2026-10-10 / D102）**：`txt` / `md` 默认**不带**任何标记，
@@ -159,6 +168,92 @@ fn move_rename_preserves_identity() {
         .expect("查询失败")
         .expect("新路径应已索引");
     assert_eq!(after.id, id_before, "移动/重命名应保留文件身份");
+}
+
+#[test]
+fn legacy_audio_placeholder_is_upgraded_in_place() {
+    // **本次升级的核心回归**（D11 → D115）：旧库里音频是**占位行**
+    // （`content_hash` 为 NULL、`verify_status = 'placeholder'`），且 size/mtime 与
+    // 磁盘一致。若升级只写"新扫描的哈希"，这些**内容未变的既有行**会被"未变即跳过"
+    // 原样留下——表现为"升了级却还是没有哈希、没有时长"。
+    //
+    // 因此这里**不重扫全量**（`full = false`），直接构造一行旧口径的占位行，
+    // 再跑一次普通扫描，断言它被就地补齐。判据只看 `content_hash`：
+    // 它是"这份内容到底算没算过"的事实，而 status 只是镜像。
+    let tmp = tempfile::tempdir().expect("创建临时目录失败");
+    let (mut db, source) = setup(&tmp);
+    let dir = Path::new(&source.local_path);
+    let audio_path = dir.join("old.mp3");
+    std::fs::write(&audio_path, b"ID3 legacy placeholder audio").expect("写 mp3 失败");
+
+    // 先按**新口径**扫一次，拿到一行正常索引（含真实 size/mtime）。
+    scan(&mut db, &source, false).expect("首次扫描失败");
+    let indexed = db
+        .get_file_by_path(source.id.as_str(), "old.mp3")
+        .expect("查询失败")
+        .expect("音频应已索引");
+    let hash_now = indexed.content_hash.clone().expect("新口径应有哈希");
+
+    // 再把这行**打回旧口径的占位行**（模拟"旧版本应用写的库"）：
+    // 清哈希、状态置 placeholder。size/mtime 一字不改。
+    // 用公开的 `upsert_file` 整行写回，**不新增仅供测试的库 API**。
+    let mut legacy = indexed.clone();
+    legacy.content_hash = None;
+    legacy.content_hash_algo = None;
+    legacy.content_hash_algo_version = None;
+    legacy.verify_status = VerifyStatus::Placeholder;
+    db.upsert_file(&legacy).expect("回退为占位行失败");
+    let rolled_back = db
+        .get_file_by_path(source.id.as_str(), "old.mp3")
+        .expect("查询失败")
+        .expect("应仍在索引");
+    assert!(
+        rolled_back.content_hash.is_none(),
+        "前提校验：回退后必须真的没有哈希（否则本用例测不到升级路径）"
+    );
+    assert_eq!(rolled_back.verify_status, VerifyStatus::Placeholder);
+
+    // 普通扫描（**非全量**）：内容没变，但占位行必须被重算。
+    scan(&mut db, &source, false).expect("升级扫描失败");
+    let upgraded = db
+        .get_file_by_path(source.id.as_str(), "old.mp3")
+        .expect("查询失败")
+        .expect("应仍在索引");
+    assert!(
+        upgraded.content_hash.is_some(),
+        "存量占位行必须被原位补齐哈希——'未变即跳过'不得把它留下"
+    );
+    assert_eq!(
+        upgraded.content_hash.as_deref(),
+        Some(hash_now.as_str()),
+        "补算出的哈希应与内容一致（内容没变，哈希就该相同）"
+    );
+    assert_eq!(
+        upgraded.verify_status,
+        VerifyStatus::Ok,
+        "升级后校验状态应为 ok（不再是 placeholder）"
+    );
+    assert_eq!(upgraded.id, indexed.id, "原位升级必须保留文件身份（id 不变）");
+}
+
+#[test]
+fn rewritten_audio_row_is_skipped_after_upgrade() {
+    // 升级路径**不得**变成"每次扫描都重哈希全部音频"：补算过一次之后，
+    // 那些行就回到正常的"内容未变即跳过"。这条与上一条是一对——
+    // 少了它，把 `needs_audio_upgrade` 写成恒真也能让上一条全绿，
+    // 代价是全库音频每次扫描都被重算（正是要避免的浪费）。
+    let tmp = tempfile::tempdir().expect("创建临时目录失败");
+    let (mut db, source) = setup(&tmp);
+    let dir = Path::new(&source.local_path);
+    std::fs::write(dir.join("song.mp3"), b"ID3 already upgraded").expect("写 mp3 失败");
+
+    scan(&mut db, &source, false).expect("首次扫描失败");
+    let outcome = scan(&mut db, &source, false).expect("二次扫描失败");
+    assert_eq!(
+        outcome.changed, 0,
+        "已是新口径的音频行在第二次扫描时应被跳过（changed 必须为 0）"
+    );
+    assert_eq!(outcome.indexed, 0, "第二次扫描不得新增行");
 }
 
 #[test]

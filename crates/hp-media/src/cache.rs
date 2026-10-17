@@ -16,6 +16,12 @@ pub enum ThumbFormat {
     Webp,
     /// 视频首帧缩略图：JPEG。
     Jpeg,
+    /// 音频**波形图**：PNG（`ffmpeg` 的 `showwavespic`，**背景透明**）。
+    ///
+    /// PNG 而不是 WebP/JPEG：波形图靠**透明背景**与主题配色共存
+    /// （见 `waveform` 模块文档），两种有损格式都没有 alpha 通道可用。
+    /// 体积也很小（实测 30 分钟音频 → 2.2 KB），无损 PNG 无需让位于有损压缩。
+    WaveformPng,
 }
 
 impl ThumbFormat {
@@ -24,10 +30,17 @@ impl ThumbFormat {
         match self {
             ThumbFormat::Webp => "webp",
             ThumbFormat::Jpeg => "jpg",
+            ThumbFormat::WaveformPng => "png",
         }
     }
 
-    /// 某媒体类型的缩略图格式；音频、文本与 PDF 不生成缩略图，返回 `None`。
+    /// 某媒体类型在该缓存目录里的**缩略图**格式；文本与 PDF 不生成缩略图，返回 `None`。
+    ///
+    /// **音频返回 [`ThumbFormat::WaveformPng`]**（2026-10-17 / D115）：音频从 D11 占位行
+    /// 升级为完整索引后，网格单元里显示的就是这张**波形图**——它占据图片缩略图同一个
+    /// 位置（`thumb.get` → `.mp-thumb`），因此属于"缩略图"这一格的格式。
+    /// **但它不是内容的视觉缩略**：波形图由**音频内容**生成，与图片缩略图"缩小的原图"
+    /// 是两种东西（详见 `waveform` 模块文档）。
     ///
     /// 文本（`text`）与 PDF（`pdf`）的"封面"都**不是**缩略图：
     /// - `epub` 的内嵌封面由 `hp_book` 解析后按原格式落到
@@ -37,12 +50,13 @@ impl ThumbFormat {
     ///   `path_for_book_cover`（`ext = "jpg"`）——它同样是"书的封面"，
     ///   不该另立一个缓存路径。
     ///
-    /// 因此这里恒为 `None`，别把两件事混起来。
+    /// 因此这里对两者恒为 `None`，别把两件事混起来。
     pub fn for_media_type(media_type: MediaType) -> Option<Self> {
         match media_type {
             MediaType::Image => Some(ThumbFormat::Webp),
             MediaType::Video => Some(ThumbFormat::Jpeg),
-            MediaType::Audio | MediaType::Text | MediaType::Pdf => None,
+            MediaType::Audio => Some(ThumbFormat::WaveformPng),
+            MediaType::Text | MediaType::Pdf => None,
         }
     }
 }
@@ -90,6 +104,13 @@ impl ThumbnailCache {
     /// 视频首帧缩略图路径（JPEG）。
     pub fn path_for_video(&self, content_hash: &str) -> PathBuf {
         self.path_for_format(content_hash, ThumbFormat::Jpeg)
+    }
+
+    /// 音频**波形图**路径（PNG；2026-10-17 / D115）。
+    ///
+    /// 与缩略图同分片、同名不同后缀，互不冲突。
+    pub fn path_for_audio(&self, content_hash: &str) -> PathBuf {
+        self.path_for_format(content_hash, ThumbFormat::WaveformPng)
     }
 
     /// 某内容哈希对应的**全分辨率预览**路径（与缩略图同分片、同名不同后缀，
@@ -182,9 +203,34 @@ mod tests {
             ThumbFormat::for_media_type(MediaType::Video),
             Some(ThumbFormat::Jpeg)
         );
-        assert_eq!(ThumbFormat::for_media_type(MediaType::Audio), None);
+        // 音频（2026-10-17 / D115）：占位行升级后，它在这一格显示的是**波形图**
+        // （PNG，背景透明）。**是 PNG 不是 WebP/JPEG**：两种有损格式都没有 alpha，
+        // 而透明背景正是"一张图配三套主题"的前提（见 `waveform` 模块文档）。
+        assert_eq!(
+            ThumbFormat::for_media_type(MediaType::Audio),
+            Some(ThumbFormat::WaveformPng)
+        );
+        assert_eq!(ThumbFormat::WaveformPng.extension(), "png");
         // 文本没有"缩略图"：epub 封面走 `path_for_book_cover`，txt 走前端文字封面。
         assert_eq!(ThumbFormat::for_media_type(MediaType::Text), None);
+        assert_eq!(ThumbFormat::for_media_type(MediaType::Pdf), None);
+    }
+
+    #[test]
+    fn audio_waveform_shares_shard_but_not_file() {
+        // 波形图与图片/视频缩略图**同分片、不同文件**：内容哈希相同的图片与音频
+        // （理论上可能，比如同一个哈希前缀）不会互相覆盖。
+        let cache = ThumbnailCache::new("C:/tmp/thumbs");
+        let audio = cache.path_for_audio("abcdef0123456789");
+        assert_eq!(
+            audio,
+            PathBuf::from("C:/tmp/thumbs/ab/abcdef0123456789.png")
+        );
+        let img = cache.path_for_image("abcdef0123456789");
+        let vid = cache.path_for_video("abcdef0123456789");
+        assert_eq!(audio.parent(), img.parent(), "三种格式共用分片目录");
+        assert_ne!(audio, img, "波形图与图片缩略图不得共用同一缓存文件");
+        assert_ne!(audio, vid, "波形图与视频缩略图不得共用同一缓存文件");
     }
 
     #[test]

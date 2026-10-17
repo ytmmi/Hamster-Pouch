@@ -161,8 +161,13 @@ CREATE INDEX idx_sources_repo ON sources(repo_id);
 -- media_type 判定：扩展名优先 + 内容兜底（D11）；**文本类只认扩展名**（txt/md/markdown/epub），
 --   **PDF 认扩展名 + `%PDF-` 内容兜底**（2026-10-11 / D110：PDF 有可靠的 magic bytes，
 --   改名的 PDF 也能入库；文本类没有，只能认扩展名，否则未知二进制会被吸进索引）
--- 音频占位行（D11）：media_type=audio，content_hash/perceptual_hash 为 NULL，
---   无缩略图，后续开放音频索引时原位升级
+-- 音频（2026-10-17 / D115）：**不再是占位行**——与图片/视频同档，照算内容哈希
+--   （移动识别/去重靠它），并用 ffprobe 缓存媒体信息（时长 / 编码 / 码率 / 采样率）。
+--   感知哈希仍为 NULL（音频没有视觉本体，dHash 对它没有意义，与文本 / PDF 同款）；
+--   波形图由 ffmpeg showwavespic 按需生成、落缩略图缓存（`<hash>.png`），**不进索引**
+-- 音频占位行的**存量升级**（D11 → D115）：不需要迁移脚本——`content_hash` 本来就是
+--   可空列，填上即可。扫描的 prepare 阶段只要发现音频行**哈希缺失**就重算一次
+--   （`needs_audio_upgrade`），与 size/mtime 是否变化无关；此后回到正常的"未变即跳过"
 -- 文本（2026-10）：media_type=text，**算内容哈希**（移动识别/去重与图片同口径），
 --   但不产出 perceptual_hash / 缩略图 / media_info_json（文本没有视觉本体）
 -- PDF（2026-10-11 / D110）：media_type=pdf，**与文本同一档入库口径**（照算内容哈希、
@@ -176,7 +181,7 @@ CREATE TABLE files (
   relative_path             TEXT NOT NULL,
   media_type                TEXT NOT NULL,     -- image|video|audio|text|pdf
   subtype                   TEXT,              -- **已废弃（D102）**：标记改存 file_marks 一对多表；本列新代码不读不写，仅为 forward-only 保留
-  content_hash              TEXT,              -- 音频占位行可空
+  content_hash              TEXT,              -- D115 起音频也写（旧占位行为 NULL，扫描补齐）
   content_hash_algo         TEXT,              -- 如 BLAKE3/SHA-256
   content_hash_algo_version INTEGER,
   perceptual_hash           TEXT,              -- 视频=首帧图像感知哈希（D12）

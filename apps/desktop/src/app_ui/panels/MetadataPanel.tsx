@@ -47,6 +47,7 @@ import {
   formatDurationMs,
   formatFrameRate,
   formatPixelSize,
+  formatSampleRate,
 } from "../shared/format";
 import { useHostSettingValue } from "../shared/settingValue";
 import type { FileMetadataResult } from "../shared/types";
@@ -231,9 +232,18 @@ export function MetadataPanel({ api: panelApi }: MetadataPanelProps = {}): JSX.E
     if (isVideo || isAudio) {
       out.push({
         label: app.t("metadata.duration"),
-        value: formatDurationMs(
-          isAudio ? probed.durationMs : (mediaFacts?.durationMs ?? probed.durationMs),
-        ),
+        // **音频改走索引里的 ffprobe 缓存**（2026-10-17 / D115）：音频不再是 D11
+        // 占位行，扫描期就用 ffprobe 缓存了时长。前端探测退为**兜底**——旧库尚未
+        // 升级、或 `ffprobe_bin` 缺失时那一段为空，仍可用元素读一次。
+        value: formatDurationMs(mediaFacts?.durationMs ?? probed.durationMs),
+      });
+    }
+    if (isAudio) {
+      // 音频专属两行：采样率与声道数（ffprobe 给得出，DOM 拿不到）。
+      out.push({ label: app.t("metadata.codec"), value: mediaFacts?.codec ?? "—" });
+      out.push({
+        label: app.t("metadata.sampleRate"),
+        value: formatSampleRate(mediaFacts?.sampleRate),
       });
     }
     if (isVideo) {

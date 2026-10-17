@@ -120,11 +120,31 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
                 unreadable: false,
             }
         }
-        // 音频是占位行（D11）：不哈希、不缩略图、不调色板。
-        MediaType::Audio => Computed {
-            thumb_status: Some(ThumbStatus::NotGenerated),
-            ..Computed::default()
-        },
+        // 音频（2026-10-17 / D115）：**不再是 D11 占位行**——与图片/视频同档，
+        // 照算内容哈希（移动识别 / 去重靠它），并用 ffprobe 缓存时长 / 编码 / 码率等
+        // 媒体信息（此前索引里**根本没有**音频时长，元数据面板只能让前端
+        // `preload="metadata"` 临时读一次）。
+        //
+        // 波形图**不在这里生成**：它是"按需缩略图"（`thumb.get` 缓存未命中时才画），
+        // 与视频首帧同一条路——扫描期不出来，免得给全库音频都白做一次 ffmpeg。
+        // 感知哈希仍为空：音频没有"视觉本体"，dHash 对它没有意义（与文本/PDF 同款）。
+        MediaType::Audio => {
+            let Ok(content) = hash_file(&prepared.path) else {
+                return Computed {
+                    unreadable: true,
+                    ..Computed::default()
+                };
+            };
+            let media_info = probe_audio(&prepared.path, options);
+            Computed {
+                content: Some(content),
+                perceptual: None,
+                palette: None,
+                thumb_status: Some(ThumbStatus::NotGenerated),
+                media_info,
+                unreadable: false,
+            }
+        }
         // 文本（2026-10）与 PDF（2026-10-11）：**照算内容哈希**（移动识别/去重与图片
         // 同口径），但不产出感知哈希 / 缩略图 / 调色板 / 媒体信息——两者都不进索引期
         // 的派生数据。封面与正文由 `hp_book` / `hp_pdf` 在**面板取数时**按需解析，
@@ -146,6 +166,21 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
             }
         }
     }
+}
+
+/// 音频媒体信息：ffprobe 原始 JSON（2026-10-17 / D115）。
+///
+/// **与视频同一份探测**（`hp_media::probe`）：ffprobe 对音频同样给出 `format.duration`
+/// 与音频流的 `codec_name` / `bit_rate` / `sample_rate` / `channels`——因此不需要
+/// 第二条探测命令，只是此前**没人对音频调它**（D11 把音频当占位行，不读内容）。
+///
+/// 没有 ffprobe（测试夹具 / 精简环境）时返回 `None`：索引行照建、哈希照算，
+/// 只是元数据那几行显示 `—`（与视频无 ffprobe 缓存时同款降级）。
+fn probe_audio(path: &Path, options: &ScanOptions) -> Option<String> {
+    let ffprobe = options.ffprobe_bin.as_ref()?;
+    hp_media::probe(path, ffprobe, options.video_timeout)
+        .ok()
+        .map(|info| info.raw_json)
 }
 
 /// 视频处理：ffprobe 元数据 + ffmpeg 首帧抽帧 + 首帧感知哈希（D12/D15/D16）。
@@ -255,13 +290,26 @@ mod tests {
     }
 
     #[test]
-    fn audio_is_a_placeholder_row() {
-        let p = prepared(PathBuf::from("song.mp3"), MediaType::Audio, false, false);
+    fn audio_is_hashed_but_has_no_visual_derivations() {
+        // 音频（2026-10-17 / D115）与文本/PDF **同一档**：照算内容哈希（移动识别/去重），
+        // 但没有感知哈希 / 调色板。它与"占位行"的差别正是那个哈希——
+        // D11 的占位行无哈希，而元数据面板/去重都指望它。
+        let dir = std::env::temp_dir().join(format!("hp-scan-task-audio-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let path = dir.join("song.mp3");
+        std::fs::write(&path, b"ID3 fake audio bytes").expect("写入测试文件失败");
+
+        let p = prepared(path, MediaType::Audio, false, false);
         let got = compute(&p, &ScanOptions::default());
-        assert!(got.content.is_none(), "音频占位行无哈希（D11）");
-        assert!(got.perceptual.is_none());
-        assert!(got.palette.is_none());
+        assert!(got.content.is_some(), "音频升级后应有内容哈希（D115）");
+        assert!(got.perceptual.is_none(), "音频没有视觉本体，不该有感知哈希");
+        assert!(got.palette.is_none(), "音频没有调色板");
+        // 没有 ffprobe（`ScanOptions::default()` 的 `ffprobe_bin` 为 None）时，
+        // 元数据如实为空——索引行照建、哈希照算。
+        assert!(got.media_info.is_none(), "无 ffprobe 时不该凭空填元数据");
         assert!(!got.unreadable);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

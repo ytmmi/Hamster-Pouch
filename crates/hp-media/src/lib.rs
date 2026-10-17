@@ -18,6 +18,7 @@ mod probe;
 mod process;
 mod svg;
 mod thumbnail;
+mod waveform;
 
 pub use cache::{ThumbFormat, ThumbnailCache};
 pub use decode::{decode_image_fallback, ensure_libheif_hooks};
@@ -33,3 +34,4 @@ pub use thumbnail::{
     extract_thumbnail, generate_image_preview, generate_image_thumbnail, IMAGE_THUMB_MAX_DIM,
     IMAGE_THUMB_WEBP_QUALITY,
 };
+pub use waveform::{generate_waveform, WAVE_COLOR, WAVE_SIZE};

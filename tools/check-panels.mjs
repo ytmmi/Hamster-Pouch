@@ -869,6 +869,11 @@ const mediaView = await import(
 const mediaPaging = await import(
   pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewPaging.ts")).href
 );
+// 波形图的纯几何（2026-10-17 / D115）：**行为断言**直接跑真函数——
+// 游标与"点哪儿跳到哪儿"互为逆运算这件事，只有按取值断言才守得住（正则守不住）。
+const waveView = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/waveformView.ts")).href
+);
 
 // ---- 缺陷 0018 P1-A：**全库游标翻页**的纯逻辑（`mediaPreviewPaging.ts`）----
 //
@@ -1374,22 +1379,130 @@ check(
       // （实测：把守卫改成 `!needsThumb || !audioVisible` 时，旧断言仍然通过）。
       /if \(!needsThumb\) return;\s*let cancelled = false;\s*void resolveThumbUrl\(/.test(code) &&
       // 去掉浏览器懒加载：窗口已有界，取图要确定。
-      !/loading="lazy"/.test(code) &&
-      // 音频仍走共享观察器（`decodeAudioData` 是实打实的 CPU）。
-      /observeUntilVisible\(el, \(\) => setAudioVisible\(true\)\)/.test(code)
+      !/loading="lazy"/.test(code)
     );
   })(),
 );
 check(
-  "音频波形的可见性判定：**共享一个** `IntersectionObserver`（不逐格新建）",
-  // 缺陷 0018：原实现每个单元各建一个观察器（5 万个单元 = 5 万个观察器）。
-  // 观察器本就是"一个观察者观察多个目标"，收成模块级唯一一个即可。
-  /const visibilityCallbacks = new WeakMap<Element, \(\) => void>\(\);/.test(mediaCellSrc) &&
-    /let sharedObserver: IntersectionObserver \| null = null;/.test(mediaCellSrc) &&
-    /function observeUntilVisible\(/.test(mediaCellSrc) &&
-    // 关键不变量：整个单元模块里 `new IntersectionObserver` **恰好一次**
-    // （逐格新建就会变成 N 次——这正是缺陷 0018 里 5 万个观察器的来源）。
-    (mediaCellSrc.match(/new IntersectionObserver/g) ?? []).length === 1,
+  "音频波形改由后端出图后，**三种媒体类型走同一条取图路径**（2026-10-17 / D115）",
+  // D115 之前音频是唯一的例外：波形由前端 `decodeAudioData` 现算现画，因此它
+  // **躲开**了"挂载即预热"，另走一道"真的进入视口才解码"的观察器闸门
+  // （D89 ③ 刻意保留的例外）。波形改成后端 ffmpeg 画好的一张 PNG 之后，
+  // 取它已无 CPU 代价（与图片缩略图同一份 `thumbUrl.ts` 缓存），
+  // 那条例外必须**一并消失**——否则音频重新变回"向上不预加载"的形态（缺陷 0025）。
+  //
+  // 两条正向锚点 + 一条反向：
+  //  ① `needsThumb` 必须把 `audio` 也算进来（音频走同一道"挂载即预热"）；
+  //  ② 音频那一格渲染的是**共用组件** `AudioWaveform`（不是自己画 canvas）；
+  //  ③ 模块里**零** `IntersectionObserver`，且不再有 `decodeAudioData` / `extractWaveform`。
+  (() => {
+    const code = stripComments(mediaCellSrc);
+    return (
+      /file\.media_type === "image"[\s\S]{0,160}file\.media_type === "audio"/.test(code) &&
+      // 音频那一格把**单元已取到的 URL** 传给共用组件：因此"同一条取图路径"
+      // 不是靠 `thumbUrl.ts` 的缓存兜住的巧合，而是字面成立
+      // （`url={thumbUrl}` 这一行就是它；少了它，同一个 fileId 会被订阅第二次）。
+      /<AudioWaveform[\s\S]{0,200}url=\{thumbUrl\}/.test(code) &&
+      /<AudioWaveform/.test(code) &&
+      (code.match(/IntersectionObserver/g) ?? []).length === 0 &&
+      !/decodeAudioData/.test(code) &&
+      !/extractWaveform/.test(code)
+    );
+  })(),
+);
+check(
+  "音频波形组件（`shared/AudioWaveform`）与取图缓存同源，且游标几何按**真实绘制盒**算",
+  // 三处消费方（媒体预览单元 / 查看器音频舞台 / 播放器）共用同一个组件与同一份
+  // 纯几何模块——分开写就会让"游标位置"与"点哪儿跳到哪儿"各自漂移。
+  (() => {
+    const shared = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/shared/AudioWaveform.tsx"),
+      "utf8",
+    );
+    const view = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/shared/waveformView.ts"),
+      "utf8",
+    );
+    return (
+      // 取图走**共享**的 `resolveThumbUrl`（不是第二条取图命令 / 第二个缓存）。
+      /resolveThumbUrl\(repoId, fileId\)/.test(shared) &&
+      // 游标与定位都由**纯函数**算出（门禁可直接 import 断言，见 §媒体预览 的取值域断言）。
+      /waveCursorPercent\(/.test(shared) &&
+      /waveSeekSeconds\(/.test(shared) &&
+      // **几何必须按"真正画出来的矩形"算**：`object-fit: contain` 会在容器里
+      // 留下 letterbox 空白，拿容器宽度当图像宽度就会让游标/定位偏一个留白量
+      // （与缺陷 0027 同一类：几何口径必须与真实绘制一致）。
+      /waveDrawnBox\(/.test(shared) &&
+      /export function waveDrawnBox\(/.test(view) &&
+      // 样式与之一致：图像用 `contain`，游标用绝对定位（且用 px 而不是百分比）。
+      // 窗口给足：规则体内有解释 letterbox 的注释（正是这条断言要守的那件事），
+      // 窗口太窄会因为"注释写详细了"而假失败。
+      /\.wf-image \{[\s\S]{0,400}object-fit: contain;/.test(stylesSource) &&
+      /\.wf-cursor \{[\s\S]{0,400}position: absolute;/.test(stylesSource)
+    );
+  })(),
+);
+// ---- 波形几何：**行为断言**（跑真函数），守住三条不变量 ----
+//
+// 这三条各自对应一个真实的坑，且都**不会让功能测试变红**：
+//   ① 游标与"点哪儿跳"必须是同一份映射的互逆运算（各写一遍就会漂移）；
+//   ② `object-fit: contain` 的 letterbox 留白必须被算进去（否则偏一个留白量，
+//      与缺陷 0027 同一类：几何口径必须与真实绘制一致）；
+//   ③ 越界取值必须夹紧 / 报"不适用"，不能画出框外游标或对未知时长响应点击。
+check(
+  "波形几何：游标百分比与「点哪儿跳到哪儿」**互为逆运算**（同一份线性映射）",
+  (() => {
+    // 取一个刻意**不等宽**的几何（容器 800 宽、波形只画 600：左右各留 100 白）。
+    const geometry = { width: 600, durationMs: 180_000 };
+    const box = { left: 100, top: 20, width: 300, height: 120 };
+    let ok = true;
+    for (const fraction of [0, 0.25, 0.5, 0.73, 1]) {
+      const seconds = (fraction * geometry.durationMs) / 1000;
+      const percent = waveView.waveCursorPercent(seconds * 1000, { ...geometry, width: box.width });
+      // 百分比 → 容器像素（`waveCursorX` 会补回 left 留白）；
+      // 再把那个像素喂回 `waveSeekSeconds`，应当回到同一个时间点。
+      const x = waveView.waveCursorX(percent, box);
+      const back = waveView.waveSeekSeconds(x, box, geometry);
+      if (back === null || Math.abs(back - seconds) > 1e-6) ok = false;
+    }
+    return ok;
+  })(),
+);
+check(
+  "波形几何：`object-fit: contain` 的留白被算进绘制盒（游标不偏、点击不偏）",
+  (() => {
+    // 容器 800×120、波形 1200×240（2:1）→ contain 后画成 600×120，左右各留 100。
+    const box = waveView.waveDrawnBox({ width: 800, height: 120 }, { width: 1200, height: 240 });
+    if (!box || Math.abs(box.left - 100) > 1e-6 || Math.abs(box.width - 600) > 1e-6) return false;
+    // **关键对照**：点容器左边缘（x=0）应落在第 0 秒，而不是"音频开头的一小段"——
+    // 若实现拿容器宽度当图像宽度，这里会得到负数夹成 0 或明显偏大的值。
+    const atLeft = waveView.waveSeekSeconds(0, box, { width: box.width, durationMs: 60_000 });
+    const atRight = waveView.waveSeekSeconds(800, box, { width: box.width, durationMs: 60_000 });
+    // 留白区（x=50）夹紧到 0 秒；留白区右侧（x=750）夹紧到总时长。
+    const inGutter = waveView.waveSeekSeconds(50, box, { width: box.width, durationMs: 60_000 });
+    return atLeft === 0 && atRight === 60 && inGutter === 0;
+  })(),
+);
+check(
+  "波形几何：越界与「不适用」都有确定答案（不画框外游标、不对未知时长响应点击）",
+  (() => {
+    const geometry = { width: 400, durationMs: 10_000 };
+    // 超出末帧的位置（浏览器 currentTime 与 duration 常差几毫秒）夹到 1，不越界。
+    const over = waveView.waveCursorPercent(10_500, geometry);
+    const under = waveView.waveCursorPercent(-500, geometry);
+    // 时长未知（0 / null）→ `null`（不画游标），而不是画一根在 0 上的假游标。
+    const unknown = waveView.waveCursorPercent(3_000, { width: 400, durationMs: 0 });
+    // 几何不可用 → 点击不响应（`null`）。
+    const noBox = waveView.waveSeekSeconds(100, null, geometry);
+    const noSize = waveView.waveDrawnBox({ width: 0, height: 100 }, { width: 1200, height: 240 });
+    return (
+      over === 1 &&
+      under === 0 &&
+      unknown === null &&
+      noBox === null &&
+      noSize === null
+    );
+  })(),
 );
 // 方向性差异的**根**在"窗口是否对称"：上下余量必须相等，否则预加载带本身就偏向一侧。
 // 用纯函数按行为断言（不是读源码正则）——这是本次缺陷的第一性判据。
@@ -3917,9 +4030,45 @@ check(
       readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"), "utf8"),
     ) &&
     // 缩略图格式表：文本与 PDF 都没有缩略图（`hp-media`）。
-    /MediaType::Audio \| MediaType::Text \| MediaType::Pdf => None/.test(
+    // **音频不在这一支**（2026-10-17 / D115）：它有自己的波形图格式
+    // （`ThumbFormat::WaveformPng`，见下一条断言），因此这里的取值域只含文本与 PDF。
+    /MediaType::Text \| MediaType::Pdf => None/.test(
       readFileSync(join(ROOT, "crates/hp-media/src/cache.rs"), "utf8"),
     ),
+);
+check(
+  "Rust：音频（D115）有内容哈希 + ffprobe 元数据，缩略图格式是**波形 PNG**",
+  // 这条把 D11 → D115 的升级钉在三处落点上，任一处漏掉就是"升了级却还是占位行"：
+  //  ① `scan_task` 的 `MediaType::Audio` 分支**照算内容哈希**（移动识别/去重靠它），
+  //     并调 ffprobe 取媒体信息（此前索引里根本没有音频时长）；
+  //  ② `scanner` 判 `verify_status = Ok`（不再是 `Placeholder`），且**存量占位行**
+  //     即使 size/mtime 未变也要补算（`needs_audio_upgrade`，判据是哈希缺失）；
+  //  ③ `hp-media` 的格式表给音频**波形 PNG**（透明背景，三套主题共用一张图）。
+  //
+  // 反向锚点同样重要：音频**不得**有感知哈希（它没有视觉本体，与文本/PDF 同款）。
+  (() => {
+    const scanTask = readFileSync(join(ROOT, "crates/hp-scanner/src/scan_task.rs"), "utf8");
+    const scanner = readFileSync(join(ROOT, "crates/hp-scanner/src/scanner.rs"), "utf8");
+    const cache = readFileSync(join(ROOT, "crates/hp-media/src/cache.rs"), "utf8");
+    const waveform = readFileSync(join(ROOT, "crates/hp-media/src/waveform.rs"), "utf8");
+    return (
+      // ① 音频分支里有 `hash_file`，且不再返回默认的"空 Computed"。
+      /MediaType::Audio => \{[\s\S]{0,700}hash_file\(&prepared\.path\)/.test(scanTask) &&
+      // 音频调 ffprobe 取元数据（与视频同一份 `hp_media::probe`，不是第二条命令）。
+      /fn probe_audio\([\s\S]{0,300}hp_media::probe\(/.test(scanTask) &&
+      // ② 校验状态不再按媒体类型分流成 placeholder。
+      !/VerifyStatus::Placeholder/.test(scanner) &&
+      // 存量占位行必须被补算，且判据是**哈希缺失**（不是 status 镜像）。
+      /needs_audio_upgrade[\s\S]{0,200}content_hash\.is_none\(\)/.test(scanner) &&
+      /unchanged && !needs_audio_upgrade/.test(scanner) &&
+      // ③ 波形 PNG 这个格式本身，以及它走的是 ffmpeg `showwavespic`。
+      /MediaType::Audio => Some\(ThumbFormat::WaveformPng\)/.test(cache) &&
+      /WaveformPng => "png"/.test(cache) &&
+      /showwavespic/.test(waveform) &&
+      // 波形图用 `hidden_command`（GUI 下不弹控制台，与其它四个接入口同款）。
+      /hidden_command\(ffmpeg_bin\)/.test(waveform)
+    );
+  })(),
 );
 check(
   "Rust：`pdf` 默认带 **book 标记**（决定封面来源），且 hp-core 与面板侧的兜底清单一致",

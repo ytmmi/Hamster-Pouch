@@ -25,6 +25,13 @@ export interface MediaInfoFacts {
   /** 码率 bit/s（优先容器，回落流）。 */
   bitRate: number | null;
   frameRate: number | null;
+  /**
+   * 音频采样率 Hz（2026-10-17 / D115）。
+   *
+   * 取自**音频流**的 `sample_rate`（ffprobe 用字符串给出，见下）；视频文件没有音频流
+   * 时为 `null`。它与 `codec` 不同——`codec` 是"首流"的编码，而采样率只有音频流才有。
+   */
+  sampleRate: number | null;
 }
 
 /** 图像 EXIF 摘要（`exif_json` 的派生结果）。 */
@@ -92,6 +99,9 @@ export function parseMediaInfo(json: string | null | undefined): MediaInfoFacts 
   const streams = Array.isArray(root.streams) ? (root.streams as Record<string, unknown>[]) : [];
   const video = streams.find((s) => s?.codec_type === "video") ?? null;
   const first = video ?? streams[0] ?? null;
+  // 采样率只在**音频流**上有意义（2026-10-17 / D115）：纯视频文件没有音频流，
+  // 取"首流"会把视频流的字段误读成采样率。
+  const audio = streams.find((s) => s?.codec_type === "audio") ?? null;
 
   // 时长：容器优先（ffprobe 的 `format.duration`，秒），回落视频流、再回落首流。
   const seconds = toNumber(format.duration) ?? toNumber(video?.duration) ?? toNumber(first?.duration);
@@ -103,6 +113,7 @@ export function parseMediaInfo(json: string | null | undefined): MediaInfoFacts 
     codec: toText(first?.codec_name),
     bitRate: toNumber(format.bit_rate) ?? toNumber(first?.bit_rate),
     frameRate: parseRatio(toText(video?.avg_frame_rate)) ?? parseRatio(toText(video?.r_frame_rate)),
+    sampleRate: toNumber(audio?.sample_rate),
   };
 }
 

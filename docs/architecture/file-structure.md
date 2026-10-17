@@ -4,7 +4,7 @@
 
 ## 已确认约束
 
-- 产品：Windows 本地资源管理软件，第一阶段围绕图像 + 视频管理（音频仅写占位行，未知类型不索引，见 D11）。
+- 产品：Windows 本地资源管理软件，第一阶段围绕图像 + 视频管理（音频自 2026-10-17 / D115 起**与图片/视频同档入库**：内容哈希 + ffprobe 元数据 + 后端波形图；此前是 D11 占位行。未知类型不索引，见 D11）。
 - 技术栈：Tauri + React + TypeScript。
 - Rust 侧：Cargo workspace 多 crate。
 - 顶层结构：前后端 workspace 分离。
@@ -114,7 +114,9 @@ apps/desktop/src/app_ui/
     SettingsApp.tsx     # 左侧大类/二级 + 右侧分节设置 + 顶部搜索
     settingsRegistry.ts # 设置注册表（宿主项 + 面板项 + 插件项；`kind` 只取控件输入类）
   menu/               # 顶部功能条、右键菜单
-  shared/             # waveform、TagInput、SwitchToggle（胶囊开关：**所有**勾选框的唯一实现）、
+  shared/             # **AudioWaveform**（音频波形图：三处面板共用的一套显示 + 取图；
+                      #     纯几何在 waveformView：waveDrawnBox/waveCursorPercent/waveSeekSeconds）、
+                      #   TagInput、SwitchToggle（胶囊开关：**所有**勾选框的唯一实现）、
                       #   panelLayout（布局 JSON 规范化）、settingValue（设置值读取 + 四条触发源热加载：宿主项与面板项共用）、
                       #   stableCallback（恒定引用回调：让条目单元的 memo 真正生效；
                       #     媒体预览与图书预览共用一份）、
@@ -150,6 +152,10 @@ apps/desktop/src/app_ui/
                       #   取图策略与缓存收敛在 shared/imageUrl.ts（HEIC 预览与当前图共用一份）
     ViewerPanel.tsx   # 查看器（大图/视频/音频预览 + **"书"正文阅读**；**顶部基础信息栏**
                       #   由面板设置 infoBarEnabled 控制）
+                      #   **音频（2026-10-17 / D115）**：`<audio controls>` + **后端波形图**
+                      #   （`shared/AudioWaveform`）叠在进度条上方，**点 / 拖波形即定位**；
+                      #   时长与位置取自 `<audio>` 元素本身（不是索引元数据）——
+                      #   判据是"永远与正在播的这份文件一致"（旧库未升级 / 换源都不会错位）
                       #   "书"（media_type = text 或 pdf）交 panels/viewer/ 阅读区渲染，
                       #   判据用媒体类型而不是扩展名（免得与扫描器两份口径）；
                       #   PDF 与文本类**合在一条判据里**（两者都要 book.content、都不取 file.path，
@@ -278,12 +284,17 @@ apps/desktop/src/app_ui/
     mediaPreviewCell.tsx    # 缩略图单元 + 宽高比测量 + ratioCache 版本号
                             #   缩略图**挂载即预热**（窗口即对称预加载带；`warmedThumbs` + `new Image()`
                             #   把取图与 `content-visibility` 的跳过渲染解耦，D89）
-                            #   共享可见性观察器**只服务音频波形**（`decodeAudioData` 是实打实的 CPU）
+                            #   **音频走同一条路**（D115）：波形图由后端出，前端只显示，
+                            #   因此那条例外连同它的 `IntersectionObserver` 一并删除
     mediaPreviewDropdown.tsx # 工具条下拉
     mediaPreviewView.ts     # 取值域与纯函数
     mediaPreviewVirtual.ts  # 虚拟化的行/列模型（纯函数：切行、行高、列偏移、窗口区间、自适应断行）
     mediaPreviewVirtualRows.tsx # 行虚拟化的共享钩子（定高 / 测量 / 变量行高 + 滚动窗口）
     mediaPreviewScroll.ts   # 滚动位置恢复的纯逻辑（与后台翻页的时序冲突，缺陷 0018 第 6 轮）
+    MediaPlayerPanel.tsx    # 媒体播放器面板（DOM `<video>` 播放控制；音频多一条**波形图**
+                            #   ——2026-10-17 / D115：游标随播放位置走、点 / 拖即定位，
+                            #   且与进度条拖动**共用** `commitSeek`（两条定位路径只有一份实现）；
+                            #   视频不画波形，理由见 A/D115 ②⑫）
     BlueprintPanel.tsx      # 蓝图编辑器主面板（**入口装配**：状态 + 文档命令 + 层工具 + 图编辑动作；
                             #   界面拼给下面四个区块组件；含当前层状态）
     BlueprintDocList.tsx    # 蓝图文档列表（新建/带结构创建开关/选中/设为默认/模板下拉）
@@ -408,7 +419,7 @@ HamsterPouch/
     hp-fsops/                 # 源间复制/剪切/移动/重命名等真实文件操作
     hp-plugin-host/           # 插件生命周期、权限、宿主 API
     hp-ai/                    # AI 打标接口抽象、任务队列、结果回写边界
-    hp-media/                 # 媒体子进程管理、播放控制、ffprobe 元数据、ffmpeg 抽帧宿主
+    hp-media/                 # 媒体子进程管理、播放控制、ffprobe 元数据、ffmpeg 抽帧、**音频波形图**
                               #   decode.rs 图片解码层：进程内 `image` 优先；**进程内无解码器**的
                               #     格式（FFMPEG_ONLY_IMAGE_EXTS：JPEG 2000 / JPEG XL / PSD / PCX /
                               #     SGI / Sun Raster / DPX / FITS / WBMP / XBM / XPM / JPEG-LS / PFM /
@@ -425,6 +436,12 @@ HamsterPouch/
                               #   thumbnail.rs 图片缩略图（WebP 三级降级）+ 视频首帧（JPEG）；
                               #     `generate_image_preview` 的 **SVG 分流必须在 ffmpeg 快路径之前**
                               #     （生产恒传 Some(ffmpeg)，顺序反了 = SVGZ 在查看器里一片空白）
+                              #   waveform.rs 音频**波形图**（2026-10-17 / D115）：ffmpeg
+                              #     `showwavespic` 出一张 **PNG**（实测**透明背景** alpha=0 ⇒
+                              #     三套主题共用一张图，不生成第二套）；实测**逐字节确定性**
+                              #     （⇒ 按内容哈希缓存）；只出一种尺寸 `WAVE_SIZE`（1200×240，
+                              #     三处面板共用同一张，避免第二条取图命令与第二个缓存）；
+                              #     落盘复用 thumbnail 的**原子写**（temp + rename，并行安全）
     hp-book/                  # 电子书元数据 / 封面 / **正文 + 目录**解析（EPUB = ZIP + OPF；txt/md 需判编码）
                               #   自实现最小 ZIP 读取器（zip.rs）+ 极简 XML 取值（xml.rs）+
                               #   EPUB 元数据解析（epub.rs）+ 封面格式判定（cover.rs）+ 格式分发（meta.rs）；

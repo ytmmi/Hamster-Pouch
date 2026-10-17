@@ -7,6 +7,18 @@
  *
  * 设置的读取与热加载走 `shared/settingValue.ts`（四条独立触发源），本文件只消费结果。
  *
+ * ## 音频（2026-10-17 / D115）
+ *
+ * 音频舞台上除了 `<audio controls>`，还叠一条**后端生成的波形图**
+ * （`shared/AudioWaveform`）：单看一根进度条看不出"哪里有声、哪里有留白"，
+ * 波形把整段的起伏摊开——这本来就是"看一眼就知道这是什么音频"的信息。
+ *
+ * **点波形即定位**：点击 / 拖动波形把播放位置跳到该处（换算在纯函数
+ * `shared/waveformView.ts`，与游标同一份映射，两者不会漂移）。
+ * 时长与位置都取自 `<audio>` 元素本身（`loadedmetadata` / `timeupdate`）：
+ * 索引里的 `media_info_json` 也有时长，但元素读数**永远与正在播的这份文件一致**
+ * （换源 / 转码 / 索引未升级时都不会错位）。
+ *
  * ## "书"：正文阅读区（2026-10-09；PDF 于 2026-10-11）
  *
  * `txt` / `md` / `epub` / `pdf` 不再落到"空舞台 + 占位提示"，而是交给
@@ -22,11 +34,12 @@
  * `viewer/useViewerBookContent.ts` 分页取数、`viewer/viewerReaderView.ts` 纯逻辑。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
+import { AudioWaveform } from "../shared/AudioWaveform";
 import { useApp } from "../core/AppContext";
 import type { PanelRenderCtx } from "../core/panelRegistry";
 import { needsPreview, resolvePreviewUrl } from "../shared/previewUrl";
@@ -66,6 +79,17 @@ export function ViewerPanel({ api: panelApi }: ViewerPanelProps = {}): JSX.Eleme
   const showInfoBar = usePanelSwitch(VIEWER_PANEL_ID, "infoBarEnabled", { api: panelApi });
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  /**
+   * 音频的时长与当前位置（ms）——**取自 `<audio>` 元素本身**，而不是索引里的元数据。
+   *
+   * 判据是"永远与正在播的这份文件一致"：索引里的 `media_info_json` 可能缺失
+   * （旧库未升级）、可能与换源后的文件不符。元素读数没有这两种风险。
+   */
+  const [audioMeta, setAudioMeta] = useState<{ durationMs: number | null; positionMs: number }>({
+    durationMs: null,
+    positionMs: 0,
+  });
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   const file = app.selectedFile;
   /**
@@ -78,6 +102,8 @@ export function ViewerPanel({ api: panelApi }: ViewerPanelProps = {}): JSX.Eleme
     let cancelled = false;
     setUrl(null);
     setFailed(false);
+    // 换文件即重置音频读数：不然切到下一首时波形游标还停在上一首的位置。
+    setAudioMeta({ durationMs: null, positionMs: 0 });
     const selected = app.selectedFile;
     // "书"没有"取图"这一步：直接跳过（否则会白发一次 file.path / preview.get）。
     if (!app.repoId || !selected || isBookMedia(selected)) return;
@@ -156,7 +182,42 @@ export function ViewerPanel({ api: panelApi }: ViewerPanelProps = {}): JSX.Eleme
                 <video src={url} controls preload="metadata" />
               )}
               {!failed && url && file.media_type === "audio" && (
-                <audio src={url} controls />
+                /* 音频舞台：`<audio controls>` + **后端波形图**（2026-10-17 / D115）。
+                   波形在进度条上方铺开整段起伏，点 / 拖即定位（`onSeek` 把它换算成秒）。
+                   时长与位置都读元素本身，因此游标永远与正在播的这份文件一致。 */
+                <div className="viewer-audio">
+                  <AudioWaveform
+                    repoId={app.repoId ?? ""}
+                    fileId={file.id}
+                    durationMs={audioMeta.durationMs}
+                    positionMs={audioMeta.positionMs}
+                    onSeek={(seconds) => {
+                      const audio = audioRef.current;
+                      if (audio) audio.currentTime = seconds;
+                    }}
+                    className="viewer-audio-wave"
+                    t={app.t}
+                  />
+                  <audio
+                    ref={audioRef}
+                    src={url}
+                    controls
+                    onLoadedMetadata={(e) => {
+                      const seconds = e.currentTarget.duration;
+                      setAudioMeta((prev) => ({
+                        ...prev,
+                        durationMs: Number.isFinite(seconds) ? Math.round(seconds * 1000) : null,
+                      }));
+                    }}
+                    onTimeUpdate={(e) => {
+                      const seconds = e.currentTarget.currentTime;
+                      setAudioMeta((prev) => ({
+                        ...prev,
+                        positionMs: Number.isFinite(seconds) ? Math.round(seconds * 1000) : 0,
+                      }));
+                    }}
+                  />
+                </div>
               )}
               {!failed && !url && (
                 <span className="placeholder">{app.t("common.loading")}</span>

@@ -19,6 +19,16 @@
  * 播放来源：蓝图双击视频（`payload.play`）→ `playerPlayStore.requestPlayerPlay(fileId)`
  * → 本面板解析路径、`convertFileSrc` 后加载并自动播放；单击画面且尚无源时播放
  * 当前选中的视频/音频文件。
+ *
+ * ## 音频的波形图（2026-10-17 / D115）
+ *
+ * **`media_type === "audio"` 时**，进度条上方多一条后端生成的**波形图**
+ * （`shared/AudioWaveform`）：进度条只回答"播到哪儿了"，波形回答"哪儿有声"。
+ * 游标按当前播放位置实时移动，点 / 拖波形即定位——与进度条拖动**共用**同一条
+ * `commitSeek`，因此两条定位路径不会给出不一致的结果。
+ *
+ * 视频**不画波形**：波形的横轴必须与音频时间线性对应才可读（后端按整段画），
+ * 而视频那张图只能是"某一帧"或"整段抽样"，两者语义不同。视频画面本身就是它的内容。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -26,6 +36,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
+import { AudioWaveform } from "../shared/AudioWaveform";
 import { useApp } from "../core/AppContext";
 import {
   getPlayerPlayRequest,
@@ -242,6 +253,20 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     setPositionMs(0);
   };
 
+  /**
+   * 真正把播放位置移过去（**进度条拖动与波形点击共用**）。
+   *
+   * 收成一处是刻意的：两条定位路径若各写一遍 `currentTime = ...`，
+   * 夹紧范围 / 长度校验就会各写一遍，迟早出现"进度条能拖到末帧、波形点不到"这类不一致。
+   */
+  const commitSeek = useCallback((ms: number) => {
+    const video = videoRef.current;
+    if (!video || !video.duration) {
+      return;
+    }
+    video.currentTime = Math.max(0, Math.min(ms / 1000, video.duration));
+  }, []);
+
   /** 进度条拖动中：只更新本地显示值。 */
   const onScrub = (value: number) => {
     scrubbingRef.current = true;
@@ -252,15 +277,18 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   const onScrubCommit = (value: number) => {
     scrubbingRef.current = false;
     setScrubMs(null);
-    const video = videoRef.current;
-    if (!video || !video.duration) {
-      return;
-    }
-    video.currentTime = Math.max(0, Math.min(value / 1000, video.duration));
+    commitSeek(value);
   };
 
   const displayPosition = scrubMs ?? positionMs;
   const seekable = Boolean(videoUrl) && durationMs > 0;
+  /**
+   * 当前源是否为音频（波形只画音频，见文件头）。
+   *
+   * 判据用 `app.selectedFile.media_type`：面板可能还没加载源，
+   * 那时不画波形是对的（没有内容可对应）。
+   */
+  const isAudio = app.selectedFile?.media_type === "audio";
 
   return (
     <div className="panel">
@@ -292,6 +320,20 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
           <div className="player-surface" />
         )}
       </div>
+
+      {/* 音频波形（D115）：进度条上方一条整段起伏，游标随播放位置走，点 / 拖即定位。
+          视频不画——见文件头（波形的横轴必须与时间线性对应才有意义）。 */}
+      {isAudio && videoUrl && app.selectedFile && (
+        <AudioWaveform
+          repoId={app.repoId ?? ""}
+          fileId={app.selectedFile.id}
+          durationMs={durationMs > 0 ? durationMs : null}
+          positionMs={displayPosition}
+          onSeek={(seconds) => commitSeek(seconds * 1000)}
+          className="player-wave"
+          t={app.t}
+        />
+      )}
 
       {/* 进度条：画面下方，拖动定位，实时同步播放进度 */}
       <div className="player-progress">

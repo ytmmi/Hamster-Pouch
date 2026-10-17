@@ -20,9 +20,9 @@ const warmedThumbs = new Set<string>();
  * 媒体预览面板：**缩略图单元**（含音频波形、缩略图加载与宽高比测量）。
  *
  * 从 `MediaPreviewPanel.tsx` 拆出来的（单文件 1200 行硬上限，`pnpm check:line-count`）：
- * 单元的职责只有三件事——取缩略图、画波形、量宽高比。
+ * 单元的职责只有两件事——取缩略图（音频那份即波形图）、量宽高比。
  *
- * ## 缩略图（图片/视频）：**挂载即预热**
+ * ## 缩略图（图片/视频/音频）：**挂载即预热**
  *
  * 本面板三种视图（平铺 / 自适应 / 瀑布流）都已按行/列**虚拟化**（缺陷 0018 P1-A），
  * 因此"被挂载" ⟺ "在虚拟化窗口内"。窗口以 `scrollTop` 为中心、**上下同余量**
@@ -32,21 +32,24 @@ const warmedThumbs = new Set<string>();
  * 此前这条链路上有两道**多余且会破坏对称性**的闸门，现均已移除：
  *
  * 1. 共享 `IntersectionObserver`（`rootMargin: "200px"`）把请求推迟到"真的进入视口"
- *    ——那是**虚拟化之前**（全量渲染）的做法，虚拟化之后它把取图时机交给了相交回调；
+ *    ——那是**虚拟化之前**（全量渲染）的做法；
  * 2. `<img loading="lazy">` 又交给浏览器的懒加载启发式。
  *
  * 并且补上**显式预热**（`warmedThumbs` + `new Image()`）：`.mp-cell` 的
  * `content-visibility: auto` 会让被跳过渲染的单元不触发 `<img>` 取图，而 overscan 带
  * 恰恰最容易被跳过——不显式预热的话，取图时机仍不等于那条对称窗口。
  *
- * ## 音频：仍然等**真的进入视口**才解码
+ * ## 音频：波形图也是"一张缩略图"，**同一道闸门一并移除**
  *
- * 波形要 `decodeAudioData`，是实打实的 CPU；为离屏条目预先解码没有观感收益
- * （波形不参与"翻到就有图"的观感），因此**保留**共享观察器这一道闸门。
- * 这也是本文件里 `IntersectionObserver` 的**唯一**用途。
+ * 2026-10-17（D115）：波形改由**后端**生成（`thumb.get` → ffmpeg `showwavespic`），
+ * 前端只是 `<img src>`。因此音频不再有"解码"这件事——此前那道共享
+ * `IntersectionObserver`（"等真的可见才 `decodeAudioData`"）失去了存在理由：
+ * 它保护的是**实打实的 CPU 解码**，而现在取回的只是缓存里的一张 PNG
+ * （与图片缩略图同一条 `thumbUrl.ts` 缓存）。于是**本模块不再有任何观察器**，
+ * 三种媒体类型走完全同一条"挂载即预热"路径——这才是对称窗口该有的样子。
  *
- * 缩略图 URL 走 `shared/thumbUrl.ts` 的**共享**缓存与请求去重（图像查看器胶片栏同源）；
- * 宽高比走本文件的 `ratioCache`（同款口径）。
+ * 缩略图 URL 走 `shared/thumbUrl.ts` 的**共享**缓存与请求去重（图像查看器胶片栏、
+ * 查看器音频舞台、播放器波形同源）；宽高比走本文件的 `ratioCache`（同款口径）。
  *
  * 三种视图的差异**只在容器与样式表上**（`.mp-view-tile` / `.mp-view-adaptive` /
  * `.mp-masonry`）：本组件只额外下发一个宽高比变量 `--mp-cell-ratio`——**只有自适应会消费它**
@@ -57,10 +60,10 @@ const warmedThumbs = new Set<string>();
 import { memo, useEffect, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent } from "react";
 
+import { AudioWaveform } from "../shared/AudioWaveform";
 import { resolveThumbUrl } from "../shared/thumbUrl";
 import type { Translate } from "../i18n";
 import type { FileItem } from "../shared/types";
-import { drawWaveform, extractWaveform } from "../shared/waveform";
 import {
   AUDIO_CARD_RATIO,
   DEFAULT_CELL_RATIO,
@@ -134,74 +137,6 @@ export function setRatioCache(fileId: string, ratio: number): void {
   scheduleRatioNotify();
 }
 
-/** 音频波形画布。 */
-function AudioWaveform({ url, t }: { url: string; t: Translate }): JSX.Element {
-  const ref = useRef<HTMLCanvasElement>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setFailed(false);
-    void (async () => {
-      try {
-        const peaks = await extractWaveform(url, 72);
-        if (!cancelled && ref.current) {
-          drawWaveform(ref.current, peaks);
-        }
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [url]);
-
-  if (failed) {
-    return <span className="mp-fallback">{t("media.waveUnavailable")}</span>;
-  }
-  return <canvas ref={ref} className="mp-wave" />;
-}
-
-/**
- * 单元的**共享可见性观察器**（**只服务音频波形**）。
- *
- * 缺陷 0018：原实现**每个单元各建一个 `IntersectionObserver`**——5 万个单元就是
- * 5 万个观察器对象，光是创建与注册就足以让面板卡住。
- *
- * 观察器本身是"一个观察者观察多个目标"的设计，因此这里收成**模块级唯一一个**：
- * 所有单元共用它，目标与回调用 `WeakMap` 关联（单元卸载即被回收，不会泄漏）。
- *
- * **缩略图不走这条路**（见文件头）：三种视图都已虚拟化，"挂载"即"在预加载带内"，
- * 再等一次异步回调只会把窗口内、视口外的单元推迟到真的可见——那正是要修的方向性差异。
- */
-const visibilityCallbacks = new WeakMap<Element, () => void>();
-let sharedObserver: IntersectionObserver | null = null;
-
-function observeUntilVisible(el: Element, onVisible: () => void): () => void {
-  if (!sharedObserver) {
-    sharedObserver = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          const callback = visibilityCallbacks.get(entry.target);
-          // 只触发一次：回调取走后立即取消观察，观察器不会为已可见单元继续工作。
-          visibilityCallbacks.delete(entry.target);
-          sharedObserver?.unobserve(entry.target);
-          callback?.();
-        }
-      },
-      { rootMargin: "200px" },
-    );
-  }
-  visibilityCallbacks.set(el, onVisible);
-  sharedObserver.observe(el);
-  return () => {
-    visibilityCallbacks.delete(el);
-    sharedObserver?.unobserve(el);
-  };
-}
-
 /**
  * 缩略图单元。
  *
@@ -249,13 +184,6 @@ export const ThumbCell = memo(function ThumbCell({
   intrinsicHeight?: number;
 }): JSX.Element {
   const cellRef = useRef<HTMLButtonElement>(null);
-  /**
-   * 音频是否已进入视口。
-   *
-   * **只有音频用它**：波形要 `decodeAudioData`（实打实的 CPU），等真可见再解码。
-   * 缩略图（图片/视频）没有这道闸门——见文件头与下面 effect 的说明。
-   */
-  const [audioVisible, setAudioVisible] = useState(false);
   /** 宽高比：缓存优先；音频没有宽高比，用固定卡片比例（否则是一张方块）。 */
   const [ratio, setRatio] = useState<number>(() =>
     file.media_type === "audio"
@@ -263,12 +191,20 @@ export const ThumbCell = memo(function ThumbCell({
       : (ratioCache.get(file.id) ?? DEFAULT_CELL_RATIO),
   );
 
-  // 图片/视频需要请求缩略图 URL；音频走波形懒加载
-  const needsThumb = file.media_type === "image" || file.media_type === "video";
+  /**
+   * 需要取缩略图的三种媒体类型——**包含音频**（2026-10-17 / D115）。
+   *
+   * 音频那一格显示的是后端的**波形图 PNG**（`thumb.get` → ffmpeg `showwavespic`），
+   * 因此它与图片/视频走**完全同一条**取图路径：同一个 `thumbUrl.ts` 缓存、
+   * 同一道"挂载即预热"闸门、同一个 `<img>`。此前音频是唯一的例外（懒加载 +
+   * `decodeAudioData`），那条例外随波形改由后端生成而消失。
+   */
+  const needsThumb =
+    file.media_type === "image" || file.media_type === "video" || file.media_type === "audio";
   // undefined=尚未请求；null=请求了但不可用；string=已就绪
   const [thumbUrl, setThumbUrl] = useState<string | null | undefined>(undefined);
 
-  // 缩略图（图片/视频）：**挂载即预热**。
+  // 缩略图（图片 / 视频 / **音频波形图**）：**挂载即预热**。
   //
   // 三种视图都已按行/列虚拟化，"被挂载" ⟺ "在虚拟化窗口内"（窗口以 scrollTop 为中心、
   // 上下同余量），窗口**就是**预加载带。在这里就把图取回来，滚到该单元时已经就位；
@@ -297,15 +233,6 @@ export const ThumbCell = memo(function ThumbCell({
       cancelled = true;
     };
   }, [needsThumb, repoId, file.id]);
-
-  // 音频：等**真的进入视口**才挂载波形并解码（`decodeAudioData` 是实打实的 CPU，
-  // 为离屏条目预先解码没有观感收益——波形不参与"翻到就有图"的观感）。
-  useEffect(() => {
-    if (needsThumb) return;
-    const el = cellRef.current;
-    if (!el) return;
-    return observeUntilVisible(el, () => setAudioVisible(true));
-  }, [needsThumb]);
 
   return (
     <button
@@ -339,34 +266,42 @@ export const ThumbCell = memo(function ThumbCell({
       <div className="mp-thumb">
         {!url ? (
           <span className="mp-fallback">{t("media.noPath")}</span>
-        ) : needsThumb ? (
-          thumbUrl === undefined ? (
-            <span className="mp-thumb-placeholder">{file.media_type}</span>
-          ) : thumbUrl === null ? (
-            <span className="mp-fallback">{t("media.unavailable")}</span>
-          ) : (
-            <img
-              src={thumbUrl}
-              alt={file.relative_path}
-              // **不用 `loading="lazy"`**：窗口已是"视口 ± 对称 overscan"的**有界**集合，
-              // 再叠一层浏览器懒加载只会把取图时机交给它的启发式（与那条对称窗口无关），
-              // 而这正是"向上不预加载"的来源之一。这里要的是确定性：窗口内一律取。
-              onLoad={(e) => {
-                // 解码后量一次真实宽高比：自适应/瀑布流据此重新配平（并推进版本号，
-                // 让面板重算行/列偏移——见 `setRatioCache` 的说明）。
-                const { naturalWidth, naturalHeight } = e.currentTarget;
-                const next = imageRatio(naturalWidth, naturalHeight, ratio);
-                if (next !== ratio) {
-                  setRatioCache(file.id, next);
-                  setRatio(next);
-                }
-              }}
-            />
-          )
-        ) : audioVisible ? (
-          <AudioWaveform url={url} t={t} />
+        ) : file.media_type === "audio" ? (
+          /* 音频：**后端的波形图**（同一张 `thumb.get` 缩略图，D115）。
+             不再走 `decodeAudioData` —— 那张图由 ffmpeg 画好并缓存，
+             前端只是把它显示出来（失败时组件内部渲染"波形不可用"占位）。
+             传 `thumbUrl`：本单元已经按"挂载即预热"取过一次图（还做了显式预热），
+             再让组件自己解析一遍就是同一 fileId 的第二次订阅——三种媒体类型
+             **在代码里**也该走同一条取图路径，而不是靠缓存兜住。 */
+          <AudioWaveform
+            repoId={repoId}
+            fileId={file.id}
+            url={thumbUrl}
+            className="mp-wave-image"
+            t={t}
+          />
+        ) : thumbUrl === undefined ? (
+          <span className="mp-thumb-placeholder">{file.media_type}</span>
+        ) : thumbUrl === null ? (
+          <span className="mp-fallback">{t("media.unavailable")}</span>
         ) : (
-          <span className="mp-thumb-placeholder">audio</span>
+          <img
+            src={thumbUrl}
+            alt={file.relative_path}
+            // **不用 `loading="lazy"`**：窗口已是"视口 ± 对称 overscan"的**有界**集合，
+            // 再叠一层浏览器懒加载只会把取图时机交给它的启发式（与那条对称窗口无关），
+            // 而这正是"向上不预加载"的来源之一。这里要的是确定性：窗口内一律取。
+            onLoad={(e) => {
+              // 解码后量一次真实宽高比：自适应/瀑布流据此重新配平（并推进版本号，
+              // 让面板重算行/列偏移——见 `setRatioCache` 的说明）。
+              const { naturalWidth, naturalHeight } = e.currentTarget;
+              const next = imageRatio(naturalWidth, naturalHeight, ratio);
+              if (next !== ratio) {
+                setRatioCache(file.id, next);
+                setRatio(next);
+              }
+            }}
+          />
         )}
       </div>
       {showName && <span className="mp-name">{fileName(file.relative_path)}</span>}

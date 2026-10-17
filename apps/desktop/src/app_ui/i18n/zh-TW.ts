@@ -283,7 +283,6 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "media.waveUnavailable": "波形不可用",
   "media.noPath": "無路徑",
   "media.unavailable": "不可用",
-  "media.audioReadFailed": "讀取音訊失敗：{status}",
   "media.viewThumb": "預覽圖",
   "media.viewName": "檔名",
   "media.filter.all": "全部",
@@ -353,6 +352,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "metadata.codec": "編碼",
   "metadata.bitrate": "碼率",
   "metadata.frameRate": "幀率",
+  "metadata.sampleRate": "取樣率",
 
   "viewer.previewFailed": "預覽失敗：{err}",
   "viewer.unavailable": "預覽不可用",

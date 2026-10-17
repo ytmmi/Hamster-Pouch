@@ -52,7 +52,10 @@ const SCALE_FILTER: &str = "scale='min(512,iw)':-2";
 ///
 /// 必须**同目录**：跨卷 `rename` 会退化成复制，就不再是原子替换了。
 /// 进程号 + 计数器保证并发线程之间不撞名。
-fn temp_sibling(target: &Path) -> PathBuf {
+///
+/// `pub(crate)`：`waveform` 模块的 ffmpeg 落盘复用同一套原子写入口
+/// （同一份"先写临时文件再 rename"的口径只应有一处实现）。
+pub(crate) fn temp_sibling(target: &Path) -> PathBuf {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
@@ -69,7 +72,9 @@ fn temp_sibling(target: &Path) -> PathBuf {
 }
 
 /// 把 `temp` 原子地替换到 `target`；失败时清理临时文件。
-fn commit(temp: &Path, target: &Path) -> HpResult<()> {
+///
+/// `pub(crate)`：与 [`temp_sibling`] 同一理由——`waveform` 模块复用这对原子写入口。
+pub(crate) fn commit(temp: &Path, target: &Path) -> HpResult<()> {
     match std::fs::rename(temp, target) {
         Ok(()) => Ok(()),
         Err(e) => {

@@ -149,3 +149,19 @@ export function formatFrameRate(fps: number | null | undefined): string {
   if (fps === null || fps === undefined || !Number.isFinite(fps) || fps <= 0) return "—";
   return `${Number(fps.toFixed(2))} fps`;
 }
+
+/**
+ * 采样率（Hz）→ `44.1 kHz`（2026-10-17 / D115）。
+ *
+ * 音频的采样率是**固定的常用档位**（8 / 11.025 / 16 / 22.05 / 32 / 44.1 / 48 / 96 / 192 kHz），
+ * 因此按 kHz 显示并保留一位小数即可；不写成 `44100 Hz` 那种裸数字——它与"码率"
+ * 挤在一列里时，量级只能靠位数猜。
+ *
+ * 非正值 / 非数值显示 `—`（与其它行同款：取不到就说取不到，不静默消失）。
+ */
+export function formatSampleRate(hertz: number | null | undefined): string {
+  if (hertz === null || hertz === undefined || !Number.isFinite(hertz) || hertz <= 0) return "—";
+  const khz = hertz / 1000;
+  // 整数 kHz（16 / 48 / 96）不带小数点；带小数的那几档（44.1 / 22.05）保留必要位数。
+  return `${Number(khz.toFixed(2))} kHz`;
+}

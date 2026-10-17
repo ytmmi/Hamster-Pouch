@@ -284,7 +284,6 @@ export const en: Record<keyof DictZhCN, string> = {
   "media.waveUnavailable": "Waveform unavailable",
   "media.noPath": "No path",
   "media.unavailable": "Unavailable",
-  "media.audioReadFailed": "Failed to read audio: {status}",
   "media.viewThumb": "Thumbnails",
   "media.viewName": "File names",
   "media.filter.all": "All",
@@ -354,6 +353,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "metadata.codec": "Codec",
   "metadata.bitrate": "Bit rate",
   "metadata.frameRate": "Frame rate",
+  "metadata.sampleRate": "Sample rate",
 
   "viewer.previewFailed": "Preview failed: {err}",
   "viewer.unavailable": "Preview unavailable",

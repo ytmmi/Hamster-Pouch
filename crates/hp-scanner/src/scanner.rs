@@ -314,6 +314,17 @@ impl Scanner {
                 Some(row) => !(options.full || row.size != size || row.mtime != mtime),
                 None => false,
             };
+            // 音频的**存量占位行**（D11 → D115）即使 size/mtime 未变也必须重算一次：
+            // 它们的 `content_hash` 从来就是 NULL、`media_info_json` 从来没有值，
+            // "跳过"会把占位行原样留下，表现为"升了级却还是没哈希、没时长"。
+            // 判据只看**哈希是否缺失**（不是 `verify_status == placeholder`）：
+            // status 是镜像，哈希才是"这份内容到底算没算过"的事实。
+            // 算完写回 `ok` + 哈希 + 元数据，此后就走正常的"未变即跳过"。
+            let needs_audio_upgrade = media_type == MediaType::Audio
+                && existing
+                    .as_ref()
+                    .is_some_and(|row| row.content_hash.is_none());
+            let unchanged = unchanged && !needs_audio_upgrade;
             // 调色板：仅图片需要；**手动锁定**的色值是用户的判定权，重扫不得覆盖，
             // 因此这里就把"要不要算"定下来，省掉并行阶段那次无用的重采样。
             let want_palette = media_type == MediaType::Image
@@ -523,13 +534,15 @@ impl Scanner {
             return Ok(());
         }
 
-        // 音频是占位行（D11）：有 media_type、无哈希/缩略图。
-        let placeholder = prep.media_type == MediaType::Audio;
-        let verify_status = if placeholder {
-            VerifyStatus::Placeholder
-        } else {
-            VerifyStatus::Ok
-        };
+        // 音频**不再**是占位行（2026-10-17 / D115）：它与图片/视频同档——有内容哈希、
+        // 有媒体信息，因此校验状态一律 `ok`。
+        //
+        // **存量占位行怎么升级**：旧库里既有音频行的 `verify_status = 'placeholder'`、
+        // `content_hash` 为 NULL（D11）。升级不需要迁移脚本，也不需要"全量重扫"这一个
+        // 前置动作：**内容未变的既有行同样要重算一次**（见下面的 `needs_audio_upgrade`），
+        // 因为它们的哈希与元数据**从来没算过**。算完就写回 `ok`——这正是"原位升级"
+        // 的字面含义（`docs/spec/database-schema.md` 第 4.3 节的措辞）。
+        let verify_status = VerifyStatus::Ok;
         let id = match &prep.existing_id {
             Some(id) => FileId::from_raw(id),
             None => FileId::generate(),
