@@ -391,6 +391,7 @@ export const zhCN = {
   "bookreader.fullscreenFailed": "这个环境不允许全屏",
   "bookreader.more": "更多",
   "bookreader.sessionTime": "本次阅读时间 {min} 分钟",
+  "bookreader.headReadTime": "已读：{min} min",
   "bookreader.pageTime": "读完本页约需 {min} 分钟",
   "bookreader.endOfBook": "— 已到全书末尾 —",
   "bookreader.prevPage": "上一页",
@@ -456,7 +457,7 @@ export const zhCN = {
   "bookreader.option.textAlign.center": "居中",
   // 底部进度条
   "bookreader.footer.progress": "当前进度",
-  "bookreader.footer.pages": "页数",
+  "bookreader.footer.chapterProgress": "本章进度",
   "bookreader.footer.chapters": "章节数",
 
   // 图像查看器

@@ -1,7 +1,21 @@
 /**
- * 图书阅读器：**左侧内置面板**（目录 / 书签 / 笔记 / 高亮）。
+ * 图书阅读器：**左侧内置面板**（栏头 + 目录 / 书签 / 笔记 / 高亮）。
  *
- * 四个标签页共用一条栏：顶部是标签条，下面是当前页的内容。
+ * 栏内**自上而下三段**（与用户给的参考图逐块对应）：
+ *
+ * ```
+ * ┌ 封面  书名           ┐  ← 栏头（ReaderBookHeader，四个标签页上方常驻）
+ * │       作者：…        │
+ * │       已读：N min    │
+ * ├ 目录 书签 笔记 高亮 ┤  ← 标签条（当前页带下划线 + 底部横线分隔）
+ * ├──────────────────────┤
+ * │ 章节列表 / 批注列表  │  ← 当前标签页的内容（自己滚）
+ * └──────────────────────┘
+ * ```
+ *
+ * 栏头**不随标签切换**：它是"我正在读哪本书"，而不是某一页的内容；
+ * 切到书签页时把封面收起来，用户会以为换了本书。
+ *
  * 「更多」按钮直接展开整组栏；用户在此栏内切换这四个标签。
  *
  * ## 目录
@@ -21,7 +35,8 @@
 import { useMemo, useState } from "react";
 
 import type { Translate } from "../../i18n";
-import type { BookTocItem, ReaderAnnotationItem, ReaderAnnotationKind } from "../../shared/types";
+import type { BookTocItem, FileItem, ReaderAnnotationKind } from "../../shared/types";
+import type { BookCoverOverride } from "../bookpreview/bookCoverCache";
 import {
   currentTocIndex,
   READER_TABS,
@@ -29,7 +44,8 @@ import {
   tocTitleOrNull,
   type ReaderTab,
 } from "./readerView";
-import type { AnnotationDraft, ReaderAnnotationsHandle } from "./useReaderAnnotations";
+import { ReaderBookHeader } from "./ReaderBookHeader";
+import type { ReaderAnnotationsHandle } from "./useReaderAnnotations";
 
 export interface ReaderTocRailProps {
   tab: ReaderTab;
@@ -56,6 +72,15 @@ export interface ReaderTocRailProps {
     title: string;
     fallbackExcerpt: string;
   };
+  /** 当前阅读的书（栏头的封面 / 书名 / 作者）；`null` = 没有选中，栏头不渲染。 */
+  book: {
+    file: FileItem;
+    author: string | null;
+    coverUrl: string | null;
+    override: BookCoverOverride | null;
+    /** 本次会话已读分钟数（与顶栏同一个计数器）。 */
+    readMinutes: number;
+  } | null;
   t: Translate;
 }
 
@@ -84,12 +109,16 @@ export function ReaderTocRail({
   onJump,
   annotations,
   currentPosition,
+  book,
   t,
 }: ReaderTocRailProps): JSX.Element {
   const activeIndex = useMemo(() => currentTocIndex(toc, cursor), [toc, cursor]);
 
   return (
     <aside className="br-rail br-rail-left">
+      {/* 栏头：封面 / 书名 / 作者 / 已读时长。四个标签页**共用**，切标签不收起。 */}
+      {book && <ReaderBookHeader {...book} t={t} />}
+
       <div className="br-rail-tabs" role="tablist">
         {READER_TABS.map((id) => (
           <button

@@ -377,6 +377,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "bookreader.fullscreenFailed": "Fullscreen is not allowed in this environment",
   "bookreader.more": "More",
   "bookreader.sessionTime": "{min} min this session",
+  "bookreader.headReadTime": "Read: {min} min",
   "bookreader.pageTime": "about {min} min for this page",
   "bookreader.endOfBook": "— end of the book —",
   "bookreader.prevPage": "Previous page",
@@ -438,7 +439,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "bookreader.option.textAlign.start": "Left",
   "bookreader.option.textAlign.center": "Center",
   "bookreader.footer.progress": "Progress",
-  "bookreader.footer.pages": "Pages",
+  "bookreader.footer.chapterProgress": "Chapter progress",
   "bookreader.footer.chapters": "Chapters",
 
   "imageviewer.loadFailed": "Failed to read image: {err}",

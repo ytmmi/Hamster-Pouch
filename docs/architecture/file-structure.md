@@ -173,26 +173,65 @@ apps/desktop/src/app_ui/
                       #   只"读一本书"，挑书在图书预览里做）
                       #   BookReaderPanel.tsx 主面板（顶栏 = 退出阅读 / 章节标题 / 会话时长 /
                       #     全屏 / **「更多」矢量图标**；主体 = 左栏 + 阅读区 + 右栏；底栏 = 进度）
+                      #     **章节数 = 目录 + 当前页游标直接算**（用户口径）：三处（章节数 /
+                      #     章节标题 / 目录高亮）统一读 currentPageCursor（**整数**页起点）→
+                      #     currentTocIndex；绝对位置另由 readerPageCursors（精确页区间，
+                      #     来自每页的 next_cursor）+ readerPositionFromPage（**只在该页内部**
+                      #     插值）给出。**禁止跨页比例乘法**（像素 ∝ 结构不成比例 → 乱跳）；
+                      #     **ReaderStage 的 key 仍用 book.cursor**（用位置当 key 会每帧重挂载）
                       #   ReaderMoreMenu.tsx **四方块矢量图标 + 内置面板菜单**
                       #     （目录 / 书签 / 笔记 / 高亮 / 阅读选项；再点 / 点外面 / Esc 三种关闭）
                       #   ReaderStage.tsx 阅读区（scroll / page / spread 三种翻页方式；
                       #     分页用 CSS **column-count** 多栏 + translateX；跳章由面板的 key 重挂载重置；
+                      #     点击正文收起左右两栏——判据在 readerView.bodyClickHidesRails
+                      #     （点链接 / 分页按钮 / 划词时不收起），面板只在两栏展开时才传回调；
+                      #     位置探测：每页带 data-page-index，用 elementFromPoint +
+                      #     closest("[data-page-index]") 认出**当前真正显示的是第几页**
+                      #     （滚动取纵向比例、分页取横向比例），上报 { visibleIndex, offsetInPage }
+                      #     （经 fractionWorthReporting 节流）；三个触发点 = scroll 事件 +
+                      #     requestAnimationFrame([pages, paged, page, pageCount, width]) 的
+                      #     effect（加载 / 翻页 / 变宽都不产生事件）+ key 重挂载后一次
+                      #     探测点取**内容框 .br-flow**（不是舞台 .br-stage——它带 page-margin
+                      #     内边距，上限 80px，取舞台会落进 padding 导致 closest 得到 null、章号退回第 1 章）
                       #     分页滚轮用**原生 addEventListener("wheel", …, {passive:false})**
                       #     ——React 的 onWheel 是 passive，preventDefault 无效 ⇒ 会退化成普通滚动
                       #     （同 bookpreview/BookCard.tsx 记录的坑）；滚轮按**增量累积**折算
                       #     "一次滚动 = 一页"，几何一律出自 readerView.readerPagination）
-                      #   ReaderTocRail.tsx 左侧四个标签页（目录跳转直接用 book.toc 的游标；
-                      #     书签 / 笔记 / 高亮三个标签页共用一份批注列表——顶部"在当前位置留一条"，
-                      #     高亮的原文取浏览器选区、划不到用当前页开头兜底）
+                      #   ReaderTocRail.tsx 左侧栏（**栏头 + 四个标签页**，D114）：
+                      #     栏头（封面 / 书名 / 作者 / 已读）在标签条**之上**且不随标签切换
+                      #     ——它是"正在读哪本书"，不是某一页的内容；目录跳转直接用
+                      #     book.toc 的游标；书签 / 笔记 / 高亮三个标签页共用一份批注列表
+                      #     ——顶部"在当前位置留一条"，高亮的原文取浏览器选区、划不到用
+                      #     当前页开头兜底
+                      #   ReaderBookHeader.tsx 左栏栏头（D114）：**复用 bookpreview 的
+                      #     BookCoverArt**（同一本书两个面板一张封面）+ bookDisplayName
+                      #     书名 + book.authorLabel 作者（缺值 —）+ 「已读 N min」
+                      #     （与顶栏会话计时**同一个** sessionMinutes，不是累计时长）
+                      #   useReaderBookIdentity.ts 栏头的取数（D114）：usesEmbeddedCover
+                      #     判据（txt / md 一次 IPC 都不发）+ loadBookMeta + 封面覆盖
+                      #     共用 bookpreview 那份模块级缓存
                       #   ReaderOptionsRail.tsx 右侧「阅读选项」（12 项面板设置的可视化控件）
-                      #   ReaderFooter.tsx 底部进度（当前进度 / 页数 / 章节数；算不出来显示 —）
+                      #   ReaderFooter.tsx 底部进度（当前进度 00.00% / **本章进度 00.0%** /
+                      #     章节数 1 / 14；算不出来显示 —，本章进度在无目录时整项不显示；
+                      #     **页数一格已删除**——纯文本的页数只是按 2 万字符折算的估算值）
                       #   useReaderBook.ts 目录 + 正文取数（跳转 = 新世代，丢弃在飞的旧响应）
+                      #     **两个游标字段不可合并**：cursor = 跳转目标（只喂阅读区 key，
+                      #     首屏与 loadMore 都不改）；segmentStart = 段起点（首屏 "0" /
+                      #     跳转目标 / **loadMore 不变**）。用 cursor 当段起点会让读完整本书
+                      #     位置仍在开头（章节数恒为 1）；让 fetchPage 回写 cursor 会让
+                      #     key 每页变、阅读区反复重挂载。
                       #   useReaderSettings.ts 12 项面板设置（panel.bookreader.*；
                       #     写入后本地广播，同窗口即时生效）
                       #   useReaderAnnotations.ts 批注（书签 / 笔记 / 高亮）取数与增删；
                       #     新增后**回读列表**（id / created_at 由后端生成）
                       #   readerView.ts 取值域与纯逻辑（零依赖，门禁直接 import；
-                      #     含分页几何 readerPagination / 滚轮累积 accumulateWheelStep）
+                      #     含分页几何 readerPagination / 滚轮累积 accumulateWheelStep /
+                      #     **章节判定 currentTocIndex** + **精确页区间 readerPageCursors**
+                      #     + **单页内插值 readerPositionFromPage** + 本章进度
+                      #     readerChapterProgress + 上报节流 fractionWorthReporting。
+                      #     已删除 readerProgress / readerScrollFraction / readerPageFraction /
+                      #     readerLoadedUnits / readerPageUnits / pageAtPixels —— 它们都在做
+                      #     **跨页比例乘法**，而那正是"章节数乱跳"的根因）
     bookpreview/      # 图书预览（panel.bookpreview；**"书" = 文本类 txt/md/epub + pdf**；
                       #   **has_class = true**，
                       #   三轴模型见 blueprintValues.ts 的 BLUEPRINT_SUBCLASS_FORMATS /

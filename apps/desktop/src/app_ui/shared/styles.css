@@ -2353,6 +2353,12 @@ button.danger {
 .br-rail-left {
   left: 0;
   border-right: 1px solid var(--border);
+  /* 参考图里左栏是"封面 + 书名 + 作者 + 已读"再往下四个标签，
+     比右栏（只有若干行滑条）需要更多横向空间；仍然远窄于正文。
+     `min(…, 70%)` 是窄面板下的兜底：260px 在 300px 宽的面板里会把正文整块盖住，
+     而浮层**不该**让阅读区完全消失（用户开目录是为了看着书名跳，不是遮住正文）。
+     百分比在绝对定位元素上按包含块（`.br-body`）解析，随面板宽度自动收窄。 */
+  width: min(260px, 70%);
 }
 
 .br-rail-right {
@@ -2363,11 +2369,84 @@ button.danger {
 
 .br-rail-tabs {
   display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px 4px;
+  align-items: stretch;
+  gap: 0;
+  padding: 0 2px;
+  /* 只有**下**边框：右栏（阅读选项）的标签条也在最顶上，加上边框会在面板顶边
+     多出一条悬空的线。左栏栏头与标签之间的分隔由 `.br-book-head` 的下边框给。 */
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+/* 栏头：封面 + 书名 / 作者 / 已读（四个标签页上方**常驻**，
+   切到书签 / 笔记 / 高亮时不收起——它是"正在读哪本书"，不是某一页的内容）。 */
+.br-book-head {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* 封面：宽度固定、比例由 `.bp-art` 的 `aspect-ratio: 2 / 3` 撑开。
+   投影沿用图书预览的两段阴影（同一本书在两个面板里应当是同一张封面）。 */
+.br-book-cover {
+  width: 72px;
+  flex: none;
+}
+
+.br-book-cover .bp-art {
+  width: 100%;
+  border-radius: 3px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    0 3px 10px rgba(0, 0, 0, 0.16);
+}
+
+/* 小尺寸下的文字封面：`wrapCoverName` 按 6 字断行，12px 的正文尺寸在 72px 宽的
+   框里会溢出（6×12 = 72 > 内宽），因此这里单独收小字号与内边距。 */
+.br-book-cover .bp-textcover {
+  padding: 4px;
+}
+
+.br-book-cover .bp-textcover-name {
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.br-book-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* **顶对齐**而不是垂直居中：参考图里书名与封面的上边缘齐平，
+     作者 / 已读依次往下；居中会让长书名把作者行推到封面下缘之外。 */
+  justify-content: flex-start;
+  gap: 3px;
+  padding-top: 2px;
+}
+
+/* 书名最多三行（长书名在 260px 宽的栏里仍然读得出是哪本）。 */
+.br-book-title {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: break-word;
+}
+
+.br-book-author,
+.br-book-read {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .br-rail-title {
@@ -2376,28 +2455,44 @@ button.danger {
   padding-left: 4px;
 }
 
+/* 四个标签**等分**整条栏宽（参考图的排布），当前页靠下划线 + 加粗标示；
+   关闭按钮贴着右边缘、不参与等分。 */
 .br-rail-tab {
+  flex: 1;
+  min-width: 0;
   font: inherit;
   font-size: 11px;
-  padding: 2px 6px;
+  padding: 6px 2px;
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--fg-dim);
   cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+.br-rail-tab:hover {
+  color: var(--fg);
+}
+
+/* 当前标签：下划线用 `--fg` 而不是 `--accent`——浅色主题下 `--accent` 是白色
+   （`#ffffff`），画在 `--bg-2` 的白底上等于没有下划线；`--accent-border` 在浅色下
+   只有 #b8bcc2，一条 2px 的浅灰线也读不出"当前在这一页"。`--fg` 在两套主题下
+   都与底色高对比（浅色深字 / 深色亮字），而这里画的是线不是字，不存在反色问题。 */
 .br-rail-tab-active {
   color: var(--fg);
-  border-bottom-color: var(--accent-border);
+  border-bottom-color: var(--fg);
+  font-weight: 600;
 }
 
 .br-rail-close {
-  margin-left: auto;
+  align-self: stretch;
   font: inherit;
   font-size: 13px;
   line-height: 1;
-  padding: 0 6px;
+  padding: 0 5px;
   border: 0;
   background: transparent;
   color: var(--fg-dim);
@@ -2435,7 +2530,11 @@ button.danger {
   text-align: left;
   font: inherit;
   font-size: 11px;
-  padding: 3px 8px;
+  /* 目录行比栏头高一点：参考图里章节列表的行距更松，观感更接近"书页目录"。
+     行高 1.5 保证两行标题（`white-space: nowrap` 下不会换行，但长标题的
+     省略号要留出垂直空间）。 */
+  line-height: 1.5;
+  padding: 4px 8px;
   border: 0;
   border-radius: 3px;
   background: transparent;
@@ -2620,6 +2719,20 @@ button.danger {
   line-height: var(--br-line-height, 1.7);
   letter-spacing: var(--br-letter-spacing, 0);
   overflow-wrap: break-word;
+}
+
+/* 一页正文的包裹层（`data-page-index` 挂在它上面，供阅读区探测"当前是第几页"）。
+   必须是**有几何的普通块**：`display: contents` 会让 `getBoundingClientRect()`
+   返回空盒（宽高 0），页内比例就永远是 0——探测直接失效。
+   好在 `.br-content` 的子元素本来就没有 margin 塌陷问题（`.vr-*` 用
+   `margin-bottom`），这里只补一条：块内最后一个元素的 margin 不参与
+   页与页之间的间距计算，免得"每页底部多出一段空白"。 */
+.br-page {
+  display: block;
+}
+
+.br-page > :last-child {
+  margin-bottom: 0;
 }
 
 .br-stage-paged .br-content {

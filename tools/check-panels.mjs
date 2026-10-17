@@ -4029,10 +4029,12 @@ const READER_FAMILY_FILES = [
   "apps/desktop/src/app_ui/panels/bookreader/BookReaderPanel.tsx",
   "apps/desktop/src/app_ui/panels/bookreader/ReaderStage.tsx",
   "apps/desktop/src/app_ui/panels/bookreader/ReaderTocRail.tsx",
+  "apps/desktop/src/app_ui/panels/bookreader/ReaderBookHeader.tsx",
   "apps/desktop/src/app_ui/panels/bookreader/ReaderOptionsRail.tsx",
   "apps/desktop/src/app_ui/panels/bookreader/ReaderFooter.tsx",
   "apps/desktop/src/app_ui/panels/bookreader/ReaderMoreMenu.tsx",
   "apps/desktop/src/app_ui/panels/bookreader/useReaderBook.ts",
+  "apps/desktop/src/app_ui/panels/bookreader/useReaderBookIdentity.ts",
   "apps/desktop/src/app_ui/panels/bookreader/useReaderSettings.ts",
   "apps/desktop/src/app_ui/panels/bookreader/readerView.ts",
 ];
@@ -4434,6 +4436,512 @@ check(
       /self\.marks\s*\n?\s*\+ self\.annotations/.test(purge) &&
       /"file_marks" => removed\.marks = n/.test(purge) &&
       /"reader_annotations" => removed\.annotations = n/.test(purge)
+    );
+  })(),
+);
+
+// ============================== 左栏栏头（2026-10-17）==============================
+//
+// 用户口径："目录部分的样式如图所示，最上面要有封面，作者等。"
+// （参考图左栏 = 封面 + 书名 + 作者 + 已读，其下四个标签与章节列表）。
+//
+// 这一组的断言钉**结构与来源**，不只钉"某符号出现过"：
+// - 栏头必须在**四个标签之上**（切标签不收起），因此它在 `ReaderTocRail` 里、
+//   位于 `.br-rail-tabs` **之前**；
+// - 封面必须复用图书预览的 `BookCoverArt`（同一本书两个面板一张封面），
+//   且取数走 `usesEmbeddedCover`（`txt` / `md` 一次 IPC 都不发）；
+// - 「已读」必须与顶栏的会话计时是**同一个数**（`sessionMinutes`），
+//   不得另起一个累计计时（项目里没有累计阅读时长这种记录）。
+
+const readerRailSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderTocRail.tsx"),
+  "utf8",
+);
+const readerHeaderSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderBookHeader.tsx"),
+  "utf8",
+);
+const readerIdentitySrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/useReaderBookIdentity.ts"),
+  "utf8",
+);
+
+check(
+  "左栏栏头：封面 / 书名 / 作者 / 已读在**四个标签之上**（切标签不收起）",
+  (() => {
+    const head = readerRailSrc.indexOf("<ReaderBookHeader");
+    const tabs = readerRailSrc.indexOf('className="br-rail-tabs"');
+    return (
+      // 位置关系：栏头在前、标签条在后（注释里也提到这两个名字，因此按
+      // **JSX 出现位置**比较，而不是"是否出现过"）。
+      head > 0 && tabs > 0 && head < tabs &&
+      // 栏头必须**包在切换条件之外**：不是 `{tab === "toc" && <ReaderBookHeader …>}`。
+      !/\{tab[^}]*&&\s*<ReaderBookHeader/.test(readerRailSrc) &&
+      /book && <ReaderBookHeader/.test(readerRailSrc) &&
+      // 三样内容都在栏头里（书名 / 作者 / 已读）。
+      /br-book-title/.test(readerHeaderSrc) &&
+      /br-book-author/.test(readerHeaderSrc) &&
+      /bookreader\.headReadTime/.test(readerHeaderSrc) &&
+      // 作者沿用图书预览的「作者：」标签（不另立第二套文案），缺值显示 `—`。
+      /book\.authorLabel/.test(readerHeaderSrc) &&
+      /bookreader\.unknown/.test(readerHeaderSrc)
+    );
+  })(),
+  `head@${readerRailSrc.indexOf("<ReaderBookHeader")} tabs@${readerRailSrc.indexOf(
+    'className="br-rail-tabs"',
+  )}`,
+);
+
+check(
+  "左栏栏头：封面**复用图书预览的 `BookCoverArt`**（同一本书两个面板一张封面）",
+  (() =>
+    // 正向：用同一个封面组件（文字封面打底 + 封面图盖上 + 覆盖优先级 + 失败回落都不要再写一遍）。
+    /import \{ BookCoverArt \} from "\.\.\/bookpreview\/BookCoverArt"/.test(readerHeaderSrc) &&
+    /<BookCoverArt\b/.test(readerHeaderSrc) &&
+    // 书名与图书预览**同一条**规则（去目录去扩展名），不是取 `relative_path` 原样。
+    /import \{ bookDisplayName \} from "\.\.\/bookpreview\/bookPreviewView"/.test(
+      readerHeaderSrc,
+    ) &&
+    /bookDisplayName\(file\.relative_path\)/.test(readerHeaderSrc) &&
+    // 反向：不得自己再拼一套封面渲染（`<img src=…>` / 自造渐变）。
+    !/<img\b/.test(readerHeaderSrc) &&
+    !/linear-gradient/.test(readerHeaderSrc))(),
+);
+
+check(
+  "左栏栏头：`txt` / `md` **不发**元数据命令（判据与图书预览同一个 `usesEmbeddedCover`）",
+  (() =>
+    /import \{ usesEmbeddedCover \} from "\.\.\/bookpreview\/bookPreviewView"/.test(
+      readerIdentitySrc,
+    ) &&
+    /const wantsCover = item !== null && usesEmbeddedCover\(item\)/.test(readerIdentitySrc) &&
+    // 判据为假时直接返回、**不**调 `loadBookMeta`（守卫必须在调用之前）。
+    /if \(!repoId \|\| !fileId \|\| !wantsCover\) \{\s*\n\s*setMeta\(null\);\s*\n\s*return;/.test(
+      readerIdentitySrc,
+    ) &&
+    // 反向：`loadBookMeta` 只能出现在守卫**之后**（否则 txt 也会白跑一次 IPC）。
+    readerIdentitySrc.indexOf("loadBookMeta(repoId, fileId)") >
+      readerIdentitySrc.indexOf("if (!repoId || !fileId || !wantsCover)"))(),
+);
+
+check(
+  "左栏栏头：「已读 N min」与顶栏会话计时是**同一个数**（不另起累计计时）",
+  (() =>
+    // 面板把**同一个** `sessionMinutes` 交给栏头（顶栏的「本次阅读时间」用的是它）。
+    /readMinutes: sessionMinutes/.test(readerPanelSrc) &&
+    // 栏头把它原样透传给组件，组件把它渲染成「已读」那一行。
+    /<ReaderBookHeader \{\.\.\.book\} t=\{t\} \/>/.test(readerRailSrc) &&
+    /bookreader\.headReadTime", \{ min: readMinutes \}/.test(readerHeaderSrc) &&
+    // 反向：栏头里不得自己起一个计时器 / 读 `Date.now()`（那会是第二个口径）。
+    !/setInterval|Date\.now\(\)|SessionStart/.test(readerHeaderSrc))(),
+);
+
+check(
+  "左栏栏头：封面覆盖（用户自选颜色 / 图片）与图书预览**共用**同一份缓存",
+  (() =>
+    /loadBookCovers\(repoId, \[fileId\]\)/.test(readerIdentitySrc) &&
+    /import \{ useBookCoverOverride \}/.test(readerIdentitySrc) &&
+    /useBookCoverOverride\(repoId, fileId \?\? ""\)/.test(readerIdentitySrc) &&
+    // 反向：不得自己发一次 `book_covers` 或另建一份缓存。
+    !/api\.bookCovers\(/.test(readerIdentitySrc) &&
+    !/new Map</.test(readerIdentitySrc))(),
+);
+
+check(
+  "左栏栏头：样式里封面宽度固定、书名最多三行、四个标签等分栏宽",
+  (() => {
+    const cover = stylesSource.match(/\.br-book-cover\s*\{[^}]*\}/)?.[0] ?? "";
+    const title = stylesSource.match(/\.br-book-title\s*\{[^}]*\}/)?.[0] ?? "";
+    const tab = stylesSource.match(/\.br-rail-tab\s*\{[^}]*\}/)?.[0] ?? "";
+    return (
+      /width:\s*\d+px/.test(cover) &&
+      /flex:\s*none/.test(cover) &&
+      /-webkit-line-clamp:\s*[23]/.test(title) &&
+      /flex:\s*1/.test(tab) &&
+      // 标签条不得再用 `margin-left: auto` 推关闭按钮（那会让四个标签不再等分）。
+      !/margin-left:\s*auto/.test(stylesSource.match(/\.br-rail-close\s*\{[^}]*\}/)?.[0] ?? "")
+    );
+  })(),
+);
+
+// ============================== 点击正文收起两栏（2026-10-17）==============================
+//
+// 用户口径："点击更多后，点击正文区域可以隐藏两栏（等同于再次点击更多）"。
+//
+// 这组的重点是**不误伤**：点链接要跳走、点分页按钮要翻页、划词要能选中——
+// 三种操作都会产生 click 事件，都不该把目录关掉。
+
+check(
+  "点击正文收起两栏：纯函数按行为判定（点在链接 / 分页按钮 / 划词时都不收起）",
+  (() => {
+    const fn = readerView.bodyClickHidesRails;
+    if (typeof fn !== "function") return false;
+    return (
+      // 正文空白处：收起。
+      fn({ interactive: false, hasSelection: false }) === true &&
+      // 点在链接 / 分页按钮里：**不**收起（它们有各自的语义）。
+      fn({ interactive: true, hasSelection: false }) === false &&
+      // 正在划词：**不**收起（划完松手同样会触发 click）。
+      fn({ interactive: false, hasSelection: true }) === false &&
+      fn({ interactive: true, hasSelection: true }) === false
+    );
+  })(),
+);
+
+check(
+  "点击正文收起两栏：可交互判定走 `closest` 而不是 tagName（点链接内的 span 也算链接）",
+  (() => {
+    const probe = readerView.isInteractiveTarget;
+    if (typeof probe !== "function") return false;
+    // 假一份"链接内部的 span"：closest("button, a, …") 命中 ⇒ 可交互。
+    const innerSpan = { tagName: "SPAN", closest: (s) => (s.includes("a") ? {} : null) };
+    // 正文段落：closest 一律 null ⇒ 不可交互。
+    const paragraph = { tagName: "P", closest: () => null };
+    return (
+      probe(innerSpan) === true &&
+      probe(paragraph) === false &&
+      // 无 closest（文本节点 / 空目标）不得抛错。
+      probe(null) === false &&
+      probe(undefined) === false &&
+      probe({}) === false
+    );
+  })(),
+);
+
+check(
+  "点击正文收起两栏：阅读区挂了 onClick、面板只在两栏展开时传回调（收起态无副作用）",
+  (() => {
+    const stage = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderStage.tsx"),
+      "utf8",
+    );
+    return (
+      // 阅读区真的接了点击（正向锚点）。
+      /onClick=\{handleClick\}/.test(stage) &&
+      // 两条否决判据都问纯函数，而不是各自写死一个 if。
+      /bodyClickHidesRails\(\{/.test(stage) &&
+      /isInteractiveTarget\(/.test(stage) &&
+      /window\.getSelection\(\)\?\.toString\(\)/.test(stage) &&
+      // 面板：展开才传回调；收起时是 `undefined`（结构性保证，不在回调里判）。
+      /onBodyClick=\{railsOpen \? collapseRails : undefined\}/.test(readerPanelSrc) &&
+      // 收起动作必须与「更多」同一个状态量（否则点正文与再点更多会走两条路）。
+      /const collapseRails = useCallback\(\(\) => \{\s*setRailsOpen\(false\);/.test(
+        readerPanelSrc,
+      ) &&
+      /const toggleRails = useCallback\(\(\) => \{\s*setRailsOpen\(\(open\) => !open\)/.test(
+        readerPanelSrc,
+      )
+    );
+  })(),
+);
+
+// ============ 进度 / 章节数：页游标区间 + 页内插值（2026-10-17 最终架构）============
+//
+// 用户口径："章节数十/十二的计数直接读取目录和当前章节计算不就可以了"。
+//
+// 因此旧的两套辅助函数已删除（它们都在做「跨页的比例乘法」，而比例是像素的、
+// 章节长度是结构的，两者不成比例 → 章节数乱跳）：
+//   `readerProgress`        —— 段起点 + 段内比例 × 已载入单位
+//   `readerScrollFraction`  —— 整段滚动像素比例
+//   `readerPageFraction`    —— 当前页 / 总页数
+//   `readerLoadedUnits`     —— 已载入单位求和
+// 现在位置只由 `readerPageCursors`（精确页区间）+ `readerPositionFromPage`
+// （单页内部插值）得出；章号另取整数页起点。两者的行为断言在下面几段。
+
+check(
+  "上报节流：小于显示精度的变化不上报（滚动一秒几十次，不重画整块正文）",
+  // 1e-4 就是 0.01%——当前进度的最小可见变化。
+  readerView.fractionWorthReporting(0.5, 0.50001) === false &&
+    readerView.fractionWorthReporting(0.5, 0.5002) === true &&
+    readerView.fractionWorthReporting(0.9, 0.1) === true &&
+    // 非有限值一律放行（宁可多报一次，也不要吞掉位置）。
+    readerView.fractionWorthReporting(Number.NaN, 0.5) === true,
+);
+
+check(
+  "章节数 = **目录 + 当前页游标**直接算（不靠插值；整数页起点，页内比例不改变章号）",
+  (() => {
+    // 真实目录（E:\仓鼠\图书测试\re0\…04.epub 实测）。
+    const toc = [
+      { cursor: "0" }, { cursor: "2" }, { cursor: "4" }, { cursor: "5" },
+      { cursor: "10" }, { cursor: "11" }, { cursor: "12" }, { cursor: "13" },
+      { cursor: "14" }, { cursor: "15" }, { cursor: "16" }, { cursor: "17" },
+      { cursor: "18" },
+    ];
+    // 20 个 section（第 0 起）。
+    const pages = Array.from({ length: 20 }, (_, i) => ({
+      format: "epub",
+      text: null,
+      blocks: [],
+      section: i,
+      next_cursor: i + 1 < 20 ? String(i + 1) : null,
+    }));
+    const cursors = readerView.readerPageCursors(pages, "0");
+    const expected = (section) => {
+      let idx = -1;
+      for (let i = 0; i < toc.length; i += 1) {
+        if (Number(toc[i].cursor) <= section) idx = i;
+        else break;
+      }
+      return idx;
+    };
+    // 逐项：每页起点算出的章号必须与目录一致，且**页内比例不改变章号**。
+    let ok = true;
+    for (let i = 0; i < pages.length; i += 1) {
+      const start = Math.floor(cursors[i].start);
+      if (readerView.currentTocIndex(toc, String(start)) !== expected(i)) ok = false;
+    }
+    // 序章（section 11）→ 目录第 6 项；第四章（15）→ 第 10 项。
+    const atPreface = readerView.currentTocIndex(toc, "11");
+    const atCh4 = readerView.currentTocIndex(toc, "15");
+
+    /*
+     * **加载更多不得改变已显示页的起点**——这是旧实现"乱跳"的直接来源：
+     * 旧式"段起点 + 比例 × 已载入单位"里，`loadedUnits` 随加载变大、像素比例随总高变小，
+     * 两者相乘后的结果会在加载瞬间跳好几章。现在页区间由 `next_cursor` 精确给出，
+     * 追加页只往后加，**前面页的 start 逐字节不变**。
+     */
+    const before = readerView.readerPageCursors(pages.slice(0, 6), "0");
+    const after = readerView.readerPageCursors(pages.slice(0, 12), "0");
+    let stable = true;
+    for (let i = 0; i < before.length; i += 1) {
+      if (before[i].start !== after[i].start || before[i].end !== after[i].end) stable = false;
+    }
+    // 且同一页的章号在加载前后一致。
+    let chapterStable = true;
+    for (let i = 0; i < before.length; i += 1) {
+      const a = readerView.currentTocIndex(toc, String(Math.floor(before[i].start)));
+      const b = readerView.currentTocIndex(toc, String(Math.floor(after[i].start)));
+      if (a !== b) chapterStable = false;
+    }
+    return (
+      ok &&
+      atPreface === 5 &&
+      atCh4 === 9 &&
+      stable &&
+      chapterStable &&
+      // 反向：面板必须读 `currentPageCursor`（整数页起点），不得拿带小数的
+      // `absolutePosition` 去判章——小数越过下一条目录项会让章号提前跳。
+      /const at = currentTocIndex\(book\.toc, String\(currentPageCursor\)\)/.test(
+        stripComments(readerPanelSrc),
+      ) &&
+      !/const at = currentTocIndex\(book\.toc, String\(absolutePosition\)\)/.test(
+        stripComments(readerPanelSrc),
+      )
+    );
+  })(),
+);
+
+check(
+  "位置探测：每页带 `data-page-index`、由 DOM 认出当前页（不再用「整段像素比例」）",
+  (() => {
+    const stage = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderStage.tsx"),
+      "utf8",
+    );
+    const code = stripComments(stage);
+    return (
+      // 每页必须有可命中的标记（否则 elementFromPoint 找不到页边界）。
+      /data-page-index=\{index\}/.test(code) &&
+      /closest\?\.\("\[data-page-index\]"\)/.test(code) &&
+      // 上报的是"第几页 + 页内比例"。
+      /onPositionChange\(\{ visibleIndex, offsetInPage \}\)/.test(code) &&
+      // **探测点用内容框 `flowRef` 而不是舞台 `hostRef`**：舞台带
+      // `padding: var(--br-page-margin)`（上限 80px），以舞台左上角往里取点，
+      // 页边距 > 该偏移时点会落进内边距，`closest` 得到 null → 章号退回第 1 章。
+      //
+      // 钉**取值来源**（`flow.getBoundingClientRect()`），不只钉变量名：
+      // 实测把这一行换成 `host.getBoundingClientRect()` 时，只检查
+      // `flowRef.current` / `flowRect.left` 字面写法的断言**仍然全绿**——变量名没变、
+      // 变的是它装了什么。因此这里必须比对"从谁身上量的"。
+      /const flowRect = flow\.getBoundingClientRect\(\);/.test(code) &&
+      !/const flowRect = host\.getBoundingClientRect\(\);/.test(code) &&
+      /flowRect\.left \+ Math\.min\(flowRect\.width \/ 2, 40\)/.test(code) &&
+      /Math\.max\(hostRect\.top \+ 2, flowRect\.top \+ 2\)/.test(code) &&
+      // **反向**：不得再回到"整段像素比例"那套（它与章数不成比例，正是乱跳的根因）。
+      !/reportFraction\(readerScrollFraction/.test(code) &&
+      !/readerScrollFraction\(/.test(code) &&
+      !/readerPageFraction\(/.test(code)
+    );
+  })(),
+);
+
+check(
+  "位置探测的三个触发点齐备（滚动 / 翻页 / 内容或几何变化），且翻页回调不直接上报",
+  (() => {
+    const stage = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderStage.tsx"),
+      "utf8",
+    );
+    const code = stripComments(stage);
+    return (
+      /const handleScroll = useCallback\([\s\S]*?reportPosition\(\);/.test(code) &&
+      // `pages` / `page` / 宽度变化后重探（不产生任何事件，必须补）。
+      /requestAnimationFrame\(\(\) => reportPosition\(\)\)/.test(code) &&
+      // 挂载时也探一次（跳章后 `key` 变即重挂载）。
+      (code.match(/reportPosition\(\)/g) ?? []).length >= 3
+    );
+  })(),
+);
+
+check(
+  "接线：面板把位置算进两处进度，底部两处精度分开（当前 00.00% / 本章 00.0%）",
+  (() => {
+    const footer = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderFooter.tsx"),
+      "utf8",
+    );
+    return (
+      /onPositionChange=\{setVisiblePage\}/.test(readerPanelSrc) &&
+      /readerPositionFromPage\(visiblePage\.visibleIndex, visiblePage\.offsetInPage, pageCursors\)/.test(
+        readerPanelSrc,
+      ) &&
+      /readerChapterProgress\(book\.toc, absolutePosition, totalUnits\)/.test(readerPanelSrc) &&
+      // epub / pdf 的总量取 `section_count`（它们的 `book.total` 恒为 null）。
+      /first\?\.section_count \?\? null\)/.test(readerPanelSrc) &&
+      /formatProgressPercent\(progress, 2\)/.test(footer) &&
+      /formatProgressPercent\(chapterProgress, 1\)/.test(footer) &&
+      /bookreader\.footer\.chapterProgress/.test(footer)
+    );
+  })(),
+);
+
+// ==================== 底栏：删页数、章节数保持原样（2026-10-17）====================
+//
+// 用户口径："使用百分比计数" → 随即更正为"**章节数保持原样，仅删除页数**"。
+// 因此这里钉两件事：章节数**仍是 `1 / 14`**（不是百分比）、页数那一格**确实没了**。
+
+check(
+  "底栏：章节数**保持原样** `1 / 14`（更正过：不改成百分比）",
+  (() => {
+    const footer = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderFooter.tsx"),
+      "utf8",
+    );
+    return (
+      // 正向：仍然是整数比值。
+      /<b>\s*\{chapters\.at\} \/ \{chapters\.total\}\s*<\/b>/.test(footer) &&
+      // 反向：不得把章节数折成百分比（用户先要后撤，两者不能并存）。
+      !/formatProgressPercent\(\s*chapters\.at/.test(stripComments(footer)) &&
+      !/chaptersPercent/.test(stripComments(footer))
+    );
+  })(),
+);
+
+check(
+  "底栏：**页数一格已删除**（面板不再算 pagesInfo，footer 不再有 pages 属性与文案）",
+  (() => {
+    const footer = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderFooter.tsx"),
+      "utf8",
+    );
+    return (
+      // 正向：三格（当前进度 / 本章进度 / 章节数）。
+      !/pages/.test(stripComments(footer)) &&
+      // 面板侧不再有这套折算：它是"按一页 2 万字符"估出来的，与另外两格的精确百分比并列会误导。
+      !/pagesInfo/.test(stripComments(readerPanelSrc)) &&
+      // 传参里也不再出现 pages。
+      !/pages=\{pagesInfo\}/.test(readerPanelSrc)
+    );
+  })(),
+);
+
+// ==================== 章节数 = 目录 + 当前页游标（2026-10-17 最终口径）====================
+//
+// 用户口径："章节数十/十二的计数直接读取目录和当前章节计算不就可以了"。
+// 就是这一条：章节数**不做任何插值**——取当前页的**整数起点游标**，去目录里找
+// "最后一条 cursor ≤ 它"的项。插值只服务"本章进度"的小数部分，与章号无关。
+
+check(
+  "章节数 / 章节标题 / 目录高亮：三处都用**当前页游标**（整数），不是取数游标",
+  (() => {
+    const src = stripComments(readerPanelSrc);
+    const chaptersBlock =
+      src.match(/const chaptersInfo = useMemo\(\(\) => \{[\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ?? "";
+    const titleBlock =
+      src.match(/const chapterTitle = useMemo\(\(\) => \{[\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ?? "";
+    return (
+      /currentTocIndex\(book\.toc, String\(currentPageCursor\)\)/.test(chaptersBlock) &&
+      /currentTocIndex\(book\.toc, String\(currentPageCursor\)\)/.test(titleBlock) &&
+      // 反向：不得退回取数游标（只在换章时变 → "不跳动"），
+      // 也不得用带小数的 absolutePosition（小数越过下一条目录项会让章号提前跳）。
+      !/book\.cursor/.test(chaptersBlock) &&
+      !/book\.cursor/.test(titleBlock) &&
+      !/String\(absolutePosition\)/.test(chaptersBlock) &&
+      !/String\(absolutePosition\)/.test(titleBlock) &&
+      // 目录高亮同一判据。
+      /cursor=\{currentPageCursor === null \? null : String\(currentPageCursor\)\}/.test(src) &&
+      // 当前页游标必须取整数（`Math.floor`），否则小数部分会让相邻两页落到同一项之外。
+      /return Number\.isFinite\(start\) \? Math\.floor\(start\) : null;/.test(src)
+    );
+  })(),
+);
+
+check(
+  "章节数实时**不影响阅读区实例**：`key` 仍是取数游标（拿位置当 key 会每帧重挂载）",
+  (() => {
+    const src = stripComments(readerPanelSrc);
+    const key = src.match(/key=\{`\$\{fileId \?\? "-"\}:\$\{([^}]*)\}`\}/)?.[1] ?? "";
+    return key.includes("book.cursor") && !key.includes("absolutePosition") && !key.includes("visiblePage");
+  })(),
+  `key 变量=${(stripComments(readerPanelSrc).match(/key=\{`\$\{fileId \?\? "-"\}:\$\{([^}]*)\}`\}/)?.[1] ?? "（未命中）")}`,
+);
+
+check(
+  "绝对位置：由**页游标区间 + 页内比例**算出（只在单页内部插值，不做跨页比例乘法）",
+  (() => {
+    const src = stripComments(readerPanelSrc);
+    const block =
+      src.match(/const absolutePosition = useMemo\([\s\S]*?\[visiblePage, pageCursors\],\s*\n  \);/)?.[0] ??
+      "";
+    return (
+      // 正向：单页内部插值。
+      /readerPositionFromPage\(visiblePage\.visibleIndex, visiblePage\.offsetInPage, pageCursors\)/.test(
+        block,
+      ) &&
+      // 页游标区间来自 `next_cursor`（精确），不是靠页数估算。
+      /readerPageCursors\(book\.pages, book\.segmentStart\)/.test(src) &&
+      // **反向**：不得再出现"整段像素比例 × 已载入单位"（两种度量不成比例，
+      // 章节长短不等时会跳整章——这是"章节数乱跳"的根因）。
+      !/readFraction \* loadedUnits/.test(src) &&
+      !/baseCursor \+ readFraction/.test(src) &&
+      // 进度由绝对位置直接得出（与章节数同源，不会各说各话）。
+      /absolutePosition \/ totalUnits/.test(src)
+    );
+  })(),
+);
+
+check(
+  "段起点 `segmentStart`：`loadMore` **不**改动它（改了会让已读位置往后退，章节数回 1）",
+  (() => {
+    const hook = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/useReaderBook.ts"),
+      "utf8",
+    );
+    const code = stripComments(hook);
+    const loadMoreBlock = code.match(/const loadMore = useCallback\(\(\) => \{[\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ?? "";
+    const fetchPageBlock = code.match(/const fetchPage = useCallback\([\s\S]*?\n  \);/)?.[0] ?? "";
+    return (
+      // 正向：首屏与跳转各自设起点（跳转 = 目标）。
+      /setSegmentStart\("0"\)/.test(code) &&
+      /setSegmentStart\(target\)/.test(code) &&
+      // 反向：`loadMore` 与 `fetchPage` 都不得写 `setSegmentStart` / `setCursor`——
+      // 一个会让段起点漂移，另一个会让 `key` 每页变一次（阅读区反复重挂载）。
+      //
+      // 注意正则写的是 **`setSegmentStart`**（带 `set`）：只写 `segmentStart` 会漏掉
+      // 真正的赋值语句——setter 名里的那一段是 `SegmentStart`（大写 S），
+      // `/segmentStart/` 匹配不到它。这条在本轮变异测试里**第一次没红**，
+      // 正是因为断言只匹配了小写的变量名（已如实记录）。
+      !/setSegmentStart/.test(loadMoreBlock) &&
+      !/setCursor/.test(loadMoreBlock) &&
+      !/setSegmentStart/.test(fetchPageBlock) &&
+      !/setCursor/.test(fetchPageBlock) &&
+      !/setState\(\(prev\) => \(\{ \.\.\.prev, loading: false, cursor: from/.test(code) &&
+      !/cursor: from, error: null/.test(code) &&
+      // 消费方必须把 `book.segmentStart` 交给页游标表（不是 `book.cursor`——
+      // 后者只是跳转目标，首屏与 loadMore 都不更新）。
+      /readerPageCursors\(book\.pages, book\.segmentStart\)/.test(stripComments(readerPanelSrc)) &&
+      !/readerPageCursors\(book\.pages, book\.cursor\)/.test(stripComments(readerPanelSrc))
     );
   })(),
 );

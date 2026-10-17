@@ -375,6 +375,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "bookreader.fullscreenFailed": "這個環境不允許全螢幕",
   "bookreader.more": "更多",
   "bookreader.sessionTime": "本次閱讀時間 {min} 分鐘",
+  "bookreader.headReadTime": "已讀：{min} min",
   "bookreader.pageTime": "讀完本頁約需 {min} 分鐘",
   "bookreader.endOfBook": "— 已到全書末尾 —",
   "bookreader.prevPage": "上一頁",
@@ -436,7 +437,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "bookreader.option.textAlign.start": "靠左",
   "bookreader.option.textAlign.center": "置中",
   "bookreader.footer.progress": "當前進度",
-  "bookreader.footer.pages": "頁數",
+  "bookreader.footer.chapterProgress": "本章進度",
   "bookreader.footer.chapters": "章節數",
 
   // 圖像檢視器

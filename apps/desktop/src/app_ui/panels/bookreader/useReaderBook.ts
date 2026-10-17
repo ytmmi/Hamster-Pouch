@@ -43,6 +43,23 @@ export interface ReaderBook {
   total: number | null;
   /** 已取回的页（按取回顺序）。 */
   pages: BookContentResult[];
+  /**
+   * **本次阅读段的起点游标**（`book.content` 的 cursor）。
+   *
+   * 与 [`ReaderBook.cursor`] 的区别是这次修订（2026-10-17）的核心：
+   *
+   * | 字段 | 何时变 | 用途 |
+   * | --- | --- | --- |
+   * | `cursor`（跳转目标） | **只有 `jumpTo`** 会改；首屏与 `loadMore` 都不动它 | 阅读区 `key`（跳章才重挂载） |
+   * | `segmentStart`（本字段） | 首屏 = `"0"`、跳转 = 目标、**`loadMore` 不变** | 进度 / 章节数的**绝对位置基准** |
+   *
+   * 为什么必须分开：`cursor` 首屏是 `null`、`loadMore` 也不更新，于是"已载入这一段的
+   * 起点"在任何**非跳转**路径上都是 `null`/`0`——用它当基准，读完整本书位置都停在开头，
+   * 章节数永远显示第 1 章（用户实测："本来下一章是第4章-序章，计数结果变回1了"）。
+   * 反过来把 `cursor` 改成"最新一页的起点"又会让 `key` 每加载一页就重挂载阅读区。
+   * 两个语义各有各的消费方，因此**分成两个字段**，而不是让一个变量同时承担两件事。
+   */
+  segmentStart: string;
   /** 当前页起点游标；`null` = 从第一页开始。 */
   cursor: string | null;
   loading: boolean;
@@ -56,13 +73,18 @@ export interface ReaderBook {
 }
 
 /** 空状态（非"书" / 无选中）：所有取数都不发生。 */
-function emptyBook(): Pick<ReaderBook, "toc" | "format" | "total" | "pages" | "cursor" | "loading" | "error" | "hasMore"> {
+function emptyBook(): Pick<
+  ReaderBook,
+  "toc" | "format" | "total" | "pages" | "cursor" | "segmentStart" | "loading" | "error" | "hasMore"
+> {
   return {
     toc: [],
     format: "",
     total: null,
     pages: [],
     cursor: null,
+    // 没有书时也按"从头"给：消费方据此算出的进度本来就是 `null`（总量也没有）。
+    segmentStart: "0",
     loading: false,
     error: null,
     hasMore: false,
@@ -84,7 +106,19 @@ export function useReaderBook(): ReaderBook {
   const [state, setState] = useState(emptyBook());
   /** 已取回的页单独存：`loadMore` 只追加，跳转只替换。 */
   const [pages, setPages] = useState<BookContentResult[]>([]);
+  /**
+   * 跳转目标（**只有 `jumpTo` 会改**；首屏与 `loadMore` 都不动它）。
+   *
+   * 消费方是阅读区的 `key`：跳章要重新挂载，加载更多**不能**重挂载。
+   */
   const [cursor, setCursor] = useState<string | null>(null);
+  /**
+   * 本次阅读段的**起点游标**（首屏 `"0"`、跳转 = 目标、`loadMore` 不变）。
+   *
+   * 这是"已载入正文从哪儿开始"的唯一真相：进度与章节数的绝对位置都靠它。
+   * 详见 [`ReaderBook.segmentStart`] 的两字段分工说明。
+   */
+  const [segmentStart, setSegmentStart] = useState("0");
 
   /** 取数世代号：换书 / 跳转后，晚到的旧响应自行丢弃。 */
   const generationRef = useRef(0);
@@ -98,6 +132,7 @@ export function useReaderBook(): ReaderBook {
     inflightRef.current = false;
     setPages([]);
     setCursor(null);
+    setSegmentStart("0");
     setState(emptyBook());
   }, []);
 
@@ -106,7 +141,18 @@ export function useReaderBook(): ReaderBook {
     reset();
   }, [repoId, fileId, reset]);
 
-  /** 取一页（`cursor` 为空 = 第一页）。 */
+  /**
+   * 取一页（`cursor` 为空 = 第一页）。
+   *
+   * **`segmentStart` 只由调用方决定，不在这里改**（2026-10-17 修订）：
+   * - 首屏：`segmentStart` 保持 `"0"`（重扫/换书时 `reset` 已置 `"0"`）；
+   * - `loadMore`：**不动**——已经载入的这一段从头到尾覆盖 `[segmentStart, 当前页]`，
+   *   每加载一页就把起点往后挪，会把"已读多少"算少（读完整本书章节数还在前面）；
+   * - `jumpTo`：由 `jumpTo` 自己置为目标。
+   *
+   * 旧实现在这里写 `cursor: from`，于是 `state.cursor` 在每次 `loadMore` 后都变成
+   * 最新一页的起点——既让 `key` 变化（阅读区重挂载），又让"段起点"漂移。
+   */
   const fetchPage = useCallback(
     async (from: string | null, generation: number, replace: boolean) => {
       if (!repoId || !fileId) return;
@@ -117,11 +163,11 @@ export function useReaderBook(): ReaderBook {
         if (generationRef.current !== generation) return;
         // 空页（非"书" / 无内容哈希 / 打不开的 PDF）不追加：否则会往列表里塞空对象。
         if (!page.format) {
-          setState((prev) => ({ ...prev, loading: false, cursor: from }));
+          setState((prev) => ({ ...prev, loading: false }));
           return;
         }
         setPages((prev) => (replace ? [page] : [...prev, page]));
-        setState((prev) => ({ ...prev, loading: false, cursor: from, error: null }));
+        setState((prev) => ({ ...prev, loading: false, error: null }));
       } catch (e) {
         if (generationRef.current !== generation) return;
         setState((prev) => ({ ...prev, loading: false, error: errorTextOf(tRef.current, e) }));
@@ -148,15 +194,24 @@ export function useReaderBook(): ReaderBook {
     })();
   }, [repoId, fileId]);
 
-  // 首屏：取第一页。
+  // 首屏：取第一页，并把"本次阅读段起点"归到 0（`book.content` 缺省 cursor 的语义）。
   useEffect(() => {
     if (!repoId || !fileId) return;
     const generation = generationRef.current;
+    setSegmentStart("0");
     void fetchPage(null, generation, true);
   }, [repoId, fileId, fetchPage]);
 
   const hasMore = pages.length > 0 && pages[pages.length - 1].next_cursor !== null;
 
+  /**
+   * 继续取下一页。
+   *
+   * **不碰 `cursor` / `segmentStart`**：加载更多是把**同一段**的后续页接上来，
+   * 段的起点没变（见 [`ReaderBook.segmentStart`]）。早期实现在这里写
+   * `setState({cursor: from})`，于是每加载一页 `key` 就变一次、阅读区重挂载，
+   * 且"段起点"往后漂——读完整本书章节数仍停在开头几章。
+   */
   const loadMore = useCallback(() => {
     if (inflightRef.current || !hasMore) return;
     const last = pages[pages.length - 1];
@@ -171,11 +226,14 @@ export function useReaderBook(): ReaderBook {
       generationRef.current += 1;
       inflightRef.current = false;
       setPages([]);
+      // 两处一起改：`cursor` 让阅读区重挂载（跳章要回到开头），
+      // `segmentStart` 让进度 / 章节数以**目标位置**为基准。
       setCursor(target);
+      setSegmentStart(target);
       void fetchPage(target, generationRef.current, true);
     },
     [fetchPage],
   );
 
-  return { ...state, pages, cursor, hasMore, loadMore, jumpTo };
+  return { ...state, pages, cursor, segmentStart, hasMore, loadMore, jumpTo };
 }

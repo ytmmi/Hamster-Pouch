@@ -134,11 +134,15 @@ export function tocTitleOrNull(title: string | null | undefined): string | null 
 }
 
 /**
- * 当前阅读位置落在目录的哪一项上。
+ * 当前阅读位置落在目录的哪一项上（**章节数的唯一判据**）。
  *
  * 判据用**游标数值比较**而不是字符串相等：`cursor` 是"序号 / 字符偏移"，
  * 当前页的游标往往落在两条目录项之间（例如第 2 章的第 3 页），
  * 因此取"最后一条 cursor ≤ 当前游标的项"。
+ *
+ * **必须传入整数页起点**（调用方负责取整）：章是离散的，页内读了多少不该改变
+ * 章号。传入带小数的"页内插值位置"时，只要小数越过下一条目录项，章号就会提前
+ * 跳一位——这正是"章节数和目录对不上"的来源。
  *
  * `toc` 必须已按书内顺序排列（后端保证）。返回 `-1` = 还没进入任何一章
  * （例如目录第一条之前的前言）。
@@ -158,41 +162,161 @@ export function currentTocIndex(entries: { cursor: string }[], cursor: string | 
 }
 
 /**
- * 阅读进度（0–1）；拿不到总量时返回 `null`（界面显示 `—` 而不是假装 0%）。
+ * 相对位置的变化是否**值得**通知父级（避免每一帧滚动都让整个面板重渲染）。
  *
- * 三种格式的**位置单位**不同（见 `hp_book::toc` 的模块文档），因此这里分开算：
- * - `epub` / `pdf`：位置 = `section`（章节 / 页码），总量 = `section_count`；
- * - `text` / `markdown`：位置 = 当前页游标（字符偏移 / 块序号），总量 = 目录接口给的 `total`。
- *
- * 为什么不用"当前页 + 一页"来算：进度条要的是"读到哪儿了"，
- * 而一页的尾部会让进度凭空多跳一格。
+ * 阈值取 `1e-4`：当前进度显示两位小数（0.01% = 1e-4），比这更小的变化在界面上
+ * 看不出来，重渲染却是实打实的开销。
  */
-export function readerProgress(
-  format: string,
-  section: number,
-  sectionCount: number | null,
-  cursor: string | null,
-  total: number | null,
-): number | null {
-  if (format === "epub" || format === "pdf") {
-    if (!sectionCount || sectionCount <= 0) return null;
-    return clamp01((section + 1) / sectionCount);
-  }
-  if (!total || total <= 0 || !cursor) return null;
-  const at = Number(cursor);
-  if (!Number.isFinite(at)) return null;
-  return clamp01(at / total);
+export function fractionWorthReporting(prev: number, next: number): boolean {
+  if (!Number.isFinite(prev) || !Number.isFinite(next)) return true;
+  return Math.abs(next - prev) >= 1e-4;
 }
 
+/**
+ * **每一页的游标区间** `[start, end)`（与 `book.content` 的游标同语义）。
+ *
+ * ## 为什么这张表是"章节数和目录对得上"的关键
+ *
+ * `BookContentResult` 自带 `next_cursor`，于是**每页的起点是精确已知的**，
+ * 不需要任何估算：
+ *
+ * ```
+ * page[0].start = segmentStart
+ * page[i].start = page[i-1].next_cursor      （i > 0）
+ * page[i].end   = page[i].next_cursor ?? (start + 本页单位数)
+ * ```
+ *
+ * 有了这张表，"我在哪儿"就变成"我在**哪一页**、离这一页开头多远"，
+ * 只在**单页内部**做比例插值——不再需要"跨页的像素比例 × 已载入章数"那种
+ * 两种度量混乘（章节长短不等时它必然错位，这是章节数乱跳的根因）。
+ *
+ * epub / pdf 的每页就是一个 `section`，`[section, section+1)` 与目录项游标
+ * **同一坐标**，所以章节号能逐项对上。
+ */
+export function readerPageCursors(
+  pages: {
+    format: string;
+    text: string | null;
+    blocks: unknown[] | null;
+    section: number;
+    next_cursor: string | null;
+  }[],
+  segmentStart: string,
+): { start: number; end: number }[] {
+  const out: { start: number; end: number }[] = [];
+  let cursor = Number(segmentStart);
+  if (!Number.isFinite(cursor)) cursor = 0;
+  for (const page of pages) {
+    // epub / pdf：`section` 是绝对序号，直接就是这一页的起点（与目录游标同坐标）。
+    if (page.format === "epub" || page.format === "pdf") {
+      const section = Number.isFinite(page.section) ? page.section : 0;
+      out.push({ start: section, end: section + 1 });
+      // 后续纯文本页的基准跟着走（同一本里格式不会混，这里只是保持自洽）。
+      cursor = section + 1;
+      continue;
+    }
+    const start = cursor;
+    const next = page.next_cursor === null ? null : Number(page.next_cursor);
+    let end: number;
+    if (next !== null && Number.isFinite(next) && next > start) {
+      end = next;
+    } else {
+      // 最后一页（没有 `next_cursor`）：用本页自身的单位数收口。
+      end =
+        start +
+        (page.format === "markdown"
+          ? (page.blocks ?? []).length
+          : (page.text ?? "").length);
+    }
+    out.push({ start, end });
+    cursor = end;
+  }
+  return out;
+}
+
+/**
+ * 由"第几页 + 页内比例"得到**绝对位置**（游标单位）。
+ *
+ * 只在**单页内部**插值：`start + offset × (end - start)`。跨页位置由页序号精确给出，
+ * 因此章节号与目录逐项对上；页内比例只影响"本章进度"的小数部分。
+ *
+ * @param visibleIndex 可见页在 `pages` 数组里的下标（`-1` = 没能判定 → 退回第一页）
+ * @param offsetInPage 页内比例（0–1）
+ * @param cursors [`readerPageCursors`] 的结果
+ */
+export function readerPositionFromPage(
+  visibleIndex: number,
+  offsetInPage: number,
+  cursors: { start: number; end: number }[],
+): number | null {
+  if (cursors.length === 0) return null;
+  if (!Number.isFinite(visibleIndex)) return null;
+  const index =
+    visibleIndex < 0 || visibleIndex >= cursors.length ? 0 : Math.floor(visibleIndex);
+  const { start, end } = cursors[index];
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  const span = Math.max(0, end - start);
+  return start + clamp01(offsetInPage) * span;
+}
+
+/** 夹到 [0, 1]（位置与比例共用；非有限值按 0 处理）。 */
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(1, Math.max(0, value));
 }
 
-/** 进度百分比文案（两位小数，与参考图的 `0.00%` 同形）。 */
-export function formatProgressPercent(progress: number | null): string | null {
+/**
+ * 本书当前章的进度（0–1）与章序号（-1 = 还没进入任何一章）。
+ *
+ * 章的范围由**目录**给出（`toc[i].cursor` → `toc[i+1].cursor`，最后一章到全书末尾）：
+ * 目录游标与正文游标同语义，所以这里**不做换算**，只做区间比例。
+ *
+ * 三处刻意的处理：
+ * 1. **位置用连续值**（含章内的滚动 / 翻页），不是"当前取数游标"——否则章内进度
+ *    同样会卡住不动，等于没加这一项；
+ * 2. **目录第一条之前**（前言 / 版权页）按 `[0, 第一条)` 算作一个区间，而不是返回
+ *    `null`：此时"本章进度"仍是有意义的"读到这里了多少"；
+ * 3. **末章没有下一条**时用 `total` 收口；`total` 拿不到（打不开的书）返回 `null`
+ *    ——编一个 100% 会让"读完了"和"算不出"看起来一样。
+ *
+ * 目录为空（PDF / 没有可识别章节的 txt）返回 `null`：没有章，就没有"本章进度"。
+ */
+export function readerChapterProgress(
+  toc: { cursor: string }[],
+  position: number | null,
+  total: number | null,
+): { index: number; progress: number } | null {
+  if (position === null || toc.length === 0) return null;
+  const index = currentTocIndex(toc, String(position));
+  const start = index >= 0 ? Number(toc[index].cursor) : 0;
+  if (!Number.isFinite(start)) return null;
+  // 下一条**严格大于**起点的游标才是本章的终点。
+  //
+  // 为什么不能只取 `toc[index + 1]`：EPUB 的 nav / NCX 允许**多条目录项指向同一章**
+  // （同一段文字挂两个锚点），此时相邻两条的游标相等，`end <= start` 会让"本章进度"
+  // 整项消失。往回找第一条严格更大的，才是这一章真正结束的位置。
+  let end: number | null = null;
+  for (let i = index + 1; i < toc.length; i += 1) {
+    const at = Number(toc[i].cursor);
+    if (Number.isFinite(at) && at > start) {
+      end = at;
+      break;
+    }
+  }
+  if (end === null) end = total;
+  if (end === null || !Number.isFinite(end) || end <= start) return null;
+  return { index, progress: clamp01((position - start) / (end - start)) };
+}
+
+/**
+ * 进度百分比文案。
+ *
+ * `digits` 是**小数位数**：当前进度 2 位（`00.00%`）、本章进度 1 位（`00.0%`）
+ * ——用户 2026-10-17 明确了两处不同的精度，所以精度是**参数**而不是写死。
+ */
+export function formatProgressPercent(progress: number | null, digits: 1 | 2 = 2): string | null {
   if (progress === null) return null;
-  return `${(progress * 100).toFixed(2)}%`;
+  return `${(progress * 100).toFixed(digits)}%`;
 }
 
 /**
@@ -307,6 +431,57 @@ export function shouldLoadMorePages(
   if (viewMode !== "scroll") return atLastPage;
   return scrollTop + clientHeight >= scrollHeight - threshold;
 }
+
+// ============================== 点击正文收起两栏 ==============================
+
+/**
+ * **点击正文是否应当收起左右两栏**（用户 2026-10-17 口径："点击更多后，点击正文区域
+ * 可以隐藏两栏（等同于再次点击更多）"）。
+ *
+ * ## "两栏没开"为什么不在这里判
+ *
+ * 那是**结构性**条件，不是这次点击的属性：面板只在两栏展开时才把 `onBodyClick`
+ * 交给阅读区（`onBodyClick={railsOpen ? collapseRails : undefined}`）。写进本函数
+ * 反而会得到一个"生产调用点恒传真值"的参数——那正是项目记过的"断言被 import 行
+ * 满足"的同类假象（D113 ⑫）。因此这里只判**这次点击本身**的两条否决条件：
+ *
+ * | 情况 | 为什么不能收起 |
+ * | --- | --- |
+ * | 点在**可交互元素**里 | 正文里的链接（`<a class="vr-link">`）与分页按钮（`‹ ›`）有各自的语义——点链接是要跳走，不是要关目录 |
+ * | 有**非空选区** | 用户正在划词（准备加高亮）。划完松手那一下同样会触发 `click`，此时选区非空——把它当成"点正文"就会把刚打开的目录关掉 |
+ *
+ * 纯函数（零依赖）才能被 `pnpm check:panels` 按行为逐条钉住；组件里只做
+ * "从事件与 DOM 取值 → 问这个函数"这一步。
+ */
+export function bodyClickHidesRails(input: {
+  /** 点击目标是否落在可交互元素（按钮 / 链接 / 输入框）里。 */
+  interactive: boolean;
+  /** 当前是否有**非空**选区（用户正在或刚刚划词）。 */
+  hasSelection: boolean;
+}): boolean {
+  if (input.interactive) return false;
+  if (input.hasSelection) return false;
+  return true;
+}
+
+/**
+ * 判断一个点击目标是否落在**可交互元素**里（用于 {@link bodyClickHidesRails}）。
+ *
+ * 用 `closest` 而不是 `tagName`：正文里真正可点的往往是 `<a>` 内部的 `<span>`，
+ * 只比 tagName 会把"点在链接文字上"判成"点在正文空白处"。
+ *
+ * 参数用**结构化声明**（不是 `HTMLElement`）——纯逻辑层不依赖 DOM 类型，
+ * 门禁可以在 Node 里直接喂一个假对象。
+ */
+export function isInteractiveTarget(
+  target: { closest?: (selector: string) => unknown } | null | undefined,
+): boolean {
+  if (!target || typeof target.closest !== "function") return false;
+  return target.closest(INTERACTIVE_SELECTOR) !== null;
+}
+
+/** 正文里算作"可交互"的元素（与 `BookBlocks` / `br-pager` 实际渲染的标签一致）。 */
+const INTERACTIVE_SELECTOR = "button, a, input, textarea, select, label";
 
 // ============================== 分页模式：滚轮翻页 ==============================
 
