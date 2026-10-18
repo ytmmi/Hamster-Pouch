@@ -2086,10 +2086,31 @@ button.danger {
 .vr-image {
   display: block;
   max-width: 100%;
-  max-height: 70vh;
+  /*
+   * **按容器高封顶**（2026-10-18；需求 3 / 5 的核查结论）。
+   *
+   * koodo-reader 内核 `src/utils/layoutUtil.ts:484-742` 的 `handleImageSize()`
+   * 给图片写内联 `max-width` / `max-height` / `margin: 0 auto`，并在 `:667-675`
+   * 做一条关键处置：**按宽度算出的 max-height 若超过容器高，就按容器高再缩一档**。
+   * 它的效果就是"图片宁可缩小，也不跨页/跨栏被切断"。
+   *
+   * 旧写法 `max-height: 70vh` 有两个毛病：`vh` 是**视口**高而不是**容器**高
+   * （分页模式下纸张比视口矮，于是图会顶破一页），且 70% 的余量在窄栏里仍然
+   * 放不下。这里改成读**面板下发的容器高**：
+   * - 查看器：`--vr-page-h`（阅读区实测内容高）+ `--vr-page-margin`（正文到栏边
+   *   的距离，固定 12px）——两个变量由 `ViewerReader.tsx` 在 `.vr-scroll` 上给出；
+   * - 阅读器：`--br-page-h`（分页模式 = 纸张高；滚动模式 = 阅读区实测高）+
+   *   `--br-page-margin`（= 纸张内页边距）——由 `ReaderStage.tsx` 下发。
+   *
+   * **两处各写一条、不共用一个变量**：查看器的"栏高"与阅读器的"纸高"不是同一个
+   * 量（分页模式的纸高由 `readerPagedLayout` 算出、且被纸内页边距再削一圈），
+   * 共用一个变量必然有一处错。兜底值分别是 `100vh` / `24px`（与两边的默认一致）。
+   */
+  max-height: calc(var(--vr-page-h, 100vh) - 2 * var(--vr-page-margin, 12px));
   margin: 10px auto;
   object-fit: contain;
-  /* 图片不该被断栏切开。 */
+  /* 图片不该被断栏切开（koodo 对不可拆内容用的是同一条规则，
+     见它给 `aside[type="sidebar"]` 的 `break-inside: avoid`）。 */
   break-inside: avoid;
 }
 
@@ -2125,7 +2146,14 @@ button.danger {
 .vr-pdf .vr-image {
   width: 100%;
   max-width: 100%;
-  /* 覆盖 `.vr-image` 的 70vh 上限：整页就是内容本体（见上面的说明）。 */
+  /* 覆盖 `.vr-image` 的**容器高封顶**：整页位图就是内容本体（见上面的说明），
+     限制高度会让用户每页都要放大才能读。
+     **选择器逐字不变**是必须的：`tools/check-panels.mjs` 钉着
+     `.vr-pdf .vr-image { … max-height: none … }` 与 `width: 100%` 这两条
+     （"PDF 恒单栏 + 页面图按整宽显示"），把 `max-height: none` 挪进
+     `.vr-content:not(.vr-pdf)` 会让那条断言失效、也丢掉了这里"谁覆盖谁"的
+     局部性（这条注释与它下面那行就是 keep-panels 检查的落点）。
+     特异性让"后来覆盖"仍然成立：`.vr-pdf .vr-image`(0,2,0) > `.vr-image`(0,1,0)。 */
   max-height: none;
   height: auto;
   margin: 0 auto 12px;
@@ -2285,6 +2313,208 @@ button.danger {
   margin: 0 0 4px 16px;
 }
 
+/* ---- 图组 / 注释 / 显式换页标记（2026-10-18，需求 3 / 4 / 5）----
+
+   出处（koodo-reader 内核 `koodo-reader/kookit`，默认分支 dev；`koodo-reader`
+   本体只转调其构建产物）：
+   - **图片的排版只有一条口径**：`src/utils/layoutUtil.ts:484-742`
+     `handleImageSize()` 给 `img,image` 写内联
+     `max-width:{maxWidth}px; max-height:{maxHeight}px; margin:0 auto;
+      min-width:0px; min-height:0px`，并在 `:667-675` 里——**若按宽度算出的
+     maxHeight 超过容器高，就按容器高再缩一档**。即：**宁可缩小，也不跨页/跨栏
+     被切断**。
+   - kookit 全仓 `break-before|break-after|page-break-before|page-break-after`
+     **0 命中**。它唯一的两条 break 规则是 `styleHelper.ts:113-127` 的
+     `code,pre{break-inside:auto !important}`（**放开**，让长代码可以跨栏）与
+     `:179-181` 的 `aside[type="sidebar"]{break-inside:avoid}`（**收紧**）。
+     因此 koodo **没有"图片单独一页"这个机制**——图片是正文流里的块级元素，
+     "放不下就整张进下一栏"是 `break-inside: avoid` + 满高封顶之后的**自然结果**。
+   - 需求 5 的裁决："3 的要求如果和此仓库的实现冲突，以此仓库为准。"
+     所以这里的实现**不引入 koodo 没有的分页符**去"制造"图片页；
+     唯一的例外是后端显式标了 `full_page=true` 的整页图（见
+     `.vr-figure-full-page`，注释里写明那是本仓库的扩展）。 */
+
+/* 图组（`kind="figure"`：`<figure>` + `<img>` + `<figcaption>`）。
+   `break-inside: avoid` 是 koodo 用来保护不可拆内容的那条规则的同款用法
+   （对应它给 `aside[type="sidebar"]` 的那一条）：图与图注必须整体走。 */
+.vr-figure {
+  margin: 10px auto;
+  break-inside: avoid;
+}
+
+/* 图注：从属小字、居中、颜色 dim（与正文段落明确区分）。
+   `text-indent: 0` 覆盖阅读器的首行缩进——图注不是正文段落，缩进两格会显得
+   像"图后面又接了一段正文"。 */
+.vr-figcaption {
+  margin: 4px auto 0;
+  font-size: 0.88em;
+  line-height: 1.5;
+  text-align: center;
+  text-indent: 0;
+  color: var(--fg-dim);
+}
+
+/* 注释块（`kind="comment"`：作者/译者的旁注）。
+   **与 koodo 的取舍差别**：koodo 把 `aside[epub:type="footnote|note|endnote|
+   rearnote"]` 与 `.hide` 直接 `font-size: 0px !important` **在流内折叠隐藏**
+   （`styleHelper.ts:175-178`），靠**弹层**（`components/imageViewer` +
+   `navigationUtil.ts:250-291` 的脚注判定）把内容再显示出来。我们没有弹层，
+   照抄"隐藏"会让注释在这套界面里彻底消失，因此**留在流内、用从属样式区分**：
+   小字号 + 左侧双线 + 整块缩进，读起来是"书页边上的小字"，不是正文段落。 */
+.vr-comment {
+  margin: 0 0 10px;
+  padding: 2px 0 2px 10px;
+  border-left: 2px double var(--border);
+  font-size: 0.9em;
+  line-height: 1.6;
+  color: var(--fg-dim);
+  break-inside: avoid;
+}
+
+.vr-comment-label {
+  margin-bottom: 2px;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* 注释内的段落不缩进（旁注本身已经整块缩进了，再缩首行就是双重缩进）。 */
+.vr-comment .vr-paragraph {
+  text-indent: 0;
+}
+
+/* 紧跟在图组之后的段落不缩进：与既有的 `.vr-heading + .vr-paragraph` 同一口径。
+   依据 koodo `layoutUtil.ts:417-459`——块的**首个子节点是 `<img>`** 时把该块
+   `text-indent` 清零（"图后面那一行不该空两格"）。我们的模型里图片是独立块，
+   因此这条判据落在"前一个块是图组"上。 */
+.vr-figure + .vr-paragraph {
+  text-indent: 0;
+}
+
+/* **整页图**（`full_page === true`；**本仓库的扩展，koodo 无对应概念**）。
+   后端只给 `epub:type="cover"` 这类整页图标 true。koodo 对封面页也是"按容器高
+   缩放 + 居中"，但它的封面页是**独立渲染的一章**（`handleRenderChapter()` 每次
+   都先 `doc.body.innerHTML=""` 再注入，`navigationUtil.ts:319-465`），章首天然
+   换页；我们这里是"累积多页拼成一条流"，那一步必须显式写出来。
+   `break-before: column`（**不是 `page`**）：分页模式靠 `column-count` 分栏，
+   换的是**栏**不是打印页；打印分页在屏幕上没有效果。
+   这一条在滚动模式（没有多栏）下不生效，由下面的 `.vr-page-break` 与
+   页容器的分隔规则承担"看得见的换页"。 */
+.vr-figure-full-page {
+  break-before: column;
+  margin: 0 auto;
+}
+
+/* 显式换页标记（`kind="page_break"`，后端给出）。
+   渲染出来是一个**空的块级元素**（`aria-hidden`，见 `BookBlocks.tsx`），
+   表现完全交给 CSS——两种排版共用同一份数据，JSX 不判断当前是哪种模式。
+
+   **滚动模式**：一条明确的分隔（1px 线 + 上下各 1em 间距）。
+   为什么不做成"一整页高的大空白"：那是"把正文吞掉"（用户明确不要），
+   而且相邻两处换页会在中间留下**半页空白**。线 + 适度间距足以让读者看出
+   "这里翻页了"，又不遮挡任何正文。
+   **分页模式**：`break-before: column`——新章从**下一栏**开始。
+   koodo 的机制是"整章重渲染"（章首天然换页），我们则是把多页拼在一条流里，
+   因此要在多栏里显式断栏。 */
+.vr-page-break {
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}
+
+.br-stage-paged .vr-page-break {
+  /* 多栏流里不再画线（线会跨栏画一条，看着像装饰而不是分隔）。 */
+  border-top: none;
+  margin: 0;
+  break-before: column;
+}
+
+/* **换页标记是流里的第一个块** ⇒ 整条抑制掉。
+   否则章节正文开头会先来一条分隔线（滚动模式），或者多出一个**空栏/空页**
+   （分页模式：`break-before` 在第一个块上会把它推到第二栏，前面留一整栏空白）。
+   **这一条同时守着分页模式**：上面 `.br-stage-paged .vr-page-break` 的
+   `break-before: column` 会命中**任何**位置的换页标记（包括流首那一个），
+   而 `display: none` 的元素**不生成盒子、不参与 fragmentation**，因此被这条
+   按住；**删掉这条会让分页模式多出一个空栏**——两处是同一条判据的两个半边。
+
+   **"作为流首块"的兜底只有这一条，且 `:first-child` 在这里是准确的**：
+   `BookBlocks` 的内层 `Blocks` 用 **fragment**（`<>…</>`）渲染，而 React 的
+   fragment **不产生 DOM 节点**；页容器（`.br-page` / `.vr-page`）里也只渲染一个
+   `<BookBlocks/>`，前面没有插任何元素。因此"块流里的第一个块"在 DOM 上就是
+   父元素的第一个元素子节点。已用真实结构与 `tools/reader-layout-verify.mjs`
+   的夹具核对（两者都是 `.vr-content` 直接作为分栏容器的子元素），未见 fragment
+   破坏 `:first-child`，因此不需要第二条更宽的兜底。
+
+   下面两条是**同一条判据的两个半边**（① 管首块、② 管紧挨着的第二个）：
+   1. `:first-child`（见上）—— 流首那一个不生成盒子。
+   2. `.vr-page-break + .vr-page-break` —— 紧挨着的第二个换页标记只保留一个。
+      （`display: none`，见下面那条规则的说明）。 */
+.vr-page-break:first-child {
+  display: none;
+}
+
+/* 相邻两个换页标记只保留一个（章尾的 `page_break` 与下一章章节头给出的
+   `page_break` 撞在一起时会产生两条线/两个断栏）。
+   这条**不是** `:first-child` 的替代品：前者管"首块"，这条管"紧挨着的第二个"。 */
+.vr-page-break + .vr-page-break {
+  display: none;
+}
+
+/* ---- 页容器的换页（需求 4 的**主判据**）----
+
+   为什么以页容器为主、`kind="page_break"` 为辅：后端每页（epub 的一章）是
+   **独立**的一段块，页与页在 DOM 里本来就是不同的容器；`data-page-break-before`
+   由面板直接给出"本页要另起一页"，比在块流里找一个标记块更稳（标记块可能被
+   解析侧漏掉，位置也可能不同）。
+
+   为什么用**属性选择器**而不是 `.vr-page + .vr-page`：页容器之间可能隔着别的
+   元素（加载提示 / 章末标记），兄弟关系不是可靠判据；属性只标记"这一页要另起
+   一页"这一件事。
+
+   属性出处（面板侧落地；两处都用**空字符串属性**，因此判据是"有该属性"，
+   不是 `="true"`）：
+   - 阅读器 `.br-page`：`item.format === "epub" && item.section > 0`；
+   - 查看器 `.vr-page`：`index > 0`。
+
+   **分页模式 = `break-before: column`（不是 `page`）**：我们的"页"是 CSS 多栏
+   分出来的**栏**（`.br-flow` / `.vr-content` 的 `column-count`），
+   而 `break-before: page` 是**打印**分页——在屏幕上什么都不会发生。
+   这是这条判据最容易写错的地方。
+   **滚动模式**：没有多栏可分，"另起一页"只能靠**看得见的分隔**表达
+   （一条细线 + 一点上边距）；不写"一整页高的大空白"，否则正文会被吞掉、
+   相邻两处换页之间还会留下半个空页。
+
+   ## 查看器一侧为什么用**类名**而不是匹配内联样式的字符串
+   （2026-10-18 真机探针量出来的一处真实缺陷）
+   `ViewerReader` 把 `--vr-columns` 写在 `.vr-scroll` 上（不是 `.vr-content`），
+   而"这一页是不是多栏"原本靠 `.vr-content[style*="--vr-columns: 1"]` 这类
+   **字符串匹配**推断。两个问题：
+   1. React 序列化的内联样式是 `--vr-columns:1`（**冒号后没有空格**），
+      而选择器写的是 `"--vr-columns: 1"`（带空格）⇒ **永远匹配不上**；
+   2. 变量挂在 `.vr-scroll` 上时，`.vr-content` 自己的 `style` 属性根本是空的
+      （多栏是从父级继承的 `column-count`），字符串匹配更无从谈起。
+   实测后果：单栏模式下"多栏"分支**错误命中**，每一页都被 `break-before: column`
+   推到下一栏，正文整页移出可视区（探针量到 `p0.x=13` 而 `p1.x=919` 当 `columns=1`）。
+
+   因此改判**结构**：面板在 `columns >= 2` 时给 `.vr-content` 加 `vr-multicolumn`
+   类，CSS 只认这个类。它与"变量写在哪、怎么写"无关。 */
+
+/* 多栏（阅读器的纸张多栏流 / 查看器的双栏 `.vr-content`）：新章从下一栏开始。 */
+.br-stage-paged .br-page[data-page-break-before],
+.vr-content.vr-multicolumn .vr-page[data-page-break-before] {
+  break-before: column;
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+/* 滚动 / 单栏模式：章界画一条**看得见的分隔**（`.vr-content` 不是多栏时即命中）。 */
+.br-stage-scroll .br-page[data-page-break-before],
+.vr-scroll .vr-content:not(.vr-multicolumn):not(.vr-image-only) .vr-page[data-page-break-before] {
+  border-top: 1px solid var(--border);
+  padding-top: 0.6em;
+  margin-top: 0.6em;
+}
+
 /* ---- 行内样式 ---- */
 
 .vr-link {
@@ -2309,6 +2539,55 @@ button.danger {
   text-decoration: line-through;
 }
 
+/* ---- 2026-10-18 追加的三种 EPUB 行内装饰（需求 5：参考 koodo-reader）----
+
+   出处（koodo-reader 的排版内核在独立仓库 `koodo-reader/kookit`，默认分支 dev；
+   `koodo-reader` 本体只转调它的构建产物 `src/assets/lib/kookit.min.js`）：
+   `src/helpers/styleHelper.ts` 的 `getDefaultCss()` 把 `font, bold` 也列进了
+   样式白名单，并且**不剥离**书自带的 `color` / `background-color`
+   / `<u> <s> <mark> <b> <i>` / 内联 `font-size`——它只在用户**显式打开**某个开关时
+   才用 `!important` 覆盖（`isUnderline` → `text-decoration: underline !important`、
+   `isOverwriteText` → `color: … !important`）。
+
+   我们没有"是否覆盖书籍样式"的开关，因此**原样保留**书里的装饰，只给它一个稳定、
+   可主题化的落点。三条中：
+   - `highlight` / `underline` 与 koodo"保留原书 `<mark>` / `<u>`"的观感等价；
+   - `small_caps` **koodo 全仓没有专门规则**（`font-variant` / `small-caps` 0 命中，
+     它交给浏览器默认）。这一条是**我们的映射**：按书的意图保留语义，
+     `font-variant: small-caps` 只改**字形呈现**，文字一个都不吞
+     （小写字母仍然是同一个字符，只是按小型大写字母绘制）。 */
+
+/* 高亮（EPUB 的 `<mark>`）。
+   底色**不用 `var(--accent)`**：项目里 `--accent` 在浅色主题下是**白色**
+   （主题 token 的定义如此），拿它当底色会得到"白底 + 白字"——本项目已记过同类
+   禁忌。这里用一组**两套主题下都读得出来**的暖黄：
+   浅色下是淡黄底 + 深色字，深色下把底色压暗、文字提亮，避免黑底上用高饱和黄。
+   透明度留在色值里（`rgba`）而不是用 `opacity`：`opacity` 会把**文字**也一起
+   变透明，那不是高亮该有的效果。 */
+.vr-highlight {
+  background-color: rgba(255, 214, 102, 0.55);
+  color: inherit;
+  /* 高亮不该被拆到两栏：底色断成两块看着像两处高亮。 */
+  box-decoration-break: clone;
+}
+
+.app-root.theme-dark .vr-highlight {
+  background-color: rgba(255, 196, 64, 0.28);
+  color: #ffe9b0;
+}
+
+/* 下划线（EPUB 的 `<u>`；`<u>` 的浏览器默认就是 underline，这条只为显式钉住
+   ——避免将来有人给 `u` 写全局 reset 时把这条语义一起 reset 掉）。 */
+.vr-underline {
+  text-decoration: underline;
+}
+
+/* 小型大写（EPUB 的 `font-variant: small-caps`；koodo 无专门规则，见上）。
+   **文本内容一个字都不改**，只改字形呈现。 */
+.vr-small-caps {
+  font-variant: small-caps;
+}
+
 /* ===== 图书阅读器（`panel.bookreader`，2026-10-16）=====
 
    阅读选项的 12 项全部落到 CSS 变量上（`BookReaderPanel` 在根元素上设值），
@@ -2325,6 +2604,29 @@ button.danger {
   min-height: 0;
   /* 阅读区自己撑满，工具栏与进度条不参与滚动。 */
   overflow: hidden;
+}
+
+/* ===== 全屏：四周底色一律为白（用户 2026-10-18 口径："全屏模式下，上下的黑边或
+   黑色背景改为白色"）=====
+
+   为什么会出现黑边（实测的成因）：进入全屏的元素是本面板的根节点 `.br-root`
+   （`BookReaderPanel` 的 `requestFullscreen`），而它**自己没有底色**——
+   `.panel` 只给 `padding: 8px` 与 `gap: 8px`，`.br-top` / `.br-footer` 是透明背景。
+   于是**全屏默认的 `::backdrop`（Chromium 下是黑底）**透过面板内边距与栏间空隙
+   露出来，在上下（以及左右）各形成一道黑边；深色主题下更明显（那圈底色本来就深）。
+
+   两处一起改才能盖满：
+   1. **根节点自己铺白底**——盖住面板内边距与 `.br-top` / `.br-body` / `.br-footer`
+      之间的 8px 间隙（它们在根节点**内部**，只改 `::backdrop` 盖不到）；
+   2. **`::backdrop` 也铺白**——盖住根节点之外的那一圈。
+
+   两条都只在 `:fullscreen` 下生效，窗口模式（含分页"桌面"配色）完全不受影响。 */
+.br-root:fullscreen {
+  background: #ffffff;
+}
+
+.br-root:fullscreen::backdrop {
+  background: #ffffff;
 }
 
 /* 顶栏 / 底栏**自然融入背景**（用户 2026-10-18 口径："上下两栏要自然融合……自然融入背景，
@@ -2964,15 +3266,11 @@ button.danger {
 }
 
 /* ===== EPUB 段落排印（2026-10-18，参考 Readium CSS / foliate-js 的默认样式）=====
-  /* 阅读器用自己的字号/行距（查看器那套是按面板宽度自适应的）。 */
-  font-size: var(--br-font-size, 20px);
-  line-height: var(--br-line-height, 1.7);
-  letter-spacing: var(--br-letter-spacing, 0);
-  overflow-wrap: break-word;
-  /* CJK 断行口径（Readium CSS 的 `:lang(ja/zh/ko)` 同款）：按"严格"规则断行，
-     避免标点跑到行首、也避免行尾出现孤立标点。 */
-  line-break: strict;
-}
+   注：这一段是**说明性注释**，真正的规则在下面的 `.br-content` 里。
+   此处原先还留着一截**没有选择器的规则残骸**（`font-size` / `line-height` 直接
+   跟在注释块之后），它会让 `font-size` 变成一条非法声明——`pnpm build` 的 CSS
+   压缩会如实报 `css-syntax-error: Expected identifier but found whitespace`。
+   2026-10-18 清理：把那段无主声明删掉（它的内容与下面 `.br-content` 完全重复）。 */
 
 .br-content {
   /* 阅读器用自己的字号/行距（查看器那套是按面板宽度自适应的）。 */
@@ -3165,8 +3463,43 @@ button.danger {
   color: #ffffff;
 }
 
-.br-content .vr-image {
-  /* 阅读器的正文图片按栏宽自适应（查看器的 70vh 上限在分页模式下会顶破一页）。 */
+/* 阅读器的正文图片：**按纸张高封顶**（2026-10-18，需求 3）。
+ *
+ * **这一条替换掉了原来的 `max-height: none`**——那条正是"图片顶破一页"的成因：
+ * 阅读器分页模式的"一页"= **一栏**（高度 = 纸张高），图片不设上限就必然长过一栏，
+ * 于是要么被 `break-inside: avoid` 整张推到下一栏（后面留一片空白）、要么顶破纸面。
+ *
+ * 依据（koodo-reader 内核，与 `.vr-image` 同源）：`src/utils/layoutUtil.ts:484-742`
+ * 的 `handleImageSize()`：按宽度算出的 max-height 若超过容器高，就**按容器高再缩一档**
+ * （注释 `:667-675` 的用意就是"别让图跨页/跨栏被切断"）。
+ * 这里把"容器高"取成纸张内可用的正文高：**纸高 − 2×页边距**
+ * （`--br-page-h` 由 `ReaderStage.tsx` 下发：分页模式 = `pagedLayout.height`、
+ * 滚动模式 = 阅读区实测高；`--br-page-margin` 已存在 = `pagedLayout.margin`）。
+ *
+ * 与查看器那条（`.vr-image` 用 `--vr-page-h` / `--vr-page-margin`）**分开写**：
+ * 查看器的"栏高"是阅读区实测高、阅读器的"纸高"是算出来的纸张高，两者不是同一个量。
+ * 兜底 `100vh` / `24px` 与两侧默认一致。
+ *
+ * **PDF 的两条例外**（2026-10-18 真机探针量出来的两处洞，都已堵上）：
+ * PDF 的整页位图**必须不封顶**（它本身就是内容本体，封顶会让用户每页都要放大才能读）。
+ * 但只看 `.vr-pdf .vr-image`（查看器那条）不够，因为：
+ * 1. 它与本条**特异性相同**（都是 0,2,0），本条排在后面 ⇒ **平局时本条赢**，
+ *    把 `max-height: none` 静默覆盖成 556px；
+ * 2. 即使把本条改成 `.br-content:not(.vr-pdf) .vr-image`，也挡不住**嵌套**
+ *    （`.br-content` 里再套一个 `.vr-pdf` 时，`:not()` 判的是**外层** `.br-content`，
+ *    于是里层的 PDF 图照样被匹配）。
+ *
+ * 因此改成**两条显式例外、用更高特异性压过本条**（0,3,0 > 0,2,0 ⇒ 与顺序无关）：
+ * - `.br-content.vr-pdf .vr-image`：同一个元素同时带两个类（假设阅读器里渲染 PDF）；
+ * - `.br-content .vr-pdf .vr-image`：PDF 容器**嵌套**在阅读器内容里。
+ * 两条都由真机探针断言（`same element` 与 `nested` 各一条）。 */
+.br-content .vr-image,
+.br-content .vr-figure img {
+  max-height: calc(var(--br-page-h, 100vh) - 2 * var(--br-page-margin, 24px));
+}
+
+.br-content.vr-pdf .vr-image,
+.br-content .vr-pdf .vr-image {
   max-height: none;
 }
 

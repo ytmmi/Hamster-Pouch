@@ -79,13 +79,55 @@ export function ViewerReader(): JSX.Element {
   const columns = isPdf ? 1 : readerColumns(width);
   const fontSize = readerFontSize(width);
 
+  /**
+   * 阅读区**实测高度**（px）——图片"按容器高封顶"要用它，见下面的 `--vr-page-h`。
+   *
+   * ## 为什么需要它（需求 3 + 需求 5 的交叉点）
+   *
+   * koodo-reader 的图片排版只有一条硬规则（内核 `koodit` 的
+   * `src/utils/layoutUtil.ts` 的 `handleImageSize()`）：图片按可用父容器等比缩放，
+   * 且**当按宽度算出的最大高超过容器高时，改按容器高再缩一档**——它的图片
+   * **宁可缩小，也不跨页/跨栏被切断**。全仓 `break-before|page-break-before`
+   * **0 命中**：koodo 没有任何"图片独占一页"的分页符机制（"单独看大图"是点击后的
+   * 弹层 UI，不是排版）。
+   *
+   * 我们照这条口径复刻，就能让"图片放不下当前栏 ⇒ 整张图连同图注被推到下一栏"成为
+   * **自然结果**（`break-inside: avoid` + 高度封顶），而**不引入** koodo 没有的
+   * 分页符。封顶用的"容器高"就是本阅读区的内容高：查看器的滚动区没有固定纸张高，
+   * 因此用它自己的可视高（去掉上下内边距）。
+   *
+   * 取数用 `ResizeObserver` 实测（与上面分栏同一条路径，不另立第二个 observer）：
+   * 面板一改尺寸，`width` 与高度一起重测；改字号也会改变内容高，所以 `fontSize`
+   * 变化时补测一次。
+   */
+  const [viewHeight, setViewHeight] = useState(0);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => {
+      const computed = getComputedStyle(el);
+      const padY =
+        (parseFloat(computed.paddingTop) || 0) + (parseFloat(computed.paddingBottom) || 0);
+      setViewHeight(Math.max(0, el.clientHeight - padY));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+    // 字号变化会让内容高变化；`ResizeObserver` 只跟盒子，因此显式补一次。
+  }, [fontSize]);
+
   const style = useMemo(
     () =>
       ({
         "--vr-columns": String(columns),
         "--vr-font-size": `${fontSize}px`,
+        // 图片"按容器高封顶"的两个量（见上面 `viewHeight` 的说明）。
+        // 未测量时给 `100vh` / 12px 兜底：宁可封得松一点，也不要算出 0 高把图压没。
+        "--vr-page-h": `${viewHeight > 0 ? viewHeight : "100vh"}`,
+        "--vr-page-margin": "12px",
       }) as CSSProperties,
-    [columns, fontSize],
+    [columns, fontSize, viewHeight],
   );
 
   /** 滚动到底部附近 → 取下一页（"面板内滚动看更多、滚动时按需缓存"）。 */
@@ -159,22 +201,52 @@ export function ViewerReader(): JSX.Element {
             </div>
           )}
 
+          {/* 每一"页"（epub 的一章 / md 的一批顶层块 / pdf 的一页）各包一层
+              `.vr-page`：一是给"每章另起一页"的反面判据一个可命中的边界，
+              二是让 `data-page-index` 与阅读器的 `.br-page` 同形，门禁与
+              `tools/reader-layout-verify.mjs` 可以按同一口径量两处。
+
+              `data-page-break-before` = "本页不是第一页"（`index > 0`）：换页判据
+              因此落在**页容器**上，而不是"往块列表里塞一个换页标记块"。两者相比，
+              前者不占内容位置（不会让 `:first-child` / `:last-child` 语义错位，
+              也不会在页首留下一个空块），且对每一种格式（epub / md / pdf）都成立。
+              EPUB 的章节序号语义与之同源：后端在 `book.content` 里给出 `section`，
+              页序号就是它。
+
+              为什么不是把页之间拼成一条连续的流：后端每页的 `blocks` 是**独立**
+              的一段（章节 / 块批次），拼接后"这一章在哪儿结束"在 DOM 里就没有
+              任何标记，CSS 无法在章间换页——这正是需求 4 要修的东西。
+
+              `vr-multicolumn`（2026-10-18 修的一处真实缺陷）：单栏还是双栏由
+              `columns >= 2` 决定，作为**类名**下发。此前 CSS 侧靠
+              `.vr-content[style*="--vr-columns: 1"]` 去匹配**内联样式的字符串**，
+              而 React 序列化后的实际文本是 `--vr-columns:1`（**冒号后没有空格**），
+              于是"单栏"那条永远匹配不上、多栏那条反而命中——单栏模式下每一页都
+              被 `break-before: column` 推到下一栏，正文整页移出可视区。
+              真机探针（`archive/…/css-pagebreak-probe.mjs`）把这条量了出来。
+              类名判据与"变量怎么写"无关，结构性地消除了这类依赖。 */}
           <div
-            className={`vr-content${imageOnly ? " vr-image-only" : ""}${isPdf ? " vr-pdf" : ""}`}
+            className={`vr-content${imageOnly ? " vr-image-only" : ""}${isPdf ? " vr-pdf" : ""}${
+              columns >= 2 ? " vr-multicolumn" : ""
+            }`}
           >
-            {pages.map((page, index) =>
-              page.format === "text" ? (
-                <p key={index} className="vr-text">
-                  {page.text}
-                </p>
-              ) : (
-                <BookBlocks
-                  key={index}
-                  blocks={page.blocks ?? []}
-                  imageFallback={app.t("viewer.imageUnavailable")}
-                />
-              ),
-            )}
+            {pages.map((page, index) => (
+              <div
+                className="vr-page"
+                key={index}
+                data-page-index={index}
+                data-page-break-before={index > 0 ? "" : undefined}
+              >
+                {page.format === "text" ? (
+                  <p className="vr-text">{page.text}</p>
+                ) : (
+                  <BookBlocks
+                    blocks={page.blocks ?? []}
+                    imageFallback={app.t("viewer.imageUnavailable")}
+                  />
+                )}
+              </div>
+            ))}
           </div>
 
           {loading && <div className="vr-more dim">{app.t("common.loading")}</div>}

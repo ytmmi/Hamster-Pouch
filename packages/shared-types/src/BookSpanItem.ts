@@ -15,7 +15,11 @@ export type BookSpanItem = {
 text: string, 
 /**
  * 叠加的行内样式（`emphasis` / `strong` / `strikethrough` / `code` /
- * `superscript` / `subscript` / `math` / `footnote`；**已归一化成固定次序**）。
+ * `superscript` / `subscript` / `math` / `footnote` / **`highlight`** /
+ * **`underline`** / **`small_caps`**；**已归一化成固定次序**）。
+ *
+ * 后三种是 EPUB 富文本的装饰（`<mark>` / `<u>` / `small-caps`），
+ * 2026-10-18 追加；前端 `BookBlocks.tsx` 按同一张固定顺序表套元素。
  */
 styles: Array<string>, 
 /**
@@ -25,4 +29,29 @@ href: string | null,
 /**
  * 图片的**已落盘绝对路径**（供前端 `convertFileSrc`）；`null` = 不是图片。
  */
-image: string | null, };
+image: string | null, 
+/**
+ * 书自带的**文字颜色**（CSS 颜色值，如 `#c00` / `rgb(...)`）；`null` = 未声明。
+ *
+ * **原样透传而不是压成主题色**：参考实现（koodo-reader 的 `StyleHelper`）
+ * 默认保留书自己的颜色，只在用户显式打开"覆盖文字色"时才用 `!important`
+ * 强制替换——用户的"彩色文字"要求正是要看着书原本的配色。
+ * 值由解析侧的白名单给出（见 [`BookSpanItem`] 的安全边界说明）；
+ * 前端把它写进 React 的 `style` 对象，不经过 HTML 字符串。
+ */
+color: string | null, 
+/**
+ * 书自带的**文字底色**（CSS 颜色值）；`null` = 未声明。
+ *
+ * 与 [`BookSpanItem::styles`] 的 `highlight` 是两件事：`highlight` 是
+ * EPUB 的**语义高亮标记**（`<mark>`），这里是书里写死的背景色。
+ */
+bg: string | null, 
+/**
+ * 书自带的**字号倍数**（em；`1.5` = 1.5 倍正文）；`null` = 未声明。
+ *
+ * EPUB 的 `font-size: 150%` / `1.5em` / `large` 在解析侧折算成这个倍数。
+ * 前端夹紧在 `0.5–4` 之后才写进 CSS：畸形的 `font-size: 3000%` 会把一栏挤成
+ * 一两个字，而"夹紧"是渲染侧的口径（后端如实上报书里写了什么）。
+ */
+size_em: number | null, };

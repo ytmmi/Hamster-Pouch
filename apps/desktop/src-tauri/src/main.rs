@@ -42,11 +42,16 @@ pub(crate) struct AppState {
     pub(crate) ffmpeg_bin: Arc<Option<PathBuf>>,
     pub(crate) ffprobe_bin: Arc<Option<PathBuf>>,
     pub(crate) thumb_cache: Arc<ThumbnailCache>,
-    /// 图书阅读器的**单本纯文本解码缓存**（2026-10-16）。
-    ///
-    /// 一本 24 MB 的 txt 整本解码约几百毫秒，而"翻一页"和"列目录"都要读同一份正文；
-    /// 没有它，阅读器每翻一页都要重解一遍整本。只留一本（阅读器一次只读一本书）。
-    pub(crate) book_text: Arc<Mutex<Option<commands::book_reader::ReaderTextCache>>>,
+    /* 图书阅读器的单本纯文本解码缓存（`book_text`）**已删除**（2026-10-18）。
+     *
+     * 它原本缓存"整本解码后的 `String`"以复用；用户实测打开一本 txt 内存涨到
+     * 5 GB 以上并卡死（需求 2）。现在纯文本改成**按窗口渐进读取**
+     * （`hp_book::text_stream`），翻页只读该页所需的字节窗口、目录按块流式扫描，
+     * 因此**没有任何"整本"可缓存**，这个字段与它的 `Mutex` 一并删掉。
+     *
+     * 这也顺带去掉了旧实现的一个隐患：缓存在持锁期间解码，同一本书的并发请求
+     * 被串行化；现在每个请求各开自己的 `File`。
+     */
     /// 媒体子进程（libmpv，单实例常驻，D14）。
     ///
     /// **休眠（2026-09）**：libmpv 播放路径已退役（播放器改走 DOM `<video>`，缺陷
@@ -97,7 +102,6 @@ fn make_state() -> AppState {
         ffmpeg_bin: Arc::new(external_bin("ffmpeg")),
         ffprobe_bin: Arc::new(external_bin("ffprobe")),
         thumb_cache: Arc::new(ThumbnailCache::new(thumb_root)),
-        book_text: Arc::new(Mutex::new(None)),
         media: Arc::new(Mutex::new(None)),
         media_embed: Arc::new(Mutex::new(None)),
         plugin_root: Arc::new(plugin_root),

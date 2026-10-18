@@ -591,6 +591,27 @@ export function ReaderStage({
         "--br-column-gap": `${pagedLayout.gap}px`,
         "--br-spine": `${READER_SPINE_SHADOW_PX}px`,
         "--br-brightness": String(settings.brightness / 100),
+        /*
+         * 「一页可用高」（px）——**图片按容器高封顶**要用它（需求 3 / 5）。
+         *
+         * 依据是 koodo-reader 内核的图片唯一一条硬规则（`koodit` 的
+         * `src/utils/layoutUtil.ts` 的 `handleImageSize()`）：图片等比缩放，且
+         * **按宽度算出的最大高超过容器高时改按容器高再缩一档**——它的图片
+         * **宁可缩小，也不跨页/跨栏被切断**。全仓 `break-before|page-break-before`
+         * **0 命中**：koodo 没有任何"图片独占一页"的分页符。
+         *
+         * 因此"图片放不下当前栏 ⇒ 整张图推到下一栏"应当是 `break-inside: avoid`
+         * + 高度封顶之后的**自然结果**，而**不是**我们写死一个分页符造出来的。
+         * 高度封顶需要知道"一页有多高"，这个量在两种排版下不同：
+         * - **分页模式**：纸张高（`pagedLayout.height`）——图绝不能高过纸张
+         *   （否则要么顶破纸面、要么被 `break-inside` 整张推走并留一片空白）；
+         * - **滚动模式**：阅读区实测高（`size.height`）——koodo 在滚动（它其实恒为
+         *   分栏翻页）里用的也是"当前容器高"，这里取同口径。
+         *
+         * CSS 侧再减掉纸张内的两侧页边距（`--br-page-margin`），得到真正可用的正文高。
+         * 未测量时给 1px（`readerPagedLayout` 与实测都保证了正常路径下不会是 0）。
+         */
+        "--br-page-h": `${Math.max(1, Math.round(paged ? pagedLayout.height : size.height))}px`,
         // 段落首行缩进：按语言档（中文 2em / 拉丁 1em，Readium CSS 口径）。
         "--br-para-indent": `${bodyProfile === "cjk" ? READER_PARA_INDENT_EM.cjk : READER_PARA_INDENT_EM.latin}em`,
         // 纸张宽高与"一张纸"的绘制宽：分页模式的三个几何量（见 `readerPagedLayout`）。
@@ -638,7 +659,36 @@ export function ReaderStage({
     <>
       <div className="vr-content br-content">
         {pages.map((item, index) => (
-          <div key={index} className="br-page" data-page-index={index}>
+          <div
+            key={index}
+            className="br-page"
+            data-page-index={index}
+            /*
+             * **本页要另起一页**（需求 4：EPUB 每章都是全新的一页，不接在上一章后面）。
+             *
+             * ## 为什么判据落在页容器上，而不是"往块列表里塞一个换页块"
+             *
+             * 三条理由，都是可观测的：
+             * 1. **koodo 的真实机制就是"整章重渲染"**：它不做连续排版，每次换章都
+             *    `doc.body.innerHTML = ""` 再注入（内核 `navigationUtil.ts:319-465`
+             *    的 `handleRenderChapter()`），章首分页是这件事的**副作用**。
+             *    我们这里"已载入的页"是**多页拼在一条流里**（滚动模式）或**多栏流**
+             *    （分页模式），所以要在页边界把它显式写出来。
+             * 2. **`section > 0` 是后端已有的信号**：`book.content` 对 epub 返回的
+             *    `section` 就是章节序号，`section > 0` 即"本章不是第一章"——与游标
+             *    同源、零新增字段、零新增块。
+             * 3. **塞一个"空换页块"是**不可靠的**：它占掉内容流里的第一个位置，
+             *    会让 `:first-child` / `:last-child` 的语义错位，并可能在章首留下
+             *    一整栏空白（`break-before` 作用在流首块上时正是如此）。把判据放在
+             *    页容器上则没有这些副作用：容器本来就存在，只是多一个属性。
+             *
+             * 属性值用**空串**（等价于 `attr=""`）：CSS 侧只做 `[data-page-break-before]`
+             * 的存在性判定，不需要它的取值。
+             */
+            data-page-break-before={
+              item.format === "epub" && item.section > 0 ? "" : undefined
+            }
+          >
             {item.format === "text" ? (
               <p className="vr-text">{item.text}</p>
             ) : (

@@ -780,6 +780,15 @@ struct InlineAcc {
     styles: Vec<SpanStyle>,
     /// 当前链接目标。
     href: Option<String>,
+    /// 颜色（Markdown 没有内联 `style` 语法，这里保留字段是为了与 EPUB 的
+    /// `BookSpan` 同形：Markdown 里的原始 HTML 片段走 `push_html`，
+    /// 它同样**不**解析颜色——`<span style>` 是 HTML 的写法，
+    /// 而 CommonMark 的原始 HTML 在本项目里"丢标签留文字"）。
+    color: Option<String>,
+    /// 高亮底色（同上）。
+    bg: Option<String>,
+    /// 字号倍率（同上）。
+    size_em: Option<f32>,
 }
 
 impl InlineAcc {
@@ -800,6 +809,9 @@ impl InlineAcc {
             styles: self.styles.clone(),
             href,
             image: None,
+            color: self.color.clone(),
+            bg: self.bg.clone(),
+            size_em: self.size_em,
         });
     }
 
@@ -810,6 +822,9 @@ impl InlineAcc {
             styles: self.styles.clone(),
             href: self.href.clone(),
             image: Some(path),
+            color: self.color.clone(),
+            bg: self.bg.clone(),
+            size_em: self.size_em,
         });
     }
 
@@ -914,5 +929,8 @@ fn push_styled(out: &mut Vec<BookSpan>, ch: char, like: &BookSpan) {
         styles: like.styles.clone(),
         href: like.href.clone(),
         image: None,
+        color: like.color.clone(),
+        bg: like.bg.clone(),
+        size_em: like.size_em,
     });
 }

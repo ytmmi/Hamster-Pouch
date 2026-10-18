@@ -52,12 +52,28 @@ export interface BookContentArgs {
 export interface BookSpanItem {
   /** 文字内容（图片片段里是 **alt 文本**）。 */
   text: string;
-  /** 叠加的行内样式（`emphasis` / `strong` / `strikethrough` / `code` …）。 */
+  /**
+   * 叠加的行内样式（`emphasis` / `strong` / `strikethrough` / `code` /
+   * `superscript` / `subscript` / `math` / `footnote` / `highlight` /
+   * `underline` / `small_caps`；后端已归一化成固定次序）。
+   */
   styles: string[];
   /** 链接目标；`null` = 不是链接。 */
   href: string | null;
   /** 图片的**已落盘绝对路径**（供 `convertFileSrc`）；`null` = 不是图片。 */
   image: string | null;
+  /** 书自带的**文字颜色**（CSS 颜色值）；`null` = 未声明。 */
+  color: string | null;
+  /** 书自带的**文字底色**（CSS 颜色值）；`null` = 未声明。 */
+  bg: string | null;
+  /**
+   * 书自带的**字号倍数**（em）；`null` = 未声明。
+   *
+   * **与 `crates/hp-dto` 的 `BookSpanItem` 逐字对应**（`size_em: Option<f32>`）：
+   * 本文件是**手写副本**，不是生成产物——两边的字段必须一起改，否则它读到的
+   * 是旧契据，而前端只会在运行时静默拿到 `undefined`。
+   */
+  size_em: number | null;
 }
 
 /** 一个列表项（GFM 任务列表的勾选态 + 项内的块）。 */
@@ -91,7 +107,8 @@ export interface BookDefinitionItem {
 export interface BookBlockItem {
   /**
    * `heading` / `paragraph` / `image` / `code_block` / `blockquote` /
-   * `list` / `rule` / `table` / `footnote` / `definition_list`。
+   * `list` / `rule` / `table` / `footnote` / `definition_list` /
+   * **`figure`** / **`comment`** / **`page_break`**。
    */
   kind: string;
   /** `heading` 的层级 1–6；其余块为 `null`。 */
@@ -124,6 +141,20 @@ export interface BookBlockItem {
   label: string | null;
   /** `definition_list` 的各项；其余为 `null`。 */
   definitions: BookDefinitionItem[] | null;
+  /**
+   * **`figure`** 的图片块本体（`kind = "image"`）；其余为 `null`。
+   *
+   * 图与图注是一个整体（EPUB 的 `<figure>` + `<figcaption>`），必须整组不被拆页。
+   */
+  figure: BookBlockItem | null;
+  /** **`figure`** 的图注；其余为 `null`。 */
+  caption: BookSpanItem[] | null;
+  /**
+   * **`figure` / `image`** 是否要求**独占一页**；其余为 `null`（`null` = 不要求）。
+   *
+   * 判据在后端解析侧（EPUB 的 `epub:type="pagebreak"`、单图 `<section>`、封面页）。
+   */
+  full_page: boolean | null;
 }
 
 /** `book.content` 返回体：查看器要显示的正文**一页**。 */
@@ -147,6 +178,14 @@ export interface BookContentResult {
   section_count: number | null;
   /** 本页标题（epub 的章节标题；纯文本 / pdf 为 `null`）。 */
   title: string | null;
+  /**
+   * 本页是否**另起一页**（epub：`section > 0`；其余格式恒 `false`）。
+   *
+   * 用户口径（需求 4）："每个章节应该是全新的一页，而不是接在上一章后面"。
+   * 由**后端**给出而不是前端按 `section > 0` 算：PDF 的 `section` 是页码、
+   * 纯文本恒为 0——三种格式语义不同，只有后端知道"这一页是不是新章"。
+   */
+  page_break_before: boolean;
   /** 内容是否因**上限**被截断（面板据此提示"仅显示开头"）。 */
   capped: boolean;
 }

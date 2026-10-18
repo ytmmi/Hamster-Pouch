@@ -20,6 +20,10 @@ import type { BookTableRowItem } from "./BookTableRowItem";
  * - `table`：`align` + `head` + `rows`
  * - `footnote`：`label` + `blocks`
  * - `definition_list`：`definitions`
+ * - **`figure`**：`figure`（图片块本体）+ `caption`（图注）+ `full_page`
+ * - **`comment`**：`label` + `blocks`（作者/译者的注释，与 `blockquote` 分开：
+ *   引用是**正文的一部分**，注释是**旁注**，两者的排印与断页口径不同）
+ * - **`page_break`**：无附加字段（一条**显式换页**标记，见 `full_page` 的说明）
  */
 export type BookBlockItem = { kind: string, 
 /**
@@ -81,4 +85,26 @@ label: string | null,
 /**
  * `definition_list` 的各项（术语 + 释义组）；其余为 `null`。
  */
-definitions: Array<BookDefinitionItem> | null, };
+definitions: Array<BookDefinitionItem> | null, 
+/**
+ * **`figure`** 的图片块本体（形如 `kind = "image"` 的块）；其余为 `null`。
+ *
+ * 为什么图组要单独一种 `kind`、而不是直接放一个 `image` 块：EPUB 的
+ * `<figure>` 是**图片 + 图注**一个整体（`<img>` + `<figcaption>`），
+ * 排版要求是"图与图注不许被拆到两栏/两页"——把图注拆出去就丢了这个约束。
+ */
+figure: BookBlockItem | null, 
+/**
+ * **`figure`** 的图注（`<figcaption>` 的行内内容）；其余为 `null`。
+ */
+caption: Array<BookSpanItem> | null, 
+/**
+ * **`figure` / `image`** 是否要求**独占一页**；其余为 `null`
+ * （`null` 与 `Some(false)` 同义：不要求）。
+ *
+ * 判据在**解析侧**：EPUB 的 `epub:type="pagebreak"`、仅含单张图的
+ * `<section>`/`<div>`、以及封面页，都要求整页只放这张图。
+ * 前端据此让这一块**横跨整栏**并单独成页（见 `styles.css` 的
+ * `.vr-figure-full-page` 与 `.vr-page-break`）。
+ */
+full_page: boolean | null, };

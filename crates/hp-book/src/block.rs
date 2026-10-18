@@ -30,6 +30,8 @@
 //!   丢弃标签、保留其文字（与 EPUB 的"白名单外标签丢标签留文字"同一条口径）。
 
 /// 行内样式（**可叠加**：`***粗斜体***` = `[Strong, Emphasis]`）。
+///
+/// 新增变体只允许**追加在末尾**（见 [`SpanStyle::rank`]）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpanStyle {
     /// 斜体（Markdown `*x*` / EPUB `<i>` / `<em>`）。
@@ -48,6 +50,15 @@ pub enum SpanStyle {
     Math,
     /// 脚注引用（GFM `[^1]`）；`text` 是脚注标签。
     Footnote,
+    /// 高亮（EPUB `<mark>`，或 `background-color` 提供底色的行内片段）。
+    ///
+    /// 与 [`BookSpan::bg`] 的分工：`Highlight` 说明"这是标记笔语义"，
+    /// `bg` 携带具体底色（`<mark>` 未声明底色时解析侧补浏览器默认的黄 `#ffff00`）。
+    Highlight,
+    /// 下划线（EPUB `<u>` / `<ins>`，以及 `text-decoration: underline`）。
+    Underline,
+    /// 小型大写（`font-variant: small-caps`）。
+    SmallCaps,
 }
 
 impl SpanStyle {
@@ -62,10 +73,16 @@ impl SpanStyle {
             SpanStyle::Subscript => "subscript",
             SpanStyle::Math => "math",
             SpanStyle::Footnote => "footnote",
+            SpanStyle::Highlight => "highlight",
+            SpanStyle::Underline => "underline",
+            SpanStyle::SmallCaps => "small_caps",
         }
     }
 
     /// 规范化排序用的固定次序（**唯一权威**，见 [`normalize_styles`]）。
+    ///
+    /// 新增变体**只允许追加在末尾**：既有次序一动，所有已产生的片段顺序就变了
+    /// （前端按固定顺序套元素、测试按 `Vec` 相等比较）。
     fn rank(self) -> u8 {
         match self {
             SpanStyle::Strong => 0,
@@ -76,6 +93,9 @@ impl SpanStyle {
             SpanStyle::Subscript => 5,
             SpanStyle::Math => 6,
             SpanStyle::Footnote => 7,
+            SpanStyle::Highlight => 8,
+            SpanStyle::Underline => 9,
+            SpanStyle::SmallCaps => 10,
         }
     }
 }
@@ -95,7 +115,11 @@ pub fn normalize_styles(styles: &mut Vec<SpanStyle>) {
 ///
 /// `image` 与 `href` 都可能为空；两者都有值时（`[![alt](a)](b)`）渲染器按
 /// "图片包在链接里"处理——这是 Markdown 里真实存在的写法。
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// **为什么不再派生 `Eq`**：`size_em` 是 `f32`，浮点没有全序（`NaN != NaN`），
+/// `Eq` 在语义上就立不住。全仓没有把本类型放进 `HashMap` / `HashSet` 的地方
+/// （实测 grep，2026-10-18），因此保 `PartialEq` 足够，测试的 `assert_eq!` 不受影响。
+#[derive(Debug, Clone, PartialEq)]
 pub struct BookSpan {
     /// 文字内容（图片片段里是 **alt 文本**）。
     pub text: String,
@@ -108,6 +132,21 @@ pub struct BookSpan {
     /// 解析侧负责把 Markdown 里的相对路径按文档所在目录解析成绝对路径，
     /// 并**确认文件真的在盘上**——认不出的图片不会变成破图（见 `markdown` 模块）。
     pub image: Option<String>,
+    /// 文字颜色（EPUB `span style="color:…"`），规范成 `#rrggbb` **小写**；`None` = 未声明。
+    ///
+    /// alpha 一律忽略（`#rrggbbaa` → `#rrggbb`）：前端是纯数据渲染、不做透明合成，
+    /// 详见 `epub_rich::parse_css_color` 的文档。
+    pub color: Option<String>,
+    /// 高亮底色（`background-color` / `<mark>`），规范成 `#rrggbb` **小写**；`None` = 未声明。
+    pub bg: Option<String>,
+    /// 字号倍率（相对正文基准；`font-size` 的 em/%/pt/px/关键字都折算成它）。
+    ///
+    /// **夹紧到 `0.5..=3.0`**（见 `epub_rich::clamp_size_em` 与其中的 `MIN_SIZE_EM`
+    /// / `MAX_SIZE_EM` 常量）：语料里出现过 `font-size:0`（折叠用的隐藏文字）与超大
+    /// 装饰字，不夹紧会让前端排版被一行撑爆。
+    /// 前端渲染时**再**夹紧到 0.5–4（一栏放得下的上限）——两个区间不同是有意的：
+    /// 解析侧记录的是"书自身的意图上限"。
+    pub size_em: Option<f32>,
 }
 
 impl BookSpan {
@@ -118,12 +157,20 @@ impl BookSpan {
             styles: Vec::new(),
             href: None,
             image: None,
+            color: None,
+            bg: None,
+            size_em: None,
         }
     }
 
-    /// 是否没有任何样式与链接（渲染器可据此走纯文本快路径）。
+    /// 是否没有任何样式、颜色、字号与链接（渲染器可据此走纯文本快路径）。
     pub fn is_plain(&self) -> bool {
-        self.styles.is_empty() && self.href.is_none() && self.image.is_none()
+        self.styles.is_empty()
+            && self.href.is_none()
+            && self.image.is_none()
+            && self.color.is_none()
+            && self.bg.is_none()
+            && self.size_em.is_none()
     }
 }
 
@@ -131,7 +178,7 @@ impl BookSpan {
 ///
 /// 项内是**块**而不是一行文字：Markdown 的列表项可以包含多个段落、嵌套列表、
 /// 代码块、引用——把它压成一行会丢掉这些结构。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BookListItem {
     /// `Some(true)` = 已勾选、`Some(false)` = 未勾选、`None` = 不是任务项。
     pub checked: Option<bool>,
@@ -140,7 +187,7 @@ pub struct BookListItem {
 }
 
 /// 定义列表的一项：一个术语 + 若干条释义（每条释义是一组块）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BookDefinition {
     /// 术语（行内内容）。
     pub term: Vec<BookSpan>,
@@ -174,7 +221,9 @@ impl ColumnAlign {
 ///
 /// 变体刻意与"两种格式的块级语义并集"对齐：EPUB 只会产出其中一部分
 /// （例如不产表格与任务列表），Markdown 产出得更全。
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// 与 [`BookSpan`] 同理，**不派生 `Eq`**（`Figure` 里嵌了带 `size_em: f32` 的片段）。
+#[derive(Debug, Clone, PartialEq)]
 pub enum BookBlock {
     /// 标题（`h1`–`h6`）。
     Heading {
@@ -243,6 +292,46 @@ pub enum BookBlock {
         /// 各项。
         items: Vec<BookDefinition>,
     },
+    /// **插画**：一张图片 + 可选图注，以及"是否应当独占一页"的判定结果。
+    ///
+    /// 为什么单独成块而不是复用 [`BookBlock::Image`]：EPUB 的 `<figure>` 是
+    /// "图 + 图注"的整体，把图注拆成兄弟段落会让前端无法把两者绑成一个
+    /// `figure/figcaption` 单元（排版上两者必须同页、同栏宽）。
+    Figure {
+        /// 图片块本体（`image` / `Box` 都行；`Box` 的情况见"非 figure 的 `<img>`"）。
+        image: Box<BookBlock>,
+        /// 图注（`<figcaption>` 的行内内容）；没有图注就是空 `Vec`（不是 `None`：
+        /// "有图无注"与"没有图"必须区分，前者仍要渲染）。
+        caption: Vec<BookSpan>,
+        /// 是否应当**独占一页**（`full_page`）。
+        ///
+        /// 判据见 `epub_text::is_full_page_image`，据 koodo-reader 的实测口径
+        /// （封面页 / `epub:type="cover"` / `pre-paginated` 单图页 / 高度占满）而定。
+        /// 前端据此把该块放进整页容器；**不**在解析侧换页（换页由前端按块与章节决定）。
+        full_page: bool,
+    },
+    /// **注释 / 脚注 / 侧栏**：一段带标签的次要内容。
+    ///
+    /// 与 [`BookBlock::Footnote`] 的区别：`Footnote` 是 Markdown 的
+    /// `[^1]: …` 定义块（标签即脚注号），`Comment` 是 EPUB 的 `aside` /
+    /// `epub:type="footnote"` / `role="doc-footnote"` / `.footnote` 这类
+    /// **原文里的注**（koodo-reader 把它当"旁注"处理，见模块内的 koodo 引用）。
+    Comment {
+        /// 标签（`epub:type` 的值或可识别的 class）；认不出来就是 `None`。
+        label: Option<String>,
+        /// 注释正文（注释可以有多段）。
+        blocks: Vec<BookBlock>,
+    },
+    /// **显式换页**：作者在**章节内部**写了"从这里另起一页"
+    /// （`page-break-before: always|page`、`epub:type="pagebreak"`、
+    /// `<hr class="pagebreak">` 之类）。
+    ///
+    /// **边界（2026-10-18 Lead 的集成决策）**：章节之间的换页**不**用这个块，
+    /// 而由前端按 `BookContentResult.section > 0` 在页容器上换页——用一个空块
+    /// 表示"章首换页"会占掉页容器的首个子元素与 `:first-child` 语义，
+    /// 是"前导空白 / 前导空栏"最容易出现的地方。
+    /// 本块因此**只在有内容跟随时**由解析侧产出（见 `epub_text` 的收尾裁剪）。
+    PageBreak,
 }
 
 impl BookBlock {
@@ -254,6 +343,12 @@ impl BookBlock {
             }
             // 图片本身没有文字（alt 文本不计入"阅读量"）。
             BookBlock::Image { .. } => 0,
+            // 图片页/插画：图注是**要读的文字**，因此计入；图片本身不计（同 `Image`）。
+            // 注释：标签是导航用的短标记（"1"/"注"），不计；正文递归计。
+            // 显式换页：没有文字（0）——它只影响排版，不影响"这页有多少字"。
+            BookBlock::Figure { caption, .. } => spans_char_count(caption),
+            BookBlock::Comment { .. } => 0,
+            BookBlock::PageBreak => 0,
             // 代码块的字符数就是代码长度（它是实打实要渲染出来的内容）。
             BookBlock::CodeBlock { text, .. } => text.chars().count(),
             BookBlock::Rule => 0,
@@ -284,9 +379,12 @@ pub fn blocks_char_count(blocks: &[BookBlock]) -> usize {
 pub fn block_char_count(block: &BookBlock) -> usize {
     let own = block.own_char_count();
     let nested = match block {
-        BookBlock::BlockQuote { blocks, .. } | BookBlock::Footnote { blocks, .. } => {
-            blocks_char_count(blocks)
-        }
+        BookBlock::BlockQuote { blocks, .. }
+        | BookBlock::Footnote { blocks, .. }
+        | BookBlock::Comment { blocks, .. } => blocks_char_count(blocks),
+        // 插画：递归图片块**本身**（`Image` 是 0，但图可以是别的块——见 `Figure` 的文档），
+        // 图注在 `own_char_count` 里已计，这里不重复。
+        BookBlock::Figure { image, .. } => block_char_count(image),
         BookBlock::List { items, .. } => items
             .iter()
             .map(|item| blocks_char_count(&item.blocks))

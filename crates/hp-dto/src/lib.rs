@@ -237,12 +237,35 @@ pub struct BookSpanItem {
     /// 文字内容（图片片段里是 **alt 文本**）。
     pub text: String,
     /// 叠加的行内样式（`emphasis` / `strong` / `strikethrough` / `code` /
-    /// `superscript` / `subscript` / `math` / `footnote`；**已归一化成固定次序**）。
+    /// `superscript` / `subscript` / `math` / `footnote` / **`highlight`** /
+    /// **`underline`** / **`small_caps`**；**已归一化成固定次序**）。
+    ///
+    /// 后三种是 EPUB 富文本的装饰（`<mark>` / `<u>` / `small-caps`），
+    /// 2026-10-18 追加；前端 `BookBlocks.tsx` 按同一张固定顺序表套元素。
     pub styles: Vec<String>,
     /// 链接目标；`null` = 不是链接。
     pub href: Option<String>,
     /// 图片的**已落盘绝对路径**（供前端 `convertFileSrc`）；`null` = 不是图片。
     pub image: Option<String>,
+    /// 书自带的**文字颜色**（CSS 颜色值，如 `#c00` / `rgb(...)`）；`null` = 未声明。
+    ///
+    /// **原样透传而不是压成主题色**：参考实现（koodo-reader 的 `StyleHelper`）
+    /// 默认保留书自己的颜色，只在用户显式打开"覆盖文字色"时才用 `!important`
+    /// 强制替换——用户的"彩色文字"要求正是要看着书原本的配色。
+    /// 值由解析侧的白名单给出（见 [`BookSpanItem`] 的安全边界说明）；
+    /// 前端把它写进 React 的 `style` 对象，不经过 HTML 字符串。
+    pub color: Option<String>,
+    /// 书自带的**文字底色**（CSS 颜色值）；`null` = 未声明。
+    ///
+    /// 与 [`BookSpanItem::styles`] 的 `highlight` 是两件事：`highlight` 是
+    /// EPUB 的**语义高亮标记**（`<mark>`），这里是书里写死的背景色。
+    pub bg: Option<String>,
+    /// 书自带的**字号倍数**（em；`1.5` = 1.5 倍正文）；`null` = 未声明。
+    ///
+    /// EPUB 的 `font-size: 150%` / `1.5em` / `large` 在解析侧折算成这个倍数。
+    /// 前端夹紧在 `0.5–4` 之后才写进 CSS：畸形的 `font-size: 3000%` 会把一栏挤成
+    /// 一两个字，而"夹紧"是渲染侧的口径（后端如实上报书里写了什么）。
+    pub size_em: Option<f32>,
 }
 
 /// 一个**列表项**（`book.content` 返回）。
@@ -276,6 +299,10 @@ pub struct BookTableRowItem {
 /// - `table`：`align` + `head` + `rows`
 /// - `footnote`：`label` + `blocks`
 /// - `definition_list`：`definitions`
+/// - **`figure`**：`figure`（图片块本体）+ `caption`（图注）+ `full_page`
+/// - **`comment`**：`label` + `blocks`（作者/译者的注释，与 `blockquote` 分开：
+///   引用是**正文的一部分**，注释是**旁注**，两者的排印与断页口径不同）
+/// - **`page_break`**：无附加字段（一条**显式换页**标记，见 `full_page` 的说明）
 #[derive(Serialize, TS, Debug, Clone)]
 pub struct BookBlockItem {
     pub kind: String,
@@ -309,6 +336,22 @@ pub struct BookBlockItem {
     pub label: Option<String>,
     /// `definition_list` 的各项（术语 + 释义组）；其余为 `null`。
     pub definitions: Option<Vec<BookDefinitionItem>>,
+    /// **`figure`** 的图片块本体（形如 `kind = "image"` 的块）；其余为 `null`。
+    ///
+    /// 为什么图组要单独一种 `kind`、而不是直接放一个 `image` 块：EPUB 的
+    /// `<figure>` 是**图片 + 图注**一个整体（`<img>` + `<figcaption>`），
+    /// 排版要求是"图与图注不许被拆到两栏/两页"——把图注拆出去就丢了这个约束。
+    pub figure: Option<Box<BookBlockItem>>,
+    /// **`figure`** 的图注（`<figcaption>` 的行内内容）；其余为 `null`。
+    pub caption: Option<Vec<BookSpanItem>>,
+    /// **`figure` / `image`** 是否要求**独占一页**；其余为 `null`
+    /// （`null` 与 `Some(false)` 同义：不要求）。
+    ///
+    /// 判据在**解析侧**：EPUB 的 `epub:type="pagebreak"`、仅含单张图的
+    /// `<section>`/`<div>`、以及封面页，都要求整页只放这张图。
+    /// 前端据此让这一块**横跨整栏**并单独成页（见 `styles.css` 的
+    /// `.vr-figure-full-page` 与 `.vr-page-break`）。
+    pub full_page: Option<bool>,
 }
 
 /// **定义列表的一项**（`术语` + 若干条释义）。
@@ -354,6 +397,15 @@ pub struct BookContentResult {
     pub section_count: Option<u32>,
     /// 本页标题（epub 的章节标题；纯文本 / pdf 为 `null`）。
     pub title: Option<String>,
+    /// 本页是否**另起一页**（epub：`section > 0`；其余格式恒 `false`）。
+    ///
+    /// 用户口径（需求 4）："每个章节应该是全新的一页，而不是接在上一章后面"。
+    /// 这个标记是**排版层的判据**：前端在相邻两页容器之间、以及带该标记的页容器
+    /// 之前断页（滚动模式给明显的分页分隔，分页模式给 `break-before: column`）。
+    ///
+    /// 为什么不让前端按 `section > 0` 自己算：PDF 的一页是**位图**（`section` 是页码）、
+    /// 纯文本恒为 0——三种格式的 `section` 语义不同，**只有后端知道"这一页是不是新章"**。
+    pub page_break_before: bool,
     /// 内容是否因**上限**被截断（用户口径"固定上限"；面板据此提示"仅显示开头"）。
     pub capped: bool,
 }

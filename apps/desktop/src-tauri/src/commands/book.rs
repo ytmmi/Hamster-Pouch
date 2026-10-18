@@ -34,7 +34,6 @@
 //! 而封面是"这本书的属性"，不该因为用户整理文件就变成坏图。
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use hp_core::{HpError, HpResult, MediaType};
 use hp_dto::{
@@ -47,10 +46,14 @@ use tauri::State;
 use crate::commands::shared::{
     api_async, api_from_hp, lock_repo, open_repo, open_repo_mut, resolve_file_path, ApiAsync,
 };
-// 阅读器一侧的取数（目录 + 整本正文缓存）拆在 `book_reader.rs`：`book.rs` 已经承担
-// 元数据 / 正文分页 / 封面覆盖三件事，再加这两件会越过"单文件 ≤ 1200 行"的红线。
-// 正文分页复用那里的**整本缓存**（见 `book_reader.rs` 的模块文档）。
-use crate::commands::book_reader::{reader_text_key, with_reader_text, ReaderCtx, ReaderTextCache};
+// 阅读器一侧的取数（目录 + 插图缓存上下文）拆在 `book_reader.rs`：`book.rs` 已经
+// 承担元数据 / 正文分页 / 封面覆盖三件事，再加目录会越过"单文件 ≤ 1200 行"的红线。
+//
+// **2026-10-18（需求 2）**：这里的 `ReaderTextCache` / `with_reader_text` /
+// `reader_text_key` 已随"整本解码"整体删除——纯文本改成按窗口读取
+// （`hp_book::read_text_page_window`），没有"整本"可缓存。`ReaderCtx` 因此只剩
+// `cache`（插图落盘）与 `hash`（缓存键）两个字段。
+use crate::commands::book_reader::ReaderCtx;
 use crate::AppState;
 
 /// `book.meta` 返回体。
@@ -291,13 +294,20 @@ pub(crate) fn parse_cursor(cursor: Option<&str>) -> u32 {
 /// 把一个**行内片段**转成 DTO。
 ///
 /// Markdown 的图片 `image` 已是解析侧确认过的**绝对路径**，原样透传；
-/// EPUB 的片段没有图片（章节插图是块级 `Image`），因此此处无需落盘。
+/// EPUB 的片段没有图片（章节插图是块级 `Figure`），因此此处无需落盘。
+///
+/// **书自带的颜色 / 底色 / 字号**（`color` / `bg` / `size_em`）原样透传：
+/// 解析侧已把它们规范成 `#rrggbb`（认不出来就是 `None`）与 0.5–3.0 的倍率，
+/// 桥接层**不重新解释**它们——两份口径必然漂移（见 `hp_book::inline` 的解析说明）。
 fn span_to_item(span: hp_book::BookSpan) -> BookSpanItem {
     BookSpanItem {
         text: span.text,
         styles: span.styles.iter().map(|s| s.as_str().to_string()).collect(),
         href: span.href,
         image: span.image,
+        color: span.color,
+        bg: span.bg,
+        size_em: span.size_em,
     }
 }
 
@@ -348,6 +358,9 @@ pub(crate) fn block_to_item(
             rows: None,
             label: None,
             definitions: None,
+            figure: None,
+            caption: None,
+            full_page: None,
         }
     }
 
@@ -448,6 +461,56 @@ pub(crate) fn block_to_item(
             ),
             ..empty("definition_list")
         },
+        /*
+         * **插画**（`<figure>`：图 + 图注）与**裸图**（不在 `figure` 里的 `<img>`）
+         * 共用同一个 DTO 形状：
+         * - `figure`：图片块（`kind = "image"` 或嵌套的其它块）+ `caption` + `full_page`；
+         * - `full_page` 如实透传（"是否应当独占一页"由解析侧的判据给出，见
+         *   `hp_book::epub_text` 的 `is_full_page_image`）；桥接层**不重新判定**
+         *   ——判据有两份必然漂移。
+         *
+         * 图片落盘口径与 `kind = "image"` 完全一致（`<hash>.book-<章节>-<序号>.<ext>`），
+         * 因此同一本书第二次打开直接命中缓存。
+         */
+        hp_book::BookBlock::Figure {
+            image,
+            caption,
+            full_page,
+        } => BookBlockItem {
+            figure: Some(Box::new(block_to_item(
+                *image,
+                cache,
+                hash,
+                section,
+                image_index,
+            ))),
+            caption: Some(caption.into_iter().map(span_to_item).collect()),
+            full_page: Some(full_page),
+            ..empty("figure")
+        },
+        /*
+         * **注释 / 脚注 / 侧栏**（EPUB 的 `aside` / `epub:type="footnote"` /
+         * `role="doc-footnote"` / `.footnote` 一类）。
+         *
+         * 与 `footnote`（GFM 的 `[^1]: …` 定义块）共用 `label` + `blocks` 两个字段，
+         * 只靠 `kind` 区分：两者的语义不同（前者是原文里的注、后者是 Markdown 的
+         * 脚注定义），前端因此可以给它们不同的样式落点。
+         */
+        hp_book::BookBlock::Comment { label, blocks } => BookBlockItem {
+            label,
+            blocks: Some(convert(blocks, cache, hash, section, image_index)),
+            ..empty("comment")
+        },
+        /*
+         * **显式换页**（章节内部的 `page-break-before`）。
+         *
+         * 无附加字段：它只是一个"从这里另起一页"的排版标记，前端渲染成
+         * `aria-hidden` 的标记元素、由 CSS 决定表现（滚动模式画分隔、分页模式
+         * `break-before: column`）。**章节之间**的换页不走这个块——那由
+         * `BookContentResult.page_break_before` 在页容器上表达（见下面
+         * `read_epub_page` 的说明）。
+         */
+        hp_book::BookBlock::PageBreak => empty("page_break"),
     }
 }
 
@@ -494,8 +557,16 @@ fn read_page_by_media_type(
         // `md` / `markdown`：**渲染**成类型化块（与 epub 同一套块模型，
         // 因此前端只有一份渲染器）。
         "md" | "markdown" => read_markdown_page(src_path, offset, ctx.cache, ctx.hash),
-        // 其余文本（`txt` 与认不出的文本扩展名）：纯文本通路（**整本**解码 + 缓存）。
-        _ => read_text_page(src_path, offset, ctx.text_cache, ctx.text_key),
+        // 其余文本（`txt` 与认不出的文本扩展名）：**按窗口读取**的纯文本通路。
+        //
+        // 这里**不再**需要缓存键 / 整本缓存：`read_text_page` 每次只读一页所需的
+        // 字节窗口（见它的文档），因此没有"整本"可缓存——需求 2 的内存问题正是
+        // 从"整本进内存"来的。
+        //
+        // 传 `ctx.hash` 作为**内容身份**：纯文本的锚点表（`hp_book::text_stream`）
+        // 用它做键，换内容必然换表，因此陈旧锚点不可能被复用（路径 + 长度 + mtime
+        // 只是启发式，见那边的模块文档第 3 条）。
+        _ => read_text_page(src_path, offset, ctx.hash),
     }
 }
 
@@ -518,22 +589,20 @@ pub(crate) async fn book_content(
     let _ = repo_id;
 
     let outcome = async {
+        let _ = repo_id;
         // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard。
-        let (src_path, media_type, content_hash, cache, text_cache, text_key) = {
+        let (src_path, media_type, content_hash, cache) = {
             let guard = lock_repo(&state)?;
             let db = open_repo(&guard)?;
             let file = db
                 .get_file(&file_id)?
                 .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
             let src_path = resolve_file_path(db, &file)?;
-            let text_key = reader_text_key(&repo_id, &file_id, file.content_hash.as_deref());
             (
                 src_path,
                 file.media_type,
                 file.content_hash,
                 (*state.thumb_cache).clone(),
-                state.book_text.clone(),
-                text_key,
             )
         };
 
@@ -552,15 +621,17 @@ pub(crate) async fn book_content(
             .unwrap_or("")
             .to_ascii_lowercase();
 
-        // 整本读盘 / 解压放在阻塞线程（大 epub 与 24 MB 的 txt 都不能占着 IPC 线程；
+        // 读盘 / 解压 / 栅格化放在阻塞线程（大 epub 与 24 MB 的 txt 都不能占着 IPC 线程；
         // PDF 还要真的把一页画出来，实测 25–156 ms，更不能占 IPC 线程）。
-        // `ReaderCtx` 在闭包内构造，理由见 `book_toc` 的同款注释。
+        //
+        // **纯文本这一轮不再需要"整本缓存"**（需求 2）：`read_text_page` 每次只读
+        // 一页所需的字节窗口，因此这里没有要跨请求保持的状态——`ReaderCtx` 只剩
+        // "插图缓存 + 内容哈希"两个字段（见 `book_reader.rs`），构造它的理由与
+        // `book_toc` 的同款注释一致（闭包按 `'static` 要求把借用移进去）。
         let read = tauri::async_runtime::spawn_blocking(move || {
             let ctx = ReaderCtx {
                 cache: &cache,
-                text_cache: &text_cache,
                 hash: &hash,
-                text_key: &text_key,
             };
             read_page_by_media_type(media_type, &src_path, &ext, offset, &ctx)
         })
@@ -585,42 +656,50 @@ fn empty_content() -> BookContentResult {
         section_count: None,
         title: None,
         capped: false,
+        // 空结果没有"章"，自然也没有"本章要另起一页"这回事。
+        page_break_before: false,
     }
 }
 
-/// 纯文本一页：**整本**解码（带单本缓存）→ 按字符偏移切页。
+/// 纯文本一页：**按窗口读取**（渐进加载）→ 直接返回该页。
 ///
-/// **与查看器共用同一条实现**（2026-10-16）：`book.content` 对纯文本只回一页，
-/// 因此查看器与阅读器的差别只在"怎么请求"，不在"怎么切页"。字节上限由
-/// [`READER_MAX_BYTES`] 给出并带缓存——查看器因此也顺带受益：能继续往下翻，
-/// 且第一页之后不再重复解码。
-pub(crate) fn read_text_page(
-    src_path: &Path,
-    offset: u32,
-    text_cache: &Mutex<Option<ReaderTextCache>>,
-    text_key: &str,
-) -> HpResult<BookContentResult> {
-    // 切页在**闭包内**完成：不把整本正文拷出缓存（一本 24 MB 的 txt 拷一次就是 24 MB）。
-    with_reader_text(
-        text_cache,
-        text_key,
+/// ## 为什么不再"整本解码 + 缓存"（2026-10-18，需求 2）
+///
+/// 旧实现先把整个文件读进内存、再一次性解码，然后缓存在 `Mutex` 里复用。
+/// 用户实测：加载一本 txt 时**内存涨到 5 GB 以上并卡死**。成因不是"某一页太大"，
+/// 而是"整本进内存"本身——一本几十 MB 的 GBK 小说解码成 `String` 后，
+/// 加上读盘缓冲区与解码中转，实际占用是文件大小的若干倍。
+///
+/// 现在交给 `hp_book::read_text_page_window`：它按**字符偏移**定位、只读该页所需的
+/// **字节窗口**再解码，返回本页与下一页游标。因此：
+/// - 任何一次调用占用的内存都与**一页**成正比，与文件大小无关；
+/// - 查看器与阅读器**共用**这条实现（两者差别只在"怎么请求"，不在"怎么切页"）；
+/// - `capped` 的语义随之改变：从前是"解码时被字节上限截断"，现在是
+///   "统计/扫描时超过了闸门"（畸形巨文件仍会被如实标记，见 `hp_book::text`）。
+///
+/// 上游的 `RUNNING_CONTEXT`（旧 `ReaderTextCache` / `with_reader_text`）已整体删除：
+/// 没有"整本"可缓存，缓存自然也就不需要了。
+pub(crate) fn read_text_page(src_path: &Path, offset: u32, content_key: &str) -> HpResult<BookContentResult> {
+    let page = hp_book::read_text_page_window(
         src_path,
-        |text, encoding, byte_capped| {
-            let page = hp_book::page_at(text, offset as usize, hp_book::TEXT_PAGE_CHARS);
-            BookContentResult {
-                format: "text".into(),
-                encoding: Some(encoding.to_string()),
-                text: Some(page.text),
-                blocks: None,
-                next_cursor: page.next_offset.map(|n| n.to_string()),
-                section: 0,
-                section_count: None,
-                title: None,
-                // 本页之后还有内容、或解码时就被上限截断，都算"仅显示开头"。
-                capped: byte_capped || page.next_offset.is_some(),
-            }
-        },
-    )
+        offset,
+        hp_book::TEXT_PAGE_CHARS,
+        Some(content_key),
+    )?;
+    Ok(BookContentResult {
+        format: "text".into(),
+        encoding: Some(page.encoding.name().to_string()),
+        text: Some(page.text),
+        blocks: None,
+        next_cursor: page.next_offset.map(|n| n.to_string()),
+        section: 0,
+        section_count: None,
+        title: None,
+        // 本页之后还有内容、或扫描时就被上限闸门截断，都算"仅显示开头"。
+        capped: page.capped || page.next_offset.is_some(),
+        // 纯文本没有"章"，因此没有"本章要另起一页"这回事。
+        page_break_before: false,
+    })
 }
 
 /// Markdown 一页：解码 → 解析成类型化块 → 按**块**切页。
@@ -668,6 +747,8 @@ pub(crate) fn read_markdown_page(
         title: None,
         // 还有下一页、或解码时被上限截断，都算"仅显示开头"。
         capped: decoded.capped || end < total,
+        // Markdown 没有"章"的概念（游标是顶层块序号），因此不声明章节换页。
+        page_break_before: false,
     })
 }
 
@@ -725,6 +806,7 @@ pub(crate) fn read_pdf_page(
                 section_count: Some(total),
                 title: None,
                 capped: false,
+                page_break_before: false,
             });
         };
         cache.ensure_dir_for(hash)?;
@@ -748,6 +830,9 @@ pub(crate) fn read_pdf_page(
         rows: None,
         label: None,
         definitions: None,
+        figure: None,
+        caption: None,
+        full_page: None,
     };
 
     Ok(BookContentResult {
@@ -761,10 +846,37 @@ pub(crate) fn read_pdf_page(
         title: None,
         // 还有下一页 = "仅显示开头"（用户口径：只显示开头的内容）。
         capped: index as u32 + 1 < total,
+        // PDF 的一"页"就是一张位图：翻到下一页天然换页，不需要额外的换页声明。
+        page_break_before: false,
     })
 }
 
 /// epub 一章：读 spine 的第 `section` 章，转成类型化块（**不返回 HTML**）。
+///
+/// ## `page_break_before`：**每章都是全新的一页**（2026-10-18，需求 4）
+///
+/// 用户口径："每个章节应该是全新的一页，而不是接在上一章后面。"
+///
+/// 判据就是 `read.section > 0`——**章节序号**（`book.content` 的游标）本身已经
+/// 表达"这是第几章"，`0` 是第一/前言，`> 0` 即"本章另起一页"。
+///
+/// **为什么不用一个 `page_break` 块表示**（三个可观测的理由）：
+/// 1. 那个块会占掉**页容器的第一个子元素**，把 `:first-child` / `:last-child`
+///    语义一起改掉（样式的落点会错位）；
+/// 2. 它是"空块"，在章首就是**前导空白**：滚动模式下多一条分隔线，
+///    分页（多栏）模式下会多出一整栏空白；
+/// 3. 前端本来就要按页容器渲染每章，页容器上多一个属性是**零新增结构**。
+///
+/// 因此解析侧不合成任何块，只在这里如实声明"本章不是第一章"。
+/// 前端在页容器上落到 `data-page-break-before`（见 `ReaderStage` 的渲染说明）。
+///
+/// ## 与 koodo-reader 的对应关系
+///
+/// koodo 的真实机制是"**整章重渲染**"：它不做连续排版，每次换章都先
+/// `doc.body.innerHTML = ""` 再注入（其排版内核 `kookit` 的
+/// `src/utils/navigationUtil.ts` 的 `handleRenderChapter()`），章首分页是这件事的
+/// **副作用**。我们这里"已载入的多页拼在一条流里"，所以要把同一个语义**显式**写出来
+/// ——`section > 0` 就是它的等价物。
 pub(crate) fn read_epub_page(
     src_path: &Path,
     section: u32,
@@ -785,6 +897,8 @@ pub(crate) fn read_epub_page(
         title: Some(read.title),
         // 还有下一章 = "仅显示开头"（用户口径：只显示开头的内容）。
         capped: read.section + 1 < read.section_count,
+        // 第 0 章（前言 / 第一章）不声明换页；其后每一章都另起一页（需求 4）。
+        page_break_before: read.section > 0,
     })
 }
 

@@ -56,12 +56,17 @@ fn tag_name(tag: &str) -> &str {
 }
 
 /// 取标签的**属性值**（支持单/双引号；属性名大小写不敏感）。
+///
+/// **属性名允许含连字符与命名空间前缀**（`font-size` / `page-break-before` /
+/// `xlink:href`）：切分属性名时只把空白、`<`、`>`、`/`、`=` 当边界，
+/// 否则 `font-size` 会被切出一个尾随 `-`，`font-size:1.5em` 这类声明就再也读不到
+/// （实测抓到的 bug，2026-10-18）。
 pub fn attr_value(tag: &str, attr: &str) -> Option<String> {
     let mut rest = tag;
     loop {
         let name_end = rest.find('=')?;
         let name = rest[..name_end]
-            .rsplit(|c: char| c.is_whitespace() || c == '<' || c == '/')
+            .rsplit(|c: char| c.is_whitespace() || c == '<' || c == '>' || c == '/' || c == '=')
             .next()
             .unwrap_or("");
         let after = rest[name_end + 1..].trim_start();

@@ -11,10 +11,12 @@
 //! 同一个域——前者是纯文件格式解析，没有外部进程、没有解码、没有缓存。按领域拆 crate
 //! 是本项目的既定口径（`docs/architecture/file-structure.md` 的"按功能分文件夹"）。
 //!
-//! ## 正文的三条读取路径（2026-10-09 / 2026-10-10）
+//! ## 正文的三条读取路径（2026-10-09 / 2026-10-10 / 2026-10-18）
 //!
-//! - **纯文本**（`txt`）：`text` 模块判编码（实测语料一半 GBK）+ 按字符偏移分页；
-//! - **EPUB**：`epub_text` 把 spine 章节的 XHTML 过白名单转成类型化块；
+//! - **纯文本**（`txt`）：`text` 判编码（实测语料一半 GBK）+ **按窗口渐进读取**
+//!   （2026-10-18：不再是"整本解码"，见该模块文档与需求 2）；
+//! - **EPUB**：`epub_text` 把 spine 章节的 XHTML 过白名单转成类型化块
+//!   （富行内样式 / 图组 / 注释 / 换页的判据在 `epub_rich`，见需求 5）；
 //! - **Markdown**（`md` / `markdown`）：`markdown` 把 CommonMark + GFM 转成**同一套**
 //!   类型化块（`block` 模块），因此前端**只有一份渲染器**。
 //!
@@ -24,12 +26,14 @@
 mod block;
 mod cover;
 mod epub;
+mod epub_rich;
 mod epub_text;
 mod inline;
 mod markdown;
 mod markdown_tests;
 mod meta;
 mod text;
+mod text_stream;
 mod toc;
 mod xml;
 mod zip;
@@ -48,6 +52,10 @@ pub use text::{
     decode_file_head, decode_file_limited, decode_head, decode_head_limited, detect_encoding,
     is_strict_utf8, is_utf8_but_maybe_truncated, page_at, trim_to_char_boundary, DecodedText,
     TextEncoding, TextPage, TEXT_PAGE_CHARS, TEXT_VIEW_MAX_BYTES,
+};
+pub use text_stream::{
+    last_page_read_bytes, read_text_page_window, scan_text, text_toc_stream, TextPageOwned,
+    TextScan, TEXT_SCAN_MAX_BYTES,
 };
 pub use toc::{markdown_toc, read_epub_toc, text_toc, TocEntry, TOC_MAX_ENTRIES};
 pub use xml::{decode_xml_bytes, percent_decode, resolve_zip_path};

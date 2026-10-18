@@ -4787,20 +4787,136 @@ check(
 );
 
 check(
-  "Rust：`book.toc` 按**媒体类型**分流、返回 `ApiAsync`，且纯文本走整本解码（目录必须覆盖全书）",
-  /pub\(crate\) async fn book_toc\(/.test(bookReaderRust) &&
-    /-> ApiAsync<BookTocResult>/.test(bookReaderRust) &&
-    // PDF 与 epub / md 一样按媒体类型先判，不按扩展名猜。
-    /if media_type == MediaType::Pdf/.test(bookReaderRust) &&
-    /hp_book::read_epub_toc\(/.test(bookReaderRust) &&
-    /hp_book::text_toc\(/.test(bookReaderRust) &&
-    /hp_book::markdown_toc\(/.test(bookReaderRust) &&
-    // 纯文本目录必须基于**整本**（64 MiB 上限 + 单本缓存），否则第 800 章不在目录里。
-    /READER_MAX_BYTES/.test(bookReaderRust) &&
-    /with_reader_text\(/.test(bookReaderRust) &&
-    /fn reader_text_key\(repo_id: &str, file_id: &str, hash: Option<&str>\)/.test(bookReaderRust) &&
-    // 缓存键必须含内容哈希（换内容即失效）。
-    /format!\("\{repo_id\}\|\{file_id\}\|\{\}", hash\.unwrap_or\("-"\)\)/.test(bookReaderRust),
+  "Rust：`book.toc` 按**媒体类型**分流、返回 `ApiAsync`，纯文本走**流式**扫描（覆盖全书且不整本进内存）",
+  (() => {
+    /*
+     * **反面断言要看代码，不看注释**：这两个文件的注释**必须**解释"旧机制为什么被删"
+     * （旧 `READER_MAX_BYTES` / `with_reader_text` / `ReaderTextCache`）——注释里提到它们
+     * 是正当的，甚至是被要求的（本项目"注释即文档"）。因此先把注释剥掉，再断言
+     * "代码里没有把它们写回来"。
+     */
+    const code = (src) =>
+      src
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .split("\n")
+        .map((line) => line.replace(/\/\/.*$/, ""))
+        .join("\n");
+    const readerCode = code(bookReaderRust);
+    return (
+      /pub\(crate\) async fn book_toc\(/.test(readerCode) &&
+      /-> ApiAsync<BookTocResult>/.test(readerCode) &&
+      // PDF 与 epub / md 一样按媒体类型先判，不按扩展名猜。
+      /if media_type == MediaType::Pdf/.test(readerCode) &&
+      /hp_book::read_epub_toc\(/.test(readerCode) &&
+      /hp_book::text_toc_stream\(/.test(readerCode) &&
+      /hp_book::markdown_toc\(/.test(readerCode) &&
+      /*
+       * 纯文本目录必须**覆盖全书**（否则第 800 章不在目录里），但**不得**把整本读进
+       * 内存——2026-10-18 用户实测"打开一本 txt 内存涨到 5 GB 以上并卡死"（需求 2）。
+       * 因此判据是"流式扫描"而不是"整本解码 + 单本缓存"：下面把旧机制的**代码**
+       * 明确排除掉（它不是"忘了写"，而是**不允许**写回来）。
+       */
+      !/with_reader_text\(/.test(readerCode) &&
+      !/ReaderTextCache/.test(readerCode) &&
+      !/READER_MAX_BYTES/.test(readerCode) &&
+      // 旧缓存字段也不得复活（`AppState` 上已无 `book_text`）。
+      !/book_text/.test(readerCode)
+    );
+  })(),
+);
+
+check(
+  "Rust：纯文本**渐进读取**（需求 2）——按窗口取页 + 有界锚点表，且不含「整本解码」路径",
+  (() => {
+    const stream = readFileSync(join(ROOT, "crates/hp-book/src/text_stream.rs"), "utf8");
+    const bookSrc = readFileSync(
+      join(ROOT, "apps/desktop/src-tauri/src/commands/book.rs"),
+      "utf8",
+    );
+    // 反面断言只看**代码**（注释里解释旧机制是正当的，见上一条的说明）。
+    const code = (src) =>
+      src
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .split("\n")
+        .map((line) => line.replace(/\/\/.*$/, ""))
+        .join("\n");
+    const bookCode = code(bookSrc);
+    return (
+      // 三个入口都在（统计 / 取页 / 流式目录），且都由 `lib.rs` 导出。
+      /pub fn scan_text\(/.test(stream) &&
+      /pub fn read_text_page_window\(/.test(stream) &&
+      /pub fn text_toc_stream\(/.test(stream) &&
+      /pub use text_stream::/.test(
+        readFileSync(join(ROOT, "crates/hp-book/src/lib.rs"), "utf8"),
+      ) &&
+      // 有界闸门与锚点步长都是**常量**（可审计的算术，不是散落的魔法数）。
+      /pub const TEXT_SCAN_MAX_BYTES: u64 = 512 \* 1024 \* 1024;/.test(stream) &&
+      /pub const ANCHOR_STRIDE_BYTES: u64 = 64 \* 1024;/.test(stream) &&
+      /pub const ANCHOR_TABLES_MAX: usize = 4;/.test(stream) &&
+      // 锚点表按**内容身份**键控（`files.content_hash`），换内容必然换表。
+      /content_key: Option<String>/.test(stream) &&
+      // 锚点必须落在字符边界上（否则会多算一个字符、游标整体偏移）。
+      // 断言读**实现 + 测试**两处：那条不变量由 `text_stream_tests.rs` 里的用例按
+      // 行为钉住（2026-10-18 拆分后测试不再与实现同文件）。
+      /fn count_chunk\(/.test(stream) &&
+      /fn anchors_land_on_character_boundaries/.test(
+        readFileSync(join(ROOT, "crates/hp-book/src/text_stream_tests.rs"), "utf8"),
+      ) &&
+      // 正文取页走窗口函数，且把内容哈希作为内容身份传进去。
+      /hp_book::read_text_page_window\(/.test(bookCode) &&
+      /Some\(content_key\)/.test(bookCode) &&
+      // **反面**：桥接层不得再出现"整本解码"的调用（`decode_file_limited` 是那条路径）。
+      !/decode_file_limited/.test(bookCode)
+    );
+  })(),
+);
+
+check(
+  "CSS：需求 3/4 的换页与图片封顶（真机探针量出的两处洞已堵）",
+  (() => {
+    const cssRaw = readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/styles.css"), "utf8");
+    /*
+     * **反面断言只看代码、不看注释**：这条规则替换掉的旧写法（
+     * `[style*="--vr-columns: 1"]`）必须在注释里被**说明**（"注释即文档"是本项目
+     * 的要求），因此先把 CSS 注释剥掉再断言"代码里没有把它写回来"。
+     */
+    const css = cssRaw.replace(/\/\*[\s\S]*?\*\//g, "");
+    return (
+      // 需求 4 的主判据：页容器上的**属性**（不是"往流里塞空块"）。
+      /\.br-stage-paged\s+\.br-page\[data-page-break-before\]/.test(css) &&
+      // 多栏里断的是**栏**，不是打印页（`page` 在屏幕上没有效果）。
+      /break-before:\s*column/.test(css) &&
+      /*
+       * 查看器一侧必须用**结构类名**，**不得**字符串匹配内联样式：
+       * 2026-10-18 真机探针量出 `[style*="--vr-columns: 1"]`（带空格）永远匹配不上
+       * React 序列化的 `--vr-columns:1`（无空格），于是单栏模式反而命中多栏分支，
+       * 每一页被推到不存在的下一栏、正文整页移出可视区。类名判据与变量写法无关。
+       */
+      /\.vr-content\.vr-multicolumn\s+\.vr-page\[data-page-break-before\]/.test(css) &&
+      !/\[style\*="--vr-columns/.test(css) &&
+      // 面板必须在 columns >= 2 时给出这个类（否则判据永远不会命中）。
+      /vr-multicolumn/.test(
+        readFileSync(
+          join(ROOT, "apps/desktop/src/app_ui/panels/viewer/ViewerReader.tsx"),
+          "utf8",
+        ),
+      ) &&
+      // 需求 3：普通图**按容器高封顶**（koodo `handleImageSize` 的口径），
+      // 不是「不封顶」（旧 `max-height: none` 正是"顶破一页"的成因）。
+      /--br-page-h/.test(css) &&
+      /--vr-page-h/.test(css) &&
+      // **PDF 例外必须与规则先后顺序无关**：`.br-content .vr-image`（0,2,0）与
+      // `.vr-pdf .vr-image`（0,2,0）平局时后者先写、前者后写 ⇒ 前者赢。
+      // 因此阅读器侧必须存在**更高特异性**的 PDF 例外（0,3,0）。
+      /\.br-content\.vr-pdf\s+\.vr-image/.test(css) &&
+      /\.br-content\s+\.vr-pdf\s+\.vr-image/.test(css) &&
+      // 图组整体不可拆（图与图注同栏）。
+      /\.vr-figure[^}]*break-inside:\s*avoid/.test(css) &&
+      // 需求 1：全屏改白必须**两条**都存在（根节点内部 + ::backdrop 外部）。
+      /\.br-root:fullscreen\s*\{[^}]*background:\s*#ffffff/.test(css) &&
+      /\.br-root:fullscreen::backdrop\s*\{[^}]*background:\s*#ffffff/.test(css)
+    );
+  })(),
 );
 
 check(

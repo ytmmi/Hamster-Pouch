@@ -255,8 +255,8 @@ mod tests {
             ffmpeg_bin: Arc::new(None),
             ffprobe_bin: Arc::new(None),
             thumb_cache: Arc::new(ThumbnailCache::new(std::path::PathBuf::from("Z:/none"))),
-            // 阅读器的单本正文缓存：本模块的用例不涉及正文读取，空缓存即可。
-            book_text: Arc::new(Mutex::new(None)),
+            // 注：2026-10-18 起 `AppState` 不再有 `book_text`（整本正文缓存）字段——
+            // 纯文本改为按窗口渐进读取，没有"整本"可缓存（用户需求 2）。
             media: Arc::new(Mutex::new(None)),
             media_embed: Arc::new(Mutex::new(None)),
             plugin_root: Arc::new(std::path::PathBuf::from("Z:/none")),

@@ -9,24 +9,25 @@ mod tests {
         read_cache, read_epub_page, read_markdown_page, read_text_page, write_atomic,
         BookMetaCache, MARKDOWN_PAGE_BLOCKS,
     };
-    // 阅读器一侧的取数拆在 `book_reader.rs`（目录 + 整本缓存）：测试仍集中在本文件。
-    use crate::commands::book_reader::{
-        read_toc_by_media_type, ReaderCtx, ReaderTextCache,
-    };
+    // 阅读器一侧的取数拆在 `book_reader.rs`（目录）：测试仍集中在本文件。
+    // 注：`ReaderCtx` 已不再被测试需要（目录读取现在是纯函数，见 2026-10-18 的
+    // 渐进加载改造）。
+    use crate::commands::book_reader::read_toc_by_media_type;
     use hp_core::{HpError, MediaType};
     use hp_dto::BookSpanItem;
     use std::path::{Path, PathBuf};
-    use std::sync::Mutex;
 
-    /// 阅读器的单本正文缓存（每个用例一份空缓存；缓存行为由 `book.rs` 的接线保证）。
-    fn empty_text_cache() -> Mutex<Option<ReaderTextCache>> {
-        Mutex::new(None)
-    }
-
-    /// 读一页纯文本（测试夹具：固定缓存键，避免每个用例都拼一遍）。
-    fn read_text_page_for_test(path: &Path, offset: u32) -> hp_core::HpResult<hp_dto::BookContentResult> {
-        let cache = empty_text_cache();
-        read_text_page(path, offset, &cache, "test|book|hash")
+    /// 读一页纯文本（测试夹具）。
+    ///
+    /// **签名变化（2026-10-18，需求 2）**：`read_text_page` 不再需要"整本解码缓存"
+    /// （`Mutex<Option<ReaderTextCache>>`）与缓存键——它改为按窗口渐进读取，每次
+    /// 只读该页所需的字节窗口。第三个参数现在是**内容身份**
+    /// （`files.content_hash`，纯文本锚点表的 `content_key`），测试里给一个固定值。
+    fn read_text_page_for_test(
+        path: &Path,
+        offset: u32,
+    ) -> hp_core::HpResult<hp_dto::BookContentResult> {
+        read_text_page(path, offset, "test-content-hash")
     }
 
     /// 测试夹具：把一组行内片段拼回纯文字（断言只关心文字，不关心样式）。
@@ -242,9 +243,15 @@ mod tests {
 
         let blocks = first.blocks.expect("epub 页应当有块");
         // **不含 HTML**：只有类型化块（安全边界）。
-        assert!(blocks
-            .iter()
-            .all(|b| b.kind == "heading" || b.kind == "paragraph" || b.kind == "image"));
+        //
+        // 2026-10-18（需求 5）：裸 `<img>`（不在 `<figure>` 里）现在也产出
+        // `kind = "figure"`——解析侧把"图 + 可选图注"统一成**一个排版单元**，
+        // 前端因此只有一条图片渲染路径（与 koodo 把图片当块级元素同源）。
+        // `heading` / `paragraph` 两种文字块不变。
+        assert!(blocks.iter().all(|b| b.kind == "heading"
+            || b.kind == "paragraph"
+            || b.kind == "image"
+            || b.kind == "figure"));
         assert_eq!(blocks[0].kind, "heading");
         assert_eq!(blocks[0].level, Some(1));
         // 文字现在在 `spans` 里（行内内容），不是 `text`（`text` 是代码块的原文）。
@@ -253,11 +260,16 @@ mod tests {
         assert_eq!(span_text(&blocks[1].spans), "甲");
 
         // 插图已落盘，且给出的是**绝对路径**（供 convertFileSrc）。
-        let image = blocks
+        //
+        // `figure` 块把图片放在 `figure` 字段里（嵌套的 `image` 块），图注在
+        // `caption`；`full_page` 如实透传解析侧的判定结果。
+        let figure = blocks
             .iter()
-            .find(|b| b.kind == "image")
-            .expect("应当有插图块");
-        let image_path = image.path.as_deref().expect("插图应当有路径");
+            .find(|b| b.kind == "figure")
+            .expect("应当有图组块");
+        let inner = figure.figure.as_ref().expect("图组应当包着图片块");
+        assert_eq!(inner.kind, "image", "图组里的图片仍是 image 块");
+        let image_path = inner.path.as_deref().expect("插图应当有路径");
         assert!(
             Path::new(image_path).exists(),
             "插图必须已落盘：{image_path}"
@@ -270,6 +282,7 @@ mod tests {
             image_path.ends_with(".png"),
             "落盘后缀应保留原格式：{image_path}"
         );
+        assert_eq!(figure.full_page, Some(false), "普通插图不是整页图");
 
         let second = read_epub_page(&path, 1, &cache, hash).expect("读取失败");
         assert_eq!(second.title.as_deref(), Some("第二章"));
@@ -539,24 +552,20 @@ mod tests {
         let text = "第一章 山边小村\n他抬起头，望向远处。\n第二章 青牛镇\n镇上人来人往。\n第三章 七玄门\n";
         std::fs::write(&path, text.as_bytes()).expect("写入失败");
 
-        let cache = empty_text_cache();
-        let thumb = hp_media::ThumbnailCache::new(dir.join("cache"));
-        let ctx = ReaderCtx {
-            cache: &thumb,
-            text_cache: &cache,
-            hash: "hash",
-            text_key: "repo|file|hash",
-        };
-        let toc = read_toc_by_media_type(MediaType::Text, &path, "txt", &ctx).expect("读目录失败");
+        // 目录读取**不需要任何上下文**（2026-10-18）：`read_toc_by_media_type`
+        // 现在是纯函数（文件 + 扩展名决定一切），因为纯文本的"整本缓存"已随
+        // 渐进加载一起删除（需求 2）。因此这里不再构造 `ReaderCtx`。
+        let toc = read_toc_by_media_type(MediaType::Text, &path, "txt").expect("读目录失败");
         assert_eq!(toc.format, "text");
         let titles: Vec<&str> = toc.entries.iter().map(|e| e.title.as_str()).collect();
         assert_eq!(titles, vec!["第一章 山边小村", "第二章 青牛镇", "第三章 七玄门"]);
         // 总字符数 = 全书字符数（进度条按 `cursor / total` 算，口径与 cursor 一致）。
+        // 2026-10-18：改成 `text_toc_stream` 的流式扫描后，`total` 由同一次扫描给出。
         assert_eq!(toc.total, Some(text.chars().count() as u32));
 
         // 跳到第二章：正文第一页必须以第二章开头。
         let cursor = toc.entries[1].cursor.parse::<u32>().expect("游标是字符偏移");
-        let page = read_text_page(&path, cursor, &cache, "repo|file|hash").expect("读取失败");
+        let page = read_text_page(&path, cursor, "hash").expect("读取失败");
         let body = page.text.unwrap_or_default();
         assert!(
             body.starts_with("第二章 青牛镇"),
@@ -565,29 +574,39 @@ mod tests {
         );
     }
 
-    /// 阅读器的整本解码：**同一把键命中缓存**（盘上换了内容也仍读缓存，
-    /// 直到键变化），换键则重新解码——这正是"翻页不再重解"的机制。
+    /// **窗口分页**（2026-10-18，需求 2 的回归）：一页只读该页所需的字节窗口，
+    /// 因此**重复请求同一偏移**必须给出同样的正文（没有缓存也就不该有"陈旧缓存"），
+    /// 而**文件内容改变后**下一次请求必须读到新内容（这正是旧"整本缓存"会读旧值的
+    /// 那个缺陷类）。
     #[test]
-    fn reader_text_cache_reuses_the_decoded_book_until_the_key_changes() {
+    fn text_pages_read_the_current_file_content_on_every_request() {
         let dir = temp_dir();
-        let path = dir.join("cached.txt");
+        let path = dir.join("streamed.txt");
         std::fs::write(&path, "第一章 甲\n".as_bytes()).expect("写入失败");
 
-        let cache = empty_text_cache();
-        let first = read_text_page(&path, 0, &cache, "k1").expect("读取失败");
-        assert!(first.text.unwrap_or_default().contains('甲'));
-
-        // 盘上换内容但**键不变**（同一本书的同一次解码）→ 仍走缓存。
-        std::fs::write(&path, "第二章 乙\n".as_bytes()).expect("写入失败");
-        let cached = read_text_page(&path, 0, &cache, "k1").expect("读取失败");
-        assert!(
-            cached.text.unwrap_or_default().contains('甲'),
-            "键不变时必须命中缓存（否则每翻一页都会重解整本）"
+        // 内容身份不变、内容也不变：两次请求必须一致（纯函数式取数）。
+        let first_text = read_text_page(&path, 0, "k1")
+            .expect("读取失败")
+            .text
+            .unwrap_or_default();
+        assert!(first_text.contains('甲'));
+        let again_text = read_text_page(&path, 0, "k1")
+            .expect("读取失败")
+            .text
+            .unwrap_or_default();
+        assert_eq!(
+            again_text, first_text,
+            "同一偏移的两次请求必须给出同样的正文"
         );
 
-        // 键变化（换书 / 换内容哈希）→ 重新解码。
-        let refreshed = read_text_page(&path, 0, &cache, "k2").expect("读取失败");
-        assert!(refreshed.text.unwrap_or_default().contains('乙'));
+        // 盘上换内容：**必须读到新内容**。旧实现（整本缓存 + 键不变）在这一步会
+        // 返回旧正文（"键不变就命中缓存"）；现在按窗口现读，不会。
+        std::fs::write(&path, "第二章 乙\n".as_bytes()).expect("写入失败");
+        let refreshed = read_text_page(&path, 0, "k1").expect("读取失败");
+        assert!(
+            refreshed.text.unwrap_or_default().contains('乙'),
+            "按窗口读取必须读到盘上的当前内容（不允许陈旧缓存）"
+        );
     }
 
     /// EPUB 的目录走 nav；PDF **没有**目录结构（空目录不是错误）。
@@ -617,15 +636,8 @@ mod tests {
         )
         .expect("写入失败");
 
-        let cache = empty_text_cache();
-        let thumb = hp_media::ThumbnailCache::new(dir.join("cache"));
-        let ctx = ReaderCtx {
-            cache: &thumb,
-            text_cache: &cache,
-            hash: "hash",
-            text_key: "repo|file|hash",
-        };
-        let toc = read_toc_by_media_type(MediaType::Text, &epub, "epub", &ctx).expect("读目录失败");
+        // 同 `txt_toc_cursor_round_trips_into_content`：目录读取不需要上下文。
+        let toc = read_toc_by_media_type(MediaType::Text, &epub, "epub").expect("读目录失败");
         assert_eq!(toc.format, "epub");
         let got: Vec<(String, String)> = toc
             .entries
@@ -644,7 +656,7 @@ mod tests {
         let pdf = dir.join("a.pdf");
         std::fs::write(&pdf, b"%PDF-1.4\n").expect("写入失败");
         let pdf_toc =
-            read_toc_by_media_type(MediaType::Pdf, &pdf, "pdf", &ctx).expect("PDF 目录不该报错");
+            read_toc_by_media_type(MediaType::Pdf, &pdf, "pdf").expect("PDF 目录不该报错");
         assert_eq!(pdf_toc.format, "pdf");
         assert!(pdf_toc.entries.is_empty());
         assert_eq!(pdf_toc.total, None, "PDF 的进度不由目录接口给");
