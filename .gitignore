@@ -62,6 +62,11 @@ Thumbs.db
 Desktop.ini
 ehthumbs.db
 
+# Windows 快捷方式（.lnk 是二进制 + 含本机绝对路径，指向的是构建产物目录，
+# 对别人没有意义）。仓库里一个都不入库；本机现有的那个是
+# `release - 快捷方式.lnk` → apps/desktop/src-tauri/target/release。
+*.lnk
+
 # === 环境与密钥 ===
 .env
 .env.*
