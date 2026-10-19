@@ -373,7 +373,9 @@ impl CarryCounter {
         };
         let boundary = joined.len() - keep;
         let (head, tail) = joined.split_at(boundary);
-        let before = out.chars().count();
+        // 按**字节**记起点再只数新增部分：旧写法 `out.chars().count() - before`
+        // 每次都把整个累积缓冲重数一遍，调用方若不清空缓冲就是 O(n²)。
+        let before = out.len();
         if !head.is_empty() {
             let mut decoder = self.encoding.new_decoder_without_bom_handling();
             let capacity = decoder
@@ -383,7 +385,7 @@ impl CarryCounter {
             let (_result, _read) =
                 decoder.decode_to_string_without_replacement(head, out, true);
         }
-        let added = out.chars().count() - before;
+        let added = out[before..].chars().count();
         self.chars += added as u64;
         self.carry = tail.to_vec();
         added
@@ -934,12 +936,23 @@ pub fn text_toc_stream(
     ///
     /// `text_toc` 的判据输入是"整行 trim 之后"；行首偏移跳掉前导空白
     /// （与 `text_toc` 一致——跳过去正好从标题开始读）。
+    ///
+    /// **不 `mem::take` 行缓冲**：旧写法每行都把 `String` 搬走再新建一个，
+    /// 一本 500 万字符的书就是几十万次分配。这里改成借用 + `clear()`，
+    /// 缓冲容量全程复用（判据返回的标题本来就是新 `String`，不受影响）。
     fn handle_line(state: &mut LineState, on_entry: &mut impl FnMut(TocEntry)) -> bool {
-        let raw = std::mem::take(&mut state.line);
-        if raw.is_empty() {
+        if state.line.is_empty() {
             return true;
         }
-        let Some((kind, title)) = crate::toc::novel_heading(raw.trim()) else {
+        let hit = {
+            let raw = state.line.as_str();
+            crate::toc::novel_heading(raw.trim()).map(|(kind, title)| {
+                let indent = raw.chars().count() - raw.trim_start().chars().count();
+                (kind, title, indent)
+            })
+        };
+        state.line.clear();
+        let Some((kind, title, indent)) = hit else {
             return true;
         };
         if kind == HeadingKind::Volume {
@@ -955,7 +968,6 @@ pub fn text_toc_stream(
                 }
             }
         };
-        let indent = raw.chars().count() - raw.trim_start().chars().count();
         on_entry(TocEntry {
             title,
             level,
@@ -963,6 +975,18 @@ pub fn text_toc_stream(
         });
         state.count += 1;
         state.count < TOC_MAX_ENTRIES
+    }
+
+    /// 把一段**已解码**的正文拼进当前行缓冲。
+    ///
+    /// `\r` 是行尾字符：不进入标题文字，但**计入字符偏移**（调用方另行累加）。
+    /// 整段不含 `\r` 时直接 `push_str`（绝大多数行都是这种，省掉逐字符过滤）。
+    fn append_line(line: &mut String, seg: &str) {
+        if seg.contains('\r') {
+            line.extend(seg.chars().filter(|c| *c != '\r'));
+        } else {
+            line.push_str(seg);
+        }
     }
 
     'outer: while at < limit {
@@ -984,20 +1008,31 @@ pub fn text_toc_stream(
         buf.clear();
         counter.feed_into(body, last, &mut buf);
 
-        for ch in buf.chars() {
-            if ch == '\n' {
-                if !handle_line(&mut state, &mut on_entry) {
-                    chars += 1;
-                    break 'outer;
+        // 按 `\n` 切段而不是逐字符 push：`str::find` 是 SIMD 扫描，一段行内正文
+        // 只需一次 `chars().count()`（O(n)，但要 UTF-8 逐字节判定）与一次
+        // `push_str`，比"每个字符都走一遍分支 + 单字符 push"快得多。
+        // 语义与逐字符版本**逐字节等价**：`\n` 计 1 个字符、`\r` 计字符但不入行、
+        // 其余字符原样入行。
+        let mut rest = buf.as_str();
+        loop {
+            match rest.find('\n') {
+                Some(pos) => {
+                    let seg = &rest[..pos];
+                    append_line(&mut state.line, seg);
+                    // 先判标题（此时 `state.start` 仍是行首偏移），再结算换行符。
+                    let more = handle_line(&mut state, &mut on_entry);
+                    chars += seg.chars().count() as u64 + 1;
+                    if !more {
+                        break 'outer;
+                    }
+                    state.start = chars;
+                    rest = &rest[pos + 1..];
                 }
-                chars += 1;
-                state.start = chars;
-            } else {
-                // `\r` 是行尾字符：不进入标题文字，但**计入字符偏移**。
-                if ch != '\r' {
-                    state.line.push(ch);
+                None => {
+                    append_line(&mut state.line, rest);
+                    chars += rest.chars().count() as u64;
+                    break;
                 }
-                chars += 1;
             }
         }
         at = next;

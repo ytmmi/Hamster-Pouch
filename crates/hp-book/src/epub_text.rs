@@ -82,13 +82,11 @@ use crate::inline::{local_name, spans_from_html, InlineState, RunBuilder};
 use crate::xml::{attr_value, decode_entities, resolve_zip_path};
 use crate::zip::ZipArchive;
 
-/// 一次章节读取的结果（一次打开包即可拿到目录 + 指定章节，避免重复解包）。
+/// 一次章节读取的结果。
 #[derive(Debug, Clone)]
 pub struct EpubSectionRead {
     /// 章节总数（spine 长度）。
     pub section_count: u32,
-    /// 全部章节标题（取自各章 `<title>`；缺失处为空串）。
-    pub titles: Vec<String>,
     /// 本次读取的章节序号。
     pub section: u32,
     /// 本章标题。
@@ -443,20 +441,6 @@ pub fn read_epub_section(path: &Path, section: u32) -> HpResult<EpubSectionRead>
         )));
     }
 
-    // 各章标题（取自 `<title>`）——顺带把目录给前端，用于进度提示。
-    let titles: Vec<String> = paths
-        .iter()
-        .map(|p| {
-            archive
-                .read(p)
-                .ok()
-                .flatten()
-                .map(|bytes| crate::xml::decode_xml_bytes(&bytes))
-                .and_then(|xhtml| crate::xml::element_text(&xhtml, "title"))
-                .unwrap_or_default()
-        })
-        .collect();
-
     let count = paths.len() as u32;
     let index = section.min(count.saturating_sub(1));
     let chapter_path = &paths[index as usize];
@@ -467,8 +451,11 @@ pub fn read_epub_section(path: &Path, section: u32) -> HpResult<EpubSectionRead>
 
     Ok(EpubSectionRead {
         section_count: count,
-        title: titles.get(index as usize).cloned().unwrap_or_default(),
-        titles,
+        // 标题只取**本章**的 `<title>`：旧实现在这里顺带解压 spine 里**全部**章节
+        // 只为攒一份 `titles`，而这份字段没有任何消费方（前端标题走
+        // `book.toc`，章节名走本字段），于是打开一本 50 MiB 的 EPUB 会把整本书
+        // 解压一遍又丢掉。2026-10-19 起只读目标章。
+        title: crate::xml::element_text(&xhtml, "title").unwrap_or_default(),
         section: index,
         blocks: blocks_from_xhtml(&xhtml, chapter_path, &archive),
     })
@@ -1131,7 +1118,6 @@ mod tests {
 
         let first = read_epub_section(&path, 0).expect("读取失败");
         assert_eq!(first.section_count, 2);
-        assert_eq!(first.titles, vec!["第一章".to_string(), "第二章".into()]);
         assert_eq!(first.section, 0);
         assert_eq!(first.title, "第一章");
         assert_eq!(

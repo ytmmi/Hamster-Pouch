@@ -364,19 +364,28 @@ fn chinese_heading_kind(line: &str) -> Option<HeadingKind> {
     })
 }
 
+/// `hay` 是否以 `needle` 开头（只折叠 ASCII 大小写）。
+///
+/// 用它替代"整行 `to_ascii_lowercase()` 再 `strip_prefix`"：旧写法每判一行都要
+/// 分配一个与行等长的 `String`，而目录扫描要对全书的每一行都判一次。
+fn starts_with_ignore_ascii_case(hay: &str, needle: &str) -> bool {
+    hay.len() >= needle.len()
+        && hay.as_bytes()[..needle.len()].eq_ignore_ascii_case(needle.as_bytes())
+}
+
 /// 英文写法：`Chapter 12` / `Part 2` / `Prologue`（大小写不敏感）。
 ///
 /// 数字位只认阿拉伯数字与罗马数字：`Chapter one` 这类拼写**不认**——
 /// 把 `Part of me…` 这种正文行误认成标题的代价，大于漏掉少量拼写数字的章节。
 fn english_heading_kind(line: &str) -> Option<HeadingKind> {
-    let lower = line.to_ascii_lowercase();
     for (word, kind) in [
         ("chapter", HeadingKind::Chapter),
         ("part", HeadingKind::Volume),
     ] {
-        let Some(rest) = lower.strip_prefix(word) else {
+        if !starts_with_ignore_ascii_case(line, word) {
             continue;
-        };
+        }
+        let rest = &line[word.len()..];
         let rest = rest.trim_start_matches([' ', '.', ':', '-', '—', '、', '　']);
         let next = rest.chars().next()?;
         if next.is_ascii_digit() || "ivxlcdm".contains(next) {
@@ -384,7 +393,11 @@ fn english_heading_kind(line: &str) -> Option<HeadingKind> {
         }
     }
     for word in ["prologue", "epilogue", "interlude"] {
-        if lower == word || lower.starts_with(&format!("{word} ")) {
+        if !starts_with_ignore_ascii_case(line, word) {
+            continue;
+        }
+        let rest = &line[word.len()..];
+        if rest.is_empty() || rest.starts_with(' ') {
             return Some(HeadingKind::Chapter);
         }
     }
@@ -430,6 +443,20 @@ fn clean_heading(line: &str) -> String {
     out.trim().chars().take(NOVEL_TITLE_MAX_CHARS).collect()
 }
 
+/// 首字符是否**有可能**出现在标题里（便宜的预筛）。
+///
+/// 目录扫描要为全书每一行判一次 [`novel_heading`]，而小说正文里绝大多数行
+/// 连"像标题"都谈不上（首字符是"他""我""这"……）。三条判据的首字符集合是有限的：
+/// 中文 `第`、英文 `c`/`p`/`e`/`i`（chapter/part/prologue/epilogue/interlude）、
+/// 固定写法那 20 条的首字。先用一次 `chars().next()` 把其余行挡掉，
+/// 长度计数、控制字符扫描、逐条 `strip_prefix` 就都不用做了。
+fn plausible_heading_start(ch: char) -> bool {
+    if ch == '第' || matches!(ch.to_ascii_lowercase(), 'c' | 'p' | 'e' | 'i') {
+        return true;
+    }
+    SPECIAL_HEADINGS.iter().any(|word| word.starts_with(ch))
+}
+
 /// 判断一行是否是**小说章节标题**，返回（种类，展示标题）。
 ///
 /// 防误判的三条约束见模块文档；命中后返回的标题已折叠空白。
@@ -437,7 +464,13 @@ fn clean_heading(line: &str) -> String {
 /// `pub(crate)`：这是本模块的内部判据，对外只暴露 [`text_toc`]——
 /// 调用方要的是"整本书的目录"，不是"这一行算不算标题"。
 pub(crate) fn novel_heading(line: &str) -> Option<(HeadingKind, String)> {
-    if line.chars().count() > NOVEL_TITLE_MAX_CHARS {
+    // 三条约束全是"不满足就 None"的过滤，彼此独立，因此可以先跑最便宜的那条。
+    let first = line.chars().next()?;
+    if !plausible_heading_start(first) {
+        return None;
+    }
+    // 字节数 ≤ 上限 ⇒ 字符数必然 ≤ 上限，省掉一次 `chars().count()`。
+    if line.len() > NOVEL_TITLE_MAX_CHARS && line.chars().count() > NOVEL_TITLE_MAX_CHARS {
         return None;
     }
     if line.chars().any(|c| c.is_control()) {

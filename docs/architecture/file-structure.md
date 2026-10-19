@@ -92,10 +92,14 @@ crates/hp-store/src/
     book.rs             # 图书元数据桥接（book.meta：EPUB 作者/简介/内嵌封面、**PDF 第一页封面**；
                         #   book.content：txt/md/epub 正文 + **PDF 逐页栅格化**；磁盘缓存按内容哈希失效）
     book_reader.rs      # 图书阅读器一侧的取数（2026-10-16，D113）：book.toc 目录
-                        #   （EPUB nav/NCX、txt 小说章节规则、md 标题；PDF 无目录）
-                        #   + **整本正文解码与单本缓存**（纯文本 64 MiB 上限，键含 content_hash；
-                        #   book.content 的纯文本路径也复用这份缓存——上限由调用方给，
-                        #   查看器仍用 2 MiB）。拆出来是因为 book.rs 已越过 1200 行红线
+                        #   （EPUB nav/NCX、txt 小说章节规则、md 标题；PDF 无目录）。
+                        #   **目录结果按内容哈希落盘缓存**（2026-10-19 / D116-R4）：
+                        #   `<hash>.booktoc.json`，记录自带 `TOC_CACHE_RULE` 版本号，
+                        #   标题识别规则一变旧缓存自动作废；只缓存"有内容"的结果
+                        #   （空目录 + 无总字数更像读取失败，落盘会把偶发失败固化）。
+                        #   **不再有"整本正文解码 + 单本缓存"**——D116-R3 已删除该路径
+                        #   （用户实测内存 5 GB+ 卡死），正文改走 hp-book 的流式窗口读。
+                        #   拆出来是因为 book.rs 已越过 1200 行红线
     reader.rs           # 阅读批注桥接（reader.annotations / addAnnotation / deleteAnnotation，
                         #   2026-10-16，D113）。**与 book.* 分开命名**：book.* 是"从**文件**里读出
                         #   内容属性"（只认 file_id、不写任何东西），批注是"**读者**留下的东西"
@@ -489,7 +493,20 @@ HamsterPouch/
                               #   markdown_tests.rs 测试独立成文件（守 1200 行）；
                               #   **正文不是 HTML**：渲染它要么 dangerouslySetInnerHTML（不接受）要么白名单，
                               #   白名单做在解析侧；**不引入 `zip` crate**（D20 依赖本地化），
-                              #   解压走已在依赖树里的 flate2
+                              #   解压走已在依赖树里的 flate2；
+                              #   **流式读（2026-10-18，D116-R3）**：text_stream.rs —— 纯文本正文
+                              #     按字符偏移**只读该页窗口**（`read_text_page_window`）、目录**流式扫描**
+                              #     （`text_toc_stream`）、总字数流式统计（`scan_text`）；**任何一次调用都
+                              #     不得读入整本**（旧"整本解码 + 单本缓存"实测内存 5 GB+ 卡死）；
+                              #     定位靠**有界锚点表**（每 64 KiB 一条，全局最多 4 张 ⇒ 常驻 ≤512 KiB），
+                              #     连续扫描必须用 `CarryCounter` 带块尾残余（丢残余会永久丢字符）；
+                              #   **打开速度（2026-10-19，D116-R4）**：zip.rs 由"整本 `fs::read` 进内存"
+                              #     改为**按需定位读**（`Source::{Memory,File}`；`open` 只读尾部 EOCD 窗口
+                              #     与中央目录，条目用平台 `read_at`/`seek_read` 定位读、不移动文件指针
+                              #     ⇒ `&self` 并发读安全）。旧前提是"封面解析是一次性操作"，阅读器落地后
+                              #     一本 EPUB 打开会走 meta/toc/content 三条入口、各 open 一次，前提消失；
+                              #     `read_epub_section` 同时删掉无人消费的 `titles` 全章预扫描；
+                              #     toc.rs 的标题识别加"首字符可能起头"预筛（见决策 D116-R4）
     hp-pdf/                   # PDF 的**封面（首页栅格化）/ 逐页栅格化 / 元数据**（2026-10-11 / D110）
                               #   lib.rs 模块文档与公开出口、open.rs 打开与**降级口径**（坏文件 / 加密 →
                               #     None 而不是 Err；只有读盘失败是 Err）、
@@ -508,6 +525,11 @@ HamsterPouch/
                               #   `src/bin/generate.rs` 负责导出）。桥接层必须直接用这里的类型
     # hp-core/examples/check-blueprint.rs：蓝图体检小工具（stdin 读 JSON，打印解析/硬错误/软告警），
     #   不属于产品运行路径；`check-line-count` 只扫 `src`，因此它不受 1200 行门禁约束。
+    # hp-book/examples/book_open_bench.rs：**打开图书的耗时基准**（2026-10-19 / D116-R4）。
+    #   `cargo run --release -p hp-book --example book_open_bench -- <目录>`；txt 分
+    #   `scan=` / `toc=` / `page0=` 三列（差值即标题识别成本）、epub 分 `toc=` / `sec0=`、
+    #   md 分 `toc=` / `page0=`。**接目录参数、不写死本机路径**，谁都能复现决策里的数字；
+    #   动 text_stream.rs / toc.rs / zip.rs 前后各跑一次，不要靠体感判断快慢。
   packages/
     ui/                       # 可复用面板组件、布局组件、设计 tokens
     shared-types/             # 由 Rust 类型生成的前端共享类型，生成文件必须标记来源

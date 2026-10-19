@@ -12,7 +12,9 @@ mod tests {
     // 阅读器一侧的取数拆在 `book_reader.rs`（目录）：测试仍集中在本文件。
     // 注：`ReaderCtx` 已不再被测试需要（目录读取现在是纯函数，见 2026-10-18 的
     // 渐进加载改造）。
-    use crate::commands::book_reader::read_toc_by_media_type;
+    use crate::commands::book_reader::{
+        read_toc_by_media_type, read_toc_cache, read_toc_with_cache, TOC_CACHE_RULE,
+    };
     use hp_core::{HpError, MediaType};
     use hp_dto::BookSpanItem;
     use std::path::{Path, PathBuf};
@@ -660,5 +662,111 @@ mod tests {
         assert_eq!(pdf_toc.format, "pdf");
         assert!(pdf_toc.entries.is_empty());
         assert_eq!(pdf_toc.total, None, "PDF 的进度不由目录接口给");
+    }
+
+    // ---- book.toc：磁盘缓存（2026-10-19，D116-R4）----
+
+    /// 缓存命中必须给出**与首次扫描逐字相同**的结果，且**不再碰源文件**。
+    ///
+    /// 判据取"把源文件删掉"：命中缓存后目录仍然读得出来 ⇒ 真的没再扫文件。
+    /// 这条同时证明缓存键与内容哈希一致（同 hash = 同一本书 = 同一份目录）。
+    #[test]
+    fn toc_cache_hit_serves_the_same_result_without_touching_the_source() {
+        let dir = temp_dir();
+        let cache = hp_media::ThumbnailCache::new(dir.join("cache"));
+        let path = dir.join("novel.txt");
+        std::fs::write(&path, "第一章 甲\n正文。\n第二章 乙\n正文。\n").expect("写入失败");
+        let hash = "0123456789abcdef";
+
+        let first = read_toc_with_cache(MediaType::Text, &path, "txt", &cache, hash)
+            .expect("首次读目录失败");
+        assert_eq!(first.entries.len(), 2);
+        assert!(cache.path_for_book_toc(hash).exists(), "首次读取应落盘缓存");
+
+        std::fs::remove_file(&path).expect("删除源文件失败");
+        let second = read_toc_with_cache(MediaType::Text, &path, "txt", &cache, hash)
+            .expect("命中缓存时不该再碰源文件");
+
+        let got: Vec<(String, String, u32)> = second
+            .entries
+            .iter()
+            .map(|e| (e.title.clone(), e.cursor.clone(), e.level))
+            .collect();
+        let want: Vec<(String, String, u32)> = first
+            .entries
+            .iter()
+            .map(|e| (e.title.clone(), e.cursor.clone(), e.level))
+            .collect();
+        assert_eq!(got, want, "缓存命中的目录必须与首次扫描逐字相同");
+        assert_eq!(second.format, first.format);
+        assert_eq!(second.total, first.total);
+    }
+
+    /// 损坏的缓存 = **未命中**（重新扫描），不是错误、也不是空目录。
+    #[test]
+    fn corrupt_toc_cache_is_recomputed() {
+        let dir = temp_dir();
+        let cache = hp_media::ThumbnailCache::new(dir.join("cache"));
+        let path = dir.join("novel.txt");
+        std::fs::write(&path, "第一章 甲\n").expect("写入失败");
+        let hash = "fedcba9876543210";
+
+        cache.ensure_dir_for(hash).expect("建目录失败");
+        std::fs::write(cache.path_for_book_toc(hash), b"{ not json").expect("写入失败");
+
+        let toc = read_toc_with_cache(MediaType::Text, &path, "txt", &cache, hash)
+            .expect("坏缓存必须回落为重新扫描");
+        assert_eq!(toc.entries.len(), 1);
+        // 重新扫描后缓存被修好（下次能命中）。
+        assert!(read_toc_cache(&cache, hash).is_some());
+    }
+
+    /// **规则版本不符**的缓存必须作废：规则一改，文件没变也要重扫。
+    ///
+    /// 做法：手写一份"条目完全不对、但 rule 更老"的记录，再验证读出来的是**真目录**。
+    #[test]
+    fn stale_toc_cache_rule_version_is_ignored() {
+        let dir = temp_dir();
+        let cache = hp_media::ThumbnailCache::new(dir.join("cache"));
+        let path = dir.join("novel.txt");
+        std::fs::write(&path, "第一章 甲\n").expect("写入失败");
+        let hash = "aaaabbbbccccdddd";
+
+        cache.ensure_dir_for(hash).expect("建目录失败");
+        let stale = serde_json::json!({
+            "rule": TOC_CACHE_RULE - 1,
+            "format": "text",
+            "entries": [{ "title": "旧规则算出来的假标题", "level": 1, "cursor": "0" }],
+            "total": 999,
+        });
+        std::fs::write(
+            cache.path_for_book_toc(hash),
+            serde_json::to_vec(&stale).expect("序列化失败"),
+        )
+        .expect("写入失败");
+
+        let toc = read_toc_with_cache(MediaType::Text, &path, "txt", &cache, hash)
+            .expect("读目录失败");
+        let titles: Vec<&str> = toc.entries.iter().map(|e| e.title.as_str()).collect();
+        assert_eq!(titles, vec!["第一章 甲"], "规则版本不符的缓存必须被忽略");
+        assert_eq!(toc.total, Some("第一章 甲\n".chars().count() as u32));
+    }
+
+    /// PDF 不写目录缓存：它的目录恒为空，缓存只会多一次 IO。
+    #[test]
+    fn pdf_does_not_write_a_toc_cache() {
+        let dir = temp_dir();
+        let cache = hp_media::ThumbnailCache::new(dir.join("cache"));
+        let pdf = dir.join("a.pdf");
+        std::fs::write(&pdf, b"%PDF-1.4\n").expect("写入失败");
+        let hash = "1111222233334444";
+
+        let toc = read_toc_with_cache(MediaType::Pdf, &pdf, "pdf", &cache, hash)
+            .expect("PDF 目录不该报错");
+        assert_eq!(toc.format, "pdf");
+        assert!(
+            !cache.path_for_book_toc(hash).exists(),
+            "PDF 的目录恒为空，不该落盘"
+        );
     }
 }

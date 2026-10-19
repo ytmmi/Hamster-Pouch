@@ -143,6 +143,20 @@ impl ThumbnailCache {
             .join(format!("{content_hash}.bookmeta.json"))
     }
 
+    /// 电子书**目录缓存**路径（`<hash>.booktoc.json`）。
+    ///
+    /// 目录是"扫一遍全书才知道"的东西：纯文本要逐块读盘、逐行套小说章节规则
+    /// （实测 24 MB 的书 release 下 60–130 ms，dev 构建下 0.4–1.1 s），
+    /// EPUB 要解 nav / NCX。**同一本书第二次打开目录是逐字不变的**，
+    /// 所以按内容哈希落盘复用——与元数据同一套失效口径（文件一变哈希就变）。
+    ///
+    /// 记录里另带一个**规则版本号**：`TOC_MAX_ENTRIES` 或标题识别规则演进时，
+    /// 旧缓存不会因为文件没变就永远命中，版本号对不上即重扫。
+    pub fn path_for_book_toc(&self, content_hash: &str) -> PathBuf {
+        self.shard_dir(content_hash)
+            .join(format!("{content_hash}.booktoc.json"))
+    }
+
     /// 电子书**正文插图**的缓存路径（`<hash>.book-<章节>-<序号>.<ext>`）。
     ///
     /// EPUB 的章节正文里可能有插图（实测语料 22/22 本都有，共 420 个 `<img>`），
@@ -244,6 +258,26 @@ mod tests {
         );
         assert_eq!(cover.parent(), thumb.parent(), "封面与缩略图共用分片目录");
         assert_ne!(cover, thumb, "封面与缩略图不得共用同一缓存文件");
+    }
+
+    #[test]
+    fn book_toc_shares_shard_but_not_file() {
+        // 目录缓存与封面 / 元数据 / 插图**同分片、不同文件**：同一本书的四种缓存
+        // 各自独立，不会互相覆盖。
+        let cache = ThumbnailCache::new("C:/tmp/thumbs");
+        let toc = cache.path_for_book_toc("abcdef0123456789");
+        assert_eq!(
+            toc,
+            PathBuf::from("C:/tmp/thumbs/ab/abcdef0123456789.booktoc.json")
+        );
+        assert_eq!(
+            toc.parent(),
+            cache.path_for_book_meta("abcdef0123456789").parent(),
+            "目录与元数据共用分片目录"
+        );
+        assert_ne!(toc, cache.path_for_book_meta("abcdef0123456789"));
+        assert_ne!(toc, cache.path_for_book_cover("abcdef0123456789", "png"));
+        assert_ne!(toc, cache.path_for_image("abcdef0123456789"));
     }
 
     #[test]

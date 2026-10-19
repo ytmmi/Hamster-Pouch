@@ -10,10 +10,22 @@
 //! 哨兵值）、多卷。EPUB 规范不允许加密与多卷；zip64 只在单文件 > 4 GiB 时出现，
 //! 那不是电子书的量级。
 //!
-//! 内存：整个文件一次读进内存（`std::fs::read`）。EPUB 单本通常在 1–60 MiB，
-//! 封面解析是"用户点了才做"的一次性操作，不值得为省这点内存引入按偏移读取的
-//! 复杂度与出错面。**这是有意的取舍，不是疏忽。**
+//! ## 读取策略：**按需读区间**，不再整本读进内存（2026-10-19 修订）
+//!
+//! 旧实现是 `std::fs::read` 一次读进整个文件，注释里写着"封面解析是用户点了才做的
+//! 一次性操作，不值得为省这点内存引入按偏移读取"。这个前提在阅读器落地后不成立了：
+//! 打开一本 EPUB 会走 **meta / toc / section 三条入口**，每条都自己 `open` 一次，
+//! 于是同一本 50 MiB 的书被整本读了 3 遍（≈150 MiB 磁盘 IO + 150 MiB 峰值内存），
+//! 而其中真正用到的字节只有 OPF、nav/NCX 和当前那一章——量级差了两个数量级。
+//!
+//! 现在 `open` 只读两小段：文件尾部（找 EOCD，最多 64 KiB + 22 字节）与中央目录
+//! （条目数 × 46 字节量级）。条目内容用平台定位读（`seek_read` / `read_at`）只取
+//! 该条目的压缩字节，**不 seek 文件指针**，因此 `&self` 上的并发读取天然安全。
+//!
+//! `from_bytes` 仍保留（测试与"调用方已经有字节"的场景），两条路径共用同一套
+//! 中央目录解析，差别只在 `Source`。
 
+use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
@@ -35,6 +47,8 @@ const METHOD_DEFLATE: u16 = 8;
 const EOCD_MIN_LEN: usize = 22;
 /// ZIP 注释长度上限（EOCD 因此最多可能出现在末尾 64 KiB + 22 字节之内）。
 const MAX_COMMENT_LEN: usize = 0xffff;
+/// 找 EOCD 时从文件尾部读的窗口长度。
+const EOCD_WINDOW: usize = EOCD_MIN_LEN + MAX_COMMENT_LEN;
 
 /// 单个条目解压后的上限（文本/OPF 都很小；防止畸形包把内存撑爆）。
 const MAX_ENTRY_BYTES: usize = 32 * 1024 * 1024;
@@ -52,10 +66,83 @@ pub struct ZipEntry {
     pub local_header_offset: u32,
 }
 
-/// 打开的 ZIP（内存中持有整个文件字节）。
+/// 条目字节的来源：内存（`from_bytes`）或磁盘文件（`open`）。
+#[derive(Debug)]
+enum Source {
+    Memory(Vec<u8>),
+    File(File),
+}
+
+/// 平台定位读：不移动文件指针，因此 `&File` 可并发使用。
+fn read_at(file: &File, buf: &mut [u8], offset: u64) -> std::io::Result<usize> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileExt;
+        file.read_at(buf, offset)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileExt;
+        file.seek_read(buf, offset)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        use std::io::{Seek, SeekFrom};
+        let mut f = file;
+        f.seek(SeekFrom::Start(offset))?;
+        f.read(buf)
+    }
+}
+
+impl Source {
+    /// 源的字节长度。
+    fn len(&self) -> HpResult<u64> {
+        match self {
+            Source::Memory(data) => Ok(data.len() as u64),
+            Source::File(file) => file
+                .metadata()
+                .map(|m| m.len())
+                .map_err(|e| HpError::Io(format!("读取压缩包长度失败: {e}"))),
+        }
+    }
+
+    /// 读取 `[offset, offset+len)`；不足时返回实际读到的字节（由调用方判定）。
+    fn read_range(&self, offset: u64, len: usize) -> HpResult<Vec<u8>> {
+        match self {
+            Source::Memory(data) => {
+                let start = usize::try_from(offset)
+                    .map_err(|_| HpError::Io("ZIP 偏移超出内存范围".into()))?;
+                let end = start.saturating_add(len).min(data.len());
+                Ok(data.get(start..end).unwrap_or(&[]).to_vec())
+            }
+            Source::File(file) => {
+                let mut out = vec![0u8; len];
+                let mut filled = 0usize;
+                while filled < len {
+                    let at = offset + filled as u64;
+                    match read_at(file, &mut out[filled..], at) {
+                        Ok(0) => break,
+                        Ok(n) => filled += n,
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(e) => {
+                            return Err(HpError::Io(format!(
+                                "读取压缩包失败（偏移 {at}，长度 {}）: {e}",
+                                len - filled
+                            )))
+                        }
+                    }
+                }
+                out.truncate(filled);
+                Ok(out)
+            }
+        }
+    }
+}
+
+/// 打开的 ZIP（内存源持字节，文件源持句柄 + 已解析的中央目录）。
 #[derive(Debug)]
 pub struct ZipArchive {
-    data: Vec<u8>,
+    source: Source,
     entries: Vec<ZipEntry>,
 }
 
@@ -77,50 +164,81 @@ fn le_u32(buf: &[u8], at: usize) -> Option<u32> {
 }
 
 impl ZipArchive {
-    /// 打开一个 ZIP 文件并解析出中央目录。
+    /// 打开一个 ZIP 文件：只读文件尾部与中央目录，条目内容按需读取。
     pub fn open(path: &Path) -> HpResult<Self> {
-        let data = std::fs::read(path).map_err(|e| io_err(path, "读取压缩包失败", e))?;
-        Self::from_bytes(data).map_err(|e| match e {
-            HpError::Io(msg) => HpError::Io(format!("{msg}（{}）", path.display())),
-            other => other,
-        })
+        let file = File::open(path).map_err(|e| io_err(path, "读取压缩包失败", e))?;
+        Self::from_source(Source::File(file))
+            .map_err(|e| match e {
+                HpError::Io(msg) => HpError::Io(format!("{msg}（{}）", path.display())),
+                other => other,
+            })
     }
 
     /// 从内存字节解析（测试与调用方复用同一实现）。
     pub fn from_bytes(data: Vec<u8>) -> HpResult<Self> {
-        let eocd = find_eocd(&data)
-            .ok_or_else(|| HpError::Io("不是有效的 ZIP：找不到中央目录结束记录".into()))?;
+        Self::from_source(Source::Memory(data))
+    }
 
-        let entry_count = le_u16(&data, eocd + 10).unwrap_or(0) as usize;
-        let central_size = le_u32(&data, eocd + 12).unwrap_or(0);
-        let central_offset = le_u32(&data, eocd + 16).unwrap_or(0);
+    /// 两条来源共用的解析流程：尾部窗口找 EOCD → 读中央目录 → 逐条解析。
+    fn from_source(source: Source) -> HpResult<Self> {
+        let len = source.len()?;
+        if len < EOCD_MIN_LEN as u64 {
+            return Err(HpError::Io("不是有效的 ZIP：文件过短".into()));
+        }
+
+        // 第一步：只读尾部窗口，找 EOCD（它后面只可能是最多 64 KiB 的注释）。
+        let window_len = (len.min(EOCD_WINDOW as u64)) as usize;
+        let window_start = len - window_len as u64;
+        let window = source.read_range(window_start, window_len)?;
+        if window.len() < EOCD_MIN_LEN {
+            return Err(HpError::Io("不是有效的 ZIP：文件被截断".into()));
+        }
+        let eocd_in_window = find_eocd(&window)
+            .ok_or_else(|| HpError::Io("不是有效的 ZIP：找不到中央目录结束记录".into()))?;
+        let eocd = eocd_in_window; // 相对窗口的偏移，够用：只需读 EOCD 自身的字段。
+
+        let entry_count = le_u16(&window, eocd + 10).unwrap_or(0) as usize;
+        let central_size = le_u32(&window, eocd + 12).unwrap_or(0);
+        let central_offset = le_u32(&window, eocd + 16).unwrap_or(0);
 
         // 哨兵值 = zip64 标记：本实现不读 zip64 扩展记录，直接如实报错。
         if entry_count == 0xffff || central_size == u32::MAX || central_offset == u32::MAX {
             return Err(HpError::Io("暂不支持 zip64 压缩包".into()));
         }
 
-        let start = central_offset as usize;
-        let end = start
-            .checked_add(central_size as usize)
-            .filter(|end| *end <= data.len())
+        let start = central_offset as u64;
+        // 只做**越界校验**：中央目录的结尾必须落在文件内（截断的包在这里报错，
+        // 而不是等到读条目时才读到半截数据）。
+        start
+            .checked_add(central_size as u64)
+            .filter(|dir_end| *dir_end <= len)
             .ok_or_else(|| HpError::Io("ZIP 中央目录越界（文件被截断？）".into()))?;
 
+        // 第二步：只读中央目录本身（条目数 × 46 字节量级）。
+        let central = source.read_range(start, central_size as usize)?;
+        if central.len() < central_size as usize {
+            return Err(HpError::Io("ZIP 中央目录越界（文件被截断？）".into()));
+        }
+
         let mut entries = Vec::with_capacity(entry_count);
-        let mut at = start;
-        while at + 46 <= end {
-            if le_u32(&data, at) != Some(CENTRAL_SIG) {
-                return Err(HpError::Io(format!("ZIP 中央目录条目签名异常（偏移 {at}）")));
+        let mut at = 0usize;
+        let dir_end = central.len();
+        while at + 46 <= dir_end {
+            if le_u32(&central, at) != Some(CENTRAL_SIG) {
+                return Err(HpError::Io(format!(
+                    "ZIP 中央目录条目签名异常（偏移 {}）",
+                    start + at as u64
+                )));
             }
-            let method = le_u16(&data, at + 10).unwrap_or(0);
-            let compressed_size = le_u32(&data, at + 20).unwrap_or(0);
-            let name_len = le_u16(&data, at + 28).unwrap_or(0) as usize;
-            let extra_len = le_u16(&data, at + 30).unwrap_or(0) as usize;
-            let comment_len = le_u16(&data, at + 32).unwrap_or(0) as usize;
-            let local_header_offset = le_u32(&data, at + 42).unwrap_or(0);
+            let method = le_u16(&central, at + 10).unwrap_or(0);
+            let compressed_size = le_u32(&central, at + 20).unwrap_or(0);
+            let name_len = le_u16(&central, at + 28).unwrap_or(0) as usize;
+            let extra_len = le_u16(&central, at + 30).unwrap_or(0) as usize;
+            let comment_len = le_u16(&central, at + 32).unwrap_or(0) as usize;
+            let local_header_offset = le_u32(&central, at + 42).unwrap_or(0);
 
             let name_at = at + 46;
-            let name_bytes = data
+            let name_bytes = central
                 .get(name_at..name_at + name_len)
                 .ok_or_else(|| HpError::Io("ZIP 条目名越界".into()))?;
             entries.push(ZipEntry {
@@ -133,7 +251,7 @@ impl ZipArchive {
             at = name_at + name_len + extra_len + comment_len;
         }
 
-        Ok(Self { data, entries })
+        Ok(Self { source, entries })
     }
 
     /// 全部条目（顺序即中央目录顺序）。
@@ -156,26 +274,34 @@ impl ZipArchive {
 
     /// 读取并解压一个条目。
     pub fn read_entry(&self, entry: &ZipEntry) -> HpResult<Vec<u8>> {
-        let head = entry.local_header_offset as usize;
-        if le_u32(&self.data, head) != Some(LOCAL_SIG) {
+        // 本地文件头只有 30 字节 + 名字 + extra；只需读这一小段拿到数据起点。
+        let head = entry.local_header_offset as u64;
+        let header = self.source.read_range(head, 30)?;
+        if le_u32(&header, 0) != Some(LOCAL_SIG) {
             return Err(HpError::Io(format!("ZIP 本地文件头签名异常：{}", entry.name)));
         }
-        let name_len = le_u16(&self.data, head + 26).unwrap_or(0) as usize;
-        let extra_len = le_u16(&self.data, head + 28).unwrap_or(0) as usize;
-        let start = head + 30 + name_len + extra_len;
+        let name_len = le_u16(&header, 26).unwrap_or(0) as usize;
+        let extra_len = le_u16(&header, 28).unwrap_or(0) as usize;
+        let start = head + 30 + name_len as u64 + extra_len as u64;
+        let len = self.source.len()?;
         let end = start
-            .checked_add(entry.compressed_size as usize)
-            .filter(|end| *end <= self.data.len())
+            .checked_add(entry.compressed_size as u64)
+            .filter(|end| *end <= len)
             .ok_or_else(|| HpError::Io(format!("ZIP 条目数据越界：{}", entry.name)))?;
-        let raw = &self.data[start..end];
+        let raw = self
+            .source
+            .read_range(start, (end - start) as usize)?;
+        if raw.len() as u64 != end - start {
+            return Err(HpError::Io(format!("ZIP 条目数据越界：{}", entry.name)));
+        }
 
         match entry.method {
-            METHOD_STORED => Ok(raw.to_vec()),
+            METHOD_STORED => Ok(raw),
             METHOD_DEFLATE => {
                 let mut out = Vec::new();
                 // `take` 把解压上限钉死：畸形包用它构造"解压炸弹"时只会失败，不会吃光内存。
                 let mut decoder =
-                    flate2::read::DeflateDecoder::new(raw).take(MAX_ENTRY_BYTES as u64 + 1);
+                    flate2::read::DeflateDecoder::new(&raw[..]).take(MAX_ENTRY_BYTES as u64 + 1);
                 decoder
                     .read_to_end(&mut out)
                     .map_err(|e| HpError::Io(format!("解压 ZIP 条目失败 {}: {e}", entry.name)))?;
@@ -200,7 +326,7 @@ fn find_eocd(data: &[u8]) -> Option<usize> {
     if data.len() < EOCD_MIN_LEN {
         return None;
     }
-    let lowest = data.len().saturating_sub(EOCD_MIN_LEN + MAX_COMMENT_LEN);
+    let lowest = data.len().saturating_sub(EOCD_WINDOW);
     // 从最靠后的候选往前扫：EOCD 后面只可能是注释，真签名取**最后一个**匹配。
     (lowest..=data.len() - EOCD_MIN_LEN)
         .rev()
@@ -267,6 +393,35 @@ mod tests {
         drop(f);
         let archive = ZipArchive::open(&path).expect("打开失败");
         assert_eq!(archive.entries().len(), 1);
+    }
+
+    #[test]
+    fn open_reads_entries_from_disk_without_loading_the_whole_file() {
+        // 磁盘源与内存源必须给出**完全一样**的条目内容（定位读的回归保护）。
+        let body: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+        let dir = tempfile::tempdir().expect("创建临时目录失败");
+        let path = dir.path().join("payload.zip");
+        let bytes = build_test_zip(&[
+            ("small.txt", b"hi", false),
+            ("big.bin", &body, true),
+            ("tail.txt", b"last", false),
+        ]);
+        std::fs::write(&path, &bytes).expect("写入失败");
+
+        let from_disk = ZipArchive::open(&path).expect("打开失败");
+        let from_mem = ZipArchive::from_bytes(bytes).expect("解析失败");
+        assert_eq!(from_disk.entries().len(), 3);
+        for name in ["small.txt", "big.bin", "tail.txt"] {
+            assert_eq!(
+                from_disk.read(name).expect("读取失败"),
+                from_mem.read(name).expect("读取失败"),
+                "条目 {name} 在磁盘源与内存源下内容不一致"
+            );
+        }
+        assert_eq!(
+            from_disk.read("big.bin").expect("读取失败").expect("缺失"),
+            body
+        );
     }
 }
 

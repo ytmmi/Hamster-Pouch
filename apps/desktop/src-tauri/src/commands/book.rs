@@ -117,10 +117,19 @@ pub(crate) fn write_atomic(target: &Path, bytes: &[u8]) -> HpResult<()> {
     })
 }
 
-/// 读缓存；文件不存在或内容损坏都返回 `None`（损坏即当未缓存，重算一次）。
-pub(crate) fn read_cache(path: &Path) -> Option<BookMetaCache> {
+/// 读一份 JSON 磁盘缓存；文件不存在或内容损坏都返回 `None`
+/// （**损坏即当未缓存**，重算一次，绝不把坏缓存变成用户可见的错误）。
+///
+/// 泛型化（2026-10-19）：目录缓存（`book_reader.rs` 的 `<hash>.booktoc.json`）
+/// 与元数据缓存走同一条"读文件 + 反序列化 + 失败即未命中"的口径，只是记录类型不同。
+pub(crate) fn read_json_cache<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
     let bytes = std::fs::read(path).ok()?;
     serde_json::from_slice(&bytes).ok()
+}
+
+/// 读元数据缓存；文件不存在或内容损坏都返回 `None`（损坏即当未缓存，重算一次）。
+pub(crate) fn read_cache(path: &Path) -> Option<BookMetaCache> {
+    read_json_cache(path)
 }
 
 /// 解析一本书并把结果写进缓存（在**阻塞线程**里跑：整本 epub 读盘 + 解压）。
