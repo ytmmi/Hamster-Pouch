@@ -511,6 +511,8 @@ export const zhCN = {
   "tagtable.createFailed": "新建标签失败：{err}",
   "tagtable.renameFailed": "重命名失败：{err}",
   "tagtable.moveFailed": "移动失败：{err}",
+  "tagtable.dropAdded": "已把 {count} 项媒体加入「{name}」",
+  "tagtable.dropFailed": "打标签失败：{err}",
 
   // 任务面板
   "task.scanProgress": "扫描进度 {payload}",

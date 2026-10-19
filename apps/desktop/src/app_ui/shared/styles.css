@@ -14,6 +14,13 @@
   --cross-tag: #2f80ed;
   --sel-bg: #ffffff;
   --sel-border: #b8bcc2;
+  /*
+   * 媒体预览的**选中框**（D117）。`--sel-border` 是浅灰细线，且浅色主题下
+   * `--sel-bg` 与 `--bg-2` 同为白色 —— 选中与未选中只差 1px 灰边，等于没有提示。
+   * 因此选中另给一组更重的 token：饱和蓝环 + 淡蓝底，一眼能看出"点了哪个"。
+   */
+  --sel-ring: #2f6fed;
+  --sel-ring-bg: #e9f1ff;
   --active-bg: #ffffff;
   --active-fg: #1f2328;
   --hover-border: #b8bcc2;
@@ -883,6 +890,20 @@ button.danger {
   background: var(--bg-3);
 }
 
+/*
+ * 媒体拖放目标高亮（D117）：从媒体预览拖来文件、悬停在某个 tag 上时**该行出蓝色框**。
+ *
+ * 与上面的 tag 移动高亮分成两个属性而不是复用 `data-drop`：两者语义不同（一个是
+ * "成为它的子级"，一个是"把这些文件打上它"），复用会让"这一下松手会发生什么"看不出来。
+ * 2px 而不是 1px —— 1px 环在缩略图/树行底色上几乎看不出（媒体预览选中框已因同样的
+ * 反馈被加粗），而这里正是要提示"松手就打标"的关键瞬间。
+ */
+.tag-tree-row[data-drop-files="1"] {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--focus-ring) 14%, transparent);
+}
+
 /* 空白临时标签行（输入命名，不命名则丢弃） */
 .tag-tree-row.draft {
   outline: 1px dashed var(--border);
@@ -1154,8 +1175,10 @@ button.danger {
 }
 
 .mp-cell.selected {
-  border-color: var(--sel-border);
-  background: var(--sel-bg);
+  border-color: var(--sel-ring);
+  background: var(--sel-ring-bg);
+  /* 外扩一圈同色环，让"选中"在缩略图之间真的跳出来（1px 边不够，D117）。 */
+  box-shadow: 0 0 0 2px var(--sel-ring);
 }
 
 .mp-thumb {
@@ -1302,8 +1325,9 @@ button.danger {
 }
 
 .mp-row.selected {
-  border-color: var(--sel-border);
-  background: var(--sel-bg);
+  border-color: var(--sel-ring);
+  background: var(--sel-ring-bg);
+  box-shadow: 0 0 0 1px var(--sel-ring);
 }
 
 .mp-row-name {
@@ -1482,8 +1506,10 @@ button.danger {
 }
 
 .mp-grid.mp-view-adaptive .mp-cell.selected {
-  outline-color: var(--sel-border);
-  background: var(--sel-bg);
+  /* 自适应视图没有 border（几何由 flex 决定），选中只能靠 outline：这里加粗到 2px。 */
+  outline-color: var(--sel-ring);
+  outline-width: 2px;
+  background: var(--sel-ring-bg);
 }
 
 /* 缩略图区：宽度交给 flex，高度由宽高比推出（于是行内等高、行间不等）。 */
@@ -3677,6 +3703,9 @@ button.danger {
   --cross-tag: #7cc4ff;
   --sel-bg: rgba(74, 163, 255, 0.12);
   --sel-border: #4aa3ff;
+  /* 深色下"更重的选中"只加亮度/不透明度：蓝环本来就亮，底色调到能透出缩略图。 */
+  --sel-ring: #63b3ff;
+  --sel-ring-bg: rgba(74, 163, 255, 0.22);
   --active-bg: #4aa3ff;
   --active-fg: #ffffff;
   --hover-border: #4aa3ff;

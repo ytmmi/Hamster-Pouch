@@ -490,6 +490,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "tagtable.createFailed": "Failed to create tag: {err}",
   "tagtable.renameFailed": "Rename failed: {err}",
   "tagtable.moveFailed": "Move failed: {err}",
+  "tagtable.dropAdded": "Added {count} item(s) to \"{name}\"",
+  "tagtable.dropFailed": "Failed to tag media: {err}",
 
   "task.scanProgress": "Scan progress {payload}",
   "task.scanCompleted": "Scan completed {payload}",

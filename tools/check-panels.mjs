@@ -5537,6 +5537,121 @@ check(
   })(),
 );
 
+// ==================== tag表：媒体拖放打标 + 媒体预览选中框（D117，2026-10-19）====================
+//
+// 用户两条直接要求：①「媒体单选或多选拖拽到 tag 表内，悬浮在某个 tag 上面时 tag 出现蓝色框
+// 标识，鼠标放下代表把刚刚选择的媒体加上该 tag」，且「标签 评分」面板同步更新；②「在媒体
+// 预览面板，选择媒体的提示框进行加粗」（澄清：指**被点击的媒体外面那个框**太细，不是计数文案）。
+//
+// 这里断言的是**契约性落点**，不是像素观感（观感由 `archive/` 的无头探针量计算值）：
+// 载荷判据只能写在 `onDragOver`（拖拽中 `getData` 受保护模式限制，只有 `types` 可读）、
+// 落点必须复用既有 `tag.add`（按名幂等）而不是新命令、同步必须走 `app.refresh()`、
+// 媒体落在空白处**不得**被当成 tag 移动。
+
+check(
+  "tag表：媒体拖放打标（`application/x-hp-files` → `tag.add` → `app.refresh()` 同步「标签 评分」）",
+  (() => {
+    const src = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/TagTablePanel.tsx"),
+      "utf8",
+    );
+    const code = stripComments(src);
+    const dropFiles = code.match(/const dropFilesOnNode = async[\s\S]*?\n  \};/)?.[0] ?? "";
+    return (
+      // 载荷 MIME 与媒体预览同源（不能自造第二套）。
+      /const FILES_MIME = "application\/x-hp-files"/.test(code) &&
+      // 判据用 `types`（`getData` 在 dragover 阶段读不到）：三处 —— 行 dragover、行 drop、空白 drop。
+      (code.match(/dataTransfer\.types\.includes\(FILES_MIME\)/g) ?? []).length >= 3 &&
+      // **反面**：`getData` 只允许出现在解析函数里一次（放进 dragover 会永远拿到空串）。
+      (code.match(/\.getData\(/g) ?? []).length === 1 &&
+      // 高亮是**独立属性**：与 tag 移动的 `data-drop` 分开，两种语义不能共用一个状态。
+      /data-drop-files=\{fileDropId === node\.id \? "1" : undefined\}/.test(code) &&
+      /data-drop=\{dropTargetId === node\.id \? "1" : undefined\}/.test(code) &&
+      // 落点复用既有 `tag.add`（`create_tag` 同仓库同名返回已有实体）——不新增命令。
+      /api\.tagAdd\(\{ repoId: app\.repoId, fileIds, tagName: target\.name \}\)/.test(dropFiles) &&
+      // 同步：`refreshKey` 递增 ⇒ 本面板重拉树、「标签 评分」面板重拉所选文件的 tag。
+      /app\.refresh\(\)/.test(dropFiles) &&
+      // **反面**：媒体落在空白处不得走 tag 移动（否则会静默把 tag 挪到根）。
+      /if \(e\.dataTransfer\.types\.includes\(FILES_MIME\)\) return;[\s\S]{0,40}?void dropOnRoot\(\);/.test(
+        code,
+      )
+    );
+  })(),
+);
+
+check(
+  "CSS：tag表媒体拖放目标的**蓝色框**（2px + 焦点环色，与 tag 移动的 1px 高亮区分）",
+  (() => {
+    const css = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/shared/styles.css"),
+      "utf8",
+    ).replace(/\/\*[\s\S]*?\*\//g, "");
+    return (
+      /\.tag-tree-row\[data-drop-files="1"\]\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/.test(
+        css,
+      ) &&
+      // 既有 D24 移动高亮必须保留（两条规则并存，互不覆盖）。
+      /\.tag-tree-row\[data-drop="1"\]\s*\{[^}]*outline:\s*1px solid var\(--focus-ring\)/.test(
+        css,
+      )
+    );
+  })(),
+);
+
+check(
+  "CSS：媒体预览**选中框加粗**（三视图同一套 `--sel-ring`，不再用浅灰 `--sel-border`）",
+  (() => {
+    const cssRaw = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/shared/styles.css"),
+      "utf8",
+    );
+    const css = cssRaw.replace(/\/\*[\s\S]*?\*\//g, "");
+    return (
+      // 专用 token 在**两套主题**都有定义（浅色灰线正是"太细看不出来"的成因）。
+      /--sel-ring:\s*#[0-9a-f]{6}/.test(css) &&
+      /\.app-root\.theme-dark\s*\{[^}]*--sel-ring:/.test(css) &&
+      // 平铺 / 瀑布流：选中单元换色 + 外扩同色环（1px 灰边不够）。
+      /\.mp-cell\.selected\s*\{[^}]*border-color:\s*var\(--sel-ring\)/.test(css) &&
+      /\.mp-cell\.selected\s*\{[^}]*box-shadow:\s*0 0 0 2px var\(--sel-ring\)/.test(css) &&
+      // 列表视图同样加粗（行高更小，环取 1px 以免相邻行粘连）。
+      /\.mp-row\.selected\s*\{[^}]*border-color:\s*var\(--sel-ring\)/.test(css) &&
+      /\.mp-row\.selected\s*\{[^}]*box-shadow:\s*0 0 0 1px var\(--sel-ring\)/.test(css) &&
+      // 自适应视图没有 border（几何由 flex 决定），只能靠 outline —— 必须仍在同一选择器上
+      // 保留 `outline-color`（既有门禁也断言这一条），并加粗到 2px。
+      /\.mp-view-adaptive \.mp-cell\.selected\s*\{[^}]*outline-color:\s*var\(--sel-ring\)/.test(
+        css,
+      ) &&
+      /\.mp-view-adaptive \.mp-cell\.selected\s*\{[^}]*outline-width:\s*2px/.test(css) &&
+      // 单元基础盒模型不变（既有断言依赖 padding/border，选中靠叠加环而非改尺寸）。
+      /\.mp-cell\s*\{[^}]*padding:\s*4px/.test(css) &&
+      /\.mp-cell\s*\{[^}]*border:\s*1px solid transparent/.test(css)
+    );
+  })(),
+);
+
+check(
+  "i18n：拖放打标两条文案三语齐备（D27 键集一致由类型强制，这里钉住键存在）",
+  (() => {
+    const read = (f) =>
+      readFileSync(join(ROOT, `apps/desktop/src/app_ui/i18n/${f}`), "utf8");
+    const zhCN = read("zh-CN.ts");
+    const zhTW = read("zh-TW.ts");
+    const en = read("en.ts");
+    const has = (src, key) => new RegExp(`"${key}":`).test(src);
+    return (
+      has(zhCN, "tagtable.dropAdded") &&
+      has(zhCN, "tagtable.dropFailed") &&
+      has(zhTW, "tagtable.dropAdded") &&
+      has(zhTW, "tagtable.dropFailed") &&
+      has(en, "tagtable.dropAdded") &&
+      has(en, "tagtable.dropFailed") &&
+      // 成功文案必须带**数量与 tag 名**：只说"已添加"无法确认加到了哪个 tag。
+      /\{count\}/.test(zhCN) &&
+      /tagtable\.dropAdded": "[^"]*\{count\}[^"]*\{name\}/.test(zhCN)
+    );
+  })(),
+);
+
 // ============================== 汇总 ==============================
 
 const passed = results.filter((r) => r.ok).length;

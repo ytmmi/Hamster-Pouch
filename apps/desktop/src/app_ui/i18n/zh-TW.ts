@@ -489,6 +489,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "tagtable.createFailed": "新增標籤失敗：{err}",
   "tagtable.renameFailed": "重新命名失敗：{err}",
   "tagtable.moveFailed": "移動失敗：{err}",
+  "tagtable.dropAdded": "已把 {count} 項媒體加入「{name}」",
+  "tagtable.dropFailed": "加標籤失敗：{err}",
 
   "task.scanProgress": "掃描進度 {payload}",
   "task.scanCompleted": "掃描完成 {payload}",
