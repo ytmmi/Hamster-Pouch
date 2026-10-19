@@ -5630,6 +5630,35 @@ check(
 );
 
 check(
+  "CSS：媒体预览容器留出**纵向**内边距，选中环不再被滚动容器裁掉（D117-R1）",
+  (() => {
+    const css = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/shared/styles.css"),
+      "utf8",
+    ).replace(/\/\*[\s\S]*?\*\//g, "");
+    /*
+     * 成因（用户 m01342「第一层媒体的蓝色选择框顶部被遮挡了一点」）：选中环是
+     * `box-shadow`，画在**边框盒之外**且不参与布局；而 `overflow: auto` 把后代裁在
+     * **内边距盒**边界上。容器纵向内边距为 0 时首行那圈环整条落在裁切线外。
+     *
+     * 因此钉住三件事：①三个滚动容器（`.mp-grid` 覆盖平铺与自适应、`.mp-masonry`、
+     * `.mp-list`）都拿到同一条规则；②留出的量 ≥ 4px（= 最宽环 2px **加 2px 余量**：
+     * 环外缘与裁切线恰好重合时，分数像素会磨掉边缘，余量让"完整可见"不依赖像素对齐）；
+     * ③**只有纵向** —— 横向内边距会计入 `clientWidth`，而列数正是按 `clientWidth`
+     * 算的（`masonryColumnCount`），加横向 padding 会少算一列。
+     */
+    const rule =
+      css.match(/\.mp-grid,\s*\.mp-masonry,\s*\.mp-list\s*\{[^}]*\}/)?.[0] ?? "";
+    const blockPx = parseFloat(
+      rule.match(/padding-block:\s*([\d.]+)px/)?.[1] ?? "0",
+    );
+    // `padding-block` 不会被这个模式命中（`padding` 后面接的是 `-block`，不是 `:`）。
+    const noInlinePadding = !/padding(?:-inline|-left|-right)?\s*:/.test(rule);
+    return blockPx >= 4 && noInlinePadding;
+  })(),
+);
+
+check(
   "i18n：拖放打标两条文案三语齐备（D27 键集一致由类型强制，这里钉住键存在）",
   (() => {
     const read = (f) =>

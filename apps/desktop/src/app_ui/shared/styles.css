@@ -1149,6 +1149,30 @@ button.danger {
   overflow: auto;
 }
 
+/*
+ * 纵向内边距 = 选中环的**外扩量**（D117-R1，用户 m01342「第一层媒体的蓝色选择框
+ * 顶部被遮挡了一点」）。
+ *
+ * 选中环是 `box-shadow`：画在边框盒**之外**、不参与布局。而 `overflow: auto` 的滚动
+ * 容器把后代的绘制裁在**内边距盒（padding box）**边界上——容器纵向内边距为 0 时，
+ * 首行单元那 2px 环恰好整条落在裁切线之外，于是"选中了但看不出来"。
+ * 给容器留出与环等宽的上下内边距，环就整体落进内边距盒内（末行同理，不再被底边裁）。
+ *
+ * **只能加纵向**：横向内边距会计入 `clientWidth`，而列数正是按 `clientWidth` 算的
+ * （`masonryColumnCount`），横向 padding 会让列数少一列。
+ *
+ * 取 4px = 最宽的环 2px（平铺/瀑布流）**再加 2px 余量**：环的外缘与裁切线恰好重合时，
+ * 分数像素（125%/150% 缩放、`content-visibility` 的尺寸估算）可能把边缘磨掉半像素；
+ * 余量让"完整可见"不依赖像素对齐，同时正好是用户要的"媒体预览往下挪一点"。
+ * 平铺/自适应/瀑布流/列表四种条目容器都要加：环分别取自 `.mp-cell.selected`（2px）、
+ * `.mp-view-adaptive .mp-cell.selected`（outline 外伸 1px）与 `.mp-row.selected`（1px）。
+ */
+.mp-grid,
+.mp-masonry,
+.mp-list {
+  padding-block: 4px;
+}
+
 /* 网格 / 瀑布流可聚焦（支持 Ctrl+A / Esc 多选快捷键），仅键盘聚焦时显示描边 */
 .mp-grid:focus,
 .mp-masonry:focus {
