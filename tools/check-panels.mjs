@@ -1196,7 +1196,8 @@ check(
 check(
   "平铺与列表**按行虚拟化**：只渲染窗口内的行，DOM 单元数与条目总数无关",
   // 缺陷 0018 的核心：容器不再 `items.map`，而是"占位层撑起总高度 + 只渲染窗口行"。
-  /const tileVirtual = useFixedRowVirtualizer\(/.test(mediaPanelSrc) &&
+  // 平铺的行高按媒体类型分项（`tileRowHeights`）逐行算，因此走**变量行高**虚拟化。
+  /const tileVirtual = useVariableRowVirtualizer\(/.test(mediaPanelSrc) &&
     /const listVirtual = useMeasuredRowVirtualizer\(/.test(mediaPanelSrc) &&
     /tileVirtual\.rows\.map\(/.test(mediaPanelSrc) &&
     /listVirtual\.rows\.map\(/.test(mediaPanelSrc) &&
@@ -1205,6 +1206,21 @@ check(
     // 列表视图**不得**再直接铺全部条目：退回全量渲染必须当场变红。
     // （平铺/自适应走 `renderCell` 那条路，见下面那条断言；自适应见 `content-visibility` 的说明。）
     !/\{items\.map\(\(\{ file \}\) => \(/.test(mediaPanelSrc),
+);
+
+check(
+  "平铺行高按媒体类型**逐行**算：同一行混着「显示 / 不显示文件名」时取该行最大值",
+  // 三个分项开关让行高不再是常量。若仍按单一布尔算一个常量行高，
+  // CSS 网格的自然行高（该行最高的单元）与虚拟化预测就会差一个文件名行，
+  // 表现为行错位 / 底部留白。
+  /const tileRowHeights = useMemo\(/.test(mediaPanelSrc) &&
+    /tileRows\.map\(\(row\) =>/.test(mediaPanelSrc) &&
+    /Math\.max\(/.test(mediaPanelSrc) &&
+    /tileRowHeight\(imageSize, showFileNameFor\(file\.media_type\)\)/.test(mediaPanelSrc) &&
+    // 平铺的虚拟化吃的是逐行行高数组，不是常量。
+    /useVariableRowVirtualizer\(\s*gridRef,\s*view === "tile" && viewMode === "thumb" \? tileRowHeights : \[\]/.test(
+      mediaPanelSrc,
+    ),
 );
 
 check(
@@ -1258,8 +1274,10 @@ check(
     /containIntrinsicBlockSize:\s*`auto \$\{intrinsicHeight\}px`/.test(mediaCellSrc) &&
     /intrinsicHeight=\{cellIntrinsicHeight\(file\)\}/.test(mediaPanelSrc) &&
     // 自适应按图片尺寸估；瀑布流按**该文件**的宽高比算。
-    /adaptiveCellIntrinsicHeight\(imageSize, showFileName\)/.test(mediaPanelSrc) &&
-    /masonryCellHeight\(imageSize, ratio, showFileName\)/.test(mediaPanelSrc) &&
+    // 文件名行的高度按该条目的媒体类型判定（`showName` 是 `showFileNameFor(file.media_type)`）。
+    /adaptiveCellIntrinsicHeight\(imageSize, showName\)/.test(mediaPanelSrc) &&
+    /masonryCellHeight\(imageSize, ratio, showName\)/.test(mediaPanelSrc) &&
+    /const showName = showFileNameFor\(file\.media_type\);/.test(mediaPanelSrc) &&
     /ratioCache\.get\(file\.id\) \?\? DEFAULT_CELL_RATIO/.test(mediaPanelSrc),
 );
 
@@ -1322,8 +1340,8 @@ check(
     /subscribeRatioChange\(\(\) => setRatioVersion\(getRatioCacheVersion\(\)\)\)/.test(
       mediaPanelSrc,
     ) &&
-    // 版本号进布局依赖数组。
-    /\[columns, imageSize, showFileName, view, viewMode, ratioVersion\]/.test(mediaPanelSrc),
+    // 版本号与文件名开关（按媒体类型分项）都进布局依赖数组。
+    /\[columns, imageSize, showFileNameFor, view, viewMode, ratioVersion\]/.test(mediaPanelSrc),
 );
 
 check(
@@ -1526,21 +1544,39 @@ check(
 
 const mediaSpec = config.panelSpec("media");
 const mediaSettingKeys = (mediaSpec?.settings ?? []).map((s) => s.key);
+/** 按媒体类型分项的文件名开关（总开关 `showFileName` 之下各自独立）。 */
+const MEDIA_FILE_NAME_TOGGLE_KEYS = [
+  "showFileName",
+  "showImageFileName",
+  "showVideoFileName",
+  "showAudioFileName",
+];
 check(
-  "媒体预览声明了 5 项面板设置（view / imageSize / showFileName / sortKey / sortDir），都带 i18n 键",
-  eqList(mediaSettingKeys, ["view", "imageSize", "showFileName", "sortKey", "sortDir"]) &&
+  "媒体预览声明了 8 项面板设置（view / imageSize / 4 个文件名开关 / sortKey / sortDir），都带 i18n 键",
+  eqList(mediaSettingKeys, [
+    "view",
+    "imageSize",
+    "showFileName",
+    "showImageFileName",
+    "showVideoFileName",
+    "showAudioFileName",
+    "sortKey",
+    "sortDir",
+  ]) &&
     (mediaSpec?.settings ?? []).every(
       (s) => typeof s.title_key === "string" && s.title_key.length > 0,
     ),
   `decls=${mediaSettingKeys.join(",") || "（无）"}`,
 );
 check(
-  "三项 select（视图 / 排序键 / 方向）+ numberInput（图片尺寸）+ switch（显示文件名）：`slider` 会把值夹在浏览器默认的 0–100，声明层没有 min/max",
+  "三项 select（视图 / 排序键 / 方向）+ numberInput（图片尺寸）+ 四个 switch（文件名总开关与三个分项）：`slider` 会把值夹在浏览器默认的 0–100，声明层没有 min/max",
   mediaSpec?.settings?.find((s) => s.key === "view")?.kind === "select" &&
     mediaSpec?.settings?.find((s) => s.key === "sortKey")?.kind === "select" &&
     mediaSpec?.settings?.find((s) => s.key === "sortDir")?.kind === "select" &&
     mediaSpec?.settings?.find((s) => s.key === "imageSize")?.kind === "numberInput" &&
-    mediaSpec?.settings?.find((s) => s.key === "showFileName")?.kind === "switch" &&
+    MEDIA_FILE_NAME_TOGGLE_KEYS.every(
+      (key) => mediaSpec?.settings?.find((s) => s.key === key)?.kind === "switch",
+    ) &&
     // 宿主 `slider` 渲染是裸 `<input type="range">`（无 min/max）→ 值域会被压在 0–100，
     // 图片尺寸 80–400 会被截断，故**不得**用 slider。
     !(mediaSpec?.settings ?? []).some((s) => s.kind === "slider"),
@@ -1593,19 +1629,58 @@ check(
     // 开关的缺省是**显示**（与既有观感一致）；非法值回落缺省。
     config.normalizePanelSettingValue("media", "showFileName", "yes") === true &&
     config.normalizePanelSettingValue("media", "showFileName", null) === true &&
+    // 三个分项开关与总开关同款归一化（缺省同样是"显示"）。
+    MEDIA_FILE_NAME_TOGGLE_KEYS.filter((key) => key !== "showFileName").every(
+      (key) =>
+        config.normalizePanelSettingValue("media", key, false) === false &&
+        config.normalizePanelSettingValue("media", key, "false") === false &&
+        config.normalizePanelSettingValue("media", key, "yes") === true &&
+        config.normalizePanelSettingValue("media", key, null) === true,
+    ) &&
     config.normalizePanelSettingValue("media", "sortKey", "date") === "name" &&
     config.normalizePanelSettingValue("media", "sortDir", "up") === "asc" &&
     config.normalizePanelSettingValue("media", "sortDir", "desc") === "desc" &&
     config.normalizePanelSettingValue("ghost", "view", "tile") === undefined,
 );
 check(
-  "「显示文件名」开关被面板真的消费（关掉只影响缩略图视图的标签，列表视图文件名照旧）",
-  mediaSpec?.settings?.find((s) => s.key === "showFileName")?.default === true &&
-    /usePanelSwitch\(MEDIA_PANEL_ID, "showFileName", \{ api: panelApi \}\)/.test(mediaFamilySrc) &&
-    /showName=\{showFileName\}/.test(mediaFamilySrc) &&
+  "四个文件名开关都被面板真的消费：总开关 × 按媒体类型的分项开关（列表视图文件名照旧）",
+  // 四个开关的缺省都是「显示」= 与既有观感一致（零视觉变化）。
+  MEDIA_FILE_NAME_TOGGLE_KEYS.every(
+    (key) => mediaSpec?.settings?.find((s) => s.key === key)?.default === true,
+  ) &&
+    // 四个开关各自被 `usePanelSwitch` 读出来（不是只读总开关）。
+    MEDIA_FILE_NAME_TOGGLE_KEYS.every((key) =>
+      new RegExp(`usePanelSwitch\\(MEDIA_PANEL_ID, "${key}", \\{ api: panelApi \\}\\)`).test(
+        mediaFamilySrc,
+      ),
+    ) &&
+    // 总开关 ∧ 分项开关在同一个回调里合成"这一格要不要标签"。
+    /if \(!showFileName\) return false;/.test(mediaFamilySrc) &&
+    /if \(mediaType === "image"\) return showImageFileName;/.test(mediaFamilySrc) &&
+    /if \(mediaType === "video"\) return showVideoFileName;/.test(mediaFamilySrc) &&
+    /if \(mediaType === "audio"\) return showAudioFileName;/.test(mediaFamilySrc) &&
+    // 三种缩略图视图都按**该条目的媒体类型**取开关（不是全局一个布尔）。
+    /showFileNameFor\(item\.file\.media_type\)/.test(mediaFamilySrc) &&
+    /showFileNameFor\(file\.media_type\)/.test(mediaFamilySrc) &&
+    /showName=\{showFileNameFor\(file\.media_type\)\}/.test(mediaFamilySrc) &&
     // 单元按开关条件渲染标签；列表视图的文件名是条目本体，不受开关影响。
     /\{showName && <span className="mp-name">/.test(mediaCellSrc) &&
     /<span className="mp-row-name">\{file\.relative_path\}<\/span>/.test(mediaFamilySrc),
+);
+check(
+  "三视图**各自**按条目媒体类型取开关：瀑布流逐格算高、自适应逐格给 nameBlock、平铺逐行取最大、单元按格渲染",
+  // 只断言"家族里出现过 showFileNameFor"是不够的——那会让其中两个视图退回全局布尔
+  // 仍然全绿。四个消费点必须**逐个**锚定到各自的调用形状上。
+  // ① 瀑布流：`masonryCellHeight` 的第三参是该格文件的媒体类型判定。
+  /masonryCellHeight\([\s\S]{0,400}?showFileNameFor\(item\.file\.media_type\)/.test(mediaPanelSrc) &&
+    // ② 自适应：`adaptiveRowLayout` 的第 6 参是**按条目下标**的数组（不是常数）。
+    /items\.map\(\(item\) =>\s*showFileNameFor\(item\.file\.media_type\)/.test(mediaPanelSrc) &&
+    // ③ 平铺：逐行取该行最大值。
+    /tileRowHeight\(imageSize, showFileNameFor\(file\.media_type\)\)/.test(mediaPanelSrc) &&
+    // ④ 单元：`showName` 由面板按媒体类型算好再传进来。
+    /showName=\{showFileNameFor\(file\.media_type\)\}/.test(mediaPanelSrc) &&
+    // ⑤ 占位高度（`content-visibility` 的块轴）同源。
+    /const showName = showFileNameFor\(file\.media_type\);/.test(mediaPanelSrc),
 );
 check(
   "列表视图的体积走**宿主设置** `ui.sizeUnit`（与元数据面板同一份格式化），不另立同名面板设置",
@@ -1620,10 +1695,10 @@ check(
     !/<span className="mp-row-size">\{file\.size\}<\/span>/.test(mediaPanelSrc),
 );
 check(
-  "媒体预览设置用 `divider_before` 分成两组（视图 / 排序），首项无分隔线",
+  "媒体预览设置用 `divider_before` 分成三组（视图+尺寸+总开关 / 三个分项开关 / 排序），首项无分隔线",
   eqList(
     (mediaSpec?.settings ?? []).filter((s) => s.divider_before).map((s) => s.key),
-    ["sortKey"],
+    ["showImageFileName", "sortKey"],
   ) && mediaSpec?.settings?.[0]?.divider_before !== true,
 );
 const mkFile = (relative_path, size, mtime, media_type) => ({
@@ -1927,6 +2002,41 @@ check(
 );
 
 check(
+  "自适应行高**逐格**取文件名块：同一行混着「显示 / 不显示文件名」时取该行最大值",
+  (() => {
+    // 三个文件名分项开关让同一行可能混着图像 / 视频 / 音频，行内仍必须等高，
+    // 因此 `nameBlock` 接受**按条目下标的数组**，行高取该行最大值。
+    const gap = 8;
+    const target = 160;
+    const factor = 2;
+    const ratios = Array.from({ length: 10 }, () => 1);
+    // 基线：全部不显示文件名 → 与常数 0 完全一致。
+    const zeros = Array.from({ length: 10 }, () => 0);
+    const base = virtual.adaptiveRowLayout(ratios, 808, target, gap, factor, zeros);
+    if (base.rowHeights[0] !== 196 || base.rowHeights[2] !== 320) return false;
+    // 只把第 0 项（落在第 1 行）的文件名块设成 16：**只有第 1 行**长高 16px。
+    const mixed = Array.from({ length: 10 }, (_, i) => (i === 0 ? 16 : 0));
+    const layout = virtual.adaptiveRowLayout(ratios, 808, target, gap, factor, mixed);
+    if (layout.rows.length !== 3) return false;
+    if (layout.rowHeights[0] !== 196 + 16) return false;
+    if (layout.rowHeights[1] !== 196) return false;
+    if (layout.rowHeights[2] !== 320) return false;
+    // 偏移跟着行高走（总高 = Σ行高 + 行间距），否则虚拟化窗口会错位。
+    if (layout.offsets[1] !== 212 + gap) return false;
+    if (layout.total !== 212 + gap + 196 + gap + 320) return false;
+    // 同一行里**非首项**带文件名块也要生效（不是"只看第 0 项"）。
+    const tail = Array.from({ length: 10 }, (_, i) => (i === 3 ? 16 : 0));
+    const tailLayout = virtual.adaptiveRowLayout(ratios, 808, target, gap, factor, tail);
+    if (tailLayout.rowHeights[0] !== 212) return false;
+    // 常数形式仍然等价于"整行统一"（旧调用点不必改）。
+    const scalar = virtual.adaptiveRowLayout(ratios, 808, target, gap, factor, 16);
+    if (scalar.rowHeights[0] !== 212 || scalar.rowHeights[2] !== 336) return false;
+    return true;
+  })(),
+  `逐格=${virtual.adaptiveRowLayout(Array(10).fill(1), 808, 160, 8, 2, [16, 0, 0, 0, 0, 0, 0, 0, 0, 0]).rowHeights.join(",")}`,
+);
+
+check(
   "自适应断行的**退化输入**：空输入、非法宽高比、零宽容器都不崩",
   (() => {
     const empty = virtual.adaptiveRowLayout([], 800, 160, 8, 2);
@@ -1952,8 +2062,9 @@ check(
     !/items\.map\(\(\{ file, url \}\) => renderCell/.test(mediaPanelSrc) &&
     // 内容总高度由虚拟化给出（行高逐行不同，但完全由纯函数算，不测量）。
     /className="mp-virtual" style=\{\{ height: adaptiveVirtual\.totalSize \}\}/.test(mediaPanelSrc) &&
-    // 宽高比与容器宽度都必须进依赖：解码后断行会变，容器宽度变了要重新断行。
-    /\[items, gridWidth, imageSize, showFileName, view, viewMode, ratioVersion\]/.test(
+    // 宽高比、文件名开关（按媒体类型分项）与容器宽度都必须进依赖：
+    // 解码后断行会变，容器宽度变了要重新断行，开关切换要重新算行高。
+    /\[items, gridWidth, imageSize, showFileNameFor, view, viewMode, ratioVersion\]/.test(
       mediaPanelSrc,
     ),
 );

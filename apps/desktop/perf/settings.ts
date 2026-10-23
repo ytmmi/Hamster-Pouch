@@ -23,7 +23,8 @@ export const PANEL_SETTING_PREFIX = `panel.${MEDIA_PANEL_ID}.`;
 /**
  * 写入一项媒体预览面板设置并广播。
  *
- * `key` 用**短名**（`view` / `imageSize` / `showFileName` / `sortKey` / `sortDir`），
+ * `key` 用**短名**（`view` / `imageSize` / `showFileName` / `showImageFileName` /
+ * `showVideoFileName` / `showAudioFileName` / `sortKey` / `sortDir`），
  * 与 `packages/config/src/panels.ts` 的声明一致。
  */
 export function writePanelSetting(key: string, value: unknown): void {

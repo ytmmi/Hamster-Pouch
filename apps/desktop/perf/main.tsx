@@ -66,6 +66,10 @@ interface PerfApi {
   setView(view: "tile" | "adaptive" | "masonry"): void;
   setImageSize(size: number): void;
   setShowFileName(on: boolean): void;
+  /** 按媒体类型分项的文件名开关（总开关 `setShowFileName` 之下各自独立）。 */
+  setShowImageFileName(on: boolean): void;
+  setShowVideoFileName(on: boolean): void;
+  setShowAudioFileName(on: boolean): void;
   /** 切成"文件名列表"模式 / 切回"预览图"模式。 */
   setMode(mode: "thumb" | "name"): void;
   /** 当前渲染出的 `.mp-cell` 数量（**本条的核心指标**）。 */
@@ -216,6 +220,15 @@ window.__perf = {
   },
   setShowFileName(on) {
     writePanelSetting("showFileName", on);
+  },
+  setShowImageFileName(on) {
+    writePanelSetting("showImageFileName", on);
+  },
+  setShowVideoFileName(on) {
+    writePanelSetting("showVideoFileName", on);
+  },
+  setShowAudioFileName(on) {
+    writePanelSetting("showAudioFileName", on);
   },
   setMode(mode) {
     // 「预览图 / 文件名」是**面板内部 state**（`viewMode`），不是设置项；

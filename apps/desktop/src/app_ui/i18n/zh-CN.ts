@@ -319,6 +319,9 @@ export const zhCN = {
   "media.settings.imageSize": "图片宽度",
   "media.imageSizeHint": "图片宽度（自适应视图下为行高）",
   "media.settings.showFileName": "显示文件名",
+  "media.settings.showImageFileName": "图像显示文件名",
+  "media.settings.showVideoFileName": "视频显示文件名",
+  "media.settings.showAudioFileName": "音频显示文件名",
   // 排序（右上角下拉：排序键 + 横线 + 正序/倒序）
   "media.settings.sortKey": "排序",
   "media.settings.sortKey.name": "名称",

@@ -262,7 +262,36 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
     },
     SettingDeclFact {
         // 是否显示缩略图下的文件名（缺省显示 = 与既有观感一致）。
+        // **总开关**：关掉即三类都不显示，下面三个分项随之失效。
         id: "showFileName",
+        owner_kind: "panel",
+        owner_id: Some("media"),
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        // 总开关之下按媒体类型分项：图像 / 视频 / 音频各自独立（缺省都显示）。
+        id: "showImageFileName",
+        owner_kind: "panel",
+        owner_id: Some("media"),
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "showVideoFileName",
+        owner_kind: "panel",
+        owner_id: Some("media"),
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "showAudioFileName",
         owner_kind: "panel",
         owner_id: Some("media"),
         kind: "switch",

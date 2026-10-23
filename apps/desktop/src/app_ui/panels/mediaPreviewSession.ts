@@ -55,8 +55,16 @@ export interface MediaViewState {
   imageSize: number;
   sortKey: MediaSortKey;
   sortDir: SortDirection;
-  /** 缩略图下是否显示文件名（开关型面板设置 `showFileName`）。 */
+  /** 缩略图下是否显示文件名（开关型面板设置 `showFileName`，是**总开关**）。 */
   showFileName: boolean;
+  /**
+   * 按**媒体类型**决定该格是否显示文件名：总开关 ∧ 该类型的分项开关
+   * （`showImageFileName` / `showVideoFileName` / `showAudioFileName`）。
+   *
+   * 三个分项缺省都是"显示"，因此缺省行为与只有总开关时完全一致（零视觉变化）。
+   * 未知类型一律不显示——媒体预览的取值域只有 image / video / audio。
+   */
+  showFileNameFor: (mediaType: string) => boolean;
   /** 面板内选视图（本会话内记住）。 */
   chooseView: (next: string) => void;
   /** 面板内拖滑条改图片尺寸（本会话内记住）。 */
@@ -74,7 +82,28 @@ export function useMediaViewState(panelApi?: PanelRenderCtx["api"]): MediaViewSt
   const defaultSortKey = usePanelSettingValue(MEDIA_PANEL_ID, "sortKey", panelApi);
   const defaultSortDir = usePanelSettingValue(MEDIA_PANEL_ID, "sortDir", panelApi);
   // 开关型面板设置（缩略图下是否显示文件名）：读法与查看器的信息栏开关同款。
+  // 总开关之下按媒体类型分项，三类各自独立（缺省都显示）。
   const showFileName = usePanelSwitch(MEDIA_PANEL_ID, "showFileName", { api: panelApi });
+  const showImageFileName = usePanelSwitch(MEDIA_PANEL_ID, "showImageFileName", { api: panelApi });
+  const showVideoFileName = usePanelSwitch(MEDIA_PANEL_ID, "showVideoFileName", { api: panelApi });
+  const showAudioFileName = usePanelSwitch(MEDIA_PANEL_ID, "showAudioFileName", { api: panelApi });
+
+  /**
+   * 总开关 ∧ 该类型的分项开关。
+   *
+   * 做成回调（而不是四个布尔各传一遍）：面板里所有消费点都是"这一格要不要标签"，
+   * 一个按类型判定的函数能让瀑布流/自适应/平铺三种视图的调用处保持同一个形状。
+   */
+  const showFileNameFor = useCallback(
+    (mediaType: string): boolean => {
+      if (!showFileName) return false;
+      if (mediaType === "image") return showImageFileName;
+      if (mediaType === "video") return showVideoFileName;
+      if (mediaType === "audio") return showAudioFileName;
+      return false;
+    },
+    [showFileName, showImageFileName, showVideoFileName, showAudioFileName],
+  );
 
   // 本会话内的覆盖（`null` = 跟随面板设置）；初值取自模块级变量，跨面板重建保持。
   const [viewOverride, setViewOverride] = useState<MediaViewMode | null>(() => sessionView);
@@ -153,6 +182,7 @@ export function useMediaViewState(panelApi?: PanelRenderCtx["api"]): MediaViewSt
     sortKey,
     sortDir,
     showFileName,
+    showFileNameFor,
     chooseView,
     chooseImageSize,
     chooseSort,

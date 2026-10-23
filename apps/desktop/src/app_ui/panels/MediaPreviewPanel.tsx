@@ -80,7 +80,6 @@ import {
 } from "./mediaPreviewVirtual";
 import {
   useContainerRef,
-  useFixedRowVirtualizer,
   useMeasuredRowVirtualizer,
   useScrollWindow,
   useVariableRowVirtualizer,
@@ -129,13 +128,13 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
 
   // 面板设置的**缺省**视图 / 尺寸 / 排序（`usePanelSettingValue` 已按声明归一化，
   // 非法取值回落缺省）叠加本会话覆盖后的**有效取值**，解析全在 `mediaPreviewSession.ts`；
-  // 开关型设置「显示文件名」同款读取（`usePanelSwitch`）。
+  // 开关型设置「显示文件名」同款读取（`usePanelSwitch`），并按媒体类型分项判定。
   const {
     view,
     imageSize,
     sortKey,
     sortDir,
-    showFileName,
+    showFileNameFor,
     chooseView,
     chooseImageSize,
     chooseSort,
@@ -318,7 +317,8 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
         item.file.media_type === "audio"
           ? AUDIO_CARD_RATIO
           : (ratioCache.get(item.file.id) ?? DEFAULT_CELL_RATIO),
-        showFileName,
+        // 瀑布流是**逐格**行高：每个文件按自己的媒体类型判定要不要文件名行。
+        showFileNameFor(item.file.media_type),
       ),
     );
     return {
@@ -326,7 +326,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
       heights: layout.heights,
       columnHeights: layout.columnHeights,
     };
-  }, [columns, imageSize, showFileName, view, viewMode, ratioVersion]);
+  }, [columns, imageSize, showFileNameFor, view, viewMode, ratioVersion]);
 
   /**
    * 瀑布流容器的滚动窗口（按列虚拟化的输入）。
@@ -380,10 +380,14 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
       MEDIA_ADAPTIVE_GAP,
       MEDIA_ADAPTIVE_ROW_MAX_FACTOR,
       // 每格除缩略图外的高度：文件名行 + 它与缩略图之间的 gap（不显示则为 0）。
-      showFileName ? 4 + MEDIA_NAME_LINE_HEIGHT : 0,
+      // **逐格给**：一行里可能混着图像 / 视频 / 音频，三类各有独立的文件名开关，
+      // 纯函数会取该行最大值当行高（行内仍等高，两端对齐不破）。
+      items.map((item) =>
+        showFileNameFor(item.file.media_type) ? 4 + MEDIA_NAME_LINE_HEIGHT : 0,
+      ),
     );
     return { rows: layout.rows, rowHeights: layout.rowHeights, ratios };
-  }, [items, gridWidth, imageSize, showFileName, view, viewMode, ratioVersion]);
+  }, [items, gridWidth, imageSize, showFileNameFor, view, viewMode, ratioVersion]);
 
   /** 自适应视图按**行高数组**虚拟化（行高逐行不同，但完全由纯函数给出，不测量）。 */
   const adaptiveVirtual = useVariableRowVirtualizer(
@@ -420,11 +424,25 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
     () => (view === "tile" && viewMode === "thumb" ? chunkRows(items, tilePerRow) : []),
     [items, tilePerRow, view, viewMode],
   );
-  const tileRowH = tileRowHeight(imageSize, showFileName);
-  const tileVirtual = useFixedRowVirtualizer(
+  /**
+   * 平铺视图的**逐行**行高。
+   *
+   * 文件名开关按媒体类型分项后，同一行可能混着"显示文件名"与"不显示"的条目
+   * （图像 / 视频 / 音频各有独立开关），行高不再是一个常量：取该行**最大**值，
+   * 于是 CSS 网格的自然行高与虚拟化的预测高度一致（不一致会表现为行错位/留白）。
+   */
+  const tileRowHeights = useMemo(
+    () =>
+      tileRows.map((row) =>
+        Math.max(
+          ...row.map(({ file }) => tileRowHeight(imageSize, showFileNameFor(file.media_type))),
+        ),
+      ),
+    [tileRows, imageSize, showFileNameFor],
+  );
+  const tileVirtual = useVariableRowVirtualizer(
     gridRef,
-    view === "tile" && viewMode === "thumb" ? tileRows.length : 0,
-    tileRowH,
+    view === "tile" && viewMode === "thumb" ? tileRowHeights : [],
     gridVersion,
     MEDIA_TILE_ROW_GAP,
   );
@@ -446,14 +464,15 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
    */
   const cellIntrinsicHeight = useCallback(
     (file: FileItem): number | undefined => {
-      if (view === "adaptive") return adaptiveCellIntrinsicHeight(imageSize, showFileName);
+      const showName = showFileNameFor(file.media_type);
+      if (view === "adaptive") return adaptiveCellIntrinsicHeight(imageSize, showName);
       if (view === "masonry") {
         const ratio = ratioCache.get(file.id) ?? DEFAULT_CELL_RATIO;
-        return masonryCellHeight(imageSize, ratio, showFileName);
+        return masonryCellHeight(imageSize, ratio, showName);
       }
       return undefined;
     },
-    [view, imageSize, showFileName],
+    [view, imageSize, showFileNameFor],
   );
 
   /**
@@ -515,7 +534,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
         repoId={repoId ?? ""}
         url={url}
         selected={app.selectedIds.has(file.id)}
-        showName={showFileName}
+        showName={showFileNameFor(file.media_type)}
         intrinsicHeight={cellIntrinsicHeight(file)}
         onSelect={cellSelect}
         onDoubleClick={cellDoubleClick}
@@ -528,7 +547,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
       repoId,
       app.selectedIds,
       app.t,
-      showFileName,
+      showFileNameFor,
       cellIntrinsicHeight,
       cellSelect,
       cellDoubleClick,

@@ -275,7 +275,10 @@ export function masonryVisibleRange(
  * @param targetHeight 目标行高（面板的"图片尺寸"滑条在自适应视图下就是它）
  * @param gap 行内格间距（与样式表 `.mp-view-adaptive` 的 `gap` 一致）
  * @param rowMaxFactor 行高上限系数（与 `--mp-row-max-factor` 一致）
- * @param nameBlock 每格除缩略图外的高度（文件名行 + gap；不显示文件名时为 0）
+ * @param nameBlock 每格除缩略图外的高度（文件名行 + gap；不显示文件名时为 0）。
+ *   **按格给**：同一行可能混着显示/不显示文件名的媒体类型（图像 / 视频 / 音频
+ *   各有独立开关），因此这里既接受常数（整行统一），也接受与 `ratios` 同长的
+ *   逐格数组——行高取该行**最大值**，行内仍严格等高（否则两端对齐会破）。
  */
 export function adaptiveRowLayout(
   ratios: readonly number[],
@@ -283,13 +286,17 @@ export function adaptiveRowLayout(
   targetHeight: number,
   gap: number,
   rowMaxFactor: number,
-  nameBlock = 0,
+  nameBlock: number | readonly number[] = 0,
 ): { rows: number[][]; rowHeights: number[]; offsets: number[]; total: number } {
   const width = Number.isFinite(containerWidth) ? containerWidth : 0;
   const target = Math.max(1, Number.isFinite(targetHeight) ? targetHeight : 1);
   const spacing = Math.max(0, Number.isFinite(gap) ? gap : 0);
   const factor = Math.max(1, Number.isFinite(rowMaxFactor) ? rowMaxFactor : 1);
-  const extra = Math.max(0, Number.isFinite(nameBlock) ? nameBlock : 0);
+  const perCell = Array.isArray(nameBlock);
+  const extraAt = (index: number): number => {
+    const raw = perCell ? (nameBlock as readonly number[])[index] : (nameBlock as number);
+    return Math.max(0, Number.isFinite(raw) ? raw : 0);
+  };
 
   const rows: number[][] = [];
   const rowHeights: number[] = [];
@@ -305,6 +312,12 @@ export function adaptiveRowLayout(
     // 行内各格等高：(容器宽 − 间距) / Σ宽高比；再被行高上限截住。
     const available = Math.max(1, width - spacing * (current.length - 1));
     const thumbHeight = Math.min(available / ratioSum, target * factor);
+    // 行内各格的文件名行可能不同（混合媒体类型）→ 行高取最大值，保证仍然等高。
+    let extra = 0;
+    for (const index of current) {
+      const cellExtra = extraAt(index);
+      if (cellExtra > extra) extra = cellExtra;
+    }
     const height = Math.round(thumbHeight + extra);
     rows.push(current);
     offsets.push(total);

@@ -162,7 +162,13 @@ export const ThumbCell = memo(function ThumbCell({
   repoId: string;
   url: string;
   selected: boolean;
-  /** 是否显示缩略图下的文件名（面板设置 `showFileName`；关掉就只剩图，行更干净）。 */
+  /**
+   * 是否显示缩略图下的文件名。
+   *
+   * 由面板按**媒体类型**算好再传进来（面板设置 `showFileName` 是总开关，
+   * `showImageFileName` / `showVideoFileName` / `showAudioFileName` 各自独立）；
+   * 关掉就只剩图，行更干净。
+   */
   showName: boolean;
   onSelect: (file: FileItem, mods: { shift: boolean; ctrl: boolean }) => void;
   /** 双击：**以文件为参数**（由单元内部传回），这样父级可以传一个恒定引用的回调。 */

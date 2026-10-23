@@ -228,9 +228,33 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
       {
         // 是否显示缩略图下的文件名（三种「预览图」视图共用；「文件名」列表视图不受影响
         // ——那里的文件名就是条目本身）。缺省显示 = 与既有观感一致（零行为变化）。
+        // 这是**总开关**：关掉即三类都不显示，下面三个分项随之失效。
         key: "showFileName",
         kind: "switch",
         title_key: "media.settings.showFileName",
+        default: true,
+      },
+      {
+        // 总开关之下按媒体类型分项：图像 / 视频 / 音频各自独立。
+        // 音频的缩略图是波形图、视频的缩略图常自带标题，关掉各自的文件名能让行更干净；
+        // 三类缺省都显示 = 与既有观感一致（零行为变化）。
+        // `divider_before` 把这一组与上面的「视图 / 尺寸 / 总开关」隔开。
+        key: "showImageFileName",
+        kind: "switch",
+        title_key: "media.settings.showImageFileName",
+        default: true,
+        divider_before: true,
+      },
+      {
+        key: "showVideoFileName",
+        kind: "switch",
+        title_key: "media.settings.showVideoFileName",
+        default: true,
+      },
+      {
+        key: "showAudioFileName",
+        kind: "switch",
+        title_key: "media.settings.showAudioFileName",
         default: true,
       },
       {

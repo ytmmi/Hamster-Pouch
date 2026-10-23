@@ -309,6 +309,9 @@ export const en: Record<keyof DictZhCN, string> = {
   "media.settings.imageSize": "Image width",
   "media.imageSizeHint": "Image width (row height in the Adaptive view)",
   "media.settings.showFileName": "Show file names",
+  "media.settings.showImageFileName": "Show image file names",
+  "media.settings.showVideoFileName": "Show video file names",
+  "media.settings.showAudioFileName": "Show audio file names",
   // Sort (top-right dropdown: sort key + rule + ascending/descending)
   "media.settings.sortKey": "Sort by",
   "media.settings.sortKey.name": "Name",

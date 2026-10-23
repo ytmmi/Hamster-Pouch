@@ -308,6 +308,9 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "media.settings.imageSize": "圖片寬度",
   "media.imageSizeHint": "圖片寬度（自適應視圖下為行高）",
   "media.settings.showFileName": "顯示檔名",
+  "media.settings.showImageFileName": "圖像顯示檔名",
+  "media.settings.showVideoFileName": "影片顯示檔名",
+  "media.settings.showAudioFileName": "音訊顯示檔名",
   // 排序（右上角下拉：排序鍵 + 橫線 + 正序/倒序）
   "media.settings.sortKey": "排序",
   "media.settings.sortKey.name": "名稱",
