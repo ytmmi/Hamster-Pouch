@@ -9,8 +9,11 @@
  *
  * - 宽高比分布取自真实照片的常见档位（16:9 / 3:2 / 4:3 / 1:1 / 3:4 / 2:3 / 9:16），
  *   因为自适应视图的**断行**完全由宽高比驱动；
- * - 缩略图用 **8 个共享的 SVG data URL**（每档一个）：浏览器只解码 8 张、其余命中缓存，
+ * - 缩略图用 **7 个共享的 SVG data URL**（每档一个）：浏览器只解码 7 张、其余命中缓存，
  *   于是测到的差异来自 **DOM 与布局**，而不是"解码 5 万张图"——这正是本条要量化的部分。
+ * - 媒体类型按序号轮转（图像 / 视频 / 音频）：D118 起「显示文件名」按媒体类型分项，
+ *   因此**同一行会混着"显示 / 不显示文件名"的条目**，行高必须取行内最大值。
+ *   类型周期 3 与宽高比周期 7 互质，任何一行（9 列）都必然三类混合、且类型×比例的组合不重复。
  */
 
 /** 宽高比档位（宽 / 高）：覆盖真实照片的主流比例。 */
@@ -30,15 +33,37 @@ export function thumbDataUrl(bucket: number): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
+/** 媒体类型轮转顺序（媒体预览只认这三类，与 `MEDIA_FILTER_TYPES` 一致）。 */
+export const MEDIA_TYPES = ["image", "video", "audio"] as const;
+
+export type CorpusMediaType = (typeof MEDIA_TYPES)[number];
+
+/** 每种媒体类型对应的文件扩展名：探针靠 `<img alt>` 的后缀区分类型，必须真实。 */
+const EXTENSIONS: Record<CorpusMediaType, string> = {
+  image: "jpg",
+  video: "mp4",
+  audio: "mp3",
+};
+
+/** 该条目使用的媒体类型（周期 3，与宽高比周期 7 互质）。 */
+export function mediaTypeOf(index: number): CorpusMediaType {
+  return MEDIA_TYPES[index % MEDIA_TYPES.length];
+}
+
 /** 合成一条文件条目（形状与 `file.query` 返回的 `FileItem` 一致）。 */
 export function makeItem(index: number, sourceId: string) {
   // 宽高比按序号轮转（确定性：同一 index 永远同一档，便于 A/B 对比）。
   const bucket = index % RATIO_BUCKETS.length;
+  const mediaType = mediaTypeOf(index);
+  const serial = String(index).padStart(6, "0");
   return {
-    id: `f${String(index).padStart(6, "0")}`,
+    id: `f${serial}`,
     source_id: sourceId,
-    relative_path: `album/${String(bucket)}/photo_${String(index).padStart(6, "0")}.jpg`,
-    media_type: "image",
+    // 三类**共用同一个基名**（只有扩展名不同）：面板按文件名排序（缺省 `sortKey: "name"`），
+    // 若把类型写进基名，排序会把同类聚成一段、一屏之内只剩一种类型，"混合类型行高"
+    // 就永远测不到。共用基名 + 序号递增 ⇒ 排序结果就是序号顺序 ⇒ 每行必然三类混合。
+    relative_path: `album/${String(bucket)}/photo_${serial}.${EXTENSIONS[mediaType]}`,
+    media_type: mediaType,
     size: 1_000_000 + (index % 997) * 1000,
     mtime: "2026-01-01T00:00:00Z",
   };
