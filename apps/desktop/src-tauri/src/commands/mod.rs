@@ -14,6 +14,9 @@ pub(crate) mod color;
 pub(crate) mod file;
 pub(crate) mod fsops;
 pub(crate) mod layout;
+// 内置 MCP 服务的命令面（D119）：只有"看状态 / 立即重应用"两条——
+// 启停本身由设置项 `mcp.*` 驱动，不给命令开第二个开关。
+pub(crate) mod mcp;
 pub(crate) mod media;
 pub(crate) mod plugin;
 pub(crate) mod plugin_catalog;

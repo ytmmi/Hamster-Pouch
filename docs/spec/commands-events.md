@@ -505,6 +505,23 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 
 **这是开发期诊断通道，不是业务命令**：打包运行（无 devtools）时前端据它把链路日志写进应用数据目录的 `debug.log`，文件位置固定、可直接查看，见 `docs/architecture/file-structure.md` 第「实现注意」节（`:250`、`:255`）。前端唯一的调用点是 `apps/desktop/src/app_ui/shared/blueprintRuntime.ts:91`（按需动态 `import` 后 `invoke`），**没有** `api/*.ts` 封装，因此不进前端命令封装的统计口径。
 
+### 3.16 `mcp.*`（内置 MCP 服务）
+
+内置 **MCP（Model Context Protocol）服务**是随应用启动的本机 HTTP 服务，让外部 AI 客户端通过标准协议读取/改写仓库里的数据（D119）。它**不是**给前端用的业务命令族，只有"看状态 / 立即重应用"两条。
+
+| 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
+| --- | --- | --- | --- | --- | --- |
+| `mcp.status` | 查询服务运行状态与客户端接入信息 | `{}` | `{ ok, data: { running, port, allow_write, endpoint, token, tool_count, write_tool_count } }` | **已包装** | 线上 `data` 字段为**蛇形**；返回 `token` 是有意的——本机应用，用户需要把它复制进 MCP 客户端配置 |
+| `mcp.reload` | 按当前设置项重新应用服务（供"端口被占、改完再试"） | `{}` | 同上 | **已包装** | 正常情况下无需调用：`setting.set` 写入 `mcp.*` 后**自动应用** |
+
+**启停不给命令开第二个开关**：服务是否运行由设置项 `mcp.enabled` 单一决定（`mcp.port` 改端口、`mcp.allowWrite` 改写权限，写入后立即应用）。这样"设置里是关的、命令却能开"的双真相不可能出现。
+
+**安全边界**：默认关闭；只绑 `127.0.0.1`（局域网连不上）；除 `/health` 与 `OPTIONS` 外都要 `Authorization: Bearer <token>`（token 落在 `data/system/mcp.token`）；写操作另受 `mcp.allowWrite` 二次开关约束。
+
+**HTTP 端点**（同一端口）：`POST /mcp` 收发 JSON-RPC 2.0、`GET /mcp` 打开 SSE 通道（只发保活注释）、`DELETE /mcp` 结束会话、`GET /health` 免鉴权探活。
+
+**MCP 工具表**（`tools/list`，共 26 个；写工具 10 个）：只读 —— `repo_list`、`repo_current`、`file_query`、`file_metadata`、`file_path`、`source_list`、`source_tree`、`tag_list`、`tag_tree`、`file_tags`、`album_list`、`album_members`、`book_meta`、`book_toc`、`book_content`、`setting_list`；写 —— `file_rename`、`file_trash`、`file_set_marks`、`file_copy`、`file_move`、`tag_add`、`tag_remove`、`rating_set`、`album_add_members`、`album_remove_members`。**每个工具都是对既有 `#[tauri::command]` 函数的直接调用**，因此 MCP 与界面是同一套语义与错误串。
+
 ## 4. 事件目录
 
 | 事件 | 载荷 |

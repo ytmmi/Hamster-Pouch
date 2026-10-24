@@ -23,6 +23,8 @@ use tasks::TaskRegistry;
 
 mod commands;
 mod embed_window;
+// 内置 MCP（模型上下文协议）服务（D119）：随应用启动的本机 HTTP 服务。
+mod mcp;
 mod tasks;
 
 /// 应用级共享状态（Arc 包装以支持后台扫描线程）。
@@ -69,6 +71,8 @@ pub(crate) struct AppState {
     pub(crate) ai: Arc<Mutex<AiTaggingService>>,
     /// 内置 tag 基底库（RFC 0008 四库，`data/system/tag_lib_base.sqlite3`，延迟加载）。
     pub(crate) tag_lib: Arc<Mutex<Option<TagLibSet>>>,
+    /// 内置 MCP 服务的生命周期（D119）：默认不运行，由设置项 `mcp.*` 驱动。
+    pub(crate) mcp: Arc<mcp::McpRuntime>,
 }
 
 /// 解析应用数据子目录（`thumbnails` / `plugins`）：`<exe 同目录>\data\<name>`。
@@ -109,6 +113,7 @@ fn make_state() -> AppState {
         supervision: Arc::new(Mutex::new(SupervisionRegistry::new())),
         ai: Arc::new(Mutex::new(AiTaggingService::new())),
         tag_lib: Arc::new(Mutex::new(None)),
+        mcp: Arc::new(mcp::McpRuntime::new()),
     }
 }
 
@@ -150,6 +155,9 @@ fn main() {
                     }
                 }
             }
+            // 按设置项应用内置 MCP 服务（D119）：缺省关闭，因此这里通常是空操作；
+            // 用户在设置里打开过则随应用启动直接可用（端口被占用只记日志，不阻断启动）。
+            mcp::reload(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -298,6 +306,10 @@ fn main() {
             commands::blueprint::blueprint_current_layer_set,
             commands::blueprint::blueprint_template_list,
             commands::blueprint::blueprint_template_install,
+            // 内置 MCP 服务（D119）：只有"看状态 / 立即重应用"两条命令，
+            // 启停由设置项 `mcp.*` 驱动。
+            commands::mcp::mcp_status,
+            commands::mcp::mcp_reload,
             commands::shared::debug_log,
             commands::tagdict::tag_dict_suggest,
             commands::tagdict::taglib_status,

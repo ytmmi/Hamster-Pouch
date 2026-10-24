@@ -90,6 +90,7 @@ Rust 核心层
 - 插件命令：`plugin.{pluginId}.{action}`。
 - 所有插件命令必须携带仓库上下文，并经过启用状态与能力授权校验。
 - 长任务必须发出进度事件，支持取消；真实文件操作必须生成操作记录。
+- 内置 MCP 服务（D119）：桥接层内另起一个本机 HTTP 服务（`apps/desktop/src-tauri/src/mcp/`），让外部 AI 客户端按 MCP 标准协议读写仓库数据。它**不新增 crate、不新增依赖**，每个 MCP 工具都是对既有 `#[tauri::command]` 函数的直接调用——因此 MCP 与界面走同一条下行路径，不会出现"界面能改、MCP 改出另一种结果"。默认关闭、只绑 `127.0.0.1`、需 Bearer token，写操作另受二次开关约束；启停由设置项 `mcp.enabled` 单一决定（见 `commands-events.md` 3.16）。
 
 ## 9. AI 打标
 

@@ -106,6 +106,22 @@ crates/hp-store/src/
                         #   （写库、按仓库隔离、同一本书换个副本不跟过去）。位置游标与 book.content
                         #   同语义，桥接层不做数值校验（越界由 book.content 兜底）
     ai.rs fsops.rs      # AI 打标桥接 / 文件操作桥接
+    mcp.rs              # 内置 MCP 服务桥接（2026-10-24，D119）：只有 mcp.status / mcp.reload
+                        #   两条命令——**启停由设置项 `mcp.enabled` 单一决定**，不另开开关
+
+  mcp/                  # 内置 MCP 服务（2026-10-24，D119）：本机 HTTP + JSON-RPC 2.0
+    mod.rs              # 生命周期 McpRuntime：读设置 → 幂等 apply（配置没变不重启）→ 起停；
+                        #   token 落 `data/system/mcp.token`；**默认关闭、只绑 127.0.0.1**
+    jsonrpc.rs          # JSON-RPC 2.0 类型与错误码（-32700 / -32600 / -32601 / -32602 / -32603）
+    protocol.rs         # MCP 方法分发：initialize / ping / tools.list / tools.call；
+                        #   通知（无 id）不回包；**业务失败走 isError 而不是协议错误**
+    tools.rs            # 26 个工具（16 只读 + 10 写）。**不重写业务逻辑**——每个工具直接调
+                        #   既有 `#[tauri::command]` 函数，因此与界面同一套语义与错误串
+    http.rs             # 手写 HTTP/1.1 + SSE 传输（单端点 /mcp + 免鉴权 /health）。
+                        #   **不引入 axum/hyper**（D119 ③）：std TcpListener + 每连接一线程，
+                        #   非阻塞 accept + 20ms 轮询 + 15s 读写超时，请求体上限 8 MiB。
+                        #   `Handler` trait 把传输层与 Tauri 解耦，端到端用例才测得到
+                        #   "头部与请求体同包"这类只在真 socket 上现形的问题
 
 apps/desktop/src/app_ui/
   core/               # 应用装配 / 上下文 / 面板注册表 / 单面板宿主 / 蓝图求值引擎
@@ -117,6 +133,8 @@ apps/desktop/src/app_ui/
   settings/           # **「全部设置」系统界面**（RFC 0010 决策 7；应用级系统界面，不受蓝图引擎管辖）
     SettingsApp.tsx     # 左侧大类/二级 + 右侧分节设置 + 顶部搜索
     settingsRegistry.ts # 设置注册表（宿主项 + 面板项 + 插件项；`kind` 只取控件输入类）
+    McpServiceStatus.tsx # 「MCP」大类底部的服务状态块（D119）：运行状态 / 端点 / 令牌 /
+                        #   工具数，端点与令牌可一键复制；`mcp_status` 命令的唯一界面消费点
   menu/               # 顶部功能条、右键菜单
   shared/             # **AudioWaveform**（音频波形图：三处面板共用的一套显示 + 取图；
                       #     纯几何在 waveformView：waveDrawnBox/waveCursorPercent/waveSeekSeconds）、

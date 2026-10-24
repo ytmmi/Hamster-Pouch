@@ -36,16 +36,22 @@ pub enum SettingCategory {
     Plugin,
     /// 语言：界面语言。
     Language,
+    /// MCP：模型上下文协议服务（D119）。
+    ///
+    /// 独立成大类而不是塞进「界面」：它是**外部进程接入本机数据**的边界，
+    /// 开关、端口与写权限必须集中在一处可见可关，和界面观感无关。
+    Mcp,
 }
 
 impl SettingCategory {
-    /// 全部大类（顺序固定：界面 / 蓝图 / 面板 / 插件 / 语言）。
-    pub const ALL: [SettingCategory; 5] = [
+    /// 全部大类（顺序固定：界面 / 蓝图 / 面板 / 插件 / 语言 / MCP）。
+    pub const ALL: [SettingCategory; 6] = [
         SettingCategory::Interface,
         SettingCategory::Blueprint,
         SettingCategory::Panel,
         SettingCategory::Plugin,
         SettingCategory::Language,
+        SettingCategory::Mcp,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -55,6 +61,7 @@ impl SettingCategory {
             SettingCategory::Panel => "panel",
             SettingCategory::Plugin => "plugin",
             SettingCategory::Language => "language",
+            SettingCategory::Mcp => "mcp",
         }
     }
 
@@ -65,6 +72,7 @@ impl SettingCategory {
             "panel" => Some(SettingCategory::Panel),
             "plugin" => Some(SettingCategory::Plugin),
             "language" => Some(SettingCategory::Language),
+            "mcp" => Some(SettingCategory::Mcp),
             _ => None,
         }
     }
@@ -245,7 +253,7 @@ pub fn validate_setting_decl(decl: &SettingDecl, ctx: &SettingDeclCtx) -> Vec<St
         Some(raw) => {
             if SettingCategory::from_str(raw).is_none() {
                 errors.push(format!(
-                    "设置项 {id} 的 category 不在五大大类内: {raw}（允许 interface/blueprint/panel/plugin/language）"
+                    "设置项 {id} 的 category 不在设置大类内: {raw}（允许 interface/blueprint/panel/plugin/language/mcp）"
                 ));
             }
         }

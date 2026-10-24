@@ -18,3 +18,4 @@ export * from "./plugin";
 export * from "./taglib";
 export * from "./fsops";
 export * from "./blueprint";
+export * from "./mcp";

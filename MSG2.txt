@@ -1,36 +1,65 @@
-fix(taglib): 扩展包装不上（entry 校验 + 文件名硬编码）+ 按类型分类命名
+feat(mcp): 内置 MCP 服务（模型上下文协议）+ 新增第六个设置大类 mcp（D119）
 
-一、修复「扩展全部装不上」（用户反馈，两处根因）
-1. entry 校验对 static-data 也生效：解析层对 StaticData 显式把 entry 置为空串
-   （「StaticData 形态不需要 entry」），而 hp-core 的 validate_structure 无条件
-   要求 entry 非空 → **所有纯数据扩展包在校验阶段被拒**。
-   修复：entry 非空校验跳过 StaticData；其它形态仍强制（不放宽规则）。
-2. 宿主硬编码数据文件名 data/tag_lib.sqlite，而关系包当时叫
-   tag_lib_games.sqlite → 静默装不上。
-   修复：打包统一为 tag_lib.sqlite；宿主兼容回退（固定名不存在时接受目录内
-   **唯一**的 tag_lib*.sqlite；多个则跳过并提示，不猜）；且只装配
-   tagdict-* / tagrel-* 目录。
+一、新增能力
+应用内起一个本机 MCP 服务，让外部 AI 客户端按标准协议读取 / 改写仓库数据。
+- 形态：Streamable HTTP 单端点 /mcp（POST 收发 JSON-RPC 2.0、GET 开 SSE 通道、
+  DELETE 结束会话）+ 免鉴权 /health 探活。
+- 工具 26 个（16 只读 + 10 写）；每个工具都是对既有 #[tauri::command] 函数的
+  直接调用，因此 MCP 与界面是同一套语义与错误串（不重写业务逻辑、不复制 DTO）。
+- 安全边界：默认关闭、只绑 127.0.0.1、除 /health 与 OPTIONS 外都要
+  Authorization: Bearer <token>（token 落 data/system/mcp.token）；写操作另受
+  mcp.allowWrite 二次开关约束。
+- 启停只有设置项一个真相：mcp.enabled 单一决定，setting.set 写入 mcp.* 后自动
+  apply（幂等，配置没变不重启）；命令只有 mcp.status / mcp.reload 两条。
 
-二、按类型分类命名（用户要求：关系扩展与词典扩展要能区分）
-原先三个包都叫 taglib-*，看不出区别。现按类型命名：
-- 词典扩展 tagdict-*：tagdict-pixiv / tagdict-danbooru
-- 关系扩展 tagrel-*：tagrel-games
-目录名、插件 id（…extension.tagdict.* / …tagrel.*）、显示名（tagdict · pixiv 词典）
-三处都带类型前缀。装配方式不变（两类都是同构四库 schema，一律进聚合层），
-分类只用于命名与展示。README 增补命名约定表与扩展类型说明。
+二、实现取舍
+- 不引入 axum / hyper：根 workspace 连 tokio 都没有，桥接层的 tokio 只是 tauri
+  运行时内部依赖。本服务单端点、请求体上限 8 MiB、并发个位数，用标准库
+  TcpListener + 每连接一线程（非阻塞 accept + 20ms 轮询 + 15s 读写超时）足够。
+  新增依赖为零——token 用两个 UUIDv4 拼接，JSON 用 serde_json，线程用 std。
+- Handler trait 把传输层与 Tauri 解耦，端到端用例才能在真实 socket 上跑。
 
-三、签名（用户要求）
-三个扩展包均已 Ed25519 签名并**真实验签通过**（用 Rust 侧权威验签器逐一验证）。
-注意 install 路径对无签名包是**降级而非报错**，因此加了显式断言签名有效的测试。
+三、设置
+- 新增第六个设置大类 mcp（SETTING_CATEGORIES 5 → 6、SettingCategory::ALL
+  [_; 5] → [_; 6]）：mcp.enabled（switch，缺省关）、mcp.port（numberInput，
+  缺省 57321）、mcp.allowWrite（switch，缺省关）。独立成大类而非塞进「界面」：
+  它是外部进程接入本机数据的安全边界，需要独立入口让用户意识到这里在对外开门。
+- 设置界面无需改代码（按 allSettingDecls() 渲染）；「全部设置 → MCP」底部新增
+  服务状态块（运行状态 / 端点 / 令牌 / 工具数，端点与令牌可一键复制）。
 
-四、回归测试（防止再次回归）
-- hp-core: static_data_package_validates_without_entry（单测，含反向断言：
-  非 StaticData 仍要求 entry 非空）
-- hp-plugin-host/tests/tag_extension_install.rs：用真实产物走完整安装路径
-  （解析 → 校验 → 验签 → 复制版本目录），并断言纯数据包无 entry/能力/贡献点
-- hp-plugin-signing/tests/verify_dist_packages.rs：用权威验签器验证三个包
+四、端到端测试抓到并修掉两个真实缺陷（纯函数单测对此完全盲）
+1. read_head 丢请求体：一次 read 会把头部与请求体前若干字节一起读进缓冲区，
+   原实现只取头部文本、把尾部丢掉，随后 read_exact 永远等不到 —— 任何正常
+   POST /mcp 都会挂住。修法：read_head 返回 (Head, leftover)，handle_post 先
+   消费 leftover 再补读。
+2. Windows RST 丢弃提前回包：接收缓冲区还有未读数据时 closesocket 发 RST 而非
+   FIN，于是 401/404/405/OPTIONS//health 在请求体超过约 4 KB 时客户端看到的是
+   ConnectionResetError 而不是那个清晰的 401（小请求恰好看不出来，所以此前所有
+   用例都漏了；真实 MCP 客户端的 initialize 带 clientInfo/capabilities，一超
+   4 KB 就命中）。修法：新增 drain_body()，在提前回包前按 Content-Length 把
+   请求体读掉（上限 MAX_DRAIN_BYTES = 1 MiB）。回归用例
+   large_unauthorized_body_still_returns_a_clean_401 已双向验证（撤掉修复即以
+   ConnectionReset 失败）。
 
-文档：RFC 0008 新增 D36.5（分类命名）、D36.6（装不上根因与修复）；
-决策清单同步；旧包名引用全部更新。
+五、真实第三方客户端验收
+以独立 MCP 客户端对 pnpm app:build 产出的 dev 包做真机连通：initialize 握手
+（协议 2025-06-18 协商成功、只声明 tools 能力）→ notifications/initialized 回
+202 → ping → tools/list 拿到 26 个工具 → 16 个只读工具逐个真实取数（含
+file_query 游标翻页与 mediaTypes 过滤）→ 5 个写工具真实落库并撤销 → 业务错误
+回 isError:true、协议错误回 -32601/-32602、错 token 回 401 → SSE 通道 200 +
+text/event-stream + 保活注释。37 项断言全通过。另核实 mcp.allowWrite=false 时
+写工具回 isError:true「写操作未启用」、只读工具不受影响（重启后生效）。
 
-验证：359 测试通过、9 项门禁全绿。
+六、验证
+- 根 workspace cargo test 629 passed；桥接层 cargo test 91 passed（MCP 38 条，
+  含 8 条真实 socket 端到端）。
+- cargo clippy --all-targets：MCP 模块零警告。
+- 22 项 pnpm check:* 全绿（settings 49/49、commands 11/11、encoding 739 个文件
+  合法 UTF-8、status 169 条计数 + 852 处路径引用可解析）；pnpm typecheck 通过；
+  check:types 无 diff；pnpm build 与 pnpm app:build 均成功。
+
+文档：commands-events 新增 3.16 mcp.*；decision-checklist 新增 D119 与 D119-R1；
+settings-standard 大类表补 MCP 行 + category 取值域补 mcp + 落库键前缀补 mcp.*；
+file-structure 新增 commands/mcp.rs、顶层 mcp/ 块与 McpServiceStatus.tsx；
+module-boundaries 补 mcp.* 命令类别与「传输适配不是新的一层」；overview 与
+README 同步。

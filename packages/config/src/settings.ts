@@ -31,6 +31,12 @@ export const SETTING_KEYS = {
   dateFormat: "ui.dateFormat",
   /** 日期之后是否再显示时间（HH:MM:SS）。 */
   dateShowTime: "ui.dateShowTime",
+  /** 是否开启内置 MCP 服务（D119，默认关）。 */
+  mcpEnabled: "mcp.enabled",
+  /** MCP 服务监听端口（仅本机回环，默认 57321）。 */
+  mcpPort: "mcp.port",
+  /** MCP 是否允许写操作（复制/移动/重命名/回收站；默认关）。 */
+  mcpAllowWrite: "mcp.allowWrite",
 } as const;
 
 /** 默认主题：白天浅色。 */
@@ -97,6 +103,44 @@ export function resolveDateShowTime(value: unknown): boolean {
   return typeof value === "boolean" ? value : DEFAULT_DATE_SHOW_TIME;
 }
 
+// ==================== MCP 服务设置（D119；「全部设置 → MCP」） ====================
+
+/**
+ * MCP 服务默认**关闭**。
+ *
+ * 关闭即不监听任何端口：外部进程无法读取本机库，也不存在"忘了关"的暴露面。
+ */
+export const DEFAULT_MCP_ENABLED = false;
+
+/** MCP 服务默认端口（仅绑 `127.0.0.1`，不监听外网）。 */
+export const DEFAULT_MCP_PORT = 57321;
+
+/** 端口合法区间：避开特权端口与常见服务端口，允许 1024–65535。 */
+export const MCP_PORT_MIN = 1024;
+export const MCP_PORT_MAX = 65535;
+
+/**
+ * MCP 写操作默认**关闭**。
+ *
+ * 只读能力（查询仓库/文件/标签/相册）开启即可用；复制、移动、重命名、
+ * 移入回收站必须由用户显式打开本开关。
+ */
+export const DEFAULT_MCP_ALLOW_WRITE = false;
+
+export function resolveMcpEnabled(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_MCP_ENABLED;
+}
+
+export function resolveMcpPort(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) return DEFAULT_MCP_PORT;
+  if (value < MCP_PORT_MIN || value > MCP_PORT_MAX) return DEFAULT_MCP_PORT;
+  return value;
+}
+
+export function resolveMcpAllowWrite(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_MCP_ALLOW_WRITE;
+}
+
 // ============================== 设置注册表 ==============================
 
 /** 设置**大类**（封闭枚举，顺序即界面的固定顺序）。 */
@@ -106,6 +150,7 @@ export const SETTING_CATEGORIES = [
   "panel",
   "plugin",
   "language",
+  "mcp",
 ] as const;
 export type SettingCategory = (typeof SETTING_CATEGORIES)[number];
 
@@ -276,6 +321,40 @@ export const SYSTEM_SETTING_DECLS: readonly SettingDecl[] = [
     keywords: ["blueprint", "layout", "sync", "蓝图", "布局", "同步"],
     section_key: "settings.section.blueprintSync",
   },
+  // MCP 服务三项（D119）。为什么独立成大类而不是塞进「界面」：这是**外部进程
+  // 接入本机数据**的边界，开关、端口与写权限必须集中在一处可见可关，
+  // 和界面观感无关；塞进「界面」会让"关闭外部访问"藏在观感选项里。
+  {
+    id: SETTING_KEYS.mcpEnabled,
+    category: "mcp",
+    owner: { kind: "system" },
+    title_key: "settings.mcp.enabled",
+    kind: "switch",
+    default: DEFAULT_MCP_ENABLED,
+    keywords: ["mcp", "server", "model context protocol", "服务", "外部访问"],
+    section_key: "settings.section.mcpServer",
+  },
+  {
+    id: SETTING_KEYS.mcpPort,
+    category: "mcp",
+    owner: { kind: "system" },
+    title_key: "settings.mcp.port",
+    kind: "numberInput",
+    default: DEFAULT_MCP_PORT,
+    keywords: ["mcp", "port", "端口", "监听"],
+    section_key: "settings.section.mcpServer",
+  },
+  {
+    id: SETTING_KEYS.mcpAllowWrite,
+    category: "mcp",
+    owner: { kind: "system" },
+    title_key: "settings.mcp.allowWrite",
+    kind: "switch",
+    default: DEFAULT_MCP_ALLOW_WRITE,
+    divider_before: true,
+    keywords: ["mcp", "write", "copy", "move", "trash", "写", "复制", "移动", "回收站"],
+    section_key: "settings.section.mcpServer",
+  },
 ];
 
 /**
@@ -430,7 +509,7 @@ export function validateSettingDecl(
     errors.push(`设置项 id 不合命名规则（^[a-z][a-z0-9._-]{0,63}$）: ${decl.id}`);
   }
   if (!SETTING_CATEGORIES.includes(decl.category)) {
-    errors.push(`设置项 ${decl.id} 的 category 不在五大大类内: ${decl.category}`);
+    errors.push(`设置项 ${decl.id} 的 category 不在设置大类内: ${decl.category}`);
   }
   if (decl.owner.kind !== "system" && !decl.owner.id.trim()) {
     errors.push(`设置项 ${decl.id} 的 owner.id 缺失（${decl.owner.kind} 归属必需）`);

@@ -2,14 +2,14 @@
  * 设置注册表一致性自检（RFC 0010 决策 7 / `docs/spec/settings-standard.md` 第 9 节）。
  *
  * 断言：
- * 1. **设置注册表 ↔ 本文档的五大大类**一致；每个大类都有归属项或**空态**（不隐藏）；
+ * 1. **设置注册表 ↔ 本文档的设置大类**一致；每个大类都有归属项或**空态**（不隐藏）；
  * 2. `kind` 白名单与控件注册表的**输入类子集**一致，**不得出现 `button` 或非输入类**；
  * 3. **「面板」二级列表的分组与面板注册表 `category` 一致**，且**只列出声明了
  *    `settings` 的面板**（无设置项的面板不显示，第 4.1 节）；
  * 4. **右侧 = 左侧当前选择的详情**（主从结构，不是整栏混合）：面板/插件的每个二级项
  *    只解析出自己那一节，未显式选择时回退到该大类第一项；
  * 4. **「插件」二级列表**覆盖已登记插件，未分类落 `other`；
- * 5. **落库键前缀规则**：宿主 `ui.*` / `layout.*`；面板 `panel.<panel_id>.`；
+ * 5. **落库键前缀规则**：宿主 `ui.*` / `layout.*` / `mcp.*`；面板 `panel.<panel_id>.`；
  *    插件强制 `plugin.<plugin_id>.`（插件自带其它前缀即拒绝）；
  * 6. **搜索**：`title_key` 在三套语言资源里都存在（三套键集一致），
  *    且搜索**只命中注册表内的项**、不搜值/仓库数据；
@@ -53,8 +53,11 @@ const t = (key) => zhCN[key] ?? zhTW[key] ?? en[key] ?? key;
 // ============================== 1. 大类（封闭枚举 + 空态） ==============================
 
 check(
-  "大类是封闭枚举且顺序固定（界面 / 蓝图 / 面板 / 插件 / 语言）",
-  eqList([...config.SETTING_CATEGORIES], ["interface", "blueprint", "panel", "plugin", "language"]),
+  "大类是封闭枚举且顺序固定（界面 / 蓝图 / 面板 / 插件 / 语言 / MCP）",
+  eqList(
+    [...config.SETTING_CATEGORIES],
+    ["interface", "blueprint", "panel", "plugin", "language", "mcp"],
+  ),
   [...config.SETTING_CATEGORIES].join(","),
 );
 const missingCategoryInDoc = config.SETTING_CATEGORIES.filter(
@@ -71,7 +74,7 @@ const categoryI18n = config.SETTING_CATEGORIES.filter(
 check(
   "每个大类都有 i18n 文案（三套语言键集一致）",
   categoryI18n.length === 0,
-  categoryI18n.join(", ") || "5 个大类文案齐全",
+  categoryI18n.join(", ") || "全部大类文案齐全",
 );
 
 /** 从 Rust `impl X { fn as_str }` 的 match 臂读出「枚举名 → JSON 取值」。 */

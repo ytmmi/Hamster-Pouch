@@ -29,6 +29,7 @@ import { SwitchToggle } from "../shared/SwitchToggle";
 import { useApp } from "../core/AppContext";
 import { publishSettingChanged } from "../core/settingChangeStore";
 import type { Translate, TranslationKey } from "../i18n";
+import { McpServiceStatus } from "./McpServiceStatus";
 import {
   allSettingCategories,
   decodeSettingValue,
@@ -160,6 +161,14 @@ export function SettingsApp({
   );
   /** 当前选择没有任何设置项（含"整类为空"）→ 右侧只留一行空态。 */
   const detailEmpty = sections.every((section) => section.decls.length === 0);
+  /**
+   * MCP 服务状态块的刷新键：三项 `mcp.*` 设置任一变化就重新拉一次状态。
+   * 写入后后端会同步重应用服务，所以这里只按"设置值变了"触发即可，
+   * 不必等 `setting.changed` 的 IPC 往返（同窗口 `writeValue` 也会更新 `values`）。
+   */
+  const mcpReloadKey = `${values["mcp.enabled"] ?? ""}|${values["mcp.port"] ?? ""}|${
+    values["mcp.allowWrite"] ?? ""
+  }`;
 
   /** 切换大类：清掉二级选择，使右侧落到该大类首项。 */
   const selectCategory = (next: SettingCategory) => {
@@ -270,6 +279,14 @@ export function SettingsApp({
                   ))}
                 </section>
               ))}
+            {/*
+              MCP 大类额外渲染**服务状态**块（D119）：设置项只声明"要不要开 / 端口 / 写权限"，
+              客户端接入信息（端点 + token + 工具数）是运行时事实，走 `mcp.status` 命令而非设置注册表。
+              放在设置项之后，因为用户是先开服务、再复制接入信息。
+            */}
+            {!query.trim() && category === "mcp" && (
+              <McpServiceStatus t={t} reloadKey={mcpReloadKey} />
+            )}
           </div>
         </div>
       </div>

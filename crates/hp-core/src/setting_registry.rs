@@ -121,6 +121,38 @@ pub const SYSTEM_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &[],
         requires_capability: None,
     },
+    // MCP 服务三项（D119）：「全部设置 → MCP」。
+    //
+    // 为什么独立成大类：这是**外部进程接入本机数据**的边界，开关与写权限
+    // 必须集中在一处可见可关，和界面观感无关；塞进「界面」会让"关闭外部访问"
+    // 藏在观感选项里。
+    SettingDeclFact {
+        id: "mcp.enabled",
+        owner_kind: "system",
+        owner_id: None,
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "mcp.port",
+        owner_kind: "system",
+        owner_id: None,
+        kind: "numberInput",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "mcp.allowWrite",
+        owner_kind: "system",
+        owner_id: None,
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
 ];
 
 /// 面板设置声明（**镜像** `packages/config/src/panels.ts` 各面板的 `settings`）。

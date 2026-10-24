@@ -83,8 +83,10 @@
 | **面板** | **各面板**（按面板 `category` 分组） | 每个面板的设置项，**按面板分节** |
 | **插件** | **各插件**（按插件分类分组） | 每个插件的设置项 + 启用状态与能力授权展示 |
 | **语言** | 语言列表 | 界面语言（`zh-CN` / `zh-TW` / `en`） |
+| **MCP** | 无（按**服务与权限**分节） | 内置 MCP 服务（模型上下文协议）：开关 `mcp.enabled`（缺省**关**）、监听端口 `mcp.port`（缺省 57321，仅绑 `127.0.0.1`）、写操作开关 `mcp.allowWrite`（缺省**关**，控制复制 / 移动 / 重命名 / 移入回收站） |
 
 - **大类是封闭枚举**：新增大类必须同时更新本表、宿主设置注册表与 i18n 文案。
+- **「MCP」为什么单独成大类**：它是**外部进程接入本机数据**的边界——开关、端口与写权限必须集中在一处可见可关；若塞进「界面」，「关闭外部访问」会被藏在观感选项里（D119）。
 - **「面板」大类管的是面板设置，不叫「控件」**：控件（26 种宿主 UI 单元）**不单独占一个大类**——它们不是用户可直接配置的功能单元，其外观由设计 token 与主题统一决定（RFC 0010 决策 1、7）。
 - 某个大类的注册表为空时，该大类**仍然显示**（不隐藏，避免"设置项凭空消失"），右侧只给**一行空态**；空大类不写解释性说明文字（第 2 节规则 6）。
 
@@ -126,8 +128,8 @@
 
 | 声明参数 | 类型 | 取值域 / 约束 | 必需 | 说明 |
 | --- | --- | --- | --- | --- |
-| `id` | string | `^[a-z][a-z0-9._-]{0,63}$`；应用设置键 `app_settings.key` | ✅ | 稳定 id，也是落库键（宿主设置用 `ui.*` / `layout.*` 前缀） |
-| `category` | enum | 大类：`interface` / `blueprint` / `panel` / `plugin` / `language` | ✅ | 归属大类（第 3 节） |
+| `id` | string | `^[a-z][a-z0-9._-]{0,63}$`；应用设置键 `app_settings.key` | ✅ | 稳定 id，也是落库键（宿主设置用 `ui.*` / `layout.*` / `mcp.*` 前缀） |
+| `category` | enum | 大类：`interface` / `blueprint` / `panel` / `plugin` / `language` / `mcp` | ✅ | 归属大类（第 3 节） |
 | `owner` | object | `{ kind: "system" \| "panel" \| "plugin", id? }` | ✅ | 归属：宿主 / 某面板 / 某插件；`panel`/`plugin` 时 `id` 必需 |
 | `title_key` | string | i18n 键（D27） | ✅ | 设置项显示名；**不得内联文字** |
 | `kind` | string | **只能取控件的输入类**：`switch` / `textInput` / `numberInput` / `select` / `slider` / `checkbox` | ✅ | 值控件类型（见下方规则） |
@@ -202,7 +204,7 @@
 
 1. `id` / `category` / `owner` / `title_key` / `kind` 缺失。
 2. `id` 不合命名规则，或与既有设置项冲突。
-3. `category` 不在五个大类内；`owner.kind = panel`/`plugin` 但 `owner.id` 缺失或未注册。
+3. `category` 不在设置大类内；`owner.kind = panel`/`plugin` 但 `owner.id` 缺失或未注册。
 4. `kind` 不在输入类白名单内。
 5. `default` 与 `kind` 不匹配（如 `switch` 给了字符串）。
 6. `scope` 不在 `app` / `repo` 内。
@@ -247,12 +249,12 @@
 ## 9. 验证
 
 - **`pnpm check:settings`**（新增门禁）：
-  1. 设置注册表 ↔ 本文档五大大类一致；每个 `category` 都有归属项或空态。
+  1. 设置注册表 ↔ 本文档设置大类一致；每个 `category` 都有归属项或空态。
   2. `kind` 白名单与控件注册表的**输入类子集**一致（`docs/spec/control-standard.md` 第 4 节），不得出现 `button` 或非输入类 `kind`。
   3. 「面板」二级列表的分组与面板注册表 `category` 一致（`docs/spec/panel-standard.md` 第 3 节），且**只列出声明了 `settings` 的面板**（第 4.1 节）。
   4. **右侧 = 左侧当前选择的详情**（第 2 节规则 4）：面板/插件的每个二级项**只**解析出自己那一节；未显式选择（或选择已失效）时回退到该大类第一项。
   5. 「插件」二级列表覆盖全部已注册插件，未分类落 `other`。
-  6. 落库键前缀规则（宿主 `ui.*` / `layout.*`；插件强制 `plugin.<plugin_id>.`）。
+  6. 落库键前缀规则（宿主 `ui.*` / `layout.*` / `mcp.*`；插件强制 `plugin.<plugin_id>.`）。
   7. 搜索：`title_key` 在所有语言资源里都存在（三套语言键集一致）。
   8. **（2026-09 新增）** Rust 校验镜像 ↔ TS 权威声明**逐项一致**（宿主项 ↔ `SYSTEM_SETTING_DECLS`、面板项 ↔ `panelSettingDecls()`，比对落库键 / `kind` / `scope` / `options`），且**无多余声明**（反向断言）；以及写入路径四条规则与 D76 包装的落点断言。
 - **`cargo test -p hp-core`**：设置声明的硬错误清单、`kind` 输入类白名单、插件键前缀强制、同名 id 冲突拒绝；**（2026-09 新增）** 校验镜像的落库键/`kind`/`scope`、值校验分级、`select` 必须有可选项、以及"仅 `repo` 项拼 `repoId`"（`crates/hp-core/src/setting_registry.rs` 的 4 个用例）。

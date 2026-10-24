@@ -137,7 +137,7 @@ impl PluginManifest {
                 let category = c.category.as_deref().unwrap_or("");
                 if SettingCategory::from_str(category).is_none() {
                     return Err(HpError::InvalidArgument(format!(
-                        "设置分节 {} 的 category 不在五大大类内: {category}（插件不能新增或改名大类）",
+                        "设置分节 {} 的 category 不在设置大类内: {category}（插件不能新增或改名大类）",
                         c.id
                     )));
                 }
@@ -298,7 +298,7 @@ impl PluginManifest {
                 if let Some(category) = c.category.as_deref() {
                     if SettingCategory::from_str(category).is_none() {
                         return Err(HpError::InvalidArgument(format!(
-                            "设置分节 {} 的 category 不在五大大类内: {category}",
+                            "设置分节 {} 的 category 不在设置大类内: {category}",
                             c.id
                         )));
                     }

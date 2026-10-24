@@ -265,6 +265,8 @@ mod tests {
             ai: Arc::new(Mutex::new(AiTaggingService::new())),
             // tag 库聚合集：本模块的用例不涉及词库查询，空集即可。
             tag_lib: Arc::new(Mutex::new(None)),
+            // MCP 服务：本模块的用例不涉及，缺省（未运行）即可。
+            mcp: Arc::new(crate::mcp::McpRuntime::new()),
         }
     }
 

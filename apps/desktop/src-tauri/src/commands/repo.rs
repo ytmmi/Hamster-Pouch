@@ -448,6 +448,12 @@ pub(crate) fn setting_set(
             g.set_setting(&storage_key, &encoded)?;
         }
         emit_setting_changed(&app, &key);
+        // MCP 服务三项（`mcp.enabled` / `mcp.port` / `mcp.allowWrite`，D119）
+        // 写入后立刻按新值应用：开关与端口不需要用户重启应用。
+        // 其它设置键不触发（避免无关改动也去读一遍配置）。
+        if key.starts_with("mcp.") {
+            crate::mcp::reload(&app);
+        }
         Ok(SettingOkResult { ok: true })
     })();
     api_from_hp(outcome)
@@ -515,6 +521,11 @@ pub(crate) fn setting_reset(
             g.delete_setting(&storage_key)?;
         }
         emit_setting_changed(&app, &key);
+        // 恢复缺省同样可能改变 MCP 服务形态：删掉 `mcp.enabled` 后读到的缺省是「关」，
+        // 不在这里重应用就会留下一个"设置里是关的、服务还在跑"的双真相（D119 ⑦）。
+        if key.starts_with("mcp.") {
+            crate::mcp::reload(&app);
+        }
         Ok(SettingOkResult { ok: true })
     })();
     api_from_hp(outcome)

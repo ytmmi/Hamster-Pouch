@@ -51,6 +51,7 @@ Rust 核心层
 - `media.*`：媒体播放控制（打开/播放/暂停/定位/停止）、媒体子进程状态查询。
 - `color.*`：色彩参考提取（仅图片）、手动调整/锁定色值。
 - `plugin.*` / `ai.*`：插件与 AI 任务入口；插件命令必须带仓库上下文并经过能力校验。
+- `mcp.*`：**内置 MCP 服务**（D119）只有 `mcp.status`（查询运行状态与客户端接入信息）与 `mcp.reload`（按当前设置再应用一次）两条。**启停不给命令开第二个开关**——服务是否运行由设置项 `mcp.enabled` 单一决定，`setting.set` 写入 `mcp.*` 后自动应用。该服务是**桥接层内的传输适配**（`apps/desktop/src-tauri/src/mcp/`），不新增 crate、不引入 web 框架：MCP 工具一律直接调既有 `#[tauri::command]` 函数，因此不改变 `UI -> Tauri -> crates` 的依赖方向，也不给 crates 增加任何对外接口。
 - 命令命名采用混合风格：核心域使用 `domain.action`，插件命令使用 `plugin.{pluginId}.{action}` 命名空间。
 
 ## 事件类别草案
@@ -100,3 +101,4 @@ AI 打标接口首期只抽象（仅图片，D17）：
 - 系统/受信动态库插件使用 C ABI + 版本化结构体；`community`/`local-dev` 不允许动态库。
 - 插件分发通道、签名与 Python 核心见 `docs/rfc/0009-plugin-distribution.md`；控件标准见 `docs/spec/control-standard.md`（**「浮动控件」已于 2026-09 取消**，浮层由蓝图 `overlay` 容器承载，其显隐由蓝图规则决定）。
 - AI 自动组内高置信更新必须生成撤销记录；**不得覆盖人工 tag**（D21）。
+- 内置 MCP 服务（D119）是桥接层内的**传输适配**，不是新的一层：`apps/desktop/src-tauri/src/mcp/` 把 MCP 请求翻成既有 `#[tauri::command]` 调用，因此 MCP 与界面走**同一条**下行路径（`Tauri -> crates -> 数据/文件`），不新增 crate、不给 crates 增加对外接口，也不允许绕开命令层直连数据库或文件系统。传输层用标准库 `TcpListener` + 每连接一线程（**不引入 axum / hyper**），并通过 `Handler` trait 与 Tauri 解耦，使端到端用例能在真实 socket 上跑。
