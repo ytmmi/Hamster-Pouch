@@ -65,10 +65,10 @@
 //! 的正确性不受影响；若在锁内读盘，一次翻页就会把另一本书的请求排在自己后面。
 //! 每个调用各开自己的 `File`，因此不共享文件游标。
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 
@@ -111,16 +111,23 @@ pub const TEXT_SCAN_MAX_BYTES: u64 = 512 * 1024 * 1024;
 /// 一个多字节字符的最大字节数（UTF-8 4、GBK 2、UTF-16 4）。
 const MAX_CHAR_BYTES: usize = 4;
 
-/// 需求 2 的**硬证据钩子**：本进程最近一次 `read_text_page_window` 从盘上读了多少字节。
-///
-/// 为什么要有它：模块文档与常量注释都能说"内存与文件大小无关"，但那是**声明**；
-/// 这条计数让**测试**能真的量出读盘量，把"没有读整本"钉成**行为**而不是注释。
-/// 生产路径不读它（纯诊断计数）。
-static LAST_PAGE_READ_BYTES: AtomicU64 = AtomicU64::new(0);
+// 需求 2 的**硬证据钩子**：本线程最近一次 `read_text_page_window` 从盘上读了多少字节。
+//
+// 为什么要有它：模块文档与常量注释都能说"内存与文件大小无关"，但那是**声明**；
+// 这条计数让**测试**能真的量出读盘量，把"没有读整本"钉成**行为**而不是注释。
+// 生产路径不读它（纯诊断计数）。
+//
+// 为什么是**线程本地**而不是进程级原子量：`cargo test` 默认用多线程并行跑同一个
+// 测试二进制，进程级计数会被别的用例的读盘覆盖。实测过一次真实红：本用例读完
+// 一页拿到 4004，下一句读计数时已被别的用例记成 30，断言 `4004 == 30` 失败。
+// 线程本地让"读一页 → 读计数"在同一测试线程内闭合，天然无竞态。
+thread_local! {
+    static LAST_PAGE_READ_BYTES: Cell<u64> = const { Cell::new(0) };
+}
 
-/// 本进程最近一次 `read_text_page_window` 的**读盘字节数**（诊断 / 测试用）。
+/// 本线程最近一次 `read_text_page_window` 的**读盘字节数**（诊断 / 测试用）。
 pub fn last_page_read_bytes() -> u64 {
-    LAST_PAGE_READ_BYTES.load(Ordering::Relaxed)
+    LAST_PAGE_READ_BYTES.with(Cell::get)
 }
 
 /// 流式统计的结果。
@@ -613,7 +620,7 @@ pub fn read_text_page_window(
     let identity = FileIdentity::of(path, content_key)?;
     let capped = len > TEXT_SCAN_MAX_BYTES;
     let scan_limit = len.min(TEXT_SCAN_MAX_BYTES);
-    LAST_PAGE_READ_BYTES.store(0, Ordering::Relaxed);
+    LAST_PAGE_READ_BYTES.with(|bytes| bytes.set(0));
     if len == 0 {
         return Ok(TextPageOwned {
             text: String::new(),
@@ -649,7 +656,7 @@ pub fn read_text_page_window(
     let at_end = target_byte + window.len() as u64 >= len;
     let (text, window_chars, _boundary) = decode_page(encoding.0, &window, at_end, page_chars);
     // 诊断计数 = 本页从盘上读掉的字节（定位读的字节不计，那由锚点表摊销）。
-    LAST_PAGE_READ_BYTES.store(window.len() as u64, Ordering::Relaxed);
+    LAST_PAGE_READ_BYTES.with(|bytes| bytes.set(window.len() as u64));
     let got = text.chars().count() as u64;
     /*
      * "还有没有下一页"的判据：**窗口内的字符数 > 本页取的字符数**。
