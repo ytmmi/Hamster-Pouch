@@ -69,26 +69,36 @@ unsafe extern "system" fn wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    let state = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const WndState;
+    // edition 2024：`unsafe_op_in_unsafe_fn` 不再是警告而是必须显式标注的行为，
+    // 函数体里的每条原始指针/ Win32 调用都要有自己的 `unsafe` 块（而不是靠函数签名）。
+    let state = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const WndState };
     if !state.is_null() {
-        if msg == WM_NCHITTEST && (*state).click_through.load(Ordering::Relaxed) {
+        // SAFETY: `state` 由 `EmbedWindow::create` 通过 `Box::into_raw` 挂在
+        // `GWLP_USERDATA` 上，且在 `WM_NCDESTROY` 里才被回收；窗口过程只在本窗口
+        // 的消息循环里执行，因此此处解引用期间它必然仍然有效。
+        let live = unsafe { &*state };
+        if msg == WM_NCHITTEST && live.click_through.load(Ordering::Relaxed) {
             return LRESULT(HTTRANSPARENT as isize);
         }
-        if msg == WM_LBUTTONUP && !(*state).click_through.load(Ordering::Relaxed) {
+        if msg == WM_LBUTTONUP && !live.click_through.load(Ordering::Relaxed) {
             // 单击视频 = 暂停/继续：把点击翻译成事件，由前端调原子切换命令。
-            let _ = (*state).app.emit_hp("media.surface.click", ());
+            let _ = live.app.emit_hp("media.surface.click", ());
             return LRESULT(0);
         }
     }
     if msg == WM_NCDESTROY {
         // 窗口销毁：释放挂在 GWLP_USERDATA 上的状态（Box::into_raw 的对应回收）。
-        let state = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WndState;
+        let state = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WndState };
         if !state.is_null() {
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-            drop(Box::from_raw(state));
+            // SAFETY: 上面已判定非空，且同一个指针只在 `WM_NCDESTROY` 这一次被回收。
+            unsafe {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                drop(Box::from_raw(state));
+            }
         }
     }
-    DefWindowProcW(hwnd, msg, wparam, lparam)
+    // SAFETY: 未处理的消息一律交回默认窗口过程，参数原样透传。
+    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
 impl EmbedWindow {

@@ -10,7 +10,7 @@
  * 进度只来自 `taskStore`（不进 AppContext）：否则每次进度事件都会让所有面板重渲染并重跑查库。
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 
 import * as api from "../shared/api";
 import { useApp } from "./AppContext";

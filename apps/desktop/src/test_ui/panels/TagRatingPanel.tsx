@@ -2,7 +2,7 @@
  * 标签与评分面板 — 添加/移除标签、列出仓库标签、显示文件标签、设置/读取评分。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type JSX } from "react";
 
 import * as api from "../api";
 import type { FileItem, StatusHandler, TagItem } from "../types";

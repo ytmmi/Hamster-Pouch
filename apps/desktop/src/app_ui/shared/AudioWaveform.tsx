@@ -19,7 +19,7 @@
  * 也不需要第二个前端缓存——同一份 in-flight 去重与结果缓存直接复用。
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 
 import type { Translate } from "../i18n";
 import { resolveThumbUrl } from "./thumbUrl";

@@ -8,7 +8,7 @@
  *    `empty('error')`，不影响同面板其余节点。
  */
 
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode, type JSX } from "react";
 
 import { type ControlNode } from "@hamster-pouch/config";
 import { COLORS } from "@hamster-pouch/ui";

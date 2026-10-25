@@ -34,7 +34,7 @@
  * `viewer/useViewerBookContent.ts` 分页取数、`viewer/viewerReaderView.ts` 纯逻辑。
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../shared/api";

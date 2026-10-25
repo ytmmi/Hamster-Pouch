@@ -5,7 +5,7 @@
  * `media_process_status` 命令。所有错误经 `onStatus` 状态栏呈现，不抛出。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type JSX } from "react";
 
 import * as api from "../api";
 import type { FileItem, MediaStatus, StatusHandler } from "../types";

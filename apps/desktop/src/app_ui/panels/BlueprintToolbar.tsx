@@ -7,6 +7,7 @@
  * 纯展示 + 回调：命令语义在 `useBlueprintDocuments`，图编辑动作在 `useBlueprintGraphEdits`。
  */
 
+import type { JSX } from "react";
 import type { Translate } from "../i18n";
 import type { BlueprintViewMode } from "./useBlueprintEditorState";
 

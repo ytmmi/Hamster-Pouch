@@ -4,7 +4,7 @@
  * 输入为空时退格删除最后一个标签。
  */
 
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useRef, useState, type KeyboardEvent, type JSX } from "react";
 
 export interface TagInputItem {
   id: string;

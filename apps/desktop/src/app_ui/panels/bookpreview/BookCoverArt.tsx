@@ -23,7 +23,7 @@
  * 完整显示（**不裁剪**：裁掉书名是书封最不能接受的一种"好看"）。
  */
 
-import { useState } from "react";
+import { useState, type JSX } from "react";
 
 import type { BookCoverOverride } from "./bookCoverCache";
 import { BookTextCover } from "./BookTextCover";

@@ -22,6 +22,7 @@
  * 需要"文字 + 开关"时用 `<span>` 容器 + `label` 属性给无障碍名。
  */
 
+import type { JSX } from "react";
 import { COLORS, type ThemeName } from "@hamster-pouch/ui";
 
 export interface SwitchToggleProps {

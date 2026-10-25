@@ -8,6 +8,7 @@
  * 容器用 `<span>`：`<label>` 不得包住可交互元素，胶囊开关自带无障碍名。
  */
 
+import type { JSX } from "react";
 import type { ThemeName } from "@hamster-pouch/ui";
 import type {
   BlueprintItem,

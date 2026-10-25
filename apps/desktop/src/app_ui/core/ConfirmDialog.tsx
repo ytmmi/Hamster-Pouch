@@ -5,6 +5,7 @@
  * 待确认状态与 resolver 由 `useConfirm` 提供，宿主（应用窗口 / 独立面板窗口）渲染本组件。
  */
 
+import type { JSX } from "react";
 import { useApp } from "./AppContext";
 
 export function ConfirmDialog(): JSX.Element | null {

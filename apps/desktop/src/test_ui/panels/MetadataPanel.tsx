@@ -2,7 +2,7 @@
  * 元数据面板 — 读取并格式化显示文件元数据。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type JSX } from "react";
 
 import * as api from "../api";
 import type { FileItem, FileMetadataResult, StatusHandler } from "../types";

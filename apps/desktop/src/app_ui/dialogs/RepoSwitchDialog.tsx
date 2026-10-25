@@ -2,7 +2,7 @@
  * 切换仓库对话框（独立窗口：index.html?dialog=repo-switch）。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type JSX } from "react";
 import { emitHp } from "../shared/events";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 

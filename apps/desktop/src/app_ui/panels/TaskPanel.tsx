@@ -2,7 +2,7 @@
  * 任务面板 — 后台任务与事件概览（扫描 / 相册同步 / 色彩提取）。
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { type UnlistenFn } from "@tauri-apps/api/event";
 
 import { listenHp } from "../shared/events";

@@ -2,7 +2,7 @@
  * 插件面板 — 已安装插件列表、按仓库启用/禁用与能力授权、加载与回滚（RFC 0004）。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type JSX } from "react";
 
 import { listenHp } from "../shared/events";
 

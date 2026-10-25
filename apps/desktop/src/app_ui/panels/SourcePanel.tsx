@@ -5,7 +5,7 @@
  * 别名不在添加时填写，只能在添加后于条目上重命名。
  */
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type JSX } from "react";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";

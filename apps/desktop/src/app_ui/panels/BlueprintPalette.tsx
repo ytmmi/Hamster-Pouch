@@ -14,6 +14,7 @@
  * 纯展示 + 回调：落点与引用推导在 `useBlueprintGraphEdits`（`blueprintNodeFactory`）。
  */
 
+import type { JSX } from "react";
 import type { BlueprintNodeType } from "@hamster-pouch/config";
 
 import type { Translate } from "../i18n";

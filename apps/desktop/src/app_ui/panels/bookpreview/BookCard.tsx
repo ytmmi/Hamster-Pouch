@@ -15,7 +15,7 @@
  * `preventDefault()` 在单元里做掉，免得 WebView 的默认菜单先弹出来。
  */
 
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, type JSX } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import type { FileItem } from "../../shared/types";

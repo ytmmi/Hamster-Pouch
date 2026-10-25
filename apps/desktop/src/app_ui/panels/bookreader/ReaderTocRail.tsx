@@ -32,7 +32,7 @@
  * 本文件只负责渲染与交互。
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type JSX } from "react";
 
 import type { Translate } from "../../i18n";
 import type { BookTocItem, FileItem, ReaderAnnotationKind } from "../../shared/types";

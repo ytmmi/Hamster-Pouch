@@ -9,6 +9,7 @@
  * 纯展示 + 回调；文档变更由面板（`BlueprintPanel`）通过 `blueprintLayers` 的纯函数完成。
  */
 
+import type { JSX } from "react";
 import type { BlueprintLayer } from "@hamster-pouch/config";
 
 import type { Translate } from "../i18n";

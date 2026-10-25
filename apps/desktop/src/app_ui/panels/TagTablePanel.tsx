@@ -21,6 +21,7 @@ import {
   useState,
   type DragEvent,
   type MouseEvent as ReactMouseEvent,
+  type JSX,
 } from "react";
 
 import * as api from "../shared/api";

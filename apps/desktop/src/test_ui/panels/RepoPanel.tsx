@@ -2,7 +2,7 @@
  * 仓库面板 — 创建、打开、关闭、列表仓库。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type JSX } from "react";
 
 import * as api from "../api";
 import type { RepoListItem, StatusHandler } from "../types";

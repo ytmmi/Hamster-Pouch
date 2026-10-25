@@ -13,7 +13,15 @@
  *    不用 `scrollIntoView`（后者会连带滚动祖先，可能把整个面板/页面顶走）。
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+} from "react";
 
 import { resolveThumbUrl } from "../../shared/thumbUrl";
 import type { FileItem } from "../../shared/types";

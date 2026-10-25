@@ -4,7 +4,7 @@
  * 源列表通过 `source_list` 获取，选中源后通过 `file_query` 按源过滤列出文件。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type JSX } from "react";
 
 import * as api from "../api";
 import type { FileItem, SourceItem, StatusHandler } from "../types";

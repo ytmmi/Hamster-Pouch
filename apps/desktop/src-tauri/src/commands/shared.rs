@@ -720,9 +720,12 @@ mod tests {
     #[test]
     fn env_override_wins_over_lookup() {
         let key = "HP_TEST_EXTERNAL_BIN_OVERRIDE";
-        std::env::set_var(key, "Z:/explicit/override.exe");
+        // edition 2024：`std::env::set_var` / `remove_var` 是 `unsafe`（进程级可变全局
+        // 状态，多线程下可能撕裂）。本用例独占一条测试专用键，且写入后立刻读取、立刻
+        // 清掉，因此不会与其它用例的读取并发。
+        unsafe { std::env::set_var(key, "Z:/explicit/override.exe") };
         let got = external_bin_path(key, "external-cli/ffmpeg/bin/ffmpeg.exe");
-        std::env::remove_var(key);
+        unsafe { std::env::remove_var(key) };
         assert_eq!(got, Some(PathBuf::from("Z:/explicit/override.exe")));
     }
 
@@ -730,9 +733,10 @@ mod tests {
     #[test]
     fn bundled_plugins_dir_honours_env_override() {
         let key = "HP_BUNDLED_PLUGINS_DIR";
-        std::env::set_var(key, "Z:/explicit/bundled");
+        // 同上：独占测试键，写入 → 读取 → 清理，无并发读者。
+        unsafe { std::env::set_var(key, "Z:/explicit/bundled") };
         let got = bundled_plugins_dir();
-        std::env::remove_var(key);
+        unsafe { std::env::remove_var(key) };
         assert_eq!(got, Some(PathBuf::from("Z:/explicit/bundled")));
     }
 

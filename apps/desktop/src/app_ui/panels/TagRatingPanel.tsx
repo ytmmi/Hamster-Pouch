@@ -4,7 +4,7 @@
  * 仓库 tag 列表已独立为「tag表」组件。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type JSX } from "react";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";

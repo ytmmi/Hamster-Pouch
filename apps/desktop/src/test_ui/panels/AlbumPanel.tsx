@@ -2,7 +2,7 @@
  * 相册面板 — 创建、列表、成员管理、同步。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type JSX } from "react";
 import { type UnlistenFn } from "@tauri-apps/api/event";
 import { listenHp } from "../../app_ui/shared/events";
 

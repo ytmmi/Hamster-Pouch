@@ -9,6 +9,7 @@ import {
   useMemo,
   useState,
   type DragEvent,
+  type JSX,
 } from "react";
 
 import * as api from "../shared/api";

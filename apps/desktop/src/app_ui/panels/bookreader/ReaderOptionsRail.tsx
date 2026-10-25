@@ -19,6 +19,7 @@
  * 属未排期项，**不做假开关**。
  */
 
+import type { JSX } from "react";
 import type { ThemeName } from "@hamster-pouch/ui";
 
 import type { TranslationKey, Translate } from "../../i18n";

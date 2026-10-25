@@ -9,7 +9,7 @@ hp-hash = { path = "../hp-hash" }
 hp-store = { path = "../hp-store" }
 hp-media = { path = "../hp-media" }
 walkdir = "2"
-notify = "6"
+notify = "8"
 time = { version = "0.3", features = ["formatting"] }
 # 扫描期**只解码一次**图片（`scan_compute.rs`）：旧实现让感知哈希与调色板各自
 # `image::open` 一次，大图（9000² = 81 MP）的重采样成本因此翻倍。见 `docs/issues/0018`。

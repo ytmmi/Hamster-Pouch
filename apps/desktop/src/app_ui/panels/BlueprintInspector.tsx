@@ -10,7 +10,7 @@
  * 展示层：参数与选项一律用本地化文案，不向用户暴露底层 key。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type JSX } from "react";
 
 import { SwitchToggle } from "../shared/SwitchToggle";
 import { useApp } from "../core/AppContext";

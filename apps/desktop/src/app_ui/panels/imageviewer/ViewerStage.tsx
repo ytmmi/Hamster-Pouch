@@ -11,7 +11,16 @@
  * `viewerZoom.ts` 的纯函数里（面板据此应用"以指针为中心"或"以中心为中心"）。
  */
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent,
+  type ReactNode,
+  type JSX,
+} from "react";
 
 import {
   clampOffset,

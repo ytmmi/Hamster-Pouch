@@ -57,7 +57,7 @@ const warmedThumbs = new Set<string>();
  * 另外两个视图不设相关规则，因此同一个变量在那里是惰性的。
  */
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, type JSX } from "react";
 import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import { AudioWaveform } from "../shared/AudioWaveform";

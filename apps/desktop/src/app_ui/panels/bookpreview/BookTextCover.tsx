@@ -10,6 +10,7 @@
  * 用户在右键菜单里选了颜色时，改用 `colorOverride`（用户口径 2026-10-09）。
  */
 
+import type { JSX } from "react";
 import { textCoverHue, wrapCoverName } from "./bookPreviewView";
 
 export interface BookTextCoverProps {

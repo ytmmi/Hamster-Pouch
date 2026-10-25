@@ -7,6 +7,7 @@
  * 纯展示 + 回调。
  */
 
+import type { JSX } from "react";
 import type { Translate } from "../i18n";
 
 export interface BlueprintJsonViewProps {

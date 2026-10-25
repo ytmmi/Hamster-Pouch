@@ -23,7 +23,7 @@
  * **余留**：`tKey` 的插件语言资源通道未落地，暂原样返回键名。
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 
 import type {
   BlueprintTrigger,

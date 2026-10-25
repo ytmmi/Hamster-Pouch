@@ -5,6 +5,7 @@
  * 右侧显示阅读选项。这里不再弹出第二层项目菜单。
  */
 
+import type { JSX } from "react";
 import type { Translate } from "../../i18n";
 
 export interface ReaderMoreMenuProps {

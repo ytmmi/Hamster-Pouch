@@ -31,7 +31,7 @@
  * 面板设置走 `shared/settingValue.ts`（四条触发源），因此需要 dockview 面板 API。
  */
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type JSX } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { useApp } from "../../core/AppContext";

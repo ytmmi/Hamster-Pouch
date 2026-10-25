@@ -31,7 +31,7 @@
  * 而视频那张图只能是"某一帧"或"整段抽样"，两者语义不同。视频画面本身就是它的内容。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type JSX } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../shared/api";

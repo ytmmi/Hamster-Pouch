@@ -12,7 +12,7 @@
  *   `useTaskWiring.ts`：设置、插件注册表、蓝图运行时、长任务的生命周期接线。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import {
   DockviewReact,
   themeDark,

@@ -9,7 +9,7 @@
  * `tools/check-panels.mjs` 的守护断言），所以这里不再引入第二种做法。
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 
 import { ContextMenu } from "../menu/ContextMenu";
 import type { Translate, TranslationKey } from "../i18n";

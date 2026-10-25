@@ -9,7 +9,7 @@
  * 所以走 `mcp.status` 命令而不是设置注册表（见 `docs/spec/commands-events.md` §3.16）。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type JSX } from "react";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";

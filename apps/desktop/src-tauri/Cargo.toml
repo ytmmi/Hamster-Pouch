@@ -1,19 +1,19 @@
 [package]
 name = "hamster-pouch-desktop"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "仓鼠颊桌面应用壳（Tauri 桥接层）"
 
 # 独立于根 workspace（Tauri 应用自带构建配置，避免与库 workspace 特性合并）
 [workspace]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2.12.5", features = ["protocol-asset"] }
 # 原生系统对话框：「添加媒体源」改为**选取文件夹**，不再手工输入路径。
-tauri-plugin-dialog = "2"
+tauri-plugin-dialog = "2.8.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
@@ -34,10 +34,10 @@ hp-album = { path = "../../../crates/hp-album" }
 hp-fsops = { path = "../../../crates/hp-fsops" }
 hp-plugin-host = { path = "../../../crates/hp-plugin-host" }
 hp-ai = { path = "../../../crates/hp-ai" }
-trash = "5.2.8"
+trash = "5.2.9"
 
 # 仅 Windows：libmpv 面板级嵌入所需的 Win32 原生子窗口宿主（D14）。
-# 版本与 tauri 2.11 使用的 windows 0.61 对齐，保证 HWND 类型兼容。
+# 版本与 tauri 2.12 使用的 windows 0.61 对齐，保证 HWND 类型兼容。
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
   "Win32_Foundation",

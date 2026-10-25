@@ -28,7 +28,7 @@
  * 第一栏末尾会发现没有后续内容。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import type { CSSProperties, UIEvent } from "react";
 
 import { useApp } from "../../core/AppContext";

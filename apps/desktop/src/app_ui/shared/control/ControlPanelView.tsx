@@ -9,7 +9,7 @@
  * 这里**不做网络/命令调用**：查询与事件回传由调用方通过 `ctx` 注入，保持渲染器纯粹。
  */
 
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode, type JSX } from "react";
 
 import {
   CONTROL_API_VERSION,

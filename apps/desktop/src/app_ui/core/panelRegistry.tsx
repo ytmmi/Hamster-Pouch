@@ -7,7 +7,7 @@
  * （`docs/spec/control-standard.md`），插件不得创建自由 React 组件（D44/RFC 0010 决策 2）。
  */
 
-import { useMemo, useSyncExternalStore, type FC } from "react";
+import { useMemo, useSyncExternalStore, type FC, type JSX } from "react";
 import type { IDockviewPanelProps } from "dockview-react";
 
 import {

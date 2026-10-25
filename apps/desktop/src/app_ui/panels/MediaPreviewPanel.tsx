@@ -38,7 +38,7 @@
  * - `mediaPreviewCell.tsx`：缩略图单元；`mediaPreviewView.ts`：取值域与纯函数。
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,

@@ -8,6 +8,7 @@
  * 「视图」下拉只在「预览图」模式下有效（列表模式置灰并给出原因）——它只改变缩略图的排布方式。
  */
 
+import type { JSX } from "react";
 import type { Translate, TranslationKey } from "../i18n";
 import type { MediaTypeFilter } from "./mediaPreviewData";
 import { ToolbarDropdown, type DropdownOption } from "./mediaPreviewDropdown";

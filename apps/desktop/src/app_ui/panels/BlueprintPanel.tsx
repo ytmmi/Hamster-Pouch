@@ -15,7 +15,7 @@
  * （`blueprintRuntime` 重载生效蓝图并对账 dockview 布局）。
  */
 
-import { useMemo } from "react";
+import { useMemo, type JSX } from "react";
 
 import { useApp } from "../core/AppContext";
 import { BlueprintCanvas } from "./BlueprintCanvas";

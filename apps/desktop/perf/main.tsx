@@ -16,6 +16,7 @@
  */
 
 import { createRoot } from "react-dom/client";
+import type { JSX } from "react";
 
 import { MediaPreviewPanel } from "../src/app_ui/panels/MediaPreviewPanel";
 import "../src/app_ui/shared/styles.css";

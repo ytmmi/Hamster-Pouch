@@ -30,8 +30,8 @@
 | 层 | 选型 |
 | --- | --- |
 | 桌面壳 | Tauri 2（Rust），应用标识 `dev.hamsterpouch.desktop` |
-| 前端 | React 18 + TypeScript + Vite 5 + dockview（面板布局） |
-| 后端 | Cargo workspace（Rust，edition 2021） |
+| 前端 | React 19 + TypeScript + Vite 8 + dockview（面板布局） |
+| 后端 | Cargo workspace（Rust，edition 2024） |
 | 数据 | SQLite（仓库库 / 全局库 / 词库边界） |
 | 包管理 | pnpm workspace（`apps/*`、`packages/*`）+ Cargo |
 
@@ -66,7 +66,7 @@ Rust crates：
 ## 环境要求
 
 - Windows 10/11（含 WebView2 运行时）
-- Rust 工具链（edition 2021）
+- Rust 工具链（edition 2024，见 `rust-toolchain.toml`）
 - Node.js ≥ 22 + pnpm ≥ 11
 - 可选：vcpkg + libheif（`hp-media` 的 `libheif` 特性**默认开启**，用于 HEIC/HEIF/AVIF 进程内解码）：
 

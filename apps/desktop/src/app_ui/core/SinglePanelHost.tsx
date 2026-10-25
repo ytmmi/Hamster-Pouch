@@ -4,7 +4,7 @@
  * 用于「窗口 → 独立」把面板脱离为系统窗口。仓库与语言上下文从 URL 读取。
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { emitHp } from "../shared/events";
 
 import { SETTING_KEYS } from "@hamster-pouch/config";

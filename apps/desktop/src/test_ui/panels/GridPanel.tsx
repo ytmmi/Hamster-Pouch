@@ -2,7 +2,7 @@
  * 文件网格面板 — 按媒体类型查询文件，点击选中。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type JSX } from "react";
 
 import * as api from "../api";
 import type { FileItem, StatusHandler } from "../types";

@@ -29,6 +29,7 @@
  * 一部分 PDF 本来就没有作者字段，省略整行会让"没有作者"与"面板坏了"看起来一样。
  */
 
+import type { JSX } from "react";
 import type { Translate } from "../../i18n";
 import type { FileItem } from "../../shared/types";
 import { BookCoverArt } from "../bookpreview/BookCoverArt";

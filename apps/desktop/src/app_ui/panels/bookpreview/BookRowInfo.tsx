@@ -11,6 +11,7 @@
  * 与"面板坏了"看起来一模一样。
  */
 
+import type { JSX } from "react";
 import { useApp } from "../../core/AppContext";
 
 export interface BookRowInfoProps {

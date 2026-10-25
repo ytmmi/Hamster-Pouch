@@ -2,7 +2,7 @@
  * 创建仓库对话框（独立窗口：index.html?dialog=repo-create）。
  */
 
-import { useState } from "react";
+import { useState, type JSX } from "react";
 import { emitHp } from "../shared/events";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 

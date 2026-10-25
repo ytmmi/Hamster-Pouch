@@ -7,7 +7,7 @@
  */
 
 import { useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import type { JSX, ReactNode } from "react";
 
 import { AppContext, type AppContextValue } from "../src/app_ui/core/AppContext";
 import { makeTranslator } from "../src/app_ui/i18n";

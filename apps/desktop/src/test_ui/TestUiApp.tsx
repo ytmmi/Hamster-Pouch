@@ -5,7 +5,7 @@
  * 布局：顶部标题栏 + 3 行 2 列面板网格 + 底部状态栏。
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, type JSX } from "react";
 
 import type { FileItem, StatusType } from "./types";
 import { RepoPanel } from "./panels/RepoPanel";

@@ -2,6 +2,7 @@
   "name": "@hamster-pouch/desktop",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -12,20 +13,20 @@
     "@hamster-pouch/config": "workspace:*",
     "@hamster-pouch/shared-types": "workspace:*",
     "@hamster-pouch/ui": "workspace:*",
-    "@tanstack/react-virtual": "3.14.13",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2.7.3",
-    "dockview": "^8.3.1",
-    "dockview-react": "^8.3.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "@tanstack/react-virtual": "3.14.22",
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.3",
+    "dockview": "^8.6.1",
+    "dockview-react": "^8.6.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
-    "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "@tauri-apps/cli": "^2.12.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
   }
 }

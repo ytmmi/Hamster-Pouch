@@ -4,7 +4,7 @@
  * 窗口菜单：布局（保存/加载）、组件（显示/隐藏/独立）、重置布局。
  */
 
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject, type JSX } from "react";
 import type { DockviewApi } from "dockview-react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 

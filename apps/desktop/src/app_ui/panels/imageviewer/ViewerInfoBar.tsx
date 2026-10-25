@@ -10,6 +10,7 @@
  * 文案模板一律走 i18n（D27）——格式化只产出数据，不产出文案。
  */
 
+import type { JSX } from "react";
 import type { DateFormat, SizeUnit } from "@hamster-pouch/config";
 
 import type { Translate } from "../../i18n";

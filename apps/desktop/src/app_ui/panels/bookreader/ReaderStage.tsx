@@ -56,7 +56,7 @@
  * 这样"改字号"不会触发 React 重排 —— 只改一个自定义属性。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent, UIEvent } from "react";
 
 import type { Translate } from "../../i18n";

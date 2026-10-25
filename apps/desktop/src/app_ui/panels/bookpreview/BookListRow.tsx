@@ -12,7 +12,7 @@
  * 面板统一接线）：三种视图的交互口径只有这一份。
  */
 
-import { memo } from "react";
+import { memo, type JSX } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import type { FileItem } from "../../shared/types";

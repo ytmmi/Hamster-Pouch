@@ -26,7 +26,7 @@
  * 不丢信息的底账。
  */
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type JSX } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import {

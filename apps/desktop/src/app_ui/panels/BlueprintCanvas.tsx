@@ -18,7 +18,7 @@
  * 画布上没线"。
  */
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type JSX } from "react";
 
 import type {
   BlueprintEdge,

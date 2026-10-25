@@ -101,7 +101,9 @@ pub fn verify_file_hash(
         }
         hasher.update(&buf[..n]);
     }
-    let actual = format!("{:x}", hasher.finalize());
+    // sha2 0.11 的 `finalize()` 返回 `hybrid-array` 的 `Array<u8, U32>`，
+    // 不再实现 `LowerHex`；改走同一 crate 里已在用的 `hex` 编码。
+    let actual = hex::encode(hasher.finalize());
     if actual != entry.sha256 {
         return Err(format!(
             "SHA-256 不匹配: {} — 期望 {} 实际 {}",

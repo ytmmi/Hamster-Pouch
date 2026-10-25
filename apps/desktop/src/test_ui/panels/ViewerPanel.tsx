@@ -5,7 +5,7 @@
  * 所有错误均降级为占位提示，不抛出。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type JSX } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../api";

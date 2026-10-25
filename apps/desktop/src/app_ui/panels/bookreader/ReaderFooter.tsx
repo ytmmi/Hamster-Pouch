@@ -27,6 +27,7 @@
  * 拿不到就显示 `—`：编一个 0% 会让"还没读数"和"这本书读不了"看起来一样。
  */
 
+import type { JSX } from "react";
 import type { Translate } from "../../i18n";
 import { formatProgressPercent } from "./readerView";
 

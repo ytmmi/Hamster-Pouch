@@ -13,7 +13,7 @@
  * 不得靠内部嵌套规避。
  */
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode, type JSX } from "react";
 
 import {
   CONTROL_GAP_VALUES,

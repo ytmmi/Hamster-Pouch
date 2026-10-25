@@ -197,10 +197,13 @@ pub fn detect_encoding(bytes: &[u8]) -> TextEncoding {
         return TextEncoding(encoding_rs::UTF_8);
     }
 
-    // 3. 统计探测（已排除 UTF-8，故 `allow_utf8 = false`）。
-    let mut detector = chardetng::EncodingDetector::new();
+    // 3. 统计探测（已排除 UTF-8，故 `Utf8Detection::Deny`）。
+    //    chardetng 1.0 起把两个布尔参数改成显式枚举：`new(Iso2022JpDetection)`
+    //    与 `guess(tld, Utf8Detection)`。两个取值与 0.1 的 `new()` /
+    //    `guess(None, false)` 语义完全一致（不允许 ISO-2022-JP、不允许 UTF-8）。
+    let mut detector = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
     detector.feed(sample, true);
-    let guessed = detector.guess(None, false);
+    let guessed = detector.guess(None, chardetng::Utf8Detection::Deny);
 
     // 4. 探测器给不出 CJK 答案时，按 GBK 可解码性兜底（见 `gbk_looks_right`）。
     //    `windows-1252` 是 chardetng 的"判断不了"兜底值，中文正文常落在这里；

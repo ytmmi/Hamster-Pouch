@@ -16,7 +16,7 @@
  * 设置的读取与热加载走 `shared/settingValue.ts`（四条独立触发源），本文件只消费结果。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type JSX } from "react";
 import { type UnlistenFn } from "@tauri-apps/api/event";
 import { listenHp } from "../shared/events";
 

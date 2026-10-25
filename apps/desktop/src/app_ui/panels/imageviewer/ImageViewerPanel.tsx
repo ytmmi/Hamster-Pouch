@@ -38,7 +38,15 @@
  * 序列来源见 `useViewerSequence.ts`。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type JSX,
+} from "react";
 
 import {
   resolveDateFormat,

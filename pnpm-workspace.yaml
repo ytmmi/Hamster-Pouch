@@ -2,5 +2,5 @@ packages:
   - "apps/*"
   - "packages/*"
 
-onlyBuiltDependencies:
-  - esbuild
+# pnpm 11+ 起，engines 强制校验只能写在 workspace 配置里（.npmrc 的 engine-strict 对 pnpm 无效）。
+engineStrict: true

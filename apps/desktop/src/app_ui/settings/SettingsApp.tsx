@@ -13,7 +13,7 @@
  * 打开入口是顶部设置区的「更多设置」（`MenuBar`）。
  */
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type JSX } from "react";
 
 import {
   SETTING_CATEGORIES,

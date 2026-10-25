@@ -9,7 +9,7 @@
  * 平移/刀痕判定（在小地图上拖拽会变成平移画布或划线删除）。
  */
 
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef, type JSX } from "react";
 
 import type { BlueprintEdge, BlueprintNode } from "@hamster-pouch/config";
 

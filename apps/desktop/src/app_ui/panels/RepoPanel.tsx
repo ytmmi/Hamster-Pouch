@@ -8,7 +8,7 @@
  * `repoDisplay.ts`（纯函数，门禁按行为断言）。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type JSX } from "react";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";

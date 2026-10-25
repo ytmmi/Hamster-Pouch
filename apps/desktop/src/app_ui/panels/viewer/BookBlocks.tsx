@@ -35,7 +35,7 @@
  * 谁在外层都不改变可见结果，但**固定住**才能让"同一组样式 → 同一棵树"成立。
  */
 
-import { memo, useState, createElement } from "react";
+import { memo, useState, createElement, type JSX } from "react";
 import type { ReactNode } from "react";
 
 import { convertFileSrc } from "@tauri-apps/api/core";

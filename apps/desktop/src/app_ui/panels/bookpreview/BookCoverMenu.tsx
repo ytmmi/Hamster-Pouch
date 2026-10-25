@@ -16,7 +16,7 @@
  * 而"给这本书换张皮"多数时候只想快速挑一个——预设是零思考路径。
  */
 
-import { useState } from "react";
+import { useState, type JSX } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import type { Translate } from "../../i18n";

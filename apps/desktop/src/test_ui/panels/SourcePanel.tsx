@@ -2,7 +2,7 @@
  * 媒体源面板 — 挂载、列表、重命名、卸载、扫描（含事件订阅）。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type JSX } from "react";
 import { type UnlistenFn } from "@tauri-apps/api/event";
 import { listenHp } from "../../app_ui/shared/events";
 

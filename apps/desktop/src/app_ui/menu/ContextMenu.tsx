@@ -32,6 +32,7 @@ import {
   useState,
   type CSSProperties,
   type ReactNode,
+  type JSX,
 } from "react";
 import { createPortal } from "react-dom";
 

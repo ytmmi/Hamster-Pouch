@@ -8,7 +8,7 @@
  * 指针事件一律 `stopPropagation`，否则会同时触发舞台的拖动平移（两套拖动互相打架）。
  */
 
-import { useCallback, useEffect, useRef, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, type PointerEvent, type JSX } from "react";
 
 import { visibleRect, type Size, type ViewTransform } from "./viewerZoom";
 import { navigatorCornerClass, type NavigatorCorner } from "./viewerPlacement";

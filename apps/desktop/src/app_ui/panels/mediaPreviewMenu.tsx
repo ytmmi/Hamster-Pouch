@@ -12,7 +12,7 @@
  * 「关闭时同时把 `renaming` 置回 false」等价。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type JSX } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 
 import { ContextMenu } from "../menu/ContextMenu";

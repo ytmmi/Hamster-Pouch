@@ -12,7 +12,7 @@
  * 右键菜单不因为"这里是网格"就少一项或换一套口径。
  */
 
-import { memo } from "react";
+import { memo, type JSX } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import type { FileItem } from "../../shared/types";
