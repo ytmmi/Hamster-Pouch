@@ -1,239 +1,147 @@
 # 仓鼠颊（Hamster Pouch）
 
-> 本地资源管理软件 —— 将图片、视频、音频、文本与绿色版程序统一入库、索引、打标与检索。
+> Windows 本地资源管理器：把图片、视频、音频、文本与绿色版程序统一入库、索引、打标与检索。
 
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![CI](https://github.com/ytmmi/Hamster-Pouch/actions/workflows/ci.yml/badge.svg)](https://github.com/ytmmi/Hamster-Pouch/actions/workflows/ci.yml)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-lightgrey.svg)](#环境要求)
 
-仓鼠颊（Hamster Pouch）是一款面向 Windows 的本地资源管理软件。它以「仓库 / 媒体源 / 相册」为组织模型：把本地文件夹作为媒体源扫描入库，支持虚拟相册、内容去重与变更检测、AI 辅助打标、插件扩展与事件蓝图自动化，帮助你在本地管理大规模图片、视频、音频、文本与绿色版程序。
+## 简介
 
-## 功能特性
+仓鼠颊是一款基于 [Tauri](https://tauri.app/) 的 Windows 桌面应用。它以「仓库 / 媒体源 / 相册」组织本地文件：把文件夹扫描入库后做内容去重、标签与评分、AI 打标、插件扩展与界面自动化。数据全部保存在本机（SQLite 数据库 + 原始文件），不依赖云端。
 
-- **资源管理**：图片 / 视频 / 音频 / 文本 / 绿色版程序（非安装程序）的统一入库与管理
-- **仓库与媒体源**：多仓库、多媒体源扫描、变更检测与索引任务；媒体类型判定（扩展名优先 + 内容兜底）
-- **哈希与去重**：BLAKE3 内容哈希 + dHash 感知哈希，支持去重、变更识别与哈希算法版本记录
-- **相册**：固定相册、跟随源同步规则、成员维护
-- **标签与评分**：仓库内 tag / 评分体系，来源、置信度与生成时间可追溯
-- **AI 打标**：可插拔的 AI 打标提供方、任务队列与结果回写；高置信度覆盖用户 tag 时生成撤销记录
-- **媒体能力**：ffprobe 元数据探测、ffmpeg 抽帧缩略图与缓存、媒体预览与播放器面板
-- **音频支持**：音频与图片/视频**同档**入库（内容哈希 + ffprobe 元数据：时长 / 编码 / 码率 / 采样率），旧音频占位行**原位升级**（不写迁移脚本、不要求全量重扫）；**波形图预览**由后端 `ffmpeg showwavespic` 生成（PNG、**透明背景**、按内容哈希缓存），出现在**媒体预览的音频单元 / 查看器的音频舞台 / 媒体播放器**三处——查看器与播放器的波形**可点击定位**，播放器波形上叠实时游标
-- **图书预览**：**"书"**（epub / txt / md / **pdf**）入库（算内容哈希、不产出视觉派生）与图书预览面板（卡片 / 列表 / 封面三视图；EPUB 作者 / 简介 / 内嵌封面、**PDF 封面 = 第一页**经 `book.meta` 解析；封面可右键换成指定颜色或自定义图片；**标记**可右键增删——标记是**可多值、与类目正交**的维度，如 `book` / `manga`）
-- **正文查看**：查看器可直接阅读 txt / md / epub / **pdf** 的开头内容（txt 自动判定 GBK / UTF-8 编码；**md 渲染成排版正文**——完整 CommonMark + GFM 语法，标题 / 列表 / 引用 / 代码块 / 表格 / 任务列表 / 脚注 / 定义列表；epub 含章节文字与插图；**pdf 逐页栅格化为整页图片**，版式（分栏 / 表格 / 乐谱）所见即原貌；文本类按面板宽度自适应单栏 / 双栏，**PDF 恒单栏**），滚动时按需取下一页
-- **图书阅读器**：**完整阅读**一本"书"（txt / md / epub / pdf）——**目录跳转**（EPUB 取 nav / NCX，**txt 按内置小说章节规则识别**，md 取标题）、**13 项阅读选项**（翻页方式 / 背景与文字配色 / **仿真背景（图书阴影）** / 字号 / 行距 / 页边距 / 页宽 / 字间距 / 段间距 / 亮度 / 字体 / 对齐，落库到面板设置）、三种翻页方式（滚动 / 单页 / 双页；**单页 = 一张居中纸、双页 = 一对相贴的居中纸，随面板自适应重排**；**翻页是刷新切换而非滑动**，D116）、**EPUB 排印对齐开源实现**（段落首行缩进中文 2em / 拉丁 1em、段间不留空、紧跟标题的首段不缩进；判据取自 Readium CSS 与 foliate-js，D116-R2）、底部进度（当前进度 / 本章进度 / 章节数）；右上角**「更多」矢量图标**展开内置面板（目录 / 书签 / 笔记 / 高亮 / 阅读选项）。**书签 / 笔记 / 高亮落库**（仓库库 `reader_annotations` 表，迁移 0011），点一条即跳回那一处
-- **文件操作**：源间复制 / 剪切 / 移动并生成操作记录；内容哈希一致时保留 tag、评分与相册成员关系
-- **插件系统**：插件包发现、安装、信任与能力校验（`hp-plugin-host`）；内置 system 插件与示例
-- **内置 MCP 服务**：随应用启动的本机 **MCP（Model Context Protocol）** 服务，让外部 AI 客户端按标准协议读取 / 改写仓库数据（D119）。Streamable HTTP 单端点 `/mcp`（`POST` 收发 JSON-RPC 2.0、`GET` 开 SSE 通道、`DELETE` 结束会话）+ 免鉴权 `/health` 探活；**26 个工具**（16 只读 + 10 写），每个工具都是对既有命令的直接调用，因此与界面同一套语义与错误串。**默认关闭**、只绑 `127.0.0.1`、需要 Bearer token，写操作另受「允许写操作」二次开关约束；开关 / 端口 / 写权限集中在「全部设置 → MCP」，底部状态块显示运行状态、端点与令牌（可一键复制）
-- **事件蓝图**：以控件事件为蓝图事件源的自动化框架
-- **多语言 UI**：简体中文（默认）/ 繁體中文 / English；dockview 可停靠面板布局
+## 功能
+
+- **统一入库**：图片、视频、音频、文本与图书（txt / md / epub / pdf）、绿色版程序（非安装程序）
+- **仓库与媒体源**：多仓库隔离；媒体源扫描、变更检测；扩展名优先 + 内容兜底判定类型
+- **去重与变更**：BLAKE3 内容哈希 + dHash 感知哈希；复制 / 移动后保留标签、评分与相册成员
+- **相册与标签**：固定相册与跟随源同步的相册；人工 / 自动标签分组、评分
+- **AI 打标**：可插拔的提供方、任务队列与结果回写
+- **预览与播放**：ffprobe 元数据、ffmpeg 缩略图与音频波形图、图片查看器、视频 / 音频播放器
+- **图书**：图书预览面板与完整阅读器（目录、阅读选项、书签 / 笔记 / 高亮）
+- **插件与自动化**：插件安装、信任与能力校验；事件蓝图驱动界面自动化
+- **内置 MCP 服务**：可选开启的本机 MCP 端点，供外部 AI 客户端按标准协议读写仓库数据
+- **界面**：dockview 可停靠面板布局；简体中文 / 繁體中文 / English
 
 ## 技术栈
 
 | 层 | 选型 |
 | --- | --- |
 | 桌面壳 | Tauri 2（Rust），应用标识 `dev.hamsterpouch.desktop` |
-| 前端 | React 19 + TypeScript + Vite 8 + dockview（面板布局） |
-| 后端 | Cargo workspace（Rust，edition 2024） |
-| 数据 | SQLite（仓库库 / 全局库 / 词库边界） |
-| 包管理 | pnpm workspace（`apps/*`、`packages/*`）+ Cargo |
-
-## 项目结构
-
-| 路径 | 说明 |
-| --- | --- |
-| `apps/desktop` | Tauri 桌面应用（前端 `src/` + 宿主 `src-tauri/`） |
-| `packages/` | 前端共享包：`config`、`ui`、`shared-types` |
-| `crates/` | Rust 核心库（见下表） |
-| `plugins/` | 插件：`system/`（palette、python-core）、`examples/` |
-| `external-cli/` | 外部 CLI：ffmpeg 与 mpv 随仓库分发（mpv 主程序走 Git LFS） |
-| `tools/` | 门禁与数据管线脚本（`check-*.mjs`、`tagdict/` 等） |
-| `docs/` | 规范（`spec/`）、决策记录（`rfc/`）、架构文档（`architecture/`） |
-
-Rust crates：
-
-| crate | 职责 |
-| --- | --- |
-| `hp-core` | 领域模型（仓库、媒体源、虚拟相册、图像、tag、评分、封面覆盖），纯净无外部依赖 |
-| `hp-store` | SQLite 访问、迁移、事务，仓库库 / 全局库 / 词库边界（仓库库当前版本 11） |
-| `hp-scanner` | 媒体源扫描、变更检测、索引任务，媒体类型判定 |
-| `hp-hash` | BLAKE3 内容哈希、dHash 感知哈希、算法版本记录 |
-| `hp-album` | 相册同步规则与成员维护 |
-| `hp-fsops` | 源间复制 / 剪切 / 移动，操作记录与元数据保留 |
-| `hp-media` | 媒体子进程管理、播放控制、ffprobe 元数据、ffmpeg 抽帧、**音频波形图生成**（`showwavespic`） |
-| `hp-book` | 电子书解析：EPUB 元数据 / 内嵌封面（自实现最小 ZIP + flate2，不引入 `zip` crate）；正文读取（txt 编码判定与分页、EPUB 章节 XHTML → 类型化块、**Markdown → 同一套类型化块**）；**目录解析**（EPUB 的 nav / NCX、**txt 小说章节规则**、Markdown 标题） |
-| `hp-ai` | AI 打标提供方抽象、任务队列与结果回写 |
-| `hp-plugin-host` | 插件发现、安装、信任与能力校验、生命周期框架 |
-| `hp-dto` | 跨层 DTO 单一事实来源（前端 `shared-types` 由其生成） |
+| 前端 | React 19 · TypeScript · Vite 8 · dockview |
+| 后端 | Cargo workspace（Rust，edition 2024，多 crate） |
+| 数据 | SQLite（仓库库 / 全局库 / 词库分离） |
+| 包管理 | pnpm workspace + Cargo |
 
 ## 环境要求
 
-- Windows 10/11（含 WebView2 运行时）
-- Rust 工具链（edition 2024，见 `rust-toolchain.toml`）
-- Node.js ≥ 22 + pnpm ≥ 12（版本由 `package.json#packageManager` 与 `pnpm-workspace.yaml#engineStrict` 双重约束）
-- 可选：vcpkg + libheif（`hp-media` 的 `libheif` 特性**默认开启**，用于 HEIC/HEIF/AVIF 进程内解码）：
+- Windows 10 / 11（含 WebView2 运行时）
+- Node.js ≥ 22.16、pnpm ≥ 12（版本见 `package.json#packageManager`）
+- Rust 工具链（edition 2024，版本见 `rust-toolchain.toml`）
 
-  ```powershell
-  git clone --depth 1 https://github.com/microsoft/vcpkg D:\vcpkg
-  D:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-  $env:VCPKG_ROOT = "D:\vcpkg"   # 建议写入用户环境变量
-  vcpkg install "libheif[aom]:x64-windows-static-md"
-  ```
+`hp-media` 默认启用 `libheif` 特性（HEIC / HEIF / AVIF 解码），构建前需安装 vcpkg 与 libheif：
 
-  > 注意：libheif 端口的默认特性含 **x265（GPL-2.0 编码器，静态链入）**，发布许可需自行评估；解码用不到它。
-  > **没有 vcpkg 就装它，别指望 `--no-default-features` 绕过**：那条路只在**单独**构建 `hp-media` 时成立；
-  > workspace 层面 `hp-scanner` 以默认特性依赖 `hp-media`，cargo 的 feature 统一会把 `libheif` 重新打开
-  > （实测 `cargo check --workspace --no-default-features` 仍然编译 `libheif-sys` 并失败）。
-  > CI（`.github/workflows/ci.yml`）因此显式装配 vcpkg，见 `.github/actions/vcpkg-libheif/action.yml`。
-  >
-  > `hp-media` 的 `libwebp` 特性（**默认开启**，D91）用于图片缩略图的**进程内 WebP 编码**：libwebp 的 C 源码**随 `libwebp-sys` crate vendored**（MIT），构建期由 `cc` 静态编译，**不联网、不依赖系统库**（C 工具链本就随 Rust MSVC 工具链提供）。关掉后自动退回 ffmpeg 子进程编码，结果**逐字节相同**、只是每张多一次进程开销。
+```powershell
+git clone --depth 1 https://github.com/microsoft/vcpkg D:\vcpkg
+D:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+$env:VCPKG_ROOT = "D:\vcpkg"
+vcpkg install "libheif[aom]:x64-windows-static-md"
+```
 
 ## 快速开始
 
 ```powershell
-# 1. 安装前端依赖
-pnpm install
-
-# 2. 开发运行（Tauri，自动启动 Vite）
+pnpm install          # 安装前端依赖（同时安装 git 钩子）
 cd apps/desktop
-pnpm tauri dev
-
-# 仅启动前端（http://localhost:5173）
-pnpm dev
-
-# 3. 构建与类型检查
-pnpm build        # vite build
-pnpm typecheck    # tsc --noEmit
-pnpm tauri build  # 打包桌面应用
+pnpm tauri dev        # 开发运行，自动启动 Vite
 ```
 
-Rust 侧（workspace 根目录）：
+仅启动前端：`pnpm dev`（http://localhost:5173）。
 
 ```powershell
-cargo build
-cargo test
+pnpm typecheck    # tsc --noEmit
+pnpm build        # vite build
+cargo build       # Rust workspace
+cargo test        # Rust 测试
+pnpm app:build    # 编译并打出便携发布包
 ```
 
-## 构建与打包
+## 目录结构
+
+| 路径 | 说明 |
+| --- | --- |
+| `apps/desktop` | Tauri 桌面应用（前端 `src/`、宿主 `src-tauri/`） |
+| `packages/` | 前端共享包：`config`、`ui`、`shared-types` |
+| `crates/` | Rust 核心库（见下表） |
+| `plugins/` | 插件：`system/`（palette、python-core）、`examples/` |
+| `external-cli/` | 随仓库分发的 ffmpeg 与 mpv |
+| `tools/` | 门禁脚本与数据管线（`check-*.mjs`、`tagdict/`） |
+| `.github/` | CI 与手动发布 workflow |
+| `docs/` | 规范、决策记录、架构与路线图 |
+
+| crate | 职责 |
+| --- | --- |
+| `hp-core` | 领域模型（仓库、媒体源、相册、图像、标签、评分），无外部依赖 |
+| `hp-store` | SQLite 访问、迁移与事务 |
+| `hp-scanner` | 媒体源扫描、变更检测、类型判定 |
+| `hp-hash` | BLAKE3 内容哈希与 dHash 感知哈希 |
+| `hp-album` | 相册同步规则与成员维护 |
+| `hp-fsops` | 源间复制 / 剪切 / 移动与操作记录 |
+| `hp-media` | 媒体子进程、ffprobe 元数据、ffmpeg 抽帧与波形图 |
+| `hp-book` | EPUB / Markdown / TXT / PDF 解析、正文与目录 |
+| `hp-ai` | AI 打标提供方抽象、任务队列与结果回写 |
+| `hp-plugin-host` | 插件发现、安装、信任与能力校验 |
+| `hp-dto` | 跨层 DTO 单一事实来源（生成 `packages/shared-types`） |
+
+## 配置
+
+| 环境变量 | 作用 |
+| --- | --- |
+| `VITE_HP_UI` | 前端 UI 变体：`app_ui`（默认）/ `test_ui` / `dev_ui` |
+| `HP_MPV_BIN` | mpv 可执行文件路径（优先于 `external-cli/mpv/`） |
+| `HP_MPV_EMBED` | 设为 `1` 时启用主窗口级 mpv 渲染嵌入（仅诊断） |
+| `HP_TEST_VIDEO` | 媒体测试用视频路径 |
+
+## 构建与发布
 
 | 命令 | 作用 |
 | --- | --- |
-| `pnpm app:build` | 编译 + 自动打包（生成开发包与发布包） |
-| `pnpm app:package` | 只打包不编译（使用现有编译产物） |
-| `pnpm clean` | 清理编译中间产物与最终产物（保留活动数据与依赖目录） |
+| `pnpm app:build` | 编译并生成开发包与发布包 |
+| `pnpm app:package` | 用现有编译产物打包 |
+| `pnpm clean` | 清理编译产物（保留活动数据与依赖） |
 
-打包产物（都在 `apps/desktop/src-tauri/target/release/` 下）都是**自包含文件夹**：
+- 产物是自包含文件夹（`apps/desktop/src-tauri/target/release/`），整夹搬走仍可运行：exe + `external-cli\`（[FFmpeg](https://ffmpeg.org/) 运行时子集、[mpv](https://mpv.io/)）+ `plugins\system\` + 基底词库。开发包用 NTFS 硬链接，发布包为真实复制。
+- 扩展插件以独立压缩包分发（`plugins-dist/*.zip`），解压后从「扩展」菜单安装，不与主程序合包。
+- 发布走手动流程：`Actions → Release Package → Run workflow`，输入 `version`（留空取 `tauri.conf.json`）、`publish`（是否创建 GitHub Release）、`notes`。同一版本重跑会覆盖资产。
 
-```text
-dev\dev-<时间戳>\   exe + data\（含用户数据）+ external-cli\ + plugins\system\ + plugins-dist\
-release\            exe + data\system\（系统库）+ data\plugins\（系统插件）+ external-cli\ + plugins\system\
-                    （不含用户数据）
-```
+## 持续集成
 
-- **随包运行时资产**：`external-cli\`（ffmpeg 运行时子集，约 168 MB）与 `plugins\system\`
-  都放在 **exe 同级**，与仓库内布局同构 ⇒ 运行时从 exe 目录**第一跳**即命中，
-  **整夹搬走仍可用**（D14 的"随应用捆绑发布"）。dev 包用 NTFS 硬链接（零额外磁盘占用），
-  release 包真实复制。回归门禁：`pnpm check:bundled-runtime`。
-- ffmpeg 只带**运行时子集**：`bin\` 下两个 exe + 全部 DLL + `LICENSE.txt`；
-  `ffplay.exe`、`doc\`、`include\`、`lib\`、`presets\` 不带（省约 31 MB）。
-  **`bin\` 下的 DLL 一个都不能省**（两个 exe 静态绑定全部 av* DLL）。
-- **mpv 已入库**（整目录约 129 MB）：`mpv.exe`（120 MB）用 **Git LFS** 存（GitHub 单文件
-  上限 100 MB），`d3dcompiler_43.dll`（4.4 MB）、`mpv.com`、`mpv/fonts.conf` 走普通 git
-  （见 `.gitattributes`）。装了 git-lfs 的克隆会拿到真实文件，发布包也会带上它
-  （`release.yml` 的 checkout 带 `lfs: true`）。
-  打包脚本仍按"存在则入包、缺失则跳过"处理：没装 git-lfs 的克隆只会拿到 130 字节的
-  指针文件，此时它被当作"缺少 mpv"跳过——**不要**为了它去改 `pnpm app:build` 的必需项。
-- **构建输入资产入库**：`external-cli/ffmpeg/`、`external-cli/mpv/`（主程序走 LFS）、`plugins/system/`、内置基底词库
-  `tools/tagdict/output/tag_lib_base.sqlite3`（13 MB）都在仓库里，因此**全新克隆也能
-  直接打出带词库、带 mpv 的发布包**；`target/release/data/`（活跃用户数据）不入库，没有它时
-  发布包只附基底词库，全局库由目标机首次运行自建。
-- **扩展插件分发**：`plugins-dist/<id>/data/tag_lib.sqlite` 单个就有 129–162 MB，超过
-  GitHub 单文件 100 MB 上限，**不能入库**；改成每个扩展一个 zip
-  （`plugins-dist/*.zip`，1.8–57 MB，已入库），zip 内顶层带 `<id>/` 目录，解压即得可安装目录。
-  生成与校验：`python tools/tagdict/zip_extensions.py` / `python tools/tagdict/zip_extensions.py --check`
-  （固定条目顺序/时间戳/权限，重复执行逐字节相同，`--check` 逐文件比 CRC32）。
-  扩展**不与主程序打在一起**，是独立下载、独立安装的包。
+`.github/workflows/ci.yml` 在 Windows runner 上跑三个作业：`gate`（全部 `pnpm check:*` 文本与结构门禁 + `typecheck` + `build`）、`clippy`、`test`（workspace 与桥接层 `cargo test --all-targets`）。提交前的本地钩子由 `pnpm install` 安装，`--no-verify` 能跳过，CI 不能。
 
-## 环境变量
+## 第三方组件
 
-| 变量 | 作用 |
-| --- | --- |
-| `VITE_HP_UI` | 前端 UI 变体：`app_ui`（默认）/ `test_ui` / `dev_ui`（占位） |
-| `HP_MPV_BIN` | mpv 可执行文件路径（优先于 `external-cli/mpv/`） |
-| `HP_MPV_EMBED` | 设为 `1` 时启用主窗口级 mpv 渲染嵌入（仅诊断用） |
-| `HP_TEST_VIDEO` | 媒体测试用的视频文件路径 |
+| 组件 | 版本 | 许可 | 说明 |
+| --- | --- | --- | --- |
+| [FFmpeg](https://ffmpeg.org/) | N-125157（2026-06-22） | GPL-3.0（`--enable-gpl --enable-version3`） | 元数据探测、缩略图、音频波形；`external-cli/ffmpeg/` 随包分发 |
+| [mpv](https://mpv.io/) | v0.41.0-1023-g69e63f425 | GPL-2.0-or-later | 随仓库分发（`mpv.exe` 走 Git LFS）；当前播放器面板使用 DOM `<video>`，libmpv 通道休眠 |
+| [libheif](https://github.com/strukturag/libheif) | 1.23.x（vcpkg） | LGPL-3.0 | HEIC / HEIF / AVIF 进程内解码 |
+| [libwebp](https://chromium.googlesource.com/webm/libwebp) | 随 `libwebp-sys` vendored | BSD-3-Clause | 缩略图进程内 WebP 编码 |
+| [SQLite](https://sqlite.org/) | 3.x（rusqlite） | Public Domain | 仓库库 / 全局库 / 词库 |
+| [Tauri](https://tauri.app/) · [React](https://react.dev/) · [dockview](https://dockview.dev/) | 见 `package.json` / `Cargo.toml` | MIT / Apache-2.0 | 桌面壳、界面与面板布局 |
 
-## 质量门禁
-
-`tools/` 下提供一系列门禁脚本（`node tools/<脚本>.mjs`），大部分已接入 `pnpm check:*`：
-
-- `check:encoding` —— 文本文件必须 UTF-8 无 BOM、统一 LF
-- `check:commands` —— 命令 / 事件契约双向守护（前端封装与后端命令一致性）
-- `check:hidden-console` —— 外部子进程不得新建控制台窗口（GUI 桌面壳下的 cmd 弹窗，缺陷 0020）
-- `check:bundled-runtime` —— 随应用捆绑的 ffmpeg 运行时子集与 `plugins/system` 真的进包（D14）
-- `check:event-names` —— 事件名唯一收发口：逻辑名点分、线上名冒号分（Tauri 2 不接受点号，缺陷 0022）
-- `check:types` —— `hp-dto` 生成类型与 `packages/shared-types` 一致性
-- `check:panels` / `check:settings` / `check:layouts` —— 面板、设置项与布局结构完整性
-- `check:blueprint-*` / `check:controls` —— 事件蓝图引擎各维度行为检查
-- `check:line-count` / `check:status` / `check:doc-status` —— 结构与文档状态对账
-- `tools/tagdict/` —— tag 词库数据管线
-
-## 持续集成（CI）
-
-`.github/workflows/ci.yml` 把本地 git 钩子（`tools/hooks/`，D120-R4）的断言在 GitHub 上再跑一遍：
-钩子的价值是"防忘记"，但 `git commit --no-verify` / `git push --no-verify` 能跳过——CI 不能。
-
-| 作业 | 跑什么 | 为什么单独一个作业 |
-| --- | --- | --- |
-| `gate` | `pnpm check:*`（除需要全量编译或本机库的 8 项）+ `typecheck` + `build` | 秒级文本/结构门禁，红了要能一眼定位 |
-| `clippy` | `pnpm check:clippy`（两个 workspace 零 warning） | 要全量编译（含 vcpkg），不该拖住 `gate` |
-| `test` | 根 workspace 与桥接层 `cargo test --all-targets` | 分钟级行为断言，与静态检查分层 |
-
-- **只在 Windows runner 上跑**：`rust-toolchain.toml` 的 `targets` 只有 `x86_64-pc-windows-msvc`，依赖 Win32 / WebView2。
-- **门禁不是抄的**：`gate` 直接枚举 `package.json` 的 `check:*`，新增门禁自动纳入；CI 自己不重写检查逻辑。
-- **两类门禁有意排除**：`check:clippy` 要全量编译（独立作业）；`check:layouts` 与 `check:blueprint-*` 脚本里写死开发机路径、读本机 release 数据目录与真实 sqlite 夹具——它们审计的是"本机库状态"而非仓库内容，继续留在本地 git 钩子里跑（2026-10-25 首次真跑时正是这 7 项在全新 checkout 上失败）。
-- **vcpkg 是硬前提**（`hp-media` 默认特性 `libheif`），提交号钉在 `ci.yml` 的 `VCPKG_COMMIT`，装配与缓存见 `.github/actions/vcpkg-libheif/action.yml`。
-- **不缓存 `target/`**（本机实测 8.8GB，Windows 上打解包比冷编译更慢）；只缓存 `~/.cargo/registry`。
-- **发布走单独一条手动流程**：`.github/workflows/release.yml`（**仅** `workflow_dispatch`）在需要发版本时跑一次，构建便携包并把压缩包上传成构建产物 / Release 资产；`ci.yml` 的 push/PR 门禁**不**构建发布包。
-- **Git LFS 是打包的前提**：`external-cli/mpv/mpv.exe`（120 MB）走 LFS；`release.yml` 的 checkout 带 `lfs: true`（否则拿到 130 字节指针 → 包里的 mpv 是假的，自检按体积兜底），CI 的检查作业**有意不拉**（3 个作业各 checkout = 360 MB/次，免费 LFS 额度 1 GB/月 撑不住；门禁不读 mpv 字节）。
-
-### 发布包（手动触发）
-
-| 输入 | 作用 |
-| --- | --- |
-| `version` | 版本号；留空则取 `apps/desktop/src-tauri/tauri.conf.json` 里的值 |
-| `publish` | 是否把压缩包挂成 GitHub Release 资产（默认 `true`） |
-| `notes` | Release 说明；留空自动生成一段 |
-
-- 产物：`hamster-pouch-<version>-win-x64.zip`（解压即得可运行文件夹）+ 每个扩展插件一个 zip（`tagdict-danbooru` / `tagdict-pixiv` / `tagrel-games`）。
-- 包内自带基底词库、`external-cli\ffmpeg\` 运行时子集、`external-cli\mpv\`、`plugins\system\`；**不含** `data\system\` 全局库与用户数据（目标机首次运行自建）。
-- 同版本重跑幂等：Release 已存在则覆盖资产（`gh release upload --clobber`），不存在才新建。
-- 发布前会自检包内容（exe / ffmpeg / ffprobe / mpv / `plugins\system` / 基底词库缺一即失败；mpv 按体积断言不是 LFS 指针文件；且断言包里**没有** `ffplay.exe`）。
+EPUB 排印规则参考了 [Readium CSS](https://github.com/readium/css) 与 [foliate-js](https://github.com/johnfactotum/foliate-js) 的公开实现。
 
 ## 文档
 
-- `docs/spec/` —— 各域规范（含 `shared-types.md`，跨层类型事实源）
+- `docs/architecture/` —— 架构总览、决策清单、文件结构
+- `docs/spec/` —— 各域规范（含 README 写作规范 `readme-standard.md`）
 - `docs/rfc/` —— 已确认的决策记录
-- `docs/architecture/` —— 架构入口文档（`overview.md`、`decision-checklist.md`、`file-structure.md`）
-- `docs/图片管理.md` —— 产品定位简述
-
-## 外部依赖
-
-- **ffmpeg**：`external-cli/ffmpeg/` 随仓库分发，无需额外下载；打包时复制到产物内
-  **exe 同级**（运行时子集，见「构建与打包」），因此打包产物不依赖仓库目录、可整夹搬走
-- **mpv**：`external-cli/mpv/` 随仓库分发（`mpv.exe` 120 MB 走 **Git LFS**，其余小文件走普通 git），
-  **无需额外下载**；克隆时需装 git-lfs（`git lfs install` 后正常 `clone`/`pull` 即可）。若你的克隆
-  里 mpv.exe 只有 130 字节（指针文件）或你另有 mpv 构建，可用 `HP_MPV_BIN` 指定 `mpv.exe` 路径；
-  缺失 mpv 不影响现有播放功能（libmpv 路径休眠）。
-  注：播放器面板已改 DOM `<video>`、libmpv 路径休眠（`docs/rfc/0005-media-capabilities.md`），
-  当前产品界面不调用 mpv。
+- `docs/roadmap/` —— 路线图与阶段计划
 
 ## 贡献
 
-欢迎提交 Issue 与 Pull Request。请遵守以下约定：
-
-- 文本文件一律 **UTF-8 无 BOM、LF 行尾**（`.gitattributes` + `pnpm check:encoding` 门禁）
-- `Cargo.lock` / `pnpm-lock.yaml` 随仓库提交
-- 提交前运行 `pnpm typecheck` 与相关 `pnpm check:*` 门禁
+欢迎提交 Issue 与 Pull Request。文本文件一律 UTF-8 无 BOM、LF 行尾（由 `pnpm check:encoding` 与 git 钩子守护）；提交前请跑 `pnpm typecheck` 与相关 `pnpm check:*` 门禁。
 
 ## 许可证
 
-[GNU General Public License v3.0](LICENSE)
+[GNU General Public License v3.0](LICENSE)（GPL-3.0）。随包分发的 FFmpeg 与 mpv 均为 GPL 构建，再分发时须一并遵守其许可。
