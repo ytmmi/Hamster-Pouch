@@ -5,20 +5,35 @@
 
 use std::path::{Path, PathBuf};
 
-use ts_rs::TS;
+use ts_rs::{Config, TS};
 
 /// 需要生成的前端类型（与 `lib.rs` 中的 DTO 一一对应）。
+///
+/// ts-rs 12 删掉了 `TS::export_all_to(dir)`，改为 `TS::export_all(&Config)`：
+/// 输出目录不再是调用参数，而是 `Config` 上的 `out_dir`。
+///
+/// `large_int` 显式钉成 `"number"`：ts-rs 12 的默认值是 `bigint`，而本仓库的
+/// 前端契约（`docs/spec/shared-types.md`）一直是 `number`。绝大多数 i64/usize
+/// 字段本来就带 `#[ts(type = "number")]`，但把默认值也钉死可以保证**以后新增的**
+/// 大整数字段不会悄悄变成 `bigint`（`bigint` 不能直接和 `number` 运算，
+/// 也不能 JSON 序列化，前端会成片报错）。
 fn export_all(out: &Path) {
+    let cfg = Config::new()
+        .with_out_dir(out)
+        .with_large_int("number");
+
+    // cfg 作为宏参数显式传入，避免 macro_rules 卫生性带来的作用域意外。
     macro_rules! export {
-        ($($t:ty),* $(,)?) => {{
+        ($cfg:expr; $($t:ty),* $(,)?) => {{
             $(
-                <$t as TS>::export_all_to(out)
+                <$t as TS>::export_all($cfg)
                     .unwrap_or_else(|e| panic!("导出 {} 失败: {e}", stringify!($t)));
             )*
         }};
     }
 
     export!(
+        &cfg;
         hp_dto::RepoSummary,
         hp_dto::RepoListItem,
         hp_dto::SourceItem,
