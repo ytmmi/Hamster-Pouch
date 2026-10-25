@@ -18,8 +18,8 @@ use hp_plugin_host::PluginHost;
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{api_from_hp, ensure_global, global, lock_global, ApiResponse};
 use crate::AppState;
+use crate::commands::shared::{ApiResponse, api_from_hp, ensure_global, global, lock_global};
 
 /// 「扩展」菜单用的一行：**已安装**插件的面板**或纯数据扩展**（均含**未启用**的）。
 ///

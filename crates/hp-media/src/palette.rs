@@ -138,8 +138,8 @@ mod tests {
         let path = dir.join("red.png");
         write_solid(&path, [255, 0, 0]);
 
-        let palette = extract_palette(&path, 3, None, Duration::from_secs(30))
-            .expect("提取调色板失败");
+        let palette =
+            extract_palette(&path, 3, None, Duration::from_secs(30)).expect("提取调色板失败");
         assert!(!palette.colors.is_empty());
         assert_eq!(palette.colors[0], "#ff0000");
 
@@ -153,8 +153,8 @@ mod tests {
         let path = dir.join("blue.png");
         write_solid(&path, [0, 0, 255]);
 
-        let palette = extract_palette(&path, 1, None, Duration::from_secs(30))
-            .expect("提取调色板失败");
+        let palette =
+            extract_palette(&path, 1, None, Duration::from_secs(30)).expect("提取调色板失败");
         assert_eq!(palette.colors.len(), 1);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -174,8 +174,12 @@ mod tests {
 
     #[test]
     fn palette_is_locked_reads_the_flag_and_tolerates_bad_json() {
-        assert!(palette_is_locked(r#"{"version":2,"colors":[],"locked":true}"#));
-        assert!(!palette_is_locked(r#"{"version":2,"colors":[],"locked":false}"#));
+        assert!(palette_is_locked(
+            r#"{"version":2,"colors":[],"locked":true}"#
+        ));
+        assert!(!palette_is_locked(
+            r#"{"version":2,"colors":[],"locked":false}"#
+        ));
         // 缺字段 / 坏 JSON / 类型不对：一律按"未锁定"处理（重扫不该被坏数据卡住）。
         assert!(!palette_is_locked(r#"{"version":2,"colors":[]}"#));
         assert!(!palette_is_locked("not json"));

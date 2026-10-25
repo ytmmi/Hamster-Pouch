@@ -60,11 +60,13 @@ fn plugin_registry_roundtrip_and_remove() {
     g.upsert_plugin(&updated).expect("更新插件失败");
     assert_eq!(g.list_plugins().expect("列出插件失败").len(), 1);
 
-    g.remove_plugin("dev.hamsterpouch.hello").expect("删除插件失败");
-    assert!(g
-        .get_plugin("dev.hamsterpouch.hello")
-        .expect("查询插件失败")
-        .is_none());
+    g.remove_plugin("dev.hamsterpouch.hello")
+        .expect("删除插件失败");
+    assert!(
+        g.get_plugin("dev.hamsterpouch.hello")
+            .expect("查询插件失败")
+            .is_none()
+    );
 }
 
 #[test]
@@ -86,19 +88,24 @@ fn plugin_repo_state_enable_and_isolation() {
     .expect("写入仓库状态失败");
 
     // repo-b 未启用。
-    assert!(g
-        .is_plugin_enabled(plugin.as_str(), "repo-a")
-        .expect("查询启用状态失败"));
-    assert!(!g
-        .is_plugin_enabled(plugin.as_str(), "repo-b")
-        .expect("查询启用状态失败"));
+    assert!(
+        g.is_plugin_enabled(plugin.as_str(), "repo-a")
+            .expect("查询启用状态失败")
+    );
+    assert!(
+        !g.is_plugin_enabled(plugin.as_str(), "repo-b")
+            .expect("查询启用状态失败")
+    );
 
     let state = g
         .get_plugin_repo_state(plugin.as_str(), "repo-a")
         .expect("查询仓库状态失败")
         .expect("状态应存在");
     assert!(state.enabled);
-    assert_eq!(state.grants, vec![Capability::UiPanel, Capability::RepoRead]);
+    assert_eq!(
+        state.grants,
+        vec![Capability::UiPanel, Capability::RepoRead]
+    );
 
     assert_eq!(
         g.list_plugin_repo_states("repo-a")
@@ -127,7 +134,11 @@ fn plugin_grants_roundtrip_preserves_high_risk() {
         plugin_id: plugin.clone(),
         repo_id: RepoId::from_raw("repo-a"),
         enabled: true,
-        grants: vec![Capability::FsWrite, Capability::Network, Capability::NativeCode],
+        grants: vec![
+            Capability::FsWrite,
+            Capability::Network,
+            Capability::NativeCode,
+        ],
     })
     .expect("写入仓库状态失败");
 
@@ -147,7 +158,11 @@ fn ai_provider_config_crud() {
     let mut g = GlobalDb::open(&path).expect("打开全局库失败");
 
     let cfg = g
-        .create_ai_provider_config("local-http", Some("clip-vit"), r#"{"endpoint":"http://127.0.0.1"}"#)
+        .create_ai_provider_config(
+            "local-http",
+            Some("clip-vit"),
+            r#"{"endpoint":"http://127.0.0.1"}"#,
+        )
         .expect("创建 AI 配置失败");
     assert_eq!(cfg.provider, "local-http");
     assert_eq!(cfg.model.as_deref(), Some("clip-vit"));
@@ -161,10 +176,11 @@ fn ai_provider_config_crud() {
 
     g.remove_ai_provider_config(cfg.id.as_str())
         .expect("删除失败");
-    assert!(g
-        .get_ai_provider_config(cfg.id.as_str())
-        .expect("查询失败")
-        .is_none());
+    assert!(
+        g.get_ai_provider_config(cfg.id.as_str())
+            .expect("查询失败")
+            .is_none()
+    );
 }
 
 #[test]

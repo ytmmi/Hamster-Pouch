@@ -9,12 +9,12 @@ use hp_core::{AlbumKind, AlbumMediaType, HpError, HpResult, SyncMode};
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{
-    api_async, api_from_hp, file_to_item, lock_repo, open_repo, open_repo_mut, AlbumFileItem,
-    ApiAsync, ApiResponse,
-};
-use crate::commands::shared::EmitHp;
 use crate::AppState;
+use crate::commands::shared::EmitHp;
+use crate::commands::shared::{
+    AlbumFileItem, ApiAsync, ApiResponse, api_async, api_from_hp, file_to_item, lock_repo,
+    open_repo, open_repo_mut,
+};
 
 #[derive(Serialize)]
 pub(crate) struct AlbumItem {
@@ -147,8 +147,9 @@ pub(crate) fn album_create(
                 )?
             }
             AlbumKind::FollowSource => {
-                let source_id = source_id
-                    .ok_or_else(|| HpError::InvalidArgument("跟随源型相册必须提供 sourceId".into()))?;
+                let source_id = source_id.ok_or_else(|| {
+                    HpError::InvalidArgument("跟随源型相册必须提供 sourceId".into())
+                })?;
                 let mode = SyncMode::from_str(sync_mode.as_deref().unwrap_or("add_only"))
                     .ok_or_else(|| HpError::InvalidArgument("未知同步模式".into()))?;
                 AlbumService::create_follow_source(
@@ -337,40 +338,42 @@ pub(crate) async fn album_sync(
         let emit_task_id = task_id.clone();
         let emit_album_id = album_id.clone();
 
-        tauri::async_runtime::spawn_blocking(move || match run_album_sync(&st, &repo_id, &album_id) {
-            Ok(outcome) => {
-                app_handle.emit_hp(
-                    "album.sync.progress",
-                    AlbumSyncProgressEvent {
-                        task_id: emit_task_id.clone(),
-                        album_id: emit_album_id.clone(),
-                        added: outcome.added,
-                        removed: outcome.removed,
-                        pinned: outcome.pinned_kept,
-                    },
-                );
-                // 逐文件冲突：一个成员一条事件，fileId 一定非空（缺陷 0004）
-                for conflict in &outcome.conflicts {
+        tauri::async_runtime::spawn_blocking(move || {
+            match run_album_sync(&st, &repo_id, &album_id) {
+                Ok(outcome) => {
                     app_handle.emit_hp(
-                        "album.sync.conflict",
-                        AlbumSyncConflictEvent {
+                        "album.sync.progress",
+                        AlbumSyncProgressEvent {
                             task_id: emit_task_id.clone(),
                             album_id: emit_album_id.clone(),
-                            file_id: conflict.file_id.clone(),
-                            reason: conflict.reason.clone(),
+                            added: outcome.added,
+                            removed: outcome.removed,
+                            pinned: outcome.pinned_kept,
+                        },
+                    );
+                    // 逐文件冲突：一个成员一条事件，fileId 一定非空（缺陷 0004）
+                    for conflict in &outcome.conflicts {
+                        app_handle.emit_hp(
+                            "album.sync.conflict",
+                            AlbumSyncConflictEvent {
+                                task_id: emit_task_id.clone(),
+                                album_id: emit_album_id.clone(),
+                                file_id: conflict.file_id.clone(),
+                                reason: conflict.reason.clone(),
+                            },
+                        );
+                    }
+                }
+                Err(e) => {
+                    app_handle.emit_hp(
+                        "album.sync.failed",
+                        AlbumSyncFailedEvent {
+                            task_id: emit_task_id.clone(),
+                            album_id: emit_album_id.clone(),
+                            error: e.to_string(),
                         },
                     );
                 }
-            }
-            Err(e) => {
-                app_handle.emit_hp(
-                    "album.sync.failed",
-                    AlbumSyncFailedEvent {
-                        task_id: emit_task_id.clone(),
-                        album_id: emit_album_id.clone(),
-                        error: e.to_string(),
-                    },
-                );
             }
         });
 

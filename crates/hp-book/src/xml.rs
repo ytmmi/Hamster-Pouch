@@ -301,9 +301,6 @@ mod tests {
             resolve_zip_path("OEBPS/content.opf", "../Images/c.png"),
             "Images/c.png"
         );
-        assert_eq!(
-            resolve_zip_path("content.opf", "./c%20d.png"),
-            "c d.png"
-        );
+        assert_eq!(resolve_zip_path("content.opf", "./c%20d.png"), "c d.png");
     }
 }

@@ -16,7 +16,7 @@ use hp_core::{
     ArtistKind, HpError, HpResult, LibLayer, LibRelation, LibRelationKind, LibTagSource, TagArtist,
     TagCharacter, TagConcept, TagConceptDetail, TagKind, TagName, TagNameKind, TagWork,
 };
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::migrate;
 use crate::util::{require_nonempty, store_err};
@@ -56,7 +56,11 @@ impl TagLibDb {
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| store_err("开启外键", e))?;
         migrate::apply(&mut conn, TAGLIB_MIGRATIONS)?;
-        Ok(Self { conn, layer: LibLayer::User, path })
+        Ok(Self {
+            conn,
+            layer: LibLayer::User,
+            path,
+        })
     }
 
     /// 以**只读**方式打开数据层文件（内置基底 / 扩展包）。
@@ -101,9 +105,11 @@ impl TagLibDb {
     /// 读取 `lib_meta` 元信息。
     pub fn meta(&self, key: &str) -> HpResult<Option<String>> {
         self.conn
-            .query_row("SELECT value FROM lib_meta WHERE key = ?1", params![key], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT value FROM lib_meta WHERE key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
             .optional()
             .map_err(|e| store_err("读取 tag 库元信息", e))
     }

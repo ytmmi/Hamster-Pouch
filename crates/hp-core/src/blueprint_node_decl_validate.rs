@@ -68,7 +68,9 @@ pub fn validate_node_decl(
     }
 
     if decl.label_key.trim().is_empty() {
-        errors.push(format!("节点类型 {ty} 缺少 label_key（D27：显示名走 i18n 键）"));
+        errors.push(format!(
+            "节点类型 {ty} 缺少 label_key（D27：显示名走 i18n 键）"
+        ));
     }
 
     if NodeRole::from_str(&decl.role).is_none() {
@@ -128,7 +130,10 @@ pub fn validate_node_decl(
         }
         let key = (port.side.clone(), port.id.clone());
         if seen_ports.contains(&key) {
-            errors.push(format!("节点类型 {ty} 的端口重复: {}/{}", port.side, port.id));
+            errors.push(format!(
+                "节点类型 {ty} 的端口重复: {}/{}",
+                port.side, port.id
+            ));
         } else {
             seen_ports.push(key);
         }
@@ -224,7 +229,11 @@ pub fn derive_ports(
                 );
             }
             if has_children {
-                push(EdgeKind::Contains.as_str(), PortSide::Out, EdgeKind::Contains.as_str());
+                push(
+                    EdgeKind::Contains.as_str(),
+                    PortSide::Out,
+                    EdgeKind::Contains.as_str(),
+                );
             }
             if is_panel_like {
                 push(
@@ -240,11 +249,23 @@ pub fn derive_ports(
         EvaluationRole::Trigger => {
             let _ = events;
             push(EdgeKind::On.as_str(), PortSide::In, EdgeKind::On.as_str());
-            push(EdgeKind::Fires.as_str(), PortSide::Out, EdgeKind::Fires.as_str());
+            push(
+                EdgeKind::Fires.as_str(),
+                PortSide::Out,
+                EdgeKind::Fires.as_str(),
+            );
         }
         EvaluationRole::Condition => {
-            push(EdgeKind::Fires.as_str(), PortSide::In, EdgeKind::Fires.as_str());
-            push(EdgeKind::Guards.as_str(), PortSide::Out, EdgeKind::Guards.as_str());
+            push(
+                EdgeKind::Fires.as_str(),
+                PortSide::In,
+                EdgeKind::Fires.as_str(),
+            );
+            push(
+                EdgeKind::Guards.as_str(),
+                PortSide::Out,
+                EdgeKind::Guards.as_str(),
+            );
         }
         EvaluationRole::Action => {
             push("in", PortSide::In, EdgeKind::Fires.as_str());

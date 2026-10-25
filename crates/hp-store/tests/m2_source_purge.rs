@@ -4,7 +4,9 @@
 //! 都 `REFERENCES sources(id)`，漏掉任何一个都会让 `DELETE FROM sources` 直接
 //! 报 `FOREIGN KEY constraint failed`（真正的"卸载失败"）。
 
-use hp_core::{AlbumKind, FileId, FileIndexRow, MediaType, SourceId, SyncMode, ThumbStatus, VerifyStatus};
+use hp_core::{
+    AlbumKind, FileId, FileIndexRow, MediaType, SourceId, SyncMode, ThumbStatus, VerifyStatus,
+};
 use hp_store::{PurgePhase, RepoDb};
 use rusqlite::params;
 
@@ -40,11 +42,18 @@ fn file_row(source_id: &SourceId, rel: &str) -> FileIndexRow {
 
 /// 给文件挂上各类派生数据（人工 tag / 自动 tag / 评分 / 色彩 / AI 撤销）。
 fn seed_derived(db: &mut RepoDb, path: &std::path::Path, file_id: &FileId, tag_name: &str) {
-    let tag = db.create_tag("repo-1", tag_name, None).expect("建 tag 失败");
+    let tag = db
+        .create_tag("repo-1", tag_name, None)
+        .expect("建 tag 失败");
     db.add_file_tag(file_id.as_str(), tag.id.as_str())
         .expect("加人工 tag 失败");
-    db.add_file_auto_tag(file_id.as_str(), tag.id.as_str(), Some(0.9), Some("model-x"))
-        .expect("加自动 tag 失败");
+    db.add_file_auto_tag(
+        file_id.as_str(),
+        tag.id.as_str(),
+        Some(0.9),
+        Some("model-x"),
+    )
+    .expect("加自动 tag 失败");
     db.upsert_rating(file_id.as_str(), 5).expect("写评分失败");
     db.upsert_color_ref(file_id.as_str(), r##"["#112233"]"##)
         .expect("写色彩参考失败");
@@ -63,8 +72,12 @@ fn complete_unmount_clears_every_source_derived_table() {
     let path = temp_path("purge-full");
     let mut db = RepoDb::create(&path, "仓库").expect("创建仓库失败");
 
-    let target = db.mount_source("repo-1", "C:/target", None, None).expect("挂载失败");
-    let other = db.mount_source("repo-1", "C:/other", None, None).expect("挂载失败");
+    let target = db
+        .mount_source("repo-1", "C:/target", None, None)
+        .expect("挂载失败");
+    let other = db
+        .mount_source("repo-1", "C:/other", None, None)
+        .expect("挂载失败");
     let f1 = file_row(&target.id, "a.jpg");
     let f2 = file_row(&target.id, "b.jpg");
     let keep = file_row(&other.id, "keep.jpg");
@@ -79,8 +92,13 @@ fn complete_unmount_clears_every_source_derived_table() {
         .create_album("repo-1", "相册", AlbumKind::Fixed, None, None)
         .expect("建相册失败");
     for f in [&f1, &f2, &keep] {
-        db.add_album_member(album.id.as_str(), f.id.as_str(), hp_core::AddedBy::User, false)
-            .expect("加成员失败");
+        db.add_album_member(
+            album.id.as_str(),
+            f.id.as_str(),
+            hp_core::AddedBy::User,
+            false,
+        )
+        .expect("加成员失败");
     }
 
     let counts = db.source_data_counts(target.id.as_str()).expect("清点失败");
@@ -106,15 +124,23 @@ fn complete_unmount_clears_every_source_derived_table() {
         PurgePhase::Files,
         PurgePhase::Source,
     ] {
-        assert!(phases.contains(&expected), "缺少阶段 {expected:?}：{phases:?}");
+        assert!(
+            phases.contains(&expected),
+            "缺少阶段 {expected:?}：{phases:?}"
+        );
     }
 
     // 源记录、文件索引、派生数据全部消失
-    assert!(db.get_source(target.id.as_str()).expect("查询源失败").is_none());
-    assert!(db
-        .get_file_by_path(target.id.as_str(), "a.jpg")
-        .expect("查询失败")
-        .is_none());
+    assert!(
+        db.get_source(target.id.as_str())
+            .expect("查询源失败")
+            .is_none()
+    );
+    assert!(
+        db.get_file_by_path(target.id.as_str(), "a.jpg")
+            .expect("查询失败")
+            .is_none()
+    );
     let conn = rusqlite::Connection::open(&path).expect("open raw");
     let leftover: i64 = conn
         .query_row(
@@ -148,7 +174,9 @@ fn complete_unmount_handles_follow_album_and_nested_child_source() {
     let path = temp_path("purge-fk");
     let mut db = RepoDb::create(&path, "仓库").expect("创建仓库失败");
 
-    let parent = db.mount_source("repo-1", "C:/parent", None, None).expect("挂载失败");
+    let parent = db
+        .mount_source("repo-1", "C:/parent", None, None)
+        .expect("挂载失败");
     let child = db
         .mount_source("repo-1", "C:/parent/sub", None, Some(parent.id.as_str()))
         .expect("挂载子源失败");
@@ -188,20 +216,31 @@ fn complete_unmount_handles_follow_album_and_nested_child_source() {
     assert_eq!(removed.counts.sync_albums, 1);
     assert_eq!(removed.counts.child_sources, 1);
 
-    assert!(db.get_source(parent.id.as_str()).expect("查询失败").is_none());
+    assert!(
+        db.get_source(parent.id.as_str())
+            .expect("查询失败")
+            .is_none()
+    );
     // 相册保留但降级为普通相册，且不再有指向已删除源的规则/状态
     let kept = db
         .get_album(album.id.as_str())
         .expect("查询相册失败")
         .expect("相册应保留");
     assert_eq!(kept.kind, AlbumKind::Fixed, "跟随相册应降级为普通相册");
-    assert!(db.get_sync_rule(album.id.as_str()).expect("查询规则失败").is_none());
+    assert!(
+        db.get_sync_rule(album.id.as_str())
+            .expect("查询规则失败")
+            .is_none()
+    );
     // 子源保留并摘挂为顶层源（独立对象，不连带删除）
     let child_after = db
         .get_source(child.id.as_str())
         .expect("查询子源失败")
         .expect("子源应保留");
-    assert!(child_after.parent_source_id.is_none(), "子源应被摘挂为顶层源");
+    assert!(
+        child_after.parent_source_id.is_none(),
+        "子源应被摘挂为顶层源"
+    );
     assert_eq!(db.count_files_by_source(child.id.as_str()).unwrap(), 1);
 }
 
@@ -209,7 +248,9 @@ fn complete_unmount_handles_follow_album_and_nested_child_source() {
 fn complete_unmount_is_atomic_when_cancelled() {
     let path = temp_path("purge-cancel");
     let mut db = RepoDb::create(&path, "仓库").expect("创建仓库失败");
-    let target = db.mount_source("repo-1", "C:/target", None, None).expect("挂载失败");
+    let target = db
+        .mount_source("repo-1", "C:/target", None, None)
+        .expect("挂载失败");
     let f = file_row(&target.id, "a.jpg");
     db.upsert_file(&f).expect("写文件失败");
     seed_derived(&mut db, &path, &f.id, "tag-a");
@@ -223,18 +264,27 @@ fn complete_unmount_is_atomic_when_cancelled() {
         hp_store::SourceDataCounts::default(),
         "取消应回滚，不产生任何删除"
     );
-    assert!(db.get_source(target.id.as_str()).expect("查询源失败").is_some());
-    assert!(db
-        .get_file_by_path(target.id.as_str(), "a.jpg")
-        .expect("查询失败")
-        .is_some());
+    assert!(
+        db.get_source(target.id.as_str())
+            .expect("查询源失败")
+            .is_some()
+    );
+    assert!(
+        db.get_file_by_path(target.id.as_str(), "a.jpg")
+            .expect("查询失败")
+            .is_some()
+    );
 
     // 再次执行（不取消）应能续完
     let removed = db
         .purge_source_data(target.id.as_str(), &|| false, &mut |_, _, _| {})
         .expect("完全卸载失败");
     assert_eq!(removed.counts.files, 1);
-    assert!(db.get_source(target.id.as_str()).expect("查询源失败").is_none());
+    assert!(
+        db.get_source(target.id.as_str())
+            .expect("查询源失败")
+            .is_none()
+    );
 }
 
 #[test]

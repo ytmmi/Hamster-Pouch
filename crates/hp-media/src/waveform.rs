@@ -152,11 +152,24 @@ mod tests {
         let wav = dir.join("half.wav");
         let status = hidden_command(ffmpeg)
             .args([
-                "-y", "-hide_banner", "-loglevel", "error",
-                "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-                "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono:d=2",
-                "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1[a]",
-                "-map", "[a]", "-c:a", "pcm_s16le",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=2",
+                "-f",
+                "lavfi",
+                "-i",
+                "anullsrc=r=44100:cl=mono:d=2",
+                "-filter_complex",
+                "[0:a][1:a]concat=n=2:v=0:a=1[a]",
+                "-map",
+                "[a]",
+                "-c:a",
+                "pcm_s16le",
             ])
             .arg(&wav)
             .status()
@@ -244,7 +257,10 @@ mod tests {
         // 纵向取波形中轴（正中间那一行）：前半段应有不透明像素。
         let mid_y = 50;
         let noisy = pixel_rgba(&ffmpeg, &out, 100, mid_y);
-        assert!(noisy[3] > 0, "前半段（第 100 列）应有波形像素，实际 {noisy:?}");
+        assert!(
+            noisy[3] > 0,
+            "前半段（第 100 列）应有波形像素，实际 {noisy:?}"
+        );
         // 后半段（静音）在同一行应为透明：说明图确实画满整段、且静音如实为空白。
         let silent = pixel_rgba(&ffmpeg, &out, 300, mid_y);
         assert_eq!(

@@ -322,7 +322,10 @@ impl PanelDeclCtx {
                 .iter()
                 .map(|s| (*s).to_string())
                 .collect(),
-            allowed_icons: PANEL_ICON_WHITELIST.iter().map(|s| (*s).to_string()).collect(),
+            allowed_icons: PANEL_ICON_WHITELIST
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
         }
     }
 
@@ -351,7 +354,9 @@ pub fn validate_panel_decl(decl: &PanelDecl, ctx: &PanelDeclCtx) -> Vec<String> 
     if id.is_empty() {
         errors.push("面板声明缺少 id".to_string());
     } else if !is_valid_panel_id(id) {
-        errors.push(format!("面板 id 不合命名规则（^[a-z][a-z0-9._-]{{0,63}}$）: {id}"));
+        errors.push(format!(
+            "面板 id 不合命名规则（^[a-z][a-z0-9._-]{{0,63}}$）: {id}"
+        ));
     } else if let Some(plugin_id) = decl.plugin_id.as_deref() {
         if !is_id_in_plugin_namespace(id, plugin_id) {
             errors.push(format!(
@@ -487,14 +492,19 @@ mod tests {
     #[test]
     fn namespace_rules() {
         assert!(is_bare_panel_id("media"));
-        assert!(is_plugin_namespaced_id("plugin.dev.hamsterpouch.palette.palette"));
+        assert!(is_plugin_namespaced_id(
+            "plugin.dev.hamsterpouch.palette.palette"
+        ));
         assert!(!is_plugin_namespaced_id("plugin.palette"));
         assert!(!is_plugin_namespaced_id("plugin.x.y"));
         assert!(is_id_in_plugin_namespace(
             "plugin.dev.hamsterpouch.palette.palette",
             "dev.hamsterpouch.palette"
         ));
-        assert!(!is_id_in_plugin_namespace("media", "dev.hamsterpouch.palette"));
+        assert!(!is_id_in_plugin_namespace(
+            "media",
+            "dev.hamsterpouch.palette"
+        ));
         // 宿主裸 id 与插件项不可能互相冲突（形式保证），没有覆盖路径。
         assert!(!is_plugin_namespaced_id("media"));
     }
@@ -526,7 +536,9 @@ mod tests {
         d.id = "palette".to_string();
         let errors = validate_panel_decl(&d, &PanelDeclCtx::builtin());
         assert!(
-            errors.iter().any(|e| e.contains("plugin.dev.hamsterpouch.palette.")),
+            errors
+                .iter()
+                .any(|e| e.contains("plugin.dev.hamsterpouch.palette.")),
             "{errors:?}"
         );
 
@@ -580,7 +592,10 @@ mod tests {
             },
         ];
         let errors = validate_panel_decl(&d, &PanelDeclCtx::builtin());
-        assert!(errors.iter().any(|e| e.contains("不是输入类控件")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("不是输入类控件")),
+            "{errors:?}"
+        );
         assert!(errors.iter().any(|e| e.contains("key 重复")), "{errors:?}");
     }
 
@@ -594,7 +609,10 @@ mod tests {
         });
         let errors = validate_panel_decl(&d, &PanelDeclCtx::builtin());
         assert!(errors.iter().any(|e| e.contains("icon")), "{errors:?}");
-        assert!(errors.iter().any(|e| e.contains("default_size")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("default_size")),
+            "{errors:?}"
+        );
 
         d.default_size = Some(PanelDefaultSize {
             width: PANEL_MAX_SIZE + 1.0,

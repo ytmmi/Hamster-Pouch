@@ -130,10 +130,7 @@ pub(crate) const FFMPEG_ONLY_IMAGE_EXTS: [&str; 17] = [
     "fits", // FITS（天文图像）
     "jls",  // JPEG-LS
     "jp2",  // JPEG 2000 家族
-    "j2k",
-    "jpf",
-    "jpx",
-    "jxl",  // JPEG XL
+    "j2k", "jpf", "jpx", "jxl",  // JPEG XL
     "pcx",  // PC Paintbrush
     "pfm",  // Portable FloatMap
     "ras",  // Sun Raster
@@ -186,7 +183,17 @@ pub(crate) fn decode_image_with_ffmpeg(
         .arg(src);
     if max_dim < u32::MAX {
         let scale = format!("scale='min({},iw)':-2", max_dim.max(2));
-        cmd.args(["-frames:v", "1", "-vf", &scale, "-f", "image2pipe", "-vcodec", "png", "-"]);
+        cmd.args([
+            "-frames:v",
+            "1",
+            "-vf",
+            &scale,
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "png",
+            "-",
+        ]);
     } else {
         cmd.args(["-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"]);
     }
@@ -319,7 +326,24 @@ mod tests {
     /// 用捆绑 ffmpeg 生成一张**纯色** AVIF（libaom-av1，确定性内容便于断言像素）。
     fn make_avif(ffmpeg: &Path, out: &Path) {
         let status = crate::process::hidden_command(ffmpeg)
-            .args(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0x3355aa:s=640x480", "-frames:v", "1", "-c:v", "libaom-av1", "-crf", "20", "-still-picture", "1"])
+            .args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=0x3355aa:s=640x480",
+                "-frames:v",
+                "1",
+                "-c:v",
+                "libaom-av1",
+                "-crf",
+                "20",
+                "-still-picture",
+                "1",
+            ])
             .arg(out)
             .status()
             .expect("启动 ffmpeg 失败");
@@ -336,13 +360,8 @@ mod tests {
         let src = dir.join("sample.avif");
         make_avif(&ffmpeg, &src);
 
-        let img = decode_image_fallback(
-            &src,
-            Some(&ffmpeg),
-            256,
-            Duration::from_secs(30),
-        )
-        .expect("AVIF 应能解码");
+        let img = decode_image_fallback(&src, Some(&ffmpeg), 256, Duration::from_secs(30))
+            .expect("AVIF 应能解码");
         // `libheif` 特性下走进程内（aom）**全分辨率**解码；关闭特性时走 ffmpeg
         // 有界兜底（长边 256）。
         let (expect_w, expect_h) = if cfg!(feature = "libheif") {
@@ -412,8 +431,18 @@ mod tests {
         let src = dir.join("sample.jp2");
         let status = crate::process::hidden_command(&ffmpeg)
             .args([
-                "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
-                "color=c=0x3355aa:s=640x480", "-frames:v", "1", "-c:v", "jpeg2000",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=0x3355aa:s=640x480",
+                "-frames:v",
+                "1",
+                "-c:v",
+                "jpeg2000",
             ])
             .arg(&src)
             .status()
@@ -429,7 +458,11 @@ mod tests {
         let img = decode_image_fallback(&src, Some(&ffmpeg), 256, Duration::from_secs(30))
             .expect("JPEG 2000 应经 ffmpeg 兜底解码");
         // 有界请求（max_dim = 256）→ 长边缩到 256。
-        assert_eq!((img.width(), img.height()), (256, 192), "应有界缩放到长边 256");
+        assert_eq!(
+            (img.width(), img.height()),
+            (256, 192),
+            "应有界缩放到长边 256"
+        );
         let rgb = img.to_rgb8();
         let px = *rgb.get_pixel(0, 0);
         let close = |a: u8, b: u8| a.abs_diff(b) <= 12;
@@ -484,7 +517,10 @@ mod tests {
             "jp2", "jxl", "psd", "pcx", "sgi", "ras", "dpx", "fits", "wbmp", "xbm", "xpm", "dib",
         ] {
             let p = Path::new("x").with_extension(ext);
-            assert!(is_ffmpeg_only_image(&p), "{ext} 进程内无解码器，应走 ffmpeg");
+            assert!(
+                is_ffmpeg_only_image(&p),
+                "{ext} 进程内无解码器，应走 ffmpeg"
+            );
         }
         // 大小写不敏感（D11 扩展名优先的既有口径）。
         assert!(is_ffmpeg_only_image(Path::new("A.JP2")));

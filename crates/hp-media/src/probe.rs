@@ -12,11 +12,7 @@ fn parse_ratio(s: &str) -> Option<f64> {
     let mut parts = s.split('/');
     let num = parts.next()?.parse::<f64>().ok()?;
     let den = parts.next().unwrap_or("1").parse::<f64>().ok()?;
-    if den == 0.0 {
-        None
-    } else {
-        Some(num / den)
-    }
+    if den == 0.0 { None } else { Some(num / den) }
 }
 
 /// 视频全量媒体信息（时长/分辨率/编码/帧率/码率）。
@@ -89,10 +85,7 @@ pub fn probe(video_path: &Path, ffprobe_bin: &Path, timeout: Duration) -> HpResu
         .and_then(|c| c.as_str())
         .map(|s| s.to_string());
     let frame_rate = video
-        .and_then(|v| {
-            v.get("avg_frame_rate")
-                .or_else(|| v.get("r_frame_rate"))
-        })
+        .and_then(|v| v.get("avg_frame_rate").or_else(|| v.get("r_frame_rate")))
         .and_then(|r| r.as_str())
         .and_then(parse_ratio);
 

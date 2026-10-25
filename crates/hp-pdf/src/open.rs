@@ -9,8 +9,8 @@
 
 use std::path::Path;
 
-use hp_core::{HpError, HpResult};
 use hayro::hayro_syntax::Pdf;
+use hp_core::{HpError, HpResult};
 
 /// 从字节打开一个 PDF；打不开返回 `None`。
 ///

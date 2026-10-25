@@ -25,8 +25,10 @@ use hp_core::{AnnotationKind, HpError, HpResult};
 use hp_dto::ReaderAnnotationItem;
 use tauri::State;
 
-use crate::commands::shared::{api_async, api_from_hp, lock_repo, open_repo, open_repo_mut, ApiAsync};
 use crate::AppState;
+use crate::commands::shared::{
+    ApiAsync, api_async, api_from_hp, lock_repo, open_repo, open_repo_mut,
+};
 
 /// 把领域记录转成 DTO（字段一一对应，无换算）。
 fn to_item(record: hp_core::ReaderAnnotation) -> ReaderAnnotationItem {
@@ -98,9 +100,8 @@ pub(crate) async fn reader_add_annotation(
         if db.get_file(&file_id)?.is_none() {
             return Err(HpError::NotFound(format!("文件不存在: {file_id}")));
         }
-        let record = db.create_annotation(
-            &file_id, kind, &cursor, progress, &title, &excerpt, &note,
-        )?;
+        let record =
+            db.create_annotation(&file_id, kind, &cursor, progress, &title, &excerpt, &note)?;
         Ok(to_item(record))
     })();
     api_async(api_from_hp(outcome))

@@ -11,4 +11,4 @@ mod writeback;
 pub use provider::AiTaggingProvider;
 pub use service::{AiRunOutcome, AiTaggingService};
 pub use task::{AiTask, AiTaskQueue, AiTaskStatus};
-pub use writeback::{writeback, WritebackOutcome};
+pub use writeback::{WritebackOutcome, writeback};

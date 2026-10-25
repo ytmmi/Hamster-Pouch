@@ -117,7 +117,11 @@ fn tagging_writes_back_auto_group_with_confidence_and_model() {
     assert_eq!(auto.len(), 1);
     assert_eq!(auto[0].confidence, Some(0.8));
     assert_eq!(auto[0].source_model.as_deref(), Some("mock-model"));
-    assert!(db.list_file_tags(file_id.as_str()).expect("查询失败").is_empty());
+    assert!(
+        db.list_file_tags(file_id.as_str())
+            .expect("查询失败")
+            .is_empty()
+    );
     db.close().expect("关闭失败");
 }
 
@@ -139,10 +143,15 @@ fn ai_and_user_tags_coexist_in_independent_tables() {
 
     // 同名 tag：人工关联表与自动关联表各一条，互不覆盖（D21）。
     let manual = db.list_file_tags(file_id.as_str()).expect("查询人工失败");
-    let auto = db.list_file_auto_tags(file_id.as_str()).expect("查询自动失败");
+    let auto = db
+        .list_file_auto_tags(file_id.as_str())
+        .expect("查询自动失败");
     assert_eq!(manual.len(), 1);
     assert_eq!(auto.len(), 1);
-    assert_eq!(manual[0].tag_id, auto[0].tag_id, "tag 实体共用（同名同一实体）");
+    assert_eq!(
+        manual[0].tag_id, auto[0].tag_id,
+        "tag 实体共用（同名同一实体）"
+    );
     assert_eq!(auto[0].confidence, Some(0.95));
     db.close().expect("关闭失败");
 }

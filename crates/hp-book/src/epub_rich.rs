@@ -203,9 +203,15 @@ fn parse_rgb_body(body: &str) -> Option<String> {
     // 兼容 `rgb(1,2,3)` / `rgba(1,2,3,0.5)` / `rgb(1 2 3 / 50%)` 三种写法。
     let normalized = body.replace('/', " ");
     let parts: Vec<String> = if normalized.contains(',') {
-        normalized.split(',').map(|s| s.trim().to_string()).collect()
+        normalized
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .collect()
     } else {
-        normalized.split_whitespace().map(|s| s.to_string()).collect()
+        normalized
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect()
     };
     if parts.len() < 3 {
         return None;
@@ -763,7 +769,11 @@ pub(crate) fn caption_from_visible_text(inner: &str) -> Vec<crate::block::BookSp
 /// 与 `epub_text::element_inner_text` 的区别：本函数**记账同名标签的嵌套深度**，
 /// 因此 `<aside><div><p>x</p></div></aside>` 不会在第一个 `</div>` 处被截断。
 /// 注释 / `figure` 这类容器必须用它（它们内部常见嵌套的 `div` / `p`）。
-pub(crate) fn element_inner_balanced(xhtml: &str, from: usize, name: &str) -> Option<(String, usize)> {
+pub(crate) fn element_inner_balanced(
+    xhtml: &str,
+    from: usize,
+    name: &str,
+) -> Option<(String, usize)> {
     let mut depth = 1usize;
     let mut at = from;
     while let Some(lt) = xhtml[at..].find('<') {
@@ -801,11 +811,20 @@ mod tests {
         assert_eq!(parse_css_color("#abc").as_deref(), Some("#aabbcc"));
         assert_eq!(parse_css_color("#AABBCC").as_deref(), Some("#aabbcc"));
         assert_eq!(parse_css_color("#11223344").as_deref(), Some("#112233"));
-        assert_eq!(parse_css_color("rgb(255, 0, 128)").as_deref(), Some("#ff0080"));
-        assert_eq!(parse_css_color("rgba(1,2,3,0.5)").as_deref(), Some("#010203"));
+        assert_eq!(
+            parse_css_color("rgb(255, 0, 128)").as_deref(),
+            Some("#ff0080")
+        );
+        assert_eq!(
+            parse_css_color("rgba(1,2,3,0.5)").as_deref(),
+            Some("#010203")
+        );
         assert_eq!(parse_css_color("red").as_deref(), Some("#ff0000"));
         assert_eq!(parse_css_color("  WHITE  ").as_deref(), Some("#ffffff"));
-        assert_eq!(parse_css_color("rgb(100% 0% 50%)").as_deref(), Some("#ff0080"));
+        assert_eq!(
+            parse_css_color("rgb(100% 0% 50%)").as_deref(),
+            Some("#ff0080")
+        );
     }
 
     #[test]
@@ -836,7 +855,11 @@ mod tests {
         assert_eq!(parse_font_size("1.5em"), clamp_size_em(1.5));
         assert_eq!(parse_font_size("150%"), clamp_size_em(1.5));
         assert_eq!(parse_font_size("24px"), clamp_size_em(1.5));
-        assert_eq!(parse_font_size("9pt"), clamp_size_em(0.75), "9pt = 12px = 0.75em");
+        assert_eq!(
+            parse_font_size("9pt"),
+            clamp_size_em(0.75),
+            "9pt = 12px = 0.75em"
+        );
         assert_eq!(parse_font_size("large"), clamp_size_em(1.2));
         assert_eq!(parse_font_size("small"), clamp_size_em(0.8));
         assert_eq!(parse_font_size("x-small"), clamp_size_em(0.6));
@@ -878,10 +901,22 @@ mod tests {
     fn comment_kinds_are_recognized_with_their_labels() {
         for (name, tag, expect) in [
             ("aside", r#"<aside>"#, Some(None)),
-            ("aside", r#"<aside epub:type="footnote">"#, Some(Some("footnote"))),
-            ("div", r#"<div role="doc-footnote">"#, Some(Some("doc-footnote"))),
+            (
+                "aside",
+                r#"<aside epub:type="footnote">"#,
+                Some(Some("footnote")),
+            ),
+            (
+                "div",
+                r#"<div role="doc-footnote">"#,
+                Some(Some("doc-footnote")),
+            ),
             ("div", r#"<div class="note">"#, Some(Some("note"))),
-            ("div", r#"<div class="annotation">"#, Some(Some("annotation"))),
+            (
+                "div",
+                r#"<div class="annotation">"#,
+                Some(Some("annotation")),
+            ),
             ("div", r#"<div class="sidebar">"#, Some(Some("sidebar"))),
             ("div", r#"<div class="chapter">"#, None),
             ("p", r#"<p>"#, None),

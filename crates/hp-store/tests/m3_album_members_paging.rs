@@ -91,7 +91,10 @@ fn paging_covers_every_member_exactly_once() {
         assert!(pages < 100, "翻页次数异常，可能有环");
     }
 
-    assert_eq!(pages, 7, "250 项按 40/页应当是 7 页（6 满页 + 1 个 10 项尾页）");
+    assert_eq!(
+        pages, 7,
+        "250 项按 40/页应当是 7 页（6 满页 + 1 个 10 项尾页）"
+    );
     assert_eq!(seen.len(), 250, "翻页总数必须等于成员总数");
     let mut uniq = seen.clone();
     uniq.sort();

@@ -124,8 +124,18 @@ mod tests {
     #[test]
     fn queue_is_fifo_and_tracks_status() {
         let mut q = AiTaskQueue::new();
-        let a = q.enqueue("repo", FileId::from_raw("f1"), AiProviderConfigId::generate(), "{}");
-        let _b = q.enqueue("repo", FileId::from_raw("f2"), AiProviderConfigId::generate(), "{}");
+        let a = q.enqueue(
+            "repo",
+            FileId::from_raw("f1"),
+            AiProviderConfigId::generate(),
+            "{}",
+        );
+        let _b = q.enqueue(
+            "repo",
+            FileId::from_raw("f2"),
+            AiProviderConfigId::generate(),
+            "{}",
+        );
         assert_eq!(q.len(), 2);
         assert_eq!(q.pending_count(), 2);
 

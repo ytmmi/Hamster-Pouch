@@ -112,7 +112,10 @@ mod tests {
 
     #[test]
     fn provider_config_id_generate_is_unique() {
-        assert_ne!(AiProviderConfigId::generate(), AiProviderConfigId::generate());
+        assert_ne!(
+            AiProviderConfigId::generate(),
+            AiProviderConfigId::generate()
+        );
     }
 
     #[test]
@@ -131,7 +134,10 @@ mod tests {
     fn overwrite_threshold_boundary() {
         assert!(should_overwrite_user_tag(0.9, DEFAULT_OVERWRITE_THRESHOLD));
         assert!(should_overwrite_user_tag(0.95, DEFAULT_OVERWRITE_THRESHOLD));
-        assert!(!should_overwrite_user_tag(0.89, DEFAULT_OVERWRITE_THRESHOLD));
+        assert!(!should_overwrite_user_tag(
+            0.89,
+            DEFAULT_OVERWRITE_THRESHOLD
+        ));
         assert!(!should_overwrite_user_tag(0.0, DEFAULT_OVERWRITE_THRESHOLD));
     }
 

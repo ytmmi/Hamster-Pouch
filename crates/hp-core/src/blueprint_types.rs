@@ -216,7 +216,8 @@ impl<'de> Deserialize<'de> for NodeType {
 /// 组模式（RFC 0007 决策 1）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum GroupMode {    /// 互斥组：同一时间至多一个成员显示，其余默认隐藏。
+pub enum GroupMode {
+    /// 互斥组：同一时间至多一个成员显示，其余默认隐藏。
     Exclusive,
     /// 独立组：各成员显隐互不影响。
     Independent,

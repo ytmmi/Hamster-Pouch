@@ -45,9 +45,7 @@ fn has_structural_parent(graph: &BlueprintGraph, node: &BlueprintNode) -> bool {
     }
     node.node_type == NodeType::Control
         && graph.edges.iter().any(|e| {
-            e.edge_kind == EdgeKind::MemberOf
-                && e.from == node.key
-                && graph.node(&e.to).is_some()
+            e.edge_kind == EdgeKind::MemberOf && e.from == node.key && graph.node(&e.to).is_some()
         })
 }
 

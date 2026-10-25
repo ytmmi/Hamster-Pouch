@@ -194,8 +194,7 @@ impl RepoDb {
             .map_err(|e| store_err("开启完全卸载事务", e))?;
 
         let abort = |tx: rusqlite::Transaction<'_>| -> HpResult<PurgeResult> {
-            tx.rollback()
-                .map_err(|e| store_err("回滚完全卸载", e))?;
+            tx.rollback().map_err(|e| store_err("回滚完全卸载", e))?;
             Ok(PurgeResult {
                 counts: SourceDataCounts::default(),
                 cancelled: true,
@@ -228,14 +227,21 @@ impl RepoDb {
             .map_err(|e| store_err("降级跟随相册", e))?;
         }
         removed.sync_albums = tx
-            .execute("DELETE FROM album_sync_rule WHERE source_id = ?1", params![source_id])
+            .execute(
+                "DELETE FROM album_sync_rule WHERE source_id = ?1",
+                params![source_id],
+            )
             .map_err(|e| store_err("删除同步规则", e))? as u64;
         tx.execute(
             "DELETE FROM album_sync_state WHERE source_id = ?1",
             params![source_id],
         )
         .map_err(|e| store_err("删除同步状态", e))?;
-        on_progress(PurgePhase::SyncRules, removed.sync_albums, counts.sync_albums);
+        on_progress(
+            PurgePhase::SyncRules,
+            removed.sync_albums,
+            counts.sync_albums,
+        );
 
         // 2) 子源摘挂：子源是独立对象，卸载父源不应连带删除，但必须断开外键
         if should_cancel() {
@@ -247,7 +253,11 @@ impl RepoDb {
                 params![source_id],
             )
             .map_err(|e| store_err("摘挂子源", e))? as u64;
-        on_progress(PurgePhase::Children, removed.child_sources, counts.child_sources);
+        on_progress(
+            PurgePhase::Children,
+            removed.child_sources,
+            counts.child_sources,
+        );
 
         // 3) 派生数据：逐表删除并上报进度
         let derived_total = counts.derived_total();
@@ -273,7 +283,11 @@ impl RepoDb {
                 _ => {}
             }
             processed += n;
-            on_progress(PurgePhase::Derived, processed.min(derived_total), derived_total);
+            on_progress(
+                PurgePhase::Derived,
+                processed.min(derived_total),
+                derived_total,
+            );
         }
 
         // 4) 文件索引

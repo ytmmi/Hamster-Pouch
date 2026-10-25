@@ -4,10 +4,10 @@
 //! 人工关联表 `file_tags` 与自动关联表独立，同名可共存、互不影响（D21）。
 //! 仅当自动关联已存在同一 tag 时写入撤销记录（D6 接口保留）。
 
-use hp_core::{AiTaggingOutput, AiTagUndo, FileId, HpResult, RepoId, TagId, TagSource};
+use hp_core::{AiTagUndo, AiTaggingOutput, FileId, HpResult, RepoId, TagId, TagSource};
 use hp_store::RepoDb;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
 /// 回写成果。

@@ -26,17 +26,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::AppHandle;
 
 use crate::commands::shared::EmitHp;
-use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{COLOR_WINDOW, HBRUSH};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetWindowLongPtrW, RegisterClassW,
-    SetWindowLongPtrW, SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA,
-    HTTRANSPARENT, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_HIDE,
-    SW_SHOW, WM_LBUTTONUP, WM_NCDESTROY, WM_NCHITTEST, WINDOW_EX_STYLE, WNDCLASSW, WS_CHILD,
+    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
+    GetWindowLongPtrW, HTTRANSPARENT, HWND_TOP, RegisterClassW, SW_HIDE, SW_SHOW, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    WINDOW_EX_STYLE, WM_LBUTTONUP, WM_NCDESTROY, WM_NCHITTEST, WNDCLASSW, WS_CHILD,
     WS_CLIPSIBLINGS, WS_VISIBLE,
 };
+use windows::core::{PCWSTR, w};
 
 /// 嵌入的原生子窗口（mpv 渲染目标）。
 pub struct EmbedWindow {

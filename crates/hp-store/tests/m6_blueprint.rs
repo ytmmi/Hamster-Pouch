@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use hp_core::{
-    BlueprintGraph, BlueprintTemplateRow, HideDirection, NodeType, BLUEPRINT_SCHEMA_VERSION,
+    BLUEPRINT_SCHEMA_VERSION, BlueprintGraph, BlueprintTemplateRow, HideDirection, NodeType,
 };
 use hp_store::{GlobalDb, RepoDb};
 
@@ -114,15 +114,14 @@ fn blueprint_crud_roundtrip_and_default() {
 
     // 删除默认蓝图 → get_default_blueprint 回退为 None（消费层回退内置默认）
     db.delete_blueprint(&row2.id).expect("删除失败");
-    assert!(db
-        .get_default_blueprint("repo-1")
-        .expect("读默认失败")
-        .is_none());
+    assert!(
+        db.get_default_blueprint("repo-1")
+            .expect("读默认失败")
+            .is_none()
+    );
 
     // 保存到不存在的蓝图 / 删除不存在的蓝图 → NotFound
-    assert!(db
-        .save_blueprint("repo-1", "missing", "x", &json)
-        .is_err());
+    assert!(db.save_blueprint("repo-1", "missing", "x", &json).is_err());
     assert!(db.delete_blueprint("missing").is_err());
 
     db.close().expect("关闭失败");
@@ -151,8 +150,10 @@ fn blueprint_repo_isolation_across_repos() {
     let b = db
         .create_blueprint("repo-b", "B 的蓝图", &valid_blueprint_json())
         .expect("创建 B 失败");
-    db.set_default_blueprint("repo-a", &a.id).expect("设 A 默认失败");
-    db.set_default_blueprint("repo-b", &b.id).expect("设 B 默认失败");
+    db.set_default_blueprint("repo-a", &a.id)
+        .expect("设 A 默认失败");
+    db.set_default_blueprint("repo-b", &b.id)
+        .expect("设 B 默认失败");
 
     let listed_a = db.list_blueprints("repo-a").expect("列出 A 失败");
     assert_eq!(listed_a.len(), 1, "只应看到本仓库的蓝图");
@@ -258,7 +259,11 @@ fn blueprint_template_copy_semantics() {
 
     // 删除模板
     g.remove_blueprint_template(&tpl.id).expect("删除模板失败");
-    assert!(g.get_blueprint_template(&tpl.id).expect("查询失败").is_none());
+    assert!(
+        g.get_blueprint_template(&tpl.id)
+            .expect("查询失败")
+            .is_none()
+    );
 
     // 模板安装语义由命令层组合（模板 → 复制进仓库 blueprints 表）：
     // 复制后与模板脱离 —— 修改模板 JSON 不影响已复制蓝图。
@@ -318,10 +323,7 @@ fn validate_rejects_all_spec_errors() {
     )
     .expect("命名合法的未知类型必须能读进内存");
     assert!(
-        graph
-            .warnings()
-            .iter()
-            .any(|w| w.contains("当前无注册项")),
+        graph.warnings().iter().any(|w| w.contains("当前无注册项")),
         "{:?}",
         graph.warnings()
     );
@@ -343,7 +345,11 @@ fn validate_rejects_all_spec_errors() {
           {"key":"g","type":"group","mode":"exclusive","default_visible":["c1","c2"]}
         ],"edges":[]}"#,
     );
-    assert!(errors.iter().any(|e| e.contains("default_visible 至多一个成员")));
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("default_visible 至多一个成员"))
+    );
 
     // 非法 hide_direction（toward 指向存在但类型不是组）
     let errors = BlueprintGraph::validate_json(
@@ -408,11 +414,11 @@ fn graph_document_roundtrip_preserves_semantics() {
         group.hide_direction.as_ref().map(|d| d.as_str()),
         Some("left".to_string())
     );
-    assert!(matches!(
-        group.hide_direction,
-        Some(HideDirection::Left)
-    ));
-    assert_eq!(group.position.as_ref().map(|p| (p.x, p.y)), Some((0.0, 0.0)));
+    assert!(matches!(group.hide_direction, Some(HideDirection::Left)));
+    assert_eq!(
+        group.position.as_ref().map(|p| (p.x, p.y)),
+        Some((0.0, 0.0))
+    );
     // 序列化 → 再解析 → 语义一致
     let back = BlueprintGraph::from_json(&graph.to_json()).expect("再解析失败");
     assert_eq!(back, graph);
@@ -429,7 +435,11 @@ fn default_blueprint_fixture_validates() {
     assert!(errors.is_empty(), "默认蓝图校验失败: {errors:?}");
     assert_eq!(graph.nodes.len(), 27, "默认蓝图应有 27 个节点");
     assert_eq!(graph.edges.len(), 26, "默认蓝图应有 26 条边");
-    assert_eq!(graph.default_version, Some(7), "引入分层后内置默认升版（D51）");
+    assert_eq!(
+        graph.default_version,
+        Some(7),
+        "引入分层后内置默认升版（D51）"
+    );
 
     // 分层（D51）：内置默认是**单层「主界面」**，每个节点都带 layer 归属。
     assert_eq!(graph.schema_version, BLUEPRINT_SCHEMA_VERSION);
@@ -437,7 +447,10 @@ fn default_blueprint_fixture_validates() {
     assert_eq!(graph.layers[0].key, "l_main");
     assert_eq!(graph.layers[0].name, "主界面");
     assert!(
-        graph.nodes.iter().all(|n| n.layer.as_deref() == Some("l_main")),
+        graph
+            .nodes
+            .iter()
+            .all(|n| n.layer.as_deref() == Some("l_main")),
         "默认蓝图每个节点都必须归属 l_main"
     );
 
@@ -447,7 +460,11 @@ fn default_blueprint_fixture_validates() {
         .iter()
         .filter(|n| n.node_type == NodeType::Interface)
         .collect();
-    assert_eq!(interfaces.len(), 1, "内置默认蓝图应有且仅有一个界面节点（ui）");
+    assert_eq!(
+        interfaces.len(),
+        1,
+        "内置默认蓝图应有且仅有一个界面节点（ui）"
+    );
     assert_eq!(interfaces[0].key, "ui");
     assert!(interfaces[0].name.is_none(), "界面显示名取自层名（D51）");
     for block in ["blk_left", "blk_center", "blk_right"] {
@@ -506,16 +523,20 @@ fn default_blueprint_fixture_validates() {
         && e.edge_kind == hp_core::EdgeKind::Contains));
 
     // 规则三元组：对象 → 操作 → 状态（on 边 + fires 边，全部连线）
-    assert!(graph
-        .edges
-        .iter()
-        .any(|e| e.from == "o_img" && e.to == "e_dbl_img" && e.edge_kind == hp_core::EdgeKind::On));
-    assert!(graph
-        .edges
-        .iter()
-        .any(|e| e.from == "e_dbl_img" && e.to == "a_show_viewer" && e.edge_kind == hp_core::EdgeKind::Fires));
+    assert!(
+        graph.edges.iter().any(|e| e.from == "o_img"
+            && e.to == "e_dbl_img"
+            && e.edge_kind == hp_core::EdgeKind::On)
+    );
+    assert!(graph.edges.iter().any(|e| e.from == "e_dbl_img"
+        && e.to == "a_show_viewer"
+        && e.edge_kind == hp_core::EdgeKind::Fires));
     // 操作节点无 target 字段（靠 on 边驱动）
-    let ev = graph.nodes.iter().find(|n| n.key == "e_dbl_img").expect("应有操作节点");
+    let ev = graph
+        .nodes
+        .iter()
+        .find(|n| n.key == "e_dbl_img")
+        .expect("应有操作节点");
     assert!(ev.target.is_none());
 
     // 如实表达当前默认「媒体-测试」布局：中栏 = 媒体预览 + 查看器/播放器；
@@ -529,7 +550,10 @@ fn default_blueprint_fixture_validates() {
     for expected in [
         "repo", "sources", "albums", "media", "viewer", "player", "color", "tags", "metadata",
     ] {
-        assert!(panel_ids.contains(&expected), "默认蓝图缺少面板控件: {expected}");
+        assert!(
+            panel_ids.contains(&expected),
+            "默认蓝图缺少面板控件: {expected}"
+        );
     }
     // 「媒体-测试」布局未挂载 tag表/任务，默认蓝图不表达它们。
     assert!(!panel_ids.contains(&"tagtable"));
@@ -566,7 +590,10 @@ fn legacy_v1_document_is_migrated_on_write() {
     assert_eq!(graph.layers[0].name, "主界面");
     assert_eq!(graph.default_version, Some(6), "内置默认标记保留");
     assert!(
-        graph.nodes.iter().all(|n| n.layer.as_deref() == Some("l_ui")),
+        graph
+            .nodes
+            .iter()
+            .all(|n| n.layer.as_deref() == Some("l_ui")),
         "所有节点应补上层归属"
     );
     assert!(graph.validate().is_empty(), "{:?}", graph.validate());
@@ -638,7 +665,10 @@ fn factory_built_docs_validate() {
         );
         checked += 1;
     }
-    assert!(checked > 0, "没有找到工厂夹具（先跑 pnpm check:blueprint-nodes）");
+    assert!(
+        checked > 0,
+        "没有找到工厂夹具（先跑 pnpm check:blueprint-nodes）"
+    );
 }
 
 #[test]
@@ -661,8 +691,9 @@ fn builtin_template_row_crud() {
         .expect("应存在");
     assert_eq!(got, row);
     g.remove_blueprint_template("tpl-manual").expect("删除失败");
-    assert!(g
-        .get_blueprint_template("tpl-manual")
-        .expect("查询失败")
-        .is_none());
+    assert!(
+        g.get_blueprint_template("tpl-manual")
+            .expect("查询失败")
+            .is_none()
+    );
 }

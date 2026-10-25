@@ -56,7 +56,15 @@ fn three_kinds_round_trip_and_stay_separate() {
     let (mut db, file_id) = repo_with_file("annotations");
 
     let bookmark = db
-        .create_annotation(&file_id, AnnotationKind::Bookmark, "12", 1_234, "第一章", "", "")
+        .create_annotation(
+            &file_id,
+            AnnotationKind::Bookmark,
+            "12",
+            1_234,
+            "第一章",
+            "",
+            "",
+        )
         .expect("写书签失败");
     let note = db
         .create_annotation(
@@ -104,7 +112,10 @@ fn three_kinds_round_trip_and_stay_separate() {
     assert_eq!(stored_highlight.title, "第三章");
 
     // 单条查询与列表一致。
-    let one = db.get_annotation(&note.id).expect("查批注失败").expect("应存在");
+    let one = db
+        .get_annotation(&note.id)
+        .expect("查批注失败")
+        .expect("应存在");
     assert_eq!(one.note, "这里写得真好");
     assert_eq!(one.excerpt, "", "笔记没有选中原文");
     assert!(db.get_annotation("不存在").expect("查批注失败").is_none());
@@ -117,24 +128,29 @@ fn content_validation_runs_before_the_write() {
     let (mut db, file_id) = repo_with_file("annotation-validation");
 
     // 书签不需要正文。
-    assert!(db
-        .create_annotation(&file_id, AnnotationKind::Bookmark, "1", 0, "", "", "")
-        .is_ok());
+    assert!(
+        db.create_annotation(&file_id, AnnotationKind::Bookmark, "1", 0, "", "", "")
+            .is_ok()
+    );
     // 笔记 / 高亮必须有内容——否则列表里就是一行空白（用户会以为没存上）。
-    assert!(db
-        .create_annotation(&file_id, AnnotationKind::Note, "1", 0, "", "", "  ")
-        .is_err());
-    assert!(db
-        .create_annotation(&file_id, AnnotationKind::Highlight, "1", 0, "", "", "")
-        .is_err());
+    assert!(
+        db.create_annotation(&file_id, AnnotationKind::Note, "1", 0, "", "", "  ")
+            .is_err()
+    );
+    assert!(
+        db.create_annotation(&file_id, AnnotationKind::Highlight, "1", 0, "", "", "")
+            .is_err()
+    );
     // 游标非空（没有位置的批注跳不回去，等于一条坏记录）。
-    assert!(db
-        .create_annotation(&file_id, AnnotationKind::Bookmark, "  ", 0, "", "", "")
-        .is_err());
+    assert!(
+        db.create_annotation(&file_id, AnnotationKind::Bookmark, "  ", 0, "", "", "")
+            .is_err()
+    );
     // 空文件 id 也拒。
-    assert!(db
-        .create_annotation("", AnnotationKind::Bookmark, "1", 0, "", "", "")
-        .is_err());
+    assert!(
+        db.create_annotation("", AnnotationKind::Bookmark, "1", 0, "", "", "")
+            .is_err()
+    );
 
     // 被拒的都不该留下记录：只剩最开始那条合法书签。
     assert_eq!(db.list_annotations(&file_id).expect("列批注失败").len(), 1);
@@ -160,7 +176,9 @@ fn delete_is_idempotent_and_cascades_with_the_file() {
     // 外键级联：文件行没了，剩下的批注随之消失（不留孤儿）。
     db.delete_files(&[file_id.clone()]).expect("删文件失败");
     assert!(
-        db.list_annotations(&file_id).expect("列批注失败").is_empty(),
+        db.list_annotations(&file_id)
+            .expect("列批注失败")
+            .is_empty(),
         "文件被删后批注必须级联消失"
     );
     assert!(db.get_annotation(&two.id).expect("查批注失败").is_none());

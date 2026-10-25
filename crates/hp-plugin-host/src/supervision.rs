@@ -101,11 +101,16 @@ impl ProcessSupervisor {
         }
         if let Some(start) = self.backoff_start {
             let backoff = backoff_duration(self.consecutive_failures);
-            return SupervisionStatus::RestartBackoff { backoff, since: start };
+            return SupervisionStatus::RestartBackoff {
+                backoff,
+                since: start,
+            };
         }
         match self.consecutive_failures {
             0 => SupervisionStatus::Healthy,
-            n => SupervisionStatus::Degraded { consecutive_failures: n },
+            n => SupervisionStatus::Degraded {
+                consecutive_failures: n,
+            },
         }
     }
 
@@ -299,11 +304,18 @@ mod tests {
         let mut s = ProcessSupervisor::new("p1");
         for i in 1..MAX_CONSECUTIVE_FAILURES {
             s.on_failure();
-            assert!(matches!(s.status(), SupervisionStatus::RestartBackoff { .. }),
-                "第 {i} 次失败后应为 Degraded");
+            assert!(
+                matches!(s.status(), SupervisionStatus::RestartBackoff { .. }),
+                "第 {i} 次失败后应为 Degraded"
+            );
         }
         let status = s.on_failure(); // 第 MAX 次
-        assert_eq!(status, SupervisionStatus::Unhealthy { consecutive_failures: MAX_CONSECUTIVE_FAILURES });
+        assert_eq!(
+            status,
+            SupervisionStatus::Unhealthy {
+                consecutive_failures: MAX_CONSECUTIVE_FAILURES
+            }
+        );
         assert!(!s.allow_retry());
     }
 

@@ -4,7 +4,7 @@
 //! 先把覆盖前状态写入 `ai_tag_undo`，保证可撤销。
 
 use hp_core::{AiTagUndo, FileId, HpError, HpResult, RepoId, TagId, TagSource};
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{OptionalExtension, Row, params};
 
 use crate::repo::repo_db::RepoDb;
 use crate::util::{require_nonempty, store_err};
@@ -71,11 +71,7 @@ impl RepoDb {
     }
 
     /// 查询某文件某 tag 最近一条覆盖撤销记录；不存在返回 `None`。
-    pub fn latest_ai_tag_undo(
-        &self,
-        file_id: &str,
-        tag_id: &str,
-    ) -> HpResult<Option<AiTagUndo>> {
+    pub fn latest_ai_tag_undo(&self, file_id: &str, tag_id: &str) -> HpResult<Option<AiTagUndo>> {
         self.conn()
             .query_row(
                 "SELECT id, repo_id, file_id, tag_id, prev_source, prev_confidence, prev_source_model, created_at

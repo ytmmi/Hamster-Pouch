@@ -29,14 +29,14 @@ use crate::blueprint_warnings as warnings_impl;
 pub use crate::blueprint_node::{
     BlueprintEdge, BlueprintLayer, BlueprintNode, BlueprintPosition, NodeKey, OverlaySize,
 };
-pub use crate::blueprint_row::{BlueprintRow, BlueprintTemplateRow};
-pub use crate::blueprint_validate::NodeIssue;
 pub use crate::blueprint_registry::{PanelFact, RegisteredPluginNode};
+pub use crate::blueprint_row::{BlueprintRow, BlueprintTemplateRow};
 pub use crate::blueprint_types::{
-    is_valid_class_media_type, media_type_has_subclass, subclass_formats_for, ActionOp, AnchorAxis,
-    EdgeKind, GroupMode, HideDirection, NodeType, OverlayAnchor, TokenLevel, Trigger, BOOK_MARK,
-    BUILTIN_MARKS, CLASS_MEDIA_TYPES, MANGA_MARK, SUBCLASS_FORMATS_TEXT,
+    ActionOp, AnchorAxis, BOOK_MARK, BUILTIN_MARKS, CLASS_MEDIA_TYPES, EdgeKind, GroupMode,
+    HideDirection, MANGA_MARK, NodeType, OverlayAnchor, SUBCLASS_FORMATS_TEXT, TokenLevel, Trigger,
+    is_valid_class_media_type, media_type_has_subclass, subclass_formats_for,
 };
+pub use crate::blueprint_validate::NodeIssue;
 
 /// 蓝图文档 schema 版本（当前 = 2；v1 → v2 为「引入分层」迁移，D52/D58）。
 pub const BLUEPRINT_SCHEMA_VERSION: i64 = 2;

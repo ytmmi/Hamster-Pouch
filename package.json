@@ -30,6 +30,7 @@
     "check:settings": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/check-settings.mjs",
     "check:layouts": "node tools/layout-check.mjs",
     "check:types": "cargo run -p hp-dto --bin generate && git diff --exit-code -- packages/shared-types",
+    "check:fmt": "node tools/check-fmt.mjs",
     "check:line-count": "node tools/check-line-count.mjs",
     "check:encoding": "node tools/check-encoding.mjs",
     "check:commands": "node tools/check-commands.mjs",

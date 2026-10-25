@@ -66,7 +66,8 @@ impl AlbumService {
         parent_album_id: Option<&str>,
         file_ids: &[String],
     ) -> HpResult<Album> {
-        let album = db.create_album(repo_id, name, AlbumKind::Fixed, media_type, parent_album_id)?;
+        let album =
+            db.create_album(repo_id, name, AlbumKind::Fixed, media_type, parent_album_id)?;
         if !file_ids.is_empty() {
             Self::add_members(db, album.id.as_str(), file_ids)?;
         }

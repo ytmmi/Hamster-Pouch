@@ -268,7 +268,9 @@ pub fn is_valid_contribution_id(id: &str) -> bool {
         _ => return false,
     }
     id.len() <= 64
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.' || c == '-')
+        && chars.all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.' || c == '-'
+        })
 }
 
 #[cfg(test)]

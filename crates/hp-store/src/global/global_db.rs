@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use hp_core::{HpError, HpResult};
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::migrate;
 use crate::util::{now_iso, require_nonempty, store_err, uuid};
@@ -161,7 +161,9 @@ impl GlobalDb {
             .prepare("SELECT key, value FROM app_settings ORDER BY key")
             .map_err(|e| store_err("准备列出应用设置", e))?;
         let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .map_err(|e| store_err("列出应用设置", e))?;
         let mut out = Vec::new();
         for row in rows {
@@ -448,8 +450,7 @@ impl GlobalDb {
         let n = tx
             .execute("DELETE FROM repos WHERE id = ?1", params![id])
             .map_err(|e| store_err("删除仓库注册行", e))?;
-        tx.commit()
-            .map_err(|e| store_err("提交仓库删除事务", e))?;
+        tx.commit().map_err(|e| store_err("提交仓库删除事务", e))?;
         if n == 0 {
             return Err(HpError::NotFound(format!("仓库不存在: {id}")));
         }

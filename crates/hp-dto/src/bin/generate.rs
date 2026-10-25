@@ -18,9 +18,7 @@ use ts_rs::{Config, TS};
 /// 大整数字段不会悄悄变成 `bigint`（`bigint` 不能直接和 `number` 运算，
 /// 也不能 JSON 序列化，前端会成片报错）。
 fn export_all(out: &Path) {
-    let cfg = Config::new()
-        .with_out_dir(out)
-        .with_large_int("number");
+    let cfg = Config::new().with_out_dir(out).with_large_int("number");
 
     // cfg 作为宏参数显式传入，避免 macro_rules 卫生性带来的作用域意外。
     macro_rules! export {
@@ -117,9 +115,12 @@ fn write_index(out: &Path) {
 fn main() {
     // 默认输出到本 crate 相对的 packages/shared-types/src（用绝对路径，避免
     // ts-rs 与 fs 对相对路径解析基准不一致）。
-    let out = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/shared-types/src")
-    });
+    let out = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/shared-types/src")
+        });
     std::fs::create_dir_all(&out).expect("创建输出目录失败");
     export_all(&out);
     write_index(&out);

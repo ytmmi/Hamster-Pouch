@@ -6,14 +6,14 @@
 
 use hp_core::{ControlEvent, HpError, HpResult};
 use hp_plugin_host::{
-    control_event_method, ExternalProcessQuery, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT,
+    ExternalProcessQuery, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT, control_event_method,
 };
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::plugin_control_channel::{panel_owner_enabled, supervised_call};
-use crate::commands::shared::{api_from_hp, ensure_global, ApiResponse};
 use crate::AppState;
+use crate::commands::plugin_control_channel::{panel_owner_enabled, supervised_call};
+use crate::commands::shared::{ApiResponse, api_from_hp, ensure_global};
 
 /// `plugin.controlEvent` 的确认载荷（诊断用）。
 #[derive(Serialize)]
@@ -106,7 +106,10 @@ pub(crate) fn plugin_control_event(
             HpError::Plugin("注册表缺少插件安装目录（source_ref），无法定位入口".into())
         })?;
         if !entry.is_file() {
-            return Err(HpError::Plugin(format!("插件入口不存在: {}", entry.display())));
+            return Err(HpError::Plugin(format!(
+                "插件入口不存在: {}",
+                entry.display()
+            )));
         }
 
         // 交付期间**不持任何锁**：这里可能阻塞到超时（D61 默认 2s）。
@@ -127,12 +130,14 @@ pub(crate) fn plugin_control_event(
                 value: value_clone.as_ref(),
                 target: target_clone.as_deref(),
             };
-            ExternalProcessQuery::for_entry(entry_clone).call(
-                &control_event_method(&pid_for_closure, &event_id_clone),
-                &params,
-                SCHEMA_QUERY_TIMEOUT,
-                SCHEMA_MAX_BYTES,
-            ).map(|_| String::new())
+            ExternalProcessQuery::for_entry(entry_clone)
+                .call(
+                    &control_event_method(&pid_for_closure, &event_id_clone),
+                    &params,
+                    SCHEMA_QUERY_TIMEOUT,
+                    SCHEMA_MAX_BYTES,
+                )
+                .map(|_| String::new())
         })?;
 
         let ack_method = control_event_method(&owner.plugin_id, &event_id);
@@ -177,6 +182,9 @@ mod tests {
             value.get("event_id").is_none(),
             "事件 id 由方法名承载，不进载荷"
         );
-        assert!(value.get("value").is_none(), "value 缺省必须省略而不是 null");
+        assert!(
+            value.get("value").is_none(),
+            "value 缺省必须省略而不是 null"
+        );
     }
 }

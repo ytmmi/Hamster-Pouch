@@ -9,8 +9,7 @@ use std::path::PathBuf;
 use hp_store::TagDictDb;
 
 fn genfile_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tools/tagdict/output/tag_dict.sqlite")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tools/tagdict/output/tag_dict.sqlite")
 }
 
 #[test]
@@ -51,7 +50,10 @@ fn open_generated_dict_and_lookup_across_languages() {
     assert!(!sugs.is_empty(), "前缀建议「少女」应返回结果");
 
     // 元信息版本存在
-    assert!(db.meta("version").unwrap().is_some(), "词库应含 version 元信息");
+    assert!(
+        db.meta("version").unwrap().is_some(),
+        "词库应含 version 元信息"
+    );
 
     db.close().unwrap();
 }

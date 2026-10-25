@@ -130,14 +130,15 @@ pub struct MergeIndex {
 impl MergeIndex {
     /// 代表 ID（未参与归并的 ID 返回自身）。
     pub fn representative_of<'a>(&'a self, id: &'a str) -> &'a str {
-        self.to_representative.get(id).map(String::as_str).unwrap_or(id)
+        self.to_representative
+            .get(id)
+            .map(String::as_str)
+            .unwrap_or(id)
     }
 
     /// 该 ID 是否是被并入的别名（而非代表）。
     pub fn is_alias(&self, id: &str) -> bool {
-        self.to_representative
-            .get(id)
-            .is_some_and(|rep| rep != id)
+        self.to_representative.get(id).is_some_and(|rep| rep != id)
     }
 
     /// 代表 ID 对应的别名 ID 列表。
@@ -155,7 +156,9 @@ impl MergeIndex {
 
     /// 因归并而减少的概念数（重复数）。
     pub fn duplicate_count(&self) -> usize {
-        self.to_representative.len().saturating_sub(self.by_key.len())
+        self.to_representative
+            .len()
+            .saturating_sub(self.by_key.len())
     }
 
     /// 构建索引。
@@ -241,7 +244,11 @@ impl MergeIndex {
         for alias in &alias_ids {
             for db in layers.iter().rev() {
                 for n in db.names_of(alias)? {
-                    if seen_names.insert((n.lang.clone(), n.value.clone(), n.kind.as_str().to_string())) {
+                    if seen_names.insert((
+                        n.lang.clone(),
+                        n.value.clone(),
+                        n.kind.as_str().to_string(),
+                    )) {
                         detail.names.push(n);
                     }
                 }
@@ -317,7 +324,10 @@ impl MergeIndex {
             }
         }
 
-        order.into_iter().filter_map(|k| by_rep.remove(&k)).collect()
+        order
+            .into_iter()
+            .filter_map(|k| by_rep.remove(&k))
+            .collect()
     }
 }
 
@@ -377,13 +387,27 @@ mod tests {
         let a = dir.path().join("a.sqlite");
         {
             let mut db = TagLibDb::open(&a).unwrap();
-            put(&mut db, "tag-a", TagKind::Work, "蔚蓝档案", 100, "blue_archive_a");
+            put(
+                &mut db,
+                "tag-a",
+                TagKind::Work,
+                "蔚蓝档案",
+                100,
+                "blue_archive_a",
+            );
         }
         // 包 B（高优先级）：同一概念，但 ID 不同 = tag-b，且热度更高
         let b = dir.path().join("b.sqlite");
         {
             let mut db = TagLibDb::open(&b).unwrap();
-            put(&mut db, "tag-b", TagKind::Work, "蔚蓝档案", 999, "blue_archive_b");
+            put(
+                &mut db,
+                "tag-b",
+                TagKind::Work,
+                "蔚蓝档案",
+                999,
+                "blue_archive_b",
+            );
         }
 
         let mut layers = vec![
@@ -404,7 +428,12 @@ mod tests {
         assert_eq!(merged.all_ids(), vec!["tag-b", "tag-a"]);
         // 热度取最大、来源并集
         assert_eq!(merged.detail.concept.popularity, Some(999));
-        let srcs: HashSet<_> = merged.detail.sources.iter().map(|s| s.source_key.as_str()).collect();
+        let srcs: HashSet<_> = merged
+            .detail
+            .sources
+            .iter()
+            .map(|s| s.source_key.as_str())
+            .collect();
         assert!(srcs.contains("blue_archive_a") && srcs.contains("blue_archive_b"));
 
         layers.clear();
@@ -418,7 +447,14 @@ mod tests {
         {
             let mut db = TagLibDb::open(&p).unwrap();
             put(&mut db, "tag-w", TagKind::Work, "爱丽丝", 10, "alice_work");
-            put(&mut db, "tag-c", TagKind::Character, "爱丽丝", 20, "alice_char");
+            put(
+                &mut db,
+                "tag-c",
+                TagKind::Character,
+                "爱丽丝",
+                20,
+                "alice_char",
+            );
         }
         let layers = vec![TagLibDb::open_readonly(&p, LibLayer::Extension).unwrap()];
         let index = MergeIndex::build(&layers).unwrap();
@@ -437,7 +473,14 @@ mod tests {
             let p = dir.path().join(format!("p{i}.sqlite"));
             {
                 let mut db = TagLibDb::open(&p).unwrap();
-                put(&mut db, id, TagKind::Character, "初音未来", (i as i64 + 1) * 10, id);
+                put(
+                    &mut db,
+                    id,
+                    TagKind::Character,
+                    "初音未来",
+                    (i as i64 + 1) * 10,
+                    id,
+                );
             }
             layers.push(TagLibDb::open_readonly(&p, LibLayer::Extension).unwrap());
         }
@@ -488,7 +531,14 @@ mod tests {
         {
             let mut db = TagLibDb::open(&a).unwrap();
             put(&mut db, "root_a", TagKind::General, "风格", 10, "style_a");
-            put(&mut db, "child_a", TagKind::General, "二次元", 10, "anime_a");
+            put(
+                &mut db,
+                "child_a",
+                TagKind::General,
+                "二次元",
+                10,
+                "anime_a",
+            );
             db.upsert_relation("root_a", "child_a", LibRelationKind::Hierarchy)
                 .unwrap();
         }
@@ -497,7 +547,14 @@ mod tests {
         {
             let mut db = TagLibDb::open(&b).unwrap();
             put(&mut db, "root_b", TagKind::General, "风格", 20, "style_b");
-            put(&mut db, "child_b", TagKind::General, "二次元", 20, "anime_b");
+            put(
+                &mut db,
+                "child_b",
+                TagKind::General,
+                "二次元",
+                20,
+                "anime_b",
+            );
             db.upsert_relation("root_b", "child_b", LibRelationKind::Hierarchy)
                 .unwrap();
         }
@@ -597,6 +654,9 @@ mod tests {
         let index = MergeIndex::build(&layers).unwrap();
         let merged = index.merge(&layers, "tag-a").unwrap().unwrap();
         assert_eq!(merged.id, "tag-b");
-        assert_eq!(merged.detail.work.unwrap().short_name.as_deref(), Some("BA"));
+        assert_eq!(
+            merged.detail.work.unwrap().short_name.as_deref(),
+            Some("BA")
+        );
     }
 }

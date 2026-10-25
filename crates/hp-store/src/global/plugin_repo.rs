@@ -5,17 +5,16 @@
 //! - `ai_provider_config`：AI 提供方配置引用（不保存密钥明文）。
 
 use hp_core::{
-    AiProviderConfig, AiProviderConfigId, Capability, HpError, HpResult, PluginId, PluginRegistryRow,
-    PluginRepoState, RepoId, RuntimeKind, SourceKind, TrustLevel,
+    AiProviderConfig, AiProviderConfigId, Capability, HpError, HpResult, PluginId,
+    PluginRegistryRow, PluginRepoState, RepoId, RuntimeKind, SourceKind, TrustLevel,
 };
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{OptionalExtension, Row, params};
 
 use super::global_db::GlobalDb;
 use crate::util::{now_iso, require_nonempty, store_err};
 
 /// `plugin_registry` 表列清单（与迁移 0001 顺序一致）。
-const PLUGIN_COLUMNS: &str =
-    "id, name, version, trust_level, source_kind, source_ref, runtime_kind, installed_at, manifest_json";
+const PLUGIN_COLUMNS: &str = "id, name, version, trust_level, source_kind, source_ref, runtime_kind, installed_at, manifest_json";
 
 impl GlobalDb {
     /// 插入或更新插件注册行（按 `id` UPSERT）。
@@ -98,8 +97,7 @@ impl GlobalDb {
                 params![plugin_id],
             )
             .map_err(|e| store_err("删除插件注册行", e))?;
-        tx.commit()
-            .map_err(|e| store_err("提交插件删除事务", e))?;
+        tx.commit().map_err(|e| store_err("提交插件删除事务", e))?;
         if n == 0 {
             return Err(HpError::NotFound(format!("插件不存在: {plugin_id}")));
         }

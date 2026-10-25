@@ -1,7 +1,7 @@
 //! 媒体源仓储（RFC 0003 / database-schema.md 第 4.2 节）。
 
 use hp_core::{HpError, HpResult, RepoId, Source, SourceId};
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{OptionalExtension, Row, params};
 
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err};

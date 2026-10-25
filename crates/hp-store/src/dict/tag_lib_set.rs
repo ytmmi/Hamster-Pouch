@@ -207,8 +207,11 @@ impl TagLibSet {
         };
 
         // 名称与来源并集（低优先级层补充高优先级层缺失的语言 / 来源）
-        let mut seen_names: std::collections::HashSet<(String, String, String)> =
-            detail.names.iter().map(|n| (n.lang.clone(), n.value.clone(), n.kind.as_str().to_string())).collect();
+        let mut seen_names: std::collections::HashSet<(String, String, String)> = detail
+            .names
+            .iter()
+            .map(|n| (n.lang.clone(), n.value.clone(), n.kind.as_str().to_string()))
+            .collect();
         let mut seen_src: std::collections::HashSet<(String, String)> = detail
             .sources
             .iter()
@@ -219,7 +222,8 @@ impl TagLibSet {
                 continue;
             }
             for n in db.names_of(tag_id)? {
-                if seen_names.insert((n.lang.clone(), n.value.clone(), n.kind.as_str().to_string())) {
+                if seen_names.insert((n.lang.clone(), n.value.clone(), n.kind.as_str().to_string()))
+                {
                     detail.names.push(n);
                 }
             }

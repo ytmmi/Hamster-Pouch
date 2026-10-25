@@ -20,12 +20,12 @@ use hp_dto::{BlueprintItem, BlueprintTemplateItem, BlueprintValidateResult};
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{
-    api_from_hp, ensure_global, global, lock_global, lock_repo, open_repo, open_repo_mut,
-    ApiResponse,
-};
-use crate::commands::shared::EmitHp;
 use crate::AppState;
+use crate::commands::shared::EmitHp;
+use crate::commands::shared::{
+    ApiResponse, api_from_hp, ensure_global, global, lock_global, lock_repo, open_repo,
+    open_repo_mut,
+};
 
 /// 蓝图变更事件载荷（RFC 0007 命令与事件；字段口径见 `docs/spec/commands-events.md`）。
 #[derive(Clone, Serialize)]
@@ -64,8 +64,7 @@ fn to_item(row: BlueprintRow) -> BlueprintItem {
 /// 「命名合法但当前无注册项的 `type`」按**未接通**（允许保存）而不是硬错误处理，
 /// 以及 `has_class = false` 的内置面板下不许挂类目。
 fn parse_valid(json: &str, registry: &hp_core::NodeRegistry) -> HpResult<BlueprintGraph> {
-    let (json, _version) =
-        hp_core::normalize_document(json).map_err(HpError::InvalidArgument)?;
+    let (json, _version) = hp_core::normalize_document(json).map_err(HpError::InvalidArgument)?;
     let graph = BlueprintGraph::from_json(&json).map_err(HpError::InvalidArgument)?;
     let errors = graph.validate_with(registry);
     if !errors.is_empty() {
@@ -103,8 +102,7 @@ fn blueprint_registry(
         if let Some(node) = entry.node {
             nodes.push(hp_core::RegisteredPluginNode {
                 node_type: node.node_type.clone(),
-                evaluation_role: node
-                    .resolved_evaluation_role(),
+                evaluation_role: node.resolved_evaluation_role(),
                 severity: node.resolved_severity(),
             });
         }
@@ -246,11 +244,12 @@ pub(crate) fn blueprint_save(
         let db = open_repo_mut(&mut guard)?;
         let name = match name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()) {
             Some(n) => n,
-            None => db
-                .get_blueprint(&blueprint_id)?
-                .filter(|r| r.repo_id == repo_id)
-                .ok_or_else(|| HpError::NotFound(format!("蓝图不存在: {blueprint_id}")))?
-                .name,
+            None => {
+                db.get_blueprint(&blueprint_id)?
+                    .filter(|r| r.repo_id == repo_id)
+                    .ok_or_else(|| HpError::NotFound(format!("蓝图不存在: {blueprint_id}")))?
+                    .name
+            }
         };
         let row = db.save_blueprint(&repo_id, &blueprint_id, &name, &blueprint_json)?;
         emit_changed(&app, &repo_id, Some(&blueprint_id));

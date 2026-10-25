@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 
 use hp_core::Capability;
-use hp_plugin_host::{InstallSource, PluginHost, PluginInstaller, MANIFEST_FILE};
+use hp_plugin_host::{InstallSource, MANIFEST_FILE, PluginHost, PluginInstaller};
 use hp_store::GlobalDb;
 
 const REPO: &str = "repo-1";
@@ -110,7 +110,9 @@ fn installed_but_disabled_panel_shows_up_only_in_the_catalog() {
     assert_eq!(panels.len(), 1, "启用后注册表应含该面板: {contribs:?}");
 
     // ④ 换一个仓库：启用是按仓库的，另一个仓库的目录必须回到 false。
-    let other = PluginHost.panel_catalog(&db, "repo-2").expect("取面板目录失败");
+    let other = PluginHost
+        .panel_catalog(&db, "repo-2")
+        .expect("取面板目录失败");
     assert_eq!(other.len(), 1);
     assert!(!other[0].enabled, "启用是按仓库隔离的");
 }
@@ -142,12 +144,7 @@ fn bundled_example_panels_are_listed_even_without_an_entry_binary() {
 }
 
 /// 写一个**纯数据扩展包**目录（`static-data`、无能力、无贡献点，RFC 0008 D36.1）。
-fn write_static_data_package(
-    root: &std::path::Path,
-    dir: &str,
-    id: &str,
-    name: &str,
-) -> PathBuf {
+fn write_static_data_package(root: &std::path::Path, dir: &str, id: &str, name: &str) -> PathBuf {
     let src = root.join(format!("src-{dir}"));
     std::fs::create_dir_all(src.join("data")).expect("建目录失败");
     std::fs::write(src.join("data").join("tag_lib.sqlite"), b"db").expect("写数据文件失败");
@@ -227,7 +224,10 @@ fn data_extensions_are_listed_last_and_have_no_enable_state() {
     assert!(!catalog[0].stateless, "有代码的插件有启用语义");
 
     // ④ 数据扩展整组在最后，且**无启用语义**（界面据此不画启用按钮）。
-    assert_eq!(catalog[1].plugin_id, "dev.hamsterpouch.aaa.tagdict.danbooru");
+    assert_eq!(
+        catalog[1].plugin_id,
+        "dev.hamsterpouch.aaa.tagdict.danbooru"
+    );
     assert_eq!(catalog[2].plugin_id, "dev.hamsterpouch.aaa.tagdict.pixiv");
     for entry in &catalog[1..] {
         assert!(entry.panel.is_none(), "数据扩展不贡献面板: {entry:?}");

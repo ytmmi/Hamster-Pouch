@@ -67,7 +67,13 @@ fn album_crud_and_media_type_change() {
 
     // 嵌套相册
     let child = db
-        .create_album("repo-1", "子相册", AlbumKind::Fixed, None, Some(album.id.as_str()))
+        .create_album(
+            "repo-1",
+            "子相册",
+            AlbumKind::Fixed,
+            None,
+            Some(album.id.as_str()),
+        )
         .expect("创建子相册失败");
     assert_eq!(
         child.parent_album_id.as_ref().map(|p| p.as_str()),
@@ -78,10 +84,7 @@ fn album_crud_and_media_type_change() {
     assert_eq!(list.len(), 2);
 
     db.delete_album(child.id.as_str()).expect("删除相册失败");
-    assert!(db
-        .get_album(child.id.as_str())
-        .expect("查询失败")
-        .is_none());
+    assert!(db.get_album(child.id.as_str()).expect("查询失败").is_none());
 
     db.close().expect("关闭失败");
 }
@@ -114,9 +117,14 @@ fn album_member_roundtrip() {
     db.add_album_member(album.id.as_str(), f1.as_str(), AddedBy::User, true)
         .expect("重复加成员应忽略");
 
-    assert_eq!(db.count_album_members(album.id.as_str()).expect("统计失败"), 2);
+    assert_eq!(
+        db.count_album_members(album.id.as_str()).expect("统计失败"),
+        2
+    );
 
-    let members = db.list_album_members(album.id.as_str()).expect("列出成员失败");
+    let members = db
+        .list_album_members(album.id.as_str())
+        .expect("列出成员失败");
     assert_eq!(members.len(), 2);
 
     let m1 = db
@@ -138,7 +146,10 @@ fn album_member_roundtrip() {
         .remove_album_members(album.id.as_str(), &[f1.as_str().to_string()])
         .expect("移除成员失败");
     assert_eq!(removed, 1);
-    assert_eq!(db.count_album_members(album.id.as_str()).expect("统计失败"), 1);
+    assert_eq!(
+        db.count_album_members(album.id.as_str()).expect("统计失败"),
+        1
+    );
 
     db.close().expect("关闭失败");
 }

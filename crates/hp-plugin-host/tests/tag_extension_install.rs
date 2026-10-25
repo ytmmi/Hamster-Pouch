@@ -32,9 +32,9 @@ fn tag_extension_dirs() -> Vec<PathBuf> {
         .filter(|p| {
             p.is_dir()
                 && p.join("plugin.manifest").is_file()
-                && p.file_name().and_then(|s| s.to_str()).is_some_and(|n| {
-                    n.starts_with("tagdict-") || n.starts_with("tagrel-")
-                })
+                && p.file_name()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|n| n.starts_with("tagdict-") || n.starts_with("tagrel-"))
         })
         .collect();
     v.sort();
@@ -46,7 +46,9 @@ fn tag_extension_dirs() -> Vec<PathBuf> {
 fn tag_extension_packages_parse_and_validate() {
     let dirs = tag_extension_dirs();
     if dirs.is_empty() {
-        eprintln!("跳过：未找到 plugins-dist/tagdict-* 或 tagrel-*（先运行 package_extensions.py）");
+        eprintln!(
+            "跳过：未找到 plugins-dist/tagdict-* 或 tagrel-*（先运行 package_extensions.py）"
+        );
         return;
     }
 
@@ -225,7 +227,9 @@ fn real_tag_extension_is_catalogued_last_without_enable_state() {
     let hello = installer
         .install_registry_row(&InstallSource::LocalPath(hello_src), "2026-01-01T00:00:00Z")
         .expect("安装 hello 示例失败");
-    PluginHost.register(&mut db, &hello).expect("注册 hello 失败");
+    PluginHost
+        .register(&mut db, &hello)
+        .expect("注册 hello 失败");
 
     // 只装**一个**真实包即可证明"真实数据包会被目录列出"：每个包要复制 128–162MB，
     // 多包排序由 `m9_panel_catalog.rs` 的合成夹具覆盖，不必在这里重复付磁盘代价。
@@ -235,9 +239,13 @@ fn real_tag_extension_is_catalogued_last_without_enable_state() {
             "2026-01-01T00:00:00Z",
         )
         .unwrap_or_else(|e| panic!("安装 {} 失败: {e}", ext_dir.display()));
-    PluginHost.register(&mut db, &ext).expect("注册 tag 扩展包失败");
+    PluginHost
+        .register(&mut db, &ext)
+        .expect("注册 tag 扩展包失败");
 
-    let catalog = PluginHost.panel_catalog(&db, "repo-1").expect("取扩展目录失败");
+    let catalog = PluginHost
+        .panel_catalog(&db, "repo-1")
+        .expect("取扩展目录失败");
     assert_eq!(
         catalog.len(),
         2,

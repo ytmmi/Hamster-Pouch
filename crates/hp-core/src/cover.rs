@@ -112,7 +112,10 @@ mod tests {
     fn color_is_normalized_to_lowercase_with_hash() {
         assert_eq!(normalize_cover_color("#AABBCC").as_deref(), Some("#aabbcc"));
         assert_eq!(normalize_cover_color("aabbcc").as_deref(), Some("#aabbcc"));
-        assert_eq!(normalize_cover_color("  #123AbC  ").as_deref(), Some("#123abc"));
+        assert_eq!(
+            normalize_cover_color("  #123AbC  ").as_deref(),
+            Some("#123abc")
+        );
     }
 
     #[test]

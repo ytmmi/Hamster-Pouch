@@ -74,7 +74,10 @@ fn repeated_load_and_poll_never_blocks() {
         // 位置应能推进
         std::thread::sleep(Duration::from_millis(700));
         let state = process.playback_state().expect("取播放进度");
-        eprintln!("round {round}: position={:?} paused={:?}", state.position_ms, state.paused);
+        eprintln!(
+            "round {round}: position={:?} paused={:?}",
+            state.position_ms, state.paused
+        );
 
         // 暂停/继续也要能用
         process.set_pause(true).expect("暂停");

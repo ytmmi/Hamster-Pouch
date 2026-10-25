@@ -4,8 +4,8 @@ mod content;
 mod perceptual;
 
 pub use content::{
-    hash_bytes, hash_file, ContentHash, CONTENT_HASH_ALGO, CONTENT_HASH_ALGO_VERSION,
+    CONTENT_HASH_ALGO, CONTENT_HASH_ALGO_VERSION, ContentHash, hash_bytes, hash_file,
 };
 pub use perceptual::{
-    dhash_file, dhash_image, PerceptualHash, PERCEPTUAL_HASH_ALGO, PERCEPTUAL_HASH_ALGO_VERSION,
+    PERCEPTUAL_HASH_ALGO, PERCEPTUAL_HASH_ALGO_VERSION, PerceptualHash, dhash_file, dhash_image,
 };

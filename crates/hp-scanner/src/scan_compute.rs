@@ -13,7 +13,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use hp_core::{HpError, HpResult};
-use hp_hash::{dhash_image, PerceptualHash};
+use hp_hash::{PerceptualHash, dhash_image};
 use hp_media::extract_palette_from_image;
 
 /// 一张图片经**一次解码**得出的派生数据。
@@ -88,10 +88,8 @@ mod tests {
     }
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "hp-scan-compute-{tag}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("hp-scan-compute-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("创建临时目录失败");
         dir
     }
@@ -171,9 +169,12 @@ mod tests {
         let dir = temp_dir("bad");
         let path = dir.join("broken.png");
         std::fs::write(&path, b"this is not an image").expect("写入失败");
-        let err = analyze_image(&path, true, None, Duration::from_secs(30))
-            .expect_err("坏文件应当报错");
-        assert!(matches!(err, HpError::Io(_)), "应当是 Io 错误，实际 {err:?}");
+        let err =
+            analyze_image(&path, true, None, Duration::from_secs(30)).expect_err("坏文件应当报错");
+        assert!(
+            matches!(err, HpError::Io(_)),
+            "应当是 Io 错误，实际 {err:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

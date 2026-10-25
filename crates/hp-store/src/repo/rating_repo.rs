@@ -1,7 +1,7 @@
 //! 评分仓储（database-schema.md 第 4.5 节）。
 
-use hp_core::{validate_rating, FileId, HpError, HpResult, Rating};
-use rusqlite::{params, OptionalExtension, Row};
+use hp_core::{FileId, HpError, HpResult, Rating, validate_rating};
+use rusqlite::{OptionalExtension, Row, params};
 
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err};

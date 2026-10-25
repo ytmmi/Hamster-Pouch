@@ -61,6 +61,10 @@ fn every_bundled_manifest_is_accepted_by_the_host() {
         }
     }
 
-    assert!(failed.is_empty(), "有插件清单被宿主拒绝：\n{}", failed.join("\n"));
+    assert!(
+        failed.is_empty(),
+        "有插件清单被宿主拒绝：\n{}",
+        failed.join("\n")
+    );
     println!("{} 份随仓库插件清单全部通过宿主校验", found.len());
 }

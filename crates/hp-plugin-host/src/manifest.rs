@@ -109,8 +109,8 @@ pub fn discover_packages(root: &Path) -> HpResult<Vec<PluginPackage>> {
         return Ok(Vec::new());
     }
     let mut out = Vec::new();
-    let entries = std::fs::read_dir(root)
-        .map_err(|e| HpError::Io(format!("读取插件目录失败: {e}")))?;
+    let entries =
+        std::fs::read_dir(root).map_err(|e| HpError::Io(format!("读取插件目录失败: {e}")))?;
     for entry in entries {
         let entry = entry.map_err(|e| HpError::Io(format!("读取插件目录项失败: {e}")))?;
         let path = entry.path();
@@ -308,9 +308,9 @@ fn parse_mount(obj: &Map<String, Value>) -> HpResult<Option<PanelMount>> {
         ("multiple_per_interface", &mut mount.multiple_per_interface),
     ] {
         if let Some(value) = m.get(field) {
-            *slot = value.as_bool().ok_or_else(|| {
-                HpError::InvalidArgument(format!("mount.{field} 必须是布尔值"))
-            })?;
+            *slot = value
+                .as_bool()
+                .ok_or_else(|| HpError::InvalidArgument(format!("mount.{field} 必须是布尔值")))?;
         }
     }
     Ok(Some(mount))
@@ -507,7 +507,10 @@ fn parse_blueprint_node(obj: &Map<String, Value>) -> HpResult<BlueprintNodeDecl>
 }
 
 /// 合并数据查询声明：顶层 `data_queries` 与 `dataQuery` 贡献点等价（去重，顶层优先）。
-fn merge_data_queries(v: &Value, contributions: &[Contribution]) -> HpResult<Vec<PluginDataQueryDecl>> {
+fn merge_data_queries(
+    v: &Value,
+    contributions: &[Contribution],
+) -> HpResult<Vec<PluginDataQueryDecl>> {
     let mut out: Vec<PluginDataQueryDecl> = Vec::new();
     if let Some(raw) = v.get("data_queries") {
         let arr = raw
@@ -558,9 +561,9 @@ fn parse_events(v: &Value) -> HpResult<Vec<PluginEventDecl>> {
         Some(Value::Array(arr)) => arr
             .iter()
             .map(|item| {
-                let obj = item.as_object().ok_or_else(|| {
-                    HpError::InvalidArgument("events 元素必须是对象".into())
-                })?;
+                let obj = item
+                    .as_object()
+                    .ok_or_else(|| HpError::InvalidArgument("events 元素必须是对象".into()))?;
                 let id = obj
                     .get("id")
                     .and_then(Value::as_str)
@@ -623,7 +626,10 @@ mod tests {
         assert_eq!(m.id.as_str(), "dev.hamsterpouch.hello");
         assert_eq!(m.runtime_kind, RuntimeKind::ExternalProcess);
         assert_eq!(m.trust_requested, TrustLevel::LocalDev);
-        assert_eq!(m.capabilities, vec![Capability::UiPanel, Capability::RepoRead]);
+        assert_eq!(
+            m.capabilities,
+            vec![Capability::UiPanel, Capability::RepoRead]
+        );
         assert_eq!(m.api_version, 1);
         assert_eq!(m.contributions.len(), 1);
         assert_eq!(m.contributions[0].kind, ContributionKind::Panel);
@@ -634,7 +640,10 @@ mod tests {
         // RFC 0010 决策 4：面板的必需声明参数与设置项都被解析出来。
         assert_eq!(m.contributions[0].category.as_deref(), Some("system"));
         assert_eq!(m.contributions[0].has_class, Some(false));
-        assert_eq!(m.contributions[0].blueprint_node.as_deref(), Some("control"));
+        assert_eq!(
+            m.contributions[0].blueprint_node.as_deref(),
+            Some("control")
+        );
         assert_eq!(m.contributions[0].settings.len(), 1);
         assert_eq!(m.contributions[0].settings[0].key, "greeting_size");
         assert_eq!(m.declared_query_names(), vec!["greetings"]);

@@ -57,13 +57,23 @@ fn registry_survives_reopen() {
     let global_path = temp_global_path("reg");
     let repo_a = temp_repo_path("a");
     let repo_b = temp_repo_path("b");
-    RepoDb::create(&repo_a, "仓库A").expect("创建A失败").close().expect("关闭A失败");
-    RepoDb::create(&repo_b, "仓库B").expect("创建B失败").close().expect("关闭B失败");
+    RepoDb::create(&repo_a, "仓库A")
+        .expect("创建A失败")
+        .close()
+        .expect("关闭A失败");
+    RepoDb::create(&repo_b, "仓库B")
+        .expect("创建B失败")
+        .close()
+        .expect("关闭B失败");
 
     let ids = {
         let mut g = GlobalDb::open(&global_path).expect("打开全局库失败");
-        let ra = g.register_repo("仓库A", repo_a.to_str().unwrap()).expect("注册A失败");
-        let rb = g.register_repo("仓库B", repo_b.to_str().unwrap()).expect("注册B失败");
+        let ra = g
+            .register_repo("仓库A", repo_a.to_str().unwrap())
+            .expect("注册A失败");
+        let rb = g
+            .register_repo("仓库B", repo_b.to_str().unwrap())
+            .expect("注册B失败");
         g.set_setting("theme", "dark").expect("写设置失败");
         (ra.id, rb.id)
     };
@@ -73,7 +83,10 @@ fn registry_survives_reopen() {
     assert_eq!(repos.len(), 2, "重开后注册表应保留两个仓库");
     assert!(repos.iter().any(|r| r.id == ids.0 && r.name == "仓库A"));
     assert!(repos.iter().any(|r| r.id == ids.1 && r.name == "仓库B"));
-    assert_eq!(g.get_setting("theme").expect("读设置失败").as_deref(), Some("dark"));
+    assert_eq!(
+        g.get_setting("theme").expect("读设置失败").as_deref(),
+        Some("dark")
+    );
     assert!(g.repo_exists(&ids.0).expect("查存在性失败"));
 }
 
@@ -82,7 +95,10 @@ fn repo_meta_roundtrip_and_version() {
     let path = temp_repo_path("meta");
     let db = RepoDb::create(&path, "元信息仓库").expect("创建失败");
     assert_eq!(db.schema_version().expect("读版本失败"), 11);
-    assert_eq!(db.meta("name").expect("读名失败").as_deref(), Some("元信息仓库"));
+    assert_eq!(
+        db.meta("name").expect("读名失败").as_deref(),
+        Some("元信息仓库")
+    );
     assert_eq!(
         db.meta("schema_version").expect("读版本失败").as_deref(),
         Some("11"),
@@ -92,7 +108,10 @@ fn repo_meta_roundtrip_and_version() {
 
     let db = RepoDb::open(&path).expect("重开失败");
     assert_eq!(db.schema_version().expect("读版本失败"), 11);
-    assert_eq!(db.meta("schema_version").expect("读版本失败").as_deref(), Some("11"));
+    assert_eq!(
+        db.meta("schema_version").expect("读版本失败").as_deref(),
+        Some("11")
+    );
     db.close().expect("关闭失败");
 }
 
@@ -116,7 +135,10 @@ fn repo_meta_roundtrip_and_version() {
 #[test]
 fn upgraded_repo_schema_version_mirror_does_not_diverge() {
     let path = temp_repo_path("meta-upgrade");
-    RepoDb::create(&path, "旧版仓库").expect("创建失败").close().expect("关闭失败");
+    RepoDb::create(&path, "旧版仓库")
+        .expect("创建失败")
+        .close()
+        .expect("关闭失败");
 
     {
         let conn = rusqlite::Connection::open(&path).expect("打开原始库失败");
@@ -137,7 +159,11 @@ fn upgraded_repo_schema_version_mirror_does_not_diverge() {
     }
 
     let db = RepoDb::open(&path).expect("重开并升级失败");
-    assert_eq!(db.schema_version().expect("读版本失败"), 11, "迁移应把权威版本升到 11");
+    assert_eq!(
+        db.schema_version().expect("读版本失败"),
+        11,
+        "迁移应把权威版本升到 11"
+    );
     assert_eq!(
         db.meta("schema_version").expect("读镜像键失败").as_deref(),
         Some("11"),
@@ -151,7 +177,10 @@ fn settings_upsert() {
     let g = GlobalDb::open(temp_global_path("settings")).expect("打开全局库失败");
     g.set_setting("lang", "zh").expect("写失败");
     g.set_setting("lang", "en").expect("覆盖失败");
-    assert_eq!(g.get_setting("lang").expect("读失败").as_deref(), Some("en"));
+    assert_eq!(
+        g.get_setting("lang").expect("读失败").as_deref(),
+        Some("en")
+    );
     assert_eq!(g.get_setting("missing").expect("读失败"), None);
 }
 
@@ -159,11 +188,16 @@ fn settings_upsert() {
 fn get_repo_by_id() {
     let global_path = temp_global_path("get");
     let repo_path = temp_repo_path("g");
-    RepoDb::create(&repo_path, "仓库").expect("创建失败").close().expect("关闭失败");
+    RepoDb::create(&repo_path, "仓库")
+        .expect("创建失败")
+        .close()
+        .expect("关闭失败");
 
     let id = {
         let mut g = GlobalDb::open(&global_path).expect("打开全局库失败");
-        g.register_repo("仓库", repo_path.to_str().unwrap()).expect("注册失败").id
+        g.register_repo("仓库", repo_path.to_str().unwrap())
+            .expect("注册失败")
+            .id
     };
 
     let g = GlobalDb::open(&global_path).expect("重开全局库失败");

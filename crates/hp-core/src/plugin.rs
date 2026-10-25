@@ -11,11 +11,13 @@
 //!
 //! 贡献点取值域不在本域：见 [`crate::plugin_contribution`]。
 
-use crate::plugin_contribution::{Contribution, ContributionKind, PluginDataQueryDecl, PluginEventDecl};
+use crate::plugin_contribution::{
+    Contribution, ContributionKind, PluginDataQueryDecl, PluginEventDecl,
+};
 
 pub use crate::plugin_row::{PluginRegistryRow, PluginRepoState};
 pub use crate::plugin_types::{
-    Capability, HostApiVersion, PluginId, RuntimeKind, SourceKind, TrustLevel, HOST_API_VERSION,
+    Capability, HOST_API_VERSION, HostApiVersion, PluginId, RuntimeKind, SourceKind, TrustLevel,
 };
 
 /// 插件清单：`plugin.manifest` 的解析结果（`docs/spec/plugin-standard.md` 第 3 节）。

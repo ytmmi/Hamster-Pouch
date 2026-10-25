@@ -9,10 +9,8 @@
 //! 游标本身**不在这里做数值校验**：它是字符串契约（见迁移 0011 的说明），
 //! 越界游标由 `book.content` 按"回落第一页 / 最后一页"兜底（翻页游标不该成为新的错误源）。
 
-use hp_core::{
-    validate_annotation_content, AnnotationKind, HpError, HpResult, ReaderAnnotation,
-};
-use rusqlite::{params, OptionalExtension, Row};
+use hp_core::{AnnotationKind, HpError, HpResult, ReaderAnnotation, validate_annotation_content};
+use rusqlite::{OptionalExtension, Row, params};
 
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err, uuid};

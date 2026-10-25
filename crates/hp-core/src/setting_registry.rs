@@ -570,7 +570,9 @@ pub fn scoped_storage_key(
             let repo = repo_id
                 .map(str::trim)
                 .filter(|r| !r.is_empty())
-                .ok_or_else(|| format!("设置项 {base_key} 按仓库隔离（scope = repo），必须提供 repoId"))?;
+                .ok_or_else(|| {
+                    format!("设置项 {base_key} 按仓库隔离（scope = repo），必须提供 repoId")
+                })?;
             Ok(format!("{base_key}.{repo}"))
         }
     }

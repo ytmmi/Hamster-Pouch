@@ -42,7 +42,7 @@ use std::path::Path;
 use hp_core::{HpError, HpResult};
 
 use crate::block::BookBlock;
-use crate::epub_text::{element_inner_text, read_spine, SpineRead};
+use crate::epub_text::{SpineRead, element_inner_text, read_spine};
 use crate::inline::local_name;
 use crate::xml::{attr_value, decode_entities, element_text, open_tags, resolve_zip_path};
 use crate::zip::ZipArchive;
@@ -311,7 +311,8 @@ pub fn read_epub_toc(path: &Path) -> HpResult<Vec<TocEntry>> {
 }
 
 /// 中文数字与全角数字（章节序号里出现的全部字符）。
-const CN_NUMERALS: &str = "0123456789０１２３４５６７８９〇零一二三四五六七八九十百千两壹贰叁肆伍陆柒捌玖拾佰仟廿卅";
+const CN_NUMERALS: &str =
+    "0123456789０１２３４５６７８９〇零一二三四五六七八九十百千两壹贰叁肆伍陆柒捌玖拾佰仟廿卅";
 
 /// 章节量词（`第一章` 里的"章"）。
 const CHAPTER_UNITS: &str = "章回节話话篇卷集部幕折";
@@ -321,8 +322,26 @@ const VOLUME_UNITS: &str = "卷部集";
 
 /// 无序号章节的固定写法（简繁并列；**不用单字"序"**——它在正文里太常见）。
 const SPECIAL_HEADINGS: [&str; 20] = [
-    "楔子", "序章", "序言", "序幕", "引子", "前言", "尾声", "终章", "终曲", "后记", "後記",
-    "后序", "番外", "外传", "外傳", "附录", "附錄", "完本感言", "作者的话", "作者的話",
+    "楔子",
+    "序章",
+    "序言",
+    "序幕",
+    "引子",
+    "前言",
+    "尾声",
+    "终章",
+    "终曲",
+    "后记",
+    "後記",
+    "后序",
+    "番外",
+    "外传",
+    "外傳",
+    "附录",
+    "附錄",
+    "完本感言",
+    "作者的话",
+    "作者的話",
 ];
 
 /// 标题行的种类（决定层级）。
@@ -633,10 +652,22 @@ mod tests {
         assert_eq!(
             entries,
             vec![
-                TocEntry { title: "序章 『愚者的坚持』".into(), level: 1, cursor: "0".into() },
+                TocEntry {
+                    title: "序章 『愚者的坚持』".into(),
+                    level: 1,
+                    cursor: "0".into()
+                },
                 // 片段 href 映射到**同一章**（`#s1` 被忽略），层级取自 `<ol>` 嵌套。
-                TocEntry { title: "第一节".into(), level: 2, cursor: "0".into() },
-                TocEntry { title: "第一章 & 之后".into(), level: 1, cursor: "1".into() },
+                TocEntry {
+                    title: "第一节".into(),
+                    level: 2,
+                    cursor: "0".into()
+                },
+                TocEntry {
+                    title: "第一章 & 之后".into(),
+                    level: 1,
+                    cursor: "1".into()
+                },
             ]
         );
     }
@@ -695,7 +726,10 @@ mod tests {
             &[
                 ("OEBPS/Text/c1.xhtml", chapter("序章", "正文一").as_bytes()),
                 // 没有 `<title>` 的章节：标题留空（由前端显示序号）。
-                ("OEBPS/Text/c2.xhtml", b"<html><body><p>\xe6\xad\xa3\xe6\x96\x87</p></body></html>"),
+                (
+                    "OEBPS/Text/c2.xhtml",
+                    b"<html><body><p>\xe6\xad\xa3\xe6\x96\x87</p></body></html>",
+                ),
             ],
         );
         let entries = read_epub_toc(&path).expect("解析目录失败");
@@ -803,10 +837,20 @@ mod tests {
     #[test]
     fn markdown_toc_uses_top_level_block_indices() {
         let blocks = vec![
-            BookBlock::Paragraph { spans: vec![BookSpan::plain("前言")] },
-            BookBlock::Heading { level: 2, spans: vec![BookSpan::plain("第一章 出发")] },
-            BookBlock::Paragraph { spans: vec![BookSpan::plain("正文")] },
-            BookBlock::Heading { level: 3, spans: vec![BookSpan::plain("小节")] },
+            BookBlock::Paragraph {
+                spans: vec![BookSpan::plain("前言")],
+            },
+            BookBlock::Heading {
+                level: 2,
+                spans: vec![BookSpan::plain("第一章 出发")],
+            },
+            BookBlock::Paragraph {
+                spans: vec![BookSpan::plain("正文")],
+            },
+            BookBlock::Heading {
+                level: 3,
+                spans: vec![BookSpan::plain("小节")],
+            },
         ];
         let entries = markdown_toc(&blocks);
         let got: Vec<(String, u32, String)> = entries

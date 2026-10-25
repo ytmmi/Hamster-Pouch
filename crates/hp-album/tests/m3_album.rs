@@ -69,7 +69,10 @@ fn fixed_album_does_not_follow_source() {
         &[f1.as_str().to_string()],
     )
     .expect("创建固定型相册失败");
-    assert_eq!(db.count_album_members(album.id.as_str()).expect("统计失败"), 1);
+    assert_eq!(
+        db.count_album_members(album.id.as_str()).expect("统计失败"),
+        1
+    );
 
     // 源新增文件，固定型不自动跟随
     let _f2 = seed_file(&mut db, &s.id, "b.jpg", MediaType::Image);
@@ -109,13 +112,19 @@ fn follow_source_add_only_keeps_members() {
     let _f2 = seed_file(&mut db, &s.id, "b.jpg", MediaType::Image);
     let out = AlbumService::sync(&mut db, "repo-1", album.id.as_str()).expect("同步失败");
     assert_eq!(out.added, 1);
-    assert_eq!(db.count_album_members(album.id.as_str()).expect("统计失败"), 2);
+    assert_eq!(
+        db.count_album_members(album.id.as_str()).expect("统计失败"),
+        2
+    );
 
     // 原成员不再匹配规则 → add_only 仍保留
     change_media_type(&mut db, &f1, MediaType::Audio);
     let out = AlbumService::sync(&mut db, "repo-1", album.id.as_str()).expect("同步失败");
     assert_eq!(out.removed, 0, "add_only 不应移除成员");
-    assert_eq!(db.count_album_members(album.id.as_str()).expect("统计失败"), 2);
+    assert_eq!(
+        db.count_album_members(album.id.as_str()).expect("统计失败"),
+        2
+    );
 }
 
 /// 跟随型 mirror 移除非 pinned 成员，pinned 成员保留。
@@ -141,7 +150,10 @@ fn follow_source_mirror_removes_unmatched_but_keeps_pinned() {
     )
     .expect("创建跟随型相册失败");
     AlbumService::sync(&mut db, "repo-1", album.id.as_str()).expect("同步失败");
-    assert_eq!(db.count_album_members(album.id.as_str()).expect("统计失败"), 2);
+    assert_eq!(
+        db.count_album_members(album.id.as_str()).expect("统计失败"),
+        2
+    );
 
     // 手动固定 f2
     db.set_member_pinned(album.id.as_str(), f2.as_str(), true)
@@ -154,13 +166,23 @@ fn follow_source_mirror_removes_unmatched_but_keeps_pinned() {
     let out = AlbumService::sync(&mut db, "repo-1", album.id.as_str()).expect("同步失败");
     assert_eq!(out.removed, 1, "非 pinned 成员应被移除");
     assert_eq!(out.pinned_kept, 1, "pinned 成员应保留");
-    assert_eq!(db.count_album_members(album.id.as_str()).expect("统计失败"), 1);
+    assert_eq!(
+        db.count_album_members(album.id.as_str()).expect("统计失败"),
+        1
+    );
 
     // 缺陷 0004 回归：这条"本应移除却被 pinned 保留"的成员必须作为**逐文件冲突**
     // 抛给命令层，且带**真实 file_id**（旧实现只累加计数，命令层只能发一个 fileId 为空串的事件）。
     assert_eq!(out.conflicts.len(), 1, "每个 pinned 保留成员都是一条冲突");
-    assert_eq!(out.conflicts[0].file_id, f2.as_str(), "冲突必须带真实 file_id");
-    assert_eq!(out.conflicts[0].reason, hp_album::CONFLICT_REASON_PINNED_KEPT);
+    assert_eq!(
+        out.conflicts[0].file_id,
+        f2.as_str(),
+        "冲突必须带真实 file_id"
+    );
+    assert_eq!(
+        out.conflicts[0].reason,
+        hp_album::CONFLICT_REASON_PINNED_KEPT
+    );
 }
 
 /// 逐文件冲突只在"规则想移除、用户 pin 住了"时产生：
@@ -191,7 +213,10 @@ fn conflicts_are_produced_only_when_a_pinned_member_stops_matching() {
         .expect("设置 pinned 失败");
     change_media_type(&mut db, &f1, MediaType::Audio);
     let out = AlbumService::sync(&mut db, "repo-1", add_only.id.as_str()).expect("同步失败");
-    assert!(out.conflicts.is_empty(), "add_only 不产生冲突（它不移除成员）");
+    assert!(
+        out.conflicts.is_empty(),
+        "add_only 不产生冲突（它不移除成员）"
+    );
 
     // mirror + 仍然匹配 → 无冲突
     change_media_type(&mut db, &f1, MediaType::Image);
@@ -264,7 +289,10 @@ fn set_media_type_removes_mismatched_and_records_history() {
         &[img.as_str().to_string(), vid.as_str().to_string()],
     )
     .expect("创建相册失败");
-    assert_eq!(db.count_album_members(album.id.as_str()).expect("统计失败"), 2);
+    assert_eq!(
+        db.count_album_members(album.id.as_str()).expect("统计失败"),
+        2
+    );
 
     let out = AlbumService::set_media_type(
         &mut db,
@@ -275,7 +303,10 @@ fn set_media_type_removes_mismatched_and_records_history() {
     .expect("修改属性失败");
     assert_eq!(out.removed_count, 1, "video 成员应被移除");
     assert!(out.op_record_id.is_some(), "移除成员必须写操作历史");
-    assert_eq!(db.count_album_members(album.id.as_str()).expect("统计失败"), 1);
+    assert_eq!(
+        db.count_album_members(album.id.as_str()).expect("统计失败"),
+        1
+    );
 }
 
 /// 修改跟随型相册属性会联动更新同步规则的媒体过滤字段（D13）。
@@ -340,7 +371,10 @@ fn add_member_rejects_mismatched_type() {
     let err = AlbumService::add_members(&mut db, album.id.as_str(), &[vid.as_str().to_string()])
         .expect_err("不匹配类型应被拒绝");
     assert!(matches!(err, HpError::InvalidArgument(_)));
-    assert_eq!(db.count_album_members(album.id.as_str()).expect("统计失败"), 0);
+    assert_eq!(
+        db.count_album_members(album.id.as_str()).expect("统计失败"),
+        0
+    );
 }
 
 /// 嵌套相册默认继承父相册媒体属性，可覆盖。
@@ -364,15 +398,9 @@ fn nested_album_inherits_parent_media_type() {
     .expect("创建父相册失败");
 
     // 子相册属性为空 → 继承 image
-    let child = AlbumService::create_fixed(
-        &mut db,
-        "repo-1",
-        "子",
-        None,
-        Some(parent.id.as_str()),
-        &[],
-    )
-    .expect("创建子相册失败");
+    let child =
+        AlbumService::create_fixed(&mut db, "repo-1", "子", None, Some(parent.id.as_str()), &[])
+            .expect("创建子相册失败");
     let out = AlbumService::add_members(&mut db, child.id.as_str(), &[img.as_str().to_string()])
         .expect("加成员失败");
     assert_eq!(out.added, 1);

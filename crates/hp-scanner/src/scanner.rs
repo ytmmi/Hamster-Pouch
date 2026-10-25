@@ -7,23 +7,22 @@
 //! 不做限流的话 16 个核同时持图会 OOM。
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use hp_core::{
-    FileId, FileIndexRow, FileMark, HpError, HpResult, MediaType, Source, ThumbStatus,
-    VerifyStatus,
+    FileId, FileIndexRow, FileMark, HpError, HpResult, MediaType, Source, ThumbStatus, VerifyStatus,
 };
 use hp_hash::{ContentHash, PerceptualHash};
-use hp_media::{encode_palette_json, palette_is_locked, ThumbnailCache};
+use hp_media::{ThumbnailCache, encode_palette_json, palette_is_locked};
 use hp_store::RepoDb;
 use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
 
 use crate::media_type::{default_file_marks, detect_media_type};
 use crate::scan_pool;
-use crate::scan_task::{compute, pixel_cost, Computed, Prepared};
+use crate::scan_task::{Computed, Prepared, compute, pixel_cost};
 
 /// 遍历阶段的进度上报间隔：**固定间隔**刷新，不做逐文件上报——海量小文件下
 /// 逐文件发事件会把事件通道打满、拖累扫描本身（用户口径 2026-10-06：
@@ -444,8 +443,8 @@ impl Scanner {
             .ok_or_else(|| HpError::NotFound(format!("无法读取文件: {relative_path}")))?;
         let existing = db.get_file_by_path(source.id.as_str(), relative_path)?;
         // 单文件分析**总是**重算（这正是"重新分析"的语义），因此 `unchanged` 恒为 false。
-        let want_palette = media_type == MediaType::Image
-            && !self.palette_is_locked(db, existing.as_ref())?;
+        let want_palette =
+            media_type == MediaType::Image && !self.palette_is_locked(db, existing.as_ref())?;
         let prepared = Prepared {
             path: path.clone(),
             relative_path: relative_path.to_string(),

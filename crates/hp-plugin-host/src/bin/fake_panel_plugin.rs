@@ -23,7 +23,7 @@
 
 use std::io::{BufRead, Write};
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 fn main() {
     let mode = std::env::var("HP_SCHEMA_FIXTURE_MODE").unwrap_or_else(|_| "ok".to_string());
@@ -89,7 +89,9 @@ fn main() {
             }
             "huge" => {
                 let blob = "x".repeat(300 * 1024);
-                emit_json(&json!({ "jsonrpc": "2.0", "id": 1, "result": { "results": { "panel:x": { "kind": "scalar", "value": blob } } } }));
+                emit_json(
+                    &json!({ "jsonrpc": "2.0", "id": 1, "result": { "results": { "panel:x": { "kind": "scalar", "value": blob } } } }),
+                );
                 return;
             }
             "echo_params" => {
@@ -101,7 +103,9 @@ fn main() {
                 return;
             }
             _ => {
-                emit_json(&json!({ "jsonrpc": "2.0", "id": 1, "result": { "results": data_results(&mode, &params) } }));
+                emit_json(
+                    &json!({ "jsonrpc": "2.0", "id": 1, "result": { "results": data_results(&mode, &params) } }),
+                );
                 return;
             }
         }
@@ -116,7 +120,10 @@ fn main() {
         }
         "slow" => {
             std::thread::sleep(std::time::Duration::from_secs(5));
-            emit_json(&ok_response(&panel_id, Some(Value::String(schema_text(&panel_id)))));
+            emit_json(&ok_response(
+                &panel_id,
+                Some(Value::String(schema_text(&panel_id))),
+            ));
             return;
         }
         "rpc_error" => {
@@ -242,7 +249,11 @@ fn data_results(mode: &str, params: &Value) -> Value {
         if mode == "data_partial" && index == 0 {
             continue;
         }
-        let key = q.get("key").and_then(Value::as_str).unwrap_or("").to_string();
+        let key = q
+            .get("key")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
         let kind = q.get("kind").and_then(Value::as_str).unwrap_or("panel");
         let name = q.get("name").and_then(Value::as_str).unwrap_or("");
         // 按**查询名**给不同形态，好让示例面板同时覆盖 rows / object / scalar 三种 returns。

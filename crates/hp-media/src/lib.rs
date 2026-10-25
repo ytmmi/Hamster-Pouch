@@ -19,19 +19,20 @@ mod process;
 mod svg;
 mod thumbnail;
 mod waveform;
+mod webp;
 
 pub use cache::{ThumbFormat, ThumbnailCache};
 pub use decode::{decode_image_fallback, ensure_libheif_hooks};
-pub use exif::{extract_exif, ImageExif};
+pub use exif::{ImageExif, extract_exif};
 pub use palette::{
-    encode_palette_json, extract_palette, extract_palette_from_image, palette_is_locked, Palette,
-    DEFAULT_PALETTE_SIZE, PALETTE_FORMAT_VERSION,
+    DEFAULT_PALETTE_SIZE, PALETTE_FORMAT_VERSION, Palette, encode_palette_json, extract_palette,
+    extract_palette_from_image, palette_is_locked,
 };
-pub use player::{MediaProcess, DEFAULT_PIPE_PATH};
-pub use probe::{probe, MediaProbe};
-pub use svg::{is_svg, rasterize_svg, SVG_EXTS};
+pub use player::{DEFAULT_PIPE_PATH, MediaProcess};
+pub use probe::{MediaProbe, probe};
+pub use svg::{SVG_EXTS, is_svg, rasterize_svg};
 pub use thumbnail::{
-    extract_thumbnail, generate_image_preview, generate_image_thumbnail, IMAGE_THUMB_MAX_DIM,
-    IMAGE_THUMB_WEBP_QUALITY,
+    IMAGE_THUMB_MAX_DIM, IMAGE_THUMB_WEBP_QUALITY, extract_thumbnail, generate_image_preview,
+    generate_image_thumbnail,
 };
-pub use waveform::{generate_waveform, WAVE_COLOR, WAVE_SIZE};
+pub use waveform::{WAVE_COLOR, WAVE_SIZE, generate_waveform};

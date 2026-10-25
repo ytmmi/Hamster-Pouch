@@ -75,7 +75,11 @@ mod tests {
         std::fs::write(&path, bytes.as_ref()).expect("写入失败");
 
         let scan = scan_text(&path).expect("统计失败");
-        assert_eq!(scan.chars as usize, text.chars().count(), "GBK 也必须按字符计数");
+        assert_eq!(
+            scan.chars as usize,
+            text.chars().count(),
+            "GBK 也必须按字符计数"
+        );
 
         let page = read_page(&path, 0, 20);
         assert_ne!(page.encoding.name(), "UTF-8", "GBK 不该被判成 UTF-8");
@@ -97,11 +101,18 @@ mod tests {
         std::fs::write(&path, &bytes).expect("写入失败");
 
         let scan = scan_text(&path).expect("统计失败");
-        assert_eq!(scan.chars as usize, text.chars().count(), "BOM 不该被算成一个字符");
+        assert_eq!(
+            scan.chars as usize,
+            text.chars().count(),
+            "BOM 不该被算成一个字符"
+        );
 
         let first = read_page(&path, 0, 8);
         assert_eq!(first.encoding.name(), "UTF-16LE");
-        assert_eq!(first.text, "正文内容正文内容", "第一页就从 BOM 之后的正文开始");
+        assert_eq!(
+            first.text, "正文内容正文内容",
+            "第一页就从 BOM 之后的正文开始"
+        );
         assert_eq!(first.next_offset, Some(8));
     }
 
@@ -155,7 +166,11 @@ mod tests {
         // 末页之前的最后一页：读盘仍是一页窗口，且**如实给出下一页游标**。
         let near_tail = read_page(&big, 4_998_000, 1000);
         assert_eq!(near_tail.text.chars().count(), 1000);
-        assert_eq!(near_tail.next_offset, Some(4_999_000), "还有一页时必须给游标");
+        assert_eq!(
+            near_tail.next_offset,
+            Some(4_999_000),
+            "还有一页时必须给游标"
+        );
         let read_near_tail = last_page_read_bytes();
         assert!(
             read_near_tail <= page_window_bytes(1000),
@@ -197,38 +212,29 @@ mod tests {
         let identity = FileIdentity::of(&path, None).expect("身份失败");
         let encoding = encoding_rs::UTF_8;
         let bom = 0usize;
-        with_table(
-            &identity,
-            encoding,
-            bom,
-            &mut file,
-            |table, file| {
-                // 延伸足够远，让表里出现多条锚点。
-                table.extend_until_above(file, 100_000)?;
-                assert!(
-                    table.anchors.len() > 1,
-                    "延伸后应当有多条锚点：{:?}",
-                    table.anchors.len()
+        with_table(&identity, encoding, bom, &mut file, |table, file| {
+            // 延伸足够远，让表里出现多条锚点。
+            table.extend_until_above(file, 100_000)?;
+            assert!(
+                table.anchors.len() > 1,
+                "延伸后应当有多条锚点：{:?}",
+                table.anchors.len()
+            );
+            for &(byte, chars) in &table.anchors {
+                // 从锚点**独立**解码一个字符：不得是替换字符。
+                let probe = read_slice(file, byte, MAX_CHAR_BYTES)?;
+                let mut decoder = encoding.new_decoder_without_bom_handling();
+                let mut out = String::new();
+                let (_r, _read) =
+                    decoder.decode_to_string_without_replacement(&probe, &mut out, false);
+                assert_ne!(
+                    out.chars().next(),
+                    Some('\u{FFFD}'),
+                    "锚点 {byte}（字符 {chars}）切在多字节字符中间"
                 );
-                for &(byte, chars) in &table.anchors {
-                    // 从锚点**独立**解码一个字符：不得是替换字符。
-                    let probe = read_slice(file, byte, MAX_CHAR_BYTES)?;
-                    let mut decoder = encoding.new_decoder_without_bom_handling();
-                    let mut out = String::new();
-                    let (_r, _read) = decoder.decode_to_string_without_replacement(
-                        &probe,
-                        &mut out,
-                        false,
-                    );
-                    assert_ne!(
-                        out.chars().next(),
-                        Some('\u{FFFD}'),
-                        "锚点 {byte}（字符 {chars}）切在多字节字符中间"
-                    );
-                }
-                Ok(())
-            },
-        )
+            }
+            Ok(())
+        })
         .expect("检查锚点失败");
     }
 
@@ -253,13 +259,21 @@ mod tests {
         let scan = text_toc_stream(&path, |entry| streamed.push(entry)).expect("扫描失败");
         let expected = crate::toc::text_toc(text);
 
-        assert_eq!(streamed.len(), expected.len(), "流式目录必须与内存版同条目数");
+        assert_eq!(
+            streamed.len(),
+            expected.len(),
+            "流式目录必须与内存版同条目数"
+        );
         for (a, b) in streamed.iter().zip(expected.iter()) {
             assert_eq!(a.title, b.title, "标题必须一致");
             assert_eq!(a.cursor, b.cursor, "游标（字符偏移）必须一致");
             assert_eq!(a.level, b.level, "层级必须一致");
         }
-        assert_eq!(scan.chars as usize, text.chars().count(), "统计必须与全文一致");
+        assert_eq!(
+            scan.chars as usize,
+            text.chars().count(),
+            "统计必须与全文一致"
+        );
     }
 
     /// 标题行**跨越块边界**时也必须被认出（目录扫描跨块保留"当前行"缓冲）。

@@ -9,11 +9,11 @@ use hp_plugin_host::PluginHost;
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{
-    api_from_hp, ensure_global, global, global_mut, lock_global, ApiResponse,
-};
-use crate::commands::shared::EmitHp;
 use crate::AppState;
+use crate::commands::shared::EmitHp;
+use crate::commands::shared::{
+    ApiResponse, api_from_hp, ensure_global, global, global_mut, lock_global,
+};
 
 #[derive(Serialize)]
 pub(crate) struct PluginStateItem {
@@ -171,7 +171,11 @@ pub(crate) fn plugin_load(
             repo_id: outcome.repo_id,
             runtime_kind: outcome.runtime_kind.as_str().to_string(),
             api_version: outcome.api_version,
-            grants: outcome.grants.iter().map(|c| c.as_str().to_string()).collect(),
+            grants: outcome
+                .grants
+                .iter()
+                .map(|c| c.as_str().to_string())
+                .collect(),
         })
     })();
     // 只在**加载成功后**广播：失败是命令级错误，不该伴随"已加载"事件。

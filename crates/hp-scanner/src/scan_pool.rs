@@ -49,13 +49,13 @@ impl Budget {
     fn acquire(&self, cost: u64) -> Permit<'_> {
         let mut available = self.available.lock().unwrap_or_else(|e| e.into_inner());
         while *available < cost {
-            available = self.ready.wait(available).unwrap_or_else(|e| e.into_inner());
+            available = self
+                .ready
+                .wait(available)
+                .unwrap_or_else(|e| e.into_inner());
         }
         *available -= cost;
-        Permit {
-            budget: self,
-            cost,
-        }
+        Permit { budget: self, cost }
     }
 }
 

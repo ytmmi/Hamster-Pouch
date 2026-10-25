@@ -112,8 +112,7 @@ impl FsOpsService {
     }
 
     fn source_of(&self, db: &RepoDb, file: &hp_core::FileIndexRow) -> HpResult<hp_core::Source> {
-        db.get_source(file.source_id.as_str())?.ok_or_else(|| {
-            HpError::NotFound(format!("媒体源不存在: {}", file.source_id.as_str()))
-        })
+        db.get_source(file.source_id.as_str())?
+            .ok_or_else(|| HpError::NotFound(format!("媒体源不存在: {}", file.source_id.as_str())))
     }
 }

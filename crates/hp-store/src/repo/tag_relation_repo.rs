@@ -3,7 +3,7 @@
 //! tag 之间为多对多关系，支持多父级（DAG）；层级与关联用 `relation_kind` 区分。
 
 use hp_core::{HpError, HpResult, RepoId, Tag, TagId, TagRelation, TagRelationKind};
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{OptionalExtension, Row, params};
 
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err, uuid};
@@ -37,13 +37,9 @@ impl RepoDb {
         }
         // 环检测：child（to）不能已是 parent（from）的祖先，否则形成环。
         if kind == TagRelationKind::Hierarchy && self.is_tag_ancestor(to_tag_id, from_tag_id)? {
-            return Err(HpError::InvalidArgument(
-                "不能建立该层级：会形成环".into(),
-            ));
+            return Err(HpError::InvalidArgument("不能建立该层级：会形成环".into()));
         }
-        if let Some(existing) =
-            self.find_tag_relation(repo_id, from_tag_id, to_tag_id, kind)?
-        {
+        if let Some(existing) = self.find_tag_relation(repo_id, from_tag_id, to_tag_id, kind)? {
             return Ok(existing);
         }
         let relation = TagRelation {

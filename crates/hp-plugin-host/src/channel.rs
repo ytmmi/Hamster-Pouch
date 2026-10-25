@@ -41,7 +41,7 @@ use std::time::Duration;
 
 use hp_core::{HpError, HpResult};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// 三种运行形态统一的请求名（D61 / 控件标准第 2 节）。
 pub const PANEL_SCHEMA_REQUEST: &str = "ui.panel.schema";
@@ -475,15 +475,26 @@ mod tests {
         // 参数缺省时不得序列化出 `args` 键（插件的宽松解析不该被迫处理 null）。
         let json = serde_json::to_string(&spec).expect("序列化");
         assert!(!json.contains("args"), "缺省 args 不应出现在请求里: {json}");
-        assert!(json.contains("\"key\":\"panel:colors\""), "意外形状: {json}");
+        assert!(
+            json.contains("\"key\":\"panel:colors\""),
+            "意外形状: {json}"
+        );
     }
 
     #[test]
     fn query_params_omit_selection_when_nothing_is_selected() {
         // 无选中项 → 整个 `selection` 字段缺省（插件据此区分"没选中"，而不是空对象）。
-        let params = PanelQueryParams::new("p.panel", 1, None, vec![PanelQuerySpec::new("panel", "x", None)]);
+        let params = PanelQueryParams::new(
+            "p.panel",
+            1,
+            None,
+            vec![PanelQuerySpec::new("panel", "x", None)],
+        );
         let json = serde_json::to_string(&params).expect("序列化");
-        assert!(!json.contains("selection"), "无选中项时不应带 selection: {json}");
+        assert!(
+            !json.contains("selection"),
+            "无选中项时不应带 selection: {json}"
+        );
 
         let with = PanelQueryParams::new(
             "p.panel",
@@ -492,7 +503,10 @@ mod tests {
             vec![],
         );
         let json = serde_json::to_string(&with).expect("序列化");
-        assert!(json.contains("\"selection\":{\"file_id\":\"file-1\"}"), "意外形状: {json}");
+        assert!(
+            json.contains("\"selection\":{\"file_id\":\"file-1\"}"),
+            "意外形状: {json}"
+        );
     }
 
     #[test]
@@ -512,9 +526,11 @@ mod tests {
         cache.put(key.clone(), "{}".into());
         assert_eq!(cache.get(&key).as_deref(), Some("{}"));
         // 版本变化即自然失效。
-        assert!(cache
-            .get(&PanelSchemaKey::new("p1", "panel.a", "0.2.0"))
-            .is_none());
+        assert!(
+            cache
+                .get(&PanelSchemaKey::new("p1", "panel.a", "0.2.0"))
+                .is_none()
+        );
         // 插件重载 → 主动失效。
         cache.invalidate_plugin("p1");
         assert!(cache.is_empty());

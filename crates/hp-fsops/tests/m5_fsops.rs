@@ -12,9 +12,7 @@ use hp_store::RepoDb;
 const REPO_ID: &str = "repo-1";
 
 fn temp_dir(_tag: &str) -> PathBuf {
-    tempfile::tempdir()
-        .expect("创建临时目录失败")
-        .keep()
+    tempfile::tempdir().expect("创建临时目录失败").keep()
 }
 
 fn sample_file(id: &FileId, source_id: &hp_core::SourceId) -> FileIndexRow {
@@ -103,15 +101,24 @@ fn copy_preserves_associations_and_writes_op_record() {
     assert_eq!(new_file.content_hash.as_deref(), Some("hash-1"));
 
     // 解释数据继承（RFC 0001 决策 5）
-    assert_eq!(db.list_tags_for_file(new_id.as_str()).expect("查询失败").len(), 1);
     assert_eq!(
-        db.get_rating(new_id.as_str()).expect("查询失败").unwrap().rating,
+        db.list_tags_for_file(new_id.as_str())
+            .expect("查询失败")
+            .len(),
+        1
+    );
+    assert_eq!(
+        db.get_rating(new_id.as_str())
+            .expect("查询失败")
+            .unwrap()
+            .rating,
         4
     );
-    assert!(db
-        .list_album_ids_for_file(new_id.as_str())
-        .expect("查询失败")
-        .contains(&album_id));
+    assert!(
+        db.list_album_ids_for_file(new_id.as_str())
+            .expect("查询失败")
+            .contains(&album_id)
+    );
 
     let ops = db.list_ops_history(REPO_ID, 10).expect("查询操作历史失败");
     assert_eq!(ops.len(), 1);
@@ -146,15 +153,24 @@ fn move_keeps_file_id_and_associations() {
 
     let moved = db.get_file(file_id.as_str()).expect("查询失败").unwrap();
     assert_eq!(moved.source_id.as_str(), src_b.id.as_str());
-    assert_eq!(db.list_tags_for_file(file_id.as_str()).expect("查询失败").len(), 1);
     assert_eq!(
-        db.get_rating(file_id.as_str()).expect("查询失败").unwrap().rating,
+        db.list_tags_for_file(file_id.as_str())
+            .expect("查询失败")
+            .len(),
+        1
+    );
+    assert_eq!(
+        db.get_rating(file_id.as_str())
+            .expect("查询失败")
+            .unwrap()
+            .rating,
         4
     );
-    assert!(db
-        .list_album_ids_for_file(file_id.as_str())
-        .expect("查询失败")
-        .contains(&album_id));
+    assert!(
+        db.list_album_ids_for_file(file_id.as_str())
+            .expect("查询失败")
+            .contains(&album_id)
+    );
 
     let ops = db.list_ops_history(REPO_ID, 10).expect("查询操作历史失败");
     assert_eq!(ops[0].op_type, "move");

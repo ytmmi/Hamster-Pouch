@@ -24,16 +24,17 @@ use sha2::{Digest, Sha256};
 /// 主线构建者 Ed25519 公钥（十六进制编码）。
 ///
 /// 首次签名工具版本上线时生成对应密钥对；公钥编译进本 crate。
-const BUILTIN_PUBKEY_HEX: &str =
-    "bc4534b0e1f150063bf773b4c94c93128ebf8f0343847c20c06a6294bd8c8ea2";
+const BUILTIN_PUBKEY_HEX: &str = "bc4534b0e1f150063bf773b4c94c93128ebf8f0343847c20c06a6294bd8c8ea2";
 
 /// 解析后的内置验证公钥（惰性求值）。
 fn builtin_verifying_key() -> HpResult<VerifyingKey> {
     let bytes = hex::decode(BUILTIN_PUBKEY_HEX)
         .map_err(|e| hp_core::HpError::Io(format!("内置公钥 hex 解码失败: {e}")))?;
-    VerifyingKey::from_bytes(&bytes.try_into().map_err(|e| {
-        hp_core::HpError::Io(format!("内置公钥字节长度不符: {e:?}"))
-    })?)
+    VerifyingKey::from_bytes(
+        &bytes
+            .try_into()
+            .map_err(|e| hp_core::HpError::Io(format!("内置公钥字节长度不符: {e:?}")))?,
+    )
     .map_err(|e| hp_core::HpError::Io(format!("内置公钥非法: {e}")))
 }
 
@@ -61,9 +62,7 @@ pub fn parse_sha256sums(content: &str) -> HpResult<Vec<ChecksumEntry>> {
         // Debian 格式：SHA256HEX  <space><space>  FILENAME
         let sep = "  ";
         let pos = line.find(sep).ok_or_else(|| {
-            hp_core::HpError::InvalidArgument(format!(
-                "SHA256SUMS:{lineno}: 缺少双空格分隔符",
-            ))
+            hp_core::HpError::InvalidArgument(format!("SHA256SUMS:{lineno}: 缺少双空格分隔符",))
         })?;
         let sha256 = &line[..pos];
         let filename = line[pos + sep.len()..].trim().to_string();
@@ -82,20 +81,16 @@ pub fn parse_sha256sums(content: &str) -> HpResult<Vec<ChecksumEntry>> {
 }
 
 /// 验证一个目录中某个文件的 SHA-256 是否与清单匹配。
-pub fn verify_file_hash(
-    dir: &Path,
-    entry: &ChecksumEntry,
-) -> std::result::Result<(), String> {
+pub fn verify_file_hash(dir: &Path, entry: &ChecksumEntry) -> std::result::Result<(), String> {
     let file_path = dir.join(&entry.filename);
-    let mut file = std::fs::File::open(&file_path).map_err(|e| {
-        format!("无法打开 {}: {e}", entry.filename)
-    })?;
+    let mut file =
+        std::fs::File::open(&file_path).map_err(|e| format!("无法打开 {}: {e}", entry.filename))?;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 65536];
     loop {
-        let n = file.read(&mut buf).map_err(|e| {
-            format!("读取 {} 失败: {e}", entry.filename)
-        })?;
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("读取 {} 失败: {e}", entry.filename))?;
         if n == 0 {
             break;
         }
@@ -132,22 +127,19 @@ pub fn verify_signature(
     };
 
     // 读 SHA256SUMS 内容
-    let sums_content = std::fs::read_to_string(sums_path)
-        .map_err(|e| format!("无法读取 SHA256SUMS: {e}"))?;
+    let sums_content =
+        std::fs::read_to_string(sums_path).map_err(|e| format!("无法读取 SHA256SUMS: {e}"))?;
 
     // 读 .sig 文件（原始 64 字节 Ed25519 签名）
-    let sig_bytes = std::fs::read(sig_path)
-        .map_err(|e| format!("无法读取 SHA256SUMS.sig: {e}"))?;
-    let signature = Signature::from_slice(&sig_bytes)
-        .map_err(|e| format!("签名格式无效: {e}"))?;
+    let sig_bytes = std::fs::read(sig_path).map_err(|e| format!("无法读取 SHA256SUMS.sig: {e}"))?;
+    let signature = Signature::from_slice(&sig_bytes).map_err(|e| format!("签名格式无效: {e}"))?;
 
     // 验证签名
     key.verify(sums_content.as_bytes(), &signature)
         .map_err(|e| format!("Ed25519 签名验证失败: {e}"))?;
 
     // 解析校验和条目
-    parse_sha256sums(&sums_content)
-        .map_err(|e| format!("SHA256SUMS 格式无效: {e}"))
+    parse_sha256sums(&sums_content).map_err(|e| format!("SHA256SUMS 格式无效: {e}"))
 }
 
 /// 签名检查结果。

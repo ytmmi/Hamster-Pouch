@@ -1,7 +1,7 @@
 //! 色彩参考仓储（D18 / database-schema.md 第 4.5 节）。
 
 use hp_core::{ColorRef, FileId, HpResult};
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{OptionalExtension, Row, params};
 
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err};

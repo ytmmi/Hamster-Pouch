@@ -42,7 +42,8 @@ fn source_mount_list_rename_unmount() {
     assert_eq!(got.local_path, "C:/photos");
 
     // 重命名别名
-    db.rename_source(s.id.as_str(), "新别名").expect("重命名失败");
+    db.rename_source(s.id.as_str(), "新别名")
+        .expect("重命名失败");
     let renamed = db
         .get_source(s.id.as_str())
         .expect("查询源失败")
@@ -245,10 +246,7 @@ fn query_files_dir_prefix_filter() {
             100,
         )
         .expect("查询失败");
-    let mut rels: Vec<&str> = filtered
-        .iter()
-        .map(|r| r.relative_path.as_str())
-        .collect();
+    let mut rels: Vec<&str> = filtered.iter().map(|r| r.relative_path.as_str()).collect();
     rels.sort_unstable();
     assert_eq!(rels, vec!["Raw/Sub/c.jpg", "Raw/b.jpg"]);
 
@@ -295,10 +293,15 @@ fn cursor_pagination_is_stable_under_inserts() {
     };
 
     // 第一页：2 条 + 游标。
-    let (page1, cursor1) = db.query_files("repo-1", &filter, None, 2).expect("第一页失败");
+    let (page1, cursor1) = db
+        .query_files("repo-1", &filter, None, 2)
+        .expect("第一页失败");
     assert_eq!(page1.len(), 2);
     let cursor1 = cursor1.expect("还有下一页时必须给出游标");
-    assert_eq!(cursor1.relative_path, "b.jpg", "排序键应为 relative_path 升序");
+    assert_eq!(
+        cursor1.relative_path, "b.jpg",
+        "排序键应为 relative_path 升序"
+    );
 
     // 翻页途中插入一行（**排在游标之前**）：键集游标不受影响；offset 分页会在这里漏项/重复。
     db.upsert_file(&row("aa.jpg")).expect("插入失败");
@@ -325,7 +328,9 @@ fn cursor_pagination_is_stable_under_inserts() {
     assert_eq!(seen.len(), 4, "不得重复返回任何行");
 
     // 从头再翻一次（此时 `aa.jpg` 已在库里）：能取到全部 5 条，说明新行按排序键正常进入首页序列。
-    let (all_first_page, _) = db.query_files("repo-1", &filter, None, 1).expect("首页失败");
+    let (all_first_page, _) = db
+        .query_files("repo-1", &filter, None, 1)
+        .expect("首页失败");
     assert_eq!(all_first_page[0].relative_path, "a.jpg");
 
     // 游标是不透明字符串：编码/解码往返一致；非法游标报错（不静默从头开始）。

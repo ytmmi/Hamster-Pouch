@@ -8,14 +8,14 @@ use hp_ai::AiTaggingProvider;
 use hp_core::{AiProviderConfig, AiTaggingInput, AiTaggingOutput, HpError, HpResult};
 use serde::Serialize;
 use tauri::State;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
-use crate::commands::shared::{
-    api_from_hp, ensure_global, global, global_mut, lock_global, lock_repo, open_repo,
-    open_repo_mut, ApiResponse,
-};
 use crate::AppState;
+use crate::commands::shared::{
+    ApiResponse, api_from_hp, ensure_global, global, global_mut, lock_global, lock_repo, open_repo,
+    open_repo_mut,
+};
 
 #[derive(Serialize)]
 pub(crate) struct AiConfigItem {

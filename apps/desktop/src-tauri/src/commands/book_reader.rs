@@ -45,11 +45,11 @@ use hp_dto::{BookTocItem, BookTocResult};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::AppState;
 use crate::commands::book::{read_json_cache, write_atomic};
 use crate::commands::shared::{
-    api_async, api_from_hp, lock_repo, open_repo, resolve_file_path, ApiAsync,
+    ApiAsync, api_async, api_from_hp, lock_repo, open_repo, resolve_file_path,
 };
-use crate::AppState;
 
 /// 一本"书"在读目录时的**全部外部依赖**。
 ///
@@ -123,7 +123,10 @@ impl BookTocCache {
 }
 
 /// 读目录缓存；**未命中 / 损坏 / 规则版本不符**一律返回 `None`。
-pub(crate) fn read_toc_cache(cache: &hp_media::ThumbnailCache, hash: &str) -> Option<BookTocResult> {
+pub(crate) fn read_toc_cache(
+    cache: &hp_media::ThumbnailCache,
+    hash: &str,
+) -> Option<BookTocResult> {
     let record: BookTocCache = read_json_cache(&cache.path_for_book_toc(hash))?;
     (record.rule == TOC_CACHE_RULE).then(|| record.into_result())
 }

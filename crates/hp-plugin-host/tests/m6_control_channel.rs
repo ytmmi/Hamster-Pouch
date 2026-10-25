@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use hp_core::HpError;
 use hp_plugin_host::{
-    ExternalProcessQuery, PanelSchemaKey, PanelSchemaParams, PANEL_SCHEMA_REQUEST,
+    ExternalProcessQuery, PANEL_SCHEMA_REQUEST, PanelSchemaKey, PanelSchemaParams,
     SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT,
 };
 
@@ -58,9 +58,15 @@ fn request_carries_the_unified_method_and_params() {
 #[test]
 fn rpc_error_is_a_plugin_error() {
     let err = query("rpc_error", SCHEMA_QUERY_TIMEOUT).expect_err("JSON-RPC error 应失败");
-    assert!(matches!(err, HpError::Plugin(_)), "应为 Plugin 类错误: {err:?}");
+    assert!(
+        matches!(err, HpError::Plugin(_)),
+        "应为 Plugin 类错误: {err:?}"
+    );
     assert_eq!(err.code(), "plugin");
-    assert!(err.to_string().contains("未实现"), "应带上插件给的说明: {err}");
+    assert!(
+        err.to_string().contains("未实现"),
+        "应带上插件给的说明: {err}"
+    );
 }
 
 #[test]
@@ -101,9 +107,15 @@ fn schema_cache_is_keyed_by_plugin_panel_and_version() {
     cache.put(key.clone(), "{\"root\":{}}".into());
     assert_eq!(cache.get(&key).as_deref(), Some("{\"root\":{}}"));
     // 版本变化 → 键变化 → 自然失效。
-    assert!(cache
-        .get(&PanelSchemaKey::new("dev.hamsterpouch.example.hello", "panel.a", "0.2.0"))
-        .is_none());
+    assert!(
+        cache
+            .get(&PanelSchemaKey::new(
+                "dev.hamsterpouch.example.hello",
+                "panel.a",
+                "0.2.0"
+            ))
+            .is_none()
+    );
     // 插件重载/禁用 → 主动失效。
     cache.invalidate_plugin("dev.hamsterpouch.example.hello");
     assert!(cache.is_empty());

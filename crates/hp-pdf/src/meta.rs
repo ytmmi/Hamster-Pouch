@@ -33,8 +33,8 @@
 
 use std::path::Path;
 
-use hp_core::HpResult;
 use hayro::hayro_syntax::Pdf;
+use hp_core::HpResult;
 
 use crate::open::open_pdf_file;
 use crate::render::{PDF_COVER_WIDTH, render_page_jpeg};
@@ -202,12 +202,20 @@ trailer << /Root 1 0 R /Size 7 /Info 6 0 R >>\n\
         let meta = read_pdf_meta(&path).expect("读盘应当成功");
 
         assert_eq!(meta.author.as_deref(), Some("wxlxt"), "作者来自 /Author");
-        assert_eq!(meta.description.as_deref(), Some("probe"), "简介来自 /Subject");
+        assert_eq!(
+            meta.description.as_deref(),
+            Some("probe"),
+            "简介来自 /Subject"
+        );
 
         // **封面 = 第一页**（用户口径）：必须真的画出来了，且是一张合法 JPEG。
         let cover = meta.cover.expect("首页封面必须渲染出来");
         assert_eq!(cover.ext, PDF_COVER_EXT);
-        assert_eq!(&cover.bytes[..3], &[0xFF, 0xD8, 0xFF], "封面必须是 JPEG 魔数");
+        assert_eq!(
+            &cover.bytes[..3],
+            &[0xFF, 0xD8, 0xFF],
+            "封面必须是 JPEG 魔数"
+        );
         // 200pt 宽的页面按 800px 目标 → 缩放比 4（正好等于上限），得到 800×400。
         assert_eq!((cover.width, cover.height), (800, 400));
     }
@@ -216,10 +224,15 @@ trailer << /Root 1 0 R /Size 7 /Info 6 0 R >>\n\
     fn renders_every_page_and_reports_the_count() {
         // 查看器路径：页数 + 逐页渲染（第 0 页有内容，越界页返回 `None`）。
         let (_dir, path) = write_fixture("book.pdf");
-        let pdf = crate::open::open_pdf_file(&path).expect("读盘应当成功").expect("应当能解析");
+        let pdf = crate::open::open_pdf_file(&path)
+            .expect("读盘应当成功")
+            .expect("应当能解析");
         assert_eq!(crate::open::page_count(&pdf), 1);
         assert!(crate::render::render_page_rgba(&pdf, 0, 400).is_some());
-        assert!(crate::render::render_page_rgba(&pdf, 1, 400).is_none(), "越界页必须是 None");
+        assert!(
+            crate::render::render_page_rgba(&pdf, 1, 400).is_none(),
+            "越界页必须是 None"
+        );
     }
 
     #[test]

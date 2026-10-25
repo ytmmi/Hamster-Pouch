@@ -52,11 +52,26 @@ fn options(ffmpeg: PathBuf, ffprobe: PathBuf, cache: hp_media::ThumbnailCache) -
 fn make_audio(ffmpeg: &Path, path: &Path) {
     let out = std::process::Command::new(ffmpeg)
         .args([
-            "-y", "-hide_banner", "-loglevel", "error",
-            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-            "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono:d=2",
-            "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1[a]",
-            "-map", "[a]", "-c:a", "libmp3lame", "-b:a", "128k",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=2",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=44100:cl=mono:d=2",
+            "-filter_complex",
+            "[0:a][1:a]concat=n=2:v=0:a=1[a]",
+            "-map",
+            "[a]",
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "128k",
         ])
         .arg(path)
         .output()
@@ -122,10 +137,7 @@ fn audio_source_scans_fully_and_yields_a_waveform_png() {
         .media_info_json
         .as_deref()
         .expect("音频应有 ffprobe 元数据（D115）");
-    assert!(
-        info.contains("duration"),
-        "元数据里应有时长，实际：{info}"
-    );
+    assert!(info.contains("duration"), "元数据里应有时长，实际：{info}");
     assert!(
         info.contains("\"codec_type\": \"audio\"") || info.contains("\"codec_type\":\"audio\""),
         "元数据里应有音频流，实际：{info}"
@@ -166,7 +178,11 @@ fn audio_source_scans_fully_and_yields_a_waveform_png() {
             .read_exact(&mut head)
             .expect("读取波形图失败");
     }
-    assert_eq!(head, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "应为 PNG");
+    assert_eq!(
+        head,
+        [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+        "应为 PNG"
+    );
     let img = image::open(&wave_path).expect("读取波形图失败");
     assert_eq!(
         (img.width(), img.height()),
@@ -195,7 +211,11 @@ fn video_source_scans_with_thumbnail_and_progress_reaches_total() {
         .expect("挂载媒体源失败");
 
     let scanner = Scanner::new();
-    let opts = options(ffmpeg, ffprobe, hp_media::ThumbnailCache::new(tmp.path().join("thumbs")));
+    let opts = options(
+        ffmpeg,
+        ffprobe,
+        hp_media::ThumbnailCache::new(tmp.path().join("thumbs")),
+    );
 
     let mut frames: Vec<(ScanPhase, u64, u64)> = Vec::new();
     let outcome = {
@@ -234,10 +254,16 @@ fn video_source_scans_with_thumbnail_and_progress_reaches_total() {
         .expect("查询失败")
         .expect("视频应已索引");
     assert!(row.content_hash.is_some(), "视频应有内容哈希");
-    assert_eq!(row.thumb_status, ThumbStatus::Generated, "视频应生成首帧缩略图");
+    assert_eq!(
+        row.thumb_status,
+        ThumbStatus::Generated,
+        "视频应生成首帧缩略图"
+    );
     assert!(row.perceptual_hash.is_some(), "首帧应产生感知哈希");
     assert!(
-        row.media_info_json.as_deref().is_some_and(|j| j.contains("duration")),
+        row.media_info_json
+            .as_deref()
+            .is_some_and(|j| j.contains("duration")),
         "应缓存 ffprobe 媒体信息"
     );
 
@@ -250,7 +276,10 @@ fn video_source_scans_with_thumbnail_and_progress_reaches_total() {
             .expect("二次扫描失败")
     };
     assert_eq!(outcome2.indexed, 0, "未变更的视频不应重新索引");
-    assert_eq!(outcome2.changed, 0, "未变更的视频不应重建行（省掉重复哈希/抽帧）");
+    assert_eq!(
+        outcome2.changed, 0,
+        "未变更的视频不应重建行（省掉重复哈希/抽帧）"
+    );
     assert!(frames2.contains(&1), "二次扫描同样应上报到 100%");
 }
 
@@ -264,7 +293,8 @@ fn cancel_is_not_an_error_and_reports_cancelled() {
         let img = image::GrayImage::from_fn(16, 16, |x, y| {
             image::Luma([(x.wrapping_add(y).wrapping_add(i as u32)) as u8])
         });
-        img.save(src_dir.join(format!("p{i:02}.png"))).expect("写测试图失败");
+        img.save(src_dir.join(format!("p{i:02}.png")))
+            .expect("写测试图失败");
     }
 
     let mut db = RepoDb::create(tmp.path().join("repo.sqlite3"), "测试仓库").expect("创建仓库失败");
@@ -319,7 +349,8 @@ fn external_cancel_flag_survives_scan_start_reset() {
         let img = image::GrayImage::from_fn(8, 8, |x, y| {
             image::Luma([(x.wrapping_add(y).wrapping_add(i as u32)) as u8])
         });
-        img.save(src_dir.join(format!("p{i:02}.png"))).expect("写测试图失败");
+        img.save(src_dir.join(format!("p{i:02}.png")))
+            .expect("写测试图失败");
     }
 
     let mut db = RepoDb::create(tmp.path().join("repo.sqlite3"), "测试仓库").expect("创建仓库失败");
@@ -336,6 +367,12 @@ fn external_cancel_flag_survives_scan_start_reset() {
         .scan_source_with_cancel(&external, &mut db, &source, &options, &mut progress)
         .expect("取消不应作为错误返回");
 
-    assert!(outcome.cancelled, "外部取消标志必须生效（不得被扫描启动时的 reset 清掉）");
-    assert_eq!(outcome.indexed, 0, "取消发生在索引之前 → 不应写入任何文件行");
+    assert!(
+        outcome.cancelled,
+        "外部取消标志必须生效（不得被扫描启动时的 reset 清掉）"
+    );
+    assert_eq!(
+        outcome.indexed, 0,
+        "取消发生在索引之前 → 不应写入任何文件行"
+    );
 }

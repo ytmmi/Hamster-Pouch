@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use hp_core::{FileMark, MediaType, ThumbStatus};
-use hp_hash::{hash_file, ContentHash, PerceptualHash};
+use hp_hash::{ContentHash, PerceptualHash, hash_file};
 use hp_media::extract_thumbnail;
 
 use crate::scan_compute::analyze_image;
@@ -223,7 +223,12 @@ fn process_video(
 mod tests {
     use super::*;
 
-    fn prepared(path: PathBuf, media_type: MediaType, unchanged: bool, want_palette: bool) -> Prepared {
+    fn prepared(
+        path: PathBuf,
+        media_type: MediaType,
+        unchanged: bool,
+        want_palette: bool,
+    ) -> Prepared {
         Prepared {
             relative_path: "x".to_string(),
             path,
@@ -239,7 +244,12 @@ mod tests {
 
     #[test]
     fn unchanged_task_does_no_work() {
-        let p = prepared(PathBuf::from("does-not-exist.png"), MediaType::Image, true, true);
+        let p = prepared(
+            PathBuf::from("does-not-exist.png"),
+            MediaType::Image,
+            true,
+            true,
+        );
         let got = compute(&p, &ScanOptions::default());
         assert!(!got.unreadable, "跳过的任务不该被当成不可读");
         assert!(got.content.is_none());

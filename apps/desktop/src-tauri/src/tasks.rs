@@ -228,10 +228,15 @@ mod tests {
     #[test]
     fn finished_task_is_no_longer_cancellable() {
         let registry = TaskRegistry::new();
-        let task = registry.start("task-a", TaskKind::Unmount).expect("应能登记");
+        let task = registry
+            .start("task-a", TaskKind::Unmount)
+            .expect("应能登记");
         registry.finish("task-a");
 
-        assert_eq!(registry.request_cancel("task-a"), RequestOutcome::NotCurrent);
+        assert_eq!(
+            registry.request_cancel("task-a"),
+            RequestOutcome::NotCurrent
+        );
         assert!(!task.is_cancelled());
         assert!(!registry.is_busy());
         assert!(registry.snapshot().is_none());
@@ -296,7 +301,9 @@ mod tests {
         );
         registry.finish("scan-1");
 
-        registry.start("unmount-1", TaskKind::Unmount).expect("应能登记");
+        registry
+            .start("unmount-1", TaskKind::Unmount)
+            .expect("应能登记");
         assert_eq!(
             registry.request_pause("unmount-1"),
             RequestOutcome::Unsupported {

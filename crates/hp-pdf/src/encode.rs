@@ -34,9 +34,7 @@ pub const PDF_JPEG_QUALITY: u8 = 90;
 /// 当成"这页就是白的"，而实际是渲染出了错）。
 pub fn encode_jpeg(rgba: &[u8], width: u32, height: u32) -> HpResult<Vec<u8>> {
     if width == 0 || height == 0 {
-        return Err(HpError::Io(format!(
-            "PDF 页面尺寸非法: {width}x{height}"
-        )));
+        return Err(HpError::Io(format!("PDF 页面尺寸非法: {width}x{height}")));
     }
     let expected = (width as usize)
         .checked_mul(height as usize)

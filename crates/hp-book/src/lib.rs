@@ -39,24 +39,24 @@ mod xml;
 mod zip;
 
 pub use block::{
-    block_char_count, blocks_char_count, normalize_styles, spans_char_count, BookBlock,
-    BookDefinition, BookListItem, BookSpan, ColumnAlign, SpanStyle,
+    BookBlock, BookDefinition, BookListItem, BookSpan, ColumnAlign, SpanStyle, block_char_count,
+    blocks_char_count, normalize_styles, spans_char_count,
 };
-pub use cover::{cover_from_bytes, detect_image_ext, BookCover};
+pub use cover::{BookCover, cover_from_bytes, detect_image_ext};
 pub use epub::read_epub;
-pub use epub_text::{blocks_from_xhtml, read_epub_section, EpubSectionRead};
+pub use epub_text::{EpubSectionRead, blocks_from_xhtml, read_epub_section};
 pub use inline::spans_from_html;
-pub use markdown::{blocks_from_markdown, MarkdownRead};
-pub use meta::{read_book_meta, BookMeta};
+pub use markdown::{MarkdownRead, blocks_from_markdown};
+pub use meta::{BookMeta, read_book_meta};
 pub use text::{
-    decode_file_head, decode_file_limited, decode_head, decode_head_limited, detect_encoding,
-    is_strict_utf8, is_utf8_but_maybe_truncated, page_at, trim_to_char_boundary, DecodedText,
-    TextEncoding, TextPage, TEXT_PAGE_CHARS, TEXT_VIEW_MAX_BYTES,
+    DecodedText, TEXT_PAGE_CHARS, TEXT_VIEW_MAX_BYTES, TextEncoding, TextPage, decode_file_head,
+    decode_file_limited, decode_head, decode_head_limited, detect_encoding, is_strict_utf8,
+    is_utf8_but_maybe_truncated, page_at, trim_to_char_boundary,
 };
 pub use text_stream::{
-    last_page_read_bytes, read_text_page_window, scan_text, text_toc_stream, TextPageOwned,
-    TextScan, TEXT_SCAN_MAX_BYTES,
+    TEXT_SCAN_MAX_BYTES, TextPageOwned, TextScan, last_page_read_bytes, read_text_page_window,
+    scan_text, text_toc_stream,
 };
-pub use toc::{markdown_toc, read_epub_toc, text_toc, TocEntry, TOC_MAX_ENTRIES};
+pub use toc::{TOC_MAX_ENTRIES, TocEntry, markdown_toc, read_epub_toc, text_toc};
 pub use xml::{decode_xml_bytes, percent_decode, resolve_zip_path};
 pub use zip::{ZipArchive, ZipEntry};

@@ -43,7 +43,8 @@ use std::time::Duration;
 
 use hp_core::{HpError, HpResult};
 
-use crate::process::{hidden_command, run_with_timeout, run_with_timeout_stdin};
+use crate::process::{hidden_command, run_with_timeout};
+use crate::webp::encode_webp;
 
 /// 抽帧过滤器：宽度不超过 512、高度按比例，小图不放大。
 const SCALE_FILTER: &str = "scale='min(512,iw)':-2";
@@ -129,161 +130,6 @@ pub const IMAGE_THUMB_MAX_DIM: u32 = 320;
 /// `-quality 90` 的 SSIM 0.9908 已明显高于旧 JPEG，体积也反超（1.05×），不再是"同质量"比较。
 pub const IMAGE_THUMB_WEBP_QUALITY: u8 = 70;
 
-// 仅测试用：强制"进程内编码失败"，以验证 ffmpeg 降级**真的会接手**。
-//
-// **必须是 `thread_local`**：测试并行跑，用全局静态会让"注入失败"泄漏到同进程的
-// 其他用例（实测：`in_process_encoder_produces_lossy_webp` 因被邻居置位而误走降级、
-// 拿到 JPEG 后断言失败）。每个用例各在自己的线程上，线程局部变量天然隔离。
-//
-// `cfg(test)` 门控——**不进生产构建**，因此不是可被误用的运行时开关。
-#[cfg(test)]
-thread_local! {
-    static FORCE_IN_PROCESS_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// 把图像编码为 WebP 并原子落盘到 `output_webp`，**快路径优先**（见模块文档的三级降级）：
-///
-/// 1. 进程内 `libwebp`（`libwebp` 特性）——最快；
-/// 2. ffmpeg 子进程（`ffmpeg_bin` 可用时）；
-///
-/// 两级都不可用 / 都失败时返回 `Err`，由调用方降级为 JPEG。
-fn encode_webp(
-    img: &image::DynamicImage,
-    output_webp: &Path,
-    ffmpeg_bin: Option<&Path>,
-    timeout: Duration,
-) -> HpResult<()> {
-    // 1. 进程内 libwebp（D91 快路径）。
-    #[cfg(feature = "libwebp")]
-    {
-        #[cfg(test)]
-        let forced = FORCE_IN_PROCESS_FAILURE.with(std::cell::Cell::get);
-        #[cfg(not(test))]
-        let forced = false;
-
-        let attempt = if forced {
-            Err(HpError::Io("测试注入：进程内编码失败".into()))
-        } else {
-            encode_webp_in_process(img, output_webp)
-        };
-        match attempt {
-            Ok(()) => return Ok(()),
-            Err(e) => {
-                // 不静默吞掉：进程内失败要能看出是"退回 ffmpeg"还是"彻底失败"。
-                // 但**不能**直接返回 Err——ffmpeg 仍可能成功（见模块文档的三级降级）。
-                if ffmpeg_bin.is_none() {
-                    return Err(e);
-                }
-            }
-        }
-    }
-
-    // 2. ffmpeg 子进程（保留的降级路径，D91）。
-    match ffmpeg_bin {
-        Some(bin) => encode_webp_via_ffmpeg(img, output_webp, bin, timeout),
-        None => Err(HpError::Io(
-            "WebP 编码不可用：未启用 libwebp 特性且没有 ffmpeg".into(),
-        )),
-    }
-}
-
-/// 进程内 `libwebp` 编码（`libwebp-sys`，MIT，C 源码随 crate vendored）。
-///
-/// 与 ffmpeg 内嵌的 libwebp **同源同版本**，实测输出**逐字节相同**（见模块文档），
-/// 因此这是纯粹的"省一次进程开销"替换，不改变任何像素结果。
-///
-/// **`unsafe` 的必要性**：`libwebp-sys` 只暴露 C ABI。这里的两处 `unsafe` 是
-/// ①把 `rgb` 的指针交给 C（长度由 `width*height*3` 与 `stride = width*3` 保证一致，
-/// `WebPEncodeRGB` 只读该区间）；②把 C `malloc` 的输出按返回长度构造成切片并
-/// `WebPFree` 释放——**`WebPFree` 必须在 `to_vec()` 之前配对**，否则泄漏。
-#[cfg(feature = "libwebp")]
-fn encode_webp_in_process(img: &image::DynamicImage, output_webp: &Path) -> HpResult<()> {
-    use libwebp_sys::{WebPEncodeRGB, WebPFree};
-
-    let rgb = img.to_rgb8();
-    let (w, h) = (rgb.width(), rgb.height());
-    let bytes = rgb.as_raw();
-
-    let mut out: *mut u8 = std::ptr::null_mut();
-    // SAFETY：`bytes` 是 `w*h*3` 字节的连续 RGB 缓冲（`to_rgb8` 保证），
-    // stride 传 `w*3` 与之相符；`WebPEncodeRGB` 只读入参、只写 `out` 指向的新分配。
-    let len = unsafe {
-        WebPEncodeRGB(
-            bytes.as_ptr(),
-            w as i32,
-            h as i32,
-            (w * 3) as i32,
-            IMAGE_THUMB_WEBP_QUALITY as f32,
-            &mut out as *mut *mut u8,
-        )
-    };
-    if len == 0 || out.is_null() {
-        return Err(HpError::Io("libwebp 编码失败（返回空缓冲）".into()));
-    }
-    // SAFETY：`len > 0` 且 `out` 非空时，libwebp 保证该指针指向 `len` 字节有效数据。
-    let data = unsafe { std::slice::from_raw_parts(out, len) }.to_vec();
-    // 复制完成后再释放（顺序不能反）。
-    // SAFETY：`out` 由 libwebp 分配，只能交回 `WebPFree`，且此处只释放一次。
-    unsafe { WebPFree(out as *mut std::ffi::c_void) };
-
-    // 原子落盘：与 ffmpeg 路径同一套临时文件 + rename（见模块文档）。
-    let temp = temp_sibling(output_webp);
-    if let Err(e) = std::fs::write(&temp, &data) {
-        let _ = std::fs::remove_file(&temp);
-        return Err(HpError::Io(format!("写入 WebP 缩略图失败: {e}")));
-    }
-    commit(&temp, output_webp)
-}
-
-/// 用 ffmpeg 的 `libwebp` 把 `img` 编码成 WebP 并原子落盘到 `output_webp`。
-///
-/// **这是降级路径**（D91：进程内 `libwebp` 优先，见 [`encode_webp`]）。走
-/// **进程内解码 + 缩放 → ffmpeg 只做编码**（rawvideo 经 stdin 管道喂像素），而不是
-/// `ffmpeg -i <源文件>` 一把梭：缩放仍在进程内完成，因此
-/// - 结果与既有实现**同一套缩放算法**（`image::DynamicImage::thumbnail`），
-/// - 源图若已由进程内路径解码（含 libheif 的 HEIC/AVIF），不必让 ffmpeg 再解一遍，
-/// - 实测比"一把梭"更快（省掉 ffmpeg 的源图解码）。
-///
-/// 编码失败（ffmpeg 缺失 / 版本无 libwebp / 超时）返回 `HpError::Io`，由 [`encode_webp`]
-/// 决定是否继续降级（它是**第二级**，见模块文档的三级降级）。
-fn encode_webp_via_ffmpeg(
-    img: &image::DynamicImage,
-    output_webp: &Path,
-    ffmpeg_bin: &Path,
-    timeout: Duration,
-) -> HpResult<()> {
-    let rgb = img.to_rgb8();
-    let (w, h) = (rgb.width(), rgb.height());
-    // 先写到临时文件，成功后原子改名（见模块文档）。
-    let temp = temp_sibling(output_webp);
-    // `hidden_command`：GUI 父进程下不新建控制台窗口（首次生成图片缩略图）。
-    let mut cmd = hidden_command(ffmpeg_bin);
-    cmd.args(["-y", "-hide_banner", "-loglevel", "error"])
-        .args(["-f", "rawvideo", "-pix_fmt", "rgb24"])
-        .args(["-s", &format!("{w}x{h}")])
-        .args(["-i", "-", "-frames:v", "1"])
-        .args(["-c:v", "libwebp"])
-        .args(["-quality", &IMAGE_THUMB_WEBP_QUALITY.to_string()])
-        .arg(&temp);
-
-    // 像素经 stdin 喂入：数据量（320×320 RGB ≈ 300 KiB）远超管道缓冲，必须并发写（见 process 文档）。
-    let output = match run_with_timeout_stdin(&mut cmd, timeout, Some(rgb.into_raw())) {
-        Ok(o) => o,
-        Err(e) => {
-            let _ = std::fs::remove_file(&temp);
-            return Err(e);
-        }
-    };
-    if !output.status.success() {
-        let _ = std::fs::remove_file(&temp);
-        return Err(HpError::Io(format!(
-            "ffmpeg 编码 WebP 失败: {}",
-            String::from_utf8_lossy(&output.stderr)
-        )));
-    }
-    commit(&temp, output_webp)
-}
-
 /// 生成**全分辨率** JPEG 预览（`preview.get` 命令，供 Chromium 无法原生解码的
 /// HEIC/HEIF 查看器使用，缺陷 0019）。
 ///
@@ -355,11 +201,7 @@ fn generate_preview_via_ffmpeg(
 }
 
 /// 进程内解码 → JPEG 质量 90（仅 ffmpeg 缺失时的兜底；`u32::MAX` = 不缩放）。
-fn generate_preview_via_image(
-    src: &Path,
-    output_jpg: &Path,
-    timeout: Duration,
-) -> HpResult<()> {
+fn generate_preview_via_image(src: &Path, output_jpg: &Path, timeout: Duration) -> HpResult<()> {
     let img = decode_thumbnail_src(src, None, u32::MAX, timeout)?;
     // 原子落盘（见模块文档）：与缩略图同款，并发安全。
     let temp = temp_sibling(output_jpg);
@@ -439,9 +281,11 @@ fn write_jpeg(img: &image::DynamicImage, output: &Path) -> HpResult<()> {
     let result = (|| -> image::ImageResult<()> {
         let file = std::fs::File::create(&temp)?;
         let mut writer = std::io::BufWriter::new(file);
-        img.to_rgb8().write_with_encoder(
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, 75),
-        )
+        img.to_rgb8()
+            .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
+                &mut writer,
+                75,
+            ))
     })();
     if let Err(e) = result {
         let _ = std::fs::remove_file(&temp);
@@ -449,7 +293,6 @@ fn write_jpeg(img: &image::DynamicImage, output: &Path) -> HpResult<()> {
     }
     commit(&temp, output)
 }
-
 
 /// 解码图片源文件：进程内路径（EXIF 方向 + 解码，输出与旧实现逐位相同）；
 /// 失败时若属 AVIF/HEIC 家族且 ffmpeg 可用，回退 ffmpeg 有界解码（见模块文档）。
@@ -515,7 +358,14 @@ fn decode_thumbnail_src(
     let mut decoder = match reader.into_decoder() {
         Ok(decoder) => decoder,
         Err(e) => {
-            return fallback_decode(src, ffmpeg_bin, max_dim, timeout, &e.to_string(), "创建图片解码器失败");
+            return fallback_decode(
+                src,
+                ffmpeg_bin,
+                max_dim,
+                timeout,
+                &e.to_string(),
+                "创建图片解码器失败",
+            );
         }
     };
     // 读取 EXIF 方向（缺失 / 不可读时按无变换处理，不报错）。
@@ -527,7 +377,14 @@ fn decode_thumbnail_src(
             img.apply_orientation(orientation);
             Ok(img)
         }
-        Err(e) => fallback_decode(src, ffmpeg_bin, max_dim, timeout, &e.to_string(), "解码图片失败"),
+        Err(e) => fallback_decode(
+            src,
+            ffmpeg_bin,
+            max_dim,
+            timeout,
+            &e.to_string(),
+            "解码图片失败",
+        ),
     }
 }
 
@@ -545,9 +402,8 @@ fn fallback_decode(
 ) -> HpResult<image::DynamicImage> {
     if crate::decode::needs_ffmpeg_decode(src) {
         if let Some(bin) = ffmpeg_bin {
-            return crate::decode::decode_image_with_ffmpeg(src, bin, max_dim, timeout).map_err(
-                |fe| HpError::Io(format!("{step}: {cause}；ffmpeg 兜底: {fe}")),
-            );
+            return crate::decode::decode_image_with_ffmpeg(src, bin, max_dim, timeout)
+                .map_err(|fe| HpError::Io(format!("{step}: {cause}；ffmpeg 兜底: {fe}")));
         }
     }
     Err(HpError::Io(format!("{step}: {cause}")))
@@ -555,7 +411,10 @@ fn fallback_decode(
 
 #[cfg(test)]
 mod tests {
+    // WebP 编码已拆到 `crate::webp`（D120-R3）；这些是**跨模块**的行为比对，
+    // 仍留在本模块的测试里——因为它们验证的是「缩略图生成链路」而非编码器单独行为。
     use super::*;
+    use crate::webp::{FORCE_IN_PROCESS_FAILURE, encode_webp_in_process, encode_webp_via_ffmpeg};
 
     #[test]
     fn downscales_longest_side_without_upscaling() {
@@ -618,7 +477,24 @@ mod tests {
         let src = dir.join("sample.avif");
         let out = dir.join("out.jpg");
         let status = crate::process::hidden_command(&ffmpeg)
-            .args(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=800x600", "-frames:v", "1", "-c:v", "libaom-av1", "-crf", "20", "-still-picture", "1"])
+            .args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=800x600",
+                "-frames:v",
+                "1",
+                "-c:v",
+                "libaom-av1",
+                "-crf",
+                "20",
+                "-still-picture",
+                "1",
+            ])
             .arg(&src)
             .status()
             .expect("启动 ffmpeg 失败");
@@ -631,7 +507,10 @@ mod tests {
         assert_eq!((thumb.width(), thumb.height()), (320, 240));
         let rgb = thumb.to_rgb8();
         let px = rgb.get_pixel(0, 0);
-        assert!(px[0] > 200 && px[1] < 60 && px[2] < 60, "角像素应为红色，实际 {px:?}");
+        assert!(
+            px[0] > 200 && px[1] < 60 && px[2] < 60,
+            "角像素应为红色，实际 {px:?}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -664,8 +543,18 @@ mod tests {
         let out = dir.join("out.webp");
         let status = crate::process::hidden_command(&ffmpeg)
             .args([
-                "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
-                "color=c=red:s=800x600", "-frames:v", "1", "-c:v", "jpeg2000",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=800x600",
+                "-frames:v",
+                "1",
+                "-c:v",
+                "jpeg2000",
             ])
             .arg(&src)
             .status()
@@ -718,7 +607,11 @@ mod tests {
         let head = magic(&out);
         assert_eq!(&head[8..12], b"WEBP", "缩略图应为 WebP，实际 {head:?}");
         let thumb = image::open(&out).expect("读取缩略图失败");
-        assert_eq!((thumb.width(), thumb.height()), (320, 240), "800×600 → 长边 320");
+        assert_eq!(
+            (thumb.width(), thumb.height()),
+            (320, 240),
+            "800×600 → 长边 320"
+        );
         let rgb = thumb.to_rgb8();
         let px = *rgb.get_pixel(0, 0);
         let close = |a: u8, b: u8| a.abs_diff(b) <= 12;
@@ -778,7 +671,11 @@ mod tests {
         generate_image_preview(&src, &out, None, Duration::from_secs(30))
             .expect("SVG 预览应生成成功");
         let head = magic(&out);
-        assert_eq!(&head[0..3], &[0xFF, 0xD8, 0xFF], "预览应为 JPEG，实际 {head:?}");
+        assert_eq!(
+            &head[0..3],
+            &[0xFF, 0xD8, 0xFF],
+            "预览应为 JPEG，实际 {head:?}"
+        );
         let img = image::open(&out).expect("读取预览失败");
         assert_eq!((img.width(), img.height()), (640, 480), "预览不缩放");
         let _ = std::fs::remove_dir_all(&dir);
@@ -862,8 +759,18 @@ mod tests {
         let out = dir.join("preview.jpg");
         let status = crate::process::hidden_command(&ffmpeg)
             .args([
-                "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
-                "color=c=0x3355aa:s=800x600", "-frames:v", "1", "-c:v", "jpeg2000",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=0x3355aa:s=800x600",
+                "-frames:v",
+                "1",
+                "-c:v",
+                "jpeg2000",
             ])
             .arg(&src)
             .status()
@@ -1056,13 +963,18 @@ mod tests {
                     image::Rgb([n as u8, (n * 3 % 256) as u8, (n * 7 % 256) as u8])
                 }),
             ),
-            ("solid", image::RgbImage::from_pixel(200, 150, image::Rgb([12, 200, 90]))),
-            ("wide", image::RgbImage::from_fn(640, 40, |x, _| {
-                image::Rgb([(x % 256) as u8, 40, 200])
-            })),
-            ("tall", image::RgbImage::from_fn(40, 640, |_, y| {
-                image::Rgb([200, (y % 256) as u8, 40])
-            })),
+            (
+                "solid",
+                image::RgbImage::from_pixel(200, 150, image::Rgb([12, 200, 90])),
+            ),
+            (
+                "wide",
+                image::RgbImage::from_fn(640, 40, |x, _| image::Rgb([(x % 256) as u8, 40, 200])),
+            ),
+            (
+                "tall",
+                image::RgbImage::from_fn(40, 640, |_, y| image::Rgb([200, (y % 256) as u8, 40])),
+            ),
         ];
 
         for (label, img) in cases {
@@ -1079,7 +991,8 @@ mod tests {
             let a = std::fs::read(&inproc).expect("读取失败");
             let b = std::fs::read(&viaff).expect("读取失败");
             assert_eq!(
-                a, b,
+                a,
+                b,
                 "{label}: 进程内 libwebp 与 ffmpeg libwebp 输出不再逐字节相同\
                  （{}B vs {}B）——不得默默接受，需重生成缓存或重新标定质量",
                 a.len(),

@@ -5,15 +5,15 @@
 #[cfg(test)]
 mod tests {
     use crate::commands::book::{
-        copy_cover_image, cover_to_result, parse_and_cache, parse_cursor, prune_other_cover_images,
-        read_cache, read_epub_page, read_markdown_page, read_text_page, write_atomic,
-        BookMetaCache, MARKDOWN_PAGE_BLOCKS,
+        BookMetaCache, MARKDOWN_PAGE_BLOCKS, copy_cover_image, cover_to_result, parse_and_cache,
+        parse_cursor, prune_other_cover_images, read_cache, read_epub_page, read_markdown_page,
+        read_text_page, write_atomic,
     };
     // 阅读器一侧的取数拆在 `book_reader.rs`（目录）：测试仍集中在本文件。
     // 注：`ReaderCtx` 已不再被测试需要（目录读取现在是纯函数，见 2026-10-18 的
     // 渐进加载改造）。
     use crate::commands::book_reader::{
-        read_toc_by_media_type, read_toc_cache, read_toc_with_cache, TOC_CACHE_RULE,
+        TOC_CACHE_RULE, read_toc_by_media_type, read_toc_cache, read_toc_with_cache,
     };
     use hp_core::{HpError, MediaType};
     use hp_dto::BookSpanItem;
@@ -179,7 +179,8 @@ mod tests {
         );
         assert!(first.capped, "还有下一页 → 应标记「仅显示开头」");
 
-        let second = read_text_page_for_test(&path, hp_book::TEXT_PAGE_CHARS as u32).expect("读取失败");
+        let second =
+            read_text_page_for_test(&path, hp_book::TEXT_PAGE_CHARS as u32).expect("读取失败");
         assert_eq!(second.text.as_deref().unwrap().chars().count(), 50);
         assert_eq!(second.next_cursor, None, "末页没有下一页");
     }
@@ -440,10 +441,12 @@ mod tests {
         std::fs::write(&src, png).expect("写入失败");
         let name = copy_cover_image("f1", &src.to_string_lossy()).expect("拷贝失败");
         assert_eq!(name, "f1.png", "扩展名必须按 magic bytes 判定");
-        assert!(crate::commands::shared::user_covers_dir()
-            .expect("目录")
-            .join(&name)
-            .exists());
+        assert!(
+            crate::commands::shared::user_covers_dir()
+                .expect("目录")
+                .join(&name)
+                .exists()
+        );
     }
 
     #[test]
@@ -551,7 +554,8 @@ mod tests {
     fn txt_toc_cursor_round_trips_into_content() {
         let dir = temp_dir();
         let path = dir.join("novel.txt");
-        let text = "第一章 山边小村\n他抬起头，望向远处。\n第二章 青牛镇\n镇上人来人往。\n第三章 七玄门\n";
+        let text =
+            "第一章 山边小村\n他抬起头，望向远处。\n第二章 青牛镇\n镇上人来人往。\n第三章 七玄门\n";
         std::fs::write(&path, text.as_bytes()).expect("写入失败");
 
         // 目录读取**不需要任何上下文**（2026-10-18）：`read_toc_by_media_type`
@@ -560,13 +564,19 @@ mod tests {
         let toc = read_toc_by_media_type(MediaType::Text, &path, "txt").expect("读目录失败");
         assert_eq!(toc.format, "text");
         let titles: Vec<&str> = toc.entries.iter().map(|e| e.title.as_str()).collect();
-        assert_eq!(titles, vec!["第一章 山边小村", "第二章 青牛镇", "第三章 七玄门"]);
+        assert_eq!(
+            titles,
+            vec!["第一章 山边小村", "第二章 青牛镇", "第三章 七玄门"]
+        );
         // 总字符数 = 全书字符数（进度条按 `cursor / total` 算，口径与 cursor 一致）。
         // 2026-10-18：改成 `text_toc_stream` 的流式扫描后，`total` 由同一次扫描给出。
         assert_eq!(toc.total, Some(text.chars().count() as u32));
 
         // 跳到第二章：正文第一页必须以第二章开头。
-        let cursor = toc.entries[1].cursor.parse::<u32>().expect("游标是字符偏移");
+        let cursor = toc.entries[1]
+            .cursor
+            .parse::<u32>()
+            .expect("游标是字符偏移");
         let page = read_text_page(&path, cursor, "hash").expect("读取失败");
         let body = page.text.unwrap_or_default();
         assert!(
@@ -745,8 +755,8 @@ mod tests {
         )
         .expect("写入失败");
 
-        let toc = read_toc_with_cache(MediaType::Text, &path, "txt", &cache, hash)
-            .expect("读目录失败");
+        let toc =
+            read_toc_with_cache(MediaType::Text, &path, "txt", &cache, hash).expect("读目录失败");
         let titles: Vec<&str> = toc.entries.iter().map(|e| e.title.as_str()).collect();
         assert_eq!(titles, vec!["第一章 甲"], "规则版本不符的缓存必须被忽略");
         assert_eq!(toc.total, Some("第一章 甲\n".chars().count() as u32));

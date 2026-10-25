@@ -17,11 +17,11 @@ use hp_media::MediaProcess;
 use serde::Serialize;
 use tauri::{Manager, State};
 
+use crate::AppState;
 use crate::commands::shared::{
-    api_async, api_from_hp, external_bin_path, lock_repo, open_repo, ApiAsync,
+    ApiAsync, api_async, api_from_hp, external_bin_path, lock_repo, open_repo,
 };
 use crate::embed_window::EmbedWindow;
-use crate::AppState;
 
 /// 嵌入窗口类错误（Win32 窗口创建/几何同步失败）→ `io`。
 fn embed_err(message: impl Into<String>) -> HpError {
@@ -134,7 +134,9 @@ pub async fn media_play(
         // 放到阻塞线程池执行，绝不占主线程。
         let media = std::sync::Arc::clone(&state.media);
         tauri::async_runtime::spawn_blocking(move || -> HpResult<()> {
-            let mut guard = media.lock().map_err(|_| HpError::Store("媒体锁中毒".into()))?;
+            let mut guard = media
+                .lock()
+                .map_err(|_| HpError::Store("媒体锁中毒".into()))?;
             // 渲染目标变化（如从独立窗口切到面板嵌入）需重启常驻子进程以应用新 `--wid`。
             if let Some(process) = guard.as_mut() {
                 if process.wid() != wid {
@@ -192,7 +194,10 @@ pub async fn media_pause(
 ) -> ApiAsync<()> {
     let _ = session_id;
     let media = std::sync::Arc::clone(&state.media);
-    let outcome = run_media(media, move |process| process.set_pause(paused.unwrap_or(true))).await;
+    let outcome = run_media(media, move |process| {
+        process.set_pause(paused.unwrap_or(true))
+    })
+    .await;
     api_async(api_from_hp(outcome))
 }
 
@@ -211,10 +216,7 @@ pub async fn media_seek(
 
 /// media.stop：停止播放（保留常驻进程）。`session_id` 可选，理由同 `media_pause`。
 #[tauri::command]
-pub async fn media_stop(
-    session_id: Option<String>,
-    state: State<'_, AppState>,
-) -> ApiAsync<()> {
+pub async fn media_stop(session_id: Option<String>, state: State<'_, AppState>) -> ApiAsync<()> {
     let _ = session_id;
     let media = std::sync::Arc::clone(&state.media);
     let outcome = run_media(media, |process| process.stop()).await;
@@ -237,7 +239,9 @@ pub async fn media_toggle_pause(state: State<'_, AppState>) -> ApiAsync<TogglePa
     let media = std::sync::Arc::clone(&state.media);
     let outcome = async {
         tauri::async_runtime::spawn_blocking(move || -> HpResult<TogglePauseResult> {
-            let mut guard = media.lock().map_err(|_| HpError::Store("媒体锁中毒".into()))?;
+            let mut guard = media
+                .lock()
+                .map_err(|_| HpError::Store("媒体锁中毒".into()))?;
             let Some(process) = guard.as_mut() else {
                 return Ok(TogglePauseResult {
                     has_session: false,
@@ -271,7 +275,9 @@ where
     F: FnOnce(&mut MediaProcess) -> hp_core::HpResult<T> + Send + 'static,
 {
     tauri::async_runtime::spawn_blocking(move || -> HpResult<T> {
-        let mut guard = media.lock().map_err(|_| HpError::Store("媒体锁中毒".into()))?;
+        let mut guard = media
+            .lock()
+            .map_err(|_| HpError::Store("媒体锁中毒".into()))?;
         let process = guard
             .as_mut()
             .ok_or_else(|| media_err("媒体子进程未启动"))?;
@@ -287,7 +293,9 @@ pub async fn media_process_status(state: State<'_, AppState>) -> ApiAsync<MediaS
     let media = std::sync::Arc::clone(&state.media);
     let outcome = async {
         tauri::async_runtime::spawn_blocking(move || -> HpResult<MediaStatus> {
-            let mut guard = media.lock().map_err(|_| HpError::Store("媒体锁中毒".into()))?;
+            let mut guard = media
+                .lock()
+                .map_err(|_| HpError::Store("媒体锁中毒".into()))?;
             match guard.as_mut() {
                 Some(process) => Ok(MediaStatus {
                     alive: process.is_alive(),

@@ -11,16 +11,16 @@ use std::time::{Duration, Instant};
 
 use hp_core::{HpError, HpResult, Source};
 use hp_scanner::{ScanOptions, ScanOutcome, ScanPhase, ScanProgress};
-use hp_store::{build_source_tree, RepoDb};
+use hp_store::{RepoDb, build_source_tree};
 use serde::Serialize;
 use tauri::State;
 
+use crate::AppState;
+use crate::commands::shared::EmitHp;
 use crate::commands::shared::{
-    api_async, api_from_hp, lock_repo, open_repo, open_repo_mut, ApiAsync, ApiResponse,
+    ApiAsync, ApiResponse, api_async, api_from_hp, lock_repo, open_repo, open_repo_mut,
 };
 use crate::tasks::{RequestOutcome, TaskControl, TaskKind};
-use crate::commands::shared::EmitHp;
-use crate::AppState;
 
 /// 扫描时单个外部媒体进程（ffprobe 探测 / ffmpeg 抽帧）的超时上限。
 const SCAN_MEDIA_TIMEOUT: Duration = Duration::from_secs(20);
@@ -267,9 +267,7 @@ pub(crate) async fn source_unmount(
         let control = state
             .tasks
             .start(&task_id, TaskKind::Unmount)
-            .ok_or_else(|| {
-                HpError::AlreadyExists("已有任务正在进行中，请等待其结束。".into())
-            })?;
+            .ok_or_else(|| HpError::AlreadyExists("已有任务正在进行中，请等待其结束。".into()))?;
         let repo_path: PathBuf = match state.current_repo_path.lock() {
             Ok(guard) => match guard.clone() {
                 Some(p) => p,
@@ -541,12 +539,9 @@ pub(crate) async fn source_scan(
 
         // 单任务闸门 + 按 `task_id` 登记控制块（登记在启动线程之前，缺陷 0003）
         let task_id = uuid::Uuid::new_v4().to_string();
-        let control = state
-            .tasks
-            .start(&task_id, TaskKind::Scan)
-            .ok_or_else(|| {
-                HpError::AlreadyExists("已有任务正在进行中，请等待其结束或先取消。".into())
-            })?;
+        let control = state.tasks.start(&task_id, TaskKind::Scan).ok_or_else(|| {
+            HpError::AlreadyExists("已有任务正在进行中，请等待其结束或先取消。".into())
+        })?;
 
         // 扫描用的仓库库路径（缺失说明仓库未打开）
         let repo_path: PathBuf = match state.current_repo_path.lock() {
@@ -712,7 +707,10 @@ pub(crate) struct TaskPauseResult {
 ///   （让"已暂停中的扫描"立刻退出等待）。
 /// - 目标不是当前任务 → `cancelled: false`，**一点状态都不动**（幂等，不报错）。
 #[tauri::command]
-pub(crate) fn task_cancel(task_id: String, state: State<AppState>) -> ApiResponse<TaskCancelResult> {
+pub(crate) fn task_cancel(
+    task_id: String,
+    state: State<AppState>,
+) -> ApiResponse<TaskCancelResult> {
     let outcome = (|| -> HpResult<TaskCancelResult> {
         if task_id.trim().is_empty() {
             return Err(HpError::InvalidArgument("任务 ID 不能为空".into()));

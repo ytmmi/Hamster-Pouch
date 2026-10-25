@@ -3,20 +3,20 @@
 use std::path::PathBuf;
 
 use hp_core::{
-    registry_decl_for_storage_key, scoped_storage_key, validate_setting_value, Capability,
-    HpError, HpResult, RepoId, SettingScope,
+    Capability, HpError, HpResult, RepoId, SettingScope, registry_decl_for_storage_key,
+    scoped_storage_key, validate_setting_value,
 };
 use hp_plugin_host::PluginHost;
 use hp_store::RepoDb;
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{
-    api_from_hp, default_repo_dir, ensure_global, global, global_mut, lock_global, lock_repo,
-    ApiResponse,
-};
-use crate::commands::shared::EmitHp;
 use crate::AppState;
+use crate::commands::shared::EmitHp;
+use crate::commands::shared::{
+    ApiResponse, api_from_hp, default_repo_dir, ensure_global, global, global_mut, lock_global,
+    lock_repo,
+};
 
 /// `app_settings` 的一行（`setting.list` 的 `items` 元素）。
 #[derive(Serialize)]
@@ -129,7 +129,8 @@ impl SettingTarget {
                     .map_err(HpError::InvalidArgument)
                     .map_err(|e| match (decl.kind.as_str(), e) {
                         ("select", HpError::InvalidArgument(_)) => HpError::InvalidArgument(
-                            "插件 select 设置项的值必须是字符串（manifest 尚未声明 options）".into(),
+                            "插件 select 设置项的值必须是字符串（manifest 尚未声明 options）"
+                                .into(),
                         ),
                         (_, e) => e,
                     })
@@ -172,7 +173,10 @@ fn ensure_setting_capability(
     target: &SettingTarget,
     repo_id: Option<&str>,
 ) -> HpResult<()> {
-    let SettingTarget::Plugin { plugin_id, decl, .. } = target else {
+    let SettingTarget::Plugin {
+        plugin_id, decl, ..
+    } = target
+    else {
         return Ok(());
     };
     let Some(raw) = decl.requires_capability.as_deref() else {
@@ -403,8 +407,9 @@ pub(crate) fn setting_get(
         ensure_global(&state, &app)?;
         let target = resolve_setting_target(&state, &key)?;
         ensure_setting_capability(&state, &target, repo_id.as_deref())?;
-        let storage_key = scoped_storage_key(&target.base_key(), target.scope(), repo_id.as_deref())
-            .map_err(HpError::InvalidArgument)?;
+        let storage_key =
+            scoped_storage_key(&target.base_key(), target.scope(), repo_id.as_deref())
+                .map_err(HpError::InvalidArgument)?;
         let guard = state
             .global_db
             .lock()
@@ -508,8 +513,9 @@ pub(crate) fn setting_reset(
         ensure_global(&state, &app)?;
         let target = resolve_setting_target(&state, &key)?;
         ensure_setting_capability(&state, &target, repo_id.as_deref())?;
-        let storage_key = scoped_storage_key(&target.base_key(), target.scope(), repo_id.as_deref())
-            .map_err(HpError::InvalidArgument)?;
+        let storage_key =
+            scoped_storage_key(&target.base_key(), target.scope(), repo_id.as_deref())
+                .map_err(HpError::InvalidArgument)?;
         {
             let guard = state
                 .global_db

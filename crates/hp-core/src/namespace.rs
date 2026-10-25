@@ -29,7 +29,9 @@ pub fn is_bare_id(id: &str) -> bool {
         _ => return false,
     }
     id.len() <= 64
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.' || c == '-')
+        && chars.all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.' || c == '-'
+        })
 }
 
 /// 插件 id 规则（manifest `id`）：`^[a-z0-9][a-z0-9._-]{2,63}$`。
@@ -40,7 +42,9 @@ pub fn is_valid_plugin_id(id: &str) -> bool {
         _ => return false,
     }
     (3..=64).contains(&id.len())
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.' || c == '-')
+        && chars.all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.' || c == '-'
+        })
 }
 
 /// 注册项 id 是否用了插件命名空间 `plugin.<plugin_id>.<local_id>`。
@@ -84,14 +88,18 @@ mod tests {
         assert!(!is_valid_namespaced_id("plugin.x.y"));
         assert!(!is_valid_namespaced_id("plugin..panel"));
 
-        assert!(is_plugin_namespaced_id("plugin.dev.hamsterpouch.palette.palette"));
+        assert!(is_plugin_namespaced_id(
+            "plugin.dev.hamsterpouch.palette.palette"
+        ));
         assert!(!is_plugin_namespaced_id("plugin.palette"));
         assert!(!is_plugin_namespaced_id("plugin.x.y"));
         assert!(!is_plugin_namespaced_id("palette"));
         // 宿主裸 id 永远不会被当成插件项，反之亦然（形式保证，不靠消歧）。
         assert!(!is_plugin_namespaced_id("control"));
         assert!(is_valid_namespaced_id("control"));
-        assert!(is_valid_namespaced_id("plugin.dev.hamsterpouch.music.waveform"));
+        assert!(is_valid_namespaced_id(
+            "plugin.dev.hamsterpouch.music.waveform"
+        ));
     }
 
     #[test]
@@ -100,7 +108,10 @@ mod tests {
             "plugin.dev.hamsterpouch.palette.palette",
             "dev.hamsterpouch.palette"
         ));
-        assert!(!is_id_in_plugin_namespace("media", "dev.hamsterpouch.palette"));
+        assert!(!is_id_in_plugin_namespace(
+            "media",
+            "dev.hamsterpouch.palette"
+        ));
         assert!(!is_id_in_plugin_namespace(
             "plugin.other.plugin.palette",
             "dev.hamsterpouch.palette"

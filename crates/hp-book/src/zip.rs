@@ -128,7 +128,7 @@ impl Source {
                             return Err(HpError::Io(format!(
                                 "读取压缩包失败（偏移 {at}，长度 {}）: {e}",
                                 len - filled
-                            )))
+                            )));
                         }
                     }
                 }
@@ -167,11 +167,10 @@ impl ZipArchive {
     /// 打开一个 ZIP 文件：只读文件尾部与中央目录，条目内容按需读取。
     pub fn open(path: &Path) -> HpResult<Self> {
         let file = File::open(path).map_err(|e| io_err(path, "读取压缩包失败", e))?;
-        Self::from_source(Source::File(file))
-            .map_err(|e| match e {
-                HpError::Io(msg) => HpError::Io(format!("{msg}（{}）", path.display())),
-                other => other,
-            })
+        Self::from_source(Source::File(file)).map_err(|e| match e {
+            HpError::Io(msg) => HpError::Io(format!("{msg}（{}）", path.display())),
+            other => other,
+        })
     }
 
     /// 从内存字节解析（测试与调用方复用同一实现）。
@@ -278,7 +277,10 @@ impl ZipArchive {
         let head = entry.local_header_offset as u64;
         let header = self.source.read_range(head, 30)?;
         if le_u32(&header, 0) != Some(LOCAL_SIG) {
-            return Err(HpError::Io(format!("ZIP 本地文件头签名异常：{}", entry.name)));
+            return Err(HpError::Io(format!(
+                "ZIP 本地文件头签名异常：{}",
+                entry.name
+            )));
         }
         let name_len = le_u16(&header, 26).unwrap_or(0) as usize;
         let extra_len = le_u16(&header, 28).unwrap_or(0) as usize;
@@ -288,9 +290,7 @@ impl ZipArchive {
             .checked_add(entry.compressed_size as u64)
             .filter(|end| *end <= len)
             .ok_or_else(|| HpError::Io(format!("ZIP 条目数据越界：{}", entry.name)))?;
-        let raw = self
-            .source
-            .read_range(start, (end - start) as usize)?;
+        let raw = self.source.read_range(start, (end - start) as usize)?;
         if raw.len() as u64 != end - start {
             return Err(HpError::Io(format!("ZIP 条目数据越界：{}", entry.name)));
         }
@@ -340,10 +340,16 @@ mod tests {
 
     #[test]
     fn reads_stored_entries() {
-        let zip = build_test_zip(&[("mimetype", b"application/epub+zip", false), ("a/b.txt", b"hi", false)]);
+        let zip = build_test_zip(&[
+            ("mimetype", b"application/epub+zip", false),
+            ("a/b.txt", b"hi", false),
+        ]);
         let archive = ZipArchive::from_bytes(zip).expect("解析失败");
         assert_eq!(archive.entries().len(), 2);
-        let body = archive.read("a/b.txt").expect("读取失败").expect("条目不存在");
+        let body = archive
+            .read("a/b.txt")
+            .expect("读取失败")
+            .expect("条目不存在");
         assert_eq!(body, b"hi");
         assert!(archive.read("missing").expect("读取失败").is_none());
     }
@@ -353,7 +359,10 @@ mod tests {
         let zip = build_test_zip(&[("a.txt", b"hello hello hello hello", true)]);
         let archive = ZipArchive::from_bytes(zip).expect("解析失败");
         assert_eq!(
-            archive.read("a.txt").expect("读取失败").expect("条目不存在"),
+            archive
+                .read("a.txt")
+                .expect("读取失败")
+                .expect("条目不存在"),
             b"hello hello hello hello"
         );
     }
@@ -388,8 +397,12 @@ mod tests {
         let dir = tempfile::tempdir().expect("创建临时目录失败");
         let path = dir.path().join("sample.zip");
         let mut f = std::fs::File::create(&path).expect("创建失败");
-        f.write_all(&build_test_zip(&[("mimetype", b"application/epub+zip", false)]))
-            .expect("写入失败");
+        f.write_all(&build_test_zip(&[(
+            "mimetype",
+            b"application/epub+zip",
+            false,
+        )]))
+        .expect("写入失败");
         drop(f);
         let archive = ZipArchive::open(&path).expect("打开失败");
         assert_eq!(archive.entries().len(), 1);

@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use hp_core::{HpError, HpResult};
-use image::imageops::FilterType;
 use image::DynamicImage;
+use image::imageops::FilterType;
 
 /// 感知哈希算法名（写入 `files.perceptual_hash_algo`）。
 pub const PERCEPTUAL_HASH_ALGO: &str = "dHash";

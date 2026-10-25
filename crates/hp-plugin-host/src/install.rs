@@ -7,11 +7,11 @@ use std::path::{Path, PathBuf};
 
 use hp_core::{HpError, HpResult, PluginRegistryRow, TrustLevel};
 use hp_plugin_signing::check_plugin_signature;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
-use crate::manifest::{read_package, PluginPackage, MANIFEST_FILE};
-use crate::trust::{effective_trust, HostSourceKind};
+use crate::manifest::{MANIFEST_FILE, PluginPackage, read_package};
+use crate::trust::{HostSourceKind, effective_trust};
 
 /// 安装来源：**宿主按实际安装方式判定的**（RFC 0009「来源与信任判定」）。
 ///
@@ -24,7 +24,11 @@ pub enum InstallSource {
     /// 本地路径（git 插件的本地路径形式）→ `local-path`。
     LocalPath(PathBuf),
     /// git 仓库：本地已克隆目录 + 锁定 URL 与 ref → `git`。
-    Git { dir: PathBuf, url: String, rev: String },
+    Git {
+        dir: PathBuf,
+        url: String,
+        rev: String,
+    },
 }
 
 impl InstallSource {
@@ -74,9 +78,9 @@ impl PluginInstaller {
         if !sig_file.is_file() {
             return Ok(()); // 无签名文件 → 信任降级由 registry_row_of 处理
         }
-        match check_plugin_signature(dir).map_err(|e| {
-            HpError::Plugin(format!("插件签名检查失败: {e}"))
-        })? {
+        match check_plugin_signature(dir)
+            .map_err(|e| HpError::Plugin(format!("插件签名检查失败: {e}")))?
+        {
             hp_plugin_signing::SignatureStatus::Verified => Ok(()),
             hp_plugin_signing::SignatureStatus::Missing => Ok(()),
             hp_plugin_signing::SignatureStatus::Invalid(e) => {
@@ -105,10 +109,7 @@ impl PluginInstaller {
             write_lock(&dest, url, rev)?;
         }
 
-        Ok(InstalledPackage {
-            package,
-            dir: dest,
-        })
+        Ok(InstalledPackage { package, dir: dest })
     }
 
     /// 安装或**复用**同版本目录：已存在则不复制、不覆盖，直接读回已安装包。
@@ -142,13 +143,7 @@ impl PluginInstaller {
             write_lock(&dest, url, rev)?;
         }
 
-        Ok((
-            InstalledPackage {
-                package,
-                dir: dest,
-            },
-            false,
-        ))
+        Ok((InstalledPackage { package, dir: dest }, false))
     }
 
     /// 由已安装包构造注册表行：`source_kind` / `trust_level` **同源于宿主判定**。
@@ -301,8 +296,8 @@ fn write_lock(dir: &Path, url: &str, rev: &str) -> HpResult<()> {
 /// 递归复制目录（含子目录与文件）。
 fn copy_dir(src: &Path, dest: &Path) -> HpResult<()> {
     std::fs::create_dir_all(dest).map_err(|e| HpError::Io(format!("创建插件目录失败: {e}")))?;
-    let entries = std::fs::read_dir(src)
-        .map_err(|e| HpError::Io(format!("读取插件源目录失败: {e}")))?;
+    let entries =
+        std::fs::read_dir(src).map_err(|e| HpError::Io(format!("读取插件源目录失败: {e}")))?;
     for entry in entries {
         let entry = entry.map_err(|e| HpError::Io(format!("读取插件源项失败: {e}")))?;
         let from = entry.path();
@@ -310,8 +305,7 @@ fn copy_dir(src: &Path, dest: &Path) -> HpResult<()> {
         if from.is_dir() {
             copy_dir(&from, &to)?;
         } else {
-            std::fs::copy(&from, &to)
-                .map_err(|e| HpError::Io(format!("复制插件文件失败: {e}")))?;
+            std::fs::copy(&from, &to).map_err(|e| HpError::Io(format!("复制插件文件失败: {e}")))?;
         }
     }
     Ok(())
@@ -340,7 +334,10 @@ mod tests {
         std::fs::create_dir_all(dir.join("bin")).expect("建目录失败");
         std::fs::write(
             dir.join(MANIFEST_FILE),
-            SAMPLE.replace("\"version\": \"0.1.0\"", &format!("\"version\": \"{version}\"")),
+            SAMPLE.replace(
+                "\"version\": \"0.1.0\"",
+                &format!("\"version\": \"{version}\""),
+            ),
         )
         .expect("写清单失败");
         std::fs::write(dir.join("bin").join("hello.exe"), b"bin").expect("写入口失败");
@@ -365,7 +362,9 @@ mod tests {
             .install(&InstallSource::LocalPath(v2))
             .expect("安装第二版失败");
 
-        let versions = installer.list_versions("dev.hamsterpouch.hello").expect("列版本失败");
+        let versions = installer
+            .list_versions("dev.hamsterpouch.hello")
+            .expect("列版本失败");
         assert_eq!(versions, vec!["0.1.0".to_string(), "0.2.0".to_string()]);
 
         // 回滚：切回旧目录，旧目录仍在。
@@ -373,7 +372,10 @@ mod tests {
             .rollback("dev.hamsterpouch.hello", "0.1.0")
             .expect("回滚失败");
         assert!(old.is_dir());
-        assert_eq!(old, installer.version_dir("dev.hamsterpouch.hello", "0.1.0"));
+        assert_eq!(
+            old,
+            installer.version_dir("dev.hamsterpouch.hello", "0.1.0")
+        );
     }
 
     #[test]
@@ -408,7 +410,11 @@ mod tests {
     fn rollback_missing_version_fails() {
         let tmp = tempfile::tempdir().expect("临时目录失败").keep();
         let installer = PluginInstaller::new(tmp.join("store"));
-        assert!(installer.rollback("dev.hamsterpouch.hello", "9.9.9").is_err());
+        assert!(
+            installer
+                .rollback("dev.hamsterpouch.hello", "9.9.9")
+                .is_err()
+        );
     }
 
     /// 幂等入口：重复播种同版本 = 复用既有目录（不报错、不覆盖），

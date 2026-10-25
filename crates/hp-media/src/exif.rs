@@ -22,8 +22,7 @@ pub struct ImageExif {
 
 /// 提取图片 EXIF；无 EXIF 时返回空摘要（降级，不报错）。
 pub fn extract_exif(path: &Path) -> HpResult<ImageExif> {
-    let file =
-        std::fs::File::open(path).map_err(|e| HpError::Io(format!("打开图片失败: {e}")))?;
+    let file = std::fs::File::open(path).map_err(|e| HpError::Io(format!("打开图片失败: {e}")))?;
     let mut reader = std::io::BufReader::new(file);
     let exif = match Reader::new().read_from_container(&mut reader) {
         Ok(exif) => exif,

@@ -245,7 +245,11 @@ pub fn decode_head(bytes: &[u8], max_chars: usize) -> DecodedText {
 /// 本函数按 `bytes.len() > max_bytes` 判"是否截断"，两者口径一致。
 pub fn decode_head_limited(bytes: &[u8], max_chars: usize, max_bytes: usize) -> DecodedText {
     let truncated_bytes = bytes.len() > max_bytes;
-    decode_head_flagged(&bytes[..bytes.len().min(max_bytes)], max_chars, truncated_bytes)
+    decode_head_flagged(
+        &bytes[..bytes.len().min(max_bytes)],
+        max_chars,
+        truncated_bytes,
+    )
 }
 
 /// 解码本体：`head` 是**已经切好**的字节，`truncated_bytes` 是"上游还丢了内容"这个事实。
@@ -316,7 +320,11 @@ pub fn decode_file_head(path: &Path, max_chars: usize) -> HpResult<DecodedText> 
 /// 先按 `max_bytes + 1` 读：多读的那一个字节就是"文件比上限大"的**证据**——
 /// 只读 `max_bytes` 的话，一个恰好等于上限的文件与一个更大的文件会被判成同一种，
 /// `capped` 于是说谎。
-pub fn decode_file_limited(path: &Path, max_chars: usize, max_bytes: usize) -> HpResult<DecodedText> {
+pub fn decode_file_limited(
+    path: &Path,
+    max_chars: usize,
+    max_bytes: usize,
+) -> HpResult<DecodedText> {
     use std::io::Read;
 
     let file = std::fs::File::open(path)
@@ -416,7 +424,10 @@ mod tests {
         // 造一段超过字节上限的 UTF-8（切在汉字中间）→ 尾部替换字符应被丢掉。
         let text = "汉".repeat(TEXT_VIEW_MAX_BYTES);
         let decoded = decode_head(text.as_bytes(), 10);
-        assert!(!decoded.text.ends_with('\u{FFFD}'), "截断产生的替换字符应被丢掉");
+        assert!(
+            !decoded.text.ends_with('\u{FFFD}'),
+            "截断产生的替换字符应被丢掉"
+        );
         // 反之：文件本身就带 U+FFFD 且未被字节上限截断时，不得误删。
         let decoded_short = decode_head("正文\u{FFFD}".as_bytes(), 100);
         assert!(
@@ -486,8 +497,9 @@ mod tests {
         std::fs::write(&path, "汉".repeat(8)).expect("写入失败");
         let decoded = decode_file_limited(&path, usize::MAX, 10).expect("解码失败");
         assert!(decoded.capped);
-        assert!(!decoded.text.ends_with('\u{FFFD}'), "截断产生的替换字符应被丢掉");
+        assert!(
+            !decoded.text.ends_with('\u{FFFD}'),
+            "截断产生的替换字符应被丢掉"
+        );
     }
 }
-
-

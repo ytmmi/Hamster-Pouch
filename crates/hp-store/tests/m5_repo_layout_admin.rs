@@ -27,10 +27,11 @@ fn layout_rename_and_delete() {
 
     g.rename_panel_layout("repo-1", "旧名", "新名")
         .expect("重命名失败");
-    assert!(g
-        .get_panel_layout("repo-1", "旧名", "")
-        .expect("查询失败")
-        .is_none());
+    assert!(
+        g.get_panel_layout("repo-1", "旧名", "")
+            .expect("查询失败")
+            .is_none()
+    );
     let renamed = g
         .get_panel_layout("repo-1", "新名", "")
         .expect("查询失败")
@@ -38,11 +39,15 @@ fn layout_rename_and_delete() {
     assert_eq!(renamed.layout_json, r#"{"v":1}"#);
 
     g.delete_panel_layout("repo-1", "新名").expect("删除失败");
-    assert!(g
-        .get_panel_layout("repo-1", "新名", "")
-        .expect("查询失败")
-        .is_none());
-    assert!(g.delete_panel_layout("repo-1", "新名").is_err(), "重复删除应报错");
+    assert!(
+        g.get_panel_layout("repo-1", "新名", "")
+            .expect("查询失败")
+            .is_none()
+    );
+    assert!(
+        g.delete_panel_layout("repo-1", "新名").is_err(),
+        "重复删除应报错"
+    );
 }
 
 #[test]

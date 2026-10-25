@@ -8,7 +8,7 @@
 //! 一次性遍历回写（D52/D58：文档内 `schema_version` 为权威，列同步写入）。
 
 use hp_core::{BlueprintTemplateRow, HpError, HpResult};
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use super::global_db::GlobalDb;
 use crate::util::{now_iso, require_nonempty, store_err, uuid};
@@ -123,10 +123,7 @@ impl GlobalDb {
         require_nonempty(id, "模板 ID")?;
         let n = self
             .conn()
-            .execute(
-                "DELETE FROM blueprint_templates WHERE id = ?1",
-                params![id],
-            )
+            .execute("DELETE FROM blueprint_templates WHERE id = ?1", params![id])
             .map_err(|e| store_err("删除蓝图模板", e))?;
         if n == 0 {
             return Err(HpError::NotFound(format!("蓝图模板不存在: {id}")));

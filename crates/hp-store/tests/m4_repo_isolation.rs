@@ -92,7 +92,7 @@ fn tag_and_rating_are_isolated_between_repos() {
     let tag2 = db2
         .create_tag("repo-2", "风景", None)
         .expect("创建 tag 失败");
-        db2.add_file_tag(f2.as_str(), tag2.id.as_str())
+    db2.add_file_tag(f2.as_str(), tag2.id.as_str())
         .expect("建立关联失败");
     assert_eq!(db1.list_tags("repo-1").expect("列 tag 失败").len(), 1);
     assert_eq!(db1.count_file_tags(tag.id.as_str()).expect("统计失败"), 1);

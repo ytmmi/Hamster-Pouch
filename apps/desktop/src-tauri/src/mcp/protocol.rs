@@ -12,10 +12,10 @@
 //! **没有**声明 `resources`、`prompts`、`sampling`、`roots`——本服务的定位是
 //! 让外部模型读写仓鼠颊里的数据，不需要反向索取宿主上下文。
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::jsonrpc::{
-    Request, Response, RpcError, INTERNAL_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND,
+    INTERNAL_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, Request, Response, RpcError,
 };
 use super::tools;
 
@@ -29,7 +29,11 @@ pub(crate) const PROTOCOL_VERSION: &str = "2025-06-18";
 pub(crate) const SERVER_NAME: &str = "hamster-pouch";
 
 /// 处理一条请求，返回应当回给客户端的响应；通知返回 `None`。
-pub(crate) fn dispatch(app: &tauri::AppHandle, allow_write: bool, request: &Request) -> Option<Response> {
+pub(crate) fn dispatch(
+    app: &tauri::AppHandle,
+    allow_write: bool,
+    request: &Request,
+) -> Option<Response> {
     if !request.is_valid() {
         let id = request.id.clone().unwrap_or(Value::Null);
         return Some(Response::err(
@@ -97,9 +101,9 @@ fn initialize_result() -> Value {
             "version": env!("CARGO_PKG_VERSION"),
         },
         "instructions": "仓鼠颊是本机资源管理软件。这里的工具作用在「当前在应用里打开的仓库」上：\
-先用 repo_current 确认仓库，再用 file_query / source_tree / tag_tree 了解内容。\
-写操作（重命名、移入回收站、复制、移动、打标、评分、相册增删）需要用户在设置里打开「允许写操作」。\
-文件用 fileId（稳定 ID）标识，不是路径；需要绝对路径时用 file_path。",
+    先用 repo_current 确认仓库，再用 file_query / source_tree / tag_tree 了解内容。\
+    写操作（重命名、移入回收站、复制、移动、打标、评分、相册增删）需要用户在设置里打开「允许写操作」。\
+    文件用 fileId（稳定 ID）标识，不是路径；需要绝对路径时用 file_path。",
     })
 }
 
@@ -119,7 +123,10 @@ fn validate_tool_call(params: &Value) -> Result<(String, Value), RpcError> {
         .and_then(Value::as_str)
         .ok_or_else(|| RpcError::new(super::jsonrpc::INVALID_PARAMS, "缺少参数 name（工具名）"))?
         .to_string();
-    let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+    let arguments = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
     if !arguments.is_object() && !arguments.is_null() {
         return Err(RpcError::new(
             super::jsonrpc::INVALID_PARAMS,
@@ -230,7 +237,12 @@ mod tests {
     /// 通知（无 `id`）一律不回包——这一判定发生在分发最前面，不需要 AppState。
     #[test]
     fn notifications_are_recognised_before_dispatch() {
-        for method in ["notifications/initialized", "initialize", "tools/list", "ping"] {
+        for method in [
+            "notifications/initialized",
+            "initialize",
+            "tools/list",
+            "ping",
+        ] {
             let req = request(None, method, None);
             assert!(req.is_notification(), "无 id 必须判为通知: {method}");
         }

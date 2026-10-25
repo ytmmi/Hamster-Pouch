@@ -12,14 +12,14 @@ use hp_store::RepoDb;
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{
-    api_async, api_from_hp, file_to_item, lock_repo, open_repo, open_repo_mut, resolve_file_path,
-    AlbumFileItem, ApiAsync, ApiResponse,
-};
+use crate::AppState;
 use crate::commands::shared::EmitHp;
+use crate::commands::shared::{
+    AlbumFileItem, ApiAsync, ApiResponse, api_async, api_from_hp, file_to_item, lock_repo,
+    open_repo, open_repo_mut, resolve_file_path,
+};
 use crate::commands::source::{ScanCompletedEvent, ScanErrorEvent, ScanProgressEvent};
 use crate::tasks::{TaskControl, TaskKind};
-use crate::AppState;
 
 /// 后台线程按需生成缩略图（缓存未命中时才调用；不阻塞 IPC 线程）。
 ///
@@ -381,7 +381,8 @@ pub(crate) fn file_rename(
         if new_name.is_empty() {
             return Err(HpError::InvalidArgument("文件名不能为空".into()));
         }
-        if new_name.contains('/') || new_name.contains('\\') || new_name == "." || new_name == ".." {
+        if new_name.contains('/') || new_name.contains('\\') || new_name == "." || new_name == ".."
+        {
             return Err(HpError::InvalidArgument("文件名非法".into()));
         }
 
@@ -396,10 +397,11 @@ pub(crate) fn file_rename(
             .ok_or_else(|| HpError::Io("无法解析文件父目录".into()))?;
         let target = parent.join(new_name);
         if target.exists() {
-            return Err(HpError::AlreadyExists(format!("目标文件已存在: {new_name}")));
+            return Err(HpError::AlreadyExists(format!(
+                "目标文件已存在: {new_name}"
+            )));
         }
-        std::fs::rename(&old_path, &target)
-            .map_err(|e| HpError::Io(format!("重命名失败: {e}")))?;
+        std::fs::rename(&old_path, &target).map_err(|e| HpError::Io(format!("重命名失败: {e}")))?;
 
         // 新相对路径 = 原目录部分 + 新文件名
         let new_rel = match file.relative_path.rsplit_once(|c| c == '/' || c == '\\') {
@@ -434,7 +436,8 @@ pub(crate) fn file_trash(
             };
             if let Ok(path) = resolve_file_path(db, &file) {
                 if path.exists() {
-                    trash::delete(&path).map_err(|e| HpError::Io(format!("移入回收站失败: {e}")))?;
+                    trash::delete(&path)
+                        .map_err(|e| HpError::Io(format!("移入回收站失败: {e}")))?;
                 }
             }
             removed.push(id.clone());
@@ -470,7 +473,9 @@ pub(crate) fn file_set_marks(
         // 标记 id 必须命名合法（不合规则的才拒绝；未注册的允许写入，见命令文档）。
         for mark in add.iter().chain(remove.iter()) {
             if !hp_core::is_valid_namespaced_id(mark) {
-                return Err(HpError::InvalidArgument(format!("标记命名不合规则: {mark}")));
+                return Err(HpError::InvalidArgument(format!(
+                    "标记命名不合规则: {mark}"
+                )));
             }
         }
         let mut guard = lock_repo(&state)?;
@@ -605,7 +610,10 @@ fn run_reanalyze(
     let file = match db.get_file(file_id) {
         Ok(Some(file)) => file,
         Ok(None) => {
-            return Err((String::new(), HpError::NotFound(format!("文件不存在: {file_id}"))))
+            return Err((
+                String::new(),
+                HpError::NotFound(format!("文件不存在: {file_id}")),
+            ));
         }
         Err(e) => return Err((String::new(), e)),
     };
@@ -638,10 +646,13 @@ fn run_reanalyze(
         ..ScanOptions::default()
     };
     let cancel = control.cancel_flag();
-    match state
-        .scanner
-        .rescan_file(&mut db, &source, &file.relative_path, &options, Some(&cancel))
-    {
+    match state.scanner.rescan_file(
+        &mut db,
+        &source,
+        &file.relative_path,
+        &options,
+        Some(&cancel),
+    ) {
         Ok(outcome) => Ok((source_id, outcome)),
         Err(e) => Err((source_id, e)),
     }

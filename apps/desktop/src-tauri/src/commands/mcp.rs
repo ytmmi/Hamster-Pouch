@@ -8,9 +8,9 @@
 
 use tauri::State;
 
-use crate::commands::shared::{api_ok, ApiResponse};
-use crate::mcp;
 use crate::AppState;
+use crate::commands::shared::{ApiResponse, api_ok};
+use crate::mcp;
 
 /// MCP 服务当前状态。
 #[derive(serde::Serialize)]
@@ -36,7 +36,10 @@ pub(crate) struct McpStatusResult {
 /// 真正的边界是"服务默认关闭 + 只绑回环 + 需要 token"，
 /// 而不是"把 token 藏起来不给自己看"。
 #[tauri::command]
-pub(crate) fn mcp_status(state: State<AppState>, app: tauri::AppHandle) -> ApiResponse<McpStatusResult> {
+pub(crate) fn mcp_status(
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> ApiResponse<McpStatusResult> {
     let cfg = mcp::read_config(&app);
     let running = state.mcp.status();
     let port = running.map(|(port, _)| port).unwrap_or(cfg.port);
@@ -58,7 +61,10 @@ pub(crate) fn mcp_status(state: State<AppState>, app: tauri::AppHandle) -> ApiRe
 /// 正常情况下不需要调——`setting.set` 写入 `mcp.*` 后会自动应用；
 /// 这条命令留给"端口被别的程序占了、改完想再试一次"的场景。
 #[tauri::command]
-pub(crate) fn mcp_reload(state: State<AppState>, app: tauri::AppHandle) -> ApiResponse<McpStatusResult> {
+pub(crate) fn mcp_reload(
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> ApiResponse<McpStatusResult> {
     state.mcp.apply(&app);
     mcp_status(state, app)
 }

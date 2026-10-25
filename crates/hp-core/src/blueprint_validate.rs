@@ -9,14 +9,14 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::blueprint::{
-    BlueprintGraph, BLUEPRINT_SCHEMA_VERSION, OVERLAY_HEIGHT_MAX, OVERLAY_HEIGHT_MIN,
+    BLUEPRINT_SCHEMA_VERSION, BlueprintGraph, OVERLAY_HEIGHT_MAX, OVERLAY_HEIGHT_MIN,
     OVERLAY_MAX_SIZE,
 };
 use crate::blueprint_node::{BlueprintEdge, BlueprintNode};
 use crate::blueprint_registry::{NodeRegistry, SeverityLevel};
 use crate::blueprint_types::{
-    is_valid_class_media_type, subclass_formats_for, ActionOp, EdgeKind, GroupMode, NodeType,
-    Trigger, CLASS_MEDIA_TYPES,
+    ActionOp, CLASS_MEDIA_TYPES, EdgeKind, GroupMode, NodeType, Trigger, is_valid_class_media_type,
+    subclass_formats_for,
 };
 
 /// 一条校验结论：消息 + **分级**（硬错误 / 未接通软告警）。
@@ -60,7 +60,10 @@ pub(crate) fn validate_graph(graph: &BlueprintGraph) -> Vec<String> {
 /// 宿主把插件注册表注入后，已启用插件的节点类型不再被标为「未接通」；
 /// 未注入（`builtin_only`）时，命名合法但无注册项的类型按**软告警**处理
 /// （不阻塞保存，RFC 0010 决策 6）。
-pub(crate) fn validate_graph_with(graph: &BlueprintGraph, registry: &NodeRegistry) -> Vec<NodeIssue> {
+pub(crate) fn validate_graph_with(
+    graph: &BlueprintGraph,
+    registry: &NodeRegistry,
+) -> Vec<NodeIssue> {
     let mut issues: Vec<NodeIssue> = Vec::new();
 
     // 版本闸门：`>` 当前版本才是硬错误；更低版本先走迁移（D58），迁移后再校验。
@@ -220,10 +223,9 @@ fn find_state_conflicts(graph: &BlueprintGraph, registry: &NodeRegistry) -> Vec<
                 .filter(|n| {
                     n.node_type == NodeType::Event
                         && n.trigger.as_ref() == Some(trigger)
-                        && graph
-                            .edges
-                            .iter()
-                            .any(|e| e.edge_kind == EdgeKind::On && e.from == source.key && e.to == n.key)
+                        && graph.edges.iter().any(|e| {
+                            e.edge_kind == EdgeKind::On && e.from == source.key && e.to == n.key
+                        })
                 })
                 .map(|n| n.key.as_str())
                 .collect();
@@ -234,17 +236,14 @@ fn find_state_conflicts(graph: &BlueprintGraph, registry: &NodeRegistry) -> Vec<
             let mut seen: HashSet<&str> = events.iter().copied().collect();
             while let Some(key) = queue.pop() {
                 for edge in graph.edges.iter().filter(|e| {
-                    e.from == key
-                        && matches!(e.edge_kind, EdgeKind::Fires | EdgeKind::Guards)
+                    e.from == key && matches!(e.edge_kind, EdgeKind::Fires | EdgeKind::Guards)
                 }) {
                     if !seen.insert(edge.to.as_str()) {
                         continue;
                     }
                     match graph.node(&edge.to) {
                         Some(n) if n.node_type == NodeType::Action => reached.push(n.key.as_str()),
-                        Some(n) if n.node_type == NodeType::Condition => {
-                            queue.push(n.key.as_str())
-                        }
+                        Some(n) if n.node_type == NodeType::Condition => queue.push(n.key.as_str()),
                         _ => {}
                     }
                 }
@@ -290,20 +289,21 @@ fn find_state_conflicts(graph: &BlueprintGraph, registry: &NodeRegistry) -> Vec<
                     continue;
                 }
                 for b in states.iter().skip(i + 1) {
-                    if a.panel_id.is_none()
-                        || a.panel_id == b.panel_id
-                        || !is_visible_op(b.op)
-                    {
+                    if a.panel_id.is_none() || a.panel_id == b.panel_id || !is_visible_op(b.op) {
                         continue;
                     }
                     let Some(group) = graph.nodes.iter().find(|g| {
                         g.node_type == NodeType::Group
                             && g.mode == Some(GroupMode::Exclusive)
                             && graph.edges.iter().any(|e| {
-                                e.edge_kind == EdgeKind::Contains && e.from == g.key && e.to == a.target
+                                e.edge_kind == EdgeKind::Contains
+                                    && e.from == g.key
+                                    && e.to == a.target
                             })
                             && graph.edges.iter().any(|e| {
-                                e.edge_kind == EdgeKind::Contains && e.from == g.key && e.to == b.target
+                                e.edge_kind == EdgeKind::Contains
+                                    && e.from == g.key
+                                    && e.to == b.target
                             })
                     }) else {
                         continue;
@@ -343,10 +343,9 @@ fn find_panel_class_violations(
         if edge.edge_kind != EdgeKind::Contains {
             continue;
         }
-        let (Some(parent), Some(child)) = (
-            by_key.get(edge.from.as_str()),
-            by_key.get(edge.to.as_str()),
-        ) else {
+        let (Some(parent), Some(child)) =
+            (by_key.get(edge.from.as_str()), by_key.get(edge.to.as_str()))
+        else {
             continue;
         };
 
@@ -587,7 +586,12 @@ fn validate_node_fields(
             // `mark` 的取值域是**可注册的标记清单**；内置项恒在，未注册的取值按
             // 「未接通」软告警处理（与节点类型注册表同口径，D102），因此这里只校验
             // **命名合法**（不合规则才是硬错误），注册与否交给软告警层。
-            if let Some(m) = node.mark.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if let Some(m) = node
+                .mark
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 if !crate::namespace::is_valid_namespaced_id(m) {
                     errors.push(format!("标记节点 {key} 的 mark 命名不合规则: {m}"));
                 }
@@ -734,7 +738,10 @@ pub(crate) fn validate_edge_with(
     let from = by_key.get(edge.from.as_str()).map(|n| &n.node_type);
     let to = by_key.get(edge.to.as_str()).map(|n| &n.node_type);
     if from.is_none() {
-        issues.push(NodeIssue::hard(format!("边引用不存在的起点: {}", edge.from)));
+        issues.push(NodeIssue::hard(format!(
+            "边引用不存在的起点: {}",
+            edge.from
+        )));
     }
     if to.is_none() {
         issues.push(NodeIssue::hard(format!("边引用不存在的终点: {}", edge.to)));

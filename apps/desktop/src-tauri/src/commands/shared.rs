@@ -45,9 +45,7 @@ pub(crate) trait EmitHp<R: tauri::Runtime>: Emitter<R> {
     fn emit_hp<S: Serialize + Clone>(&self, logical: &str, payload: S) {
         let name = wire_event(logical);
         if let Err(e) = self.emit(&name, payload) {
-            diag_log(&format!(
-                "[event] 发送失败 {logical}（线上名 {name}）: {e}"
-            ));
+            diag_log(&format!("[event] 发送失败 {logical}（线上名 {name}）: {e}"));
         }
     }
 }
@@ -347,7 +345,8 @@ fn is_tag_extension_id(plugin_id: &str) -> bool {
     let local = plugin_id.rsplit('.').next().unwrap_or(plugin_id);
     // 插件 id 形如 `dev.hamsterpouch.extension.tagdict.pixiv`；
     // 取完整 id 里是否含类型段，避免只比对末段（末段是 pixiv/danbooru/games）。
-    plugin_id.contains(".tagdict.") || plugin_id.contains(".tagrel.")
+    plugin_id.contains(".tagdict.")
+        || plugin_id.contains(".tagrel.")
         || local == "tagdict"
         || local == "tagrel"
 }
@@ -570,9 +569,7 @@ pub(crate) fn open_repo_mut<'g, 'a>(
 }
 
 /// 锁住 `open_repo`（毒锁 → `Store`）。
-pub(crate) fn lock_repo(
-    state: &AppState,
-) -> HpResult<std::sync::MutexGuard<'_, Option<RepoDb>>> {
+pub(crate) fn lock_repo(state: &AppState) -> HpResult<std::sync::MutexGuard<'_, Option<RepoDb>>> {
     state
         .open_repo
         .lock()
@@ -671,7 +668,9 @@ mod tests {
     #[test]
     fn find_upwards_finds_repo_relative_mpv() {
         let Some(found) = find_upwards("external-cli/mpv/mpv.exe") else {
-            eprintln!("跳过：未找到 external-cli/mpv/mpv.exe（该目录不入库，见根 README「外部依赖」）");
+            eprintln!(
+                "跳过：未找到 external-cli/mpv/mpv.exe（该目录不入库，见根 README「外部依赖」）"
+            );
             return;
         };
         assert!(found.is_file());
@@ -794,7 +793,10 @@ mod tests {
         };
         // 仓库内确实有可供安装的包（否则本用例没有意义）。
         assert!(
-            dist.join("tagdict-pixiv").join("data").join("tag_lib.sqlite").is_file(),
+            dist.join("tagdict-pixiv")
+                .join("data")
+                .join("tag_lib.sqlite")
+                .is_file(),
             "前提：plugins-dist/ 下应有包（先运行 package_extensions.py）"
         );
 
@@ -865,7 +867,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
 
         assert_eq!(attached, 3, "应装配三个已安装扩展包，实际 {attached}");
-        assert_eq!(set.len(), 4, "层数应为 1 基底 + 3 扩展 = 4，实际 {}", set.len());
+        assert_eq!(
+            set.len(),
+            4,
+            "层数应为 1 基底 + 3 扩展 = 4，实际 {}",
+            set.len()
+        );
 
         set.refresh_merge().expect("构建归并索引");
 
@@ -877,7 +884,8 @@ mod tests {
             "扩展包里的 tag 装配后应立即可查（说明数据真的进了聚合层）"
         );
         assert!(
-            hits.iter().any(|d| d.concept.kind == hp_core::TagKind::Artist),
+            hits.iter()
+                .any(|d| d.concept.kind == hp_core::TagKind::Artist),
             "该名字应命中 artist 概念，实际 {:?}",
             hits.iter().map(|d| d.concept.kind).collect::<Vec<_>>()
         );

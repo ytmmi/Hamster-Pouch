@@ -10,8 +10,8 @@ use hp_plugin_host::PluginHost;
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{api_from_hp, ensure_global, global, lock_global, ApiResponse};
 use crate::AppState;
+use crate::commands::shared::{ApiResponse, api_from_hp, ensure_global, global, lock_global};
 
 /// 面板贡献项（前端登记进面板注册表）。
 #[derive(Serialize)]

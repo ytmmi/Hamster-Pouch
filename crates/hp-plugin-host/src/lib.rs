@@ -10,18 +10,18 @@ mod supervision;
 mod trust;
 
 pub use channel::{
-    control_event_method, ExternalProcessQuery, PanelQueryParams, PanelQuerySpec,
-    PanelSchemaCache, PanelSchemaKey, PanelSchemaParams, PanelSelectionContext,
-    CONTROL_EVENT_METHOD_PREFIX, PANEL_QUERY_REQUEST, PANEL_SCHEMA_REQUEST, QUERY_MAX_BYTES,
-    QUERY_TIMEOUT, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT,
+    CONTROL_EVENT_METHOD_PREFIX, ExternalProcessQuery, PANEL_QUERY_REQUEST, PANEL_SCHEMA_REQUEST,
+    PanelQueryParams, PanelQuerySpec, PanelSchemaCache, PanelSchemaKey, PanelSchemaParams,
+    PanelSelectionContext, QUERY_MAX_BYTES, QUERY_TIMEOUT, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT,
+    control_event_method,
 };
 pub use host::{
     LoadOutcome, PanelCatalogEntry, PanelCatalogPanel, PanelOwner, PluginHost, RepoContribution,
     SettingsSectionDecl,
 };
 pub use install::{InstallSource, InstalledPackage, PluginInstaller};
-pub use manifest::{discover_packages, parse_manifest, read_package, PluginPackage, MANIFEST_FILE};
+pub use manifest::{MANIFEST_FILE, PluginPackage, discover_packages, parse_manifest, read_package};
 pub use supervision::{
-    ProcessSupervisor, SupervisionRegistry, SupervisionStatus, MAX_CONSECUTIVE_FAILURES,
+    MAX_CONSECUTIVE_FAILURES, ProcessSupervisor, SupervisionRegistry, SupervisionStatus,
 };
-pub use trust::{can_elevate, effective_trust, HostSourceKind};
+pub use trust::{HostSourceKind, can_elevate, effective_trust};

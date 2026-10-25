@@ -68,7 +68,9 @@ fn register_rejects_manifest_id_mismatch() {
         &["ui.panel"],
         "local-dev",
     );
-    let err = PluginHost.register(&mut db, &row).expect_err("ID 不一致应被拒绝");
+    let err = PluginHost
+        .register(&mut db, &row)
+        .expect_err("ID 不一致应被拒绝");
     assert!(matches!(err, hp_core::HpError::InvalidArgument(_)));
 }
 
@@ -80,7 +82,12 @@ fn enable_grants_readonly_panel_and_requested_caps() {
     PluginHost
         .register(
             &mut db,
-            &registry_row(id, "external-process", &["ui.panel", "repo.read"], TrustLevel::LocalDev),
+            &registry_row(
+                id,
+                "external-process",
+                &["ui.panel", "repo.read"],
+                TrustLevel::LocalDev,
+            ),
         )
         .expect("注册失败");
 
@@ -163,7 +170,12 @@ fn capability_check_enforces_enable_and_grants() {
     PluginHost
         .register(
             &mut db,
-            &registry_row(id, "external-process", &["ui.panel", "repo.read"], TrustLevel::LocalDev),
+            &registry_row(
+                id,
+                "external-process",
+                &["ui.panel", "repo.read"],
+                TrustLevel::LocalDev,
+            ),
         )
         .expect("注册失败");
 

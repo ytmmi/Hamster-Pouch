@@ -54,7 +54,9 @@ fn unmount_hides_source_from_lists_and_queries_but_keeps_index() {
 
     // 挂载后：在线列表有它，文件可查
     assert_eq!(
-        db.list_mounted_sources("repo-1").expect("列出在线源失败").len(),
+        db.list_mounted_sources("repo-1")
+            .expect("列出在线源失败")
+            .len(),
         1
     );
     assert_eq!(
@@ -82,11 +84,12 @@ fn unmount_hides_source_from_lists_and_queries_but_keeps_index() {
         1,
         "源行应保留（仅标记离线）"
     );
-    assert!(!db
-        .get_source(s.id.as_str())
-        .expect("查询源失败")
-        .expect("源应存在")
-        .mounted);
+    assert!(
+        !db.get_source(s.id.as_str())
+            .expect("查询源失败")
+            .expect("源应存在")
+            .mounted
+    );
     assert_eq!(
         db.list_files_by_source(s.id.as_str())
             .expect("列出源文件失败")
@@ -120,7 +123,9 @@ fn unmount_hides_source_from_lists_and_queries_but_keeps_index() {
         "恢复应保留用户改过的别名"
     );
     assert_eq!(
-        db.list_mounted_sources("repo-1").expect("列出在线源失败").len(),
+        db.list_mounted_sources("repo-1")
+            .expect("列出在线源失败")
+            .len(),
         1,
         "恢复后在线列表应恰好一行（不产生重复源）"
     );
@@ -155,7 +160,9 @@ fn remount_different_path_creates_new_source() {
         .expect("挂载失败");
     assert_ne!(a.id.as_str(), b.id.as_str());
     assert_eq!(
-        db.list_mounted_sources("repo-1").expect("列出在线源失败").len(),
+        db.list_mounted_sources("repo-1")
+            .expect("列出在线源失败")
+            .len(),
         1
     );
 }

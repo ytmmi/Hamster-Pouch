@@ -6,24 +6,29 @@
 //! 失败即广播 `plugin.error`，由前端把**该面板**降级为错误态，其它面板不受影响。
 
 use hp_core::{
-    ControlSchema, ControlValidateCtx, ControlValidateResult, HpError, HpResult, RuntimeKind,
-    CONTROL_API_VERSION,
+    CONTROL_API_VERSION, ControlSchema, ControlValidateCtx, ControlValidateResult, HpError,
+    HpResult, RuntimeKind,
 };
 use hp_plugin_host::{
     ExternalProcessQuery, PanelOwner, PanelSchemaKey, PanelSchemaParams, PluginHost,
-    SupervisionStatus, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT,
+    SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT, SupervisionStatus,
 };
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{api_from_hp, ensure_global, ApiResponse, EmitHp};
 use crate::AppState;
+use crate::commands::shared::{ApiResponse, EmitHp, api_from_hp, ensure_global};
 
 /// 广播 `plugin.error`：某个面板的 schema 查询失败。
 ///
 /// 语义（控件标准第 2 节）：**该面板**渲染错误态，**不阻塞其它面板**。
 /// `error` 是诊断串（不面向用户显示）；界面文案由前端按结构化 `code` 走 i18n（D27）。
-pub(crate) fn emit_plugin_error(app: &tauri::AppHandle, repo_id: &str, plugin_id: &str, error: &str) {
+pub(crate) fn emit_plugin_error(
+    app: &tauri::AppHandle,
+    repo_id: &str,
+    plugin_id: &str,
+    error: &str,
+) {
     #[derive(Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     struct PluginError {
@@ -129,7 +134,9 @@ pub(crate) fn supervised_call(
         if let Some(s) = guard.get_mut(&plugin_id) {
             match &result {
                 Ok(_) => s.on_success(),
-                Err(_) => { s.on_failure(); }
+                Err(_) => {
+                    s.on_failure();
+                }
             }
         }
     }
@@ -184,7 +191,10 @@ fn fetch_panel_schema(
         HpError::Plugin("注册表缺少插件安装目录（source_ref），无法定位入口".into())
     })?;
     if !entry.is_file() {
-        return Err(HpError::Plugin(format!("插件入口不存在: {}", entry.display())));
+        return Err(HpError::Plugin(format!(
+            "插件入口不存在: {}",
+            entry.display()
+        )));
     }
 
     // 查询期间**不持任何锁**：这里可能阻塞到超时（D61 默认 2s）。
@@ -275,7 +285,7 @@ pub(crate) fn plugin_validate_control(
                 return Ok(ControlValidateResult {
                     errors: vec![message],
                     warnings: Vec::new(),
-                })
+                });
             }
         };
         Ok(schema.validate(&ctx))

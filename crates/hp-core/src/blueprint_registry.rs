@@ -28,13 +28,13 @@ use crate::blueprint_types::{EdgeKind, NodeType};
 
 // 域内再导出：`crate::blueprint_registry::<节点声明/定义表>` 这些历史路径保持可用
 // （消费方只认本模块，域内文件怎么分不影响调用方）。
-pub use crate::blueprint_builtin_nodes::{BuiltinNodeSpec, BUILTIN_NODE_SPECS};
+pub use crate::blueprint_builtin_nodes::{BUILTIN_NODE_SPECS, BuiltinNodeSpec};
 pub use crate::blueprint_node_decl::{
     BlueprintNodeDecl, EvaluationRole, NodeFieldDecl, NodePortDecl, NodeRole, NodeSeverity,
     NodeSeverityDecl, PortSide, SeverityLevel,
 };
 pub use crate::blueprint_node_decl_validate::{
-    derive_ports, validate_node_decl, NodeDeclCtx, NODE_EVENT_NAMES, NODE_FIELD_TYPES,
+    NODE_EVENT_NAMES, NODE_FIELD_TYPES, NodeDeclCtx, derive_ports, validate_node_decl,
 };
 
 /// 规则边（非结构边）的**输出侧来源**：`边类型 → 允许的输出节点类型`。
@@ -232,9 +232,7 @@ impl NodeRegistry {
 
     /// 该类型的校验策略（未注册 = 既有缺省口径）。
     pub fn severity(&self, node_type: &NodeType) -> NodeSeverity {
-        self.spec(node_type)
-            .map(|s| s.severity)
-            .unwrap_or_default()
+        self.spec(node_type).map(|s| s.severity).unwrap_or_default()
     }
 
     /// 该类型的引擎语义（未注册返回 `None`）。
@@ -268,7 +266,6 @@ impl NodeRegistry {
         let Some((_, targets)) = RULE_EDGE_TARGETS.iter().find(|(k, _)| *k == name) else {
             return false;
         };
-        sources.iter().any(|s| *s == from.as_str())
-            && targets.iter().any(|t| *t == to.as_str())
+        sources.iter().any(|s| *s == from.as_str()) && targets.iter().any(|t| *t == to.as_str())
     }
 }

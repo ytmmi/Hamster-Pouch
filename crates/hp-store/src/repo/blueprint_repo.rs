@@ -12,7 +12,7 @@
 //! 本仓储只做存储、版本归一化与默认标记维护。
 
 use hp_core::{BlueprintRow, HpError, HpResult};
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err, uuid};
@@ -209,8 +209,7 @@ impl RepoDb {
             params![id, now_iso()],
         )
         .map_err(|e| store_err("设置默认蓝图", e))?;
-        tx.commit()
-            .map_err(|e| store_err("提交设默认事务", e))?;
+        tx.commit().map_err(|e| store_err("提交设默认事务", e))?;
         Ok(())
     }
 

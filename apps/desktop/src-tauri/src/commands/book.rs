@@ -44,7 +44,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::commands::shared::{
-    api_async, api_from_hp, lock_repo, open_repo, open_repo_mut, resolve_file_path, ApiAsync,
+    ApiAsync, api_async, api_from_hp, lock_repo, open_repo, open_repo_mut, resolve_file_path,
 };
 // 阅读器一侧的取数（目录 + 插图缓存上下文）拆在 `book_reader.rs`：`book.rs` 已经
 // 承担元数据 / 正文分页 / 封面覆盖三件事，再加目录会越过"单文件 ≤ 1200 行"的红线。
@@ -53,8 +53,8 @@ use crate::commands::shared::{
 // `reader_text_key` 已随"整本解码"整体删除——纯文本改成按窗口读取
 // （`hp_book::read_text_page_window`），没有"整本"可缓存。`ReaderCtx` 因此只剩
 // `cache`（插图落盘）与 `hash`（缓存键）两个字段。
-use crate::commands::book_reader::ReaderCtx;
 use crate::AppState;
+use crate::commands::book_reader::ReaderCtx;
 
 /// `book.meta` 返回体。
 #[derive(Serialize)]
@@ -688,7 +688,11 @@ fn empty_content() -> BookContentResult {
 ///
 /// 上游的 `RUNNING_CONTEXT`（旧 `ReaderTextCache` / `with_reader_text`）已整体删除：
 /// 没有"整本"可缓存，缓存自然也就不需要了。
-pub(crate) fn read_text_page(src_path: &Path, offset: u32, content_key: &str) -> HpResult<BookContentResult> {
+pub(crate) fn read_text_page(
+    src_path: &Path,
+    offset: u32,
+    content_key: &str,
+) -> HpResult<BookContentResult> {
     let page = hp_book::read_text_page_window(
         src_path,
         offset,

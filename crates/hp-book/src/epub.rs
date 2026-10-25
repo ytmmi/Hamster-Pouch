@@ -40,8 +40,8 @@ fn cover_href_from_opf(opf: &str) -> Option<String> {
     // 2. EPUB2：`<meta name="cover" content="<id>">`。
     //    注意 `name` 既可能是 `cover`，也可能是别的值；逐个比对，不做整体匹配。
     for meta in open_tags(opf, "meta") {
-        let is_cover = attr_value(meta, "name")
-            .is_some_and(|name| name.eq_ignore_ascii_case("cover"));
+        let is_cover =
+            attr_value(meta, "name").is_some_and(|name| name.eq_ignore_ascii_case("cover"));
         if !is_cover {
             continue;
         }
@@ -65,8 +65,7 @@ fn cover_href_from_opf(opf: &str) -> Option<String> {
         }
         let id = attr_value(tag, "id").unwrap_or_default();
         let href = attr_value(tag, "href").unwrap_or_default();
-        if id.to_ascii_lowercase().contains("cover")
-            || href.to_ascii_lowercase().contains("cover")
+        if id.to_ascii_lowercase().contains("cover") || href.to_ascii_lowercase().contains("cover")
         {
             if !href.is_empty() {
                 return Some(href);
@@ -213,12 +212,7 @@ mod tests {
     <item id="c" href="Images/cover.png" media-type="image/png" properties="cover-image"/>
   </manifest>
 </package>"#;
-        let (_dir, path) = write_epub(
-            "a.epub",
-            opf,
-            &[("OEBPS/Images/cover.png", PNG)],
-            true,
-        );
+        let (_dir, path) = write_epub("a.epub", opf, &[("OEBPS/Images/cover.png", PNG)], true);
         let meta = read_epub(&path).expect("解析失败");
         assert_eq!(meta.author.as_deref(), Some("长月达平"));
         assert_eq!(meta.description.as_deref(), Some("简介 & 更多"));
@@ -258,7 +252,8 @@ mod tests {
 
     #[test]
     fn works_without_container_xml() {
-        let opf = r#"<package xmlns:dc="x"><metadata><dc:creator>B</dc:creator></metadata></package>"#;
+        let opf =
+            r#"<package xmlns:dc="x"><metadata><dc:creator>B</dc:creator></metadata></package>"#;
         let (_dir, path) = write_epub("e.epub", opf, &[], false);
         let meta = read_epub(&path).expect("缺 container.xml 时应回落唯一 .opf");
         assert_eq!(meta.author.as_deref(), Some("B"));

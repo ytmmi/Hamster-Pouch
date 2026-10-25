@@ -145,7 +145,10 @@ fn layout_is_stored_per_layer() {
         .get_panel_layout("repo-1", "预置", "l_b")
         .expect("再次读取 B 层失败")
         .expect("B 层布局应存在");
-    assert_eq!(b_after.layout_json, r#"{"layer":"b"}"#, "覆盖 A 层不得影响 B 层");
+    assert_eq!(
+        b_after.layout_json, r#"{"layer":"b"}"#,
+        "覆盖 A 层不得影响 B 层"
+    );
     assert_eq!(
         g.list_panel_layouts("repo-1").expect("列出失败").len(),
         2,
@@ -201,7 +204,11 @@ fn rename_delete_and_binding_span_layers() {
         .expect("读取失败")
         .expect("B 层应存在");
     assert_eq!(a.blueprint_ids, vec!["bp-1".to_string()]);
-    assert_eq!(b.blueprint_ids, vec!["bp-1".to_string()], "绑定是预设级语义");
+    assert_eq!(
+        b.blueprint_ids,
+        vec!["bp-1".to_string()],
+        "绑定是预设级语义"
+    );
 
     g.rename_panel_layout("repo-1", "预置", "改名后")
         .expect("重命名失败");
@@ -219,9 +226,7 @@ fn rename_delete_and_binding_span_layers() {
 
     g.delete_panel_layout("repo-1", "改名后").expect("删除失败");
     assert_eq!(
-        g.list_panel_layouts("repo-1")
-            .expect("列出失败")
-            .len(),
+        g.list_panel_layouts("repo-1").expect("列出失败").len(),
         0,
         "删除预设应清理全部层行"
     );

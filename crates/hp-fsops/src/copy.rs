@@ -1,6 +1,8 @@
 //! 源间复制实现（RFC 0001：内容哈希一致则解释数据不丢失）。
 
-use hp_core::{AddedBy, FileId, FileIndexRow, HpError, HpResult, Source, ThumbStatus, VerifyStatus};
+use hp_core::{
+    AddedBy, FileId, FileIndexRow, HpError, HpResult, Source, ThumbStatus, VerifyStatus,
+};
 use hp_store::RepoDb;
 
 use crate::util;

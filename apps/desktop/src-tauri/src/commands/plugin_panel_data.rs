@@ -7,7 +7,7 @@
 //! 与 schema 通道共用的地基（归属校验 / 受监督调用 / `plugin.error`）在
 //! `plugin_control_channel.rs`。
 
-use hp_core::{HpError, HpResult, RuntimeKind, CONTROL_API_VERSION};
+use hp_core::{CONTROL_API_VERSION, HpError, HpResult, RuntimeKind};
 use hp_plugin_host::{
     ExternalProcessQuery, PanelOwner, PanelQueryParams, PanelQuerySpec, PanelSelectionContext,
     QUERY_MAX_BYTES, QUERY_TIMEOUT,
@@ -15,9 +15,11 @@ use hp_plugin_host::{
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::commands::plugin_control_channel::{emit_plugin_error, panel_owner_enabled, supervised_call};
-use crate::commands::shared::{api_from_hp, ensure_global, ApiResponse};
 use crate::AppState;
+use crate::commands::plugin_control_channel::{
+    emit_plugin_error, panel_owner_enabled, supervised_call,
+};
+use crate::commands::shared::{ApiResponse, api_from_hp, ensure_global};
 
 // ===== 控件受控取数通道（`docs/spec/control-standard.md` 第 5 节 / 第 4 轮）=====
 
@@ -130,7 +132,10 @@ fn fetch_panel_data(
         HpError::Plugin("注册表缺少插件安装目录（source_ref），无法定位入口".into())
     })?;
     if !entry.is_file() {
-        return Err(HpError::Plugin(format!("插件入口不存在: {}", entry.display())));
+        return Err(HpError::Plugin(format!(
+            "插件入口不存在: {}",
+            entry.display()
+        )));
     }
 
     let specs: Vec<PanelQuerySpec> = binds
@@ -186,7 +191,13 @@ pub(crate) fn plugin_panel_data(
     let outcome = (|| -> HpResult<PanelDataItem> {
         ensure_global(&state, &app)?;
         let owner = panel_owner_enabled(&state, &repo_id, &panel_id)?;
-        let result = fetch_panel_data(&state, &owner, &panel_id, selected_file_id.as_deref(), &binds);
+        let result = fetch_panel_data(
+            &state,
+            &owner,
+            &panel_id,
+            selected_file_id.as_deref(),
+            &binds,
+        );
         if let Err(e) = &result {
             emit_plugin_error(&app, &repo_id, &owner.plugin_id, &e.to_string());
         }
@@ -194,7 +205,6 @@ pub(crate) fn plugin_panel_data(
     })();
     api_from_hp(outcome)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -230,21 +240,34 @@ mod tests {
         assert!(ok.contains_key("panel:colors"));
 
         // 空对象是合法的（"没有数据" ≠ 错误）。
-        assert!(parse_panel_data_results(r#"{"results":{}}"#).expect("空结果合法").is_empty());
+        assert!(
+            parse_panel_data_results(r#"{"results":{}}"#)
+                .expect("空结果合法")
+                .is_empty()
+        );
 
-        assert!(parse_panel_data_results(r#"{"results":[]}"#).is_err(), "数组应被拒绝");
-        assert!(parse_panel_data_results(r#"{}"#).is_err(), "缺 results 应被拒绝");
-        assert!(parse_panel_data_results("not json").is_err(), "非 JSON 应被拒绝");
+        assert!(
+            parse_panel_data_results(r#"{"results":[]}"#).is_err(),
+            "数组应被拒绝"
+        );
+        assert!(
+            parse_panel_data_results(r#"{}"#).is_err(),
+            "缺 results 应被拒绝"
+        );
+        assert!(
+            parse_panel_data_results("not json").is_err(),
+            "非 JSON 应被拒绝"
+        );
     }
 
     /// 测试用的空 AppState（监督为空不干预，插件未注册监督器时跳过检查）。
     fn test_state() -> AppState {
-        use std::sync::{Arc, Mutex};
-        use hp_media::ThumbnailCache;
+        use crate::tasks::TaskRegistry;
         use hp_ai::AiTaggingService;
+        use hp_media::ThumbnailCache;
         use hp_plugin_host::SupervisionRegistry;
         use hp_scanner::Scanner;
-        use crate::tasks::TaskRegistry;
+        use std::sync::{Arc, Mutex};
         AppState {
             global_db: Arc::new(Mutex::new(None)),
             open_repo: Arc::new(Mutex::new(None)),
@@ -277,13 +300,19 @@ mod tests {
         let s = test_state();
         let err = fetch_panel_data(&s, &owner, "p.panel", None, &[bind("panel", "ghost")])
             .expect_err("未声明的查询名应失败");
-        assert!(matches!(err, HpError::InvalidArgument(_)), "应为参数类错误: {err:?}");
+        assert!(
+            matches!(err, HpError::InvalidArgument(_)),
+            "应为参数类错误: {err:?}"
+        );
         assert!(err.to_string().contains("ghost"), "应指出是哪个名字: {err}");
 
         // 声明过的名字通过校验，随后才因**入口不存在**失败（证明失败点在校验之后）。
         let err = fetch_panel_data(&s, &owner, "p.panel", None, &[bind("panel", "colors")])
             .expect_err("入口不存在应失败");
-        assert!(err.to_string().contains("入口不存在"), "应是入口问题: {err}");
+        assert!(
+            err.to_string().contains("入口不存在"),
+            "应是入口问题: {err}"
+        );
     }
 
     /// `bind.kind` 是闭集：`repo` 属规范里的"开放点"，第一版必须拒绝。
@@ -294,7 +323,10 @@ mod tests {
         let err = fetch_panel_data(&s, &owner, "p.panel", None, &[bind("repo", "colors")])
             .expect_err("repo 类第一版不应开放");
         assert!(matches!(err, HpError::InvalidArgument(_)));
-        assert!(err.to_string().contains("bind.kind 非法"), "应指出 kind 问题: {err}");
+        assert!(
+            err.to_string().contains("bind.kind 非法"),
+            "应指出 kind 问题: {err}"
+        );
     }
 
     /// 没有 `bind` 时**不起进程**：即使入口不存在也必须成功返回空结果。

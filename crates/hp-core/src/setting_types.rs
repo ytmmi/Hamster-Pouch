@@ -230,7 +230,9 @@ pub fn validate_setting_decl(decl: &SettingDecl, ctx: &SettingDeclCtx) -> Vec<St
     if id.is_empty() {
         errors.push("设置项缺少 id".to_string());
     } else if !crate::namespace::is_valid_namespaced_id(id) {
-        errors.push(format!("设置项 id 不合命名规则（^[a-z][a-z0-9._-]{{0,63}}$）: {id}"));
+        errors.push(format!(
+            "设置项 id 不合命名规则（^[a-z][a-z0-9._-]{{0,63}}$）: {id}"
+        ));
     }
 
     let owner_kind = match decl.owner_kind.as_deref() {
@@ -270,9 +272,7 @@ pub fn validate_setting_decl(decl: &SettingDecl, ctx: &SettingDeclCtx) -> Vec<St
                         SettingOwnerKind::System => &Vec::new(),
                     };
                     if !known.is_empty() && !known.iter().any(|k| k == owner_id) {
-                        errors.push(format!(
-                            "设置项 {id} 的 owner.id 未注册: {owner_id}"
-                        ));
+                        errors.push(format!("设置项 {id} 的 owner.id 未注册: {owner_id}"));
                     }
                 }
                 _ => errors.push(format!("设置项 {id} 的 owner.id 缺失（{kind} 归属必需）")),
@@ -297,7 +297,9 @@ pub fn validate_setting_decl(decl: &SettingDecl, ctx: &SettingDeclCtx) -> Vec<St
 
     if let Some(scope) = decl.scope.as_deref() {
         if SettingScope::from_str(scope).is_none() {
-            errors.push(format!("设置项 {id} 的 scope 非法: {scope}（允许 app/repo）"));
+            errors.push(format!(
+                "设置项 {id} 的 scope 非法: {scope}（允许 app/repo）"
+            ));
         }
     }
 
@@ -305,7 +307,9 @@ pub fn validate_setting_decl(decl: &SettingDecl, ctx: &SettingDeclCtx) -> Vec<St
         if !ctx.allowed_capabilities.is_empty()
             && !ctx.allowed_capabilities.iter().any(|c| c == cap)
         {
-            errors.push(format!("设置项 {id} 的 requires_capability 不在能力白名单内: {cap}"));
+            errors.push(format!(
+                "设置项 {id} 的 requires_capability 不在能力白名单内: {cap}"
+            ));
         }
     }
 
@@ -359,14 +363,16 @@ mod tests {
     #[test]
     fn input_kinds_are_the_six_input_controls() {
         for k in SettingInputKind::ALL {
-            assert!(validate_setting_decl(
-                &SettingDecl {
-                    kind: Some(k.as_str().to_string()),
-                    ..decl()
-                },
-                &SettingDeclCtx::permissive()
-            )
-            .is_empty());
+            assert!(
+                validate_setting_decl(
+                    &SettingDecl {
+                        kind: Some(k.as_str().to_string()),
+                        ..decl()
+                    },
+                    &SettingDeclCtx::permissive()
+                )
+                .is_empty()
+            );
         }
         let errors = validate_setting_decl(
             &SettingDecl {
@@ -375,7 +381,10 @@ mod tests {
             },
             &SettingDeclCtx::permissive(),
         );
-        assert!(errors.iter().any(|e| e.contains("不是输入类控件")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("不是输入类控件")),
+            "{errors:?}"
+        );
     }
 
     #[test]
@@ -407,7 +416,10 @@ mod tests {
             ..SettingDeclCtx::permissive()
         };
         let errors = validate_setting_decl(&decl(), &ctx);
-        assert!(errors.iter().any(|e| e.contains("落库键冲突")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("落库键冲突")),
+            "{errors:?}"
+        );
     }
 
     #[test]

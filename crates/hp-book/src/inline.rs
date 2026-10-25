@@ -30,8 +30,8 @@
 //! 但前端拿到的仍是纯数据。纯解析（颜色 / 字号 / 样式标记）在
 //! [`crate::epub_rich`]，本模块只负责"扫描标签 + 折叠空白 + 维护状态"。
 
-use crate::block::{normalize_styles, BookSpan, SpanStyle};
-use crate::epub_rich::{clamp_size_em, inline_styles_from_style, InlineExtras, MARK_DEFAULT_BG};
+use crate::block::{BookSpan, SpanStyle, normalize_styles};
+use crate::epub_rich::{InlineExtras, MARK_DEFAULT_BG, clamp_size_em, inline_styles_from_style};
 use crate::xml::{attr_value, decode_entities};
 
 // ==================== 行内累积（原始 run → 折叠后的片段）====================
@@ -809,12 +809,16 @@ mod tests {
     #[test]
     fn new_tags_map_to_new_styles() {
         let spans = spans_from_html("<mark>高</mark><u>下</u>", false);
-        assert!(spans
-            .iter()
-            .any(|s| s.styles.contains(&SpanStyle::Highlight)));
-        assert!(spans
-            .iter()
-            .any(|s| s.styles.contains(&SpanStyle::Underline)));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.styles.contains(&SpanStyle::Highlight))
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.styles.contains(&SpanStyle::Underline))
+        );
         // `<mark>` 未声明底色时补浏览器默认黄。
         let marked = spans
             .iter()
@@ -846,7 +850,11 @@ mod tests {
             "<span style=\"font-size:2em\"><span style=\"font-size:2em\">大</span></span>",
             false,
         );
-        assert_eq!(spans[0].size_em, Some(crate::epub_rich::MAX_SIZE_EM), "2×2 应夹到上限");
+        assert_eq!(
+            spans[0].size_em,
+            Some(crate::epub_rich::MAX_SIZE_EM),
+            "2×2 应夹到上限"
+        );
     }
 
     #[test]

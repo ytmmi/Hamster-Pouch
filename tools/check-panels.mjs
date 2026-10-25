@@ -728,9 +728,12 @@ check(
     // ④ 两条触发链路都设 `want_palette`：源扫描的准备阶段 + 单文件重新分析。
     (scannerPaletteSrc.match(/want_palette,?\s*$/gm) ?? []).length >= 2 &&
     // ⑤ 两条触发链路：`file.reanalyze` → `scanner.rescan_file`；源全量 → `options.full` 强制重算。
+    //    **断言不假设折行方式**：rustfmt 会把长实参列表逐行展开（每个实参一行），
+    //    因此实参之间只用 `\s*` 而不写死空格或换行；断言对象是「四个实参按序传入、cancel 为 Some」。
+    //    2026-10-25（D120）格式化后此断言曾因写死折行而假红，即本条的由来。
     // （`file.reanalyze` 自 2026-09 起是**后台任务**：带上任务的取消标志，见 `check:commands`
     //  的"单文件分析 = 与源扫描同款的后台任务"那组断言。）
-    /\.scanner\s*\n?\s*\.rescan_file\(&mut db, &source, &file\.relative_path, &options, Some\(&cancel\)\)/.test(
+    /\.scanner\s*\.rescan_file\(\s*&mut db,\s*&source,\s*&file\.relative_path,\s*&options,\s*Some\(&cancel\),?\s*\)/.test(
       readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"), "utf8"),
     ) &&
     // `options.full` 仍然强制重算（"源全量重扫"会把全部图片的调色板刷新一遍）。

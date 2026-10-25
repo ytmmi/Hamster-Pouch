@@ -46,8 +46,6 @@ mod meta;
 mod open;
 mod render;
 
-pub use meta::{read_pdf_meta, PdfCover, PdfMeta, PDF_COVER_EXT};
+pub use meta::{PDF_COVER_EXT, PdfCover, PdfMeta, read_pdf_meta};
 pub use open::{open_pdf, open_pdf_file, page_count};
-pub use render::{
-    render_page_jpeg, render_page_rgba, PdfPage, PDF_COVER_WIDTH, PDF_PAGE_WIDTH,
-};
+pub use render::{PDF_COVER_WIDTH, PDF_PAGE_WIDTH, PdfPage, render_page_jpeg, render_page_rgba};

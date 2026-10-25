@@ -9,7 +9,7 @@ use hp_store::RepoDb;
 
 use crate::provider::AiTaggingProvider;
 use crate::task::AiTaskQueue;
-use crate::writeback::{writeback, WritebackOutcome};
+use crate::writeback::{WritebackOutcome, writeback};
 
 /// 单个任务执行成果。
 #[derive(Debug, Clone, PartialEq)]
@@ -86,9 +86,9 @@ impl AiTaggingService {
             return Err(HpError::InvalidArgument("第一期 AI 打标仅支持图片".into()));
         }
 
-        let source = db
-            .get_source(file.source_id.as_str())?
-            .ok_or_else(|| HpError::NotFound(format!("媒体源不存在: {}", file.source_id.as_str())))?;
+        let source = db.get_source(file.source_id.as_str())?.ok_or_else(|| {
+            HpError::NotFound(format!("媒体源不存在: {}", file.source_id.as_str()))
+        })?;
         let image_path = Path::new(&source.local_path).join(&file.relative_path);
 
         let input = AiTaggingInput {
@@ -99,8 +99,7 @@ impl AiTaggingService {
 
         match provider.tag_image(&input, &image_path) {
             Ok(output) => {
-                let outcome =
-                    writeback(db, &task.repo_id, task.file_id.as_str(), &output)?;
+                let outcome = writeback(db, &task.repo_id, task.file_id.as_str(), &output)?;
                 self.queue.mark_done(&task.id);
                 Ok(Some(AiRunOutcome {
                     task_id: task.id,

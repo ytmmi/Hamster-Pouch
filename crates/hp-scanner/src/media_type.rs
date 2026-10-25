@@ -3,7 +3,7 @@
 use std::io::Read;
 use std::path::Path;
 
-use hp_core::{default_book_mark_for_ext, FileMark, MediaType};
+use hp_core::{FileMark, MediaType, default_book_mark_for_ext};
 
 /// 扩展名 → 媒体类型映射（扩展名优先，D11）。
 ///
@@ -212,9 +212,7 @@ fn sniff_media_type(path: &Path) -> Option<MediaType> {
     if b.starts_with(b"ID3") {
         return Some(MediaType::Audio); // MP3 (ID3 tag)
     }
-    if b.starts_with(&[0xFF, 0xFB])
-        || b.starts_with(&[0xFF, 0xF3])
-        || b.starts_with(&[0xFF, 0xF2])
+    if b.starts_with(&[0xFF, 0xFB]) || b.starts_with(&[0xFF, 0xF3]) || b.starts_with(&[0xFF, 0xF2])
     {
         return Some(MediaType::Audio); // MP3 帧同步
     }
@@ -261,7 +259,10 @@ mod tests {
 
     #[test]
     fn content_fallback_without_extension() {
-        let jpeg = write_tmp("noext", &[0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let jpeg = write_tmp(
+            "noext",
+            &[0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        );
         assert_eq!(detect_media_type(&jpeg), Some(MediaType::Image));
     }
 
@@ -355,16 +356,21 @@ mod tests {
         assert!(both.iter().any(|m| m.as_str() == "manga"));
 
         // 默认标记：epub → [book]；txt / md → 空（可被用户打上任意标记）。
-        assert_eq!(default_file_marks(MediaType::Text, "epub"), vec![book.clone()]);
+        assert_eq!(
+            default_file_marks(MediaType::Text, "epub"),
+            vec![book.clone()]
+        );
         assert!(default_file_marks(MediaType::Text, "txt").is_empty());
         assert!(default_file_marks(MediaType::Text, "md").is_empty());
 
         // PDF 同样默认带 book 标记（2026-10-11），因此"标记可交叉"对 PDF 也成立：
         // 一本 pdf 可以同时是 book 与 manga。
         assert_eq!(default_file_marks(MediaType::Pdf, "pdf"), vec![book]);
-        assert!(default_file_marks(MediaType::Pdf, "pdf")
-            .iter()
-            .all(|m| m.is_book()));
+        assert!(
+            default_file_marks(MediaType::Pdf, "pdf")
+                .iter()
+                .all(|m| m.is_book())
+        );
     }
 
     #[test]
@@ -433,7 +439,10 @@ mod tests {
             ("dds", b"DDS \x7c\x00\x00\x00\x10\x00\x00\x00".to_vec()),
             ("exr", vec![0x76, 0x2F, 0x31, 0x01, 0x02, 0x00, 0x00, 0x00]),
             ("qoi", b"qoif\x00\x00\x00\x40\x00\x00\x00\x30".to_vec()),
-            ("farbfeld", b"farbfeld\x00\x00\x00\x40\x00\x00\x00\x30".to_vec()),
+            (
+                "farbfeld",
+                b"farbfeld\x00\x00\x00\x40\x00\x00\x00\x30".to_vec(),
+            ),
             ("hdr", b"#?RADIANCE\nSOFTWARE=x\n".to_vec()),
             ("ras", vec![0x59, 0xA6, 0x6A, 0x95, 0, 0, 0, 64]),
             ("sgi", vec![0x01, 0xDA, 0x01, 0x01, 0x00, 0x03, 0x00, 0x40]),
@@ -462,10 +471,22 @@ mod tests {
         // 签名过弱 → **不得**兜底（否则未知二进制会被吸进索引，D11 失守）。
         // 这些都是"看着像图片头、但不足以判定"的字节串。
         for (name, bytes) in [
-            ("wbmp（00 00 两字节太弱）", vec![0x00, 0x00, 0x40, 0x30, 0x22, 0x22]),
-            ("pcx（0A 05 太弱）", vec![0x0A, 0x05, 0x01, 0x08, 0x00, 0x00]),
-            ("dib（28 00 00 00 是通用长度前缀）", vec![0x28, 0x00, 0x00, 0x00, 0x40, 0x00]),
-            ("tga 头部（无签名）", vec![0x00, 0x00, 0x0A, 0x00, 0x00, 0x00]),
+            (
+                "wbmp（00 00 两字节太弱）",
+                vec![0x00, 0x00, 0x40, 0x30, 0x22, 0x22],
+            ),
+            (
+                "pcx（0A 05 太弱）",
+                vec![0x0A, 0x05, 0x01, 0x08, 0x00, 0x00],
+            ),
+            (
+                "dib（28 00 00 00 是通用长度前缀）",
+                vec![0x28, 0x00, 0x00, 0x00, 0x40, 0x00],
+            ),
+            (
+                "tga 头部（无签名）",
+                vec![0x00, 0x00, 0x0A, 0x00, 0x00, 0x00],
+            ),
             ("随机二进制", vec![0x9E, 0x37, 0x11, 0xCD, 0x44, 0x02]),
         ] {
             let p = write_tmp("unknown-noext", &bytes);
@@ -481,11 +502,21 @@ mod tests {
     /// 因此 SVG / SVGZ **只认扩展名**（与 `txt` / `md` 同一档口径），改名后认不出是**已知边界**。
     #[test]
     fn svg_is_extension_only_no_content_fallback() {
-        let svg = write_tmp("icon.svg", b"<svg xmlns='http://www.w3.org/2000/svg'></svg>");
+        let svg = write_tmp(
+            "icon.svg",
+            b"<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+        );
         assert_eq!(detect_media_type(&svg), Some(MediaType::Image));
         // 反向：同样内容但**没有扩展名** → 未知类型，不索引。
-        let noext = write_tmp("renamed-svg", b"<svg xmlns='http://www.w3.org/2000/svg'></svg>");
-        assert_eq!(detect_media_type(&noext), None, "SVG 无扩展名时不该被吸进索引");
+        let noext = write_tmp(
+            "renamed-svg",
+            b"<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+        );
+        assert_eq!(
+            detect_media_type(&noext),
+            None,
+            "SVG 无扩展名时不该被吸进索引"
+        );
         // 反向：SVGZ 是 gzip，但同样只认扩展名（gzip 不是 SVG 专属魔数）。
         let svgz = write_tmp("icon.svgz", &[0x1F, 0x8B, 0x08, 0x00]);
         assert_eq!(detect_media_type(&svgz), Some(MediaType::Image));

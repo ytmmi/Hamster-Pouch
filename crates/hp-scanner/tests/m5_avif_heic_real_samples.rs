@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use hp_media::{generate_image_preview, generate_image_thumbnail, IMAGE_THUMB_MAX_DIM};
+use hp_media::{IMAGE_THUMB_MAX_DIM, generate_image_preview, generate_image_thumbnail};
 use hp_scanner::analyze_image;
 
 /// 仓库内捆绑 ffmpeg 的定位（与 `m2_video_scan.rs` 同款）。
@@ -68,12 +68,8 @@ fn verify_sample(sample: &Path, label: &str, ffmpeg: &Path) {
     // 扫描期路径：一次解码 → 感知哈希 + 调色板。
     let derived = analyze_image(sample, true, Some(ffmpeg), Duration::from_secs(60))
         .unwrap_or_else(|e| panic!("{label}: analyze_image 失败: {e}"));
-    let perceptual = derived
-        .perceptual
-        .expect("{label}: 解码成功后必有感知哈希");
-    let palette = derived
-        .palette
-        .expect("{label}: 请求调色板后必须产出");
+    let perceptual = derived.perceptual.expect("{label}: 解码成功后必有感知哈希");
+    let palette = derived.palette.expect("{label}: 请求调色板后必须产出");
     assert!(!palette.is_empty(), "{label}: 调色板不应为空");
 
     // 确定性：同一文件第二次扫描结果必须逐位相同（缓存可比性前提）。
@@ -84,18 +80,30 @@ fn verify_sample(sample: &Path, label: &str, ffmpeg: &Path) {
         perceptual.value,
         "{label}: 感知哈希必须按文件确定性（跨扫描可比）"
     );
-    assert_eq!(again.palette.expect("二次调色板"), palette, "{label}: 调色板必须按文件确定性");
+    assert_eq!(
+        again.palette.expect("二次调色板"),
+        palette,
+        "{label}: 调色板必须按文件确定性"
+    );
 
     // 按需缩略图路径：320 有界输出 jpg。
     let dir = std::env::temp_dir().join(format!(
         "hp-real-sample-{}-{}",
         std::process::id(),
-        std::env::var_os("HP_SAMPLE_TAG").unwrap_or_default().to_string_lossy()
+        std::env::var_os("HP_SAMPLE_TAG")
+            .unwrap_or_default()
+            .to_string_lossy()
     ));
     std::fs::create_dir_all(&dir).expect("创建临时目录失败");
     let out = dir.join(format!("{label}.jpg"));
-    generate_image_thumbnail(sample, &out, IMAGE_THUMB_MAX_DIM, Some(ffmpeg), Duration::from_secs(60))
-        .unwrap_or_else(|e| panic!("{label}: 缩略图生成失败: {e}"));
+    generate_image_thumbnail(
+        sample,
+        &out,
+        IMAGE_THUMB_MAX_DIM,
+        Some(ffmpeg),
+        Duration::from_secs(60),
+    )
+    .unwrap_or_else(|e| panic!("{label}: 缩略图生成失败: {e}"));
     let thumb = image::open(&out).expect("{label}: 缩略图文件应可被 image crate 读取");
     assert!(
         thumb.width() <= IMAGE_THUMB_MAX_DIM && thumb.height() <= IMAGE_THUMB_MAX_DIM,
@@ -106,8 +114,8 @@ fn verify_sample(sample: &Path, label: &str, ffmpeg: &Path) {
 
     // 查看器**全分辨率预览**：不缩放、q90 JPEG，尺寸必须等于原始分辨率
     //（用户 2026-10-06 裁定：不要 2048 有界预览）。
-    let original = probe_dims(ffmpeg, sample)
-        .unwrap_or_else(|| panic!("{label}: ffmpeg 探测原始分辨率失败"));
+    let original =
+        probe_dims(ffmpeg, sample).unwrap_or_else(|| panic!("{label}: ffmpeg 探测原始分辨率失败"));
     let preview_out = dir.join(format!("{label}.preview.jpg"));
     generate_image_preview(sample, &preview_out, Some(ffmpeg), Duration::from_secs(120))
         .unwrap_or_else(|e| panic!("{label}: 预览生成失败: {e}"));
@@ -120,8 +128,7 @@ fn verify_sample(sample: &Path, label: &str, ffmpeg: &Path) {
         .into_dimensions()
         .expect("{label}: 读取预览尺寸");
     assert_eq!(
-        preview_dims,
-        original,
+        preview_dims, original,
         "{label}: 预览必须是原始分辨率 {original:?}（不许有界缩放），实际 {preview_dims:?}"
     );
 

@@ -10,12 +10,12 @@
 use crate::blueprint_registry::validate_node_decl;
 use crate::error::{HpError, HpResult};
 use crate::panel_types::{
-    validate_panel_decl, PanelCategory, PanelDeclCtx, PanelSettingKind, PanelSettingScope,
+    PanelCategory, PanelDeclCtx, PanelSettingKind, PanelSettingScope, validate_panel_decl,
 };
 use crate::plugin::PluginManifest;
 use crate::plugin_contribution::{ContributionKind, DataQueryReturns};
-use crate::plugin_types::{Capability, HostApiVersion, RuntimeKind, HOST_API_VERSION};
-use crate::setting_types::{validate_setting_decl, SettingCategory, SettingDecl};
+use crate::plugin_types::{Capability, HOST_API_VERSION, HostApiVersion, RuntimeKind};
+use crate::setting_types::{SettingCategory, SettingDecl, validate_setting_decl};
 
 impl PluginManifest {
     /// 宿主校验规则（RFC 0004「运行形态边界」/ `docs/spec/plugin-standard.md` 第 6 节）。
@@ -49,7 +49,9 @@ impl PluginManifest {
             return Err(HpError::InvalidArgument("插件入口不能为空".into()));
         }
         if self.api_version == 0 {
-            return Err(HpError::InvalidArgument("插件 api_version 必须 >= 1".into()));
+            return Err(HpError::InvalidArgument(
+                "插件 api_version 必须 >= 1".into(),
+            ));
         }
         if self.runtime_kind == RuntimeKind::DynamicLibrary {
             if !self.capabilities.contains(&Capability::NativeCode) {
@@ -82,7 +84,9 @@ impl PluginManifest {
         for c in &self.contributions {
             if matches!(
                 c.kind,
-                ContributionKind::Panel | ContributionKind::Command | ContributionKind::MetadataField
+                ContributionKind::Panel
+                    | ContributionKind::Command
+                    | ContributionKind::MetadataField
             ) && c.title_key.as_deref().unwrap_or("").trim().is_empty()
             {
                 return Err(HpError::InvalidArgument(format!(
@@ -117,7 +121,8 @@ impl PluginManifest {
                         c.id
                     )));
                 };
-                let errors = validate_node_decl(decl, Some(self.id.as_str()), &self.node_decl_ctx());
+                let errors =
+                    validate_node_decl(decl, Some(self.id.as_str()), &self.node_decl_ctx());
                 if let Some(first) = errors.first() {
                     return Err(HpError::InvalidArgument(format!(
                         "蓝图节点贡献点 {} 声明不合规（共 {} 项）: {first}",
@@ -219,7 +224,10 @@ impl PluginManifest {
                     c.id
                 )));
             }
-            if seen.iter().any(|(k, id)| *k == c.kind && *id == c.id.as_str()) {
+            if seen
+                .iter()
+                .any(|(k, id)| *k == c.kind && *id == c.id.as_str())
+            {
                 return Err(HpError::InvalidArgument(format!(
                     "贡献点重复: {} / {}",
                     c.kind, c.id
@@ -227,8 +235,10 @@ impl PluginManifest {
             }
             seen.push((c.kind, c.id.as_str()));
 
-            if matches!(c.kind, ContributionKind::Viewer | ContributionKind::MetadataField)
-                && !matches!(c.media_type.as_deref(), Some("image" | "video" | "audio"))
+            if matches!(
+                c.kind,
+                ContributionKind::Viewer | ContributionKind::MetadataField
+            ) && !matches!(c.media_type.as_deref(), Some("image" | "video" | "audio"))
             {
                 return Err(HpError::InvalidArgument(format!(
                     "贡献点 {} / {} 缺少合法 media_type（image/video/audio）",
@@ -282,14 +292,12 @@ impl PluginManifest {
                             )));
                         }
                     }
-                    if PanelSettingScope::from_str(setting.scope.as_deref().unwrap_or("app")).is_none()
+                    if PanelSettingScope::from_str(setting.scope.as_deref().unwrap_or("app"))
+                        .is_none()
                     {
                         return Err(HpError::InvalidArgument(format!(
                             "贡献点 {} / {} 的设置项 {} 的 scope 非法: {:?}",
-                            c.kind,
-                            c.id,
-                            setting.key,
-                            setting.scope
+                            c.kind, c.id, setting.key, setting.scope
                         )));
                     }
                 }
@@ -323,10 +331,16 @@ impl PluginManifest {
         let mut names: Vec<&str> = Vec::new();
         for q in &self.data_queries {
             if !crate::plugin_contribution::is_valid_contribution_id(&q.name) {
-                return Err(HpError::InvalidArgument(format!("数据查询名非法: {:?}", q.name)));
+                return Err(HpError::InvalidArgument(format!(
+                    "数据查询名非法: {:?}",
+                    q.name
+                )));
             }
             if names.contains(&q.name.as_str()) {
-                return Err(HpError::InvalidArgument(format!("数据查询名重复: {}", q.name)));
+                return Err(HpError::InvalidArgument(format!(
+                    "数据查询名重复: {}",
+                    q.name
+                )));
             }
             names.push(q.name.as_str());
             if DataQueryReturns::from_str(&q.returns).is_none() {
@@ -339,7 +353,10 @@ impl PluginManifest {
         let mut ids: Vec<&str> = Vec::new();
         for e in &self.events {
             if !crate::plugin_contribution::is_valid_contribution_id(&e.id) {
-                return Err(HpError::InvalidArgument(format!("事件 id 非法: {:?}", e.id)));
+                return Err(HpError::InvalidArgument(format!(
+                    "事件 id 非法: {:?}",
+                    e.id
+                )));
             }
             if ids.contains(&e.id.as_str()) {
                 return Err(HpError::InvalidArgument(format!("事件 id 重复: {}", e.id)));

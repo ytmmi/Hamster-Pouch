@@ -93,7 +93,10 @@ fn base_lib_opens_and_resolves_user_example() {
         .map(|n| n.lang.as_str())
         .collect();
     for lang in ["zh", "ja", "en"] {
-        assert!(std_langs.contains(&lang), "应含 {lang} 标准名，实际 {std_langs:?}");
+        assert!(
+            std_langs.contains(&lang),
+            "应含 {lang} 标准名，实际 {std_langs:?}"
+        );
     }
     assert_eq!(detail.layer, LibLayer::Base);
 }
@@ -321,7 +324,11 @@ fn games_extension_relations_and_multilingual_match() {
     );
 
     // ---- 角色名不带括号后缀（作品归属由关系边表达）----
-    for n in nodes.iter().filter(|n| n.kind == hp_core::TagKind::Character).take(50) {
+    for n in nodes
+        .iter()
+        .filter(|n| n.kind == hp_core::TagKind::Character)
+        .take(50)
+    {
         assert!(
             !n.display_name.contains('（') && !n.display_name.contains('('),
             "角色展示名不应带括号后缀，实际 {}",
@@ -354,4 +361,3 @@ fn games_extension_relations_and_multilingual_match() {
         "简称命中的角色应带作品关系边（游戏为父级）"
     );
 }
-

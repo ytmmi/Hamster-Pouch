@@ -11,7 +11,7 @@
 //! 迁移只在 `schema_version < 当前版本` 时发生；已是当前版本返回 `None`（不做无谓改写，
 //! 避免把用户文档重新序列化一次）。`schema_version > 当前版本` 由校验层报硬错误。
 
-use crate::blueprint::{BlueprintGraph, BlueprintLayer, NodeType, BLUEPRINT_SCHEMA_VERSION};
+use crate::blueprint::{BLUEPRINT_SCHEMA_VERSION, BlueprintGraph, BlueprintLayer, NodeType};
 
 /// 迁移结果：新文档 JSON 与权威版本（调用方据此同步数据库 `schema_version` 列）。
 #[derive(Debug, Clone, PartialEq, Eq)]

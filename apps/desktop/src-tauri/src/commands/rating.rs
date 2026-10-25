@@ -6,8 +6,8 @@
 
 use tauri::State;
 
-use crate::commands::shared::{api_from_hp, lock_repo, open_repo, open_repo_mut, ApiResponse};
 use crate::AppState;
+use crate::commands::shared::{ApiResponse, api_from_hp, lock_repo, open_repo, open_repo_mut};
 
 /// rating.set：设置文件评分（0-5）。
 #[tauri::command]

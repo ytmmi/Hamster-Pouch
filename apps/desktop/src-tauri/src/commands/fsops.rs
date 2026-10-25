@@ -7,10 +7,8 @@ use hp_fsops::FsOpsService;
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{
-    api_from_hp, lock_repo, open_repo_mut, ApiResponse,
-};
 use crate::AppState;
+use crate::commands::shared::{ApiResponse, api_from_hp, lock_repo, open_repo_mut};
 
 #[derive(Serialize)]
 pub(crate) struct FsOpsResult {
@@ -41,7 +39,11 @@ pub(crate) fn fsops_copy(
         )?;
         Ok(FsOpsResult {
             op_record_id: out.op_record_id,
-            affected: out.affected.iter().map(|f| f.as_str().to_string()).collect(),
+            affected: out
+                .affected
+                .iter()
+                .map(|f| f.as_str().to_string())
+                .collect(),
         })
     })();
     api_from_hp(outcome)
@@ -68,7 +70,11 @@ pub(crate) fn fsops_move(
         )?;
         Ok(FsOpsResult {
             op_record_id: out.op_record_id,
-            affected: out.affected.iter().map(|f| f.as_str().to_string()).collect(),
+            affected: out
+                .affected
+                .iter()
+                .map(|f| f.as_str().to_string())
+                .collect(),
         })
     })();
     api_from_hp(outcome)

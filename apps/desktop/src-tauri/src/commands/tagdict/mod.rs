@@ -7,8 +7,8 @@ use hp_core::HpResult;
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{api_from_hp, ApiResponse};
 use crate::AppState;
+use crate::commands::shared::{ApiResponse, api_from_hp};
 
 /// `tag_dict.suggest`：按关键词搜索词库，返回候选列表。
 ///

@@ -1,8 +1,8 @@
 //! 通用工具。
 
 use hp_core::{HpError, HpResult};
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 /// 当前 UTC 时间的 ISO 8601 文本。
 pub(crate) fn now_iso() -> String {

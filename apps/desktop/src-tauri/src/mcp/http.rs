@@ -21,8 +21,8 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -96,9 +96,7 @@ pub(crate) fn serve(
                 let spawned = std::thread::Builder::new()
                     .name("hp-mcp-conn".into())
                     .spawn(move || {
-                        if let Err(err) =
-                            handle(stream, handler.as_ref(), &token, &shutdown)
-                        {
+                        if let Err(err) = handle(stream, handler.as_ref(), &token, &shutdown) {
                             // 客户端提前断开是常态，只记非预期错误。
                             if err.kind() != std::io::ErrorKind::BrokenPipe
                                 && err.kind() != std::io::ErrorKind::ConnectionReset
@@ -204,7 +202,12 @@ fn handle(
         }
         _ => {
             drain_body(&mut stream, &head, &leftover);
-            write_text(&mut stream, 405, "Method Not Allowed", "只支持 POST / GET / DELETE")
+            write_text(
+                &mut stream,
+                405,
+                "Method Not Allowed",
+                "只支持 POST / GET / DELETE",
+            )
         }
     }
 }
@@ -247,7 +250,10 @@ fn authorized(head: &Head, token: &str) -> bool {
     let Some(raw) = head.header("authorization") else {
         return false;
     };
-    let Some(rest) = raw.strip_prefix("Bearer ").or_else(|| raw.strip_prefix("bearer ")) else {
+    let Some(rest) = raw
+        .strip_prefix("Bearer ")
+        .or_else(|| raw.strip_prefix("bearer "))
+    else {
         return false;
     };
     // 定长比较：token 是 64 位 hex，长度不等直接失败。
@@ -272,7 +278,12 @@ fn handle_post(
         .and_then(|v| v.trim().parse::<usize>().ok())
         .unwrap_or(0);
     if length == 0 {
-        return write_text(stream, 411, "Length Required", "POST /mcp 需要 Content-Length");
+        return write_text(
+            stream,
+            411,
+            "Length Required",
+            "POST /mcp 需要 Content-Length",
+        );
     }
     if length > MAX_BODY_BYTES {
         return write_text(stream, 413, "Payload Too Large", "请求体过大");
@@ -298,7 +309,12 @@ fn handle_post(
         Ok(value) => value,
         Err(_) => {
             let response = protocol::parse_error_response(Value::Null);
-            return write_json(stream, 200, &serde_json::to_value(response).unwrap_or(Value::Null), &[]);
+            return write_json(
+                stream,
+                200,
+                &serde_json::to_value(response).unwrap_or(Value::Null),
+                &[],
+            );
         }
     };
 
@@ -438,9 +454,7 @@ fn read_head(stream: &mut TcpStream) -> std::io::Result<Option<(Head, Vec<u8>)>>
 
 /// 找 `\r\n\r\n` 的位置（返回头部结尾下标）。
 fn find_head_end(buffer: &[u8]) -> Option<usize> {
-    buffer
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
+    buffer.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
 /// 解析请求行与头部。
@@ -484,7 +498,13 @@ fn write_json(
     extra: &[(&str, &str)],
 ) -> std::io::Result<()> {
     let payload = serde_json::to_vec(body).unwrap_or_else(|_| b"null".to_vec());
-    write_head(stream, status, "application/json; charset=utf-8", payload.len(), extra)?;
+    write_head(
+        stream,
+        status,
+        "application/json; charset=utf-8",
+        payload.len(),
+        extra,
+    )?;
     stream.write_all(&payload)?;
     stream.flush()
 }
@@ -593,8 +613,14 @@ mod tests {
         assert!(authorized(&with("Bearer deadbeef   "), token));
 
         assert!(!authorized(&with("Bearer deadbeee"), token), "不等必须拒绝");
-        assert!(!authorized(&with("Bearer deadbee"), token), "长度不等必须拒绝");
-        assert!(!authorized(&with("Basic deadbeef"), token), "方案必须 Bearer");
+        assert!(
+            !authorized(&with("Bearer deadbee"), token),
+            "长度不等必须拒绝"
+        );
+        assert!(
+            !authorized(&with("Basic deadbeef"), token),
+            "方案必须 Bearer"
+        );
         assert!(!authorized(&with("deadbeef"), token), "缺方案必须拒绝");
         assert!(
             !authorized(
@@ -609,7 +635,10 @@ mod tests {
     #[test]
     fn parse_head_rejects_non_http_requests() {
         assert!(parse_head("GET /health\r\n").is_none(), "缺版本串");
-        assert!(parse_head("GET /health HTTP/2.0\r\n").is_none(), "只支持 HTTP/1.x");
+        assert!(
+            parse_head("GET /health HTTP/2.0\r\n").is_none(),
+            "只支持 HTTP/1.x"
+        );
         assert!(parse_head("").is_none(), "空串");
         assert!(parse_head("GET /health HTTP/1.1\r\n").is_some());
     }
@@ -630,7 +659,11 @@ mod tests {
     #[test]
     fn every_supported_status_has_a_reason_phrase() {
         for status in [200, 202, 204, 400, 401, 404, 405, 411, 413, 500] {
-            assert_ne!(reason_phrase(status), "Unknown", "状态码 {status} 缺原因短语");
+            assert_ne!(
+                reason_phrase(status),
+                "Unknown",
+                "状态码 {status} 缺原因短语"
+            );
         }
     }
 
@@ -784,7 +817,11 @@ mod tests {
              Content-Length: {}\r\n\r\n{body}",
             body.len()
         );
-        assert_eq!(status_of(&roundtrip(port, &unknown)), 404, "大请求体也必须回得出 404");
+        assert_eq!(
+            status_of(&roundtrip(port, &unknown)),
+            404,
+            "大请求体也必须回得出 404"
+        );
 
         let bad_method = format!(
             "PUT /mcp HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer s3cret\r\n\
@@ -872,7 +909,10 @@ mod tests {
         let (port, shutdown) = spawn_server(handler.clone(), "tok");
         let auth = "Authorization: Bearer tok\r\n";
 
-        let no_length = roundtrip(port, &format!("POST /mcp HTTP/1.1\r\nHost: x\r\n{auth}\r\n"));
+        let no_length = roundtrip(
+            port,
+            &format!("POST /mcp HTTP/1.1\r\nHost: x\r\n{auth}\r\n"),
+        );
         assert_eq!(status_of(&no_length), 411);
 
         // 只声明超限长度、不真发 8 MiB：服务端应在读体之前就拒绝。

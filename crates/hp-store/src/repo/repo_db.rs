@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use hp_core::{HpError, HpResult};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::migrate;
 use crate::util::{now_iso, require_nonempty, store_err};

@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use hp_core::HpError;
 use hp_plugin_host::{
-    ExternalProcessQuery, PanelQueryParams, PanelQuerySpec, PanelSelectionContext,
-    PANEL_QUERY_REQUEST, QUERY_MAX_BYTES, QUERY_TIMEOUT,
+    ExternalProcessQuery, PANEL_QUERY_REQUEST, PanelQueryParams, PanelQuerySpec,
+    PanelSelectionContext, QUERY_MAX_BYTES, QUERY_TIMEOUT,
 };
 
 /// 按夹具模式构造一条取数命令。
@@ -36,8 +36,7 @@ fn params(selected: Option<&str>) -> PanelQueryParams {
 }
 
 fn query(mode: &str, selected: Option<&str>, timeout: Duration) -> Result<String, HpError> {
-    fixture(mode)
-        .query_panel_data(&params(selected), timeout, QUERY_MAX_BYTES)
+    fixture(mode).query_panel_data(&params(selected), timeout, QUERY_MAX_BYTES)
 }
 
 #[test]
@@ -54,8 +53,14 @@ fn request_name_and_limits_are_the_spec_constants() {
 fn one_request_carries_every_bind_with_host_built_snapshot_keys() {
     // "一次问完"：两个 bind 必须在**同一个**请求里，且 key 是宿主构造的 `kind:name`。
     let text = query("echo_params", Some("file-42"), QUERY_TIMEOUT).expect("夹具应回显参数");
-    assert!(text.contains("\"key\":\"panel:colors\""), "缺 panel:colors 键: {text}");
-    assert!(text.contains("\"key\":\"selection:current\""), "缺 selection:current 键: {text}");
+    assert!(
+        text.contains("\"key\":\"panel:colors\""),
+        "缺 panel:colors 键: {text}"
+    );
+    assert!(
+        text.contains("\"key\":\"selection:current\""),
+        "缺 selection:current 键: {text}"
+    );
     assert!(text.contains("\"panel_id\""), "缺 panel_id: {text}");
     assert!(text.contains("\"api_version\":1"), "缺 api_version: {text}");
     // 标量 args 原样透传。
@@ -88,8 +93,14 @@ fn results_come_back_keyed_by_the_host_snapshot_key() {
     // `panel` 类 → 行集；`selection` 类 → 对象（并回显 file_id）。
     assert!(text.contains("\"panel:colors\""), "缺结果键: {text}");
     assert!(text.contains("\"selection:current\""), "缺结果键: {text}");
-    assert!(text.contains("\"kind\":\"rows\""), "panel 类应为行集: {text}");
-    assert!(text.contains("file-42"), "selection 类应看到选中文件: {text}");
+    assert!(
+        text.contains("\"kind\":\"rows\""),
+        "panel 类应为行集: {text}"
+    );
+    assert!(
+        text.contains("file-42"),
+        "selection 类应看到选中文件: {text}"
+    );
 }
 
 #[test]
@@ -98,7 +109,10 @@ fn missing_result_key_is_not_an_error() {
     // 因此这里必须**成功**返回，由调用方决定渲染。
     let text = query("data_partial", Some("file-42"), QUERY_TIMEOUT).expect("漏键不应让协议层失败");
     assert!(!text.contains("panel:colors"), "第一个键本应缺席: {text}");
-    assert!(text.contains("selection:current"), "其余键应照常返回: {text}");
+    assert!(
+        text.contains("selection:current"),
+        "其余键应照常返回: {text}"
+    );
 }
 
 #[test]
@@ -110,9 +124,15 @@ fn empty_results_object_is_not_an_error() {
 #[test]
 fn rpc_error_is_a_plugin_error() {
     let err = query("rpc_error", None, QUERY_TIMEOUT).expect_err("JSON-RPC error 应失败");
-    assert!(matches!(err, HpError::Plugin(_)), "应为 Plugin 类错误: {err:?}");
+    assert!(
+        matches!(err, HpError::Plugin(_)),
+        "应为 Plugin 类错误: {err:?}"
+    );
     assert_eq!(err.code(), "plugin");
-    assert!(err.to_string().contains("未实现"), "应带上插件给的说明: {err}");
+    assert!(
+        err.to_string().contains("未实现"),
+        "应带上插件给的说明: {err}"
+    );
 }
 
 #[test]
@@ -121,7 +141,10 @@ fn output_over_the_byte_cap_is_rejected() {
     assert!(matches!(err, HpError::Plugin(_)));
     assert!(err.to_string().contains("上限"), "应说明超限: {err}");
     // 报文里要能看出是**哪条**请求超限（取数与 schema 共用一条通道）。
-    assert!(err.to_string().contains("ui.panel.query"), "应标明请求名: {err}");
+    assert!(
+        err.to_string().contains("ui.panel.query"),
+        "应标明请求名: {err}"
+    );
 }
 
 #[test]
@@ -131,7 +154,10 @@ fn slow_plugin_hits_the_timeout_and_does_not_hang() {
     let err = query("slow", None, Duration::from_millis(300)).expect_err("超时应失败");
     assert!(matches!(err, HpError::Plugin(_)));
     assert!(err.to_string().contains("超时"), "应说明超时: {err}");
-    assert!(err.to_string().contains("ui.panel.query"), "应标明请求名: {err}");
+    assert!(
+        err.to_string().contains("ui.panel.query"),
+        "应标明请求名: {err}"
+    );
     assert!(
         started.elapsed() < Duration::from_secs(3),
         "超时路径不得把 300ms 拖成更久: {:?}",
@@ -187,6 +213,9 @@ fn demo_schema_passes_the_real_validator_with_the_demo_manifest_declarations() {
             "示例 schema 缺少 bind：{name}"
         );
     }
-    assert!(text.contains("\"visible_when\""), "示例应带一个 visible_when");
+    assert!(
+        text.contains("\"visible_when\""),
+        "示例应带一个 visible_when"
+    );
     assert!(text.contains("\"on\""), "示例应带事件映射");
 }

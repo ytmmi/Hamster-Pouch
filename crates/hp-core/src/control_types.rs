@@ -605,7 +605,10 @@ mod tests {
             .filter(|s| s.container)
             .map(|s| s.kind.as_str())
             .collect();
-        assert_eq!(containers, vec!["row", "column", "panel", "section", "notice"]);
+        assert_eq!(
+            containers,
+            vec!["row", "column", "panel", "section", "notice"]
+        );
     }
 
     #[test]
@@ -622,10 +625,16 @@ mod tests {
 
     #[test]
     fn props_belonging_to_specific_kinds_are_not_accepted_elsewhere() {
-        assert!(control_spec(ControlKind::Table)
-            .find_prop("columns")
-            .is_some());
-        assert!(control_spec(ControlKind::Button).find_prop("columns").is_none());
+        assert!(
+            control_spec(ControlKind::Table)
+                .find_prop("columns")
+                .is_some()
+        );
+        assert!(
+            control_spec(ControlKind::Button)
+                .find_prop("columns")
+                .is_none()
+        );
         assert_eq!(control_spec(ControlKind::Icon).prop_names(), vec!["icon"]);
     }
 }

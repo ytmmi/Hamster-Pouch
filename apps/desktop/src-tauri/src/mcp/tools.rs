@@ -22,12 +22,12 @@
 //! [`ToolSpec::write`] 为 `true` 的工具只有在设置项 `mcp.allowWrite` 打开时
 //! 才可执行；只读工具不受该开关影响（但仍需 `mcp.enabled` + token）。
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tauri::Manager;
 
-use super::jsonrpc::{RpcError, INTERNAL_ERROR, INVALID_PARAMS};
-use crate::commands::shared::ApiResponse;
+use super::jsonrpc::{INTERNAL_ERROR, INVALID_PARAMS, RpcError};
 use crate::AppState;
+use crate::commands::shared::ApiResponse;
 
 /// 一个工具的定义。
 pub(crate) struct ToolSpec {
@@ -449,12 +449,17 @@ pub(crate) fn call(
 
     let state = app.state::<AppState>();
     let repo_id = current_repo(&state).unwrap_or_default();
-    let args = if args.is_null() { json!({}) } else { args.clone() };
+    let args = if args.is_null() {
+        json!({})
+    } else {
+        args.clone()
+    };
 
     // 各工具共用同一个错误收敛点：`Result<Value, String>` → 工具结果。
     let outcome: Result<Value, String> = match name {
-        "repo_list" => flatten(crate::commands::repo::repo_list(state, app.clone()))
-            .and_then(to_json),
+        "repo_list" => {
+            flatten(crate::commands::repo::repo_list(state, app.clone())).and_then(to_json)
+        }
         "repo_current" => {
             let repo_id = current_repo(&state);
             Ok(json!({ "repo_id": repo_id }))
@@ -499,7 +504,9 @@ pub(crate) fn call(
             state,
         ))
         .and_then(to_json),
-        "album_list" => flatten(crate::commands::album::album_list(repo_id, state)).and_then(to_json),
+        "album_list" => {
+            flatten(crate::commands::album::album_list(repo_id, state)).and_then(to_json)
+        }
         "album_members" => flatten(crate::commands::album::album_members(
             repo_id,
             req_str(&args, "albumId")?,
@@ -524,8 +531,9 @@ pub(crate) fn call(
             opt_str(&args, "cursor"),
             state,
         )),
-        "setting_list" => flatten(crate::commands::repo::setting_list(state, app.clone()))
-            .and_then(to_json),
+        "setting_list" => {
+            flatten(crate::commands::repo::setting_list(state, app.clone())).and_then(to_json)
+        }
         "file_rename" => flatten(crate::commands::file::file_rename(
             repo_id,
             req_str(&args, "fileId")?,
@@ -618,7 +626,7 @@ pub(crate) fn call(
             return Err(RpcError::new(
                 INTERNAL_ERROR,
                 format!("工具 {other} 有定义但缺少执行分支"),
-            ))
+            ));
         }
     };
 
@@ -647,7 +655,9 @@ fn to_json<T: serde::Serialize>(value: T) -> Result<Value, String> {
 /// `FileQueryFilterArgs` 的字段在本层是私有的，但它实现了 `Deserialize`
 /// 且 `rename_all = "camelCase"`，所以用 JSON 中转——这样既不用把字段
 /// 改成 `pub(crate)`（保持 `file.rs` 的封装），也不会漏掉任何字段。
-fn query_filter(args: &Value) -> Result<Option<crate::commands::file::FileQueryFilterArgs>, String> {
+fn query_filter(
+    args: &Value,
+) -> Result<Option<crate::commands::file::FileQueryFilterArgs>, String> {
     let mut object = serde_json::Map::new();
     for key in ["mediaTypes", "sourceId", "dirPrefix"] {
         if let Some(value) = args.get(key) {
@@ -681,7 +691,6 @@ where
     flatten(response).and_then(to_json)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,7 +710,9 @@ mod tests {
     fn tool_names_are_snake_case() {
         for spec in list() {
             assert!(
-                spec.name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                spec.name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
                 "工具名 {} 不是 snake_case",
                 spec.name
             );
@@ -842,20 +853,28 @@ mod tests {
     #[test]
     fn empty_query_filter_means_no_filter() {
         assert!(query_filter(&json!({})).expect("空对象应合法").is_none());
-        assert!(query_filter(&json!({"mediaTypes": null}))
-            .expect("null 视为未提供")
-            .is_none());
+        assert!(
+            query_filter(&json!({"mediaTypes": null}))
+                .expect("null 视为未提供")
+                .is_none()
+        );
         // 只有未知键（一个都不是过滤条件）同样等于不筛。
-        assert!(query_filter(&json!({"unknown": 1}))
-            .expect("未知键应被忽略")
-            .is_none());
+        assert!(
+            query_filter(&json!({"unknown": 1}))
+                .expect("未知键应被忽略")
+                .is_none()
+        );
         // 有真条件时必须给出过滤体，否则会把整库当成筛选结果返回。
-        assert!(query_filter(&json!({"mediaTypes": ["image"]}))
-            .expect("应可构造")
-            .is_some());
-        assert!(query_filter(&json!({"dirPrefix": "a/b"}))
-            .expect("应可构造")
-            .is_some());
+        assert!(
+            query_filter(&json!({"mediaTypes": ["image"]}))
+                .expect("应可构造")
+                .is_some()
+        );
+        assert!(
+            query_filter(&json!({"dirPrefix": "a/b"}))
+                .expect("应可构造")
+                .is_some()
+        );
     }
 
     /// 条件形状不对（媒体类型不是字符串数组）必须报错，不能静默降级成"不筛"。
@@ -863,12 +882,12 @@ mod tests {
     fn malformed_query_filter_is_rejected() {
         // 用 match 而非 expect_err：`FileQueryFilterArgs` 没实现 Debug，
         // 而这里要断言的是"它被拒绝"，不是它的内容。
-        for bad in [json!({"mediaTypes": "image"}), json!({"mediaTypes": [1, 2]})] {
+        for bad in [
+            json!({"mediaTypes": "image"}),
+            json!({"mediaTypes": [1, 2]}),
+        ] {
             match query_filter(&bad) {
-                Err(err) => assert!(
-                    err.contains("查询条件不合法"),
-                    "错误串应说明原因: {err}"
-                ),
+                Err(err) => assert!(err.contains("查询条件不合法"), "错误串应说明原因: {err}"),
                 Ok(_) => panic!("形状不对的条件必须被拒绝: {bad}"),
             }
         }

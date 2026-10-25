@@ -4,7 +4,7 @@ use hp_core::{
     FileId, FileIndexRow, FileMark, HpError, HpResult, MediaType, SourceId, ThumbStatus,
     VerifyStatus,
 };
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err};
@@ -64,9 +64,7 @@ impl FileQueryCursor {
     /// 解析调用方回传的游标（非法即 `validation`，**不静默从头开始**）。
     pub fn decode(raw: &str) -> HpResult<Self> {
         let invalid = || {
-            HpError::InvalidArgument(
-                "游标格式非法（应由上次响应的 nextCursor 原样回传）".into(),
-            )
+            HpError::InvalidArgument("游标格式非法（应由上次响应的 nextCursor 原样回传）".into())
         };
         let Some(sep1) = raw.find(CURSOR_SEP) else {
             return Err(invalid());
@@ -193,7 +191,9 @@ impl RepoDb {
         let mut row = self
             .conn()
             .query_row(
-                &format!("SELECT {FILE_COLUMNS} FROM files WHERE source_id = ?1 AND relative_path = ?2"),
+                &format!(
+                    "SELECT {FILE_COLUMNS} FROM files WHERE source_id = ?1 AND relative_path = ?2"
+                ),
                 params![source_id, relative_path],
                 row_to_file,
             )
@@ -508,8 +508,7 @@ impl RepoDb {
                 .map_err(|e| store_err("删除文件索引", e))?;
             deleted += n as u64;
         }
-        tx.commit()
-            .map_err(|e| store_err("提交文件删除事务", e))?;
+        tx.commit().map_err(|e| store_err("提交文件删除事务", e))?;
         Ok(deleted)
     }
 

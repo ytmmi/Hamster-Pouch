@@ -138,8 +138,7 @@ fn read_svg_bytes(src: &Path) -> HpResult<Vec<u8>> {
             src.display()
         )));
     }
-    std::fs::read(src)
-        .map_err(|e| HpError::Io(format!("读取 SVG 失败 {}: {e}", src.display())))
+    std::fs::read(src).map_err(|e| HpError::Io(format!("读取 SVG 失败 {}: {e}", src.display())))
 }
 
 /// 决定输出画布尺寸：`max_dim` 有界 / 全尺寸两条口径共用同一套取尺寸规则。
@@ -265,8 +264,7 @@ mod tests {
         // **顶着 `.svgz` 后缀** + **顶着 `.svg` 后缀**都必须能解——判据是魔数而非后缀。
         for name in ["f.svgz", "f.svg"] {
             let src = write_tmp(name, &gz);
-            let img = rasterize_svg(&src, 32)
-                .unwrap_or_else(|e| panic!("{name} 应能栅格化: {e}"));
+            let img = rasterize_svg(&src, 32).unwrap_or_else(|e| panic!("{name} 应能栅格化: {e}"));
             assert_eq!((img.width(), img.height()), (32, 24), "{name} 尺寸应有界");
             let _ = std::fs::remove_file(&src);
         }

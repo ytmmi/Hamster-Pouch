@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::control_types::{
-    control_spec, ControlEvent, ControlKind, PropType, CONTROL_API_VERSION, CONTROL_NODE_SOFT_LIMIT,
-    TABLE_COLUMN_MAX,
+    CONTROL_API_VERSION, CONTROL_NODE_SOFT_LIMIT, ControlEvent, ControlKind, PropType,
+    TABLE_COLUMN_MAX, control_spec,
 };
 
 /// 控件 schema 文档（一次 panel schema 查询的返回体）。
@@ -217,11 +217,18 @@ fn validate_node(
     // 专属属性：必须在注册表白名单内，且取值类型/枚举匹配。
     for (name, value) in &node.props {
         match spec.find_prop(name) {
-            None => result.errors.push(format!(
-                "控件 {id}（{}）不支持字段 {name}",
-                node.kind
-            )),
-            Some(prop) => check_prop_value(id, node.kind, prop.name, prop.ty, prop.enum_values, value, result),
+            None => result
+                .errors
+                .push(format!("控件 {id}（{}）不支持字段 {name}", node.kind)),
+            Some(prop) => check_prop_value(
+                id,
+                node.kind,
+                prop.name,
+                prop.ty,
+                prop.enum_values,
+                value,
+                result,
+            ),
         }
     }
     for prop in spec.props {
@@ -234,7 +241,10 @@ fn validate_node(
     }
 
     // 文字：`text_key` 与专属于文本类字段 `text` 至少有一个（其余类型只允许 text_key）。
-    let has_text = node.text_key.as_deref().is_some_and(|s| !s.trim().is_empty())
+    let has_text = node
+        .text_key
+        .as_deref()
+        .is_some_and(|s| !s.trim().is_empty())
         || node
             .props
             .get("text")
@@ -255,7 +265,9 @@ fn validate_node(
             ));
         }
         if bind.name.trim().is_empty() {
-            result.errors.push(format!("控件 {id} 的 bind.name 不能为空"));
+            result
+                .errors
+                .push(format!("控件 {id} 的 bind.name 不能为空"));
         } else if !queries.contains(bind.name.as_str()) {
             result.errors.push(format!(
                 "控件 {id} 的 bind.name「{}」未在 manifest 的 data_queries 中声明",
@@ -276,9 +288,10 @@ fn validate_node(
     // 显隐谓词。
     if let Some(pred) = &node.visible_when {
         if !matches!(pred.kind.as_str(), "panel" | "selection") {
-            result
-                .errors
-                .push(format!("控件 {id} 的 visible_when.kind 非法: {}", pred.kind));
+            result.errors.push(format!(
+                "控件 {id} 的 visible_when.kind 非法: {}",
+                pred.kind
+            ));
         }
         if !matches!(pred.test.as_str(), "zero" | "empty" | "truthy" | "exists") {
             result.errors.push(format!(
@@ -302,10 +315,9 @@ fn validate_node(
                 None => result.errors.push(format!(
                     "控件 {id} 的事件名非法: {event_name}（固定谓词表外）"
                 )),
-                Some(event) if !spec.allows_event(event) => result.errors.push(format!(
-                    "控件 {id}（{}）不支持事件 {event_name}",
-                    node.kind
-                )),
+                Some(event) if !spec.allows_event(event) => result
+                    .errors
+                    .push(format!("控件 {id}（{}）不支持事件 {event_name}", node.kind)),
                 Some(_) => {}
             }
             let declared = event_id.as_str().is_some_and(|s| events.contains(s));
@@ -343,9 +355,9 @@ fn validate_node(
     }
     if let Some(max) = num("max") {
         if node.kind == ControlKind::Progress && max <= 0.0 {
-            result
-                .errors
-                .push(format!("控件 {id}（progress）的 max 必须为正数（当前 {max}）"));
+            result.errors.push(format!(
+                "控件 {id}（progress）的 max 必须为正数（当前 {max}）"
+            ));
         }
     }
 }
@@ -376,12 +388,10 @@ fn check_prop_value(
                 bad(result, "布尔");
             }
         }
-        PropType::Num => {
-            match value.as_f64() {
-                Some(n) if n.is_finite() => {}
-                _ => bad(result, "有限数值"),
-            }
-        }
+        PropType::Num => match value.as_f64() {
+            Some(n) if n.is_finite() => {}
+            _ => bad(result, "有限数值"),
+        },
         PropType::Enum => match value.as_str() {
             Some(s) if enum_values.contains(&s) => {}
             Some(s) => result.errors.push(format!(
@@ -395,9 +405,9 @@ fn check_prop_value(
             match items {
                 Some(items) => {
                     if items.iter().any(|v| !v.is_string()) {
-                        result.errors.push(format!(
-                            "控件 {id}（{kind}）的字段 {name} 必须是字符串数组"
-                        ));
+                        result
+                            .errors
+                            .push(format!("控件 {id}（{kind}）的字段 {name} 必须是字符串数组"));
                     }
                     if name == "columns" && (items.is_empty() || items.len() > TABLE_COLUMN_MAX) {
                         result.errors.push(format!(
@@ -531,7 +541,8 @@ mod tests {
         let result = schema(&leaf).validate(&ctx());
         assert!(result.errors.iter().any(|e| e.contains("不是容器")));
 
-        let container = r#"{"api_version":1,"panel_id":"palette.panel","root":{"id":"root","kind":"row"}}"#;
+        let container =
+            r#"{"api_version":1,"panel_id":"palette.panel","root":{"id":"root","kind":"row"}}"#;
         let result = schema(container).validate(&ctx());
         assert!(result.warnings.iter().any(|w| w.contains("children")));
     }
@@ -567,7 +578,12 @@ mod tests {
             .replace("\"api_version\": 1", "\"api_version\": 2");
         let result = schema(&bad).validate(&ctx());
         assert!(result.errors.iter().any(|e| e.contains("id 非法")));
-        assert!(result.errors.iter().any(|e| e.contains("不支持的控件 schema 版本")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("不支持的控件 schema 版本"))
+        );
 
         let dup = OK.replace("\"id\": \"title\"", "\"id\": \"colors\"");
         let result = schema(&dup).validate(&ctx());
@@ -589,7 +605,12 @@ mod tests {
 
         let range = r#"{"api_version":1,"panel_id":"palette.panel","root":{"id":"n","kind":"numberInput","min":10,"max":1,"step":0}}"#;
         let result = schema(range).validate(&ctx());
-        assert!(result.errors.iter().any(|e| e.contains("min(10) 大于 max(1)")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("min(10) 大于 max(1)"))
+        );
         assert!(result.errors.iter().any(|e| e.contains("step 必须为正数")));
     }
 
@@ -608,7 +629,12 @@ mod tests {
     fn rejects_text_control_without_text() {
         let bad = r#"{"api_version":1,"panel_id":"palette.panel","root":{"id":"t","kind":"text"}}"#;
         let result = schema(bad).validate(&ctx());
-        assert!(result.errors.iter().any(|e| e.contains("缺少 text_key 或 text")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("缺少 text_key 或 text"))
+        );
     }
 
     #[test]

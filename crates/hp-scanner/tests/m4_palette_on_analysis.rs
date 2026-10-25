@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use hp_media::{encode_palette_json, PALETTE_FORMAT_VERSION};
+use hp_media::{PALETTE_FORMAT_VERSION, encode_palette_json};
 use hp_scanner::{ScanOptions, Scanner};
 use hp_store::RepoDb;
 
@@ -97,7 +97,8 @@ fn reanalyze_refreshes_palette_but_never_overwrites_locked() {
 
     // 1）未锁定：`file.reanalyze` 走的就是 `rescan_file`，重扫应把调色板刷新成当前内容。
     let stale = encode_palette_json(&["#000000".to_string()]);
-    db.upsert_color_ref(file.id.as_str(), &stale).expect("写入旧调色板失败");
+    db.upsert_color_ref(file.id.as_str(), &stale)
+        .expect("写入旧调色板失败");
     scanner
         .rescan_file(&mut db, &source, "red.png", &ScanOptions::default(), None)
         .expect("重新分析失败");
@@ -114,7 +115,8 @@ fn reanalyze_refreshes_palette_but_never_overwrites_locked() {
 
     // 2）已锁定：手动锁定的色值是用户的判定权，重扫不得覆盖。
     let locked = r##"{"version":2,"colors":["#123456"],"locked":true}"##.to_string();
-    db.upsert_color_ref(file.id.as_str(), &locked).expect("写入锁定调色板失败");
+    db.upsert_color_ref(file.id.as_str(), &locked)
+        .expect("写入锁定调色板失败");
     // 文件内容也换掉，确保"刷新"的条件成立（否则可能是碰巧没重算）
     write_solid_png(&image_path, [0, 0, 255]);
     scan_all(&mut db, &source, true);

@@ -36,9 +36,9 @@ use std::path::{Path, PathBuf};
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 use crate::block::{
-    normalize_styles, BookBlock, BookDefinition, BookListItem, BookSpan, ColumnAlign, SpanStyle,
+    BookBlock, BookDefinition, BookListItem, BookSpan, ColumnAlign, SpanStyle, normalize_styles,
 };
-use crate::inline::{inline_style, local_name, LINE_BREAK_MARKER};
+use crate::inline::{LINE_BREAK_MARKER, inline_style, local_name};
 use crate::xml::{attr_value, decode_entities};
 
 /// 解析选项：CommonMark 全量 + 口径要求的 GFM 扩展。

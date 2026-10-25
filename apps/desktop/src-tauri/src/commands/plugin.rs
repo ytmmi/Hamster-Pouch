@@ -12,17 +12,17 @@ use std::path::{Path, PathBuf};
 
 use hp_core::{HpError, HpResult, PluginRegistryRow};
 use hp_plugin_host::{
-    discover_packages, parse_manifest, InstallSource, PluginHost, PluginInstaller, MANIFEST_FILE,
+    InstallSource, MANIFEST_FILE, PluginHost, PluginInstaller, discover_packages, parse_manifest,
 };
 use serde::Serialize;
 use tauri::State;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
-use crate::commands::shared::{
-    api_from_hp, bundled_plugins_dir, ensure_global, global, global_mut, lock_global, ApiResponse,
-};
 use crate::AppState;
+use crate::commands::shared::{
+    ApiResponse, api_from_hp, bundled_plugins_dir, ensure_global, global, global_mut, lock_global,
+};
 
 #[derive(Serialize)]
 pub(crate) struct PluginItem {
@@ -53,7 +53,12 @@ fn row_to_item(r: PluginRegistryRow) -> PluginItem {
     // 声明能力从注册表里的 manifest_json 解析（安装时原样存入，是权威清单）。
     // 解析失败不致命：退回空列表（前端将不请求任何能力，等价于只读启用）。
     let capabilities = parse_manifest(&r.manifest_json)
-        .map(|m| m.capabilities.iter().map(|c| c.as_str().to_string()).collect())
+        .map(|m| {
+            m.capabilities
+                .iter()
+                .map(|c| c.as_str().to_string())
+                .collect()
+        })
         .unwrap_or_default();
     PluginItem {
         id: r.id.as_str().to_string(),
@@ -438,9 +443,6 @@ mod tests {
         let (item, row) = install_bundled_candidate(&installer, &candidate, "t1");
         assert_eq!(item.status, "skipped");
         assert!(row.is_none(), "跳过项不应产出注册表行");
-        assert!(item
-            .message
-            .unwrap_or_default()
-            .contains(MANIFEST_FILE));
+        assert!(item.message.unwrap_or_default().contains(MANIFEST_FILE));
     }
 }

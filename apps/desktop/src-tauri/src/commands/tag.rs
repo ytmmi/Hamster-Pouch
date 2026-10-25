@@ -8,10 +8,8 @@ use hp_core::{HpError, HpResult, Tag, TagRelationKind};
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{
-    api_from_hp, lock_repo, open_repo, open_repo_mut, ApiResponse,
-};
 use crate::AppState;
+use crate::commands::shared::{ApiResponse, api_from_hp, lock_repo, open_repo, open_repo_mut};
 
 #[derive(Serialize)]
 pub(crate) struct TagItem {
@@ -189,10 +187,7 @@ pub(crate) fn tag_relation_add(
 
 /// tag.relation.remove：按 ID 删除 tag 关系。
 #[tauri::command]
-pub(crate) fn tag_relation_remove(
-    relation_id: String,
-    state: State<AppState>,
-) -> ApiResponse<()> {
+pub(crate) fn tag_relation_remove(relation_id: String, state: State<AppState>) -> ApiResponse<()> {
     api_from_hp((|| -> HpResult<()> {
         let mut guard = lock_repo(&state)?;
         let db = open_repo_mut(&mut guard)?;
@@ -288,11 +283,7 @@ pub(crate) fn tag_tree(
 
 /// tag.rename：重命名 tag 实体。
 #[tauri::command]
-pub(crate) fn tag_rename(
-    tag_id: String,
-    name: String,
-    state: State<AppState>,
-) -> ApiResponse<()> {
+pub(crate) fn tag_rename(tag_id: String, name: String, state: State<AppState>) -> ApiResponse<()> {
     api_from_hp((|| -> HpResult<()> {
         let mut guard = lock_repo(&state)?;
         let db = open_repo_mut(&mut guard)?;

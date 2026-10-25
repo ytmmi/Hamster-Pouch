@@ -1,0 +1,2 @@
+# 统一格式口径：显式钉住 style_edition，避免未来 rustfmt 默认值变化导致全仓重新漂移。
+style_edition = "2024"

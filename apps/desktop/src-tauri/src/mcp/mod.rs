@@ -37,8 +37,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use tauri::Manager;
 
-use crate::commands::shared::{app_data_root, diag_log, ensure_global};
 use crate::AppState;
+use crate::commands::shared::{app_data_root, diag_log, ensure_global};
 
 /// 默认监听端口（与 `packages/config/src/settings.ts` 的 `DEFAULT_MCP_PORT` 一致）。
 pub(crate) const DEFAULT_PORT: u16 = 57321;
@@ -143,7 +143,9 @@ impl McpRuntime {
 
     /// 当前是否在运行，以及（端口, 是否允许写）。
     pub(crate) fn status(&self) -> Option<(u16, bool)> {
-        self.lock_running().as_ref().map(|r| (r.port, r.allow_write))
+        self.lock_running()
+            .as_ref()
+            .map(|r| (r.port, r.allow_write))
     }
 
     /// 取 token：优先内存缓存，其次读文件，最后生成并落盘。
@@ -194,7 +196,8 @@ impl McpRuntime {
     pub(crate) fn stop(&self) {
         let taken = self.lock_running().take();
         if let Some(run) = taken {
-            run.shutdown.store(true, std::sync::atomic::Ordering::SeqCst);
+            run.shutdown
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             diag_log(&format!("[mcp] 已停止（原端口 {}）", run.port));
         }
     }
@@ -221,7 +224,11 @@ impl McpRuntime {
         match self.start(app, cfg) {
             Ok(port) => diag_log(&format!(
                 "[mcp] 已启动：http://127.0.0.1:{port}/mcp（写操作{}）",
-                if cfg.allow_write { "已允许" } else { "已禁用" }
+                if cfg.allow_write {
+                    "已允许"
+                } else {
+                    "已禁用"
+                }
             )),
             Err(message) => diag_log(&format!("[mcp] 启动失败：{message}")),
         }
@@ -289,7 +296,10 @@ mod tests {
     #[test]
     fn booleans_require_the_literal_true() {
         assert!(parse_config(Some("true"), None, None).enabled);
-        assert!(parse_config(Some(" true "), None, None).enabled, "两侧空白应忽略");
+        assert!(
+            parse_config(Some(" true "), None, None).enabled,
+            "两侧空白应忽略"
+        );
         for value in ["false", "1", "TRUE", "yes", ""] {
             assert!(
                 !parse_config(Some(value), None, None).enabled,
@@ -304,7 +314,11 @@ mod tests {
     fn invalid_ports_fall_back_to_default() {
         assert_eq!(parse_config(None, Some("60000"), None).port, 60000);
         assert_eq!(parse_config(None, Some("1024"), None).port, 1024, "下界含");
-        assert_eq!(parse_config(None, Some("65535"), None).port, 65535, "上界含");
+        assert_eq!(
+            parse_config(None, Some("65535"), None).port,
+            65535,
+            "上界含"
+        );
         for value in ["1023", "65536", "0", "-1", "abc", "", "8080.5"] {
             assert_eq!(
                 parse_config(None, Some(value), None).port,

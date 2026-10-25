@@ -27,9 +27,9 @@ fn all_dist_tag_extensions_have_valid_signature() {
         .map(|e| e.path())
         .filter(|p| {
             p.is_dir()
-                && p.file_name().and_then(|s| s.to_str()).is_some_and(|n| {
-                    n.starts_with("tagdict-") || n.starts_with("tagrel-")
-                })
+                && p.file_name()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|n| n.starts_with("tagdict-") || n.starts_with("tagrel-"))
         })
         .collect();
 

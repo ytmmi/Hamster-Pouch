@@ -185,9 +185,7 @@ impl MediaProcess {
         loop {
             let mut available: u32 = 0;
             let handle = HANDLE(pipe.as_raw_handle() as *mut std::ffi::c_void);
-            let peek = unsafe {
-                PeekNamedPipe(handle, None, 0, None, Some(&mut available), None)
-            };
+            let peek = unsafe { PeekNamedPipe(handle, None, 0, None, Some(&mut available), None) };
             if peek.is_err() {
                 return Err(HpError::Io("媒体 IPC 已断开".into()));
             }
@@ -273,7 +271,8 @@ impl MediaProcess {
 
     /// 暂停 / 继续。
     pub fn set_pause(&mut self, paused: bool) -> HpResult<()> {
-        let payload = serde_json::json!({ "command": ["set_property", "pause", paused] }).to_string();
+        let payload =
+            serde_json::json!({ "command": ["set_property", "pause", paused] }).to_string();
         self.send_command(&payload)
     }
 

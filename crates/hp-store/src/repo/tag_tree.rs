@@ -52,7 +52,10 @@ pub fn build_tag_tree(
         if !by_id.contains_key(from) || !by_id.contains_key(to) {
             continue; // 防御：关系两端必须存在于 tag 集合
         }
-        children.entry(from.to_string()).or_default().push(to.to_string());
+        children
+            .entry(from.to_string())
+            .or_default()
+            .push(to.to_string());
         *parent_count.entry(to.to_string()).or_insert(0) += 1;
     }
 
@@ -150,7 +153,11 @@ mod tests {
             tag("gshot", "游戏截图"),
             tag("gacha", "抽卡"),
         ];
-        let relations = vec![hier("shot", "gshot"), hier("game", "gshot"), hier("gshot", "gacha")];
+        let relations = vec![
+            hier("shot", "gshot"),
+            hier("game", "gshot"),
+            hier("gshot", "gacha"),
+        ];
         let mut counts = HashMap::new();
         counts.insert("gshot".to_string(), 10i64);
 
@@ -196,7 +203,11 @@ mod tests {
         let relations = vec![hier("r", "c2"), hier("r", "c1")];
         let tree = build_tag_tree(&tags, &relations, &HashMap::new());
         assert_eq!(tree.roots.len(), 1);
-        let names: Vec<&str> = tree.roots[0].children.iter().map(|n| n.name.as_str()).collect();
+        let names: Vec<&str> = tree.roots[0]
+            .children
+            .iter()
+            .map(|n| n.name.as_str())
+            .collect();
         assert_eq!(names, vec!["alpha", "beta"]);
     }
 }

@@ -10,7 +10,7 @@ use hp_core::{
     DictCategory, DictLang, DictSource, HpError, HpResult, TagDictAlias, TagDictEntry,
     TagDictLookup, TagDictSuggestion, TagDictTranslation, TranslationKind,
 };
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::migrate;
 use crate::util::{require_nonempty, store_err};
@@ -81,7 +81,11 @@ impl TagDictDb {
     }
 
     /// 按来源与原始 tag 精确查询词条；不存在返回 `None`（管线导入幂等用）。
-    pub fn entry_by_key(&self, source: DictSource, source_key: &str) -> HpResult<Option<TagDictEntry>> {
+    pub fn entry_by_key(
+        &self,
+        source: DictSource,
+        source_key: &str,
+    ) -> HpResult<Option<TagDictEntry>> {
         require_nonempty(source_key, "原始 tag 名")?;
         let entry = self
             .conn
@@ -156,8 +160,7 @@ impl TagDictDb {
             )
             .map_err(|e| store_err("写入别名", e))?;
         }
-        tx.commit()
-            .map_err(|e| store_err("提交词条写入事务", e))?;
+        tx.commit().map_err(|e| store_err("提交词条写入事务", e))?;
         Ok(())
     }
 
@@ -341,8 +344,7 @@ impl TagDictDb {
             .map_err(|e| store_err("准备翻译建议查询", e))?;
         let rows = stmt
             .query_map(params![pattern, limit], |row| {
-                let lang = DictLang::from_str(&row.get::<_, String>(6)?)
-                    .unwrap_or(DictLang::En);
+                let lang = DictLang::from_str(&row.get::<_, String>(6)?).unwrap_or(DictLang::En);
                 let matched = row.get::<_, String>(5)?;
                 row_to_suggestion(row, lang, matched)
             })
@@ -365,8 +367,7 @@ impl TagDictDb {
             .map_err(|e| store_err("准备别名建议查询", e))?;
         let rows = stmt
             .query_map(params![pattern, limit], |row| {
-                let lang = DictLang::from_str(&row.get::<_, String>(6)?)
-                    .unwrap_or(DictLang::En);
+                let lang = DictLang::from_str(&row.get::<_, String>(6)?).unwrap_or(DictLang::En);
                 let matched = row.get::<_, String>(5)?;
                 row_to_suggestion(row, lang, matched)
             })
@@ -388,8 +389,7 @@ impl std::fmt::Debug for TagDictDb {
 fn row_to_entry(row: &Row) -> rusqlite::Result<TagDictEntry> {
     Ok(TagDictEntry {
         id: row.get(0)?,
-        source: DictSource::from_str(&row.get::<_, String>(1)?)
-            .unwrap_or(DictSource::Manual),
+        source: DictSource::from_str(&row.get::<_, String>(1)?).unwrap_or(DictSource::Manual),
         source_key: row.get(2)?,
         zh: row.get(3)?,
         category: DictCategory::from_str(&row.get::<_, String>(4)?)
@@ -406,8 +406,7 @@ fn row_to_translation(row: &Row) -> rusqlite::Result<TagDictTranslation> {
         entry_id: row.get(0)?,
         lang: DictLang::from_str(&row.get::<_, String>(1)?).unwrap_or(DictLang::Zh),
         value: row.get(2)?,
-        kind: TranslationKind::from_str(&row.get::<_, String>(3)?)
-            .unwrap_or(TranslationKind::Alt),
+        kind: TranslationKind::from_str(&row.get::<_, String>(3)?).unwrap_or(TranslationKind::Alt),
     })
 }
 
@@ -509,10 +508,7 @@ mod tests {
         // 中/日/英任意语言命中同一词条
         for q in ["摄影", "写真", "Photo", "フォト"] {
             let hits = db.lookup(q, 10).unwrap();
-            assert!(
-                !hits.is_empty(),
-                "查询 {q} 应命中词条（zh=摄影）"
-            );
+            assert!(!hits.is_empty(), "查询 {q} 应命中词条（zh=摄影）");
             assert_eq!(hits[0].entry.zh, "摄影");
             assert_eq!(hits[0].translations.len(), 2);
             assert_eq!(hits[0].aliases.len(), 1);

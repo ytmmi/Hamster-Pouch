@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use hp_core::{Capability, HpError, SourceKind, TrustLevel};
 use hp_plugin_host::{
-    effective_trust, read_package, HostSourceKind, InstallSource, PluginHost, PluginInstaller,
-    MANIFEST_FILE,
+    HostSourceKind, InstallSource, MANIFEST_FILE, PluginHost, PluginInstaller, effective_trust,
+    read_package,
 };
 use hp_store::GlobalDb;
 
@@ -93,8 +93,7 @@ fn system_plugin_is_valid_and_effective_trust_is_system() {
     );
 
     // 仓库自带的系统插件清单**不声明**来源（RFC 0009「来源与信任判定」）。
-    let manifest_text =
-        std::fs::read_to_string(dir.join(MANIFEST_FILE)).expect("读取清单文本失败");
+    let manifest_text = std::fs::read_to_string(dir.join(MANIFEST_FILE)).expect("读取清单文本失败");
     assert!(
         !manifest_text.contains("\"source\""),
         "manifest 不应声明来源（RFC 0009「来源与信任判定」）"

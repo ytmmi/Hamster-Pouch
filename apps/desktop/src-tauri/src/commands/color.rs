@@ -8,12 +8,12 @@ use hp_media::{encode_palette_json, extract_palette};
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{
-    api_async, api_from_hp, lock_repo, open_repo, open_repo_mut, resolve_file_path, ApiAsync,
-    ApiResponse,
-};
-use crate::commands::shared::EmitHp;
 use crate::AppState;
+use crate::commands::shared::EmitHp;
+use crate::commands::shared::{
+    ApiAsync, ApiResponse, api_async, api_from_hp, lock_repo, open_repo, open_repo_mut,
+    resolve_file_path,
+};
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]

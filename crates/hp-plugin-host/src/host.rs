@@ -86,7 +86,8 @@ impl PluginHost {
                 )));
             }
         }
-        if requested.contains(&Capability::NativeCode) && !row.trust_level.allows_dynamic_library() {
+        if requested.contains(&Capability::NativeCode) && !row.trust_level.allows_dynamic_library()
+        {
             return Err(HpError::InvalidArgument(
                 "native.code 需要 system/trusted 信任等级".into(),
             ));
@@ -183,11 +184,7 @@ impl PluginHost {
     ///
     /// 返回 `Ok(None)` = 没有任何已安装插件声明该面板（面板可能来自已卸载的插件，
     /// 此时面板按「未接通」处理，不是错误）。
-    pub fn find_panel_owner(
-        &self,
-        db: &GlobalDb,
-        panel_id: &str,
-    ) -> HpResult<Option<PanelOwner>> {
+    pub fn find_panel_owner(&self, db: &GlobalDb, panel_id: &str) -> HpResult<Option<PanelOwner>> {
         for row in db.list_plugins()? {
             // 安装目录里的清单是权威；解析失败的行跳过（该行本身已不可用）。
             let Ok(manifest) = parse_manifest(&row.manifest_json) else {
@@ -204,9 +201,7 @@ impl PluginHost {
             let version_dir = row.source_ref.as_ref().map(std::path::PathBuf::from);
             let entry_path = match manifest.runtime_kind {
                 RuntimeKind::StaticData => None,
-                _ => version_dir
-                    .as_ref()
-                    .map(|dir| dir.join(&manifest.entry)),
+                _ => version_dir.as_ref().map(|dir| dir.join(&manifest.entry)),
             };
             return Ok(Some(PanelOwner {
                 plugin_id: manifest.id.as_str().to_string(),
@@ -342,11 +337,7 @@ impl PluginHost {
     ///
     /// **排序**：带面板的在前（按 plugin_id / panel id），**无面板的整组排在最后**
     /// ——界面据此把"数据扩展"放在菜单底部，不必自己再排。
-    pub fn panel_catalog(
-        &self,
-        db: &GlobalDb,
-        repo_id: &str,
-    ) -> HpResult<Vec<PanelCatalogEntry>> {
+    pub fn panel_catalog(&self, db: &GlobalDb, repo_id: &str) -> HpResult<Vec<PanelCatalogEntry>> {
         let mut with_panel = Vec::new();
         let mut without_panel = Vec::new();
         for row in db.list_plugins()? {
@@ -399,8 +390,14 @@ impl PluginHost {
             }
         }
         with_panel.sort_by(|a, b| {
-            (a.plugin_id.as_str(), a.panel.as_ref().map(|p| p.id.as_str()))
-                .cmp(&(b.plugin_id.as_str(), b.panel.as_ref().map(|p| p.id.as_str())))
+            (
+                a.plugin_id.as_str(),
+                a.panel.as_ref().map(|p| p.id.as_str()),
+            )
+                .cmp(&(
+                    b.plugin_id.as_str(),
+                    b.panel.as_ref().map(|p| p.id.as_str()),
+                ))
         });
         without_panel.sort_by(|a, b| a.plugin_id.as_str().cmp(b.plugin_id.as_str()));
         // 带面板的在前，**无面板的数据扩展整组在最后**。

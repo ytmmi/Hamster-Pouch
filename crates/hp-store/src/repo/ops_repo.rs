@@ -4,7 +4,7 @@
 //! 都必须写入 `ops_history`，供追溯与撤销。
 
 use hp_core::{HpError, HpResult};
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{OptionalExtension, Row, params};
 
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err, uuid};

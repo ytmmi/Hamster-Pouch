@@ -74,11 +74,11 @@ use hp_core::{HpError, HpResult};
 
 use crate::block::BookBlock;
 use crate::epub_rich::{
-    caption_from_visible_text, comment_label, element_inner_balanced, figcaption_inner,
-    first_image_tag, heading_level, image_ref, is_full_page_image, is_page_break_tag, strip_tags,
-    trim_page_breaks, ANCESTOR_TAGS, BLOCK_TAGS, SKIPPED_CONTENT,
+    ANCESTOR_TAGS, BLOCK_TAGS, SKIPPED_CONTENT, caption_from_visible_text, comment_label,
+    element_inner_balanced, figcaption_inner, first_image_tag, heading_level, image_ref,
+    is_full_page_image, is_page_break_tag, strip_tags, trim_page_breaks,
 };
-use crate::inline::{local_name, spans_from_html, InlineState, RunBuilder};
+use crate::inline::{InlineState, RunBuilder, local_name, spans_from_html};
 use crate::xml::{attr_value, decode_entities, resolve_zip_path};
 use crate::zip::ZipArchive;
 
@@ -734,12 +734,16 @@ mod tests {
         let blocks = blocks_from_xhtml(xhtml, "c.xhtml", &archive_with(&[]));
         match &blocks[0] {
             BookBlock::Paragraph { spans } => {
-                assert!(spans
-                    .iter()
-                    .any(|s| s.styles.contains(&SpanStyle::Highlight)));
-                assert!(spans
-                    .iter()
-                    .any(|s| s.styles.contains(&SpanStyle::Underline)));
+                assert!(
+                    spans
+                        .iter()
+                        .any(|s| s.styles.contains(&SpanStyle::Highlight))
+                );
+                assert!(
+                    spans
+                        .iter()
+                        .any(|s| s.styles.contains(&SpanStyle::Underline))
+                );
             }
             other => panic!("不是段落：{other:?}"),
         }
@@ -751,7 +755,10 @@ mod tests {
         let blocks = blocks_from_xhtml(xhtml, "c.xhtml", &archive_with(&[]));
         match &blocks[0] {
             BookBlock::Paragraph { spans } => {
-                let note = spans.iter().find(|s| s.text == "kan").expect("应有注音片段");
+                let note = spans
+                    .iter()
+                    .find(|s| s.text == "kan")
+                    .expect("应有注音片段");
                 assert!(note.styles.contains(&SpanStyle::Superscript));
                 assert_eq!(note.size_em, Some(RUBY_NOTE_SIZE_EM));
             }
@@ -792,9 +799,11 @@ mod tests {
         let blocks = blocks_from_xhtml(xhtml, "c.xhtml", &archive);
         match &blocks[0] {
             BookBlock::Figure { caption, .. } => {
-                assert!(caption
-                    .iter()
-                    .any(|s| s.styles.contains(&SpanStyle::Strong)));
+                assert!(
+                    caption
+                        .iter()
+                        .any(|s| s.styles.contains(&SpanStyle::Strong))
+                );
             }
             other => panic!("应当是 Figure：{other:?}"),
         }
@@ -865,7 +874,10 @@ mod tests {
         let xhtml = r#"<body><figure><img src="i.png" style="height:100%"/></figure></body>"#;
         let archive = archive_with(&[("i.png", PNG, false)]);
         let blocks = blocks_from_xhtml(xhtml, "c.xhtml", &archive);
-        assert!(images(&blocks)[0].1, "img 自己的 style 高度也算：{blocks:?}");
+        assert!(
+            images(&blocks)[0].1,
+            "img 自己的 style 高度也算：{blocks:?}"
+        );
     }
 
     // ---- Comment（注释 / 脚注 / 侧栏）----
@@ -897,7 +909,11 @@ mod tests {
         assert_eq!(blocks.len(), 2);
         match &blocks[1] {
             BookBlock::Comment { label, blocks } => {
-                assert_eq!(label.as_deref(), Some("footnote"), "label 取 epub:type 的值");
+                assert_eq!(
+                    label.as_deref(),
+                    Some("footnote"),
+                    "label 取 epub:type 的值"
+                );
                 assert_eq!(blocks.len(), 1);
             }
             other => panic!("应当是 Comment：{other:?}"),
@@ -912,7 +928,10 @@ mod tests {
                 Some("doc-footnote"),
             ),
             (r#"<div class="note"><p>注</p></div>"#, Some("note")),
-            (r#"<div class="annotation"><p>注</p></div>"#, Some("annotation")),
+            (
+                r#"<div class="annotation"><p>注</p></div>"#,
+                Some("annotation"),
+            ),
             (
                 r#"<div class="sidebar" epub:type="sidebar"><p>侧栏</p></div>"#,
                 Some("sidebar"),
@@ -983,8 +1002,7 @@ mod tests {
 
     #[test]
     fn inline_page_break_between_paragraphs_is_kept() {
-        let xhtml =
-            r#"<body><p>a</p><div style="page-break-before:always"></div><p>b</p></body>"#;
+        let xhtml = r#"<body><p>a</p><div style="page-break-before:always"></div><p>b</p></body>"#;
         let blocks = blocks_from_xhtml(xhtml, "c.xhtml", &archive_with(&[]));
         assert_eq!(
             blocks,
@@ -1160,7 +1178,7 @@ mod tests {
         let comment = BookBlock::Comment {
             label: Some("footnote".into()),
             blocks: vec![BookBlock::Paragraph {
-                spans: vec![text("注文")]
+                spans: vec![text("注文")],
             }],
         };
         assert_eq!(block_char_count(&comment), 2, "注释正文要递归计入");

@@ -81,7 +81,8 @@ fn to_tree_nodes(parent_rel: &str, node: &DirNode) -> Vec<TreeNode> {
                 format!("{parent_rel}/{name}")
             };
             let children = to_tree_nodes(&relative_path, child);
-            let file_count = child.direct_files + children.iter().map(|c| c.file_count).sum::<i64>();
+            let file_count =
+                child.direct_files + children.iter().map(|c| c.file_count).sum::<i64>();
             TreeNode {
                 name: name.clone(),
                 relative_path,

@@ -1,9 +1,9 @@
 //! 文件封面覆盖仓储（database-schema.md 第 4.5 节，迁移 repo/0009）。
 
 use hp_core::{
-    is_safe_cover_file_name, normalize_cover_color, CoverKind, FileCover, HpError, HpResult,
+    CoverKind, FileCover, HpError, HpResult, is_safe_cover_file_name, normalize_cover_color,
 };
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{OptionalExtension, Row, params};
 
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err};
@@ -69,7 +69,10 @@ impl RepoDb {
     pub fn delete_file_cover(&mut self, file_id: &str) -> HpResult<bool> {
         let n = self
             .conn()
-            .execute("DELETE FROM file_covers WHERE file_id = ?1", params![file_id])
+            .execute(
+                "DELETE FROM file_covers WHERE file_id = ?1",
+                params![file_id],
+            )
             .map_err(|e| store_err("删除封面覆盖", e))?;
         Ok(n > 0)
     }
@@ -94,8 +97,9 @@ impl RepoDb {
             .map(|i| format!("?{i}"))
             .collect::<Vec<_>>()
             .join(", ");
-        let sql =
-            format!("SELECT file_id, kind, value, updated_at FROM file_covers WHERE file_id IN ({placeholders})");
+        let sql = format!(
+            "SELECT file_id, kind, value, updated_at FROM file_covers WHERE file_id IN ({placeholders})"
+        );
         let mut stmt = self
             .conn()
             .prepare(&sql)

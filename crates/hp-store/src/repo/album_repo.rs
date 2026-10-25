@@ -7,9 +7,9 @@ use hp_core::{
     AddedBy, Album, AlbumId, AlbumKind, AlbumMediaType, AlbumMember, AlbumSyncRule, AlbumSyncState,
     FileId, FileIndexRow, HpError, HpResult, RepoId, SourceId, SyncMode,
 };
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{OptionalExtension, Row, params};
 
-use crate::repo::file_repo::{row_to_file, FILE_COLUMNS_F, FILE_COLUMN_COUNT};
+use crate::repo::file_repo::{FILE_COLUMN_COUNT, FILE_COLUMNS_F, row_to_file};
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err};
 
@@ -211,8 +211,7 @@ impl RepoDb {
         let n = tx
             .execute("DELETE FROM albums WHERE id = ?1", params![album_id])
             .map_err(|e| store_err("删除相册", e))?;
-        tx.commit()
-            .map_err(|e| store_err("提交相册删除事务", e))?;
+        tx.commit().map_err(|e| store_err("提交相册删除事务", e))?;
         if n == 0 {
             return Err(HpError::NotFound(format!("相册不存在: {album_id}")));
         }
@@ -233,7 +232,13 @@ impl RepoDb {
             .execute(
                 "INSERT OR IGNORE INTO album_member (album_id, file_id, added_at, added_by, pinned)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![album_id, file_id, now_iso(), added_by.as_str(), pinned as i64],
+                params![
+                    album_id,
+                    file_id,
+                    now_iso(),
+                    added_by.as_str(),
+                    pinned as i64
+                ],
             )
             .map_err(|e| store_err("加入相册成员", e))?;
         Ok(())
@@ -256,8 +261,7 @@ impl RepoDb {
                 .map_err(|e| store_err("移除相册成员", e))?;
             removed += n as u64;
         }
-        tx.commit()
-            .map_err(|e| store_err("提交成员移除事务", e))?;
+        tx.commit().map_err(|e| store_err("提交成员移除事务", e))?;
         Ok(removed)
     }
 
@@ -373,11 +377,7 @@ impl RepoDb {
     }
 
     /// 查询单个相册成员；不存在返回 `None`。
-    pub fn get_album_member(
-        &self,
-        album_id: &str,
-        file_id: &str,
-    ) -> HpResult<Option<AlbumMember>> {
+    pub fn get_album_member(&self, album_id: &str, file_id: &str) -> HpResult<Option<AlbumMember>> {
         self.conn()
             .query_row(
                 "SELECT album_id, file_id, added_at, added_by, pinned
@@ -390,7 +390,12 @@ impl RepoDb {
     }
 
     /// 设置成员 pinned 标记（防止被跟随源同步移除）。
-    pub fn set_member_pinned(&mut self, album_id: &str, file_id: &str, pinned: bool) -> HpResult<()> {
+    pub fn set_member_pinned(
+        &mut self,
+        album_id: &str,
+        file_id: &str,
+        pinned: bool,
+    ) -> HpResult<()> {
         require_nonempty(album_id, "相册 ID")?;
         require_nonempty(file_id, "文件 ID")?;
         let n = self
@@ -447,10 +452,7 @@ impl RepoDb {
     /// 列出"某媒体源的文件参与了哪些相册、各多少条成员关系"（卸载影响评估与清理都基于它）。
     ///
     /// 按相册名排序，便于界面稳定展示。
-    pub fn list_album_source_members(
-        &self,
-        source_id: &str,
-    ) -> HpResult<Vec<AlbumSourceMembers>> {
+    pub fn list_album_source_members(&self, source_id: &str) -> HpResult<Vec<AlbumSourceMembers>> {
         let mut stmt = self
             .conn()
             .prepare(

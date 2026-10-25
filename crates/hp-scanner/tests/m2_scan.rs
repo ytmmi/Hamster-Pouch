@@ -27,7 +27,11 @@ fn setup(tmp: &tempfile::TempDir) -> (RepoDb, Source) {
     (db, source)
 }
 
-fn scan(db: &mut RepoDb, source: &Source, full: bool) -> hp_core::HpResult<hp_scanner::ScanOutcome> {
+fn scan(
+    db: &mut RepoDb,
+    source: &Source,
+    full: bool,
+) -> hp_core::HpResult<hp_scanner::ScanOutcome> {
     let scanner = Scanner::new();
     let options = ScanOptions {
         full,
@@ -94,8 +98,14 @@ fn scan_indexes_image_audio_and_text_with_hashes() {
         text.marks.is_empty(),
         "txt 默认不带标记（旧口径的 document 子类型已废弃）"
     );
-    assert!(text.content_hash.is_some(), "文本应有内容哈希（与音频占位行不同）");
-    assert!(text.perceptual_hash.is_none(), "文本没有视觉本体，不应有感知哈希");
+    assert!(
+        text.content_hash.is_some(),
+        "文本应有内容哈希（与音频占位行不同）"
+    );
+    assert!(
+        text.perceptual_hash.is_none(),
+        "文本没有视觉本体，不应有感知哈希"
+    );
     assert_eq!(text.verify_status, VerifyStatus::Ok);
 
     // 未知类型不入库
@@ -233,7 +243,10 @@ fn legacy_audio_placeholder_is_upgraded_in_place() {
         VerifyStatus::Ok,
         "升级后校验状态应为 ok（不再是 placeholder）"
     );
-    assert_eq!(upgraded.id, indexed.id, "原位升级必须保留文件身份（id 不变）");
+    assert_eq!(
+        upgraded.id, indexed.id,
+        "原位升级必须保留文件身份（id 不变）"
+    );
 }
 
 #[test]

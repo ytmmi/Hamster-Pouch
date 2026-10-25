@@ -14,10 +14,10 @@ use hp_store::PanelLayoutRow;
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::shared::{
-    api_from_hp, ensure_global, global, global_mut, lock_global, ApiResponse,
-};
 use crate::AppState;
+use crate::commands::shared::{
+    ApiResponse, api_from_hp, ensure_global, global, global_mut, lock_global,
+};
 
 /// 布局列表项（返回前端）。
 #[derive(Serialize)]

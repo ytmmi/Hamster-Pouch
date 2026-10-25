@@ -75,7 +75,7 @@ use std::time::SystemTime;
 use encoding_rs::Encoding;
 use hp_core::{HpError, HpResult};
 
-use crate::text::{detect_encoding, TextEncoding};
+use crate::text::{TextEncoding, detect_encoding};
 
 #[cfg(test)]
 #[path = "text_stream_tests.rs"]
@@ -382,8 +382,7 @@ impl CarryCounter {
                 .max_utf8_buffer_length_without_replacement(head.len())
                 .unwrap_or(head.len().saturating_mul(3).saturating_add(16));
             out.reserve(capacity);
-            let (_result, _read) =
-                decoder.decode_to_string_without_replacement(head, out, true);
+            let (_result, _read) = decoder.decode_to_string_without_replacement(head, out, true);
         }
         let added = out[before..].chars().count();
         self.chars += added as u64;
@@ -876,11 +875,7 @@ fn encoded_char_len(encoding: &'static Encoding, ch: char) -> usize {
         return ch.len_utf16() * 2;
     }
     // GBK / Big5 / Shift_JIS：ASCII 1 字节，其余 2 字节。
-    if (ch as u32) < 0x80 {
-        1
-    } else {
-        2
-    }
+    if (ch as u32) < 0x80 { 1 } else { 2 }
 }
 
 /// **流式目录扫描**：逐行匹配小说章节标题，命中即回调；**不保留全文**。
@@ -902,7 +897,7 @@ pub fn text_toc_stream(
     path: &Path,
     mut on_entry: impl FnMut(crate::toc::TocEntry),
 ) -> HpResult<TextScan> {
-    use crate::toc::{HeadingKind, TocEntry, TOC_MAX_ENTRIES};
+    use crate::toc::{HeadingKind, TOC_MAX_ENTRIES, TocEntry};
 
     let (mut file, len, encoding, bom) = open_with_encoding(path)?;
     let limit = len.min(TEXT_SCAN_MAX_BYTES);

@@ -5,7 +5,7 @@
 //! - 自动组：`auto_tags` + `file_auto_tags`
 
 use hp_core::{FileAutoTag, FileId, FileTag, HpError, HpResult, RepoId, Tag, TagId};
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{OptionalExtension, Row, params};
 
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err};
@@ -94,8 +94,7 @@ impl RepoDb {
         let n = tx
             .execute("DELETE FROM tags WHERE id = ?1", params![tag_id])
             .map_err(|e| store_err("删除 tag", e))?;
-        tx.commit()
-            .map_err(|e| store_err("提交 tag 删除事务", e))?;
+        tx.commit().map_err(|e| store_err("提交 tag 删除事务", e))?;
         if n == 0 {
             return Err(HpError::NotFound(format!("tag 不存在: {tag_id}")));
         }
