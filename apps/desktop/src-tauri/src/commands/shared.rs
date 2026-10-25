@@ -806,14 +806,17 @@ mod tests {
             eprintln!("跳过：未找到 plugins-dist/");
             return;
         };
-        // 仓库内确实有可供安装的包（否则本用例没有意义）。
-        assert!(
-            dist.join("tagdict-pixiv")
-                .join("data")
-                .join("tag_lib.sqlite")
-                .is_file(),
-            "前提：plugins-dist/ 下应有包（先运行 package_extensions.py）"
-        );
+        // 前提：仓库内真有**解包好的**扩展包目录（否则本用例没有意义）。
+        // D122 起 `plugins-dist/*.zip` 入库分发、解包目录仍不入库——全新 checkout
+        // 里只有 zip，此时无法构造"已分发但未安装"的现场，直接跳过；本机生成过
+        // 包（package_extensions.py）时照常断言。
+        let has_package = ["tagdict-pixiv", "tagdict-danbooru", "tagrel-games"]
+            .iter()
+            .any(|id| dist.join(id).join("data").join("tag_lib.sqlite").is_file());
+        if !has_package {
+            eprintln!("跳过：plugins-dist/ 下没有解包好的扩展（只有 zip 分发件）");
+            return;
+        }
 
         // 安装目录为空 = 一个扩展都没装。
         let empty = std::env::temp_dir().join(format!("hp-taglib-none-{}", std::process::id()));
