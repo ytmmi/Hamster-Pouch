@@ -1,0 +1,134 @@
+# 装配 vcpkg + libheif —— `hp-media` 默认特性 `libheif` 的构建前提。
+#
+# ## 为什么必须装，而不是想办法绕开
+#
+# `crates/hp-media/Cargo.toml` 的 `default = ["libheif", "libwebp"]`。MSVC 下
+# `libheif-sys` 的 build.rs 调 `vcpkg find_package("libheif")`，找不到就
+# `process::exit(1)`——**硬失败，不是降级**。实测报错原文：
+#
+#   warning: libheif-sys@5.3.1+1.23.1: Could not find Vcpkg tree: Could not find Vcpkg root at …\.vcpkg-root
+#   error: failed to run custom build command for `libheif-sys v5.3.1+1.23.1`
+#
+# README「环境要求」给的退路"没有 vcpkg 就用 `--no-default-features` 构建 hp-media"
+# 在 workspace 层面**不成立**：`hp-scanner` 以默认特性依赖 `hp-media`，cargo 的
+# feature 统一会把 `libheif` 重新打开（实测 `cargo check --workspace
+# --no-default-features` 仍然编译 libheif-sys 并失败）。CI 只有一条路：把前提备好。
+#
+# ## 为什么是 composite action
+#
+# clippy 与 test 两个作业都要它。抄两遍的代价不是重复劳动，而是**将来改版本时
+# 只改一处**：两份配置漂移的症状是"一个作业能过、另一个不能过"，最难查的那类红。
+#
+# ## 为什么钉提交
+#
+# vcpkg 是滚动仓库，portfile 每天都在变。跟 master 跑等于让 CI 结果取决于
+# 上游今天改了什么。钉到本地实测通过的提交（2026-10-04，libheif port 1.23.5），
+# 升级 vcpkg 变成一次有意、可 review 的改动。
+#
+# ## 为什么缓存 `installed/`，以及为什么"只缓存 installed/"不够
+#
+# libheif 的依赖链（aom / x265 / libde265）是 C++ 大工程，冷装是分钟级；
+# 缓存命中后只剩解析 portfile 的时间。**但 installed/ 单独存在时并不能被使用**：
+# vcpkg-rs 先要确认 `$VCPKG_ROOT/.vcpkg-root` 这个标记文件存在，才认这个根
+# （上文的报错就是这么来的）。所以这里**始终先检出 vcpkg 仓库**（40 秒级），
+# 只在"要不要跑 `vcpkg install`"上用缓存——单一代码路径，不需要伪造标记文件，
+# 也不依赖"缓存命中"这一状态去跳过整个装配流程。
+# 缓存键含三元组与提交：任一变化都必须重装，否则拿到的是 ABI 不匹配的静态库，
+# 症状是链接期一堆无法解释的符号缺失。
+
+name: vcpkg-libheif
+description: 按钉死的 vcpkg 提交安装 libheif（含 aom / x265 / libde265），供 hp-media 静态链接
+
+inputs:
+  vcpkg-commit:
+    description: vcpkg 仓库提交号（本地已验证的版本）
+    required: true
+  vcpkg-root:
+    description: vcpkg 检出目录（不要用 runner 预装的 C:/vcpkg——那不受本文件钉的提交约束）
+    required: true
+  triplet:
+    description: vcpkg 三元组（需与 vcpkg-rs 的默认选择一致）
+    required: false
+    default: x64-windows-static-md
+
+runs:
+  using: composite
+  steps:
+    # vcpkg-rs 认的是环境变量 VCPKG_ROOT。GHA 的 env 不跨 step 继承，
+    # 所以写进 $GITHUB_ENV，让本 action 之后的所有 step（含 cargo）都看得到。
+    - name: 导出 VCPKG_ROOT / 三元组
+      shell: bash
+      run: |
+        {
+          echo "VCPKG_ROOT=${{ inputs.vcpkg-root }}"
+          echo "VCPKG_DEFAULT_TRIPLET=${{ inputs.triplet }}"
+        } >> "$GITHUB_ENV"
+
+    # 按 SHA 浅取。GitHub 允许按可达 SHA fetch（uploadpack.allowReachableSHA1InWant），
+    # 因此 `--depth 1` 足够，不必拉整个历史。不用 `--branch <tag>`：
+    # tag 与"本地实测的那个提交"未必是同一个点。
+    # `.vcpkg-root` 是 vcpkg 仓库自带的标记文件（vcpkg-rs 用它确认根），检出后自然存在。
+    - name: 检出 vcpkg（钉提交）
+      shell: pwsh
+      run: |
+        $root = '${{ inputs.vcpkg-root }}'
+        $sha  = '${{ inputs.vcpkg-commit }}'
+        if (Test-Path (Join-Path $root '.vcpkg-root')) {
+          $head = git -C $root rev-parse HEAD 2>$null
+          if ($head -eq $sha) {
+            Write-Host "vcpkg 已在 $sha，跳过检出"
+            exit 0
+          }
+        }
+        New-Item -ItemType Directory -Force -Path $root | Out-Null
+        git -C $root init -q
+        git -C $root remote remove origin 2>$null
+        git -C $root remote add origin https://github.com/microsoft/vcpkg.git
+        git -C $root fetch -q --depth 1 origin $sha
+        git -C $root checkout -q FETCH_HEAD
+        $actual = git -C $root rev-parse HEAD
+        if ($actual -ne $sha) { throw "vcpkg 提交不一致：期望 $sha，实际 $actual" }
+        Write-Host "vcpkg 提交：$actual"
+
+    # bootstrap 编译 vcpkg 自己的 C++ 程序（20–30 秒）。对已构建的树是幂等的。
+    - name: bootstrap vcpkg
+      shell: pwsh
+      run: |
+        & '${{ inputs.vcpkg-root }}/bootstrap-vcpkg.bat' -disableMetrics
+        if ($LASTEXITCODE -ne 0) { throw "bootstrap 失败（exit $LASTEXITCODE）" }
+
+    - name: 缓存 vcpkg installed/
+      id: cache
+      uses: actions/cache@v6
+      with:
+        path: ${{ inputs.vcpkg-root }}/installed
+        key: vcpkg-${{ runner.os }}-${{ inputs.vcpkg-commit }}-${{ inputs.triplet }}
+        restore-keys: |
+          vcpkg-${{ runner.os }}-${{ inputs.vcpkg-commit }}-
+
+    # 与 README「环境要求」给的命令逐字一致：
+    #   vcpkg install "libheif[aom]:x64-windows-static-md"
+    # `aom` 是 AVIF 解码器；libheif 端口的 default-features 含 `hevc`（x265）。
+    - name: 安装 libheif
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        & '${{ inputs.vcpkg-root }}/vcpkg.exe' install 'libheif[aom]:${{ inputs.triplet }}'
+        if ($LASTEXITCODE -ne 0) { throw "vcpkg install 失败（exit $LASTEXITCODE）" }
+
+    # 负向自检：装完必须真的有头文件与静态库。少了这一步，缺件会推迟到 cargo
+    # 构建阶段、并伪装成"Rust 编译错误"——那时离真正的原因很远了。
+    # 库名跟着**钉死的 vcpkg 提交**走，因此可以写死：本地同一份安装产出的就是
+    # heif / aom / libde265 / x265-static（libheif 的 default-features 含 hevc，
+    # 静态链接时 x265 与 de265 会被 libheif 的内部引用带上来，缺了就链接期爆）。
+    - name: 自检 libheif 产物
+      shell: pwsh
+      run: |
+        $root = '${{ inputs.vcpkg-root }}'
+        $lib  = Join-Path $root 'installed/${{ inputs.triplet }}/lib'
+        $inc  = Join-Path $root 'installed/${{ inputs.triplet }}/include'
+        foreach ($f in 'heif.lib', 'aom.lib', 'libde265.lib', 'x265-static.lib') {
+          if (-not (Test-Path (Join-Path $lib $f))) { throw "缺少 $lib\$f" }
+        }
+        if (-not (Test-Path (Join-Path $inc 'libheif'))) { throw "缺少 $inc\libheif" }
+        Write-Host "libheif 就绪：$lib"

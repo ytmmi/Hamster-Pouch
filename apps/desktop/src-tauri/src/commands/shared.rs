@@ -753,8 +753,17 @@ mod tests {
     /// （用户看到的「N 层」不对），且 128/161MB 的词库被打开多遍。
     #[test]
     fn only_newest_version_of_a_plugin_is_attached() {
-        let base = find_upwards("tools/tagdict/output/tag_lib_base.sqlite3")
-            .expect("需要基底库产物（先运行 tools/tagdict/build_base_lib.py）");
+        // 产物缺失时**跳过**而不是 panic：本用例考察的是"安装目录的版本循环"，
+        // 词库产物只是它借用的一个真实 sqlite 夹具。`tools/tagdict/output/` 不入库
+        // （见 `.gitignore`），因此新克隆与 CI 上必然没有它——这与同文件里
+        // `base_plus_three_extensions_attach_as_four_queryable_layers` 及
+        // `crates/hp-store/tests/tag_lib_artifacts.rs` 的既有口径一致
+        // （"CI 无产物时跳过"）。此前这里写的是 `expect(...)`，单把这一条变成
+        // "新克隆必红"，与仓库自己登记的 CI 口径相悖。
+        let Some(base) = find_upwards("tools/tagdict/output/tag_lib_base.sqlite3") else {
+            eprintln!("跳过：未找到词库基底产物（先运行 tools/tagdict/build_base_lib.py）");
+            return;
+        };
         let tmp = std::env::temp_dir().join(format!("hp-taglib-vers-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         // 用一个**仓库 `plugins-dist/` 里不存在**的插件 id，让本用例只考察

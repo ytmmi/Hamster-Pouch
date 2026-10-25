@@ -3,6 +3,7 @@
 > 本地资源管理软件 —— 将图片、视频、音频、文本与绿色版程序统一入库、索引、打标与检索。
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
+[![CI](https://github.com/ytmmi/Hamster-Pouch/actions/workflows/ci.yml/badge.svg)](https://github.com/ytmmi/Hamster-Pouch/actions/workflows/ci.yml)
 
 仓鼠颊（Hamster Pouch）是一款面向 Windows 的本地资源管理软件。它以「仓库 / 媒体源 / 相册」为组织模型：把本地文件夹作为媒体源扫描入库，支持虚拟相册、内容去重与变更检测、AI 辅助打标、插件扩展与事件蓝图自动化，帮助你在本地管理大规模图片、视频、音频、文本与绿色版程序。
 
@@ -77,7 +78,11 @@ Rust crates：
   vcpkg install "libheif[aom]:x64-windows-static-md"
   ```
 
-  > 注意：libheif 端口的默认特性含 **x265（GPL-2.0 编码器，静态链入）**，发布许可需自行评估；解码用不到它。没有 vcpkg 的环境可用 `--no-default-features` 构建 `hp-media`，退回捆绑的 ffmpeg 兜底（功能不受影响）。
+  > 注意：libheif 端口的默认特性含 **x265（GPL-2.0 编码器，静态链入）**，发布许可需自行评估；解码用不到它。
+  > **没有 vcpkg 就装它，别指望 `--no-default-features` 绕过**：那条路只在**单独**构建 `hp-media` 时成立；
+  > workspace 层面 `hp-scanner` 以默认特性依赖 `hp-media`，cargo 的 feature 统一会把 `libheif` 重新打开
+  > （实测 `cargo check --workspace --no-default-features` 仍然编译 `libheif-sys` 并失败）。
+  > CI（`.github/workflows/ci.yml`）因此显式装配 vcpkg，见 `.github/actions/vcpkg-libheif/action.yml`。
   >
   > `hp-media` 的 `libwebp` 特性（**默认开启**，D91）用于图片缩略图的**进程内 WebP 编码**：libwebp 的 C 源码**随 `libwebp-sys` crate vendored**（MIT），构建期由 `cc` 静态编译，**不联网、不依赖系统库**（C 工具链本就随 Rust MSVC 工具链提供）。关掉后自动退回 ffmpeg 子进程编码，结果**逐字节相同**、只是每张多一次进程开销。
 
@@ -158,6 +163,22 @@ release\            exe + data\system\（系统库）+ data\plugins\（系统插
 - `check:blueprint-*` / `check:controls` —— 事件蓝图引擎各维度行为检查
 - `check:line-count` / `check:status` / `check:doc-status` —— 结构与文档状态对账
 - `tools/tagdict/` —— tag 词库数据管线
+
+## 持续集成（CI）
+
+`.github/workflows/ci.yml` 把本地 git 钩子（`tools/hooks/`，D120-R4）的断言在 GitHub 上再跑一遍：
+钩子的价值是"防忘记"，但 `git commit --no-verify` / `git push --no-verify` 能跳过——CI 不能。
+
+| 作业 | 跑什么 | 为什么单独一个作业 |
+| --- | --- | --- |
+| `gate` | `pnpm check:*`（除 `check:clippy`）+ `typecheck` + `build` | 秒级文本/结构门禁，红了要能一眼定位 |
+| `clippy` | `pnpm check:clippy`（两个 workspace 零 warning） | 要全量编译（含 vcpkg），不该拖住 `gate` |
+| `test` | 根 workspace 与桥接层 `cargo test --all-targets` | 分钟级行为断言，与静态检查分层 |
+
+- **只在 Windows runner 上跑**：`rust-toolchain.toml` 的 `targets` 只有 `x86_64-pc-windows-msvc`，依赖 Win32 / WebView2。
+- **门禁不是抄的**：`gate` 直接枚举 `package.json` 的 `check:*`，新增门禁自动纳入；CI 自己不重写检查逻辑。
+- **vcpkg 是硬前提**（`hp-media` 默认特性 `libheif`），提交号钉在 `ci.yml` 的 `VCPKG_COMMIT`，装配与缓存见 `.github/actions/vcpkg-libheif/action.yml`。
+- **不缓存 `target/`**（本机实测 8.8GB，Windows 上打解包比冷编译更慢）；**不构建安装包**（需要不入库的 mpv 与签名材料，打包仍走本地 `pnpm app:build`）。
 
 ## 文档
 

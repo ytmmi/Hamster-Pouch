@@ -1,0 +1,232 @@
+# CI：把本地 git hooks（D120-R4）的断言搬到服务端真跑一遍。
+#
+# ## 为什么需要它
+#
+# `tools/hooks/pre-commit` 与 `pre-push` 只在本机生效。它们的价值是"防忘记"，
+# 但 `git commit --no-verify` / `git push --no-verify` 一条命令就能跳过——
+# **它防的是"忘了跑"，不防"故意不跑"**。CI 用同一套断言补上这个缺口：
+# push 到 main 与 PR 都必须真跑过，跳过钩子不再等于跳过检查。
+#
+# ## 设计口径
+#
+# 1. **只调用本仓已有的 `pnpm check:*`，不在 workflow 里重写检查逻辑。**
+#    门禁是仓库的单一事实来源；CI 若自己抄一份，两边迟早漂移，
+#    最坏的情况是"CI 绿而本地红"或反过来——最难查的一类失败。
+#    gate 作业直接枚举 `package.json` 的 `check:*`，新增门禁自动纳入。
+# 2. **Windows runner**：`rust-toolchain.toml` 的 `targets` 只有
+#    `x86_64-pc-windows-msvc`，硬编码 Win32 API、WebView2、`.exe` 打包，
+#    在 ubuntu 上跑没有意义。
+# 3. **vcpkg 是硬前提，不是可选项。** `hp-media` 的 `default = ["libheif", …]`，
+#    MSVC 下 `libheif-sys` 的 build.rs 找不到 vcpkg 就 `process::exit(1)`（硬失败）。
+#    README 里"没有 vcpkg 就用 `--no-default-features`"这条退路**在 workspace 层面不成立**：
+#    `hp-scanner` 以默认特性依赖 `hp-media`，feature 统一会把 `libheif` 重新打开
+#    （实测 `cargo check --workspace --no-default-features` 仍然编译并失败）。
+#    所以 CI 显式准备 vcpkg，而不是绕（见 `.github/actions/vcpkg-libheif`）。
+# 4. **三层分作业**，与 pre-commit / pre-push 的分工同构：
+#    gate（秒级，文本与结构）→ clippy（分钟级，编译期 lint）→ test（分钟级，行为）。
+#    分作业的收益不只是并行：**失败定位**。一个作业里串三件事时，
+#    前一件事红会掩盖后两件"本来也会红"的信息。
+#
+# ## 不做的事（有意的取舍，不是遗漏）
+#
+# - **不缓存 `target/`**：本机实测根 `target` 5.2GB + 桥接层 3.6GB（≈8.8GB），
+#   超出 GitHub 单仓库 10GB 缓存配额的一半以上，且 Windows 上打包/解包 8GB
+#   往往比冷编译更慢。只缓存 `~/.cargo/registry`（依赖源码，几百 MB，稳赚）。
+# - **不构建安装包**（`pnpm app:build`）：那需要 NSIS/WiX、`external-cli/mpv/`（
+#   不入库的 119MB 资产）与签名材料；PR 上验证"能不能装"成本远高于收益。
+#   打包仍由本地 `pnpm app:build`（见 README「构建与打包」）。
+# - **不跑 `check:doc-status` 之外什么都没有的"文档存在性"检查**：PASS 的判定
+#   属门禁自己，CI 不重复判断。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支的旧跑批自动取消：门禁的价值在"当前提交是否干净"，
+# 排队跑历史提交是浪费配额（旧提交的结果已经没人会看）。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 默认最小权限：本流程只读仓库（actions/cache 走 runtime token，不需要额外 scopes）。
+permissions:
+  contents: read
+
+env:
+  # vcpkg 钉到本地实测通过的提交（2026-10-04，libheif port 1.23.5）。
+  # 跟着 master 跑等于让 CI 红绿取决于上游今天改了什么，与你的改动无关。
+  VCPKG_COMMIT: "19780d9cdf84d0944cf9a318666703b89ab6629c"
+  # 与本地 vcpkg 安装口径一致：静态库 + 动态 CRT（Rust MSVC 默认 /MD）。
+  VCPKG_DEFAULT_TRIPLET: "x64-windows-static-md"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ── 门禁：文本 / 结构 / 契约 / 文档对账（几十秒，不需要 vcpkg）─────────────
+  gate:
+    name: 门禁（check:*）
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出
+        uses: actions/checkout@v7
+
+      # check:fmt / check:types 要 cargo 与 rustfmt；它们**不需要** vcpkg
+      # （`hp-dto` 只依赖 hp-core/serde/ts-rs，编译不碰 hp-media）。
+      # 版本真相是 rust-toolchain.toml：`rustup show` 会按它安装/切换，
+      # 后面四行是自检——组件缺失时在这里就红，而不是在门禁里伪装成别的问题。
+      - name: 安装 Rust 工具链（按 rust-toolchain.toml）
+        run: |
+          rustup show
+          rustc --version
+          cargo --version
+          cargo fmt --version
+          cargo clippy --version
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: 安装 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # check:settings / check:panels / check:controls / check:blueprint-* 用 ESM
+      # 直接 import 前端 TS 源码，靠 workspace 软连接解析 `@hamster-pouch/*`。
+      # 缺这一步，那些门禁会以 ERR_MODULE_NOT_FOUND 失败（实测）。
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 缓存 Cargo 依赖源码
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            cargo-registry-${{ runner.os }}-
+
+      # 枚举方式与 `tools/hooks/pre-commit` 一致：读 package.json 的 check:*，
+      # 新增门禁自动纳入，不需要回头改这个文件。
+      # check:clippy 排除在这里、放到 clippy 作业——它要全量编译（含 vcpkg），
+      # 混进来会让"文本门禁"这类几十秒的断言被十几分钟的编译拖住。
+      - name: 跑门禁（除 check:clippy）
+        run: |
+          set -uo pipefail
+          mapfile -t NAMES < <(node -p 'Object.keys(require("./package.json").scripts).filter((k) => k.startsWith("check:") && k !== "check:clippy").join("\n")')
+          echo "共 ${#NAMES[@]} 项门禁（check:clippy 在 clippy 作业单独跑）"
+          failed=()
+          for name in "${NAMES[@]}"; do
+            echo "── $name ─────────────────────────────"
+            pnpm --silent run "$name" || failed+=("$name")
+          done
+          if [ ${#failed[@]} -ne 0 ]; then
+            echo "::error::门禁失败：${failed[*]}"
+            exit 1
+          fi
+          echo "全部 ${#NAMES[@]} 项门禁通过"
+
+      # typecheck / build 不属于 check:*，但它们是"能编译吗"的断言：
+      # 门禁大多只看文本与结构，不跑 tsc / vite。
+      - name: 类型检查
+        run: pnpm typecheck
+
+      - name: 前端构建
+        run: pnpm build
+
+  # ── clippy：两个 workspace 都零 warning（编译期 lint，需要 vcpkg）──────────
+  clippy:
+    name: clippy
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: 检出
+        uses: actions/checkout@v7
+
+      - name: 安装 Rust 工具链（按 rust-toolchain.toml）
+        run: |
+          rustup show
+          rustc --version
+          cargo clippy --version
+
+      - name: 装配 vcpkg（libheif）
+        uses: ./.github/actions/vcpkg-libheif
+        with:
+          vcpkg-commit: ${{ env.VCPKG_COMMIT }}
+          vcpkg-root: ${{ runner.temp }}/vcpkg
+          triplet: ${{ env.VCPKG_DEFAULT_TRIPLET }}
+
+      - name: 缓存 Cargo 依赖源码
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            cargo-registry-${{ runner.os }}-
+
+      # `check:clippy` 是 node 脚本（`tools/check-clippy.mjs`）包着两段 cargo clippy，
+      # 因此这里需要 pnpm + node，但**不需要 `pnpm install`**（脚本不 import 前端源码）。
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: 安装 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: 零 warning 检查
+        run: pnpm --silent run check:clippy
+
+  # ── 测试：两个独立 workspace 都要 `--all-targets`（行为断言，需要 vcpkg）───
+  test:
+    name: 测试（cargo test --all-targets）
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: 检出
+        uses: actions/checkout@v7
+
+      - name: 安装 Rust 工具链（按 rust-toolchain.toml）
+        run: |
+          rustup show
+          rustc --version
+
+      - name: 装配 vcpkg（libheif）
+        uses: ./.github/actions/vcpkg-libheif
+        with:
+          vcpkg-commit: ${{ env.VCPKG_COMMIT }}
+          vcpkg-root: ${{ runner.temp }}/vcpkg
+          triplet: ${{ env.VCPKG_DEFAULT_TRIPLET }}
+
+      - name: 缓存 Cargo 依赖源码
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            cargo-registry-${{ runner.os }}-
+
+      # 必须 --all-targets：本仓关键回归大量在 tests/ 与 examples/ 里。
+      # pre-push 钩子的注释记过一个真实的坑——"只跑 lib 测试会漏掉被格式化弄坏的
+      # examples/"，两个 workspace 都要按同一口径跑。
+      - name: 根 workspace 测试
+        run: cargo test --workspace --all-targets
+
+      # 桥接层自带 `[workspace]`（刻意与根隔离），根上的命令**不覆盖它**。
+      - name: 桥接层测试
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets
