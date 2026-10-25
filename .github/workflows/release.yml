@@ -202,7 +202,12 @@ jobs:
           ls -lh "$ZIP"
           echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
           # 解压后的顶层目录就是 $NAME/，解压即得可运行文件夹。
-          "$SEVENZ" l "$ZIP" | grep -m1 "$NAME/hamster-pouch-desktop.exe" > /dev/null
+          # 注意：7-Zip 在 Windows 上列出的路径分隔符是 "\"，所以这里不用
+          # 带分隔符的字面串断言，而是分别匹配顶层目录名与 exe 文件名。
+          if ! "$SEVENZ" l "$ZIP" | grep -F "$NAME" | grep -F "hamster-pouch-desktop.exe" > /dev/null; then
+            echo "::error::zip 里找不到 $NAME 下的 hamster-pouch-desktop.exe"
+            exit 1
+          fi
           echo "zip 内容自检通过"
 
       - name: 上传主包 artifact
