@@ -82,7 +82,10 @@ logs/
 # 它们是源文件、必须入库；因此只忽略两个下载来的大表，不忽略整个 data/。
 tools/tagdict/data/danbooru_tags.sqlite
 tools/tagdict/data/pixiv_tags.sqlite
-tools/tagdict/output/
+# 生成产物不入库；**唯一例外**：内置基底词库（13MB，随发布包分发，RFC 0008 / D36 第一层）
+# 作为构建输入资产入库，使全新克隆（CI）也能打出带词库的完整发布包。
+tools/tagdict/output/*
+!tools/tagdict/output/tag_lib_base.sqlite3
 
 # === 外部 CLI：体积过大，不入库，自行下载 ===
 # mpv Windows 构建（mpv.exe + d3dcompiler_43.dll 等约 100MB+）体积过大无法上传，
@@ -102,11 +105,13 @@ tools/signing/signing-key.pem
 tools/signing/pubkey-base64.txt
 tools/signing/pubkey.der
 
-# === 预分发扩展插件：单独分发，整体不入库 ===
-# plugins-dist/ 下的 tag 库扩展包是**单独分发**的扩展插件（体积 128–162MB，
-# 见 RFC 0008 / D36），不进主仓库：主仓库只保留**生产这些包的代码**
-# （tools/tagdict/*.py 与 crates/hp-store/migrations/dict_lib/）。
-# 包本身按需构建/安装；data/ 与 bin/ 已在下方单独列出（历史规则，保留以免遗漏）。
-plugins-dist/
-plugins-dist/*/data/
-plugins-dist/*/bin/
+# === 预分发扩展插件：目录不入库，单包 zip 作为构建输入资产入库 ===
+# plugins-dist/ 下的 tag 库扩展包是**单独分发**的扩展插件（目录 129–162MB，
+# 见 RFC 0008 / D36）。目录本身不进主仓库——其中 data/tag_lib.sqlite **单文件**
+# 已超过 GitHub 100MB 单文件上限，且可由 tools/tagdict/*.py 在本机重建。
+# 但压缩后的**单包 zip**（1.8–57MB，均 <100MB 上限）作为构建输入资产入库：
+# CI 发布流程把它逐个挂到 Release，**每个扩展一个压缩包，不与主程序打在一起**
+# （解压即得可安装目录，对齐 plugin.installLocal 的目录口径）。
+# 生成/校验：python tools/tagdict/zip_extensions.py [--check]
+plugins-dist/*
+!plugins-dist/*.zip

@@ -139,6 +139,16 @@ release\            exe + data\system\（系统库）+ data\plugins\（系统插
   因为 `external-cli/mpv/` **不入 git 库**，新克隆里必然没有它——做成硬失败会让
   `pnpm app:build` 在新克隆上直接断掉。**"不入库"与"能否进构建包"是两件事**：
   打包脚本从本地磁盘复制、不读 git，所以本机有 mpv 时它就会进包。
+- **构建输入资产入库**：`external-cli/ffmpeg/`、`plugins/system/`、内置基底词库
+  `tools/tagdict/output/tag_lib_base.sqlite3`（13 MB）都在仓库里，因此**全新克隆也能
+  直接打出带词库的发布包**；`target/release/data/`（活跃用户数据）不入库，没有它时
+  发布包只附基底词库，全局库由目标机首次运行自建。
+- **扩展插件分发**：`plugins-dist/<id>/data/tag_lib.sqlite` 单个就有 129–162 MB，超过
+  GitHub 单文件 100 MB 上限，**不能入库**；改成每个扩展一个 zip
+  （`plugins-dist/*.zip`，1.8–57 MB，已入库），zip 内顶层带 `<id>/` 目录，解压即得可安装目录。
+  生成与校验：`python tools/tagdict/zip_extensions.py` / `python tools/tagdict/zip_extensions.py --check`
+  （固定条目顺序/时间戳/权限，重复执行逐字节相同，`--check` 逐文件比 CRC32）。
+  扩展**不与主程序打在一起**，是独立下载、独立安装的包。
 
 ## 环境变量
 
@@ -179,7 +189,21 @@ release\            exe + data\system\（系统库）+ data\plugins\（系统插
 - **门禁不是抄的**：`gate` 直接枚举 `package.json` 的 `check:*`，新增门禁自动纳入；CI 自己不重写检查逻辑。
 - **两类门禁有意排除**：`check:clippy` 要全量编译（独立作业）；`check:layouts` 与 `check:blueprint-*` 脚本里写死开发机路径、读本机 release 数据目录与真实 sqlite 夹具——它们审计的是"本机库状态"而非仓库内容，继续留在本地 git 钩子里跑（2026-10-25 首次真跑时正是这 7 项在全新 checkout 上失败）。
 - **vcpkg 是硬前提**（`hp-media` 默认特性 `libheif`），提交号钉在 `ci.yml` 的 `VCPKG_COMMIT`，装配与缓存见 `.github/actions/vcpkg-libheif/action.yml`。
-- **不缓存 `target/`**（本机实测 8.8GB，Windows 上打解包比冷编译更慢）；**不构建安装包**（需要不入库的 mpv 与签名材料，打包仍走本地 `pnpm app:build`）。
+- **不缓存 `target/`**（本机实测 8.8GB，Windows 上打解包比冷编译更慢）；只缓存 `~/.cargo/registry`。
+- **发布走单独一条手动流程**：`.github/workflows/release.yml`（**仅** `workflow_dispatch`）在需要发版本时跑一次，构建便携包并把压缩包上传成构建产物 / Release 资产；`ci.yml` 的 push/PR 门禁**不**构建发布包。
+
+### 发布包（手动触发）
+
+| 输入 | 作用 |
+| --- | --- |
+| `version` | 版本号；留空则取 `apps/desktop/src-tauri/tauri.conf.json` 里的值 |
+| `publish` | 是否把压缩包挂成 GitHub Release 资产（默认 `true`） |
+| `notes` | Release 说明；留空自动生成一段 |
+
+- 产物：`hamster-pouch-<version>-win-x64.zip`（解压即得可运行文件夹）+ 每个扩展插件一个 zip（`tagdict-danbooru` / `tagdict-pixiv` / `tagrel-games`）。
+- 包内自带基底词库、`external-cli\ffmpeg\` 运行时子集、`plugins\system\`；**不含** `data\system\` 全局库与用户数据（目标机首次运行自建），**不含** mpv（本机补）。
+- 同版本重跑幂等：Release 已存在则覆盖资产（`gh release upload --clobber`），不存在才新建。
+- 发布前会自检包内容（exe / ffmpeg / ffprobe / `plugins\system` / 基底词库缺一即失败，且断言包里**没有** `ffplay.exe`）。
 
 ## 文档
 

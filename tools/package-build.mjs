@@ -493,15 +493,27 @@ if (dataStat?.isDirectory()) {
       "DELETE FROM plugin_registry WHERE trust_level <> 'system';";
     execFileSync("sqlite3", [relGdb, sql], { stdio: "ignore" });
   }
+}
 
-  // 发布包也必须带内置基底库：上面是从 DATA 暂存目录整体复制的，而 DATA 里可能是
-  // 旧编译缓存（甚至只有已退役的 tag_dict_base.sqlite3）。这里**显式**再复制一次，
-  // 保证发布包与开发包的内置基底库同源同版本；并清掉已退役的旧基底库
-  // （RFC 0008 起由 tag_lib_base.sqlite3 取代，留着会让运行时读到旧 schema）。
-  await rm(join(relDir, "data", "system", "tag_dict_base.sqlite3"), { force: true });
-  if (await copyBaseDict(join(relDir, "data"))) {
-    console.log(`[package-build]   发布包附加: data\\system\\tag_lib_base.sqlite3（内置基底词库）`);
-  }
+// 发布包必须带内置基底库：它随应用分发（RFC 0008 / D36 第一层），与「编译机本地活动数据」
+// 无关——**全新克隆（CI）里没有 target\release\data\**，但基底库仍是发布包的一部分。
+// 因此这一步在 data 分支**之外**无条件执行（开发包同理，见上）；同时清掉已退役的旧基底库
+// （RFC 0008 起由 tag_lib_base.sqlite3 取代，留着会让运行时读到旧 schema）。
+await rm(join(relDir, "data", "system", "tag_dict_base.sqlite3"), { force: true });
+const relBaseDict = await copyBaseDict(join(relDir, "data"));
+if (relBaseDict) {
+  console.log(`[package-build]   发布包附加: data\\system\\tag_lib_base.sqlite3（内置基底词库）`);
+} else {
+  console.log(
+    "[package-build]   警告: 未找到内置基底词库源 tools/tagdict/output/tag_lib_base.sqlite3" +
+      "（发布包将不含基底词库，目标机 tag 词库功能受限）",
+  );
+}
+if (!dataStat?.isDirectory()) {
+  console.log(
+    "[package-build]   无编译期活动数据（全新克隆/CI）：包内不含 data\\system\\ 全局库与用户数据，" +
+      "全局库由目标机首次运行自建",
+  );
 }
 // 随包运行时资产：与开发包同源同内容，但**真实复制**（release 是可分发实体，
 // 不依赖本机 NTFS 硬链接）。`plugins\system\` 与 `data\plugins\` 是两回事：

@@ -1,0 +1,255 @@
+# 发布包（Release Package）：**手动触发**的「构建 + 上传压缩包」通道。
+#
+# ## 为什么要单独一条流程（而不是并进 ci.yml）
+#
+# ci.yml 跑的是"当前提交干净吗"，成本低、每次 push 都要绿；发布是另一回事：
+# 它产出可分发产物、要上传、要写版本号与 Release 说明。用户口径（2026-10-25）：
+# **"仅在我要发版本时才触发"** ⇒ 本流程只有 `workflow_dispatch`，不挂在 push/PR 上，
+# 不拖慢日常门禁，也不会在每次提交后往 Releases 里堆垃圾。
+#
+# ## 产物形态（与 README「构建与打包」同一套口径）
+#
+# 本仓的发布形态是**便携文件夹**（exe + 同级 `data\` / `external-cli\` / `plugins\`），
+# 不是安装器：`pnpm app:build` = `tauri build --no-bundle` + `node tools/package-build.mjs`。
+# 因此这里把 `apps/desktop/src-tauri/target/release/release/` 重命名成
+# `hamster-pouch-<version>/` 再打成**一个 zip**（解压即得可运行文件夹，整夹可搬走）。
+#
+# ## 与 ci.yml 的关系（取舍，不是遗漏）
+#
+# - 门禁/clippy/test **不在这里重跑**：发布前应已在 main 上绿过（ci.yml 覆盖）。
+#   这里只做一件事——**能不能真的打出一个完整的包**，并在打包后做 fail-closed 自检
+#   （exe / ffmpeg / 插件 / 内置基底词库缺任何一项就红，而不是默默上传一个残包）。
+# - 不做安装器（NSIS/WiX）与代码签名：本仓产品口径就是便携包；
+#   签名材料（`tools/signing/*.pem`）不入库，也不该出现在 CI 里。
+#
+# ## 资产边界（哪些进 CI 包、哪些仍由本机补）
+#
+# 全新克隆里只有「入库资产」；本机生成的资产分三类处理（用户裁定 2026-10-25）：
+# 1. **内置基底词库** `tools/tagdict/output/tag_lib_base.sqlite3`（13MB）⇒ 已入库，
+#    `package-build` 在 data 缺省时也会复制，因此 CI 包自带它（D36 第一层）。
+# 2. **扩展插件**（`tagdict-pixiv` / `tagdict-danbooru` / `tagrel-games`）⇒ 目录不入库
+#    （单个 `data/tag_lib.sqlite` 129–162MB，超 GitHub 100MB 单文件上限），
+#    但**单包 zip** 已作为构建输入资产入库（`plugins-dist/*.zip`，1.8–57MB）。
+#    发布时**逐个挂上**，与主程序**分开打包**——每个扩展一个压缩包。
+# 3. **mpv**（`external-cli/mpv/`，约 119MB）⇒ 仍由本机补，不进 CI 包；
+#    `package-build` 对它是"存在则入包、缺失则跳过"，属于正常取舍。
+# 包内不含 `data\system\` 全局库与任何用户数据：目标机首次运行自建（便携布局）。
+
+name: Release Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（默认取 apps/desktop/src-tauri/tauri.conf.json 的 version）"
+        required: false
+        default: ""
+      publish:
+        description: "创建 GitHub Release 并把压缩包挂为资产（关掉则只上传 Actions artifact）"
+        type: boolean
+        required: false
+        default: true
+      notes:
+        description: "Release 说明（可空；空则自动生成）"
+        required: false
+        default: ""
+
+# 同一 ref 上不要并发出两个发布：zip 名与 Release 资产会互相覆盖。
+# 发布不可取消（中途取消会留下半个资产），因此 cancel-in-progress: false。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# 创建 Release / 上传资产需要写权限；其余步骤只读仓库。
+permissions:
+  contents: write
+
+env:
+  # 与 ci.yml 同口径：vcpkg 钉死提交、静态库 + 动态 CRT。
+  VCPKG_COMMIT: "19780d9cdf84d0944cf9a318666703b89ab6629c"
+  VCPKG_DEFAULT_TRIPLET: "x64-windows-static-md"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  package:
+    name: 构建发布包并上传
+    runs-on: windows-latest
+    # 冷构建（两个 workspace 的 release 全量编译）实测约 20 分钟；
+    # 留 90 分钟余量，超时说明真的卡死了而不是"慢"。
+    timeout-minutes: 90
+    steps:
+      - name: 检出
+        uses: actions/checkout@v7
+
+      - name: 安装 Rust 工具链（按 rust-toolchain.toml）
+        run: |
+          rustup show
+          rustc --version
+          cargo --version
+
+      # 与 ci.yml 相同：`hp-media` 的默认特性带 libheif，缺 vcpkg 时
+      # libheif-sys 的 build.rs 会 process::exit(1) —— 硬失败，不是可选依赖。
+      - name: 装配 vcpkg（libheif）
+        uses: ./.github/actions/vcpkg-libheif
+        with:
+          vcpkg-commit: ${{ env.VCPKG_COMMIT }}
+          vcpkg-root: ${{ runner.temp }}/vcpkg
+          triplet: ${{ env.VCPKG_DEFAULT_TRIPLET }}
+
+      - name: 缓存 Cargo 依赖源码
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            cargo-registry-${{ runner.os }}-
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: 安装 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+
+      # 复用仓库自己的打包脚本（不在 workflow 里重写打包逻辑）：
+      # tauri build --no-bundle 产出 exe，package-build 产出自包含文件夹。
+      - name: 构建（pnpm app:build）
+        run: pnpm app:build
+
+      # fail-closed 自检：残包比不发布更糟。缺任何必需项就在这里红，
+      # 而不是把半个包挂到 Release 上让人下载后才发现。
+      - name: 自检发布包内容
+        run: |
+          set -euo pipefail
+          REL=apps/desktop/src-tauri/target/release/release
+          missing=()
+          for p in \
+            "$REL/hamster-pouch-desktop.exe" \
+            "$REL/external-cli/ffmpeg/bin/ffmpeg.exe" \
+            "$REL/external-cli/ffmpeg/bin/ffprobe.exe" \
+            "$REL/plugins/system" \
+            "$REL/data/system/tag_lib_base.sqlite3"; do
+            [ -e "$p" ] || missing+=("$p")
+          done
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::发布包自检失败，缺少：${missing[*]}"
+            exit 1
+          fi
+          du -sh "$REL"
+          find "$REL/external-cli/ffmpeg" -name ffplay.exe | grep . && {
+            echo "::error::不该带 ffplay.exe（运行时子集不含它）"; exit 1; } || true
+          echo "发布包内容自检通过"
+
+      - name: 解析版本号
+        id: version
+        run: |
+          set -euo pipefail
+          V="${{ inputs.version }}"
+          if [ -z "$V" ]; then
+            V=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "版本号: $V"
+
+      # BUILD-INFO.txt 写进包内：拿到压缩包的人能直接对上「哪个提交、哪次跑批」，
+      # 也知道包里有意不含什么（mpv、全局库、用户数据）。
+      - name: 写 BUILD-INFO.txt
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          REL=apps/desktop/src-tauri/target/release/release
+          cat > "$REL/BUILD-INFO.txt" <<EOF
+          Hamster Pouch $VERSION（Windows x64 便携包）
+          commit:  ${{ github.sha }}
+          run:     ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          built:   $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          内容: exe + data\system\（内置基底词库）+ external-cli\ffmpeg\（运行时子集）+ plugins\system\
+          不含: mpv（本机补，可选）、data\system\ 全局库与用户数据（目标机首次运行自建）
+          EOF
+          cat "$REL/BUILD-INFO.txt"
+
+      - name: 重命名并打 zip
+        id: zip
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd apps/desktop/src-tauri/target/release
+          NAME="hamster-pouch-$VERSION"
+          rm -rf "$NAME"
+          mv release "$NAME"
+          mkdir -p dist
+          # 7-Zip 在 windows-latest 上随镜像提供（也有可能在 PATH 里找不到，
+          # 因此直接给绝对路径兜底）；比 Compress-Archive 快得多，且不受
+          # PowerShell 那条 2GB/路径长度的小脾气影响。
+          SEVENZ="$(command -v 7z || echo '/c/Program Files/7-Zip/7z.exe')"
+          ZIP="dist/$NAME-win-x64.zip"
+          rm -f "$ZIP"
+          "$SEVENZ" a -tzip -mx=3 "$ZIP" "$NAME" > /dev/null
+          ls -lh "$ZIP"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          # 解压后的顶层目录就是 $NAME/，解压即得可运行文件夹。
+          "$SEVENZ" l "$ZIP" | grep -m1 "$NAME/hamster-pouch-desktop.exe" > /dev/null
+          echo "zip 内容自检通过"
+
+      - name: 上传主包 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hamster-pouch-${{ steps.version.outputs.version }}-win-x64
+          path: apps/desktop/src-tauri/target/release/dist/*.zip
+          if-no-files-found: error
+
+      # 扩展插件：zip 已作为构建输入资产入库，这里只负责上传（不再重新打包）。
+      # 每个扩展一个压缩包，与主程序分开（用户口径 2026-10-25）。
+      - name: 上传扩展包 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extensions
+          path: plugins-dist/*.zip
+          if-no-files-found: error
+
+      # 发布：默认创建/更新 GitHub Release，并把主包 + 三个扩展包挂为资产。
+      # 同版本重跑是幂等的（release 已存在则 --clobber 覆盖资产），
+      # 免得"重跑一次发布"变成"tag 冲突后什么都没上传"。
+      - name: 创建 / 更新 GitHub Release
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          EXTRA_NOTES: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+          TAG="v$VERSION"
+          ZIP="apps/desktop/src-tauri/target/release/dist/hamster-pouch-$VERSION-win-x64.zip"
+          shopt -s nullglob
+          FILES=("$ZIP" plugins-dist/*.zip)
+          NOTES="$EXTRA_NOTES"
+          if [ -z "$NOTES" ]; then
+            NOTES="Hamster Pouch $VERSION（Windows x64 便携包）
+
+          - 主程序：\`$(basename "$ZIP")\`（解压即得可运行文件夹；含内置基底词库、ffmpeg 运行时子集、系统插件）
+          - 扩展插件（各自独立压缩包，解压后用 plugin.installLocal 安装目录）：
+          $(for z in plugins-dist/*.zip; do echo "  - \`$(basename "$z")\`"; done)
+          - 不含 mpv / 全局库 / 用户数据（见包内 BUILD-INFO.txt）
+          - 构建提交：\`${{ github.sha }}\`"
+          fi
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG 已存在 → 覆盖上传资产"
+            gh release upload "$TAG" "${FILES[@]}" --clobber
+          else
+            gh release create "$TAG" "${FILES[@]}" --title "Hamster Pouch $VERSION" --notes "$NOTES"
+          fi
+          echo "::notice::已发布 $TAG：${{ github.server_url }}/${{ github.repository }}/releases/tag/$TAG"
