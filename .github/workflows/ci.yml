@@ -37,6 +37,11 @@
 #   打包仍由本地 `pnpm app:build`（见 README「构建与打包」）。
 # - **不跑 `check:doc-status` 之外什么都没有的"文档存在性"检查**：PASS 的判定
 #   属门禁自己，CI 不重复判断。
+# - **不跑"本地开发库体检"类门禁**（`check:layouts` / `check:blueprint-*`）：
+#   这些脚本里写死 `ROOT = "E:/Hamster Pouch"`，读的是开发机的 release 数据目录
+#   与真实 sqlite 夹具。它们审计的是**本机库状态**，不是仓库内容——在全新
+#   checkout 上必然失败（2026-10-25 首次真跑就红了这 7 项）。它们继续留在
+#   D120-R4 的本地钩子里跑，CI 不假装它们通过了。
 
 name: CI
 
@@ -117,13 +122,23 @@ jobs:
 
       # 枚举方式与 `tools/hooks/pre-commit` 一致：读 package.json 的 check:*，
       # 新增门禁自动纳入，不需要回头改这个文件。
-      # check:clippy 排除在这里、放到 clippy 作业——它要全量编译（含 vcpkg），
-      # 混进来会让"文本门禁"这类几十秒的断言被十几分钟的编译拖住。
-      - name: 跑门禁（除 check:clippy）
+      # **排除项集中在这一处**（不是"漏跑"，见下方 EXCLUDE 的注释与文件头
+      # "不做的事"）：它们要么要全量编译，要么审计的是开发机的本地数据库。
+      - name: 跑门禁（与仓库内容相关的那部分）
         run: |
           set -uo pipefail
-          mapfile -t NAMES < <(node -p 'Object.keys(require("./package.json").scripts).filter((k) => k.startsWith("check:") && k !== "check:clippy").join("\n")')
-          echo "共 ${#NAMES[@]} 项门禁（check:clippy 在 clippy 作业单独跑）"
+          # check:clippy → 单独作业（要全量编译，含 vcpkg）。
+          # check:layouts / check:blueprint-* → **本地开发库体检**：脚本里写死
+          #   `ROOT = "E:/Hamster Pouch"`，读的是开发机的 release 数据目录与
+          #   真实 sqlite 夹具。它们审计"我这台机器上的库"，不是仓库内容，
+          #   全新 checkout 上必然失败（2026-10-25 首次真跑：这 7 项同时红）。
+          EXCLUDE="check:clippy check:layouts check:blueprint-runtime check:blueprint-delete check:blueprint-engine check:blueprint-geometry check:blueprint-slots check:blueprint-minimap"
+          mapfile -t NAMES < <(EXCLUDE="$EXCLUDE" node -p '
+            const exclude = new Set(process.env.EXCLUDE.split(/\s+/).filter(Boolean));
+            Object.keys(require("./package.json").scripts)
+              .filter((k) => k.startsWith("check:") && !exclude.has(k))
+              .join("\n")')
+          echo "共 ${#NAMES[@]} 项门禁（排除项：$EXCLUDE）"
           failed=()
           for name in "${NAMES[@]}"; do
             echo "── $name ─────────────────────────────"

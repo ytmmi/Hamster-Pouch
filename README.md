@@ -171,12 +171,13 @@ release\            exe + data\system\（系统库）+ data\plugins\（系统插
 
 | 作业 | 跑什么 | 为什么单独一个作业 |
 | --- | --- | --- |
-| `gate` | `pnpm check:*`（除 `check:clippy`）+ `typecheck` + `build` | 秒级文本/结构门禁，红了要能一眼定位 |
+| `gate` | `pnpm check:*`（除需要全量编译或本机库的 8 项）+ `typecheck` + `build` | 秒级文本/结构门禁，红了要能一眼定位 |
 | `clippy` | `pnpm check:clippy`（两个 workspace 零 warning） | 要全量编译（含 vcpkg），不该拖住 `gate` |
 | `test` | 根 workspace 与桥接层 `cargo test --all-targets` | 分钟级行为断言，与静态检查分层 |
 
 - **只在 Windows runner 上跑**：`rust-toolchain.toml` 的 `targets` 只有 `x86_64-pc-windows-msvc`，依赖 Win32 / WebView2。
 - **门禁不是抄的**：`gate` 直接枚举 `package.json` 的 `check:*`，新增门禁自动纳入；CI 自己不重写检查逻辑。
+- **两类门禁有意排除**：`check:clippy` 要全量编译（独立作业）；`check:layouts` 与 `check:blueprint-*` 脚本里写死开发机路径、读本机 release 数据目录与真实 sqlite 夹具——它们审计的是"本机库状态"而非仓库内容，继续留在本地 git 钩子里跑（2026-10-25 首次真跑时正是这 7 项在全新 checkout 上失败）。
 - **vcpkg 是硬前提**（`hp-media` 默认特性 `libheif`），提交号钉在 `ci.yml` 的 `VCPKG_COMMIT`，装配与缓存见 `.github/actions/vcpkg-libheif/action.yml`。
 - **不缓存 `target/`**（本机实测 8.8GB，Windows 上打解包比冷编译更慢）；**不构建安装包**（需要不入库的 mpv 与签名材料，打包仍走本地 `pnpm app:build`）。
 
