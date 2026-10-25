@@ -660,10 +660,10 @@ fn query_filter(
 ) -> Result<Option<crate::commands::file::FileQueryFilterArgs>, String> {
     let mut object = serde_json::Map::new();
     for key in ["mediaTypes", "sourceId", "dirPrefix"] {
-        if let Some(value) = args.get(key) {
-            if !value.is_null() {
-                object.insert(key.to_string(), value.clone());
-            }
+        if let Some(value) = args.get(key)
+            && !value.is_null()
+        {
+            object.insert(key.to_string(), value.clone());
         }
     }
     if object.is_empty() {

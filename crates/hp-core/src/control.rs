@@ -132,13 +132,13 @@ impl ControlSchema {
                 self.api_version, CONTROL_API_VERSION
             ));
         }
-        if let Some(expected) = &ctx.expected_panel_id {
-            if &self.panel_id != expected {
-                out.errors.push(format!(
-                    "面板 id 不一致: schema={} 期望={expected}",
-                    self.panel_id
-                ));
-            }
+        if let Some(expected) = &ctx.expected_panel_id
+            && &self.panel_id != expected
+        {
+            out.errors.push(format!(
+                "面板 id 不一致: schema={} 期望={expected}",
+                self.panel_id
+            ));
         }
         if self.panel_id.trim().is_empty() {
             out.errors.push("面板 id 不能为空".into());
@@ -339,26 +339,27 @@ fn validate_node(
 
     // 数值范围自洽（min ≤ max，step > 0）。
     let num = |key: &str| node.props.get(key).and_then(Value::as_f64);
-    if let (Some(min), Some(max)) = (num("min"), num("max")) {
-        if min > max {
-            result
-                .errors
-                .push(format!("控件 {id} 的 min({min}) 大于 max({max})"));
-        }
+    if let (Some(min), Some(max)) = (num("min"), num("max"))
+        && min > max
+    {
+        result
+            .errors
+            .push(format!("控件 {id} 的 min({min}) 大于 max({max})"));
     }
-    if let Some(step) = num("step") {
-        if step <= 0.0 {
-            result
-                .errors
-                .push(format!("控件 {id} 的 step 必须为正数（当前 {step}）"));
-        }
+    if let Some(step) = num("step")
+        && step <= 0.0
+    {
+        result
+            .errors
+            .push(format!("控件 {id} 的 step 必须为正数（当前 {step}）"));
     }
-    if let Some(max) = num("max") {
-        if node.kind == ControlKind::Progress && max <= 0.0 {
-            result.errors.push(format!(
-                "控件 {id}（progress）的 max 必须为正数（当前 {max}）"
-            ));
-        }
+    if let Some(max) = num("max")
+        && node.kind == ControlKind::Progress
+        && max <= 0.0
+    {
+        result.errors.push(format!(
+            "控件 {id}（progress）的 max 必须为正数（当前 {max}）"
+        ));
     }
 }
 

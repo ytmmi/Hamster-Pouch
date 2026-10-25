@@ -497,7 +497,8 @@ mod tests {
             "前缀重叠的**别的书**不得被误删"
         );
         // 收尾（这些文件落在真实的用户封面目录里）。
-        for ext in ["png"] {
+        {
+            let ext = "png";
             let _ = std::fs::remove_file(dir.join(format!("{id}.{ext}")));
             let _ = std::fs::remove_file(dir.join(format!("{other}.{ext}")));
         }

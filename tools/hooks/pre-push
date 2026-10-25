@@ -1,0 +1,28 @@
+#!/bin/sh
+# 仓鼠颊 pre-push 钩子：推送前跑全量 Rust 测试。
+#
+# ## 为什么把测试放 pre-push 而不是 pre-commit
+#
+# 测试是**分钟级**（根 workspace 629 个用例 + 桥接层 91 个，冷构建更久），
+# 每次小提交都跑会显著拖慢节奏；而"代码真的能过测试"是推送级的要求。
+# 门禁（秒级）留在 pre-commit，测试（分钟级）放这里。
+#
+# ## 为什么用 --all-targets
+#
+# 本仓库的关键回归用例大量在 `tests/` 与 `examples/` 里（集成测试、探针、
+# 基准程序的编译检查），只跑默认 lib 目标会漏掉它们——D120 那轮就见过
+# 格式化把 `examples/` 弄坏而 lib 测试全绿的情形。
+#
+# 两个 workspace 都要跑（src-tauri 自带 [workspace]，与根隔离）。
+
+set -eu
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "── pre-push：根 workspace 测试 ─────────────────────"
+cargo test --workspace --all-targets
+
+echo "── pre-push：桥接层测试 ────────────────────────────"
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets
+
+echo "── pre-push：通过 ─────────────────────────────────"

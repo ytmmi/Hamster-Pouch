@@ -23,6 +23,7 @@
 
 use hp_core::{AnnotationKind, HpError, HpResult};
 use hp_dto::ReaderAnnotationItem;
+use hp_store::NewAnnotation;
 use tauri::State;
 
 use crate::AppState;
@@ -100,8 +101,15 @@ pub(crate) async fn reader_add_annotation(
         if db.get_file(&file_id)?.is_none() {
             return Err(HpError::NotFound(format!("文件不存在: {file_id}")));
         }
-        let record =
-            db.create_annotation(&file_id, kind, &cursor, progress, &title, &excerpt, &note)?;
+        let record = db.create_annotation(NewAnnotation {
+            file_id: &file_id,
+            kind,
+            cursor: &cursor,
+            progress,
+            title: &title,
+            excerpt: &excerpt,
+            note: &note,
+        })?;
         Ok(to_item(record))
     })();
     api_async(api_from_hp(outcome))

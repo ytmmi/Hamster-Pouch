@@ -30,10 +30,9 @@ fn cover_href_from_opf(opf: &str) -> Option<String> {
         if properties
             .split_whitespace()
             .any(|p| p.eq_ignore_ascii_case("cover-image"))
+            && let Some(href) = attr_value(tag, "href")
         {
-            if let Some(href) = attr_value(tag, "href") {
-                return Some(href);
-            }
+            return Some(href);
         }
     }
 
@@ -49,10 +48,10 @@ fn cover_href_from_opf(opf: &str) -> Option<String> {
             continue;
         };
         for tag in &items {
-            if attr_value(tag, "id").as_deref() == Some(id.as_str()) {
-                if let Some(href) = attr_value(tag, "href") {
-                    return Some(href);
-                }
+            if attr_value(tag, "id").as_deref() == Some(id.as_str())
+                && let Some(href) = attr_value(tag, "href")
+            {
+                return Some(href);
             }
         }
     }
@@ -65,11 +64,11 @@ fn cover_href_from_opf(opf: &str) -> Option<String> {
         }
         let id = attr_value(tag, "id").unwrap_or_default();
         let href = attr_value(tag, "href").unwrap_or_default();
-        if id.to_ascii_lowercase().contains("cover") || href.to_ascii_lowercase().contains("cover")
+        if (id.to_ascii_lowercase().contains("cover")
+            || href.to_ascii_lowercase().contains("cover"))
+            && !href.is_empty()
         {
-            if !href.is_empty() {
-                return Some(href);
-            }
+            return Some(href);
         }
     }
 
@@ -102,12 +101,11 @@ pub(crate) fn read_opf(archive: &ZipArchive) -> HpResult<Option<(String, String)
     if let Some(bytes) = container {
         let xml = crate::xml::decode_xml_bytes(&bytes);
         for tag in open_tags(&xml, "rootfile") {
-            if let Some(path) = attr_value(tag, "full-path") {
-                if !path.is_empty() {
-                    if let Some(opf) = archive.read(&path)? {
-                        return Ok(Some((path, crate::xml::decode_xml_bytes(&opf))));
-                    }
-                }
+            if let Some(path) = attr_value(tag, "full-path")
+                && !path.is_empty()
+                && let Some(opf) = archive.read(&path)?
+            {
+                return Ok(Some((path, crate::xml::decode_xml_bytes(&opf))));
             }
         }
     }

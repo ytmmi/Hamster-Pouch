@@ -184,7 +184,7 @@ impl MediaProcess {
             .ok_or_else(|| HpError::Io("媒体 IPC 管道未连接".into()))?;
         loop {
             let mut available: u32 = 0;
-            let handle = HANDLE(pipe.as_raw_handle() as *mut std::ffi::c_void);
+            let handle = HANDLE(pipe.as_raw_handle());
             let peek = unsafe { PeekNamedPipe(handle, None, 0, None, Some(&mut available), None) };
             if peek.is_err() {
                 return Err(HpError::Io("媒体 IPC 已断开".into()));

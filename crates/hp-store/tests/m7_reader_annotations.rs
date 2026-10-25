@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use hp_core::{AnnotationKind, FileId, FileIndexRow, MediaType, ThumbStatus, VerifyStatus};
-use hp_store::RepoDb;
+use hp_store::{NewAnnotation, RepoDb};
 
 fn temp_repo_path(tag: &str) -> PathBuf {
     tempfile::tempdir()
@@ -56,37 +56,37 @@ fn three_kinds_round_trip_and_stay_separate() {
     let (mut db, file_id) = repo_with_file("annotations");
 
     let bookmark = db
-        .create_annotation(
-            &file_id,
-            AnnotationKind::Bookmark,
-            "12",
-            1_234,
-            "第一章",
-            "",
-            "",
-        )
+        .create_annotation(NewAnnotation {
+            file_id: &file_id,
+            kind: AnnotationKind::Bookmark,
+            cursor: "12",
+            progress: 1_234,
+            title: "第一章",
+            excerpt: "",
+            note: "",
+        })
         .expect("写书签失败");
     let note = db
-        .create_annotation(
-            &file_id,
-            AnnotationKind::Note,
-            "40",
-            2_500,
-            "第二章",
-            "",
-            "这里写得真好",
-        )
+        .create_annotation(NewAnnotation {
+            file_id: &file_id,
+            kind: AnnotationKind::Note,
+            cursor: "40",
+            progress: 2_500,
+            title: "第二章",
+            excerpt: "",
+            note: "这里写得真好",
+        })
         .expect("写笔记失败");
     let highlight = db
-        .create_annotation(
-            &file_id,
-            AnnotationKind::Highlight,
-            "80",
-            5_000,
-            "第三章",
-            "他抬起头，望向远处。",
-            "伏笔",
-        )
+        .create_annotation(NewAnnotation {
+            file_id: &file_id,
+            kind: AnnotationKind::Highlight,
+            cursor: "80",
+            progress: 5_000,
+            title: "第三章",
+            excerpt: "他抬起头，望向远处。",
+            note: "伏笔",
+        })
         .expect("写高亮失败");
 
     // id 由仓储生成（UUID），三条互不相同。
@@ -129,27 +129,67 @@ fn content_validation_runs_before_the_write() {
 
     // 书签不需要正文。
     assert!(
-        db.create_annotation(&file_id, AnnotationKind::Bookmark, "1", 0, "", "", "")
-            .is_ok()
+        db.create_annotation(NewAnnotation {
+            file_id: &file_id,
+            kind: AnnotationKind::Bookmark,
+            cursor: "1",
+            progress: 0,
+            title: "",
+            excerpt: "",
+            note: ""
+        })
+        .is_ok()
     );
     // 笔记 / 高亮必须有内容——否则列表里就是一行空白（用户会以为没存上）。
     assert!(
-        db.create_annotation(&file_id, AnnotationKind::Note, "1", 0, "", "", "  ")
-            .is_err()
+        db.create_annotation(NewAnnotation {
+            file_id: &file_id,
+            kind: AnnotationKind::Note,
+            cursor: "1",
+            progress: 0,
+            title: "",
+            excerpt: "",
+            note: "  "
+        })
+        .is_err()
     );
     assert!(
-        db.create_annotation(&file_id, AnnotationKind::Highlight, "1", 0, "", "", "")
-            .is_err()
+        db.create_annotation(NewAnnotation {
+            file_id: &file_id,
+            kind: AnnotationKind::Highlight,
+            cursor: "1",
+            progress: 0,
+            title: "",
+            excerpt: "",
+            note: ""
+        })
+        .is_err()
     );
     // 游标非空（没有位置的批注跳不回去，等于一条坏记录）。
     assert!(
-        db.create_annotation(&file_id, AnnotationKind::Bookmark, "  ", 0, "", "", "")
-            .is_err()
+        db.create_annotation(NewAnnotation {
+            file_id: &file_id,
+            kind: AnnotationKind::Bookmark,
+            cursor: "  ",
+            progress: 0,
+            title: "",
+            excerpt: "",
+            note: ""
+        })
+        .is_err()
     );
     // 空文件 id 也拒。
     assert!(
-        db.create_annotation("", AnnotationKind::Bookmark, "1", 0, "", "", "")
-            .is_err()
+        db.create_annotation(NewAnnotation {
+            file_id: "",
+            kind: AnnotationKind::Bookmark,
+            cursor: "1",
+            progress: 0,
+            title: "",
+            excerpt: "",
+            note: ""
+        })
+        .is_err()
     );
 
     // 被拒的都不该留下记录：只剩最开始那条合法书签。
@@ -162,10 +202,26 @@ fn content_validation_runs_before_the_write() {
 fn delete_is_idempotent_and_cascades_with_the_file() {
     let (mut db, file_id) = repo_with_file("annotation-delete");
     let one = db
-        .create_annotation(&file_id, AnnotationKind::Bookmark, "5", 100, "序章", "", "")
+        .create_annotation(NewAnnotation {
+            file_id: &file_id,
+            kind: AnnotationKind::Bookmark,
+            cursor: "5",
+            progress: 100,
+            title: "序章",
+            excerpt: "",
+            note: "",
+        })
         .expect("写书签失败");
     let two = db
-        .create_annotation(&file_id, AnnotationKind::Bookmark, "9", 200, "终章", "", "")
+        .create_annotation(NewAnnotation {
+            file_id: &file_id,
+            kind: AnnotationKind::Bookmark,
+            cursor: "9",
+            progress: 200,
+            title: "终章",
+            excerpt: "",
+            note: "",
+        })
         .expect("写书签失败");
 
     // 删两次都成功（幂等）：用户在列表里连点两下删除不该报错。
@@ -174,7 +230,8 @@ fn delete_is_idempotent_and_cascades_with_the_file() {
     assert_eq!(db.list_annotations(&file_id).expect("列批注失败").len(), 1);
 
     // 外键级联：文件行没了，剩下的批注随之消失（不留孤儿）。
-    db.delete_files(&[file_id.clone()]).expect("删文件失败");
+    db.delete_files(std::slice::from_ref(&file_id))
+        .expect("删文件失败");
     assert!(
         db.list_annotations(&file_id)
             .expect("列批注失败")
@@ -193,8 +250,16 @@ fn annotations_are_scoped_per_file() {
     db.upsert_file(&file_row("file-2", source_id, "other.txt"))
         .expect("写第二个文件失败");
 
-    db.create_annotation(&file_id, AnnotationKind::Bookmark, "1", 0, "甲", "", "")
-        .expect("写失败");
+    db.create_annotation(NewAnnotation {
+        file_id: &file_id,
+        kind: AnnotationKind::Bookmark,
+        cursor: "1",
+        progress: 0,
+        title: "甲",
+        excerpt: "",
+        note: "",
+    })
+    .expect("写失败");
 
     // 另一本书看不到这本书的批注（批注是"读者在某个条目上的"，不是全局的）。
     assert_eq!(db.list_annotations("file-2").expect("列失败").len(), 0);

@@ -412,13 +412,13 @@ pub fn validate_panel_decl(decl: &PanelDecl, ctx: &PanelDeclCtx) -> Vec<String> 
         if setting.title_key.trim().is_empty() {
             errors.push(format!("面板 {id} 的设置项 {} 缺少 title_key", setting.key));
         }
-        if let Some(scope) = setting.scope.as_deref() {
-            if PanelSettingScope::from_str(scope).is_none() {
-                errors.push(format!(
-                    "面板 {id} 的设置项 {} 的 scope 非法: {scope}（允许 app/repo）",
-                    setting.key
-                ));
-            }
+        if let Some(scope) = setting.scope.as_deref()
+            && PanelSettingScope::from_str(scope).is_none()
+        {
+            errors.push(format!(
+                "面板 {id} 的设置项 {} 的 scope 非法: {scope}（允许 app/repo）",
+                setting.key
+            ));
         }
         if seen_keys.contains(&setting.key.as_str()) {
             errors.push(format!("面板 {id} 的设置项 key 重复: {}", setting.key));
@@ -428,15 +428,15 @@ pub fn validate_panel_decl(decl: &PanelDecl, ctx: &PanelDeclCtx) -> Vec<String> 
     }
 
     // 5. 显示层信息。
-    if let Some(icon) = decl.icon.as_deref() {
-        if !ctx.icon_allowed(icon) {
-            errors.push(format!(
-                "面板 {id} 的 icon 不在宿主图标集内: {icon}（宿主图标集尚未定义，声明 icon 会被拒绝）"
-            ));
-        }
+    if let Some(icon) = decl.icon.as_deref()
+        && !ctx.icon_allowed(icon)
+    {
+        errors.push(format!(
+            "面板 {id} 的 icon 不在宿主图标集内: {icon}（宿主图标集尚未定义，声明 icon 会被拒绝）"
+        ));
     }
     if let Some(size) = &decl.default_size {
-        if !(size.width > 0.0) || !(size.height > 0.0) {
+        if size.width.is_nan() || size.width <= 0.0 || size.height.is_nan() || size.height <= 0.0 {
             errors.push(format!(
                 "面板 {id} 的 default_size 宽高必须为正数（当前: {}×{}）",
                 size.width, size.height

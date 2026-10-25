@@ -27,11 +27,12 @@ impl TagDictDb {
     /// 打开词库；不存在则创建（建表 + 迁移），父目录不存在时自动创建。
     pub fn open(path: impl AsRef<Path>) -> HpResult<Self> {
         let path = path.as_ref();
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() && !parent.exists() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| HpError::Store(format!("创建词库目录失败: {e}")))?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| HpError::Store(format!("创建词库目录失败: {e}")))?;
         }
         let mut conn = Connection::open(path).map_err(|e| store_err("打开 tag 词库", e))?;
         conn.pragma_update(None, "journal_mode", "WAL")
@@ -231,7 +232,7 @@ impl TagDictDb {
                 out.push(s);
             }
         }
-        out.sort_by(|a, b| b.popularity.unwrap_or(0).cmp(&a.popularity.unwrap_or(0)));
+        out.sort_by_key(|a| std::cmp::Reverse(a.popularity.unwrap_or(0)));
         out.truncate(limit as usize);
         Ok(out)
     }

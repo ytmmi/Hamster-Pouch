@@ -69,7 +69,7 @@ pub fn run_sync(db: &mut RepoDb, repo_id: &str, album_id: &str) -> HpResult<Sync
             let media_ok = rule.media_type.contains(file.media_type);
             let dir_ok = dir_prefix
                 .as_deref()
-                .map_or(true, |p| file.relative_path.starts_with(p));
+                .is_none_or(|p| file.relative_path.starts_with(p));
             if media_ok && dir_ok {
                 matched.push(file.id.as_str().to_string());
             }
@@ -155,7 +155,7 @@ fn collect_source_ids(
             let is_child = source
                 .parent_source_id
                 .as_ref()
-                .map_or(false, |p| p.as_str() == parent.as_str());
+                .is_some_and(|p| p.as_str() == parent.as_str());
             if is_child {
                 let id = source.id.as_str().to_string();
                 if !out.contains(&id) {

@@ -378,7 +378,7 @@ impl Scanner {
             let computed =
                 scan_pool::map_bounded(chunk, pixel_cost, |p: &Prepared| compute(p, options));
 
-            for (prep, comp) in chunk.iter().zip(computed.into_iter()) {
+            for (prep, comp) in chunk.iter().zip(computed) {
                 // **文件粒度**的取消/暂停检查：与旧实现逐文件循环的响应性一致。
                 if !self.wait_if_paused(extra_cancel)? {
                     outcome.cancelled = true;

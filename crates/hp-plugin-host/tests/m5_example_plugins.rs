@@ -132,7 +132,7 @@ fn local_path_install_cannot_self_declare_system_trust() {
     );
 
     // 授权侧：`native.code` 要求 system/trusted，这条路径必须被拒。
-    let mut db = GlobalDb::open(&root.join("global.sqlite3")).expect("打开全局库失败");
+    let mut db = GlobalDb::open(root.join("global.sqlite3")).expect("打开全局库失败");
     PluginHost.register(&mut db, &row).expect("注册失败");
     let err = PluginHost
         .enable_for_repo(&mut db, row.id.as_str(), REPO, &[Capability::NativeCode])

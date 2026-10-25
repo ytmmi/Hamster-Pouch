@@ -171,21 +171,21 @@ impl AlbumService {
         let effective = resolve_media_type(db, &updated)?;
 
         // D13：跟随源型相册属性变更时联动更新同步规则的媒体过滤字段。
-        if updated.kind == AlbumKind::FollowSource {
-            if let Some(mut rule) = db.get_sync_rule(album_id)? {
-                rule.media_type = effective;
-                db.upsert_sync_rule(&rule)?;
-            }
+        if updated.kind == AlbumKind::FollowSource
+            && let Some(mut rule) = db.get_sync_rule(album_id)?
+        {
+            rule.media_type = effective;
+            db.upsert_sync_rule(&rule)?;
         }
 
         // 移除不再匹配新属性的成员。
         let members = db.list_album_members(album_id)?;
         let mut to_remove = Vec::new();
         for member in &members {
-            if let Some(file) = db.get_file(member.file_id.as_str())? {
-                if !effective.contains(file.media_type) {
-                    to_remove.push(member.file_id.as_str().to_string());
-                }
+            if let Some(file) = db.get_file(member.file_id.as_str())?
+                && !effective.contains(file.media_type)
+            {
+                to_remove.push(member.file_id.as_str().to_string());
             }
         }
         let removed_count = if to_remove.is_empty() {

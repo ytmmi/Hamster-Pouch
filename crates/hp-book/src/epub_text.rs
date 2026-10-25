@@ -251,25 +251,26 @@ pub fn blocks_from_xhtml(xhtml: &str, chapter_path: &str, archive: &ZipArchive) 
         // 为什么不用 `pop()`：`figure` / `aside` 的内文是原子抽取（`at` 直接跳到配对的
         // 结束标签之后），它们的结束标签根本走不到这里；用 `pop()` 会把别的祖先弹掉，
         // 于是 `cover` 提示再也传不到内部的图片上（实测抓到的 bug，2026-10-18）。
-        if closing && ANCESTOR_TAGS.contains(&name.as_str()) {
-            if let Some(pos) = ancestors.iter().rposition(|(pushed, _)| *pushed == name) {
-                ancestors.truncate(pos);
-                inline.leave_block();
-            }
+        if closing
+            && ANCESTOR_TAGS.contains(&name.as_str())
+            && let Some(pos) = ancestors.iter().rposition(|(pushed, _)| *pushed == name)
+        {
+            ancestors.truncate(pos);
+            inline.leave_block();
         }
 
         // `<figure>`：图片 + 图注整体抽取（见 [`figure_from_inner`]）。
         if name == "figure" {
             flush(&mut pending, &mut blocks);
-            if !closing {
-                if let Some((inner, next)) = element_inner_balanced(xhtml, tag_end, "figure") {
-                    if let Some(block) = figure_from_inner(&inner, tag, chapter_path, archive) {
-                        blocks.push(block);
-                    }
-                    at = next;
+            if !closing
+                && let Some((inner, next)) = element_inner_balanced(xhtml, tag_end, "figure")
+            {
+                if let Some(block) = figure_from_inner(&inner, tag, chapter_path, archive) {
+                    blocks.push(block);
                 }
-                // 标签汤（没有配对的 `</figure>`）：退回普通块处理，内容不丢。
+                at = next;
             }
+            // 标签汤（没有配对的 `</figure>`）：退回普通块处理，内容不丢。
             continue;
         }
 
@@ -277,16 +278,14 @@ pub fn blocks_from_xhtml(xhtml: &str, chapter_path: &str, archive: &ZipArchive) 
         // 内文**递归**解析成块（嵌套注释因此天然正确）。
         if let Some(label) = comment_label(&name, tag) {
             flush(&mut pending, &mut blocks);
-            if !closing {
-                if let Some((inner, next)) = element_inner_balanced(xhtml, tag_end, &name) {
-                    // 递归：`inner` 里可以再有注释 / figure / 表格，口径完全一致。
-                    let inner_blocks = blocks_from_xhtml(&inner, chapter_path, archive);
-                    blocks.push(BookBlock::Comment {
-                        label,
-                        blocks: inner_blocks,
-                    });
-                    at = next;
-                }
+            if !closing && let Some((inner, next)) = element_inner_balanced(xhtml, tag_end, &name) {
+                // 递归：`inner` 里可以再有注释 / figure / 表格，口径完全一致。
+                let inner_blocks = blocks_from_xhtml(&inner, chapter_path, archive);
+                blocks.push(BookBlock::Comment {
+                    label,
+                    blocks: inner_blocks,
+                });
+                at = next;
             }
             continue;
         }

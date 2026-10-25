@@ -73,7 +73,7 @@ fn blueprint_crud_roundtrip_and_default() {
     let row = db
         .create_blueprint("repo-1", "默认联动", &json)
         .expect("创建蓝图失败");
-    assert_eq!(row.is_default, false);
+    assert!(!row.is_default);
     assert_eq!(row.schema_version, BLUEPRINT_SCHEMA_VERSION);
     assert!(!row.id.is_empty());
 

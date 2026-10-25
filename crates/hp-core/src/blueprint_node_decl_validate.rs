@@ -59,12 +59,12 @@ pub fn validate_node_decl(
         errors.push(format!(
             "插件注册的节点类型必须用 plugin.<plugin_id>.<local_id> 形式: {ty}"
         ));
-    } else if let Some(plugin_id) = plugin_id {
-        if !crate::namespace::is_id_in_plugin_namespace(ty, plugin_id) {
-            errors.push(format!(
-                "节点类型 {ty} 不在本插件（{plugin_id}）的命名空间内：插件不得注册其它插件的类型"
-            ));
-        }
+    } else if let Some(plugin_id) = plugin_id
+        && !crate::namespace::is_id_in_plugin_namespace(ty, plugin_id)
+    {
+        errors.push(format!(
+            "节点类型 {ty} 不在本插件（{plugin_id}）的命名空间内：插件不得注册其它插件的类型"
+        ));
     }
 
     if decl.label_key.trim().is_empty() {
@@ -152,12 +152,12 @@ pub fn validate_node_decl(
         }
     }
 
-    if let Some(role) = decl.evaluation_role.as_deref() {
-        if EvaluationRole::from_str(role).is_none() {
-            errors.push(format!(
+    if let Some(role) = decl.evaluation_role.as_deref()
+        && EvaluationRole::from_str(role).is_none()
+    {
+        errors.push(format!(
                 "节点类型 {ty} 的 evaluation_role 非法: {role}（允许 structural/trigger/condition/action）"
             ));
-        }
     }
 
     // `fields.values` 里的引用目标必须命中已注册的节点类型（其余取值是自由枚举）。

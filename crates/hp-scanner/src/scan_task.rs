@@ -193,10 +193,10 @@ fn process_video(
     let mut perceptual: Option<PerceptualHash> = None;
     let mut media_info: Option<String> = None;
 
-    if let Some(ffprobe) = &options.ffprobe_bin {
-        if let Ok(info) = hp_media::probe(path, ffprobe, options.video_timeout) {
-            media_info = Some(info.raw_json);
-        }
+    if let Some(ffprobe) = &options.ffprobe_bin
+        && let Ok(info) = hp_media::probe(path, ffprobe, options.video_timeout)
+    {
+        media_info = Some(info.raw_json);
     }
 
     if let (Some(ffmpeg), Some(cache)) = (&options.ffmpeg_bin, &options.thumbnail_cache) {

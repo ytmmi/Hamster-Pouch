@@ -231,8 +231,7 @@ fn video_source_scans_with_thumbnail_and_progress_reaches_total() {
     // 进度必须收敛到 100%：旧实现逐文件上报 processed=i，最后一格永远停在 total-1。
     let last_indexing = frames
         .iter()
-        .filter(|(phase, _, _)| *phase == ScanPhase::Indexing)
-        .next_back()
+        .rfind(|(phase, _, _)| *phase == ScanPhase::Indexing)
         .expect("应有索引阶段进度");
     assert_eq!(
         (last_indexing.1, last_indexing.2),

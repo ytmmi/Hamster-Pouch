@@ -87,12 +87,12 @@ pub(crate) fn plugin_control_event(
         // 事件名：宿主谓词表（闭集六项）。
         let parsed = ControlEvent::from_str(&event)
             .ok_or_else(|| HpError::InvalidArgument(format!("未知控件事件: {event}")))?;
-        if let Some(v) = &value {
-            if !(v.is_string() || v.is_number() || v.is_boolean()) {
-                return Err(HpError::InvalidArgument(
-                    "控件事件 value 只能是字符串 / 数值 / 布尔".into(),
-                ));
-            }
+        if let Some(v) = &value
+            && !(v.is_string() || v.is_number() || v.is_boolean())
+        {
+            return Err(HpError::InvalidArgument(
+                "控件事件 value 只能是字符串 / 数值 / 布尔".into(),
+            ));
         }
 
         let owner = panel_owner_enabled(&state, &repo_id, &panel_id)?;

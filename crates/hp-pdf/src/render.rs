@@ -148,7 +148,7 @@ pub fn render_page_jpeg(pdf: &Pdf, index: usize, target_width: u32) -> Option<Ve
 /// `a = 0` 的像素直接置 0（"完全透明"没有颜色可言；保留预乘值会让它变成一个
 /// 不存在的深色，缩略图上表现为一圈黑边）。
 pub(crate) fn unpremultiply_rgba(rgba: &mut [u8]) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         let a = px[3];
         if a == 255 {
             // 绝大多数像素走这条（白底渲染）：一个乘法都不做。

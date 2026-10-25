@@ -62,9 +62,7 @@ fn mpv_bin() -> Option<PathBuf> {
 /// WebView（含所有面板与按钮），只适合诊断。正常路径一律走面板级嵌入子窗口
 /// （`media_embed`），因此默认返回 `None` 且调用方据此报 `EMBED_NOT_READY`。
 fn main_wid(app: &tauri::AppHandle) -> Option<i64> {
-    if std::env::var_os("HP_MPV_EMBED").is_none() {
-        return None;
-    }
+    std::env::var_os("HP_MPV_EMBED")?;
     app.get_webview_window("main")
         .and_then(|w| w.hwnd().ok())
         .map(|h| h.0 as i64)
@@ -138,11 +136,11 @@ pub async fn media_play(
                 .lock()
                 .map_err(|_| HpError::Store("媒体锁中毒".into()))?;
             // 渲染目标变化（如从独立窗口切到面板嵌入）需重启常驻子进程以应用新 `--wid`。
-            if let Some(process) = guard.as_mut() {
-                if process.wid() != wid {
-                    let _ = process.shutdown();
-                    *guard = None;
-                }
+            if let Some(process) = guard.as_mut()
+                && process.wid() != wid
+            {
+                let _ = process.shutdown();
+                *guard = None;
             }
             if guard.is_none() {
                 *guard = Some(MediaProcess::spawn(&mpv, wid)?);
@@ -404,10 +402,10 @@ pub async fn media_embed_release(
 ) -> ApiAsync<()> {
     let st = state.inner().clone();
     let outcome = on_main_thread(&app, move || {
-        if let Ok(mut guard) = st.media_embed.lock() {
-            if let Some(mut win) = guard.take() {
-                win.destroy();
-            }
+        if let Ok(mut guard) = st.media_embed.lock()
+            && let Some(mut win) = guard.take()
+        {
+            win.destroy();
         }
         Ok(())
     })

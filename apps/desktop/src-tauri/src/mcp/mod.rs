@@ -153,10 +153,10 @@ impl McpRuntime {
     /// 生成 64 位十六进制（两个 UUIDv4 拼接）——本机服务的防误连强度足够，
     /// 也不需要为此引入新的随机数依赖。
     fn ensure_token(&self) -> String {
-        if let Ok(guard) = self.token.lock() {
-            if let Some(existing) = guard.as_ref() {
-                return existing.clone();
-            }
+        if let Ok(guard) = self.token.lock()
+            && let Some(existing) = guard.as_ref()
+        {
+            return existing.clone();
         }
         let path = token_path().ok();
         let existing = path
@@ -214,10 +214,11 @@ impl McpRuntime {
         }
         {
             let guard = self.lock_running();
-            if let Some(run) = guard.as_ref() {
-                if run.port == cfg.port && run.allow_write == cfg.allow_write {
-                    return;
-                }
+            if let Some(run) = guard.as_ref()
+                && run.port == cfg.port
+                && run.allow_write == cfg.allow_write
+            {
+                return;
             }
         }
         self.stop();

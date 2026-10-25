@@ -34,10 +34,7 @@ impl TagLibDb {
         if from_tag_id == to_tag_id {
             return Err(HpError::InvalidArgument("库 2 关系不允许自环".into()));
         }
-        let id = format!(
-            "rel-{}",
-            crate::util::uuid().replace('-', "")[..16].to_string()
-        );
+        let id = format!("rel-{}", &crate::util::uuid().replace('-', "")[..16]);
         self.conn()
             .execute(
                 "INSERT OR IGNORE INTO tag_relation

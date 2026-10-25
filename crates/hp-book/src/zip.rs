@@ -333,6 +333,76 @@ fn find_eocd(data: &[u8]) -> Option<usize> {
         .find(|at| le_u32(data, *at) == Some(EOCD_SIG))
 }
 
+/// **测试夹具**：拼一个最小 ZIP（可选 deflate 压缩）。
+///
+/// 放在 `zip` 模块里给同 crate 的其它测试模块复用（`epub` 的解析测试也要造包），
+/// 避免每个测试各写一份 ZIP 拼装代码、又各自拼错。
+#[cfg(test)]
+pub(crate) fn build_test_zip(files: &[(&str, &[u8], bool)]) -> Vec<u8> {
+    use std::io::Write;
+
+    /// 按需压缩条目体。
+    fn encode(body: &[u8], deflate: bool) -> (u16, Vec<u8>) {
+        if !deflate {
+            return (METHOD_STORED, body.to_vec());
+        }
+        let mut encoder =
+            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(body).expect("压缩测试数据失败");
+        (METHOD_DEFLATE, encoder.finish().expect("结束压缩失败"))
+    }
+
+    let mut out: Vec<u8> = Vec::new();
+    let mut central: Vec<u8> = Vec::new();
+    for (name, body, deflate) in files {
+        let (method, payload) = encode(body, *deflate);
+        let offset = out.len() as u32;
+        out.extend_from_slice(&LOCAL_SIG.to_le_bytes());
+        out.extend_from_slice(&20u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&method.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(&payload);
+
+        central.extend_from_slice(&CENTRAL_SIG.to_le_bytes());
+        central.extend_from_slice(&20u16.to_le_bytes());
+        central.extend_from_slice(&20u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&method.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u32.to_le_bytes());
+        central.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u32.to_le_bytes());
+        central.extend_from_slice(&offset.to_le_bytes());
+        central.extend_from_slice(name.as_bytes());
+    }
+    let central_offset = out.len() as u32;
+    out.extend_from_slice(&central);
+    out.extend_from_slice(&EOCD_SIG.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
+    out.extend_from_slice(&central_offset.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,74 +506,4 @@ mod tests {
             body
         );
     }
-}
-
-/// **测试夹具**：拼一个最小 ZIP（可选 deflate 压缩）。
-///
-/// 放在 `zip` 模块里给同 crate 的其它测试模块复用（`epub` 的解析测试也要造包），
-/// 避免每个测试各写一份 ZIP 拼装代码、又各自拼错。
-#[cfg(test)]
-pub(crate) fn build_test_zip(files: &[(&str, &[u8], bool)]) -> Vec<u8> {
-    use std::io::Write;
-
-    /// 按需压缩条目体。
-    fn encode(body: &[u8], deflate: bool) -> (u16, Vec<u8>) {
-        if !deflate {
-            return (METHOD_STORED, body.to_vec());
-        }
-        let mut encoder =
-            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
-        encoder.write_all(body).expect("压缩测试数据失败");
-        (METHOD_DEFLATE, encoder.finish().expect("结束压缩失败"))
-    }
-
-    let mut out: Vec<u8> = Vec::new();
-    let mut central: Vec<u8> = Vec::new();
-    for (name, body, deflate) in files {
-        let (method, payload) = encode(body, *deflate);
-        let offset = out.len() as u32;
-        out.extend_from_slice(&LOCAL_SIG.to_le_bytes());
-        out.extend_from_slice(&20u16.to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes());
-        out.extend_from_slice(&method.to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes());
-        out.extend_from_slice(&0u32.to_le_bytes());
-        out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-        out.extend_from_slice(&(body.len() as u32).to_le_bytes());
-        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes());
-        out.extend_from_slice(name.as_bytes());
-        out.extend_from_slice(&payload);
-
-        central.extend_from_slice(&CENTRAL_SIG.to_le_bytes());
-        central.extend_from_slice(&20u16.to_le_bytes());
-        central.extend_from_slice(&20u16.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&method.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&0u32.to_le_bytes());
-        central.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-        central.extend_from_slice(&(body.len() as u32).to_le_bytes());
-        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&0u32.to_le_bytes());
-        central.extend_from_slice(&offset.to_le_bytes());
-        central.extend_from_slice(name.as_bytes());
-    }
-    let central_offset = out.len() as u32;
-    out.extend_from_slice(&central);
-    out.extend_from_slice(&EOCD_SIG.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
-    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
-    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
-    out.extend_from_slice(&central_offset.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    out
 }

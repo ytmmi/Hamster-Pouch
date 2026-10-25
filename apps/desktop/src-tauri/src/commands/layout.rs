@@ -60,10 +60,10 @@ pub fn layout_save(
         let mut guard = lock_global(&state)?;
         let g = global_mut(&mut guard)?;
         let row = g.save_panel_layout(&repo_id, &name, &layer_key, &layout_json)?;
-        if let Some(ids) = blueprint_ids {
-            if !ids.is_empty() {
-                g.set_layout_blueprints(&repo_id, &name, &ids)?;
-            }
+        if let Some(ids) = blueprint_ids
+            && !ids.is_empty()
+        {
+            g.set_layout_blueprints(&repo_id, &name, &ids)?;
         }
         Ok(to_item(row))
     })();

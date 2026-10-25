@@ -68,11 +68,11 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         let mut got_event = false;
         while std::time::Instant::now() < deadline {
-            if let Some(Ok(event)) = watcher.try_recv() {
-                if event.paths.iter().any(|p| p == &dir.path().join("new.txt")) {
-                    got_event = true;
-                    break;
-                }
+            if let Some(Ok(event)) = watcher.try_recv()
+                && event.paths.iter().any(|p| p == &dir.path().join("new.txt"))
+            {
+                got_event = true;
+                break;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }

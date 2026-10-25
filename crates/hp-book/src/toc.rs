@@ -514,7 +514,7 @@ pub fn text_toc(text: &str) -> Vec<TocEntry> {
     let mut offset = 0usize;
     let mut seen_volume = false;
     for raw in text.split_inclusive('\n') {
-        let line = raw.trim_end_matches(|c| c == '\n' || c == '\r');
+        let line = raw.trim_end_matches(['\n', '\r']);
         let trimmed = line.trim_start();
         let start_offset = offset + (line.chars().count() - trimmed.chars().count());
         offset += raw.chars().count();

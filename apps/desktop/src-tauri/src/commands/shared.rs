@@ -58,7 +58,6 @@ impl<R: tauri::Runtime, T: Emitter<R>> EmitHp<R> for T {}
 /// 并携带 `HpError::code()` 的闭集错误码，因此该函数在 2026-09 最后一批
 /// （`repo` / `layout` / `debug.log`）迁移完成后**已无调用方**并删除。
 /// 新增命令一律走 [`api_from_hp`] / [`api_async`]；错误文案由前端按 `code` 走 i18n（D27）。
-
 /// **D76 统一响应包装**：`{ ok, data?, error? }`（`docs/spec/commands-events.md` 第 2 节）。
 ///
 /// 全部命令**必须**用这个形状（2026-09 起已全量迁移，无一例外）。
@@ -141,7 +140,14 @@ pub(crate) fn api_from_hp<T>(result: HpResult<T>) -> ApiResponse<T> {
 /// 这样前端只需一套 `unwrapApi`，错误码（`validation`/`not_found`/…）不会在
 /// IPC 边界被压成字符串。因此本类型**恒为 `Ok(..)`**，失败信息放在
 /// `ApiResponse.error` 里（`Err` 分支仅为满足宏约束而存在，不被构造）。
-pub(crate) type ApiAsync<T> = Result<ApiResponse<T>, ApiResponse<T>>;
+/// **`Err` 分支装箱**（2026-10-25，D120-R4）。
+///
+/// 该分支**永不构造**（见上文），但它与 `Ok` 同型，会让 `Result` 的尺寸按
+/// `ApiResponse<T>` 的较大者算两遍——大 DTO（`BookContentResult` 等）下
+/// `Result<ApiResponse<T>, ApiResponse<T>>` 可达 **248 字节**，触发
+/// `clippy::result_large_err`。装箱后尺寸按 `Box` 走（8 字节），
+/// 且因为该分支不被构造，**零运行时代价**。
+pub(crate) type ApiAsync<T> = Result<ApiResponse<T>, Box<ApiResponse<T>>>;
 
 /// 把统一响应装进异步命令的返回类型（见 [`ApiAsync`]）。
 pub(crate) fn api_async<T>(response: ApiResponse<T>) -> ApiAsync<T> {
@@ -310,11 +316,11 @@ pub(crate) fn attach_tag_lib_extensions(
                 .iter()
                 .rev()
                 .find_map(|vdir| find_tag_lib_data(vdir).map(|db| (vdir.clone(), db)));
-            if let Some((vdir, db_path)) = chosen {
-                if attach_one(set, &db_path) {
-                    attached += 1;
-                    seen.insert(manifest_plugin_id(&vdir).unwrap_or(dir_name.clone()));
-                }
+            if let Some((vdir, db_path)) = chosen
+                && attach_one(set, &db_path)
+            {
+                attached += 1;
+                seen.insert(manifest_plugin_id(&vdir).unwrap_or(dir_name.clone()));
             }
         }
     }
@@ -441,10 +447,10 @@ fn find_upwards_matching(
     if let Ok(cwd) = std::env::current_dir() {
         roots.push(cwd);
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            roots.push(dir.to_path_buf());
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        roots.push(dir.to_path_buf());
     }
     for root in roots {
         for dir in root.ancestors() {

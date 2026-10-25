@@ -311,12 +311,12 @@ impl ExternalProcessQuery {
         // （`method: &str` 的生命周期不够 `'static`）。线程外的超时文案仍用借用版。
         let method_in_reader = method.to_string();
 
-        let mut command = &mut self.command;
+        let command = &mut self.command;
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        hide_console_window(&mut command);
+        hide_console_window(command);
 
         let mut child = command
             .spawn()
@@ -413,14 +413,14 @@ fn hide_console_window(_command: &mut Command) {}
 fn decode_response(text: &str) -> HpResult<String> {
     let value: Value = serde_json::from_str(text)
         .map_err(|e| HpError::Plugin(format!("插件返回的不是合法 JSON-RPC: {e}")))?;
-    if let Some(error) = value.get("error") {
-        if !error.is_null() {
-            let message = error
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("插件未提供错误说明");
-            return Err(HpError::Plugin(format!("插件返回错误: {message}")));
-        }
+    if let Some(error) = value.get("error")
+        && !error.is_null()
+    {
+        let message = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("插件未提供错误说明");
+        return Err(HpError::Plugin(format!("插件返回错误: {message}")));
     }
     let result = value
         .get("result")

@@ -404,7 +404,7 @@ pub(crate) fn file_rename(
         std::fs::rename(&old_path, &target).map_err(|e| HpError::Io(format!("重命名失败: {e}")))?;
 
         // 新相对路径 = 原目录部分 + 新文件名
-        let new_rel = match file.relative_path.rsplit_once(|c| c == '/' || c == '\\') {
+        let new_rel = match file.relative_path.rsplit_once(['/', '\\']) {
             Some((dir, _)) => format!("{dir}/{new_name}"),
             None => new_name.to_string(),
         };
@@ -434,11 +434,10 @@ pub(crate) fn file_trash(
             let Some(file) = db.get_file(id)? else {
                 continue;
             };
-            if let Ok(path) = resolve_file_path(db, &file) {
-                if path.exists() {
-                    trash::delete(&path)
-                        .map_err(|e| HpError::Io(format!("移入回收站失败: {e}")))?;
-                }
+            if let Ok(path) = resolve_file_path(db, &file)
+                && path.exists()
+            {
+                trash::delete(&path).map_err(|e| HpError::Io(format!("移入回收站失败: {e}")))?;
             }
             removed.push(id.clone());
         }

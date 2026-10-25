@@ -249,10 +249,10 @@ impl BlueprintNodeDecl {
 
     /// 该声明的 `evaluation_role`（缺省由 `role` 推导）。
     pub fn resolved_evaluation_role(&self) -> EvaluationRole {
-        if let Some(raw) = self.evaluation_role.as_deref() {
-            if let Some(role) = EvaluationRole::from_str(raw) {
-                return role;
-            }
+        if let Some(raw) = self.evaluation_role.as_deref()
+            && let Some(role) = EvaluationRole::from_str(raw)
+        {
+            return role;
         }
         match NodeRole::from_str(&self.role) {
             Some(NodeRole::Logic) => EvaluationRole::Condition,

@@ -267,30 +267,30 @@ pub fn decode_image_fallback(
 
     // **尺寸分流**（有界请求 + AVIF/HEIC 超大图 + 有 ffmpeg）：直接走 ffmpeg 有界，
     // 跳过进程内全分辨率解码（实测大图快 3.4×，见 [`LIBHEIF_FULL_RES_MAX_MP`]）。
-    if max_dim < u32::MAX && is_avif_family(src) {
-        if let Some(bin) = ffmpeg_bin {
-            if is_huge_avif_family(src) {
-                return decode_image_with_ffmpeg(src, bin, max_dim, timeout).map_err(|fe| {
-                    HpError::Io(format!(
-                        "解码图片失败 {}: 超大图走 ffmpeg 有界失败: {fe}",
-                        src.display()
-                    ))
-                });
-            }
-        }
+    if max_dim < u32::MAX
+        && is_avif_family(src)
+        && let Some(bin) = ffmpeg_bin
+        && is_huge_avif_family(src)
+    {
+        return decode_image_with_ffmpeg(src, bin, max_dim, timeout).map_err(|fe| {
+            HpError::Io(format!(
+                "解码图片失败 {}: 超大图走 ffmpeg 有界失败: {fe}",
+                src.display()
+            ))
+        });
     }
     match image::open(src) {
         Ok(img) => Ok(img),
         Err(inproc_err) => {
-            if is_avif_family(src) {
-                if let Some(bin) = ffmpeg_bin {
-                    return decode_image_with_ffmpeg(src, bin, max_dim, timeout).map_err(|fe| {
-                        HpError::Io(format!(
-                            "解码图片失败 {}: {inproc_err}；ffmpeg 兜底: {fe}",
-                            src.display()
-                        ))
-                    });
-                }
+            if is_avif_family(src)
+                && let Some(bin) = ffmpeg_bin
+            {
+                return decode_image_with_ffmpeg(src, bin, max_dim, timeout).map_err(|fe| {
+                    HpError::Io(format!(
+                        "解码图片失败 {}: {inproc_err}；ffmpeg 兜底: {fe}",
+                        src.display()
+                    ))
+                });
             }
             Err(HpError::Io(format!(
                 "解码图片失败 {}: {inproc_err}",

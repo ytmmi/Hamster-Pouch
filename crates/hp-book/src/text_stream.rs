@@ -851,13 +851,11 @@ fn byte_len_of_chars(encoding: &'static Encoding, body: &[u8], n: usize) -> usiz
         return read;
     }
     let mut bytes = 0usize;
-    let mut taken = 0usize;
-    for ch in out.chars() {
+    for (taken, ch) in out.chars().enumerate() {
         if taken >= n {
             break;
         }
         bytes += encoded_char_len(encoding, ch);
-        taken += 1;
     }
     // 夹在本块已消费的字节数之内（防御：反查结果不该超过真实消费量）。
     bytes.min(read)

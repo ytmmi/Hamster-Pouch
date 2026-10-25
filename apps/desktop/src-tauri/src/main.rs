@@ -132,10 +132,10 @@ fn main() {
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(5));
-                if let Some(win) = handle.get_webview_window("main") {
-                    if !win.is_visible().unwrap_or(true) {
-                        let _ = win.show();
-                    }
+                if let Some(win) = handle.get_webview_window("main")
+                    && !win.is_visible().unwrap_or(true)
+                {
+                    let _ = win.show();
                 }
             });
             // 装配 tag 库：内置基底库（RFC 0008 / D36 第一层）+ 已安装扩展包

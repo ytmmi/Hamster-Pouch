@@ -212,12 +212,11 @@ impl RepoDb {
             let mut stmt = tx
                 .prepare("SELECT album_id FROM album_sync_rule WHERE source_id = ?1")
                 .map_err(|e| store_err("查询跟随相册", e))?;
-            let rows = stmt
-                .query_map(params![source_id], |row| row.get::<_, String>(0))
+
+            stmt.query_map(params![source_id], |row| row.get::<_, String>(0))
                 .map_err(|e| store_err("读取跟随相册", e))?
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| store_err("解析跟随相册", e))?;
-            rows
+                .map_err(|e| store_err("解析跟随相册", e))?
         };
         for album_id in &affected_albums {
             tx.execute(

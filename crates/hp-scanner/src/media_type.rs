@@ -229,10 +229,10 @@ fn sniff_media_type(path: &Path) -> Option<MediaType> {
 /// 判定文件媒体类型；未知类型返回 `None`（跳过不索引，D11）。
 pub fn detect_media_type(path: &Path) -> Option<MediaType> {
     // 扩展名优先
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        if let Some(mt) = ext_to_media_type(ext) {
-            return Some(mt);
-        }
+    if let Some(ext) = path.extension().and_then(|e| e.to_str())
+        && let Some(mt) = ext_to_media_type(ext)
+    {
+        return Some(mt);
     }
     // 内容兜底
     sniff_media_type(path)
@@ -350,7 +350,7 @@ mod tests {
         assert!(!manga.is_book(), "manga 不是 book 标记");
 
         // 一个文件的两个标记可以并存（这就是"可交叉"）。
-        let both = vec![book.clone(), manga.clone()];
+        let both = [book.clone(), manga.clone()];
         assert_eq!(both.len(), 2);
         assert!(both.iter().any(|m| m.is_book()));
         assert!(both.iter().any(|m| m.as_str() == "manga"));

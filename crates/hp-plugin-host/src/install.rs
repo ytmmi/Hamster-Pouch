@@ -271,10 +271,10 @@ impl PluginInstaller {
             .map_err(|e| HpError::Io(format!("读取插件版本目录失败: {e}")))?;
         for entry in entries {
             let entry = entry.map_err(|e| HpError::Io(format!("读取插件版本项失败: {e}")))?;
-            if entry.path().is_dir() {
-                if let Some(name) = entry.file_name().to_str() {
-                    out.push(name.to_string());
-                }
+            if entry.path().is_dir()
+                && let Some(name) = entry.file_name().to_str()
+            {
+                out.push(name.to_string());
             }
         }
         out.sort();

@@ -1,0 +1,64 @@
+#!/bin/sh
+# 仓鼠颊 pre-commit 钩子：提交前跑 rustfmt + clippy + 全部门禁。
+#
+# ## 为什么用 shell 而不是 husky/lint-staged
+#
+# D20「依赖与构建链本地化」：引入 husky 会往 devDependencies 加包、并要求
+# `pnpm install` 时自动写 .git/hooks（对 CI / 新克隆都是隐式副作用）。本仓库的
+# 门禁本来就是 `pnpm check:*` 一组脚本，钩子只需**逐条调用它们**——不需要框架。
+#
+# ## 为什么检查面是全量而不是"只查改动文件"
+#
+# 本仓库的门禁是**跨文件一致性**断言（路径引用、行数上限、文档↔代码对账、
+# 命令契约、i18n 键集…），单文件视角会漏掉它们；而且 check:* 在热缓存下总耗时
+# 约 20–30 秒，对提交节奏可接受。用 `--no-verify` 可临时跳过（应急口子）。
+#
+# ## 为什么先 fmt 再 clippy 再 check
+#
+# 顺序有依赖：fmt 会改代码 → clippy 基于格式化后的代码才有意义 → 门禁里
+# `check:fmt` / `check:clippy` 是**断言**（不会自动修），跑在最后才能确认前面
+# 的自动修真的落到了干净状态。
+#
+# 失败时退出非 0，git 会中止提交。
+
+set -eu
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "── pre-commit：rustfmt ─────────────────────────────"
+# --check 而不是直接格式化：钩子不修改工作区（避免"提交的内容与我看到的不一致"）。
+cargo fmt --all --check
+cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all --check
+
+echo "── pre-commit：clippy ──────────────────────────────"
+node tools/check-clippy.mjs
+
+echo "── pre-commit：全部门禁 ────────────────────────────"
+# 从 package.json 里取全部 check:* 脚本名，逐条跑（新增门禁自动纳入，不用改本文件）。
+node -e '
+const p = require("./package.json");
+const names = Object.keys(p.scripts).filter((k) => k.startsWith("check:"));
+process.stdout.write(names.join(" "));
+' > /tmp/hp-check-names.txt 2>/dev/null || true
+
+if [ -f /tmp/hp-check-names.txt ]; then
+  for name in $(cat /tmp/hp-check-names.txt); do
+    echo "  → pnpm $name"
+    pnpm --silent "$name"
+  done
+  rm -f /tmp/hp-check-names.txt
+else
+  # 兜底：直接跑全部门禁（不依赖临时文件）
+  for name in check:fmt check:clippy check:line-count check:encoding check:doc-status \
+              check:status check:commands check:event-names check:bundled-runtime \
+              check:hidden-console check:dormant-media check:layouts check:settings \
+              check:controls check:panels check:types check:blueprint-runtime \
+              check:blueprint-delete check:blueprint-engine check:blueprint-nodes \
+              check:blueprint-connect check:blueprint-geometry check:blueprint-slots \
+              check:blueprint-minimap; do
+    echo "  → pnpm $name"
+    pnpm --silent "$name"
+  done
+fi
+
+echo "── pre-commit：通过 ────────────────────────────────"

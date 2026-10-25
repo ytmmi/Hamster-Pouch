@@ -113,10 +113,9 @@ fn main() {
 
     // ── schema 分支（`ui.panel.schema`，原有行为）──
     match mode.as_str() {
-        "silent" => return,
+        "silent" => (),
         "garbage" => {
             emit_line("这不是 JSON-RPC");
-            return;
         }
         "slow" => {
             std::thread::sleep(std::time::Duration::from_secs(5));
@@ -124,7 +123,6 @@ fn main() {
                 &panel_id,
                 Some(Value::String(schema_text(&panel_id))),
             ));
-            return;
         }
         "rpc_error" => {
             emit_json(&json!({
@@ -132,13 +130,11 @@ fn main() {
                 "id": 1,
                 "error": { "code": -32601, "message": "夹具：插件未实现 ui.panel.schema" },
             }));
-            return;
         }
         "huge" => {
             // 超过 256 KiB 的输出：宿主必须判失败，而不是把巨量数据带进渲染层。
             let blob = "x".repeat(300 * 1024);
             emit_json(&ok_response(&panel_id, Some(Value::String(blob))));
-            return;
         }
         "echo_params" => {
             if !read {
@@ -146,14 +142,12 @@ fn main() {
                 return;
             }
             emit_json(&ok_response(&panel_id, Some(params)));
-            return;
         }
         "string_result" => {
             emit_json(&ok_response(
                 &panel_id,
                 Some(Value::String(schema_text(&panel_id))),
             ));
-            return;
         }
         _ => {
             // `ok`：`result` 直接是 schema 对象。

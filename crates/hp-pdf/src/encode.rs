@@ -49,7 +49,7 @@ pub fn encode_jpeg(rgba: &[u8], width: u32, height: u32) -> HpResult<Vec<u8>> {
 
     // 只保留 RGB：JPEG 没有 alpha 通道。
     let mut rgb = Vec::with_capacity((width as usize) * (height as usize) * 3);
-    for px in rgba.chunks_exact(4) {
+    for px in rgba.as_chunks::<4>().0 {
         rgb.extend_from_slice(&px[..3]);
     }
 

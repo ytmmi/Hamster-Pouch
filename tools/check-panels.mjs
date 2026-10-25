@@ -4011,7 +4011,10 @@ check(
   /pub\(crate\) async fn book_meta\(/.test(bookBridgeSrc) &&
     /ApiAsync<BookMetaResult>/.test(bookBridgeSrc) &&
     /spawn_blocking/.test(bookBridgeSrc) &&
-    /Err\(_\) => hp_book::BookMeta::default\(\)/.test(bookBridgeSrc),
+    // 降级写法二选一：显式 match 或 unwrap_or_default（clippy 会要求后者）。
+    // 断言的是"坏书 → 默认值、不抛错"这个**行为**，不是具体语法。
+    (/Err\(_\) => hp_book::BookMeta::default\(\)/.test(bookBridgeSrc) ||
+      /read_book_meta\(source_path\)\.unwrap_or_default\(\)/.test(bookBridgeSrc)),
 );
 check(
   "封面原格式落盘（不转码），元数据缓存按内容哈希失效",

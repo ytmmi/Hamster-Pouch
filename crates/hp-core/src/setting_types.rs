@@ -262,21 +262,21 @@ pub fn validate_setting_decl(decl: &SettingDecl, ctx: &SettingDeclCtx) -> Vec<St
         None => errors.push(format!("设置项 {id} 缺少 category")),
     }
 
-    if let Some(kind) = owner_kind {
-        if kind.requires_owner_id() {
-            match decl.owner_id.as_deref().map(str::trim) {
-                Some(owner_id) if !owner_id.is_empty() => {
-                    let known = match kind {
-                        SettingOwnerKind::Panel => &ctx.registered_panels,
-                        SettingOwnerKind::Plugin => &ctx.registered_plugins,
-                        SettingOwnerKind::System => &Vec::new(),
-                    };
-                    if !known.is_empty() && !known.iter().any(|k| k == owner_id) {
-                        errors.push(format!("设置项 {id} 的 owner.id 未注册: {owner_id}"));
-                    }
+    if let Some(kind) = owner_kind
+        && kind.requires_owner_id()
+    {
+        match decl.owner_id.as_deref().map(str::trim) {
+            Some(owner_id) if !owner_id.is_empty() => {
+                let known = match kind {
+                    SettingOwnerKind::Panel => &ctx.registered_panels,
+                    SettingOwnerKind::Plugin => &ctx.registered_plugins,
+                    SettingOwnerKind::System => &Vec::new(),
+                };
+                if !known.is_empty() && !known.iter().any(|k| k == owner_id) {
+                    errors.push(format!("设置项 {id} 的 owner.id 未注册: {owner_id}"));
                 }
-                _ => errors.push(format!("设置项 {id} 的 owner.id 缺失（{kind} 归属必需）")),
             }
+            _ => errors.push(format!("设置项 {id} 的 owner.id 缺失（{kind} 归属必需）")),
         }
     }
 
@@ -295,36 +295,35 @@ pub fn validate_setting_decl(decl: &SettingDecl, ctx: &SettingDeclCtx) -> Vec<St
         None => errors.push(format!("设置项 {id} 缺少 kind")),
     }
 
-    if let Some(scope) = decl.scope.as_deref() {
-        if SettingScope::from_str(scope).is_none() {
-            errors.push(format!(
-                "设置项 {id} 的 scope 非法: {scope}（允许 app/repo）"
-            ));
-        }
+    if let Some(scope) = decl.scope.as_deref()
+        && SettingScope::from_str(scope).is_none()
+    {
+        errors.push(format!(
+            "设置项 {id} 的 scope 非法: {scope}（允许 app/repo）"
+        ));
     }
 
-    if let Some(cap) = decl.requires_capability.as_deref() {
-        if !ctx.allowed_capabilities.is_empty()
-            && !ctx.allowed_capabilities.iter().any(|c| c == cap)
-        {
-            errors.push(format!(
-                "设置项 {id} 的 requires_capability 不在能力白名单内: {cap}"
-            ));
-        }
+    if let Some(cap) = decl.requires_capability.as_deref()
+        && !ctx.allowed_capabilities.is_empty()
+        && !ctx.allowed_capabilities.iter().any(|c| c == cap)
+    {
+        errors.push(format!(
+            "设置项 {id} 的 requires_capability 不在能力白名单内: {cap}"
+        ));
     }
 
     // 值一律是标量（不接受嵌套对象或任意表达式，同 D32 口径）。
-    if let Some(value) = &decl.default {
-        if value.is_object() || value.is_array() || value.is_null() {
-            errors.push(format!(
-                "设置项 {id} 的 default 必须是标量（string/number/bool）"
-            ));
-        }
+    if let Some(value) = &decl.default
+        && (value.is_object() || value.is_array() || value.is_null())
+    {
+        errors.push(format!(
+            "设置项 {id} 的 default 必须是标量（string/number/bool）"
+        ));
     }
 
     // 同名 id 一律硬错误（不覆盖、不合并）。
     let key = decl.storage_key();
-    if ctx.taken_keys.iter().any(|k| *k == key) {
+    if ctx.taken_keys.contains(&key) {
         errors.push(format!("设置项落库键冲突（不覆盖、不合并）: {key}"));
     }
 

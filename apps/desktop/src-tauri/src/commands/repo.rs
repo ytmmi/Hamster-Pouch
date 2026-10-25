@@ -65,24 +65,24 @@ fn decode_setting_value(raw: &str) -> serde_json::Value {
         "false" => return serde_json::Value::Bool(false),
         _ => {}
     }
-    if let Ok(int) = raw.parse::<i64>() {
-        if int.to_string() == raw {
-            return serde_json::Value::from(int);
-        }
+    if let Ok(int) = raw.parse::<i64>()
+        && int.to_string() == raw
+    {
+        return serde_json::Value::from(int);
     }
-    if let Ok(float) = raw.parse::<f64>() {
-        if float.to_string() == raw {
-            return serde_json::Value::from(float);
-        }
+    if let Ok(float) = raw.parse::<f64>()
+        && float.to_string() == raw
+    {
+        return serde_json::Value::from(float);
     }
     serde_json::Value::String(raw.to_string())
 }
 
-/// `scope = "repo"` 的设置项按仓库隔离，键为 `{key}.{repoId}`
-/// （`docs/spec/commands-events.md` 3.13 规则 4）。
-///
-/// 规则本身在 `hp_core::scoped_storage_key`（纯函数 + 单测）：
-/// **只有** `scope = "repo"` 的项才拼 `repoId`，其余项忽略传入的 `repoId`。
+// `scope = "repo"` 的设置项按仓库隔离，键为 `{key}.{repoId}`
+// （`docs/spec/commands-events.md` 3.13 规则 4）。
+//
+// 规则本身在 `hp_core::scoped_storage_key`（纯函数 + 单测）：
+// **只有** `scope = "repo"` 的项才拼 `repoId`，其余项忽略传入的 `repoId`。
 
 /// 一个设置键解析出的**校验事实**：宿主/面板项来自注册表镜像，插件项来自 manifest。
 enum SettingTarget {

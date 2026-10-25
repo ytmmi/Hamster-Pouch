@@ -545,7 +545,7 @@ impl ParseCtx {
     }
 
     /// 结束一张图片：把两者之间产生的文字当作 alt，落成一个图片片段。
-    fn close_image(&mut self, stack: &mut Vec<Frame>) {
+    fn close_image(&mut self, stack: &mut [Frame]) {
         let mark = stack.last_mut().expect("栈非空").image_mark.take();
         let Some((start, src)) = mark else {
             return;
@@ -582,7 +582,7 @@ impl ParseCtx {
     /// 复用的路径（`spans_from_html`）只看到孤立的标签字符串，同样拦不住它。
     /// 于是本函数**自己驱动一遍扫描**：遇到丢弃标签就记深度，深度内的文字一律不产出。
     /// 扫描逻辑与 `inline::spans_from_html` 同一条口径（白名单 + 丢标签留文字）。
-    fn push_html(&mut self, html: &str, stack: &mut Vec<Frame>) {
+    fn push_html(&mut self, html: &str, stack: &mut [Frame]) {
         // front matter 里的 HTML 事件是 YAML 原文：整段丢弃。
         if stack
             .last()
@@ -798,11 +798,13 @@ impl InlineAcc {
             return;
         }
         let href = self.href.clone();
-        if let Some(last) = self.spans.last_mut() {
-            if last.image.is_none() && last.styles == self.styles && last.href == href {
-                last.text.push_str(text);
-                return;
-            }
+        if let Some(last) = self.spans.last_mut()
+            && last.image.is_none()
+            && last.styles == self.styles
+            && last.href == href
+        {
+            last.text.push_str(text);
+            return;
         }
         self.spans.push(BookSpan {
             text: text.to_string(),
@@ -918,11 +920,13 @@ fn collapse_spans(spans: &[BookSpan]) -> Vec<BookSpan> {
 
 /// 把字符追加到末尾片段（样式 / 链接 / 图片身份不同则另起）。
 fn push_styled(out: &mut Vec<BookSpan>, ch: char, like: &BookSpan) {
-    if let Some(last) = out.last_mut() {
-        if last.image.is_none() && last.styles == like.styles && last.href == like.href {
-            last.text.push(ch);
-            return;
-        }
+    if let Some(last) = out.last_mut()
+        && last.image.is_none()
+        && last.styles == like.styles
+        && last.href == like.href
+    {
+        last.text.push(ch);
+        return;
     }
     out.push(BookSpan {
         text: ch.to_string(),

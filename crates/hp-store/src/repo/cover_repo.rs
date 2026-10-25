@@ -107,13 +107,13 @@ impl RepoDb {
         let rows = stmt
             .query_map(rusqlite::params_from_iter(file_ids.iter()), row_to_cover)
             .map_err(|e| store_err("批量查询封面覆盖", e))?;
-        let mut out = HashMap::new();
-        for row in rows {
-            // 单行解析失败（未知 kind）跳过该行而不是让整批失败：见 `row_to_cover`。
-            if let Ok(cover) = row {
-                out.insert(cover.file_id.clone(), cover);
-            }
-        }
+        // 单行解析失败（未知 kind）跳过该行而不是让整批失败：见 `row_to_cover`。
+        // 用 `filter_map` 而不是 `flatten`：后者会连 rusqlite 的真实错误一起吞掉，
+        // 而这里只该跳过"解析不出记录"的行。
+        let out: HashMap<_, _> = rows
+            .filter_map(|row| row.ok())
+            .map(|cover| (cover.file_id.clone(), cover))
+            .collect();
         Ok(out)
     }
 }

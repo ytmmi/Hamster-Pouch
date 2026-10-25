@@ -263,16 +263,16 @@ pub(crate) fn collect_issues(
                     ));
                 }
                 // 尺寸小于最小尺寸 → 只是被夹紧，提示一下即可（不阻塞保存）。
-                if let Some(size) = &node.size {
-                    if size.below_minimum() {
-                        warnings.push((
+                if let Some(size) = &node.size
+                    && size.below_minimum()
+                {
+                    warnings.push((
                             format!(
                                 "浮层 {key} 的尺寸小于最小尺寸（{OVERLAY_MIN_WIDTH}×{OVERLAY_MIN_HEIGHT}），将按最小尺寸显示",
                                 key = node.key
                             ),
                             SeverityLevel::Soft,
                         ));
-                    }
                 }
             }
             _ => {}

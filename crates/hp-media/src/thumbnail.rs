@@ -340,15 +340,13 @@ fn decode_thumbnail_src(
 
     // **尺寸分流**（有界请求 + AVIF/HEIC 超大图 + 有 ffmpeg）：直接 ffmpeg 有界，
     // 跳过进程内全分辨率解码（实测大图快 3.4×，见 `decode::LIBHEIF_FULL_RES_MAX_MP`）。
-    if max_dim < u32::MAX && crate::decode::is_avif_family(src) {
-        if let Some(bin) = ffmpeg_bin {
-            if crate::decode::is_huge_avif_family(src) {
-                return crate::decode::decode_image_with_ffmpeg(src, bin, max_dim, timeout)
-                    .map_err(|fe| {
-                        HpError::Io(format!("解码图片失败: 超大图走 ffmpeg 有界失败: {fe}"))
-                    });
-            }
-        }
+    if max_dim < u32::MAX
+        && crate::decode::is_avif_family(src)
+        && let Some(bin) = ffmpeg_bin
+        && crate::decode::is_huge_avif_family(src)
+    {
+        return crate::decode::decode_image_with_ffmpeg(src, bin, max_dim, timeout)
+            .map_err(|fe| HpError::Io(format!("解码图片失败: 超大图走 ffmpeg 有界失败: {fe}")));
     }
 
     let reader = ImageReader::open(src)
@@ -400,11 +398,11 @@ fn fallback_decode(
     cause: &str,
     step: &str,
 ) -> HpResult<image::DynamicImage> {
-    if crate::decode::needs_ffmpeg_decode(src) {
-        if let Some(bin) = ffmpeg_bin {
-            return crate::decode::decode_image_with_ffmpeg(src, bin, max_dim, timeout)
-                .map_err(|fe| HpError::Io(format!("{step}: {cause}；ffmpeg 兜底: {fe}")));
-        }
+    if crate::decode::needs_ffmpeg_decode(src)
+        && let Some(bin) = ffmpeg_bin
+    {
+        return crate::decode::decode_image_with_ffmpeg(src, bin, max_dim, timeout)
+            .map_err(|fe| HpError::Io(format!("{step}: {cause}；ffmpeg 兜底: {fe}")));
     }
     Err(HpError::Io(format!("{step}: {cause}")))
 }

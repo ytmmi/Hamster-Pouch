@@ -504,9 +504,9 @@ fn tree_nodes_to_items(nodes: Vec<hp_store::TreeNode>, source_id: &str) -> Vec<S
 
 /// 取路径末级段（兼容 `\` 与 `/`，忽略尾部分隔符）。
 fn last_path_segment(path: &str) -> String {
-    let trimmed = path.trim_end_matches(|c| c == '\\' || c == '/');
+    let trimmed = path.trim_end_matches(['\\', '/']);
     trimmed
-        .rsplit(|c| c == '\\' || c == '/')
+        .rsplit(['\\', '/'])
         .next()
         .filter(|s| !s.is_empty())
         .unwrap_or(path)
@@ -716,10 +716,10 @@ pub(crate) fn task_cancel(
             return Err(HpError::InvalidArgument("任务 ID 不能为空".into()));
         }
         let outcome = state.tasks.request_cancel(&task_id);
-        if let RequestOutcome::Accepted { kind } = outcome {
-            if kind == TaskKind::Scan {
-                state.scanner.cancel();
-            }
+        if let RequestOutcome::Accepted { kind } = outcome
+            && kind == TaskKind::Scan
+        {
+            state.scanner.cancel();
         }
         Ok(TaskCancelResult {
             cancelled: outcome.is_accepted(),

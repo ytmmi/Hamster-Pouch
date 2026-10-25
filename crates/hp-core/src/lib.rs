@@ -1,6 +1,27 @@
 //! hp-core：仓鼠颊领域模型（仓库、媒体源、虚拟相册、图像、tag、评分）。
 //! 本 crate 保持纯净，不依赖 Tauri/SQLite/文件系统。
 
+//!
+//! ## clippy `should_implement_trait` 的定向豁免（2026-10-25，D120-R4）
+//!
+//! 本 crate 里 45 个领域值类型都有同一形态的解析入口：
+//!
+//! ```text
+//! pub fn from_str(s: &str) -> Option<Self>
+//! ```
+//!
+//! clippy 认为叫 `from_str` 就该实现 `std::str::FromStr`。但两者的失败语义不同：
+//! `FromStr` 要求 `Result<Self, Self::Err>`，而这里的"解析不出来"是**正常情况**
+//! （JSON / 数据库里来了一个未知枚举值），调用方一律按 `None` 走默认或跳过。
+//! 实现 `FromStr` 会逼所有调用方写 `map_err` 把 `None` 再手工还原，属为满足 lint
+//! 而增加真实复杂度。
+//!
+//! 因此**在 crate 级别豁免这一条**，而不是：①逐个 `#[allow]`（45 处重复注释，
+//! 噪声大）；②改名为 `parse`（会波及 174 处调用点，且丢掉"从字符串值还原枚举"
+//! 的直白语义）。**其余 clippy 规则仍然生效**——`pnpm check:clippy` 要求除本条目外
+//! 零 warning。
+#![allow(clippy::should_implement_trait)]
+
 pub mod ai;
 pub mod album;
 pub mod annotation;

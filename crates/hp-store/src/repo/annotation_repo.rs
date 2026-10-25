@@ -15,22 +15,36 @@ use rusqlite::{OptionalExtension, Row, params};
 use crate::repo::repo_db::RepoDb;
 use crate::util::{now_iso, require_nonempty, store_err, uuid};
 
+/// 新建阅读批注的入参（取代 8 个位置参数，clippy 的 too_many_arguments 检查）。
+///
+/// 各字段语义见 [`RepoDb::create_annotation`] 的文档：`progress` 是保存时的阅读进度
+/// （0–10000），`title` / `excerpt` / `note` 允许为空串，但**是否允许为空**由
+/// `validate_annotation_content` 按 `kind` 决定——因此校验仍在仓储内做，不在这里。
+pub struct NewAnnotation<'a> {
+    pub file_id: &'a str,
+    pub kind: AnnotationKind,
+    pub cursor: &'a str,
+    pub progress: u32,
+    pub title: &'a str,
+    pub excerpt: &'a str,
+    pub note: &'a str,
+}
 impl RepoDb {
     /// 新建一条批注，返回落库后的完整记录。
     ///
     /// `id` 由仓储生成（UUID）：调用方不该关心主键（与 `create_tag` 同一口径）。
     /// `progress` 由调用方按**保存时**的阅读进度传入（0–10000，`progress_to_stored`
     /// 换算），它只用于列表展示，不参与跳转。
-    pub fn create_annotation(
-        &mut self,
-        file_id: &str,
-        kind: AnnotationKind,
-        cursor: &str,
-        progress: u32,
-        title: &str,
-        excerpt: &str,
-        note: &str,
-    ) -> HpResult<ReaderAnnotation> {
+    pub fn create_annotation(&mut self, new: NewAnnotation<'_>) -> HpResult<ReaderAnnotation> {
+        let NewAnnotation {
+            file_id,
+            kind,
+            cursor,
+            progress,
+            title,
+            excerpt,
+            note,
+        } = new;
         require_nonempty(file_id, "文件 ID")?;
         if let Err(reason) = validate_annotation_content(kind, cursor, excerpt, note) {
             return Err(HpError::InvalidArgument(reason));
@@ -85,13 +99,10 @@ impl RepoDb {
         let rows = stmt
             .query_map(params![file_id], row_to_annotation)
             .map_err(|e| store_err("读取阅读批注", e))?;
-        let mut out = Vec::new();
-        for row in rows {
-            // 单行解析失败（未知 kind）跳过该行而不是让整表失败：见 `row_to_annotation`。
-            if let Ok(record) = row {
-                out.push(record);
-            }
-        }
+        // 单行解析失败（未知 kind）跳过该行而不是让整表失败：见 `row_to_annotation`。
+        // 用 `filter_map` 而不是 `flatten`：后者会连 rusqlite 的真实错误一起吞掉，
+        // 而这里只该跳过"解析不出记录"的行。
+        let out: Vec<_> = rows.filter_map(|row| row.ok()).collect();
         Ok(out)
     }
 

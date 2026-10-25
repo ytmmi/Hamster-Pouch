@@ -125,14 +125,14 @@ pub(crate) fn validate_graph_with(
         if node.node_type != NodeType::Group || node.mode != Some(GroupMode::Exclusive) {
             continue;
         }
-        if let Some(visible) = &node.default_visible {
-            if visible.len() > 1 {
-                issues.push(NodeIssue::hard(format!(
-                    "互斥组 {} 的 default_visible 至多一个成员（当前 {} 个）",
-                    node.key,
-                    visible.len()
-                )));
-            }
+        if let Some(visible) = &node.default_visible
+            && visible.len() > 1
+        {
+            issues.push(NodeIssue::hard(format!(
+                "互斥组 {} 的 default_visible 至多一个成员（当前 {} 个）",
+                node.key,
+                visible.len()
+            )));
         }
     }
 
@@ -210,7 +210,7 @@ fn find_state_conflicts(graph: &BlueprintGraph, registry: &NodeRegistry) -> Vec<
             .collect();
         let mut unique_triggers: Vec<&Trigger> = Vec::new();
         for t in triggers {
-            if !unique_triggers.iter().any(|u| *u == t) {
+            if !unique_triggers.contains(&t) {
                 unique_triggers.push(t);
             }
         }
@@ -350,41 +350,39 @@ fn find_panel_class_violations(
         };
 
         // 1. 类目挂在无类目面板下。
-        if parent.node_type == NodeType::Control && child.node_type == NodeType::Class {
-            if let Some(panel_id) = parent.panel_id.as_deref().filter(|s| !s.trim().is_empty()) {
-                if let Some(fact) = registry.panel_fact(panel_id) {
-                    if !fact.has_class {
-                        if fact.plugin {
-                            issues.push(NodeIssue {
+        if parent.node_type == NodeType::Control
+            && child.node_type == NodeType::Class
+            && let Some(panel_id) = parent.panel_id.as_deref().filter(|s| !s.trim().is_empty())
+            && let Some(fact) = registry.panel_fact(panel_id)
+            && !fact.has_class
+        {
+            if fact.plugin {
+                issues.push(NodeIssue {
                                 message: format!(
                                     "类目节点 {} 暂未接通：面板 {} 声明 has_class = false（插件注册面板，声明可能随插件版本变化）",
                                     child.key, panel_id
                                 ),
                                 severity: SeverityLevel::Soft,
                             });
-                        } else {
-                            issues.push(NodeIssue::hard(format!(
+            } else {
+                issues.push(NodeIssue::hard(format!(
                                 "类目节点 {} 挂在无类目的面板 {} 下：宿主内置面板的 has_class = false 是不变量，不允许出现 面板→类目 的结构边",
                                 child.key, panel_id
                             )));
-                        }
-                    }
-                }
             }
         }
 
         // 2. 浮层内容不合法：面板声明 `mount.overlay_content = false` 却被浮层 contains。
-        if parent.node_type == NodeType::Overlay && child.node_type == NodeType::Control {
-            if let Some(panel_id) = child.panel_id.as_deref().filter(|s| !s.trim().is_empty()) {
-                if let Some(fact) = registry.panel_fact(panel_id) {
-                    if !fact.overlay_content {
-                        issues.push(NodeIssue::hard(format!(
-                            "面板 {} 声明 mount.overlay_content = false，不能作为浮层 {} 的内容",
-                            panel_id, parent.key
-                        )));
-                    }
-                }
-            }
+        if parent.node_type == NodeType::Overlay
+            && child.node_type == NodeType::Control
+            && let Some(panel_id) = child.panel_id.as_deref().filter(|s| !s.trim().is_empty())
+            && let Some(fact) = registry.panel_fact(panel_id)
+            && !fact.overlay_content
+        {
+            issues.push(NodeIssue::hard(format!(
+                "面板 {} 声明 mount.overlay_content = false，不能作为浮层 {} 的内容",
+                panel_id, parent.key
+            )));
         }
     }
     issues
@@ -457,12 +455,12 @@ fn validate_node_fields(
             // 2026-09 取消「浮动控件」绑定，浮层不再有 `control_id`。
             // 锚点与偏移的取值合法性由解析层保证（枚举 + 数字）；
             // JSON 的 f64 由 serde_json 保证有限，不会出现 NaN/∞。
-            if let Some(h) = node.height {
-                if !(OVERLAY_HEIGHT_MIN..=OVERLAY_HEIGHT_MAX).contains(&h) {
-                    errors.push(format!(
+            if let Some(h) = node.height
+                && !(OVERLAY_HEIGHT_MIN..=OVERLAY_HEIGHT_MAX).contains(&h)
+            {
+                errors.push(format!(
                         "浮层节点 {key} 的 height 必须在 {OVERLAY_HEIGHT_MIN}-{OVERLAY_HEIGHT_MAX}（当前: {h}）"
                     ));
-                }
             }
             // 框体尺寸：必须为正且不超过上限；小于最小尺寸只夹紧（软告警，见 warnings）。
             if let Some(size) = &node.size {
@@ -484,15 +482,14 @@ fn validate_node_fields(
         }
         NodeType::Class => {
             // control 缺失/指向已删除节点 → 未接通（软）；指向存在但类型不符 → 硬错误。
-            if let Some(ck) = node.control.as_deref() {
-                if let Some(target) = by_key.get(ck) {
-                    if target.node_type != NodeType::Control {
-                        errors.push(format!(
-                            "类节点 {key} 的 control 必须指向面板控件节点（当前指向 {}）",
-                            target.node_type
-                        ));
-                    }
-                }
+            if let Some(ck) = node.control.as_deref()
+                && let Some(target) = by_key.get(ck)
+                && target.node_type != NodeType::Control
+            {
+                errors.push(format!(
+                    "类节点 {key} 的 control 必须指向面板控件节点（当前指向 {}）",
+                    target.node_type
+                ));
             }
             match node.media_type.as_deref() {
                 Some(mt) if is_valid_class_media_type(mt) => {}
@@ -518,15 +515,14 @@ fn validate_node_fields(
         }
         NodeType::Subclass => {
             // 所属类目引用：缺失/已删除 → 未接通（软）；指向存在但类型不符 → 硬错误。
-            if let Some(ck) = node.subclass.as_deref() {
-                if let Some(target) = by_key.get(ck) {
-                    if target.node_type != NodeType::Class {
-                        errors.push(format!(
-                            "子类节点 {key} 的 subclass 必须指向类目节点（当前指向 {}）",
-                            target.node_type
-                        ));
-                    }
-                }
+            if let Some(ck) = node.subclass.as_deref()
+                && let Some(target) = by_key.get(ck)
+                && target.node_type != NodeType::Class
+            {
+                errors.push(format!(
+                    "子类节点 {key} 的 subclass 必须指向类目节点（当前指向 {}）",
+                    target.node_type
+                ));
             }
             // `format` 的取值域**按所属类目的媒体类型分域**：`text` 类目下只能是
             // epub/txt/md；其余媒体类型**没有**子类取值域（该类目下不该有子类）。
@@ -573,15 +569,14 @@ fn validate_node_fields(
             }
         }
         NodeType::Mark => {
-            if let Some(ck) = node.control.as_deref() {
-                if let Some(target) = by_key.get(ck) {
-                    if target.node_type != NodeType::Control {
-                        errors.push(format!(
-                            "标记节点 {key} 的 control 必须指向面板控件节点（当前指向 {}）",
-                            target.node_type
-                        ));
-                    }
-                }
+            if let Some(ck) = node.control.as_deref()
+                && let Some(target) = by_key.get(ck)
+                && target.node_type != NodeType::Control
+            {
+                errors.push(format!(
+                    "标记节点 {key} 的 control 必须指向面板控件节点（当前指向 {}）",
+                    target.node_type
+                ));
             }
             // `mark` 的取值域是**可注册的标记清单**；内置项恒在，未注册的取值按
             // 「未接通」软告警处理（与节点类型注册表同口径，D102），因此这里只校验
@@ -591,10 +586,9 @@ fn validate_node_fields(
                 .as_deref()
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
+                && !crate::namespace::is_valid_namespaced_id(m)
             {
-                if !crate::namespace::is_valid_namespaced_id(m) {
-                    errors.push(format!("标记节点 {key} 的 mark 命名不合规则: {m}"));
-                }
+                errors.push(format!("标记节点 {key} 的 mark 命名不合规则: {m}"));
             }
         }
         NodeType::Object => {
@@ -613,13 +607,13 @@ fn validate_node_fields(
                     continue;
                 }
                 declared += 1;
-                if let Some(target) = by_key.get(parent_key) {
-                    if target.node_type != want {
-                        errors.push(format!(
-                            "对象节点 {key} 的 {field} 必须指向 {} 节点（当前指向 {}）",
-                            want, target.node_type
-                        ));
-                    }
+                if let Some(target) = by_key.get(parent_key)
+                    && target.node_type != want
+                {
+                    errors.push(format!(
+                        "对象节点 {key} 的 {field} 必须指向 {} 节点（当前指向 {}）",
+                        want, target.node_type
+                    ));
                 }
             }
             // **三条轴互斥**：对象只属于一个结构父（与"结构父唯一性"同一条约束）。
@@ -638,43 +632,40 @@ fn validate_node_fields(
             }
             if let Some(visible) = &node.default_visible {
                 for vk in visible {
-                    if let Some(target) = by_key.get(vk.as_str()) {
-                        if target.node_type != NodeType::Control {
-                            errors.push(format!(
-                                "组节点 {key} 的 default_visible 成员 {vk} 必须是面板控件节点"
-                            ));
-                        }
+                    if let Some(target) = by_key.get(vk.as_str())
+                        && target.node_type != NodeType::Control
+                    {
+                        errors.push(format!(
+                            "组节点 {key} 的 default_visible 成员 {vk} 必须是面板控件节点"
+                        ));
                     }
                 }
             }
-            if let Some(dir) = &node.hide_direction {
-                if let Some(target_key) = dir.toward_target() {
-                    if let Some(target) = by_key.get(target_key) {
-                        if target.node_type != NodeType::Group {
-                            errors.push(format!(
-                                "组节点 {key} 的 hide_direction 指向的 {target_key} 必须是组节点"
-                            ));
-                        }
-                    }
-                }
+            if let Some(dir) = &node.hide_direction
+                && let Some(target_key) = dir.toward_target()
+                && let Some(target) = by_key.get(target_key)
+                && target.node_type != NodeType::Group
+            {
+                errors.push(format!(
+                    "组节点 {key} 的 hide_direction 指向的 {target_key} 必须是组节点"
+                ));
             }
         }
         NodeType::Event => {
             if node.trigger.is_none() {
                 errors.push(format!("操作节点 {key} 缺少 trigger"));
             }
-            if let Some(t) = node.target.as_deref() {
-                if let Some(target) = by_key.get(t) {
-                    if !matches!(
-                        target.node_type,
-                        NodeType::Control | NodeType::Class | NodeType::Object
-                    ) {
-                        errors.push(format!(
-                            "操作节点 {key} 的 target 必须指向面板控件/类/对象节点（当前指向 {}）",
-                            target.node_type
-                        ));
-                    }
-                }
+            if let Some(t) = node.target.as_deref()
+                && let Some(target) = by_key.get(t)
+                && !matches!(
+                    target.node_type,
+                    NodeType::Control | NodeType::Class | NodeType::Object
+                )
+            {
+                errors.push(format!(
+                    "操作节点 {key} 的 target 必须指向面板控件/类/对象节点（当前指向 {}）",
+                    target.node_type
+                ));
             }
         }
         NodeType::Condition => {
@@ -691,35 +682,33 @@ fn validate_node_fields(
             if op.is_none() {
                 errors.push(format!("动作节点 {key} 缺少 op"));
             }
-            if let Some(target_key) = node.target.as_deref() {
-                if let Some(target) = by_key.get(target_key) {
-                    let actual = target.node_type.clone();
-                    let ok = match op {
-                        // 显隐：面板控件，或浮层（D50：show/hide/toggle 可指向浮层）。
-                        Some(ActionOp::Show) | Some(ActionOp::Hide) => {
-                            matches!(actual, NodeType::Control | NodeType::Overlay)
-                        }
-                        // 组收起/展开：只允许标签组；指向浮层为硬错误（D50）。
-                        Some(ActionOp::Collapse) | Some(ActionOp::Expand) => {
-                            actual == NodeType::Group
-                        }
-                        Some(ActionOp::Toggle) => {
-                            matches!(
-                                actual,
-                                NodeType::Control | NodeType::Group | NodeType::Overlay
-                            )
-                        }
-                        // 界面跳转：目标必须是界面节点（D48）；指向浮层为硬错误（D50）。
-                        Some(ActionOp::Navigate) => actual == NodeType::Interface,
-                        None => true,
-                    };
-                    if !ok {
-                        errors.push(format!(
-                            "动作节点 {key} 的 target 类型不符：{} 不能指向 {}",
-                            op.map(|o| o.as_str()).unwrap_or("?"),
-                            actual
-                        ));
+            if let Some(target_key) = node.target.as_deref()
+                && let Some(target) = by_key.get(target_key)
+            {
+                let actual = target.node_type.clone();
+                let ok = match op {
+                    // 显隐：面板控件，或浮层（D50：show/hide/toggle 可指向浮层）。
+                    Some(ActionOp::Show) | Some(ActionOp::Hide) => {
+                        matches!(actual, NodeType::Control | NodeType::Overlay)
                     }
+                    // 组收起/展开：只允许标签组；指向浮层为硬错误（D50）。
+                    Some(ActionOp::Collapse) | Some(ActionOp::Expand) => actual == NodeType::Group,
+                    Some(ActionOp::Toggle) => {
+                        matches!(
+                            actual,
+                            NodeType::Control | NodeType::Group | NodeType::Overlay
+                        )
+                    }
+                    // 界面跳转：目标必须是界面节点（D48）；指向浮层为硬错误（D50）。
+                    Some(ActionOp::Navigate) => actual == NodeType::Interface,
+                    None => true,
+                };
+                if !ok {
+                    errors.push(format!(
+                        "动作节点 {key} 的 target 类型不符：{} 不能指向 {}",
+                        op.map(|o| o.as_str()).unwrap_or("?"),
+                        actual
+                    ));
                 }
             }
         }

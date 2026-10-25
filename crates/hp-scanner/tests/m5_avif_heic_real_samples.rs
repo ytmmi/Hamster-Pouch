@@ -58,7 +58,7 @@ fn probe_dims(ffmpeg: &Path, path: &Path) -> Option<(u32, u32)> {
             let h = h.parse::<u32>().ok()?;
             (w >= 64 && h >= 64).then_some((w, h))
         })
-        .last()
+        .next_back()
 }
 
 /// 对单个真实样本跑完整验证：扫描期派生数据 + 320 缩略图 + 全分辨率预览 + 确定性复现。
@@ -141,7 +141,7 @@ fn verify_sample(sample: &Path, label: &str, ffmpeg: &Path) {
         thumb_h = thumb.height(),
         prev_w = preview_dims.0,
         prev_h = preview_dims.1,
-        perceptual_value = &perceptual.value,
+        perceptual_value = perceptual.value,
         palette_len = palette.len(),
     );
     let _ = std::fs::remove_dir_all(&dir);

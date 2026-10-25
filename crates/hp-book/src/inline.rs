@@ -78,17 +78,16 @@ fn push_char(
     bg: &Option<String>,
     size_em: Option<f32>,
 ) {
-    if let Some(last) = out.last_mut() {
-        if last.image.is_none()
-            && last.styles == styles
-            && last.href.as_deref() == href
-            && last.color == *color
-            && last.bg == *bg
-            && last.size_em.map(f32::to_bits) == size_em.map(f32::to_bits)
-        {
-            last.text.push(ch);
-            return;
-        }
+    if let Some(last) = out.last_mut()
+        && last.image.is_none()
+        && last.styles == styles
+        && last.href.as_deref() == href
+        && last.color == *color
+        && last.bg == *bg
+        && last.size_em.map(f32::to_bits) == size_em.map(f32::to_bits)
+    {
+        last.text.push(ch);
+        return;
     }
     out.push(BookSpan {
         text: ch.to_string(),
@@ -175,16 +174,14 @@ impl RunBuilder {
             bg,
             size_em,
         }) = self.runs.last_mut()
+            && last_styles == styles
+            && *last_href == href
+            && *color == self.color
+            && *bg == self.bg
+            && size_em.map(f32::to_bits) == self.size_em.map(f32::to_bits)
         {
-            if last_styles == styles
-                && *last_href == href
-                && *color == self.color
-                && *bg == self.bg
-                && size_em.map(f32::to_bits) == self.size_em.map(f32::to_bits)
-            {
-                last_text.push_str(text);
-                return;
-            }
+            last_text.push_str(text);
+            return;
         }
         self.runs.push(Run::Text {
             text: text.to_string(),
@@ -453,10 +450,10 @@ impl InlineState {
             "span" | "font" => {
                 let mut declared = attr_value(tag, "style").unwrap_or_default();
                 // `<font color="red">` 是上古写法，语料里真有：颜色属性也认。
-                if name == "font" {
-                    if let Some(color) = attr_value(tag, "color").filter(|c| !c.is_empty()) {
-                        declared = format!("{declared}; color: {color}");
-                    }
+                if name == "font"
+                    && let Some(color) = attr_value(tag, "color").filter(|c| !c.is_empty())
+                {
+                    declared = format!("{declared}; color: {color}");
                 }
                 let (marks, extras) = inline_styles_from_style(&declared);
                 self.styles.extend(marks.iter().copied());
@@ -639,15 +636,16 @@ pub fn spans_from_html(fragment: &str, keep_images: bool) -> Vec<BookSpan> {
         }
 
         if name == "img" {
-            if keep_images && !closing {
-                if let Some(src) = attr_value(tag, "src").filter(|s| !s.is_empty()) {
-                    let alt = attr_value(tag, "alt").unwrap_or_default();
-                    let mut img = BookSpan::plain(decode_entities(&alt));
-                    img.image = Some(src);
-                    // 链接里的图片要带上链接（`[![alt](a)](b)` 是真实写法）。
-                    img.href = state.current_href();
-                    builder.push_atomic(img);
-                }
+            if keep_images
+                && !closing
+                && let Some(src) = attr_value(tag, "src").filter(|s| !s.is_empty())
+            {
+                let alt = attr_value(tag, "alt").unwrap_or_default();
+                let mut img = BookSpan::plain(decode_entities(&alt));
+                img.image = Some(src);
+                // 链接里的图片要带上链接（`[![alt](a)](b)` 是真实写法）。
+                img.href = state.current_href();
+                builder.push_atomic(img);
             }
             continue;
         }

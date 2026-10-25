@@ -185,10 +185,10 @@ impl PluginManifest {
     pub fn panel_decl_ctx(&self) -> PanelDeclCtx {
         let mut ctx = PanelDeclCtx::builtin();
         for c in &self.contributions {
-            if c.kind == ContributionKind::BlueprintNode {
-                if let Some(ty) = c.blueprint_node_type() {
-                    ctx.registered_node_types.push(ty.to_string());
-                }
+            if c.kind == ContributionKind::BlueprintNode
+                && let Some(ty) = c.blueprint_node_type()
+            {
+                ctx.registered_node_types.push(ty.to_string());
             }
         }
         ctx
@@ -198,10 +198,10 @@ impl PluginManifest {
     pub fn node_decl_ctx(&self) -> crate::blueprint_registry::NodeDeclCtx {
         let mut ctx = crate::blueprint_registry::NodeDeclCtx::builtin();
         for c in &self.contributions {
-            if c.kind == ContributionKind::BlueprintNode {
-                if let Some(ty) = c.blueprint_node_type() {
-                    ctx.registered_node_types.push(ty.to_string());
-                }
+            if c.kind == ContributionKind::BlueprintNode
+                && let Some(ty) = c.blueprint_node_type()
+            {
+                ctx.registered_node_types.push(ty.to_string());
             }
         }
         ctx
@@ -256,13 +256,13 @@ impl PluginManifest {
             // 面板 / 设置分节：**已给出**的取值域立即硬错误（歧义即拒绝，不静默降级）。
             // "必需项缺失"留给完备性校验：旧包必须在解析层读得出来。
             if c.kind == ContributionKind::Panel {
-                if let Some(category) = c.category.as_deref() {
-                    if PanelCategory::from_str(category).is_none() {
-                        return Err(HpError::InvalidArgument(format!(
-                            "面板贡献点 {} 的 category 非法: {category}（允许 source/media/info/system/other）",
-                            c.id
-                        )));
-                    }
+                if let Some(category) = c.category.as_deref()
+                    && PanelCategory::from_str(category).is_none()
+                {
+                    return Err(HpError::InvalidArgument(format!(
+                        "面板贡献点 {} 的 category 非法: {category}（允许 source/media/info/system/other）",
+                        c.id
+                    )));
                 }
                 for cap in &c.capabilities {
                     if Capability::from_str(cap).is_none() {
@@ -284,13 +284,13 @@ impl PluginManifest {
                             c.kind, c.id, setting.key, setting.kind
                         )));
                     }
-                    if let Some(cap) = setting.requires_capability.as_deref() {
-                        if Capability::from_str(cap).is_none() {
-                            return Err(HpError::InvalidArgument(format!(
-                                "贡献点 {} / {} 的设置项 {} 声明了未知能力: {cap}",
-                                c.kind, c.id, setting.key
-                            )));
-                        }
+                    if let Some(cap) = setting.requires_capability.as_deref()
+                        && Capability::from_str(cap).is_none()
+                    {
+                        return Err(HpError::InvalidArgument(format!(
+                            "贡献点 {} / {} 的设置项 {} 声明了未知能力: {cap}",
+                            c.kind, c.id, setting.key
+                        )));
                     }
                     if PanelSettingScope::from_str(setting.scope.as_deref().unwrap_or("app"))
                         .is_none()
@@ -302,25 +302,23 @@ impl PluginManifest {
                     }
                 }
             }
-            if c.kind == ContributionKind::SettingsSection {
-                if let Some(category) = c.category.as_deref() {
-                    if SettingCategory::from_str(category).is_none() {
-                        return Err(HpError::InvalidArgument(format!(
-                            "设置分节 {} 的 category 不在设置大类内: {category}",
-                            c.id
-                        )));
-                    }
-                }
+            if c.kind == ContributionKind::SettingsSection
+                && let Some(category) = c.category.as_deref()
+                && SettingCategory::from_str(category).is_none()
+            {
+                return Err(HpError::InvalidArgument(format!(
+                    "设置分节 {} 的 category 不在设置大类内: {category}",
+                    c.id
+                )));
             }
-            if let Some(required) = c.required_capability() {
-                if let Some(cap) = Capability::from_str(required) {
-                    if !self.capabilities.contains(&cap) {
-                        return Err(HpError::InvalidArgument(format!(
-                            "贡献点 {} / {} 需要能力 {required}，manifest 未声明",
-                            c.kind, c.id
-                        )));
-                    }
-                }
+            if let Some(required) = c.required_capability()
+                && let Some(cap) = Capability::from_str(required)
+                && !self.capabilities.contains(&cap)
+            {
+                return Err(HpError::InvalidArgument(format!(
+                    "贡献点 {} / {} 需要能力 {required}，manifest 未声明",
+                    c.kind, c.id
+                )));
             }
         }
         Ok(())

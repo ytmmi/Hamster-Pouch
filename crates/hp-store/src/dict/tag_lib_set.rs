@@ -30,6 +30,11 @@ pub struct TagLibSet {
     merge: Option<MergeIndex>,
 }
 
+/// 一层词库的元信息行：(层, 库文件路径, [(key, value)])。
+///
+/// 单独起别名而不是就地写元组（clippy 的 type_complexity 检查）：这个形状在读取侧
+/// 出现多次，就地展开会让签名难以扫读。
+type LibMetaRow = (LibLayer, PathBuf, Vec<(String, String)>);
 impl TagLibSet {
     /// 以空集合构造（随后用 [`TagLibSet::add`] 装配各层）。
     pub fn new() -> Self {
@@ -91,7 +96,7 @@ impl TagLibSet {
     }
 
     /// 各层 `lib_meta` 汇总（版本 / 计数 / 来源层），供词库管理展示。
-    pub fn layer_meta(&self) -> HpResult<Vec<(LibLayer, PathBuf, Vec<(String, String)>)>> {
+    pub fn layer_meta(&self) -> HpResult<Vec<LibMetaRow>> {
         let mut out = Vec::new();
         for db in &self.layers {
             let mut stmt = db

@@ -256,7 +256,7 @@ pub(crate) fn read_toc_by_media_type(
                 let mut entries: Vec<hp_book::TocEntry> = Vec::new();
                 let scan = hp_book::text_toc_stream(src_path, |entry| entries.push(entry))
                     .unwrap_or_default();
-                let total = u32::try_from(scan.chars).ok();
+                let total = Some(scan.chars);
                 ("text".to_string(), entries, total)
             }
         }

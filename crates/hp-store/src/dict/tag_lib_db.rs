@@ -44,11 +44,12 @@ impl TagLibDb {
     /// 以**读写**方式打开用户库；不存在则建表（跑四库迁移）。
     pub fn open(path: impl AsRef<Path>) -> HpResult<Self> {
         let path = path.as_ref().to_path_buf();
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() && !parent.exists() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| HpError::Store(format!("创建 tag 库目录失败: {e}")))?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| HpError::Store(format!("创建 tag 库目录失败: {e}")))?;
         }
         let mut conn = Connection::open(&path).map_err(|e| store_err("打开 tag 库", e))?;
         conn.pragma_update(None, "journal_mode", "WAL")

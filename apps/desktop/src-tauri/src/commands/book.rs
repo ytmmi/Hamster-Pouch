@@ -138,11 +138,8 @@ pub(crate) fn parse_and_cache(
     cache: &hp_media::ThumbnailCache,
     hash: &str,
 ) -> HpResult<BookMetaCache> {
-    let meta = match hp_book::read_book_meta(source_path) {
-        Ok(meta) => meta,
-        // 解析失败 = 这本书没有元数据（不向上抛：面板要的是"能显示"）。
-        Err(_) => hp_book::BookMeta::default(),
-    };
+    // 解析失败 = 这本书没有元数据（不向上抛：面板要的是"能显示"）。
+    let meta = hp_book::read_book_meta(source_path).unwrap_or_default();
 
     cache.ensure_dir_for(hash)?;
 
@@ -180,11 +177,8 @@ pub(crate) fn parse_pdf_and_cache(
     cache: &hp_media::ThumbnailCache,
     hash: &str,
 ) -> HpResult<BookMetaCache> {
-    let meta = match hp_pdf::read_pdf_meta(source_path) {
-        Ok(meta) => meta,
-        // 打不开（损坏 / 加密）= 没有元数据（不向上抛：面板回落文字封面即可）。
-        Err(_) => hp_pdf::PdfMeta::default(),
-    };
+    // 打不开（损坏 / 加密）= 没有元数据（不向上抛：面板回落文字封面即可）。
+    let meta = hp_pdf::read_pdf_meta(source_path).unwrap_or_default();
 
     cache.ensure_dir_for(hash)?;
 
@@ -260,10 +254,10 @@ pub(crate) async fn book_meta(
         };
 
         // 缓存命中：封面文件也必须在盘上（否则退回重新解析）。
-        if let Some(record) = read_cache(&cache.path_for_book_meta(&hash)) {
-            if record.cover_ext.is_none() || record.cover_path(&cache, &hash).is_some() {
-                return Ok(record.into_result(&cache, &hash));
-            }
+        if let Some(record) = read_cache(&cache.path_for_book_meta(&hash))
+            && (record.cover_ext.is_none() || record.cover_path(&cache, &hash).is_some())
+        {
+            return Ok(record.into_result(&cache, &hash));
         }
 
         // 未命中：整本解析放到阻塞线程（大 epub 读盘 + 解压封面，不能占着 IPC 线程）。
@@ -390,11 +384,11 @@ pub(crate) fn block_to_item(
             };
             let path = cache.path_for_book_content_image(hash, section, *image_index, ext);
             *image_index += 1;
-            if !path.exists() {
-                if cache.ensure_dir_for(hash).is_err() || write_atomic(&path, &bytes).is_err() {
-                    // 单张图落盘失败不该让整页变成错误态：跳过它，正文照常显示。
-                    return empty("image");
-                }
+            if !path.exists()
+                && (cache.ensure_dir_for(hash).is_err() || write_atomic(&path, &bytes).is_err())
+            {
+                // 单张图落盘失败不该让整页变成错误态：跳过它，正文照常显示。
+                return empty("image");
             }
             BookBlockItem {
                 path: Some(path.to_string_lossy().to_string()),
@@ -1081,10 +1075,9 @@ pub(crate) async fn book_clear_cover(
             value,
             ..
         }) = previous
+            && let Ok(dir) = crate::commands::shared::user_covers_dir()
         {
-            if let Ok(dir) = crate::commands::shared::user_covers_dir() {
-                let _ = std::fs::remove_file(dir.join(value));
-            }
+            let _ = std::fs::remove_file(dir.join(value));
         }
         Ok(BookCoverResult {
             kind: None,

@@ -513,7 +513,7 @@ fn style_height_percent(style: &str) -> Option<f32> {
         let Some((name, value)) = declaration.split_once(':') else {
             continue;
         };
-        if name.trim().to_ascii_lowercase() != "height" {
+        if !name.trim().eq_ignore_ascii_case("height") {
             continue;
         }
         let value = value
@@ -638,10 +638,10 @@ pub(crate) fn heading_level(name: &str) -> Option<u8> {
 /// 取图片地址：`<img src>` 与 SVG 的 `<image xlink:href>` / `href` 都要认。
 pub(crate) fn image_ref(tag: &str) -> Option<String> {
     for attr in ["src", "href", "xlink:href"] {
-        if let Some(v) = attr_value(tag, attr) {
-            if !v.is_empty() {
-                return Some(v);
-            }
+        if let Some(v) = attr_value(tag, attr)
+            && !v.is_empty()
+        {
+            return Some(v);
         }
     }
     // 兜底：任何以 `:href` 结尾的属性（不同前缀写法）。

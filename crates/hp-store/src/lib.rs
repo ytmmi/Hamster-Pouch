@@ -10,7 +10,7 @@ pub use dict::{ConceptKey, MergeIndex, MergedConcept, TagDictDb, TagLibDb, TagLi
 pub use global::{GlobalDb, PanelLayoutRow, RepoRow};
 pub use repo::{
     ALBUM_MEMBERS_MAX_LIMIT, AlbumMemberCursor, AlbumSourceMembers, FILE_QUERY_MAX_LIMIT,
-    FileQueryCursor, FileQueryFilter, OpsHistoryRow, PurgePhase, PurgeResult, RepoDb,
-    SourceDataCounts, SourceTree, TagTree, TagTreeNode, TreeNode, build_source_tree,
+    FileQueryCursor, FileQueryFilter, NewAnnotation, OpsHistoryRow, PurgePhase, PurgeResult,
+    RepoDb, SourceDataCounts, SourceTree, TagTree, TagTreeNode, TreeNode, build_source_tree,
     build_tag_tree,
 };

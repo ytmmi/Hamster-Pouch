@@ -82,7 +82,7 @@ unsafe extern "system" fn wnd_proc(
         }
         if msg == WM_LBUTTONUP && !live.click_through.load(Ordering::Relaxed) {
             // 单击视频 = 暂停/继续：把点击翻译成事件，由前端调原子切换命令。
-            let _ = live.app.emit_hp("media.surface.click", ());
+            live.app.emit_hp("media.surface.click", ());
             return LRESULT(0);
         }
     }

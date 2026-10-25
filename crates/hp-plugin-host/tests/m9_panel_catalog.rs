@@ -64,7 +64,7 @@ fn install_panel_plugin(tag: &str) -> (GlobalDb, String) {
     let row = installer
         .install_registry_row(&InstallSource::LocalPath(src), INSTALLED_AT)
         .expect("本地路径安装失败");
-    let mut db = GlobalDb::open(&root.join("global.sqlite3")).expect("打开全局库失败");
+    let mut db = GlobalDb::open(root.join("global.sqlite3")).expect("打开全局库失败");
     PluginHost.register(&mut db, &row).expect("注册失败");
     let id = row.id.as_str().to_string();
     (db, id)
@@ -129,7 +129,7 @@ fn bundled_example_panels_are_listed_even_without_an_entry_binary() {
             INSTALLED_AT,
         )
         .expect("安装 hello 示例失败");
-    let mut db = GlobalDb::open(&root.join("global.sqlite3")).expect("打开全局库失败");
+    let mut db = GlobalDb::open(root.join("global.sqlite3")).expect("打开全局库失败");
     PluginHost.register(&mut db, &row).expect("注册失败");
 
     let catalog = PluginHost.panel_catalog(&db, REPO).expect("取面板目录失败");
@@ -183,7 +183,7 @@ fn data_extensions_are_listed_last_and_have_no_enable_state() {
     // `temp_root` 只保住了 tempdir 本身，tag 子目录要自己建（`GlobalDb::open` 不建父目录）。
     std::fs::create_dir_all(&root).expect("建临时根目录失败");
     let installer = PluginInstaller::new(root.join("store"));
-    let mut db = GlobalDb::open(&root.join("global.sqlite3")).expect("打开全局库失败");
+    let mut db = GlobalDb::open(root.join("global.sqlite3")).expect("打开全局库失败");
 
     // ① 一个**带面板**的插件作为对照。
     let hello = installer
