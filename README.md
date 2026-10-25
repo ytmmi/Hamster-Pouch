@@ -67,7 +67,7 @@ Rust crates：
 
 - Windows 10/11（含 WebView2 运行时）
 - Rust 工具链（edition 2024，见 `rust-toolchain.toml`）
-- Node.js ≥ 22 + pnpm ≥ 11
+- Node.js ≥ 22 + pnpm ≥ 12（版本由 `package.json#packageManager` 与 `pnpm-workspace.yaml#engineStrict` 双重约束）
 - 可选：vcpkg + libheif（`hp-media` 的 `libheif` 特性**默认开启**，用于 HEIC/HEIF/AVIF 进程内解码）：
 
   ```powershell
