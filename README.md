@@ -44,7 +44,7 @@
 | `packages/` | 前端共享包：`config`、`ui`、`shared-types` |
 | `crates/` | Rust 核心库（见下表） |
 | `plugins/` | 插件：`system/`（palette、python-core）、`examples/` |
-| `external-cli/` | 外部 CLI：ffmpeg 随仓库分发；mpv 需自行下载（可选） |
+| `external-cli/` | 外部 CLI：ffmpeg 与 mpv 随仓库分发（mpv 主程序走 Git LFS） |
 | `tools/` | 门禁与数据管线脚本（`check-*.mjs`、`tagdict/` 等） |
 | `docs/` | 规范（`spec/`）、决策记录（`rfc/`）、架构文档（`architecture/`） |
 
@@ -135,13 +135,15 @@ release\            exe + data\system\（系统库）+ data\plugins\（系统插
 - ffmpeg 只带**运行时子集**：`bin\` 下两个 exe + 全部 DLL + `LICENSE.txt`；
   `ffplay.exe`、`doc\`、`include\`、`lib\`、`presets\` 不带（省约 31 MB）。
   **`bin\` 下的 DLL 一个都不能省**（两个 exe 静态绑定全部 av* DLL）。
-- **mpv 是可选资产**（约 119 MB）：**存在则入包、缺失则跳过并说明**。
-  因为 `external-cli/mpv/` **不入 git 库**，新克隆里必然没有它——做成硬失败会让
-  `pnpm app:build` 在新克隆上直接断掉。**"不入库"与"能否进构建包"是两件事**：
-  打包脚本从本地磁盘复制、不读 git，所以本机有 mpv 时它就会进包。
-- **构建输入资产入库**：`external-cli/ffmpeg/`、`plugins/system/`、内置基底词库
+- **mpv 已入库**（整目录约 129 MB）：`mpv.exe`（120 MB）用 **Git LFS** 存（GitHub 单文件
+  上限 100 MB），`d3dcompiler_43.dll`（4.4 MB）、`mpv.com`、`mpv/fonts.conf` 走普通 git
+  （见 `.gitattributes`）。装了 git-lfs 的克隆会拿到真实文件，发布包也会带上它
+  （`release.yml` 的 checkout 带 `lfs: true`）。
+  打包脚本仍按"存在则入包、缺失则跳过"处理：没装 git-lfs 的克隆只会拿到 130 字节的
+  指针文件，此时它被当作"缺少 mpv"跳过——**不要**为了它去改 `pnpm app:build` 的必需项。
+- **构建输入资产入库**：`external-cli/ffmpeg/`、`external-cli/mpv/`（主程序走 LFS）、`plugins/system/`、内置基底词库
   `tools/tagdict/output/tag_lib_base.sqlite3`（13 MB）都在仓库里，因此**全新克隆也能
-  直接打出带词库的发布包**；`target/release/data/`（活跃用户数据）不入库，没有它时
+  直接打出带词库、带 mpv 的发布包**；`target/release/data/`（活跃用户数据）不入库，没有它时
   发布包只附基底词库，全局库由目标机首次运行自建。
 - **扩展插件分发**：`plugins-dist/<id>/data/tag_lib.sqlite` 单个就有 129–162 MB，超过
   GitHub 单文件 100 MB 上限，**不能入库**；改成每个扩展一个 zip
@@ -191,6 +193,7 @@ release\            exe + data\system\（系统库）+ data\plugins\（系统插
 - **vcpkg 是硬前提**（`hp-media` 默认特性 `libheif`），提交号钉在 `ci.yml` 的 `VCPKG_COMMIT`，装配与缓存见 `.github/actions/vcpkg-libheif/action.yml`。
 - **不缓存 `target/`**（本机实测 8.8GB，Windows 上打解包比冷编译更慢）；只缓存 `~/.cargo/registry`。
 - **发布走单独一条手动流程**：`.github/workflows/release.yml`（**仅** `workflow_dispatch`）在需要发版本时跑一次，构建便携包并把压缩包上传成构建产物 / Release 资产；`ci.yml` 的 push/PR 门禁**不**构建发布包。
+- **Git LFS 是打包的前提**：`external-cli/mpv/mpv.exe`（120 MB）走 LFS；`release.yml` 的 checkout 带 `lfs: true`（否则拿到 130 字节指针 → 包里的 mpv 是假的，自检按体积兜底），CI 的检查作业**有意不拉**（3 个作业各 checkout = 360 MB/次，免费 LFS 额度 1 GB/月 撑不住；门禁不读 mpv 字节）。
 
 ### 发布包（手动触发）
 
@@ -201,9 +204,9 @@ release\            exe + data\system\（系统库）+ data\plugins\（系统插
 | `notes` | Release 说明；留空自动生成一段 |
 
 - 产物：`hamster-pouch-<version>-win-x64.zip`（解压即得可运行文件夹）+ 每个扩展插件一个 zip（`tagdict-danbooru` / `tagdict-pixiv` / `tagrel-games`）。
-- 包内自带基底词库、`external-cli\ffmpeg\` 运行时子集、`plugins\system\`；**不含** `data\system\` 全局库与用户数据（目标机首次运行自建），**不含** mpv（本机补）。
+- 包内自带基底词库、`external-cli\ffmpeg\` 运行时子集、`external-cli\mpv\`、`plugins\system\`；**不含** `data\system\` 全局库与用户数据（目标机首次运行自建）。
 - 同版本重跑幂等：Release 已存在则覆盖资产（`gh release upload --clobber`），不存在才新建。
-- 发布前会自检包内容（exe / ffmpeg / ffprobe / `plugins\system` / 基底词库缺一即失败，且断言包里**没有** `ffplay.exe`）。
+- 发布前会自检包内容（exe / ffmpeg / ffprobe / mpv / `plugins\system` / 基底词库缺一即失败；mpv 按体积断言不是 LFS 指针文件；且断言包里**没有** `ffplay.exe`）。
 
 ## 文档
 
@@ -216,9 +219,10 @@ release\            exe + data\system\（系统库）+ data\plugins\（系统插
 
 - **ffmpeg**：`external-cli/ffmpeg/` 随仓库分发，无需额外下载；打包时复制到产物内
   **exe 同级**（运行时子集，见「构建与打包」），因此打包产物不依赖仓库目录、可整夹搬走
-- **mpv**（可选）：libmpv 播放路径需要 mpv Windows 构建（约 100MB+），请自行下载并放入 `external-cli/mpv/mpv.exe`，或通过环境变量 `HP_MPV_BIN` 指定路径；缺失 mpv 不影响现有播放功能。
-  **本目录不入 git 库**（100 MB+ 二进制不进版本库），但**只要本机存在就会随包分发**——
-  打包脚本从本地磁盘复制，与入库与否无关（见「构建与打包」）。
+- **mpv**：`external-cli/mpv/` 随仓库分发（`mpv.exe` 120 MB 走 **Git LFS**，其余小文件走普通 git），
+  **无需额外下载**；克隆时需装 git-lfs（`git lfs install` 后正常 `clone`/`pull` 即可）。若你的克隆
+  里 mpv.exe 只有 130 字节（指针文件）或你另有 mpv 构建，可用 `HP_MPV_BIN` 指定 `mpv.exe` 路径；
+  缺失 mpv 不影响现有播放功能（libmpv 路径休眠）。
   注：播放器面板已改 DOM `<video>`、libmpv 路径休眠（`docs/rfc/0005-media-capabilities.md`），
   当前产品界面不调用 mpv。
 

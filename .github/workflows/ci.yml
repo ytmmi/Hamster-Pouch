@@ -32,9 +32,15 @@
 # - **不缓存 `target/`**：本机实测根 `target` 5.2GB + 桥接层 3.6GB（≈8.8GB），
 #   超出 GitHub 单仓库 10GB 缓存配额的一半以上，且 Windows 上打包/解包 8GB
 #   往往比冷编译更慢。只缓存 `~/.cargo/registry`（依赖源码，几百 MB，稳赚）。
-# - **不构建发布包**（`pnpm app:build`）：那需要 NSIS/WiX 与 `external-cli/mpv/`
-#   （不入库的 119MB 资产）；PR 上验证"能不能装"成本远高于收益。发布通道单独一条、
-#   **手动触发**：`.github/workflows/release.yml`（`workflow_dispatch`，只在要发版本时跑）。
+# - **不构建发布包**（`pnpm app:build`）：那是分发环节（便携包 + Release 资产），
+#   成本高于 PR 上的收益；发布通道单独一条、**手动触发**：
+#   `.github/workflows/release.yml`（`workflow_dispatch`，只在要发版本时跑）。
+# - **不拉 Git LFS**（`lfs: true` 只出现在 release.yml）：`external-cli/mpv/mpv.exe`
+#   （120MB）用 LFS 存，但门禁只查源码/结构、不读 mpv 字节；而本流程 3 个作业各自
+#   checkout，全拉就是 360MB/次——GitHub 免费档 LFS 额度 1GB/月，几天就用光（发布
+#   作业一次 120MB，按月发版量算绰绰有余）。所以这里的 checkout 拿到的是指针文件，
+#   `check:bundled-runtime` 的断言只看"存在 + 打包脚本对它的语义"，不看内容。
+#   这是有意的取舍，不是漏配。
 # - **不跑 `check:doc-status` 之外什么都没有的"文档存在性"检查**：PASS 的判定
 #   属门禁自己，CI 不重复判断。
 # - **不跑"本地开发库体检"类门禁**（`check:layouts` / `check:blueprint-*`）：

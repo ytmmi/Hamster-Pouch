@@ -87,11 +87,11 @@ tools/tagdict/data/pixiv_tags.sqlite
 tools/tagdict/output/*
 !tools/tagdict/output/tag_lib_base.sqlite3
 
-# === 外部 CLI：体积过大，不入库，自行下载 ===
-# mpv Windows 构建（mpv.exe + d3dcompiler_43.dll 等约 100MB+）体积过大无法上传，
-# 仓库不随附，需自行下载放入该目录（下载说明见 README.md「外部依赖」）。
-# 也可用环境变量 HP_MPV_BIN 直接指定 mpv.exe 路径，不依赖本目录。
-external-cli/mpv/
+# === 外部 CLI ===
+# mpv Windows 构建（mpv.exe + d3dcompiler_43.dll 等约 120MB）：发布包需要包含它，
+# 所以**入库**——其中 120MB 的 mpv.exe 用 Git LFS 存（GitHub 单文件上限 100MB），
+# 其余小文件走普通 git（见 .gitattributes）。本地克隆没装 git-lfs 时只会拿到指针文件，
+# 此时 `pnpm app:build` 会把它当"缺少 mpv"跳过；也可用 `HP_MPV_BIN` 指定 mpv.exe 路径。
 
 # === 插件可执行入口：构建产物，不入库 ===
 # 插件入口是**本地构建**的可执行文件（源码是测试夹具 crates/hp-plugin-host/src/bin/，

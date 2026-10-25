@@ -26,3 +26,13 @@ echo "── pre-push：桥接层测试 ─────────────�
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets
 
 echo "── pre-push：通过 ─────────────────────────────────"
+
+# ── Git LFS：external-cli/mpv/mpv.exe（120MB）走 LFS，推送时必须把对象传上去 ──
+# 没有这一步，远端只有 130 字节指针文件，新克隆与 CI 拿到的是空壳 mpv。
+# 注意：**不要**跑 `git lfs install` —— 它会试图用 git-lfs 自己的 pre-push 覆盖
+# 上面那段测试钩子（实测报 "Hook already exists: pre-push" 并要求 --force）。
+# 这里等价地委托一次：钩子拿到的参数（远端名、URL）原样转交给 git-lfs。
+# 未安装 git-lfs 时跳过（此时推送的只是一个指针文件，克隆方需要自己拉 LFS）。
+if command -v git-lfs > /dev/null 2>&1; then
+  git lfs pre-push "$@" || { echo "── pre-push：git-lfs 上传 LFS 对象失败 ──────────"; exit 1; }
+fi

@@ -31,8 +31,10 @@
 #    （单个 `data/tag_lib.sqlite` 129–162MB，超 GitHub 100MB 单文件上限），
 #    但**单包 zip** 已作为构建输入资产入库（`plugins-dist/*.zip`，1.8–57MB）。
 #    发布时**逐个挂上**，与主程序**分开打包**——每个扩展一个压缩包。
-# 3. **mpv**（`external-cli/mpv/`，约 119MB）⇒ 仍由本机补，不进 CI 包；
-#    `package-build` 对它是"存在则入包、缺失则跳过"，属于正常取舍。
+# 3. **mpv**（`external-cli/mpv/mpv.exe`，约 120MB）⇒ **已入库**：120MB 主程序走 Git LFS
+#    （GitHub 单文件上限 100MB），其余小文件（`d3dcompiler_43.dll` 4.4MB、`mpv.com`、
+#    `mpv/fonts.conf`）走普通 git；checkout 必须带 `lfs: true`，否则包里的 mpv 是
+#    130 字节的指针文件（下面自检按体积兜底）。因此发布包**会带 mpv**。
 # 包内不含 `data\system\` 全局库与任何用户数据：目标机首次运行自建（便携布局）。
 
 name: Release Package
@@ -83,6 +85,10 @@ jobs:
     steps:
       - name: 检出
         uses: actions/checkout@v7
+        with:
+          # external-cli/mpv/mpv.exe（120MB）用 Git LFS 存（GitHub 单文件上限 100MB）。
+          # 发布包必须真带 mpv，不拉 LFS 只会拿到指针文件 → 包里的 mpv 是假的。
+          lfs: true
 
       - name: 安装 Rust 工具链（按 rust-toolchain.toml）
         run: |
@@ -138,6 +144,8 @@ jobs:
             "$REL/hamster-pouch-desktop.exe" \
             "$REL/external-cli/ffmpeg/bin/ffmpeg.exe" \
             "$REL/external-cli/ffmpeg/bin/ffprobe.exe" \
+            "$REL/external-cli/mpv/mpv.exe" \
+            "$REL/external-cli/mpv/d3dcompiler_43.dll" \
             "$REL/plugins/system" \
             "$REL/data/system/tag_lib_base.sqlite3"; do
             [ -e "$p" ] || missing+=("$p")
@@ -146,6 +154,14 @@ jobs:
             echo "::error::发布包自检失败，缺少：${missing[*]}"
             exit 1
           fi
+          # mpv.exe 走 Git LFS：checkout 没开 `lfs: true` 时它是 ~130 字节的指针文件，
+          # 包"存在"但内容假 —— 按体积兜底，真文件约 120MB。
+          MPV_SIZE=$(wc -c < "$REL/external-cli/mpv/mpv.exe" | tr -d ' ')
+          if [ "$MPV_SIZE" -lt 50000000 ]; then
+            echo "::error::包内 mpv.exe 只有 ${MPV_SIZE} 字节，是 Git LFS 指针文件而非真实二进制（checkout 需 lfs: true）"
+            exit 1
+          fi
+          echo "mpv.exe ${MPV_SIZE} 字节"
           du -sh "$REL"
           find "$REL/external-cli/ffmpeg" -name ffplay.exe | grep . && {
             echo "::error::不该带 ffplay.exe（运行时子集不含它）"; exit 1; } || true
@@ -163,7 +179,7 @@ jobs:
           echo "版本号: $V"
 
       # BUILD-INFO.txt 写进包内：拿到压缩包的人能直接对上「哪个提交、哪次跑批」，
-      # 也知道包里有意不含什么（mpv、全局库、用户数据）。
+      # 也知道包里有意不含什么（全局库、用户数据）。
       - name: 写 BUILD-INFO.txt
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -176,8 +192,8 @@ jobs:
           run:     ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           built:   $(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-          内容: exe + data\system\（内置基底词库）+ external-cli\ffmpeg\（运行时子集）+ plugins\system\
-          不含: mpv（本机补，可选）、data\system\ 全局库与用户数据（目标机首次运行自建）
+          内容: exe + data\system\（内置基底词库）+ external-cli\ffmpeg\（运行时子集）+ external-cli\mpv\ + plugins\system\
+          不含: data\system\ 全局库与用户数据（目标机首次运行自建）
           EOF
           cat "$REL/BUILD-INFO.txt"
 
@@ -248,7 +264,7 @@ jobs:
           - 主程序：\`$(basename "$ZIP")\`（解压即得可运行文件夹；含内置基底词库、ffmpeg 运行时子集、系统插件）
           - 扩展插件（各自独立压缩包，解压后用 plugin.installLocal 安装目录）：
           $(for z in plugins-dist/*.zip; do echo "  - \`$(basename "$z")\`"; done)
-          - 不含 mpv / 全局库 / 用户数据（见包内 BUILD-INFO.txt）
+          - 不含全局库 / 用户数据（见包内 BUILD-INFO.txt）
           - 构建提交：\`${{ github.sha }}\`"
           fi
           if gh release view "$TAG" > /dev/null 2>&1; then

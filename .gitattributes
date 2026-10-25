@@ -37,3 +37,9 @@
 # 锁文件与快照：由工具生成，一律按文本处理（LF）。
 Cargo.lock text eol=lf
 pnpm-lock.yaml text eol=lf
+
+# mpv 的 120MB 主程序走 Git LFS（GitHub 单文件上限 100MB）；同目录的小文件
+# （d3dcompiler_43.dll 4.4MB、mpv.com 3.5KB、mpv/fonts.conf）仍走普通 git。
+# 发布包需要包含 mpv，因此它必须能被全新克隆（CI）拿到 —— 用 LFS 存内容、
+# 用 `actions/checkout` 的 `lfs: true` 拉取；本地未装 git-lfs 的克隆会得到指针文件。
+external-cli/mpv/mpv.exe filter=lfs diff=lfs merge=lfs -text
