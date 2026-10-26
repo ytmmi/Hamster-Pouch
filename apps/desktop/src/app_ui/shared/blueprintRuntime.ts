@@ -19,6 +19,7 @@ import {
   homeLayerKey,
   isObsoleteDefaultBlueprint,
   type BlueprintGraph,
+  type BlueprintLayer,
   type BlueprintStateConflict,
 } from "@hamster-pouch/config";
 import type { DockviewApi } from "dockview-react";
@@ -163,6 +164,8 @@ function activate(graph: BlueprintGraph | null, digest?: string): BlueprintGraph
         .join(" | ")}`,
     );
   }
+  // 生效蓝图换了 → 界面页标签条要重建（层的增删改名都走这里，D124）。
+  notifyRuntimeListeners();
   return activeGraph;
 }
 
@@ -298,6 +301,55 @@ export function currentLayerKey(): string | null {
 export function setCurrentLayerKey(layerKey: string | null): void {
   activeLayer = layerKey;
   blueprintEngine.setLayer(layerKey);
+  // 当前层变了 → 界面页标签条的高亮跟着变（D124）。
+  notifyRuntimeListeners();
+}
+
+// ==================== 界面页标签条订阅（D124） ====================
+
+/**
+ * 运行时变更订阅者（D124）。
+ *
+ * 为什么需要它：界面页标签条要显示的"有哪些界面、当前是哪个"全在**蓝图运行时**的
+ * 模块私有变量里（`activeGraph` / `activeLayer`），它没有 React 状态可订阅。
+ * 让标签条自己去轮询蓝图 API 会引出第二份真相（标签条看到的层和画布套用的层可能
+ * 不是同一份），所以由运行时在**真正改动的两处**（`activate` 装图、`setCurrentLayerKey`
+ * 切层）主动广播。
+ */
+const runtimeListeners = new Set<() => void>();
+
+/** 广播一次运行时变更；订阅者异常逐个吞掉，不影响蓝图主链路。 */
+function notifyRuntimeListeners(): void {
+  for (const listener of [...runtimeListeners]) {
+    try {
+      listener();
+    } catch (err) {
+      trace(`[blueprint] 界面页订阅者抛错（已忽略）：${String(err)}`);
+    }
+  }
+}
+
+/**
+ * 订阅运行时变更（生效蓝图换图 / 当前层切换）；返回退订函数。
+ *
+ * 只广播"发生了什么变了"，**不传快照**——订阅者用 `currentLayers()` 与
+ * `currentLayerKey()` 现取，避免"事件里的旧快照覆盖新状态"这类经典竞态。
+ */
+export function subscribeBlueprintRuntime(listener: () => void): () => void {
+  runtimeListeners.add(listener);
+  return () => {
+    runtimeListeners.delete(listener);
+  };
+}
+
+/**
+ * 当前生效蓝图里的**全部界面**（层），顺序即蓝图里的层顺序；未装载时为空数组。
+ *
+ * 与 `effectiveLayers(activeGraph)` 同源：界面页标签条据此渲染标签，**不另存一份**
+ * 层列表，否则层改名/增删后标签条会留旧名字。
+ */
+export function currentLayers(): BlueprintLayer[] {
+  return activeGraph ? effectiveLayers(activeGraph) : [];
 }
 
 /**

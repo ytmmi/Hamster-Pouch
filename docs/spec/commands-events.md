@@ -522,6 +522,19 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 
 **MCP 工具表**（`tools/list`，共 26 个；写工具 10 个）：只读 —— `repo_list`、`repo_current`、`file_query`、`file_metadata`、`file_path`、`source_list`、`source_tree`、`tag_list`、`tag_tree`、`file_tags`、`album_list`、`album_members`、`book_meta`、`book_toc`、`book_content`、`setting_list`；写 —— `file_rename`、`file_trash`、`file_set_marks`、`file_copy`、`file_move`、`tag_add`、`tag_remove`、`rating_set`、`album_add_members`、`album_remove_members`。**每个工具都是对既有 `#[tauri::command]` 函数的直接调用**，因此 MCP 与界面是同一套语义与错误串。
 
+### 3.17 `interfacePages.*`（垂直界面页的页面组）
+
+垂直「界面页」标签条（D124）的**页面组结构**存取。只有两条：读一份、写一份整包 JSON。
+
+| 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
+| --- | --- | --- | --- | --- | --- |
+| `interfacePages.get` | 读某仓库的界面页分组结构 | `{ repoId }` | `{ ok, data: string \| null }` | **已包装** | 线上 `data` 是**序列化字符串**（未存过则 `null`）；解析容错在前端 `apps/desktop/src/app_ui/shared/interfacePages.ts`，后端不解释内容 |
+| `interfacePages.set` | 整包覆盖某仓库的界面页分组结构 | `{ repoId, pagesJson }` | `{ ok, data: () }` | **已包装** | 落库键 `interfacePages.{repoId}`（`app_settings`），**不新增库表**；`repoId` 为空 → `invalidArgument` |
+
+**为什么是"整包 JSON 字符串"而不是拆成组/归属两条命令**：分组结构是**用户导航状态**，不是蓝图语义。它不参与 Rust 蓝图校验（`blueprint_validate`）、不进 `blueprints` 表，因此没有"逐条原子修改"的必要；一次交互只改一个字段，整包写回反而让落库值与内存状态天然一致（不会出现"组删了、归属还在"的中间态）。前端的增删改全是纯函数（`shared/interfacePages.ts`），后端只做键值存取。
+
+**与蓝图的关系**：界面 = 蓝图的一层（`BlueprintLayer`）。**归属里的界面 key 不在这里校验**，原因是不想为"删层"再开一条跨存储的写路径：标签条渲染时只按**当前生效蓝图的层列表**过滤，蓝图里没有的层其归属自然不显示；反过来，归属指向已不存在的组则在解析时丢弃（否则界面会挂在一个看不见的组下）。两条规则合起来，删层与删组都不必反写这份 JSON。
+
 ## 4. 事件目录
 
 | 事件 | 载荷 |

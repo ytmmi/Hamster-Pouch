@@ -24,15 +24,17 @@ import "dockview-react/dist/styles/dockview.css";
 
 import { listenHp } from "../shared/events";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { PANEL_MIN_SIZE } from "@hamster-pouch/config";
+import { PANEL_MIN_SIZE, SETTING_KEYS, resolveInterfacePagesPosition } from "@hamster-pouch/config";
 import { reconcileActiveBlueprint } from "../shared/blueprintRuntime";
 import {
   publishStructure,
   snapshotFromDockview,
 } from "../panels/blueprintStructure";
 
-import { AppContext, type AppContextValue } from "./AppContext";
+import { AppContext, useApp, type AppContextValue } from "./AppContext";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { InterfacePageBar } from "./InterfacePageBar";
+import { useInterfacePages } from "./useInterfacePages";
 import { TaskOverlay } from "./TaskOverlay";
 import { blueprintEngine, type BlueprintDispatchInput } from "./blueprintEngine";
 import { useBlueprintExecutor } from "./blueprintExecutor";
@@ -47,9 +49,47 @@ import { useBlueprintRuntimeWiring } from "./useBlueprintRuntimeWiring";
 import { useConfirm } from "./useConfirm";
 import { useOverlayHost } from "./overlayHost";
 import { usePluginRegistrations } from "./usePluginRegistrations";
+import { useHostSettingValue, useHostSwitch } from "../shared/settingValue";
 import { useShellSettings } from "./useShellSettings";
 import { useTaskWiring } from "./useTaskWiring";
 import { bootstrapDefaultRepo } from "./workspaceBootstrap";
+
+/**
+ * 垂直「界面页」标签条宿主（D124）。
+ *
+ * 为什么必须是**独立组件**而不是直接在 `AppUiApp` 里调 hook：`useInterfacePages`
+ * 依赖 `useApp()`（仓库 id / 状态栏 / dockview 实例），而 `AppUiApp` 本身在
+ * `AppContext.Provider` **外面**——在这里调会抛"必须在 Provider 内使用"。
+ * 拆成子组件后，它天然落在 Provider 之内，也能顺带把"关闭时不挂载"表达成条件渲染
+ * （关闭期间不读库、不订阅运行时）。
+ */
+function InterfacePagesHost({ position }: { position: "left" | "right" }): JSX.Element {
+  const { t } = useApp();
+  const pages = useInterfacePages();
+  return (
+    <InterfacePageBar
+      layers={pages.layers}
+      current={pages.currentLayer}
+      state={pages.state}
+      position={position}
+      onSwitch={pages.switchTo}
+      onCreatePage={pages.createPage}
+      onCreateGroupWithPage={(layerKey, name, colorIndex) =>
+        void pages.createGroupWithPage(layerKey, name, colorIndex)
+      }
+      onRenameGroup={pages.renameGroup}
+      onMovePage={pages.movePage}
+      onToggleCollapsed={pages.toggleCollapsed}
+      onReorderPage={pages.reorderPage}
+      onDropOnPage={pages.dropOnPage}
+      onDropOnGroup={pages.dropOnGroup}
+      onDropToUngrouped={pages.dropToUngrouped}
+      onSetGroupColor={pages.setGroupColor}
+      onClearGroupAssignment={pages.clearGroupAssignment}
+      t={t}
+    />
+  );
+}
 
 export function AppUiApp(): JSX.Element {
   // 界面偏好（主题 / 语言）：菜单条与「全部设置」共用同一份状态与写回入口。
@@ -74,6 +114,12 @@ export function AppUiApp(): JSX.Element {
 
   // 「全部设置」系统界面（RFC 0010 决策 7）：应用级、独立于仓库蓝图与 panel_layouts。
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // 垂直「界面页」标签条（D124）：启用开关与左右位置都是宿主设置，改动即时生效。
+  const interfacePagesEnabled = useHostSwitch(SETTING_KEYS.interfacePagesEnabled, { fallback: true });
+  const interfacePagesPosition = resolveInterfacePagesPosition(
+    useHostSettingValue(SETTING_KEYS.interfacePagesPosition),
+  );
 
   /** 当前 dockview 实例（只读用途：执行器、蓝图对账、结构快照、上下文）。 */
   const getDockview = useCallback(() => apiRef.current, []);
@@ -305,6 +351,14 @@ export function AppUiApp(): JSX.Element {
           onOpenSettings={() => setSettingsOpen(true)}
         />
         <div className="app-workspace" ref={workspaceRef}>
+          {/* 垂直「界面页」标签条（D124 / D124-R2）：默认启用、默认左侧，启用与位置在设置里改。
+              它是**界面导航**（点击切层），与 dockview 的面板标签不是一回事，也不属于任何面板组。
+              收起态是工作区里一条 **12px 真实占位**的窄条（面板区整体让开 12px，不覆盖任何面板）；
+              指针移入时从窄条外侧滑出 200px 浮层，不改变 dockview 尺寸 → 面板不重排、不会点错。
+              位置只决定它排在 dockview 之前（左）还是之后（右）。 */}
+          {interfacePagesEnabled && interfacePagesPosition === "left" && (
+            <InterfacePagesHost position="left" />
+          )}
           <DockviewReact
             components={dockComponents}
             onReady={onReady}
@@ -327,6 +381,9 @@ export function AppUiApp(): JSX.Element {
               },
             ]}
           />
+          {interfacePagesEnabled && interfacePagesPosition === "right" && (
+            <InterfacePagesHost position="right" />
+          )}
         </div>
         <div className="app-status">
           <span className={`status-text ${statusMsg?.type ?? "info"}`}>

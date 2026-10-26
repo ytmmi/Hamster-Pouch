@@ -91,9 +91,12 @@ body {
   min-height: 0;
   display: flex;
   color: var(--fg);
+  /* 垂直「界面页」标签条的展开面板是绝对定位浮层（D124-R2），以工作区为定位上下文。 */
+  position: relative;
 }
 
-/* dockview 容器需填满工作区，否则拖拽/布局异常 */
+/* dockview 容器需填满工作区，否则拖拽/布局异常。
+   「界面页」窄条用更具体的 `.app-workspace > .iface-bar` 覆盖成 flex: 0 0 auto（D124-R2）。 */
 .app-workspace > div {
   flex: 1;
   min-width: 0;
@@ -5069,3 +5072,437 @@ button.danger {
   border-radius: 6px;
   transition: left 120ms ease;
 }
+
+
+/* ===== 垂直「界面页」标签条（D124） ===== */
+
+/*
+ * 形态（D124-R2）：**收起态在布局层、展开态才浮起来**。
+ *
+ * - 收起态：工作区里一条 12px 的**真实占位列**（flex 兄弟，不是绝对定位）。
+ *   dockview 的宽度相应少 12px，窄条与面板**同一层**、互不覆盖，
+ *   所以它绝不会挡住面板内容（D124-R1 那种常驻绝对定位浮层会压住最左侧面板，已作废）。
+ * - 展开态：200px 面板**绝对定位**在窄条外侧，脱离布局 → 浮在面板之上，
+ *   并且不改变 dockview 尺寸，悬停展开/收起时面板不重排。
+ *
+ * 它始终是**界面导航**（点击切层），不属于任何面板组。
+ * 展开面板的 z-index 高于 dockview 面板本体（5 / 10），
+ * 低于拖拽占位（9999）、右键菜单（2000）、浮窗（3000）、「全部设置」覆盖层（60）。
+ */
+.app-workspace > .iface-bar {
+  /* 覆盖 `.app-workspace > div { flex: 1 }`：窄条固定占位，不参与伸缩。 */
+  flex: 0 0 auto;
+  width: 12px;
+  min-width: 12px;
+  height: 100%;
+}
+
+.iface-bar {
+  /* 展开面板的定位上下文；收起态它自己只是一个 12px 的普通列。 */
+  position: relative;
+  z-index: 50;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  user-select: none;
+}
+
+/* ---- 收起态窄条：悬停命中区 + 键盘/触摸的展开入口 ---- */
+
+.iface-rail {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 12px;
+  padding: 6px 0;
+  color: var(--fg-dim);
+  background: var(--bg-2);
+  border: none;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.iface-bar-left .iface-rail {
+  border-right: 1px solid var(--border);
+}
+
+.iface-bar-right .iface-rail {
+  border-left: 1px solid var(--border);
+}
+
+.iface-rail:hover,
+.iface-bar.is-open .iface-rail {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+
+.iface-rail-chevron {
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.8;
+}
+
+/* 一根细竖线：收起时唯一可见的"这里有东西"的暗示。 */
+.iface-rail-grip {
+  flex: 1;
+  width: 2px;
+  min-height: 16px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.25;
+}
+
+.iface-rail-label {
+  writing-mode: vertical-rl;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  opacity: 0.75;
+}
+
+.iface-rail:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+
+/* ---- 展开态面板：绝对定位在窄条外侧（浮在面板之上，不挤占 dockview） ---- */
+
+.iface-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: 0;
+  overflow: hidden;
+  background: var(--bg-2);
+  box-shadow: 2px 0 10px rgb(0 0 0 / 28%);
+  /* 收起时不占位也不可聚焦（避免 Tab 键掉进看不见的按钮里）。 */
+  visibility: hidden;
+  opacity: 0;
+  /* visibility 延迟到宽度/透明度收完再切，否则收起动画看不见（瞬间消失）。 */
+  transition:
+    width 140ms ease,
+    opacity 120ms ease,
+    visibility 0s linear 140ms;
+}
+
+/* 左侧标签条：面板从窄条右缘向工作区内侧展开。 */
+.iface-bar-left .iface-panel {
+  left: 100%;
+}
+
+/* 右侧标签条：面板从窄条左缘向内侧展开，阴影方向相反。 */
+.iface-bar-right .iface-panel {
+  right: 100%;
+  box-shadow: -2px 0 10px rgb(0 0 0 / 28%);
+}
+
+.iface-bar.is-open .iface-panel {
+  width: 200px;
+  visibility: visible;
+  opacity: 1;
+  /* 展开时 visibility 立即生效（否则前 140ms 仍是 hidden，看不到动画）。 */
+  transition:
+    width 140ms ease,
+    opacity 120ms ease,
+    visibility 0s linear 0s;
+}
+
+/* 描边贴外侧：只在展开时出现，收起态不会留下一条 1px 的假边框。 */
+.iface-bar.is-open.iface-bar-left .iface-panel {
+  border-right: 1px solid var(--border);
+}
+
+.iface-bar.is-open.iface-bar-right .iface-panel {
+  border-left: 1px solid var(--border);
+}
+
+/* ---- 头部 ---- */
+
+.iface-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.iface-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- 列表（滚动区） ---- */
+
+.iface-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.iface-empty {
+  padding: 8px 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-dim);
+}
+
+/* ---- 页面组 ---- */
+
+.iface-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.iface-group-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 3px;
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.iface-group-head:hover {
+  background: var(--bg-3);
+}
+
+.iface-group-toggle {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+  font-size: 10px;
+  color: var(--fg-dim);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.iface-group-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.iface-group-count {
+  flex: 0 0 auto;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.iface-group-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* 组内界面缩进，视觉上归属该组。 */
+  padding-left: 10px;
+}
+
+/* 「未分组」段没有折叠开关，头部只是个小标题。 */
+.iface-group-plain > .iface-group-head {
+  padding-left: 4px;
+}
+
+.iface-group-plain > .iface-group-head:hover {
+  background: transparent;
+}
+
+/* ---- 界面标签 ---- */
+
+.iface-page {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 26px;
+  padding: 0 6px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.iface-page:hover {
+  background: var(--bg-3);
+}
+
+.iface-page.active {
+  background: var(--active-bg);
+  color: var(--active-fg);
+  border-color: var(--active-bg);
+}
+
+.iface-page-dot {
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+}
+
+.iface-page.active .iface-page-dot {
+  opacity: 0.9;
+}
+
+.iface-page-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iface-page-home {
+  flex: 0 0 auto;
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+.iface-page:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+
+/* ---- D124-R3 / D124-R4：拖拽排序、队列末尾新建、组色条 ---- */
+
+/* 组头是按钮（点击展开/折叠，右键出菜单）：清掉原生按钮样式，保持行内观感。 */
+.iface-group-head {
+  width: 100%;
+  padding: 0 4px;
+  text-align: left;
+  font-family: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+/* 「未分组」标题只是小标签，不可点、不显示悬停底色。 */
+.iface-group-head-static {
+  cursor: default;
+}
+
+/* 拖拽落点：整组高亮 + 顶部插入线。 */
+.iface-group.drop-target {
+  background: var(--sel-ring-bg);
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--sel-border);
+}
+
+/* 拖拽中的界面：半透明，明确"它正在被搬走"。 */
+.iface-page.dragging {
+  opacity: 0.45;
+}
+
+/* 拖到某个界面上：在该界面上沿画插入线，表示"会插到它前面"。 */
+.iface-page.drop-before {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+/*
+ * 组色条跟在**组内界面的标签**左侧（D124-R4 ④），不是画在组名旁：
+ * 组名只用文字染色表示归属，色条跟着每个标签走，标签被拖走时颜色语义不变。
+ */
+.iface-page-color {
+  flex: 0 0 auto;
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+}
+
+/*
+ * 「+」是标签 / 组队列的**末尾一项**（D124-R4 ③），随列表一起滚动，
+ * 而不是像 D124-R3 那样钉在面板底部的 .iface-foot 里。
+ */
+.iface-add-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.iface-add {
+  width: 100%;
+  height: 24px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--fg-dim);
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.iface-add:hover {
+  color: var(--fg);
+  background: var(--bg-3);
+  border-color: var(--accent-border);
+}
+
+.iface-add:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+
+/*
+   * 界面标签与页面组共用的右键弹窗头部（D124-R4 ①）：
+   * 组名输入框用既有 .rename-row / .menu-input，下面是 8 色圆点色带。
+   */
+.iface-swatches {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.iface-swatch {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid rgb(0 0 0 / 30%);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 100ms ease;
+}
+
+.iface-swatch:hover {
+  transform: scale(1.15);
+}
+
+/* 当前选中的色点：外圈描边，避免"颜色相近看不出选中"。 */
+.iface-swatch.on {
+  box-shadow: 0 0 0 2px var(--bg-3), 0 0 0 3px var(--accent);
+}
+
+.iface-swatch:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+

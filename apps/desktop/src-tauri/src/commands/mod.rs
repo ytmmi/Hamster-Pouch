@@ -13,6 +13,9 @@ pub(crate) mod book_tests;
 pub(crate) mod color;
 pub(crate) mod file;
 pub(crate) mod fsops;
+// 垂直「界面页」标签条的页面组持久化（D124）：按仓库读写一份不透明 JSON，
+// 语义在前端 `shared/interfacePages.ts`，桥接层不解析内容。
+pub(crate) mod interface_pages;
 pub(crate) mod layout;
 // 内置 MCP 服务的命令面（D119）：只有"看状态 / 立即重应用"两条——
 // 启停本身由设置项 `mcp.*` 驱动，不给命令开第二个开关。

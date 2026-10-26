@@ -306,6 +306,9 @@ fn main() {
             commands::blueprint::blueprint_current_layer_set,
             commands::blueprint::blueprint_template_list,
             commands::blueprint::blueprint_template_install,
+            // 垂直「界面页」标签条（D124）：按仓库读写页面组 JSON。
+            commands::interface_pages::interface_pages_get,
+            commands::interface_pages::interface_pages_set,
             // 内置 MCP 服务（D119）：只有"看状态 / 立即重应用"两条命令，
             // 启停由设置项 `mcp.*` 驱动。
             commands::mcp::mcp_status,

@@ -121,6 +121,28 @@ pub const SYSTEM_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &[],
         requires_capability: None,
     },
+    // 垂直「界面页」标签条两项（D124）：「全部设置 → 界面 → 界面页」。
+    //
+    // 独立分节而不是并入「其他设置」：它是界面骨架的一部分（是否显示、停在哪一侧），
+    // 与日期/体积这类显示格式不是一回事。
+    SettingDeclFact {
+        id: "ui.interfacePagesEnabled",
+        owner_kind: "system",
+        owner_id: None,
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "ui.interfacePagesPosition",
+        owner_kind: "system",
+        owner_id: None,
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["left", "right"],
+        requires_capability: None,
+    },
     // MCP 服务三项（D119）：「全部设置 → MCP」。
     //
     // 为什么独立成大类：这是**外部进程接入本机数据**的边界，开关与写权限

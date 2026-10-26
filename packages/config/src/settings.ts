@@ -31,6 +31,10 @@ export const SETTING_KEYS = {
   dateFormat: "ui.dateFormat",
   /** 日期之后是否再显示时间（HH:MM:SS）。 */
   dateShowTime: "ui.dateShowTime",
+  /** 是否启用垂直「界面页」标签条（D124，默认开）。 */
+  interfacePagesEnabled: "ui.interfacePagesEnabled",
+  /** 「界面页」标签条停靠位置（D124，默认左侧）。 */
+  interfacePagesPosition: "ui.interfacePagesPosition",
   /** 是否开启内置 MCP 服务（D119，默认关）。 */
   mcpEnabled: "mcp.enabled",
   /** MCP 服务监听端口（仅本机回环，默认 57321）。 */
@@ -101,6 +105,35 @@ export const DEFAULT_DATE_SHOW_TIME = false;
 
 export function resolveDateShowTime(value: unknown): boolean {
   return typeof value === "boolean" ? value : DEFAULT_DATE_SHOW_TIME;
+}
+
+// ============ 垂直「界面页」标签条设置（D124；「全部设置 → 界面 → 界面页」） ============
+
+/**
+ * 垂直「界面页」标签条：把蓝图里的每个**层**渲染成一条可点击的界面标签。
+ *
+ * 与 Edge 的垂直标签页逻辑一致（竖向排布、可分组、可折叠），但这里的标签切换的是
+ * **应用内界面**（一层 = 一个界面，D51/D53/D54/D55/D60/D67），不做页面导航。
+ */
+export const INTERFACE_PAGES_POSITIONS = ["left", "right"] as const;
+export type InterfacePagesPosition = (typeof INTERFACE_PAGES_POSITIONS)[number];
+
+/** 缺省**启用**界面页（需求：默认启用）。 */
+export const DEFAULT_INTERFACE_PAGES_ENABLED = true;
+
+/** 缺省停靠**左侧**（需求：默认在左边）。 */
+export const DEFAULT_INTERFACE_PAGES_POSITION: InterfacePagesPosition = "left";
+
+export function isInterfacePagesPosition(value: unknown): value is InterfacePagesPosition {
+  return value === "left" || value === "right";
+}
+
+export function resolveInterfacePagesEnabled(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_INTERFACE_PAGES_ENABLED;
+}
+
+export function resolveInterfacePagesPosition(value: unknown): InterfacePagesPosition {
+  return isInterfacePagesPosition(value) ? value : DEFAULT_INTERFACE_PAGES_POSITION;
 }
 
 // ==================== MCP 服务设置（D119；「全部设置 → MCP」） ====================
@@ -295,6 +328,32 @@ export const SYSTEM_SETTING_DECLS: readonly SettingDecl[] = [
     default: DEFAULT_DATE_SHOW_TIME,
     keywords: ["time", "clock", "hh:mm:ss", "时间", "時分秒"],
     section_key: "settings.section.other",
+  },
+  // 垂直「界面页」标签条两项（D124）：**独立分节**而不是塞进「其他设置」——
+  // 它是界面骨架的一部分（是否显示、停在哪一侧），和日期/体积这类显示格式不是一回事。
+  {
+    id: SETTING_KEYS.interfacePagesEnabled,
+    category: "interface",
+    owner: { kind: "system" },
+    title_key: "settings.interface.interfacePagesEnabled",
+    kind: "switch",
+    default: DEFAULT_INTERFACE_PAGES_ENABLED,
+    keywords: ["interface", "pages", "vertical", "tabs", "side bar", "界面页", "垂直标签", "标签条"],
+    section_key: "settings.section.interfacePages",
+  },
+  {
+    id: SETTING_KEYS.interfacePagesPosition,
+    category: "interface",
+    owner: { kind: "system" },
+    title_key: "settings.interface.interfacePagesPosition",
+    kind: "select",
+    default: DEFAULT_INTERFACE_PAGES_POSITION,
+    options: [
+      { value: "left", title_key: "settings.interface.interfacePagesPosition.left" },
+      { value: "right", title_key: "settings.interface.interfacePagesPosition.right" },
+    ],
+    keywords: ["position", "side", "left", "right", "位置", "左侧", "右侧", "左右"],
+    section_key: "settings.section.interfacePages",
   },
   {
     id: SETTING_KEYS.language,
