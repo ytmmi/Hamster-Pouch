@@ -115,3 +115,11 @@ tools/signing/pubkey.der
 # 生成/校验：python tools/tagdict/zip_extensions.py [--check]
 plugins-dist/*
 !plugins-dist/*.zip
+
+# === 图标打磨的本地工装：不入库 ===
+# `.icon-scratch/` 保存生成 `apps/desktop/src-tauri/icons/icon.ico` 的**本地**材料：
+# 用户提供的原图（2048×2048 PNG）、逐尺寸缩放与 32 位 DIB 打包脚本、逐帧位深校验脚本、
+# 多尺寸预览图，以及换图标前的旧图标备份。它们是"换一次图标"的工装而**不是构建输入**
+# （`app:build` 只读 `icons/icon.ico`），与插件入口 exe 同理不入库。
+# 图标最终的形态、七帧位深口径与"换图标必须逼 build.rs 重跑"这条坑见 D125。
+.icon-scratch/

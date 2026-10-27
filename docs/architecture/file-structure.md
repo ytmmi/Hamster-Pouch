@@ -679,6 +679,8 @@ hp-dto -> hp-core（跨层 DTO；由 ts-rs 生成 packages/shared-types）
 
 - 面板布局表放全局配置库，每行带 `repo_id`；读取布局时必须按当前仓库过滤。
 - 桌面应用构建走 `pnpm app:build`（= `tauri build --no-bundle`），**不要直接用 `cargo build --release`**：前者会重新打包 `apps/desktop/dist` 前端产物并嵌入二进制，后者在前端已构建过时会认为资产未变而**静默沿用旧的内嵌产物**，表现为"改了前端但运行的是旧界面"。
+- **换图标必须逼 `build.rs` 重跑**（D125）：`tauri_build` 的 `cargo:rerun-if-changed` 只盯 `tauri.conf.json` 与 `capabilities`，**不盯 `icons/icon.ico`**；只换图标文件时构建脚本不重跑，链接沿用旧 `resource.lib` ⇒ **"编译成功"但 exe 里还是旧图标**。做法：换完 `apps/desktop/src-tauri/icons/icon.ico` 后 `touch apps/desktop/src-tauri/tauri.conf.json`（只改 mtime、内容不变，git 仍干净）再 `pnpm app:build`，最后取 exe 内嵌帧与 `icon.ico` 的 32px 帧逐像素比对确认（`magick compare -metric AE` 应为 0；取帧用 `[System.Drawing.Icon]::ExtractAssociatedIcon`）。
+- **应用图标只有一处**：`apps/desktop/src-tauri/icons/icon.ico`（七帧 16/24/32/48/64/128/256、全部 32 位，256 帧为 PNG 载荷）。`tauri.conf.json` 没有 `bundle` 段、构建走 `--no-bundle`，故 PNG 组与 `.icns` 非必需；前端没有 favicon / logo 引用 ⇒ 这个 `.ico` 就是唯一品牌面。**不要用 ImageMagick 的 ICO writer 生成它**——它会把小帧降成 8 位调色板 DIB，透明只剩 1 位 AND mask，圆角发毛（详见 D125）。
 - 前端资产文件名带内容哈希，重建后旧哈希文件会被删除；若 WebView2 缓存了旧 `index.html`，可能引用已删除的 chunk 而白屏，排查时可清理 `%LOCALAPPDATA%\<identifier>\EBWebView`。
 - 打包运行（无 devtools）下排查前端链路的诊断通道：前端调用 `debug_log` 命令，日志追加到应用数据目录 `debug.log`。
 - git 插件更新保留旧插件包目录；回滚是目录切换，不依赖网络。
