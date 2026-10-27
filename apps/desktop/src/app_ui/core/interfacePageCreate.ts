@@ -6,23 +6,17 @@
  * 反之写进蓝图后，蓝图编辑器、层切换、布局按层保存全部自动对齐——"新页面同步进蓝图"
  * 是这条不变式的必然结果，不是额外做的同步。
  *
- * 写盘路径照抄编辑器保存（`useBlueprintDocuments.save`）：
- * `normalizeLayersForSave` → `blueprintValidate`（有硬错误就不写）→ `blueprintSave`
- * → `notifyBlueprintChangedLocally`（热更新，标签条随之重建）。
+ * 「往哪份蓝图写、怎么写回去」与删除界面（`interfacePageDelete.ts`）共用
+ * `interfacePageBlueprint.ts`：两条路径只有"改哪一步"不同，落库管道必须同一份。
  */
 
-import {
-  forUserSave,
-  normalizeLayersForSave,
-  parseBlueprintDocument,
-} from "@hamster-pouch/config";
+import { parseBlueprintDocument } from "@hamster-pouch/config";
 
 import { addLayer } from "../panels/blueprintLayers";
-import * as api from "../shared/api";
 import {
-  activeBlueprintId,
-  notifyBlueprintChangedLocally,
-} from "../shared/blueprintRuntime";
+  resolveInterfacePageTarget,
+  saveInterfacePageBlueprint,
+} from "./interfacePageBlueprint";
 
 /** 新建成功后的定位信息（用于分组归属与状态栏提示）。 */
 export interface CreatedInterfacePage {
@@ -30,30 +24,6 @@ export interface CreatedInterfacePage {
   layerKey: string;
   /** 新层的显示名（蓝图里可能已自动去重）。 */
   name: string;
-}
-
-/**
- * 解析"该往哪个蓝图里写"。
- *
- * 生效蓝图可能是**指定的某份**，也可能是**仓库默认蓝图**——后者运行时用 `activeId = null`
- * 表示，所以这里要回落到"列表里 is_default 的那份"，不能直接拿 `activeBlueprintId()` 当 id。
- */
-async function resolveTarget(
-  repoId: string,
-): Promise<{ id: string; json: string }> {
-  const activeId = activeBlueprintId();
-  if (activeId) {
-    const json = await api.blueprintGet({ repoId, blueprintId: activeId });
-    // 生效蓝图被外部删掉时会读回 null：此时回落到默认蓝图，而不是直接失败。
-    if (json) return { id: activeId, json };
-  }
-  const [json, list] = await Promise.all([
-    api.blueprintGetDefault({ repoId }),
-    api.blueprintList({ repoId }),
-  ]);
-  const fallback = list.find((item) => item.is_default);
-  if (json && fallback) return { id: fallback.id, json };
-  throw new Error("当前仓库没有可写入的蓝图");
 }
 
 /**
@@ -66,24 +36,10 @@ export async function createInterfacePage(
   repoId: string,
   name?: string,
 ): Promise<CreatedInterfacePage> {
-  const target = await resolveTarget(repoId);
+  const target = await resolveInterfacePageTarget(repoId);
   const doc = parseBlueprintDocument(target.json);
   if (!doc) throw new Error("蓝图解析失败");
   const { doc: withLayer, layer } = addLayer(doc, name);
-  const prepared = normalizeLayersForSave(withLayer);
-  const check = await api.blueprintValidate({
-    repoId,
-    blueprintJson: JSON.stringify(prepared),
-  });
-  if (check.errors.length > 0) {
-    throw new Error(check.errors[0] ?? "蓝图校验未通过");
-  }
-  await api.blueprintSave({
-    repoId,
-    blueprintId: target.id,
-    // 不传 name：保留蓝图原名（新建界面不该顺手改名）。
-    blueprintJson: JSON.stringify(forUserSave(prepared)),
-  });
-  notifyBlueprintChangedLocally({ id: target.id, graph: prepared });
+  await saveInterfacePageBlueprint(repoId, target.id, withLayer);
   return { layerKey: layer.key, name: layer.name };
 }

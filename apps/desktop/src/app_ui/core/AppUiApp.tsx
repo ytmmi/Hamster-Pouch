@@ -86,6 +86,8 @@ function InterfacePagesHost({ position }: { position: "left" | "right" }): JSX.E
       onDropToUngrouped={pages.dropToUngrouped}
       onSetGroupColor={pages.setGroupColor}
       onClearGroupAssignment={pages.clearGroupAssignment}
+      onDeleteGroup={pages.deleteGroup}
+      onDeletePage={pages.deletePage}
       t={t}
     />
   );

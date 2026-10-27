@@ -9,8 +9,13 @@
  * 3. **切界面** —— 复用 `switchLayer`（持久化当前层 + 套用该层布局 + 蓝图对账），
  *    与编辑器层工具条走同一条路径，不新开第二条切层实现。
  *
- * **新建界面**是唯一会写蓝图的操作：界面页的标签恒等于蓝图的一层，所以
- * "新建标签"就是"给蓝图加一层"（`interfacePageCreate.ts`），前端不另存一份界面清单。
+ * **界面页的标签恒等于蓝图的一层**，所以"新建界面""删除界面"都是**写蓝图**的操作
+ * （`interfacePageCreate.ts` / `interfacePageDelete.ts`），前端不另存一份界面清单；
+ * 删除之后还要把前端分组结构里的残留归属与顺序位清掉（`removePage`）。
+ *
+ * 两个"删除"粒度不同、都必须问一次用户（D124-R5）：
+ * - **删除页面组**：只删 `app_settings` 里的一条组记录，组内界面回到「未分组」，**蓝图不动**；
+ * - **删除界面**：删蓝图的一层（D55 直接删除、不是软删除），**不可撤销**，且至少保留一层。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,6 +24,7 @@ import type { BlueprintLayer } from "@hamster-pouch/config";
 
 import { useApp } from "./AppContext";
 import { createInterfacePage } from "./interfacePageCreate";
+import { deleteInterfacePage } from "./interfacePageDelete";
 import * as api from "../shared/api";
 import {
   currentLayerKey,
@@ -34,7 +40,10 @@ import {
   dropPageOnPage as dropPageOnPagePure,
   emptyInterfacePagesState,
   movePageBefore as movePageBeforePure,
+  orderedPages,
   parseInterfacePagesState,
+  removeGroup as removeGroupPure,
+  removePage as removePagePure,
   renameGroup as renameGroupPure,
   serializeInterfacePagesState,
   setGroupColor as setGroupColorPure,
@@ -92,6 +101,16 @@ export interface InterfacePagesController {
   setGroupColor: (groupId: string, index: number) => void;
   /** 「取消组合」：组内界面全部移出分组，组本身保留。 */
   clearGroupAssignment: (groupId: string) => void;
+  /**
+   * 「删除页面组」（D124-R5）：删掉组记录，组内界面回到「未分组」——**界面本身不删**，
+   * 所以这是无损操作，确认弹窗要如实这么说（不弹假警告）。
+   */
+  deleteGroup: (groupId: string) => void;
+  /**
+   * 「删除界面」（D124-R5）：删**蓝图的一层**（连带层内节点，不可撤销），前端不提供撤销。
+   * 只剩一层时不允许（没有界面可导航）——菜单项会置灰，这里再拦一次，两处同一口径。
+   */
+  deletePage: (layerKey: string) => void;
 }
 
 /** 读运行时快照（层列表 + 当前层），供订阅回调判重。 */
@@ -112,7 +131,7 @@ function hasLayer(layerKey: string): boolean {
  */
 export function useInterfacePages(): InterfacePagesController {
   const app = useApp();
-  const { repoId, status, t, getDockview } = app;
+  const { repoId, status, t, getDockview, askConfirm } = app;
 
   const [layers, setLayers] = useState<BlueprintLayer[]>(() => snapshot().layers);
   const [current, setCurrent] = useState<string | null>(() => snapshot().current);
@@ -286,6 +305,80 @@ export function useInterfacePages(): InterfacePagesController {
     [persist, state, status, t],
   );
 
+  /**
+   * 「删除页面组」（D124-R5）：只动前端分组结构，界面回到「未分组」。
+   *
+   * 确认弹窗只说真话：这一项**不会**删掉任何界面（删界面是另一个菜单项），
+   * 因此不给 `danger` 级红按钮，也不写"不可恢复"之类的话。
+   */
+  const deleteGroup = useCallback(
+    (groupId: string) => {
+      const group = state.groups.find((g) => g.id === groupId);
+      if (!group) return;
+      void (async () => {
+        // 提示并进 message 而不用 `warning` 字段：那一行是危险色，与"无损操作"的事实相悖。
+        const confirmed = await askConfirm({
+          title: t("iface.removeGroup"),
+          message: `${t("iface.removeGroupConfirm", { name: group.name })} ${t("iface.removeGroupHint")}`,
+          confirmLabel: t("iface.removeGroup"),
+        });
+        if (!confirmed) return;
+        persist(removeGroupPure(state, groupId));
+        status(t("iface.groupRemoved", { name: group.name }), "ok");
+      })();
+    },
+    [askConfirm, persist, state, status, t],
+  );
+
+  /**
+   * 「删除界面」（D124-R5）：删蓝图的一层，连带层内节点，**不可撤销**。
+   *
+   * 删的是"界面"而不是"标签"：界面页没有"关掉标签"这种语义（标签恒等于层）。
+   * 三层收尾必须都做——蓝图（`deleteInterfacePage`）、前端分组状态（`removePage`）、
+   * 当前层（删的正是当前界面时切到剩下的第一个，否则画布上停留的还是那个已删除的界面）。
+   */
+  const deletePage = useCallback(
+    (layerKey: string) => {
+      if (!repoId) return;
+      if (layers.length <= 1) {
+        status(t("iface.pageRemoveLast"), "error");
+        return;
+      }
+      const target = layers.find((l) => l.key === layerKey);
+      void (async () => {
+        const confirmed = await askConfirm({
+          title: t("iface.deletePage"),
+          message: t("iface.deletePageConfirm", { name: target?.name ?? layerKey }),
+          warning: t("iface.deletePageWarning"),
+          confirmLabel: t("iface.deletePage"),
+          danger: true,
+        });
+        if (!confirmed) return;
+        try {
+          const removed = await deleteInterfacePage(repoId, layerKey);
+          // 前端分组结构里的残留（归属 / 顺序位）必须跟着清，否则会攒下指向已删层的 key。
+          persist(removePagePure(state, layerKey));
+          status(t("iface.pageRemoved", { name: removed.name }), "ok");
+          // 删的正是当前界面：显式切到剩下的第一个可见界面——运行时的 activate 只会把
+          // "已不存在的当前层"回退到**蓝图第一层**，那未必是标签条上的第一个，而且回退发生在
+          // 异步重载里；这里主动切一次，无论重载先到还是后到，最终都停在同一个界面上。
+          if (current === layerKey) {
+            const remaining = orderedPages(state, layers.map((l) => l.key)).filter(
+              (key) => key !== layerKey,
+            );
+            const next = remaining[0];
+            if (next) {
+              void switchLayer(repoId, next, getDockview()).catch(() => undefined);
+            }
+          }
+        } catch (err) {
+          status(t("iface.pageDeleteFailed", { err: String(err) }), "error");
+        }
+      })();
+    },
+    [askConfirm, current, getDockview, layers, persist, repoId, state, status, t],
+  );
+
   return useMemo(
     () => ({
       layers,
@@ -303,6 +396,8 @@ export function useInterfacePages(): InterfacePagesController {
       dropToUngrouped,
       setGroupColor,
       clearGroupAssignment,
+      deleteGroup,
+      deletePage,
     }),
     [
       layers,
@@ -320,6 +415,8 @@ export function useInterfacePages(): InterfacePagesController {
       dropToUngrouped,
       setGroupColor,
       clearGroupAssignment,
+      deleteGroup,
+      deletePage,
     ],
   );
 }

@@ -133,7 +133,7 @@ apps/desktop/src/app_ui/
                         #   RFC 0010 决策 4 要接入插件面板的动态注册路径）
     settingChangeStore.ts # 设置变更的**同窗口**广播（「全部设置」写完即通知面板；
                         #   跨窗口仍走后端 `setting.changed` 事件）
-    InterfacePageBar.tsx  # 垂直「界面页」标签条（D124 / D124-R2 / D124-R3 / D124-R4）：界面（= 蓝图层）
+    InterfacePageBar.tsx  # 垂直「界面页」标签条（D124 / D124-R2 / D124-R3 / D124-R4 / D124-R5）：界面（= 蓝图层）
                         #   导航 + 页面组。收起是工作区里 12px 的**真实占位列**（与面板同层、不覆盖内容），
                         #   指针移入才把 200px 面板**绝对定位**滑出到面板之上（展开态才脱离布局）。
                         #   交互对齐 Edge：界面上下**拖拽排序**、拖到组上即入组；点击组头展开/折叠；
@@ -141,7 +141,9 @@ apps/desktop/src/app_ui/
                         #   右键弹窗（D124-R4 ①）：界面标签与页面组**共用同一形态** = 组名输入框 +
                         #   8 色圆点色带（未分组时输入框即"要新建的组"名），操作项分别为
                         #   「在组中新建标签页 / 取消组合」与「新建页面组 / 移出页面组 / 加入已有组」；
-                        #   「移动到新窗口」「删除组」按用户口径**不出现**（无对应语义）。
+                        #   两个弹窗的**末项都是危险色删除**（D124-R5）：组菜单「删除页面组」（只删组、
+                        #   界面回到「未分组」）、界面菜单「删除界面」（删蓝图的一层，只剩一层时置灰）；
+                        #   「移动到新窗口」按用户口径**不出现**（无对应语义）。
                         #   色条跟着标签走（D124-R4 ④）：组内界面标签左侧带该组色条、组名文字染色。
                         #   **不是** dockview 面板标签——标签数量由蓝图决定、不可在此关闭
     useInterfacePages.ts  # 界面页标签条的控制器（D124）：层列表/当前层现取蓝图运行时并订阅其
@@ -149,11 +151,17 @@ apps/desktop/src/app_ui/
                         #   `createGroupWithPage(layerKey, name, colorIndex?)` 把"建组 + 上色 + 入组"合成
                         #   一次落库（Edge 的 Add tab to new group）；拖拽排序/入组各由**一次**状态变更
                         #   表达（dropOnPage / dropOnGroup / dropToUngrouped），顺序与组色仍落前端设置，
-                        #   不写蓝图；「删除组」按用户口径不再暴露（D124-R4 ②）
+                        #   不写蓝图。两个删除动作都要 askConfirm 一次（D124-R5）：删除页面组只动
+                        #   前端分组结构（无损），删除界面则写蓝图 + removePage 清残留（不可撤销）
     interfacePageCreate.ts # 新建界面 = 给**生效蓝图加一层**（D124-R3）：标签恒等于层，只在前端凭空
-                        #   加标签会在运行时对账时被删掉。写盘路径照抄编辑器保存
-                        #   （parseBlueprintDocument → addLayer → normalizeLayersForSave →
-                        #   blueprintValidate → blueprintSave → notifyBlueprintChangedLocally）
+                        #   加标签会在运行时对账时被删掉
+    interfacePageDelete.ts # 删除界面 = **删生效蓝图的一层**（D124-R5，D55 直接删、不是软删除）：
+                        #   标签恒等于层，只在前端藏掉标签会在下一次对账后"复活"。至少保留一层
+                        #   （removeLayer 的 last-layer），删的若是当前层则切到剩下的第一个界面
+    interfacePageBlueprint.ts # 新建/删除界面共用的写蓝图管道：resolveInterfacePageTarget
+                        #   （生效蓝图 id 或仓库默认蓝图）+ saveInterfacePageBlueprint
+                        #   （normalizeLayersForSave → blueprintValidate → blueprintSave →
+                        #   notifyBlueprintChangedLocally）。两条路径只差"改哪一步"，落库必须同一份
   settings/           # **「全部设置」系统界面**（RFC 0010 决策 7；应用级系统界面，不受蓝图引擎管辖）
     SettingsApp.tsx     # 左侧大类/二级 + 右侧分节设置 + 顶部搜索
     settingsRegistry.ts # 设置注册表（宿主项 + 面板项 + 插件项；`kind` 只取控件输入类）
@@ -168,12 +176,13 @@ apps/desktop/src/app_ui/
                       #     媒体预览与图书预览共用一份）、
                       #   format（显示格式纯函数：体积自适应 KiB/KB、日期三格式、时长/码率/帧率）、
                       #   styles、api/（按域）、types/（按域）、thumbUrl
-    interfacePages.ts     # 垂直「界面页」的**纯逻辑**（D124 / D124-R3 / D124-R4）：页面组模型 + 容错解析（任何
+    interfacePages.ts     # 垂直「界面页」的**纯逻辑**（D124 / D124-R3 / D124-R4 / D124-R5）：页面组模型 + 容错解析（任何
                           #   脏数据都落回可用状态，不抛异常）+ 序列化 + 增删改（删组无损，界面回到
                           #   未分组）；另有**导航顺序** `order`（orderedPages 收敛：order 认识的排前面、
                           #   蓝图里剩下的按蓝图顺序追加）与**组色** `colors`（存色板索引不存色值），
                           #   以及拖拽落点的纯函数 dropPageOnPage / dropPageOnGroup / clearGroupAssignment；
-                          #   D124-R4 起「删除组」不再有 UI 入口（removeGroup 纯函数保留备用）
+                          #   removeGroup（删组、界面回到未分组）与 removePage（删界面后清归属/顺序残留）
+                          #   在 D124-R5 起都有 UI 入口（右键菜单末项）
     blueprintRuntime.ts   # 生效蓝图加载/升级/回退（含解析层校验与回退提示）+ 当前层与每层布局 + 热更新订阅
                           #   + `currentLayers`/`subscribeBlueprintRuntime`（D124 界面页标签条订阅）
     blueprintLayout.ts    # 蓝图 → dockview 对账（**只对账当前层**；默认可见标签、组收起/展开与尺寸记忆）

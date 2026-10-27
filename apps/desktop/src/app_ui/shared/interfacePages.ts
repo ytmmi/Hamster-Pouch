@@ -239,10 +239,11 @@ export function renameGroup(
  * 删除页面组：组内界面自动回到「未分组」。
  *
  * 只删 `groups` 的一条 + 清掉指向它的归属、颜色与折叠标记——**界面本身不动**，
- * 所以"删组"永远是无损操作。
+ * 所以"删组"永远是无损操作（"删组"与"删界面"是两件事，见 `removePage`）。
  *
- * 注意：D124-R4 ② 起 UI **不再暴露"删除组"**（用户口径：无对应语义），
- * 这里保留纯函数是因为它仍是合法的状态操作，将来若要恢复入口无需重写。
+ * 入口沿革：D124-R3 ⑦ 有「🗑 删除组」→ D124-R4 ② 按用户口径移除 → **D124-R5 恢复**
+ * （用户要求右键菜单里"分组和标签都加删除选项"）。恢复只补菜单项与三语 i18n 键，
+ * 纯函数一直是同一份，没有第二套实现。
  */
 export function removeGroup(state: InterfacePagesState, groupId: string): InterfacePagesState {
   if (!state.groups.some((g) => g.id === groupId)) return state;
@@ -261,6 +262,29 @@ export function removeGroup(state: InterfacePagesState, groupId: string): Interf
     collapsedGroups: state.collapsedGroups.filter((id) => id !== groupId),
     colors,
   };
+}
+
+/**
+ * 删除界面后在**前端分组结构**里收尾：清掉它的归属与顺序位（折叠是组级状态，与层无关）。
+ *
+ * 真正"删界面"是删蓝图层（见 `core/interfacePageDelete.ts`）；这里只处理 `app_settings`
+ * 里那份按仓库存的导航状态。两处都必须做，否则标签条会留下指向已不存在层的旧条目
+ * （`orderedPages` 虽然能容忍残留，但不清就会永远攒着无用 key）。
+ *
+ * 纯函数：层不存在时原样返回（幂等，重复调用安全）。
+ */
+export function removePage(
+  state: InterfacePagesState,
+  layerKey: string,
+): InterfacePagesState {
+  if (!layerKey.trim()) return state;
+  const assignment = { ...state.assignment };
+  const hadAssignment = Object.prototype.hasOwnProperty.call(assignment, layerKey);
+  delete assignment[layerKey];
+  const order = state.order.filter((key) => key !== layerKey);
+  const orderChanged = order.length !== state.order.length;
+  if (!hadAssignment && !orderChanged) return state;
+  return { ...state, assignment, order };
 }
 
 /** 把界面放进某个组；`groupId` 为 `null` 或组不存在时移出分组。 */
@@ -393,9 +417,10 @@ export function setGroupColor(
 /**
  * 「取消组合」：把组内界面全部移出分组，**组本身保留**（变成空组）。
  *
- * 与 removeGroup 的区别是刻意的：Edge 的「取消组合」保留标签、去掉分组；
- * 我们的界面页不能"关闭"（那等于删蓝图层），所以这里只解组、不删组。
- * D124-R4 ② 之后 UI 只剩这一个"解散"入口（"删除组"项已按用户口径移除）。
+ * 与 removeGroup 的区别是刻意的：Edge 的「取消组合」保留标签、去掉分组，而这里的标签
+ * 就是蓝图的层——"关闭标签"=删蓝图层，是另一件事（见 removePage / D124-R5）。
+ * D124-R5 起右键菜单同时给出「删除页面组」与「删除界面」两个不同粒度的入口，
+ * **都没有**"关掉标签但保留分组"这种语义。
  */
 export function clearGroupAssignment(
   state: InterfacePagesState,

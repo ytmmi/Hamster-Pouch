@@ -17,12 +17,14 @@
  * 点击组头 = 展开/折叠（Edge 语义）。拖拽用 HTML5 拖放，落点判定以 draggingRef 为准
  * （部分 webview 只在 drop 阶段可读 dataTransfer）。
  *
- * 菜单（D124-R4）：界面标签与页面组**共用同一套右键弹窗形态**——顶部组名输入框 +
+ * 菜单（D124-R4 / D124-R5）：界面标签与页面组**共用同一套右键弹窗形态**——顶部组名输入框 +
  * 8 色圆点色带，只是下面的操作项不同：
- * - 右键**页面组**：输入框改名该组、色带改该组颜色；操作项「在组中新建标签页」「取消组合」。
+ * - 右键**页面组**：输入框改名该组、色带改该组颜色；操作项「在组中新建标签页」「取消组合」，
+ *   末项是**危险色**的「删除页面组」（只删组，组内界面回到「未分组」）。
  * - 右键**界面**：输入框 / 色带作用于"这个界面所属的组"；**未分组时输入框表示要新建的组**
- *   （组名就在这个弹窗里命名，不再弹系统 prompt），色带是新建组的颜色。
- * 「移动到新窗口」「删除组」按用户口径**不实现**（本应用无对应语义），直接不出现。
+ *   （组名就在这个弹窗里命名，不再弹系统 prompt），色带是新建组的颜色；末项是**危险色**的
+ *   「删除界面」——删的是**蓝图的一层**（不可撤销），只剩一层时置灰并给出原因。
+ * 「移动到新窗口」按用户口径**不实现**（本应用无对应语义，独立窗口只服务面板），直接不出现。
  * 色条不画在组名旁（D124-R4 ④）：组内每个界面标签左侧带该组色条，组名文字本身染色。
  * 「+」不在面板底部（D124-R4 ③）：它是标签 / 组队列的**末尾一项**，随列表一起滚动。
  *
@@ -86,6 +88,10 @@ export interface InterfacePageBarProps {
   onSetGroupColor: (groupId: string, index: number) => void;
   /** 「取消组合」：组内界面全部移出分组，组本身保留。 */
   onClearGroupAssignment: (groupId: string) => void;
+  /** 「删除页面组」：只删组，组内界面回到「未分组」（界面本身不删）。 */
+  onDeleteGroup: (groupId: string) => void;
+  /** 「删除界面」：删蓝图对应层（不可撤销）；只剩一层时调用方应拦下。 */
+  onDeletePage: (layerKey: string) => void;
   t: Translate;
 }
 
@@ -118,6 +124,8 @@ export function InterfacePageBar({
   onDropToUngrouped,
   onSetGroupColor,
   onClearGroupAssignment,
+  onDeleteGroup,
+  onDeletePage,
   t,
 }: InterfacePageBarProps): JSX.Element {
   const [menu, setMenu] = useState<MenuTarget | null>(null);
@@ -599,6 +607,18 @@ export function InterfacePageBar({
           >
             ⛶ {t("iface.ungroupAll")}
           </button>
+          {/* 「删除页面组」只删组、不删界面（D124-R5）：与「删除界面」是两件事，故单列危险项。 */}
+          <div className="menu-sep" />
+          <button
+            type="button"
+            className="menu-item danger"
+            onClick={() => {
+              setMenu(null);
+              onDeleteGroup(menuGroup.id);
+            }}
+          >
+            🗑 {t("iface.removeGroup")}
+          </button>
         </ContextMenu>
       ) : null}
 
@@ -650,6 +670,22 @@ export function InterfacePageBar({
               ))}
             </>
           ) : null}
+          {/* 「删除界面」= 删蓝图的一层（D124-R5）。只剩一层时置灰而不是隐藏：
+              用户能看到"有删除语义、但这次不行"，比菜单里莫名其妙少一项更好理解。 */}
+          <div className="menu-sep" />
+          <button
+            type="button"
+            className="menu-item danger"
+            disabled={layers.length <= 1}
+            title={layers.length <= 1 ? t("iface.pageRemoveLast") : undefined}
+            onClick={() => {
+              if (layers.length <= 1) return;
+              setMenu(null);
+              onDeletePage(menu.layerKey);
+            }}
+          >
+            🗑 {t("iface.deletePage")}
+          </button>
         </ContextMenu>
       ) : null}
     </div>
