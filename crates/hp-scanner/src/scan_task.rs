@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use hp_core::{FileMark, MediaType, ThumbStatus};
 use hp_hash::{ContentHash, PerceptualHash, hash_file};
-use hp_media::extract_thumbnail;
+use hp_media::{IMAGE_THUMB_MAX_DIM, extract_thumbnail, generate_image_thumbnail};
 
 use crate::scan_compute::analyze_image;
 use crate::scanner::ScanOptions;
@@ -64,7 +64,7 @@ pub fn pixel_cost(prepared: &Prepared) -> u64 {
     crate::scan_compute::image_pixel_cost(&prepared.path)
 }
 
-/// 纯计算：读文件、算哈希、抽帧。**不访问数据库、不写索引**。
+/// 纯计算：读文件、算哈希、抽帧 / 出缩略图。**不访问数据库、不写索引**。
 ///
 /// 视频抽帧会写缩略图缓存（`ThumbnailCache`），那是按内容哈希分文件的独立路径，
 /// 且 `hp_media` 侧已改为**原子落盘**（先写临时文件再改名），因此并发安全。
@@ -93,11 +93,15 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
                 Ok(derived) => (derived.perceptual, derived.palette),
                 Err(_) => (None, None),
             };
+            // 缩略图**扫描期同步生成**（D126）：与视频首帧（D16）同一条路——
+            // 解码 / 编码只依赖文件本身，正是并行阶段该干的活。反过来（留到界面要
+            // 显示时才逐张补）会让大库第一次滚动就是几百次同步解码。
+            let thumb_status = process_image_thumb(&prepared.path, &content, options);
             Computed {
                 content: Some(content),
                 perceptual,
                 palette,
-                thumb_status: Some(ThumbStatus::NotGenerated),
+                thumb_status: Some(thumb_status),
                 media_info: None,
                 unreadable: false,
             }
@@ -165,6 +169,46 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
                 ..Computed::default()
             }
         }
+    }
+}
+
+/// 图片缩略图：**扫描期同步生成**（2026-10-27 / D126）。
+///
+/// **口径与视频首帧（D16）一致，与音频波形（D115）相反**：视频首帧扫描期就抽，
+/// 音频波形留到按需。分界线是"这张图是不是每张卡片都要显示"——图片缩略图是网格 /
+/// 胶片栏的视觉本体，不预生成，第一次滚动就是几百次同步解码；波形只是播放器的辅助图。
+///
+/// **复用按需路径的同一次调用**（`hp_media::generate_image_thumbnail` + 同一个
+/// `ThumbnailCache` 路径）：另写一套扫描期解码会让 EXIF 方向、WebP 编码降级、
+/// SVG / AVIF 的 ffmpeg 兜底与 `thumb.get` 分叉，同一张图出现两份不同的字节。
+///
+/// **缓存命中即跳过重编码**：缩略图按内容哈希寻址，图没变就不必再算一次——
+/// 这也让"全量重扫"（右键「全量」）在已有缩略图的库上不额外花时间。
+///
+/// 没有 `thumbnail_cache`（单元测试 / 精简环境）时不出图：行照建、`thumb_status`
+/// 留 0，与视频无 `ffmpeg_bin` 时同款降级。
+fn process_image_thumb(path: &Path, content: &ContentHash, options: &ScanOptions) -> ThumbStatus {
+    let Some(cache) = &options.thumbnail_cache else {
+        return ThumbStatus::NotGenerated;
+    };
+    let thumb_path = cache.path_for_image(&content.value);
+    if thumb_path.exists() {
+        return ThumbStatus::Generated;
+    }
+    if cache.ensure_dir_for(&content.value).is_err() {
+        return ThumbStatus::Failed;
+    }
+    match generate_image_thumbnail(
+        path,
+        &thumb_path,
+        IMAGE_THUMB_MAX_DIM,
+        options.ffmpeg_bin.as_deref(),
+        options.video_timeout,
+    ) {
+        Ok(()) => ThumbStatus::Generated,
+        // 坏图 / 无解码器：**不影响索引**，行照建，只是没有缩略图
+        // （与感知哈希缺失、调色板缺失同一容错口径）。
+        Err(_) => ThumbStatus::Failed,
     }
 }
 
@@ -366,5 +410,89 @@ mod tests {
         let manga = FileMark::from_raw("manga");
         assert!(book.is_book());
         assert!(!manga.is_book());
+    }
+
+    #[test]
+    fn image_scan_writes_thumbnail_when_cache_is_present() {
+        // D126：图片缩略图在**扫描期**就落盘，不等界面来要。缩略图缓存按内容哈希
+        // 寻址，所以断言"缓存里有这个文件"即可——不必关心它是不是 WebP、有多大。
+        let dir = std::env::temp_dir().join(format!("hp-scan-task-thumb-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let path = dir.join("a.png");
+        image::RgbImage::from_pixel(48, 32, image::Rgb([0x11, 0xcc, 0x22]))
+            .save(&path)
+            .expect("写入测试图片失败");
+
+        let cache = hp_media::ThumbnailCache::new(dir.join("thumbs"));
+        let options = ScanOptions {
+            thumbnail_cache: Some(cache.clone()),
+            ..ScanOptions::default()
+        };
+        let p = prepared(path.clone(), MediaType::Image, false, false);
+        let got = compute(&p, &options);
+        assert_eq!(
+            got.thumb_status,
+            Some(ThumbStatus::Generated),
+            "有 thumbnail_cache 时图片必须在扫描期出缩略图（D126）"
+        );
+        let hash = got.content.expect("应有内容哈希").value;
+        let thumb_path = cache.path_for_image(&hash);
+        assert!(
+            thumb_path.exists(),
+            "缩略图应落在 内容哈希 对应的缓存路径上"
+        );
+
+        // 再算一次：缓存已存在 → 直接判 Generated，**不重编码**（幂等，全量重扫不重复花钱）。
+        let again = compute(&prepared(path, MediaType::Image, false, false), &options);
+        assert_eq!(again.thumb_status, Some(ThumbStatus::Generated));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn image_scan_without_cache_leaves_thumb_not_generated() {
+        // 没有 `thumbnail_cache`（单元测试 / 精简环境）时降级：行照建、哈希照算，
+        // 只是 thumb_status 留 0，与视频无 `ffmpeg_bin` 时同款。
+        let dir = std::env::temp_dir().join(format!("hp-scan-task-nocache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let path = dir.join("b.png");
+        image::RgbImage::from_pixel(16, 16, image::Rgb([0, 0, 0]))
+            .save(&path)
+            .expect("写入测试图片失败");
+
+        let got = compute(
+            &prepared(path, MediaType::Image, false, false),
+            &ScanOptions::default(),
+        );
+        assert_eq!(got.thumb_status, Some(ThumbStatus::NotGenerated));
+        assert!(got.content.is_some(), "有没有缓存都不影响哈希");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn audio_is_not_thumbnailed_even_with_cache() {
+        // 反向钉住 D115：音频**不**在扫描期出波形图——即便 cache 就在手上。
+        // 这条与上面的图片用例成对，防止日后"顺手也给音频生成一张"把 D115 推翻。
+        let dir =
+            std::env::temp_dir().join(format!("hp-scan-task-audiothumb-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let path = dir.join("song.mp3");
+        std::fs::write(&path, b"ID3 fake audio bytes").expect("写入测试文件失败");
+
+        let cache = hp_media::ThumbnailCache::new(dir.join("thumbs"));
+        let options = ScanOptions {
+            thumbnail_cache: Some(cache.clone()),
+            ..ScanOptions::default()
+        };
+        let got = compute(&prepared(path, MediaType::Audio, false, false), &options);
+        assert_eq!(got.thumb_status, Some(ThumbStatus::NotGenerated));
+        let hash = got.content.expect("应有内容哈希").value;
+        assert!(
+            !cache.path_for_audio(&hash).exists(),
+            "音频波形图仍按需生成（D115），扫描期不该出"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

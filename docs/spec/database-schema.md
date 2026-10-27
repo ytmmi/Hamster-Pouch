@@ -175,6 +175,11 @@ CREATE INDEX idx_sources_repo ON sources(repo_id);
 --   的按内容哈希磁盘缓存，**不进索引**
 -- 视频（D14-D16）：全量媒体信息由 ffprobe 探测后缓存（存储形式见实现期开放点），
 --   首帧缩略图扫描时由 ffmpeg 生成，thumb_status 标记是否已生成
+-- 图片（2026-10-27 / D126）：**缩略图同样扫描期同步生成**（与视频首帧 D16 同一条路、与音频
+--   波形 D115 相反；分界线是「这张图是不是每张卡片都要显示」），`thumb_status` 对图片同样有效
+--   （0=未生成 1=已生成 -1=失败）；**复用按需路径 `thumb.get` 的同一个 `generate_image_thumbnail`
+--   与同一个缓存路径**（`<hash>.webp`，D90-D91），缓存命中不再重编码，坏图判 -1 但行照建
+-- 音频（D115）：波形图**仍按需**生成（`thumb.get` 缓存未命中时才画），扫描期不出图，thumb_status 恒 0
 CREATE TABLE files (
   id                        TEXT PRIMARY KEY,  -- 稳定文件 ID
   source_id                 TEXT NOT NULL,
