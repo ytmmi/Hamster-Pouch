@@ -25,6 +25,17 @@ set -eu
 
 cd "$(git rev-parse --show-toplevel)"
 
+# ── pnpm 版本门禁：对齐到 `package.json#packageManager`（D127）─────────────
+# 本仓 pnpm 版本的唯一真相是 `packageManager`（D120-R2 ③：该字段一旦存在，
+# `engines.pnpm` 不再校验；`pnpm-workspace.yaml#engineStrict` 实际只管 `engines.node`）。
+# pnpm 的正常路径是"自我对齐"：用一个更低的 pnpm 直接调起来，它会自己切到声明版本。
+# 但**由 corepack 拉起的父进程**（环境里带 `COREPACK_ROOT`，例如 `pnpm dsh` 起的
+# shell）会让 pnpm 拒绝自我对齐，直接报"版本不符"并中止提交——它的提示会让人去加
+# `devEngines.packageManager`，而实测那只会让自我对齐**彻底失效**（onFail=error 硬
+# 失败；onFail=warn 则静默按旧版本跑）。所以这里去掉 corepack 标记，让门禁永远跑
+# `packageManager` 声明的那个 pnpm。
+unset COREPACK_ROOT
+
 echo "── pre-commit：rustfmt ─────────────────────────────"
 # --check 而不是直接格式化：钩子不修改工作区（避免"提交的内容与我看到的不一致"）。
 cargo fmt --all --check

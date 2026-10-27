@@ -36,7 +36,7 @@
 ## 环境要求
 
 - Windows 10 / 11（含 WebView2 运行时）
-- Node.js ≥ 22.16、pnpm ≥ 12（版本见 `package.json#packageManager`）
+- Node.js ≥ 22.16、pnpm ≥ 12（版本真相是 `package.json#packageManager`，pnpm 会自我对齐到它；若在 corepack 拉起的 shell 里报版本不符，用 `env -u COREPACK_ROOT pnpm …`）
 - Rust 工具链（edition 2024，版本见 `rust-toolchain.toml`）
 
 `hp-media` 默认启用 `libheif` 特性（HEIC / HEIF / AVIF 解码），构建前需安装 vcpkg 与 libheif：

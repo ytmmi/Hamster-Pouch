@@ -3,4 +3,6 @@ packages:
   - "packages/*"
 
 # pnpm 11+ 起，engines 强制校验只能写在 workspace 配置里（.npmrc 的 engine-strict 对 pnpm 无效）。
+# 注意它实际约束的是 `engines.node`：`engines.pnpm` 一旦与 `packageManager` 同时存在就不再校验，
+# pnpm 自身的版本由 `package.json#packageManager` 决定（D120-R2 ③、D127）。
 engineStrict: true
