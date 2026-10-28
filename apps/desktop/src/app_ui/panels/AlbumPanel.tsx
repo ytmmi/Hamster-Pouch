@@ -458,11 +458,10 @@ export function AlbumPanel(): JSX.Element {
     if (anchorIndex < 0) return;
     const beforeAlbumId =
       edge === "before" ? targetAlbumId : (siblings[anchorIndex + 1]?.id ?? null);
-    const unchangedParent = album.parent_album_id === newParentId;
-    if (unchangedParent && beforeAlbumId === targetAlbumId) {
-      app.status(t("album.moved", { name: album.name }), "info");
-      return;
-    }
+    // 不做本地的"位置没变"预判：剔除自己之后的下标与真实顺序不同，
+    // "拖到 target 前面"在本地看起来永远像原位（`beforeAlbumId === targetAlbumId`），
+    // 一刀切提前返回会把"从后面挪到它前面"这种真实重排吞掉。
+    // 空操作交给后端判定：`parent_changed` / `order_changed` 都为假才是真的没变。
     try {
       const r = await api.albumMove({
         repoId: app.repoId,
