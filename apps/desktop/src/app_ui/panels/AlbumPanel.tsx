@@ -394,6 +394,28 @@ export function AlbumPanel(): JSX.Element {
     [albums],
   );
 
+  /**
+   * 拖拽排序（插到某行前/后）的合法性（D132）。
+   *
+   * **只看结构，不看媒体属性**：插入只改变"排第几"和"归谁管"，不动成员集合，
+   * 所以不同媒体属性的兄弟之间理应可以互相排序。若沿用 `computeDropKind`
+   * 的三色口径，`image` 兄弟拖到 `video` 兄弟旁边会被判成红——那是"嵌套"的规矩，
+   * 拿来管"排序"会让一半的排序操作被无理由拦掉。
+   *
+   * 唯一的结构性禁止：新父级落在被拖相册的子树内（会形成互相包含）。
+   */
+  const insertConflict = useCallback(
+    (sourceAlbumId: string, targetAlbumId: string): boolean => {
+      if (sourceAlbumId === targetAlbumId) return true;
+      const byId = new Map(albums.map((a) => [a.id, a]));
+      const target = byId.get(targetAlbumId);
+      if (!target) return true;
+      const newParentId = target.parent_album_id;
+      return newParentId !== null && isDescendantOf(newParentId, sourceAlbumId, byId);
+    },
+    [albums],
+  );
+
   // 拖拽相册到目标相册：改变 parent_album_id（后端再做一次禁环校验）
   const moveAlbum = async (albumId: string, parentAlbumId: string | null) => {
     if (!app.repoId) return;
@@ -630,8 +652,10 @@ export function AlbumPanel(): JSX.Element {
               // 行的上/下边缘 = 插到它前面/后面（蓝色横线）；中间 = 放进它里面（三色）
               const edge = movingId === node.id ? null : edgeFromEvent(e);
               if (edge) {
-                const kind = computeDropKind(movingId, node.id);
-                e.dataTransfer.dropEffect = kind === "conflict" ? "none" : "move";
+                // 排序只看结构：媒体属性不同也能互相插（insertConflict）
+                e.dataTransfer.dropEffect = insertConflict(movingId, node.id)
+                  ? "none"
+                  : "move";
                 setDropAlbumId(null);
                 setDropKind(null);
                 setDropEdge({ albumId: node.id, edge });
@@ -671,13 +695,18 @@ export function AlbumPanel(): JSX.Element {
               setExtractHover(false);
               setDropEdge(null);
               if (albumId === node.id) return;
+              if (edge) {
+                // 排序只看结构，媒体属性不同也可以插（insertConflict）
+                if (insertConflict(albumId, node.id)) {
+                  app.status(t("album.moveCycle"), "error");
+                  return;
+                }
+                void reorderAlbum(albumId, node.id, edge);
+                return;
+              }
               const kind = computeDropKind(albumId, node.id);
               if (kind === "conflict") {
                 app.status(t("album.moveCycle"), "error");
-                return;
-              }
-              if (edge) {
-                void reorderAlbum(albumId, node.id, edge);
                 return;
               }
               void moveAlbum(albumId, node.id);
