@@ -67,7 +67,7 @@ crates/hp-store/src/
     tag_lib_set.rs    # 四库**聚合查询层**：用户库 > 扩展包 > 内置基底的统一视图（TagLibSet）
     tag_lib_merge.rs  # 多扩展包之间的**重复概念归并**（MergeIndex，D36.3）
   migrations/         # 迁移 SQL（forward-only，发布后禁止修改；权威文本在这些文件里）
-    repo/             # 仓库库：0001_init … 0009_file_covers.sql（当前版本 = 9）
+    repo/             # 仓库库：0001_init … 0013_album_sort_order.sql（当前版本 = 13）
     global/           # 全局配置库：0001_init … 0004_layout_layers.sql（当前版本 = 4）
     dict/             # tag 词库：0001_init.sql
                       # 注意：**没有** `dict_lib/` 目录——实际只有 repo/ global/ dict/ 三个。
@@ -501,7 +501,9 @@ HamsterPouch/
     hp-store/                 # SQLite 访问、迁移、事务；内部按 repo/ 与 global/ 分层
     hp-scanner/               # 媒体源扫描、变更检测、索引任务
     hp-hash/                  # 内容哈希、感知哈希、哈希算法版本记录
-    hp-album/                 # 固定相册成员、跟随源同步规则、相册查询
+    hp-album/                 # 相册领域：固定型成员、跟随源同步规则（`sync.rs`）、
+                              #   同步相册的源目录镜像树（`mirror.rs`，D128）、
+                              #   媒体属性继承（`media.rs`）、移动/同级排序与取消同步（D130 / D132）
     hp-fsops/                 # 源间复制/剪切/移动/重命名等真实文件操作
     hp-plugin-host/           # 插件生命周期、权限、宿主 API
     hp-ai/                    # AI 打标接口抽象、任务队列、结果回写边界

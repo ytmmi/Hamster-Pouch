@@ -20,7 +20,9 @@
 | --- | --- | --- |
 | 命令请求/响应 | `RepoOpenRequest`、`SourceMountRequest` | `hp-dto` |
 | 事件载荷 | `ScanProgress`、`AiTaggingCompleted` | `hp-dto` |
-| 领域视图模型 | `FileIndexRow`、`Album`、`Tag`、`Rating`、`ColorRef` | `hp-dto` |
+| 领域视图模型 | `RepoSummary`、`RepoListItem`、`SourceItem`、`AlbumFileItem`、`FileMetadata` | `hp-dto` |
+
+> **2026-10-28 实测口径**：`crates/hp-dto/src/lib.rs` 目前只导出上表这几个命令 DTO（`AlbumFileItem` 是 `album.members` / `file.query` 的元素）。**领域模型 `FileIndexRow`（`hp-core`/`hp-store`）、`Album`（`hp-core`）、`Tag`、`Rating`、`ColorRef` 并没有进 `hp-dto`**，也未生成到 `packages/shared-types`——它们的对应前端形状由各面板 `shared/types/*.ts` 手写声明（例如 `apps/desktop/src/app_ui/shared/types/album.ts` 的 `AlbumItem` 与后端 `commands/album.rs` 的 `AlbumItem` 逐字对齐）。本行早先的「领域视图模型 → `hp-dto`」是**目标态**，不是现状。
 | 插件 manifest/schema | `PluginManifest`、面板 schema 类型 | `hp-plugin-host` / `hp-dto` |
 | 布局/配置类型 | `PanelLayout`、前端常量、面板注册表 | `packages/config` |
 
