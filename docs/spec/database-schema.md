@@ -493,6 +493,14 @@ CREATE TABLE album_sync_exclusion (
   FOREIGN KEY (file_id)  REFERENCES files(id)
 );
 
+-- 仓库库迁移 repo/0013（D132，库版本 12 → 13）：相册同级排序位。
+-- 只需重排目标父级的序号：不同父级之间互不比较，移动相册换父时不必全局重编号。
+ALTER TABLE albums ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;  -- 同一父级内 0 起递增
+-- 默认值 0 让既有行在迁移后全都并列；读侧按 (sort_order, created_at) 排序，
+-- 于是老相册仍然保持"先建的在前"的观感，不会因为加列而乱序。
+-- 该列不参与唯一约束：拖拽过程中允许重复序号，写入端每次都整体重排。
+CREATE INDEX idx_albums_repo_order ON albums(repo_id, parent_album_id, sort_order);
+
 CREATE TABLE album_member (
   album_id  TEXT NOT NULL,
   file_id   TEXT NOT NULL,
@@ -628,7 +636,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blueprints_default
 ## 5. 迁移策略
 
 - 三库**共用同一个版本追踪机制**：`PRAGMA user_version`。读：`crates/hp-store/src/migrate.rs:12`；版本号以"迁移数组下标 + 1"推导（`migrate.rs:16`）；每次未执行版本单开事务执行后写回（`migrate.rs:23`）。三库分别在 `crates/hp-store/src/repo/repo_db.rs:71`、`crates/hp-store/src/global/global_db.rs:65`、`crates/hp-store/src/dict/dict_db.rs:41` 调用同一个 `migrate::apply`。
-  - **当前仓库库版本 = 12**（`0012` 为相册同步镜像身份列 + `album_sync_exclusion`（同步相册镜像树、只增不删、位置与源一致，D129）；`0011` 为 `reader_annotations` 阅读批注表（书签 / 笔记 / 高亮，D113）；`0010` 为 `file_marks` 一对多标记表 + 存量搬迁；`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列（**已废弃**）；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
+  - **当前仓库库版本 = 13**（`0013` 为 `albums.sort_order` 同级排序位 + `idx_albums_repo_order`（拖拽排序，D132）；`0012` 为相册同步镜像身份列 + `album_sync_exclusion`（同步相册镜像树、只增不删、位置与源一致，D129）；`0011` 为 `reader_annotations` 阅读批注表（书签 / 笔记 / 高亮，D113）；`0010` 为 `file_marks` 一对多标记表 + 存量搬迁；`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列（**已废弃**）；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
   - **当前全局配置库版本 = 4**（`global/0001_init` … `global/0004_layout_layers`，见 `crates/hp-store/src/global/global_db.rs:15`-`18` 的四个 `include_str!`）；全局库内**没有**镜像表（7 张表里没有 `global_meta`）。
   - **当前词库版本 = 1**（`dict_db.rs:19`）；`dict_meta`（`dict/0001:6-9`）是数据元信息 K/V，**不是** schema 版本。
 - **`repo_meta.schema_version` 是**镜像键**，每次打开仓库库都按权威值回写**（2026-09 修复缺陷 0006）：`repo_db.rs:86`-`89`（`sync_schema_version_meta`）在 `repo_db.rs:78`-`79`（`open_inner` 汇总点，`migrate::apply` 与蓝图文档迁移之后）执行，**新建与打开两条路径共用这一处**，因此升级过的库不再与 `user_version` 分叉。回写**不能**下沉到 `migrate::apply`（`migrate.rs:10`）：那个执行器由仓库库/全局库/词库共用，且全局库与词库**没有** `repo_meta`。**版本判断一律以 `PRAGMA user_version` 为准**，不要读镜像键（该键仍无读取方）。

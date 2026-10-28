@@ -512,6 +512,38 @@ button.danger {
   pointer-events: none;
 }
 
+/*
+ * 拖拽排序的插入线（D132）：拖到某一行上/下边缘时，在该行上下画出蓝色横线，
+ * 表示"插到这个相册前面/后面"（成为兄弟），与行中间的绿/黄/红（成为子相册）区分。
+ *
+ * 用伪元素而不是 `border-top/bottom`：border 会改变盒模型高度，鼠标一靠近行高
+ * 就变、落点跟着跳。伪元素绝对定位，行高恒不变。
+ */
+.list-row.drop-insert-before,
+.list-row.drop-insert-after {
+  position: relative;
+}
+
+.list-row.drop-insert-before::before,
+.list-row.drop-insert-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #4aa3ff;
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.list-row.drop-insert-before::before {
+  top: -3px;
+}
+
+.list-row.drop-insert-after::after {
+  bottom: -3px;
+}
+
 /* ===== 媒体源目录树 ===== */
 
 .tree-node-wrap {

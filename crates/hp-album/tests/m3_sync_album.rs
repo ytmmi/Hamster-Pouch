@@ -1,10 +1,11 @@
-//! M3 验收测试：同步相册的镜像子树、拖拽移动与取消同步（D128 / D129 / D130）。
+//! M3 验收测试：同步相册的镜像子树、拖拽移动/排序与取消同步（D128 / D129 / D130 / D132）。
 //!
-//! 覆盖四项用户口径：
+//! 覆盖五项用户口径：
 //! 1. 「创建为相册（仅当前对象）」= 一次性快照（固定型，之后不跟随源）；
 //! 2. 「创建为同步相册」= 持续同步 + 按源目录层级镜像子相册，位置与源一致；
 //! 3. 源侧子相册被删后，下次同步重建（不是把已删的当"更新"）；
-//! 4. 同步成员「只增不删、尊重手动编辑」；取消同步后变一般相册。
+//! 4. 同步成员「只增不删、尊重手动编辑」；取消同步后变一般相册；
+//! 5. 拖拽排序：同级重排只在目标父级内重编号，插到原位是空操作，禁环口径与移动一致。
 
 use hp_album::AlbumService;
 use hp_core::{
@@ -486,4 +487,211 @@ fn syncing_root_syncs_whole_mirror_tree_in_one_call() {
         .expect("a/b 应被镜像");
     assert_eq!(db.count_album_members(a.id.as_str()).expect("统计失败"), 1);
     assert_eq!(db.count_album_members(b.id.as_str()).expect("统计失败"), 1);
+}
+
+/// 新建相册默认排在同级末尾，读侧按 `sort_order` 升序（D132）。
+#[test]
+fn new_album_appends_to_sibling_tail() {
+    let mut db = temp_db("m3_reorder_tail");
+    let a =
+        AlbumService::create_fixed(&mut db, "repo-1", "A", None, None, &[]).expect("创建 A 失败");
+    let b =
+        AlbumService::create_fixed(&mut db, "repo-1", "B", None, None, &[]).expect("创建 B 失败");
+    let c =
+        AlbumService::create_fixed(&mut db, "repo-1", "C", None, None, &[]).expect("创建 C 失败");
+
+    let ids: Vec<String> = db
+        .list_albums("repo-1")
+        .expect("列出相册失败")
+        .into_iter()
+        .map(|album| album.id.as_str().to_string())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![
+            a.id.as_str().to_string(),
+            b.id.as_str().to_string(),
+            c.id.as_str().to_string()
+        ],
+        "新相册应依次追加到同级末尾"
+    );
+    assert_eq!(a.sort_order, 0);
+    assert_eq!(b.sort_order, 1);
+    assert_eq!(c.sort_order, 2);
+}
+
+/// 拖拽排序：插到某个兄弟之前，只重排目标父级的序号（D132）。
+#[test]
+fn move_album_ordered_inserts_before_sibling() {
+    let mut db = temp_db("m3_reorder_insert");
+    let a =
+        AlbumService::create_fixed(&mut db, "repo-1", "A", None, None, &[]).expect("创建 A 失败");
+    let b =
+        AlbumService::create_fixed(&mut db, "repo-1", "B", None, None, &[]).expect("创建 B 失败");
+    let c =
+        AlbumService::create_fixed(&mut db, "repo-1", "C", None, None, &[]).expect("创建 C 失败");
+
+    // C 插到 A 之前：期望 C, A, B
+    let outcome =
+        AlbumService::move_album_ordered(&mut db, c.id.as_str(), None, Some(a.id.as_str()))
+            .expect("排序失败");
+    assert!(outcome.order_changed, "插到别人之前应视为顺序变化");
+    assert!(!outcome.parent_changed, "父级没变");
+
+    let ids: Vec<String> = db
+        .list_albums("repo-1")
+        .expect("列出相册失败")
+        .into_iter()
+        .map(|album| album.id.as_str().to_string())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![
+            c.id.as_str().to_string(),
+            a.id.as_str().to_string(),
+            b.id.as_str().to_string()
+        ],
+        "C 应排到 A 之前"
+    );
+
+    // 再把它插回 B 之后（同级末尾）：期望 A, B, C
+    let outcome =
+        AlbumService::move_album_ordered(&mut db, c.id.as_str(), None, None).expect("排序失败");
+    assert!(outcome.order_changed);
+    let ids: Vec<String> = db
+        .list_albums("repo-1")
+        .expect("列出相册失败")
+        .into_iter()
+        .map(|album| album.id.as_str().to_string())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![
+            a.id.as_str().to_string(),
+            b.id.as_str().to_string(),
+            c.id.as_str().to_string()
+        ],
+        "落点为 null 应排到同级末尾"
+    );
+}
+
+/// 插到自己原来的位置是空操作：`order_changed` / `parent_changed` 都为假，不写库（D132）。
+#[test]
+fn move_album_ordered_noop_keeps_order() {
+    let mut db = temp_db("m3_reorder_noop");
+    let a =
+        AlbumService::create_fixed(&mut db, "repo-1", "A", None, None, &[]).expect("创建 A 失败");
+    let _b =
+        AlbumService::create_fixed(&mut db, "repo-1", "B", None, None, &[]).expect("创建 B 失败");
+
+    // A 已经是同级第一个，插到 B 之前 = 原位。
+    let outcome =
+        AlbumService::move_album_ordered(&mut db, a.id.as_str(), None, Some(_b.id.as_str()))
+            .expect("排序失败");
+    assert!(!outcome.parent_changed, "父级未变");
+    assert!(!outcome.order_changed, "插回原位不应算顺序变化");
+}
+
+/// 拖拽排序同时改变父级：插到另一个父级下的兄弟之前，会先换父再重排（D132）。
+#[test]
+fn move_album_ordered_changes_parent_and_order() {
+    let mut db = temp_db("m3_reorder_cross_parent");
+    let target = AlbumService::create_fixed(&mut db, "repo-1", "目标父", None, None, &[])
+        .expect("创建父失败");
+    let x = AlbumService::create_fixed(&mut db, "repo-1", "X", None, Some(target.id.as_str()), &[])
+        .expect("创建 X 失败");
+    let y = AlbumService::create_fixed(&mut db, "repo-1", "Y", None, Some(target.id.as_str()), &[])
+        .expect("创建 Y 失败");
+    let outsider =
+        AlbumService::create_fixed(&mut db, "repo-1", "外来", None, None, &[]).expect("创建失败");
+
+    // 把顶层相册插到 Y 之前 → 父级变成 target，顺序 target 下为 X, 外来, Y
+    let outcome = AlbumService::move_album_ordered(
+        &mut db,
+        outsider.id.as_str(),
+        Some(target.id.as_str()),
+        Some(y.id.as_str()),
+    )
+    .expect("跨父级排序失败");
+    assert!(outcome.parent_changed, "父级应变化");
+    assert!(outcome.order_changed, "同级顺序也应变化");
+    assert_eq!(
+        outcome.parent_album_id.as_deref(),
+        Some(target.id.as_str()),
+        "返回的新父级应为目标父"
+    );
+
+    let children: Vec<String> = db
+        .list_child_albums(target.id.as_str())
+        .expect("列出子相册失败")
+        .into_iter()
+        .map(|album| album.id.as_str().to_string())
+        .collect();
+    assert_eq!(
+        children,
+        vec![
+            x.id.as_str().to_string(),
+            outsider.id.as_str().to_string(),
+            y.id.as_str().to_string()
+        ],
+        "外来相册应插在 Y 之前、X 之后"
+    );
+}
+
+/// 排序落点不在目标父级下时报错，而不是静默塞到别处（D132）。
+#[test]
+fn move_album_ordered_rejects_foreign_anchor() {
+    let mut db = temp_db("m3_reorder_bad_anchor");
+    let parent =
+        AlbumService::create_fixed(&mut db, "repo-1", "父", None, None, &[]).expect("创建父失败");
+    let child =
+        AlbumService::create_fixed(&mut db, "repo-1", "子", None, Some(parent.id.as_str()), &[])
+            .expect("创建子失败");
+    let other =
+        AlbumService::create_fixed(&mut db, "repo-1", "别的", None, None, &[]).expect("创建失败");
+
+    // 落点 other 与目标父 parent 不在同一层
+    let err = AlbumService::move_album_ordered(
+        &mut db,
+        child.id.as_str(),
+        Some(parent.id.as_str()),
+        Some(other.id.as_str()),
+    )
+    .expect_err("落点跨层必须被拒绝");
+    assert!(
+        matches!(err, HpError::InvalidArgument(ref msg) if msg.contains("排序落点")),
+        "错误文案应说明落点不合法，实际：{err:?}"
+    );
+}
+
+/// 拖拽排序不得形成互相包含（D132 沿用 D130 的禁环口径）。
+#[test]
+fn move_album_ordered_rejects_mutual_containment() {
+    let mut db = temp_db("m3_reorder_cycle");
+    let parent =
+        AlbumService::create_fixed(&mut db, "repo-1", "父", None, None, &[]).expect("创建父失败");
+    let child =
+        AlbumService::create_fixed(&mut db, "repo-1", "子", None, Some(parent.id.as_str()), &[])
+            .expect("创建子失败");
+
+    let err = AlbumService::move_album_ordered(
+        &mut db,
+        parent.id.as_str(),
+        Some(parent.id.as_str()),
+        None,
+    )
+    .expect_err("自包含必须被拒绝");
+    assert!(matches!(err, HpError::InvalidArgument(_)));
+
+    let err = AlbumService::move_album_ordered(
+        &mut db,
+        parent.id.as_str(),
+        Some(child.id.as_str()),
+        None,
+    )
+    .expect_err("互相包含必须被拒绝");
+    assert!(
+        matches!(err, HpError::InvalidArgument(ref msg) if msg.contains("互相包含")),
+        "错误文案应说明互相包含，实际：{err:?}"
+    );
 }

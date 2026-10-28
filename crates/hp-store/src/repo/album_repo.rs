@@ -71,9 +71,10 @@ impl AlbumMemberCursor {
     }
 }
 
-/// `albums` 表列清单（与迁移 0001 顺序一致；`0012` 追加的两列在末尾，D128）。
+/// `albums` 表列清单（与迁移 0001 顺序一致；`0012` 追加的两列在 `media_type` 之后，
+/// `0013` 追加的 `sort_order` 在末尾，D128 / D132）。
 const ALBUM_COLUMNS: &str = "id, repo_id, parent_album_id, name, kind, media_type, \
-     sync_root_album_id, sync_dir_path, created_at, updated_at";
+     sync_root_album_id, sync_dir_path, sort_order, created_at, updated_at";
 
 /// 某媒体源在**单个相册**中的成员关系统计（卸载影响评估与清理用）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +99,8 @@ impl RepoDb {
         require_nonempty(name, "相册名")?;
 
         let now = now_iso();
+        // 新相册排在同级末尾（D132）：取当前同级最大序号 + 1。
+        let sort_order = self.next_album_sort_order(repo_id, parent_album_id)?;
         let album = Album {
             id: AlbumId::generate(),
             repo_id: RepoId::from_raw(repo_id),
@@ -108,14 +111,15 @@ impl RepoDb {
             // 新建相册默认不是源镜像相册；同步根由 `set_album_sync_mirror` 回指自身（D128）。
             sync_root_album_id: None,
             sync_dir_path: None,
+            sort_order,
             created_at: now.clone(),
             updated_at: now,
         };
 
         self.conn()
             .execute(
-                "INSERT INTO albums (id, repo_id, parent_album_id, name, kind, media_type, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO albums (id, repo_id, parent_album_id, name, kind, media_type, sort_order, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     album.id.as_str(),
                     album.repo_id.as_str(),
@@ -123,6 +127,7 @@ impl RepoDb {
                     album.name,
                     album.kind.as_str(),
                     album.media_type.map(|m| m.as_str()),
+                    album.sort_order,
                     album.created_at,
                     album.updated_at,
                 ],
@@ -130,6 +135,20 @@ impl RepoDb {
             .map_err(|e| store_err("创建相册", e))?;
 
         Ok(album)
+    }
+
+    /// 同级下一个可用序号（当前最大 + 1；无兄弟时为 0）。
+    fn next_album_sort_order(&self, repo_id: &str, parent_album_id: Option<&str>) -> HpResult<i64> {
+        let max: Option<i64> = self
+            .conn()
+            .query_row(
+                "SELECT MAX(sort_order) FROM albums
+                 WHERE repo_id = ?1 AND parent_album_id IS ?2",
+                params![repo_id, parent_album_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| store_err("查询相册排序位", e))?;
+        Ok(max.map_or(0, |m| m + 1))
     }
 
     /// 按 ID 查询相册；不存在返回 `None`。
@@ -144,12 +163,13 @@ impl RepoDb {
             .map_err(|e| store_err("查询相册", e))
     }
 
-    /// 列出仓库下全部相册（按创建时间升序）。
+    /// 列出仓库下全部相册（按同级顺序升序，同序按创建时间兜底；D132）。
     pub fn list_albums(&self, repo_id: &str) -> HpResult<Vec<Album>> {
         let mut stmt = self
             .conn()
             .prepare(&format!(
-                "SELECT {ALBUM_COLUMNS} FROM albums WHERE repo_id = ?1 ORDER BY created_at"
+                "SELECT {ALBUM_COLUMNS} FROM albums WHERE repo_id = ?1
+                 ORDER BY sort_order, created_at"
             ))
             .map_err(|e| store_err("查询相册列表", e))?;
         let rows = stmt
@@ -257,12 +277,13 @@ impl RepoDb {
         Ok(())
     }
 
-    /// 列出直接子相册（按创建时间升序）。
+    /// 列出直接子相册（按同级顺序升序，同序按创建时间兜底；D132）。
     pub fn list_child_albums(&self, parent_album_id: &str) -> HpResult<Vec<Album>> {
         let mut stmt = self
             .conn()
             .prepare(&format!(
-                "SELECT {ALBUM_COLUMNS} FROM albums WHERE parent_album_id = ?1 ORDER BY created_at"
+                "SELECT {ALBUM_COLUMNS} FROM albums WHERE parent_album_id = ?1
+                 ORDER BY sort_order, created_at"
             ))
             .map_err(|e| store_err("查询子相册列表", e))?;
         let rows = stmt
@@ -271,6 +292,36 @@ impl RepoDb {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| store_err("解析子相册列表", e))?;
         Ok(rows)
+    }
+
+    /// 按给定顺序重写**同一父级**下全部相册的 `sort_order`（0 起递增，D132）。
+    ///
+    /// `ordered_ids` 必须是该父级的完整兄弟列表（调用方负责把被移动的相册插到目标位置）；
+    /// 本方法只按数组下标写序号，不校验成员完整性——遗漏的兄弟会保留旧序号，
+    /// 读侧仍有 `created_at` 兜底，不会丢行。
+    pub fn reorder_albums(
+        &mut self,
+        repo_id: &str,
+        parent_album_id: Option<&str>,
+        ordered_ids: &[String],
+    ) -> HpResult<()> {
+        require_nonempty(repo_id, "仓库 ID")?;
+        let now = now_iso();
+        let tx = self
+            .conn()
+            .unchecked_transaction()
+            .map_err(|e| store_err("开启相册排序事务", e))?;
+        for (index, album_id) in ordered_ids.iter().enumerate() {
+            require_nonempty(album_id, "相册 ID")?;
+            tx.execute(
+                "UPDATE albums SET sort_order = ?2, updated_at = ?3
+                 WHERE id = ?1 AND repo_id = ?4 AND parent_album_id IS ?5",
+                params![album_id, index as i64, now, repo_id, parent_album_id],
+            )
+            .map_err(|e| store_err("写入相册排序位", e))?;
+        }
+        tx.commit().map_err(|e| store_err("提交相册排序事务", e))?;
+        Ok(())
     }
 
     /// 按 `(同步根, 源目录)` 查镜像子相册；不存在返回 `None`（D128 同步重建用）。
@@ -756,8 +807,9 @@ fn row_to_album(row: &Row) -> rusqlite::Result<Album> {
     let media_type: Option<String> = row.get(5)?;
     let sync_root_album_id: Option<String> = row.get(6)?;
     let sync_dir_path: Option<String> = row.get(7)?;
-    let created_at: String = row.get(8)?;
-    let updated_at: String = row.get(9)?;
+    let sort_order: i64 = row.get(8)?;
+    let created_at: String = row.get(9)?;
+    let updated_at: String = row.get(10)?;
     Ok(Album {
         id: AlbumId::from_raw(id),
         repo_id: RepoId::from_raw(repo_id),
@@ -767,6 +819,7 @@ fn row_to_album(row: &Row) -> rusqlite::Result<Album> {
         media_type: media_type.as_deref().and_then(AlbumMediaType::from_str),
         sync_root_album_id: sync_root_album_id.map(AlbumId::from_raw),
         sync_dir_path,
+        sort_order,
         created_at,
         updated_at,
     })

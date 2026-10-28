@@ -135,6 +135,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "album.drop.contain": "包含（目標為媒體、拖曳為圖像）",
   "album.drop.conflict": "衝突",
   "album.drop.extract": "移出為獨立相簿（拖到空白處）",
+  "album.drop.insert": "插到此處（成為同級相簿）",
+  "album.reordered": "已調整相簿順序：{name}",
   "album.extract": "移出為獨立相簿",
   "album.extracted": "已移出為獨立相簿：{name}",
   "album.extractFailed": "移出為獨立相簿失敗：{err}",

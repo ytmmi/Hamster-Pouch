@@ -16,6 +16,8 @@ export interface AlbumItem {
   sync_root_album_id: string | null;
   /** 镜像的源内相对目录（`""` = 源根，`null` = 非镜像相册）（D128）。 */
   sync_dir_path: string | null;
+  /** 同一父级内的展示顺序，0 起递增（D132）。 */
+  sort_order: number;
   /** 成员数量 */
   member_count: number;
   created_at: string;
@@ -139,18 +141,22 @@ export interface AlbumCreateSyncArgs {
   relativePath?: string | null;
 }
 
-/** album_move 命令参数（拖拽改变父相册，D128） */
+/** album_move 命令参数（拖拽改变父相册 / 同级排序，D128 / D132） */
 export interface AlbumMoveArgs {
   repoId: string;
   albumId: string;
   /** 目标父相册；`null` / 省略 = 移到顶层。 */
   parentAlbumId?: string | null;
+  /** 同级落点：插到该兄弟相册之前；`null` / 省略 = 排到同级末尾（D132）。 */
+  beforeAlbumId?: string | null;
 }
 
 /** album_move 返回 */
 export interface AlbumMoveResult {
   parent_changed: boolean;
   parent_album_id: string | null;
+  /** 同级顺序是否变化（拖回原位置为 `false`，不写库）（D132）。 */
+  order_changed: boolean;
 }
 
 /** album_unsync 命令参数（取消同步，D128） */

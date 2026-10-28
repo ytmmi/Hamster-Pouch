@@ -135,6 +135,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "album.drop.contain": "Contains (target is media, dragged is image)",
   "album.drop.conflict": "Conflict",
   "album.drop.extract": "Move out as a standalone album (drop on empty space)",
+  "album.drop.insert": "Insert here (becomes a sibling album)",
+  "album.reordered": "Album order updated: {name}",
   "album.extract": "Move out as a standalone album",
   "album.extracted": "Moved out as a standalone album: {name}",
   "album.extractFailed": "Failed to move out as a standalone album: {err}",

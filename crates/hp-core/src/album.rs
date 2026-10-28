@@ -208,6 +208,12 @@ pub struct Album {
     pub sync_root_album_id: Option<AlbumId>,
     /// 本相册镜像的源内相对目录（已归一化为 `/`、无首尾斜杠，`""` 表示源根）（D128）。
     pub sync_dir_path: Option<String>,
+    /// 同一父级内的展示顺序，0 起递增（D132）。
+    ///
+    /// 只在兄弟之间有意义：不同父级的序号互不比较，因此移动到别的父级时
+    /// 只需重排目标父级的序号。读侧用 `(sort_order, created_at)` 兜底，
+    /// 迁移民的老数据全为 0 时仍按创建时间排序。
+    pub sort_order: i64,
     pub created_at: String,
     pub updated_at: String,
 }

@@ -28,13 +28,15 @@ pub struct AddMembersOutcome {
     pub added: u64,
 }
 
-/// 移动相册的结果（D128）。
+/// 移动相册的结果（D128 / D132）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoveOutcome {
     /// 父相册是否真的发生变化（拖到原来的父级下即为 `false`）。
     pub parent_changed: bool,
     /// 移动后父相册的 ID；移动到顶层为 `None`。
     pub parent_album_id: Option<String>,
+    /// 同级顺序是否真的发生变化（插到自己原来的位置即为 `false`）。
+    pub order_changed: bool,
 }
 
 /// 取消同步的结果（D128）。
@@ -230,10 +232,26 @@ impl AlbumService {
     /// 移动相册到新的父相册（`None` 表示移到顶层），D128。
     ///
     /// 拒绝自包含与任何会形成环的移动：两个相册不允许互为祖先。
+    /// 同级顺序不变（相册保持原有 `sort_order`）；要精确插到某一行之前请用
+    /// [`Self::move_album_ordered`]（D132）。
     pub fn move_album(
         db: &mut RepoDb,
         album_id: &str,
         new_parent_album_id: Option<&str>,
+    ) -> HpResult<MoveOutcome> {
+        Self::move_album_ordered(db, album_id, new_parent_album_id, None)
+    }
+
+    /// 移动相册并指定同级落点（D132 拖拽排序）。
+    ///
+    /// `before_album_id` 是**目标父级下已有的一个兄弟相册**，被移动的相册插到它之前；
+    /// `None` 表示排到同级末尾。落点不属于目标父级时报 `validation`——
+    /// 静默忽略会让"插在中间"变成"随便塞一个地方"，用户看到的结果与操作不符。
+    pub fn move_album_ordered(
+        db: &mut RepoDb,
+        album_id: &str,
+        new_parent_album_id: Option<&str>,
+        before_album_id: Option<&str>,
     ) -> HpResult<MoveOutcome> {
         let album = db
             .get_album(album_id)?
@@ -268,9 +286,45 @@ impl AlbumService {
         if parent_changed {
             db.update_album_parent(album_id, new_parent_album_id)?;
         }
+
+        // 目标父级下的完整兄弟序列（已按当前顺序排好）
+        let mut siblings: Vec<String> = match new_parent_album_id {
+            Some(parent_id) => db
+                .list_child_albums(parent_id)?
+                .into_iter()
+                .map(|a| a.id.as_str().to_string())
+                .collect(),
+            None => db
+                .list_albums(album.repo_id.as_str())?
+                .into_iter()
+                .filter(|a| a.parent_album_id.is_none())
+                .map(|a| a.id.as_str().to_string())
+                .collect(),
+        };
+        let previous_order = siblings.clone();
+        siblings.retain(|id| id != album_id);
+        let insert_at = match before_album_id {
+            Some(anchor) => match siblings.iter().position(|id| id == anchor) {
+                Some(index) => index,
+                None => {
+                    return Err(HpError::InvalidArgument(format!(
+                        "排序落点不是目标父级下的相册: {anchor}"
+                    )));
+                }
+            },
+            None => siblings.len(),
+        };
+        siblings.insert(insert_at, album_id.to_string());
+
+        // 父级没变且顺序没变 = 空操作，不写库（避免拖回原位也刷新 updated_at）
+        let order_changed = siblings != previous_order;
+        if order_changed {
+            db.reorder_albums(album.repo_id.as_str(), new_parent_album_id, &siblings)?;
+        }
         Ok(MoveOutcome {
             parent_changed,
             parent_album_id: new_parent_album_id.map(|p| p.to_string()),
+            order_changed,
         })
     }
 

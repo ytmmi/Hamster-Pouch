@@ -24,6 +24,8 @@ const REPO_MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/repo/0011_reader_annotations.sql"),
     // 同步相册的源镜像树 + 成员排除留痕：D128。
     include_str!("../../migrations/repo/0012_album_sync_mirror.sql"),
+    // 相册同级排序位：D132。
+    include_str!("../../migrations/repo/0013_album_sort_order.sql"),
 ];
 
 /// 仓库库句柄。

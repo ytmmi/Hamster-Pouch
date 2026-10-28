@@ -139,6 +139,8 @@ export const zhCN = {
   "album.drop.contain": "包含（目标为媒体、拖拽为图像）",
   "album.drop.conflict": "冲突",
   "album.drop.extract": "移出为独立相册（拖到空白处）",
+  "album.drop.insert": "插到此处（成为同级相册）",
+  "album.reordered": "已调整相册顺序：{name}",
   "album.extract": "移出为独立相册",
   "album.extracted": "已移出为独立相册：{name}",
   "album.extractFailed": "移出为独立相册失败：{err}",

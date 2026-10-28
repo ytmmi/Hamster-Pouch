@@ -94,6 +94,7 @@ export function albumMove(args: AlbumMoveArgs): Promise<AlbumMoveResult> {
     repoId: args.repoId,
     albumId: args.albumId,
     parentAlbumId: args.parentAlbumId ?? null,
+    beforeAlbumId: args.beforeAlbumId ?? null,
   }).then(unwrapApi);
 }
 

@@ -28,6 +28,8 @@ pub(crate) struct AlbumItem {
     sync_root_album_id: Option<String>,
     /// 镜像的源内相对目录（`""` = 源根，`null` = 非镜像相册）（D128）。
     sync_dir_path: Option<String>,
+    /// 同一父级内的展示顺序，0 起递增（D132）。
+    sort_order: i64,
     /// 成员数量（`album_member` 表行数）。
     member_count: i64,
     created_at: String,
@@ -43,6 +45,8 @@ pub(crate) struct AlbumCreateResult {
 pub(crate) struct AlbumMoveResult {
     parent_changed: bool,
     parent_album_id: Option<String>,
+    /// 同级顺序是否变化（拖回原位置为 `false`，不写库）（D132）。
+    order_changed: bool,
 }
 
 #[derive(Serialize)]
@@ -118,6 +122,7 @@ fn album_to_item(a: hp_core::Album, member_count: i64) -> AlbumItem {
         media_type: a.media_type.map(|m| m.as_str().to_string()),
         sync_root_album_id: a.sync_root_album_id.map(|r| r.as_str().to_string()),
         sync_dir_path: a.sync_dir_path,
+        sort_order: a.sort_order,
         member_count,
         created_at: a.created_at,
         updated_at: a.updated_at,
@@ -277,21 +282,30 @@ pub(crate) fn album_create_sync(
 /// album.move：把相册移到新的父相册（`parentAlbumId = null` 表示移到顶层）。
 ///
 /// 自包含与互相包含会被拒绝（`validation`），这是父子关系唯一的写入口（D128）。
+/// `beforeAlbumId` 指定同级落点（插到该兄弟之前；`null` = 排到同级末尾），
+/// 用于拖拽排序（D132）。父级与顺序都未变化时不写库。
 #[tauri::command]
 pub(crate) fn album_move(
     repo_id: String,
     album_id: String,
     parent_album_id: Option<String>,
+    before_album_id: Option<String>,
     state: State<AppState>,
 ) -> ApiResponse<AlbumMoveResult> {
     let _ = repo_id;
     let outcome = (|| -> HpResult<AlbumMoveResult> {
         let mut guard = lock_repo(&state)?;
         let db = open_repo_mut(&mut guard)?;
-        let outcome = AlbumService::move_album(db, &album_id, parent_album_id.as_deref())?;
+        let outcome = AlbumService::move_album_ordered(
+            db,
+            &album_id,
+            parent_album_id.as_deref(),
+            before_album_id.as_deref(),
+        )?;
         Ok(AlbumMoveResult {
             parent_changed: outcome.parent_changed,
             parent_album_id: outcome.parent_album_id,
+            order_changed: outcome.order_changed,
         })
     })();
     api_from_hp(outcome)

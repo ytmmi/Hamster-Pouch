@@ -35,6 +35,28 @@ type DropKind = "match" | "contain" | "conflict";
  */
 const EXTRACT_DROP_HINT = "album.drop.extract" as const;
 
+/**
+ * 拖拽排序的插入边（D132）：悬停在行的上/下三分之一时出现蓝色横线，
+ * 表示"插到这个相册的前面/后面"，而不是"放进它里面"。
+ *
+ * 行的中间三分之一仍然走三色（成为子相册）——同一个落点按纵向位置分派两种语义，
+ * 是因为"成为子相册"和"成为兄弟"本来就是两件事，不该靠拖动距离来区分。
+ */
+type DropEdge = "before" | "after";
+
+/** 行高上下各多少比例算"插到行间"；中间留给"放进这一行"。 */
+const EDGE_RATIO = 0.3;
+
+/** 悬停位置落在行的上边、下边还是中间（D132）。 */
+function edgeFromEvent(e: DragEvent<HTMLElement>): DropEdge | null {
+  const rect = e.currentTarget.getBoundingClientRect();
+  if (rect.height <= 0) return null;
+  const ratio = (e.clientY - rect.top) / rect.height;
+  if (ratio < EDGE_RATIO) return "before";
+  if (ratio > 1 - EDGE_RATIO) return "after";
+  return null;
+}
+
 interface ContextMenuState {
   x: number;
   y: number;
@@ -63,6 +85,14 @@ function buildAlbumTree(albums: AlbumItem[]): AlbumNode[] {
       roots.push(node);
     }
   }
+  // 同级按 sort_order 排（D132 拖拽排序），同序按创建时间兜底——与后端读侧同口径。
+  const bySort = (x: AlbumNode, y: AlbumNode): number =>
+    x.sort_order - y.sort_order || x.created_at.localeCompare(y.created_at);
+  const sortDeep = (nodes: AlbumNode[]): void => {
+    nodes.sort(bySort);
+    for (const n of nodes) sortDeep(n.children);
+  };
+  sortDeep(roots);
   return roots;
 }
 
@@ -163,6 +193,8 @@ export function AlbumPanel(): JSX.Element {
   const [dropKind, setDropKind] = useState<DropKind | null>(null);
   // 相册拖到列表空白处 = 移出为独立相册：蓝框描在被拖的那一行上（D131）
   const [extractHover, setExtractHover] = useState(false);
+  // 拖拽排序的蓝色插入线：`albumId` 是被悬停的兄弟行，`edge` 是插到它前还是后（D132）
+  const [dropEdge, setDropEdge] = useState<{ albumId: string; edge: DropEdge } | null>(null);
   // 正在被拖拽的相册 id（用于三色预判与禁环）
   const [dragAlbumId, setDragAlbumId] = useState<string | null>(null);
   // 右键菜单内「重命名相册」行内输入状态
@@ -386,6 +418,69 @@ export function AlbumPanel(): JSX.Element {
     }
   };
 
+  /** 同一父级下的兄弟相册，按当前展示顺序（`sort_order`，同序按创建时间兜底，D132）。 */
+  const sortedSiblings = useCallback(
+    (parentAlbumId: string | null): AlbumItem[] =>
+      albums
+        .filter((a) => a.parent_album_id === parentAlbumId)
+        .sort(
+          (x, y) =>
+            x.sort_order - y.sort_order || x.created_at.localeCompare(y.created_at),
+        ),
+    [albums],
+  );
+
+  /**
+   * 拖拽排序：把相册插到某个兄弟行的前/后（D132）。
+   *
+   * 落点行的父级就是被移动相册的新父级——"插在中间"意味着和这一行长成同级，
+   * 所以跨层级拖动也顺带完成了父子变更，不需要再单独判断。
+   * 目标父级落在被拖相册子树内时拒绝（会形成互相包含）。
+   */
+  const reorderAlbum = async (
+    albumId: string,
+    targetAlbumId: string,
+    edge: DropEdge,
+  ) => {
+    if (!app.repoId) return;
+    const album = albums.find((a) => a.id === albumId);
+    const target = albums.find((a) => a.id === targetAlbumId);
+    if (!album || !target || albumId === targetAlbumId) return;
+    const newParentId = target.parent_album_id;
+    const byId = new Map(albums.map((a) => [a.id, a]));
+    // 新父级是自己的后代（或就是自己）→ 互相包含，禁止
+    if (newParentId !== null && isDescendantOf(newParentId, albumId, byId)) {
+      app.status(t("album.moveCycle"), "error");
+      return;
+    }
+    const siblings = sortedSiblings(newParentId).filter((a) => a.id !== albumId);
+    const anchorIndex = siblings.findIndex((a) => a.id === targetAlbumId);
+    if (anchorIndex < 0) return;
+    const beforeAlbumId =
+      edge === "before" ? targetAlbumId : (siblings[anchorIndex + 1]?.id ?? null);
+    const unchangedParent = album.parent_album_id === newParentId;
+    if (unchangedParent && beforeAlbumId === targetAlbumId) {
+      app.status(t("album.moved", { name: album.name }), "info");
+      return;
+    }
+    try {
+      const r = await api.albumMove({
+        repoId: app.repoId,
+        albumId,
+        parentAlbumId: newParentId,
+        beforeAlbumId,
+      });
+      if (!r.parent_changed && !r.order_changed) {
+        app.status(t("album.moved", { name: album.name }), "info");
+        return;
+      }
+      app.status(t("album.reordered", { name: album.name }), "ok");
+      app.refresh();
+    } catch (e) {
+      app.status(t("album.moveFailed", { err: errorTextOf(t, e) }), "error");
+    }
+  };
+
   /**
    * 把子相册从父相册中**移出**，成为独立（顶层）相册（D131）。
    *
@@ -469,16 +564,27 @@ export function AlbumPanel(): JSX.Element {
     // 蓝框画在**被拖的相册自己**身上（不是列表容器）：它表示"这个相册会被拿出来"，
     // 与三色的"这个相册会接收它"是不同的主语（D131）。
     const extractSelf = extractHover && dragAlbumId === node.id;
+    const fileHover = dragAlbumId === null && dropAlbumId === node.id;
+    // 蓝色插入线：拖的是相册，且悬停在这一行的上/下边缘（D132）
+    const insertEdge =
+      dragAlbumId !== null && dropEdge?.albumId === node.id ? dropEdge.edge : null;
+    const insertClass =
+      insertEdge === "before"
+        ? " drop-insert-before"
+        : insertEdge === "after"
+          ? " drop-insert-after"
+          : "";
     const dragClass = `${albumHover && dropKind ? ` drop-target-${dropKind}` : ""}${
       extractSelf ? " drop-target-extract" : ""
-    }`;
+    }${insertClass}`;
     // 颜色只说"能不能放"，文字说"为什么"——色觉差异不该成为唯一判据。
     const dragHint = extractSelf
       ? t(EXTRACT_DROP_HINT)
-      : albumHover && dropKind
-        ? t(`album.drop.${dropKind}`)
-        : undefined;
-    const fileHover = dragAlbumId === null && dropAlbumId === node.id;
+      : insertEdge !== null
+        ? t("album.drop.insert")
+        : albumHover && dropKind
+          ? t(`album.drop.${dropKind}`)
+          : undefined;
     return (
       <Fragment key={node.id}>
         <div
@@ -513,6 +619,7 @@ export function AlbumPanel(): JSX.Element {
             setDropAlbumId(null);
             setDropKind(null);
             setExtractHover(false);
+            setDropEdge(null);
           }}
           onDragOver={(e) => {
             e.preventDefault();
@@ -521,14 +628,26 @@ export function AlbumPanel(): JSX.Element {
             setExtractHover(false);
             const movingId = dragAlbumId ?? "";
             if (movingId) {
-              const kind = computeDropKind(movingId, node.id);
-              e.dataTransfer.dropEffect = kind === "conflict" ? "none" : "move";
-              setDropAlbumId(node.id);
-              setDropKind(kind);
+              // 行的上/下边缘 = 插到它前面/后面（蓝色横线）；中间 = 放进它里面（三色）
+              const edge = movingId === node.id ? null : edgeFromEvent(e);
+              if (edge) {
+                const kind = computeDropKind(movingId, node.id);
+                e.dataTransfer.dropEffect = kind === "conflict" ? "none" : "move";
+                setDropAlbumId(null);
+                setDropKind(null);
+                setDropEdge({ albumId: node.id, edge });
+              } else {
+                const kind = computeDropKind(movingId, node.id);
+                e.dataTransfer.dropEffect = kind === "conflict" ? "none" : "move";
+                setDropAlbumId(node.id);
+                setDropKind(kind);
+                setDropEdge(null);
+              }
             } else {
               e.dataTransfer.dropEffect = "copy";
               setDropAlbumId(node.id);
               setDropKind(null);
+              setDropEdge(null);
             }
           }}
           onDragLeave={(e) => {
@@ -538,6 +657,7 @@ export function AlbumPanel(): JSX.Element {
             if (related instanceof Node && row.contains(related)) return;
             setDropAlbumId(null);
             setDropKind(null);
+            setDropEdge(null);
           }}
           onDrop={(e) => {
             const albumId = e.dataTransfer.getData(ALBUM_DRAG_MIME);
@@ -546,13 +666,19 @@ export function AlbumPanel(): JSX.Element {
               e.preventDefault();
               // 已经落在这一行上，就不要再冒泡到列表容器被当成"移出为独立相册"
               e.stopPropagation();
+              const edge = albumId === node.id ? null : edgeFromEvent(e);
               setDropAlbumId(null);
               setDropKind(null);
               setExtractHover(false);
+              setDropEdge(null);
               if (albumId === node.id) return;
               const kind = computeDropKind(albumId, node.id);
               if (kind === "conflict") {
                 app.status(t("album.moveCycle"), "error");
+                return;
+              }
+              if (edge) {
+                void reorderAlbum(albumId, node.id, edge);
                 return;
               }
               void moveAlbum(albumId, node.id);
