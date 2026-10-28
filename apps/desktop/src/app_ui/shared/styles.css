@@ -493,22 +493,22 @@ button.danger {
 /*
  * 把子相册拖到列表空白处 = 移出为独立相册（D131）。
  * 蓝色与行内的绿/黄/红区分：前三种说"放进谁里面"，蓝色说"谁都不放进去"。
- * 同样用 `outline`，不改盒模型。
+ *
+ * 蓝框画在**被拖的那个相册身上**，不是画在相册面板/列表容器上——高亮框始终
+ * 跟着"被动的是谁"走：三色说"目标行会接收它"，蓝色说"它自己会被拿出来"。
+ * 画在容器上会读成"整个面板是个投放区"，与"这个相册要移出去"不是一回事。
+ * 同样用 `outline`，不改盒模型、不引起列表抖动。
  */
-.list.album-list.extract-target {
+.list-row.drop-target-extract {
   outline: 2px solid #4aa3ff;
   outline-offset: -2px;
-  background: rgba(74, 163, 255, 0.10);
-  border-radius: 4px;
+  background: rgba(74, 163, 255, 0.12);
 }
 
-/* 列表底部的空白落点：撑满剩余高度，保证"空白处"永远真实可放 */
+/* 列表底部的纯占位：撑满剩余高度，保证"空白处"永远真实可放（不承载任何提示文案） */
 .album-extract-hint {
   flex: 1;
   min-height: 28px;
-  padding: 4px 2px;
-  font-size: 11px;
-  color: #4aa3ff;
   pointer-events: none;
 }
 

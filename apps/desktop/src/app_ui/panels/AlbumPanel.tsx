@@ -29,6 +29,9 @@ type DropKind = "match" | "contain" | "conflict";
  *
  * 与三种行内提示分开是因为落点不同：行内改的是"谁是谁的子相册"，空白处改的是
  * "不再是任何人的子相册"，两者的合法性判定完全不同（后者永远合法，只需排除空操作）。
+ *
+ * 蓝框描在**被拖的那个相册自己**身上（`.list-row.drop-target-extract`），不描在列表
+ * 容器上——高亮的主语必须与被操作对象一致（用户 m01526）。
  */
 const EXTRACT_DROP_HINT = "album.drop.extract" as const;
 
@@ -158,7 +161,7 @@ export function AlbumPanel(): JSX.Element {
   const [dropAlbumId, setDropAlbumId] = useState<string | null>(null);
   // 相册拖相册的命中提示（`null` = 只是文件拖放，不画三色框）
   const [dropKind, setDropKind] = useState<DropKind | null>(null);
-  // 相册拖到列表空白处 = 移出为独立相册的高亮（D131）
+  // 相册拖到列表空白处 = 移出为独立相册：蓝框描在被拖的那一行上（D131）
   const [extractHover, setExtractHover] = useState(false);
   // 正在被拖拽的相册 id（用于三色预判与禁环）
   const [dragAlbumId, setDragAlbumId] = useState<string | null>(null);
@@ -463,9 +466,18 @@ export function AlbumPanel(): JSX.Element {
     const indent = depth * 14;
     // 相册拖相册时的三色命中提示；文件拖放仍走旧的 drop-target 高亮
     const albumHover = dragAlbumId !== null && dropAlbumId === node.id;
-    const dragClass = albumHover && dropKind ? ` drop-target-${dropKind}` : "";
+    // 蓝框画在**被拖的相册自己**身上（不是列表容器）：它表示"这个相册会被拿出来"，
+    // 与三色的"这个相册会接收它"是不同的主语（D131）。
+    const extractSelf = extractHover && dragAlbumId === node.id;
+    const dragClass = `${albumHover && dropKind ? ` drop-target-${dropKind}` : ""}${
+      extractSelf ? " drop-target-extract" : ""
+    }`;
     // 颜色只说"能不能放"，文字说"为什么"——色觉差异不该成为唯一判据。
-    const dragHint = albumHover && dropKind ? t(`album.drop.${dropKind}`) : undefined;
+    const dragHint = extractSelf
+      ? t(EXTRACT_DROP_HINT)
+      : albumHover && dropKind
+        ? t(`album.drop.${dropKind}`)
+        : undefined;
     const fileHover = dragAlbumId === null && dropAlbumId === node.id;
     return (
       <Fragment key={node.id}>
@@ -618,11 +630,13 @@ export function AlbumPanel(): JSX.Element {
             {t("album.list")}（{albums.length}）
           </div>
           {/*
-           * 列表本身就是"顶层相册"的落点：把子相册拖到空白处 → 移出为独立相册（D131）。
-           * 蓝色只在此处出现，和行内的绿/黄/红不混淆；文件拖放落在空白处一律忽略。
+           * 列表空白处是"移出为独立相册"的落点（D131），但蓝框画在**被拖的相册**身上
+           * （见 renderAlbumNode 的 extractSelf），不画在容器上——高亮框始终跟着
+           * "被动的是谁"走，画在容器上会被读成"整个面板是个投放区"。
+           * 文件拖放落在空白处一律忽略。
            */}
           <div
-            className={`list album-list${extractHover ? " extract-target" : ""}`}
+            className="list album-list"
             onDragOver={(e) => {
               if (!dragAlbumId) return;
               e.preventDefault();
@@ -630,7 +644,10 @@ export function AlbumPanel(): JSX.Element {
               // 行内 onDragOver 已先跑过并置了 dropAlbumId；这里反过来清掉行内高亮
               setDropAlbumId(null);
               setDropKind(null);
-              setExtractHover(true);
+              // 只有"本来有父级、拖出来真的会发生位移"的相册才亮蓝框；
+              // 顶层相册拖到空白处是空操作，不该先给一个会被自己否掉的承诺。
+              const dragged = albums.find((a) => a.id === dragAlbumId);
+              setExtractHover(dragged !== undefined && dragged.parent_album_id !== null);
             }}
             onDragLeave={(e) => {
               const list = e.currentTarget;
@@ -649,11 +666,8 @@ export function AlbumPanel(): JSX.Element {
             }}
           >
             {albumTree.map((n) => renderAlbumNode(n, 0))}
-            {albumTree.length > 0 && (
-              <div className="album-extract-hint">
-                {extractHover ? t(EXTRACT_DROP_HINT) : ""}
-              </div>
-            )}
+            {/* 纯占位：撑满剩余高度，保证"空白处"永远真实可放；文案已在被拖的行上显示 */}
+            {albumTree.length > 0 && <div className="album-extract-hint" />}
             {albums.length === 0 && <span className="placeholder">{t("common.noFile")}</span>}
           </div>
 
