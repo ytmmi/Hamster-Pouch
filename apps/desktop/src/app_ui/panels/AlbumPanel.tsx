@@ -24,6 +24,14 @@ const ALBUM_DRAG_MIME = "application/x-hp-album";
 /** 拖拽命中目标相册时的三种提示：属性完全匹配 / 目标包含拖拽 / 冲突（D128）。 */
 type DropKind = "match" | "contain" | "conflict";
 
+/**
+ * 拖到相册列表空白处 = 把子相册**移出**为独立（顶层）相册，提示色为蓝（D131）。
+ *
+ * 与三种行内提示分开是因为落点不同：行内改的是"谁是谁的子相册"，空白处改的是
+ * "不再是任何人的子相册"，两者的合法性判定完全不同（后者永远合法，只需排除空操作）。
+ */
+const EXTRACT_DROP_HINT = "album.drop.extract" as const;
+
 interface ContextMenuState {
   x: number;
   y: number;
@@ -150,6 +158,8 @@ export function AlbumPanel(): JSX.Element {
   const [dropAlbumId, setDropAlbumId] = useState<string | null>(null);
   // 相册拖相册的命中提示（`null` = 只是文件拖放，不画三色框）
   const [dropKind, setDropKind] = useState<DropKind | null>(null);
+  // 相册拖到列表空白处 = 移出为独立相册的高亮（D131）
+  const [extractHover, setExtractHover] = useState(false);
   // 正在被拖拽的相册 id（用于三色预判与禁环）
   const [dragAlbumId, setDragAlbumId] = useState<string | null>(null);
   // 右键菜单内「重命名相册」行内输入状态
@@ -373,6 +383,43 @@ export function AlbumPanel(): JSX.Element {
     }
   };
 
+  /**
+   * 把子相册从父相册中**移出**，成为独立（顶层）相册（D131）。
+   *
+   * 落点是相册列表的空白区域，语义等价于 `move_album(parent = null)`：
+   * 不删除任何成员、不改名、不改媒体属性，只断开父子链接。
+   * 同步镜像子相册也能拖出，但下次同步会按源目录位置重新挂回去（D129），所以要告知。
+   */
+  const extractAlbum = async (albumId: string) => {
+    if (!app.repoId) return;
+    const album = albums.find((a) => a.id === albumId);
+    if (!album) return;
+    if (album.parent_album_id === null) {
+      app.status(t("album.alreadyRoot", { name: album.name }), "info");
+      return;
+    }
+    try {
+      const r = await api.albumMove({
+        repoId: app.repoId,
+        albumId,
+        parentAlbumId: null,
+      });
+      if (!r.parent_changed) {
+        app.status(t("album.alreadyRoot", { name: album.name }), "info");
+        return;
+      }
+      app.status(t("album.extracted", { name: album.name }), "ok");
+      const isMirrorChild =
+        album.sync_root_album_id !== null && album.sync_root_album_id !== album.id;
+      if (isMirrorChild) {
+        app.status(t("album.extractSyncNote", { name: album.name }), "info");
+      }
+      app.refresh();
+    } catch (e) {
+      app.status(t("album.extractFailed", { err: errorTextOf(t, e) }), "error");
+    }
+  };
+
   // 取消同步：同步相册退化为一般（固定型）相册，成员全部保留
   const unsyncAlbum = async (albumId: string) => {
     if (!app.repoId) return;
@@ -453,9 +500,13 @@ export function AlbumPanel(): JSX.Element {
             setDragAlbumId(null);
             setDropAlbumId(null);
             setDropKind(null);
+            setExtractHover(false);
           }}
           onDragOver={(e) => {
             e.preventDefault();
+            // 行内命中优先于"移出"落点：阻止冒泡到列表容器，避免蓝色提示覆盖三色提示
+            e.stopPropagation();
+            setExtractHover(false);
             const movingId = dragAlbumId ?? "";
             if (movingId) {
               const kind = computeDropKind(movingId, node.id);
@@ -481,8 +532,11 @@ export function AlbumPanel(): JSX.Element {
             if (albumId) {
               // 相册拖相册：改变父子关系（红框 / 自包含 / 互相包含一律拒绝）
               e.preventDefault();
+              // 已经落在这一行上，就不要再冒泡到列表容器被当成"移出为独立相册"
+              e.stopPropagation();
               setDropAlbumId(null);
               setDropKind(null);
+              setExtractHover(false);
               if (albumId === node.id) return;
               const kind = computeDropKind(albumId, node.id);
               if (kind === "conflict") {
@@ -563,8 +617,43 @@ export function AlbumPanel(): JSX.Element {
           <div className="section-title">
             {t("album.list")}（{albums.length}）
           </div>
-          <div className="list album-list">
+          {/*
+           * 列表本身就是"顶层相册"的落点：把子相册拖到空白处 → 移出为独立相册（D131）。
+           * 蓝色只在此处出现，和行内的绿/黄/红不混淆；文件拖放落在空白处一律忽略。
+           */}
+          <div
+            className={`list album-list${extractHover ? " extract-target" : ""}`}
+            onDragOver={(e) => {
+              if (!dragAlbumId) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              // 行内 onDragOver 已先跑过并置了 dropAlbumId；这里反过来清掉行内高亮
+              setDropAlbumId(null);
+              setDropKind(null);
+              setExtractHover(true);
+            }}
+            onDragLeave={(e) => {
+              const list = e.currentTarget;
+              const related = e.relatedTarget;
+              if (related instanceof Node && list.contains(related)) return;
+              setExtractHover(false);
+            }}
+            onDrop={(e) => {
+              const draggedId = e.dataTransfer.getData(ALBUM_DRAG_MIME);
+              setExtractHover(false);
+              setDropAlbumId(null);
+              setDropKind(null);
+              if (!draggedId) return; // 文件拖到空白处：不加入任何相册
+              e.preventDefault();
+              void extractAlbum(draggedId);
+            }}
+          >
             {albumTree.map((n) => renderAlbumNode(n, 0))}
+            {albumTree.length > 0 && (
+              <div className="album-extract-hint">
+                {extractHover ? t(EXTRACT_DROP_HINT) : ""}
+              </div>
+            )}
             {albums.length === 0 && <span className="placeholder">{t("common.noFile")}</span>}
           </div>
 
@@ -641,6 +730,19 @@ export function AlbumPanel(): JSX.Element {
                   }}
                 >
                   {t("album.createChild")}
+                </button>
+              )}
+
+              {/* 移出为独立相册：仅子相册出现（拖到列表空白处也能达到同样效果，D131） */}
+              {menuAlbum !== undefined && menuAlbum.parent_album_id !== null && (
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    void extractAlbum(menu.albumId);
+                    setMenu(null);
+                  }}
+                >
+                  {t("album.extract")}
                 </button>
               )}
 

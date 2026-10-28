@@ -134,6 +134,12 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "album.drop.match": "屬性完全符合",
   "album.drop.contain": "包含（目標為媒體、拖曳為圖像）",
   "album.drop.conflict": "衝突",
+  "album.drop.extract": "移出為獨立相簿（拖到空白處）",
+  "album.extract": "移出為獨立相簿",
+  "album.extracted": "已移出為獨立相簿：{name}",
+  "album.extractFailed": "移出為獨立相簿失敗：{err}",
+  "album.alreadyRoot": "該相簿已經是獨立相簿：{name}",
+  "album.extractSyncNote": "已移出，但下次同步會依來源目錄位置把它掛回：{name}",
 
   // 外掛面板（M5 / RFC 0004）
   "panel.plugins": "外掛",

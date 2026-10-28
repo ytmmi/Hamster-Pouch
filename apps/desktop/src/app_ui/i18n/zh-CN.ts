@@ -138,6 +138,12 @@ export const zhCN = {
   "album.drop.match": "属性完全匹配",
   "album.drop.contain": "包含（目标为媒体、拖拽为图像）",
   "album.drop.conflict": "冲突",
+  "album.drop.extract": "移出为独立相册（拖到空白处）",
+  "album.extract": "移出为独立相册",
+  "album.extracted": "已移出为独立相册：{name}",
+  "album.extractFailed": "移出为独立相册失败：{err}",
+  "album.alreadyRoot": "该相册已经是独立相册：{name}",
+  "album.extractSyncNote": "已移出，但下次同步会按源目录位置把它挂回：{name}",
 
   // 插件面板（M5 / RFC 0004）
   "panel.plugins": "插件",

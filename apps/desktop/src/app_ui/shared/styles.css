@@ -490,6 +490,28 @@ button.danger {
   cursor: not-allowed;
 }
 
+/*
+ * 把子相册拖到列表空白处 = 移出为独立相册（D131）。
+ * 蓝色与行内的绿/黄/红区分：前三种说"放进谁里面"，蓝色说"谁都不放进去"。
+ * 同样用 `outline`，不改盒模型。
+ */
+.list.album-list.extract-target {
+  outline: 2px solid #4aa3ff;
+  outline-offset: -2px;
+  background: rgba(74, 163, 255, 0.10);
+  border-radius: 4px;
+}
+
+/* 列表底部的空白落点：撑满剩余高度，保证"空白处"永远真实可放 */
+.album-extract-hint {
+  flex: 1;
+  min-height: 28px;
+  padding: 4px 2px;
+  font-size: 11px;
+  color: #4aa3ff;
+  pointer-events: none;
+}
+
 /* ===== 媒体源目录树 ===== */
 
 .tree-node-wrap {

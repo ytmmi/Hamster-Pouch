@@ -134,6 +134,12 @@ export const en: Record<keyof DictZhCN, string> = {
   "album.drop.match": "Properties match exactly",
   "album.drop.contain": "Contains (target is media, dragged is image)",
   "album.drop.conflict": "Conflict",
+  "album.drop.extract": "Move out as a standalone album (drop on empty space)",
+  "album.extract": "Move out as a standalone album",
+  "album.extracted": "Moved out as a standalone album: {name}",
+  "album.extractFailed": "Failed to move out as a standalone album: {err}",
+  "album.alreadyRoot": "Already a standalone album: {name}",
+  "album.extractSyncNote": "Moved out, but the next sync will attach it back to its source directory: {name}",
 
   // Plugins panel (M5 / RFC 0004)
   "panel.plugins": "Plugins",
