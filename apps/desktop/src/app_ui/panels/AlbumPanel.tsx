@@ -417,6 +417,8 @@ export function AlbumPanel(): JSX.Element {
     // 相册拖相册时的三色命中提示；文件拖放仍走旧的 drop-target 高亮
     const albumHover = dragAlbumId !== null && dropAlbumId === node.id;
     const dragClass = albumHover && dropKind ? ` drop-target-${dropKind}` : "";
+    // 颜色只说"能不能放"，文字说"为什么"——色觉差异不该成为唯一判据。
+    const dragHint = albumHover && dropKind ? t(`album.drop.${dropKind}`) : undefined;
     const fileHover = dragAlbumId === null && dropAlbumId === node.id;
     return (
       <Fragment key={node.id}>
@@ -511,7 +513,11 @@ export function AlbumPanel(): JSX.Element {
           </span>
           <span className="source-name">{node.name}</span>
           <span className="source-path">
-            {kindLabel(node.kind)} · {mediaLabel(node.media_type)}
+            {dragHint ?? (
+              <>
+                {kindLabel(node.kind)} · {mediaLabel(node.media_type)}
+              </>
+            )}
           </span>
           <span className="tree-count">{node.member_count}</span>
         </div>
