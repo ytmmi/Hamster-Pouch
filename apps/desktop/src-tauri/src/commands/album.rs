@@ -24,6 +24,10 @@ pub(crate) struct AlbumItem {
     name: String,
     kind: String,
     media_type: Option<String>,
+    /// 所属同步根相册；同步根指向自己，非镜像相册为 `null`（D128）。
+    sync_root_album_id: Option<String>,
+    /// 镜像的源内相对目录（`""` = 源根，`null` = 非镜像相册）（D128）。
+    sync_dir_path: Option<String>,
     /// 成员数量（`album_member` 表行数）。
     member_count: i64,
     created_at: String,
@@ -33,6 +37,17 @@ pub(crate) struct AlbumItem {
 #[derive(Serialize)]
 pub(crate) struct AlbumCreateResult {
     album_id: String,
+}
+
+#[derive(Serialize)]
+pub(crate) struct AlbumMoveResult {
+    parent_changed: bool,
+    parent_album_id: Option<String>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct AlbumUnsyncResult {
+    released_children: u64,
 }
 
 #[derive(Serialize)]
@@ -101,6 +116,8 @@ fn album_to_item(a: hp_core::Album, member_count: i64) -> AlbumItem {
         name: a.name,
         kind: a.kind.as_str().to_string(),
         media_type: a.media_type.map(|m| m.as_str().to_string()),
+        sync_root_album_id: a.sync_root_album_id.map(|r| r.as_str().to_string()),
+        sync_dir_path: a.sync_dir_path,
         member_count,
         created_at: a.created_at,
         updated_at: a.updated_at,
@@ -168,6 +185,132 @@ pub(crate) fn album_create(
 
         Ok(AlbumCreateResult {
             album_id: album.id.as_str().to_string(),
+        })
+    })();
+    api_from_hp(outcome)
+}
+
+/// album.createSnapshot：「创建为相册（仅当前对象）」——把源/目录当前的对象一次性
+/// 复制成**固定型相册**（D128）。
+///
+/// 快照语义：创建之后不再跟随源；与 `album.createSync` 的区别只在于"是否持续同步"。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn album_create_snapshot(
+    repo_id: String,
+    name: String,
+    media_type: Option<String>,
+    parent_album_id: Option<String>,
+    source_id: String,
+    relative_path: Option<String>,
+    include_subsources: Option<bool>,
+    state: State<AppState>,
+) -> ApiResponse<AlbumCreateResult> {
+    let outcome = (|| -> HpResult<AlbumCreateResult> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(HpError::InvalidArgument("相册名不能为空".into()));
+        }
+        if source_id.trim().is_empty() {
+            return Err(HpError::InvalidArgument("创建相册必须提供 sourceId".into()));
+        }
+        let media_type = parse_album_media_type(media_type.as_deref())?;
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let album = AlbumService::create_snapshot(
+            db,
+            &repo_id,
+            name,
+            media_type,
+            parent_album_id.as_deref(),
+            &source_id,
+            relative_path.as_deref(),
+            include_subsources.unwrap_or(false),
+        )?;
+        Ok(AlbumCreateResult {
+            album_id: album.id.as_str().to_string(),
+        })
+    })();
+    api_from_hp(outcome)
+}
+
+/// album.createSync：「创建为同步相册」——建立持续同步的相册，并按源目录层级
+/// 自动维护镜像子相册（D128）。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn album_create_sync(
+    repo_id: String,
+    name: String,
+    media_type: Option<String>,
+    parent_album_id: Option<String>,
+    source_id: String,
+    relative_path: Option<String>,
+    state: State<AppState>,
+) -> ApiResponse<AlbumCreateResult> {
+    let outcome = (|| -> HpResult<AlbumCreateResult> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(HpError::InvalidArgument("相册名不能为空".into()));
+        }
+        if source_id.trim().is_empty() {
+            return Err(HpError::InvalidArgument("同步相册必须提供 sourceId".into()));
+        }
+        let media_type = parse_album_media_type(media_type.as_deref())?;
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let album = AlbumService::create_sync_album(
+            db,
+            &repo_id,
+            name,
+            media_type,
+            parent_album_id.as_deref(),
+            &source_id,
+            relative_path.as_deref(),
+        )?;
+        Ok(AlbumCreateResult {
+            album_id: album.id.as_str().to_string(),
+        })
+    })();
+    api_from_hp(outcome)
+}
+
+/// album.move：把相册移到新的父相册（`parentAlbumId = null` 表示移到顶层）。
+///
+/// 自包含与互相包含会被拒绝（`validation`），这是父子关系唯一的写入口（D128）。
+#[tauri::command]
+pub(crate) fn album_move(
+    repo_id: String,
+    album_id: String,
+    parent_album_id: Option<String>,
+    state: State<AppState>,
+) -> ApiResponse<AlbumMoveResult> {
+    let _ = repo_id;
+    let outcome = (|| -> HpResult<AlbumMoveResult> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let outcome = AlbumService::move_album(db, &album_id, parent_album_id.as_deref())?;
+        Ok(AlbumMoveResult {
+            parent_changed: outcome.parent_changed,
+            parent_album_id: outcome.parent_album_id,
+        })
+    })();
+    api_from_hp(outcome)
+}
+
+/// album.unsync：取消同步——同步相册退化为一般（固定型）相册，成员全部保留（D128）。
+#[tauri::command]
+pub(crate) fn album_unsync(
+    repo_id: String,
+    album_id: String,
+    state: State<AppState>,
+) -> ApiResponse<AlbumUnsyncResult> {
+    let _ = repo_id;
+    let outcome = (|| -> HpResult<AlbumUnsyncResult> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let outcome = AlbumService::unsync_album(db, &album_id)?;
+        Ok(AlbumUnsyncResult {
+            released_children: outcome.released_children,
         })
     })();
     api_from_hp(outcome)

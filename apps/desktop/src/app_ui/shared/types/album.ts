@@ -12,6 +12,10 @@ export interface AlbumItem {
   name: string;
   kind: string;
   media_type: string | null;
+  /** 所属同步根相册；同步根指向自己，非镜像相册为 `null`（D128）。 */
+  sync_root_album_id: string | null;
+  /** 镜像的源内相对目录（`""` = 源根，`null` = 非镜像相册）（D128）。 */
+  sync_dir_path: string | null;
   /** 成员数量 */
   member_count: number;
   created_at: string;
@@ -110,4 +114,52 @@ export interface AlbumRenameArgs {
 export interface AlbumDeleteArgs {
   repoId: string;
   albumId: string;
+}
+
+/** album_create_snapshot 命令参数（「创建为相册（仅当前对象）」，D128） */
+export interface AlbumCreateSnapshotArgs {
+  repoId: string;
+  name: string;
+  mediaType?: string;
+  parentAlbumId?: string;
+  sourceId: string;
+  /** 源内相对目录；省略 = 源根。 */
+  relativePath?: string | null;
+  includeSubsources?: boolean;
+}
+
+/** album_create_sync 命令参数（「创建为同步相册」，D128） */
+export interface AlbumCreateSyncArgs {
+  repoId: string;
+  name: string;
+  mediaType?: string;
+  parentAlbumId?: string;
+  sourceId: string;
+  /** 源内相对目录；省略 = 源根。 */
+  relativePath?: string | null;
+}
+
+/** album_move 命令参数（拖拽改变父相册，D128） */
+export interface AlbumMoveArgs {
+  repoId: string;
+  albumId: string;
+  /** 目标父相册；`null` / 省略 = 移到顶层。 */
+  parentAlbumId?: string | null;
+}
+
+/** album_move 返回 */
+export interface AlbumMoveResult {
+  parent_changed: boolean;
+  parent_album_id: string | null;
+}
+
+/** album_unsync 命令参数（取消同步，D128） */
+export interface AlbumUnsyncArgs {
+  repoId: string;
+  albumId: string;
+}
+
+/** album_unsync 返回 */
+export interface AlbumUnsyncResult {
+  released_children: number;
 }

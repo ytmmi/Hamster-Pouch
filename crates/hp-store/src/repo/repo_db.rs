@@ -22,6 +22,8 @@ const REPO_MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/repo/0010_file_marks.sql"),
     // 阅读批注（书签 / 笔记 / 高亮）：2026-10-16，D113。
     include_str!("../../migrations/repo/0011_reader_annotations.sql"),
+    // 同步相册的源镜像树 + 成员排除留痕：D128。
+    include_str!("../../migrations/repo/0012_album_sync_mirror.sql"),
 ];
 
 /// 仓库库句柄。

@@ -374,32 +374,61 @@ export function SourcePanel(): JSX.Element {
     }
   };
 
-  // 复制为相册：基于源（或子文件夹）创建跟随源相册并立即同步
-  const copyAsAlbum = async (
+  /**
+   * 创建为相册（仅当前对象）：把当前源/目录下**已有**的对象一次性复制成固定型相册。
+   *
+   * 快照语义（D128）：创建后不再跟随源，之后新增/删除的文件都不会影响这个相册；
+   * 需要持续跟随请用 {@link createSyncAlbum}。
+   */
+  const createSnapshotAlbum = async (
     sourceId: string,
     relativePath: string | null,
     name: string,
   ) => {
     if (!app.repoId) return;
     try {
-      const r = await api.albumCreate({
+      const r = await api.albumCreateSnapshot({
         repoId: app.repoId,
         name,
-        kind: "follow_source",
         sourceId,
-        syncMode: "mirror",
+        relativePath,
         includeSubsources: false,
-        filterJson: relativePath
-          ? JSON.stringify({ dirPrefix: relativePath })
-          : undefined,
       });
-      await api.albumSync({ repoId: app.repoId, albumId: r.album_id });
-      app.status(t("source.copiedAsAlbum", { name }), "ok");
+      app.status(t("source.createdAsAlbum", { name }), "ok");
       app.setAlbumId(r.album_id);
       app.setSourceId(null);
       app.refresh();
     } catch (e) {
-      app.status(t("source.copyAsAlbumFailed", { err: errorTextOf(app.t, e) }), "error");
+      app.status(t("source.createAsAlbumFailed", { err: errorTextOf(app.t, e) }), "error");
+    }
+  };
+
+  /**
+   * 创建为同步相册：建立持续跟随该源的相册，并按源目录层级自动维护镜像子相册（D128）。
+   *
+   * 同步时"只增不删"：源里新出现的对象自动加入；用户手动移除的对象记入排除表，
+   * 后续同步不再加回（尊重手动编辑）。
+   */
+  const createSyncAlbum = async (
+    sourceId: string,
+    relativePath: string | null,
+    name: string,
+  ) => {
+    if (!app.repoId) return;
+    try {
+      const r = await api.albumCreateSync({
+        repoId: app.repoId,
+        name,
+        sourceId,
+        relativePath,
+      });
+      await api.albumSync({ repoId: app.repoId, albumId: r.album_id });
+      app.status(t("source.createdAsSyncAlbum", { name }), "ok");
+      app.setAlbumId(r.album_id);
+      app.setSourceId(null);
+      app.refresh();
+    } catch (e) {
+      app.status(t("source.createSyncAlbumFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -584,11 +613,20 @@ export function SourcePanel(): JSX.Element {
               <button
                 className="menu-item"
                 onClick={() => {
-                  void copyAsAlbum(menu.sourceId, menu.relativePath, menu.name);
+                  void createSnapshotAlbum(menu.sourceId, menu.relativePath, menu.name);
                   setMenu(null);
                 }}
               >
                 {t("source.copyAsAlbum")}
+              </button>
+              <button
+                className="menu-item"
+                onClick={() => {
+                  void createSyncAlbum(menu.sourceId, menu.relativePath, menu.name);
+                  setMenu(null);
+                }}
+              >
+                {t("source.createSyncAlbum")}
               </button>
               {menu.relativePath === null && (
                 <>

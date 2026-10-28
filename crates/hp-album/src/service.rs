@@ -1,4 +1,7 @@
-//! 相册业务服务：创建、媒体属性变更、成员维护（RFC 0002 / D10 / D13）。
+//! 相册业务服务：创建、媒体属性变更、成员维护、移动与取消同步
+//! （RFC 0002 / D10 / D13 / D128）。
+
+use std::collections::HashSet;
 
 use hp_core::{
     AddedBy, Album, AlbumKind, AlbumMediaType, AlbumSyncRule, FileIndexRow, HpError, HpResult,
@@ -7,6 +10,7 @@ use hp_core::{
 use hp_store::RepoDb;
 
 use crate::media::resolve_media_type;
+use crate::mirror::{dir_filter_json, normalize_dir};
 
 /// 修改媒体属性的结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +26,22 @@ pub struct SetMediaTypeOutcome {
 pub struct AddMembersOutcome {
     /// 实际新增的成员数（已存在的成员不计入）。
     pub added: u64,
+}
+
+/// 移动相册的结果（D128）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoveOutcome {
+    /// 父相册是否真的发生变化（拖到原来的父级下即为 `false`）。
+    pub parent_changed: bool,
+    /// 移动后父相册的 ID；移动到顶层为 `None`。
+    pub parent_album_id: Option<String>,
+}
+
+/// 取消同步的结果（D128）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnsyncOutcome {
+    /// 一并退化为固定型相册的**镜像子相册**数量（不含被取消的相册本人）。
+    pub released_children: u64,
 }
 
 /// 单文件同步冲突的原因码：成员已被用户固定（pinned），`mirror` 本应移除却保留。
@@ -108,6 +128,197 @@ impl AlbumService {
         Ok(album)
     }
 
+    /// 「创建为相册（仅当前对象）」：把源（或源内某个目录）**当前**的对象一次性复制成
+    /// **固定型相册**（D128）。
+    ///
+    /// 这是一份快照：创建之后不再跟随源，源里新增/删除文件都不会影响它。
+    /// 与 [`Self::create_sync_album`] 的区别只在于"是否持续同步"。
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_snapshot(
+        db: &mut RepoDb,
+        repo_id: &str,
+        name: &str,
+        media_type: Option<AlbumMediaType>,
+        parent_album_id: Option<&str>,
+        source_id: &str,
+        relative_path: Option<&str>,
+        include_subsources: bool,
+    ) -> HpResult<Album> {
+        let album =
+            db.create_album(repo_id, name, AlbumKind::Fixed, media_type, parent_album_id)?;
+        let effective = resolve_media_type(db, &album)?;
+        let prefix = relative_path.map(normalize_dir).filter(|p| !p.is_empty());
+        let dir_prefix = prefix.map(|p| format!("{p}/"));
+
+        let mut source_ids = vec![source_id.to_string()];
+        if include_subsources {
+            let sources = db.list_mounted_sources(repo_id)?;
+            let mut frontier = vec![source_id.to_string()];
+            while let Some(parent) = frontier.pop() {
+                for source in &sources {
+                    let is_child = source
+                        .parent_source_id
+                        .as_ref()
+                        .is_some_and(|p| p.as_str() == parent.as_str());
+                    let id = source.id.as_str().to_string();
+                    if is_child && !source_ids.contains(&id) {
+                        source_ids.push(id.clone());
+                        frontier.push(id);
+                    }
+                }
+            }
+        }
+
+        let mut file_ids = Vec::new();
+        for id in &source_ids {
+            for file in db.list_files_by_source(id)? {
+                let media_ok = effective.contains(file.media_type);
+                let dir_ok = dir_prefix
+                    .as_deref()
+                    .is_none_or(|p| file.relative_path.starts_with(p));
+                if media_ok && dir_ok {
+                    file_ids.push(file.id.as_str().to_string());
+                }
+            }
+        }
+        if !file_ids.is_empty() {
+            Self::add_members(db, album.id.as_str(), &file_ids)?;
+        }
+        Ok(album)
+    }
+
+    /// 「创建为同步相册」：建立**持续同步**的跟随源相册，并按源目录层级自动维护镜像子相册
+    /// （D128）。
+    ///
+    /// 只增不删：源里新出现的对象自动加入；用户手动移除的对象会被记入排除表而不再被加回；
+    /// 用户手动加入的对象保持。镜像子相册的位置始终与源目录层级一致。
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_sync_album(
+        db: &mut RepoDb,
+        repo_id: &str,
+        name: &str,
+        media_type: Option<AlbumMediaType>,
+        parent_album_id: Option<&str>,
+        source_id: &str,
+        relative_path: Option<&str>,
+    ) -> HpResult<Album> {
+        let dir_path = relative_path.map(normalize_dir).unwrap_or_default();
+        let album = Self::create_follow_source(
+            db,
+            repo_id,
+            name,
+            media_type,
+            parent_album_id,
+            source_id,
+            // 只增不删：同步相册不会因为源里文件消失而移除用户看到的成员（D128）。
+            SyncMode::AddOnly,
+            false,
+            dir_filter_json(&dir_path),
+        )?;
+        // 同步根指向自己，这是"我是同步根"的唯一标记。
+        db.set_album_sync_mirror(
+            album.id.as_str(),
+            Some(album.id.as_str()),
+            Some(dir_path.as_str()),
+        )?;
+        let mut album = album;
+        album.sync_root_album_id = Some(album.id.clone());
+        album.sync_dir_path = Some(dir_path);
+        Ok(album)
+    }
+
+    /// 移动相册到新的父相册（`None` 表示移到顶层），D128。
+    ///
+    /// 拒绝自包含与任何会形成环的移动：两个相册不允许互为祖先。
+    pub fn move_album(
+        db: &mut RepoDb,
+        album_id: &str,
+        new_parent_album_id: Option<&str>,
+    ) -> HpResult<MoveOutcome> {
+        let album = db
+            .get_album(album_id)?
+            .ok_or_else(|| HpError::NotFound(format!("相册不存在: {album_id}")))?;
+
+        if let Some(parent_id) = new_parent_album_id {
+            if parent_id == album_id {
+                return Err(HpError::InvalidArgument(
+                    "相册不能成为自己的子相册".to_string(),
+                ));
+            }
+            let mut cursor = Some(parent_id.to_string());
+            // 沿目标父级向上回溯：遇到自己就说明会形成环。上限防御脏数据。
+            for _ in 0..crate::media::MAX_ALBUM_DEPTH {
+                let Some(current) = cursor else { break };
+                if current == album_id {
+                    return Err(HpError::InvalidArgument(
+                        "目标相册是当前相册的子相册，不能形成互相包含".to_string(),
+                    ));
+                }
+                cursor = db
+                    .get_album(&current)?
+                    .and_then(|a| a.parent_album_id.map(|p| p.as_str().to_string()));
+            }
+        }
+
+        let current_parent = album
+            .parent_album_id
+            .as_ref()
+            .map(|p| p.as_str().to_string());
+        let parent_changed = current_parent.as_deref() != new_parent_album_id;
+        if parent_changed {
+            db.update_album_parent(album_id, new_parent_album_id)?;
+        }
+        Ok(MoveOutcome {
+            parent_changed,
+            parent_album_id: new_parent_album_id.map(|p| p.to_string()),
+        })
+    }
+
+    /// 取消同步：同步相册退化为一般（固定型）相册（D128）。
+    ///
+    /// 一并释放它自动生成的镜像子相册，避免它们失去同步根后仍挂着"跟随源"的规则；
+    /// 成员关系全部保留（取消同步只改变后续是否跟随，不动已有内容）。
+    pub fn unsync_album(db: &mut RepoDb, album_id: &str) -> HpResult<UnsyncOutcome> {
+        let album = db
+            .get_album(album_id)?
+            .ok_or_else(|| HpError::NotFound(format!("相册不存在: {album_id}")))?;
+        let is_sync_root = album
+            .sync_root_album_id
+            .as_ref()
+            .is_some_and(|root| root.as_str() == album.id.as_str());
+        if album.kind != AlbumKind::FollowSource || !is_sync_root {
+            return Err(HpError::InvalidArgument(format!(
+                "该相册不是同步相册: {album_id}"
+            )));
+        }
+
+        // 镜像子相册：同一同步根下、且不是根自己的那些。
+        let mirrors = db.list_albums(album.repo_id.as_str())?;
+        let mut released_children = 0u64;
+        let mut visited: HashSet<String> = HashSet::new();
+        visited.insert(album_id.to_string());
+        for mirror in mirrors {
+            let belongs = mirror
+                .sync_root_album_id
+                .as_ref()
+                .is_some_and(|root| root.as_str() == album_id);
+            if !belongs || !visited.insert(mirror.id.as_str().to_string()) {
+                continue;
+            }
+            db.delete_sync_rule(mirror.id.as_str())?;
+            db.delete_sync_state(mirror.id.as_str())?;
+            db.update_album_kind(mirror.id.as_str(), AlbumKind::Fixed)?;
+            db.set_album_sync_mirror(mirror.id.as_str(), None, None)?;
+            released_children += 1;
+        }
+
+        db.delete_sync_rule(album_id)?;
+        db.delete_sync_state(album_id)?;
+        db.update_album_kind(album_id, AlbumKind::Fixed)?;
+        db.set_album_sync_mirror(album_id, None, None)?;
+        Ok(UnsyncOutcome { released_children })
+    }
+
     /// 手动加入成员：不匹配相册属性的文件整体拒绝（D10）。
     ///
     /// 跟随型相册中用户手动加入的成员默认 `pinned=true`，防止被同步移除。
@@ -142,6 +353,10 @@ impl AlbumService {
         for file_id in file_ids {
             let existed = db.get_album_member(album_id, file_id)?.is_some();
             db.add_album_member(album_id, file_id, AddedBy::User, pinned)?;
+            // 用户重新手工加入 = 撤销之前的排除留痕（D128），否则下次同步仍判它被排除。
+            if album.kind == AlbumKind::FollowSource {
+                db.remove_album_sync_exclusion(album_id, file_id)?;
+            }
             if !existed {
                 added += 1;
             }
@@ -150,8 +365,20 @@ impl AlbumService {
     }
 
     /// 移除成员；返回实际移除数量。
+    ///
+    /// 跟随源型相册里被用户手动移除的成员会写入**排除留痕**（D128）：同步是"只增不删、
+    /// 尊重用户手动编辑"的，没有这条留痕下一轮同步就会把它原样加回来。
     pub fn remove_members(db: &mut RepoDb, album_id: &str, file_ids: &[String]) -> HpResult<u64> {
-        db.remove_album_members(album_id, file_ids)
+        let album = db
+            .get_album(album_id)?
+            .ok_or_else(|| HpError::NotFound(format!("相册不存在: {album_id}")))?;
+        let removed = db.remove_album_members(album_id, file_ids)?;
+        if album.kind == AlbumKind::FollowSource {
+            for file_id in file_ids {
+                db.add_album_sync_exclusion(album_id, file_id)?;
+            }
+        }
+        Ok(removed)
     }
 
     /// 修改媒体属性：联动同步规则、移除不匹配成员并写操作历史（D10 / D13）。

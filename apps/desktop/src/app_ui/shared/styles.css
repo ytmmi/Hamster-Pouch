@@ -466,6 +466,30 @@ button.danger {
   background: var(--sel-bg);
 }
 
+/*
+ * 相册拖相册的三色命中提示（D128）：
+ * 绿 = 相册属性完全匹配；黄 = 目标包含拖拽方（如目标多媒体、拖拽图像）；红 = 冲突。
+ * 用 `outline` 而非 `border`，避免改变行高导致列表抖动。
+ */
+.list-row.drop-target-match {
+  outline: 2px solid #3fb950;
+  outline-offset: -2px;
+  background: rgba(63, 185, 80, 0.12);
+}
+
+.list-row.drop-target-contain {
+  outline: 2px solid #d29922;
+  outline-offset: -2px;
+  background: rgba(210, 153, 34, 0.12);
+}
+
+.list-row.drop-target-conflict {
+  outline: 2px solid #f85149;
+  outline-offset: -2px;
+  background: rgba(248, 81, 73, 0.12);
+  cursor: not-allowed;
+}
+
 /* ===== 媒体源目录树 ===== */
 
 .tree-node-wrap {

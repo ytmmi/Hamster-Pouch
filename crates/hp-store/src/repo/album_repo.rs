@@ -71,9 +71,9 @@ impl AlbumMemberCursor {
     }
 }
 
-/// `albums` 表列清单（与迁移 0001 顺序一致）。
-const ALBUM_COLUMNS: &str =
-    "id, repo_id, parent_album_id, name, kind, media_type, created_at, updated_at";
+/// `albums` 表列清单（与迁移 0001 顺序一致；`0012` 追加的两列在末尾，D128）。
+const ALBUM_COLUMNS: &str = "id, repo_id, parent_album_id, name, kind, media_type, \
+     sync_root_album_id, sync_dir_path, created_at, updated_at";
 
 /// 某媒体源在**单个相册**中的成员关系统计（卸载影响评估与清理用）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +105,9 @@ impl RepoDb {
             name: name.to_string(),
             kind,
             media_type,
+            // 新建相册默认不是源镜像相册；同步根由 `set_album_sync_mirror` 回指自身（D128）。
+            sync_root_album_id: None,
+            sync_dir_path: None,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -194,14 +197,178 @@ impl RepoDb {
         Ok(())
     }
 
-    /// 删除相册及其成员关系、同步规则、同步状态（外键无级联，需手动清理）。
+    /// 改挂父相册（`None` 表示移到顶层），并刷新 `updated_at`（D128 拖拽移动）。
+    ///
+    /// 环检测不在此层做（仓储只负责写），由 `hp-album` 在移动前拒绝自包含与互相包含。
+    pub fn update_album_parent(
+        &mut self,
+        album_id: &str,
+        parent_album_id: Option<&str>,
+    ) -> HpResult<()> {
+        require_nonempty(album_id, "相册 ID")?;
+        let n = self
+            .conn()
+            .execute(
+                "UPDATE albums SET parent_album_id = ?2, updated_at = ?3 WHERE id = ?1",
+                params![album_id, parent_album_id, now_iso()],
+            )
+            .map_err(|e| store_err("移动相册", e))?;
+        if n == 0 {
+            return Err(HpError::NotFound(format!("相册不存在: {album_id}")));
+        }
+        Ok(())
+    }
+
+    /// 修改相册类型（取消同步时把跟随源型降级为固定型），并刷新 `updated_at`。
+    pub fn update_album_kind(&mut self, album_id: &str, kind: AlbumKind) -> HpResult<()> {
+        require_nonempty(album_id, "相册 ID")?;
+        let n = self
+            .conn()
+            .execute(
+                "UPDATE albums SET kind = ?2, updated_at = ?3 WHERE id = ?1",
+                params![album_id, kind.as_str(), now_iso()],
+            )
+            .map_err(|e| store_err("修改相册类型", e))?;
+        if n == 0 {
+            return Err(HpError::NotFound(format!("相册不存在: {album_id}")));
+        }
+        Ok(())
+    }
+
+    /// 登记/解除同步镜像身份：`(sync_root_album_id, sync_dir_path)` 同时为 `None` 即解除（D128）。
+    pub fn set_album_sync_mirror(
+        &mut self,
+        album_id: &str,
+        sync_root_album_id: Option<&str>,
+        sync_dir_path: Option<&str>,
+    ) -> HpResult<()> {
+        require_nonempty(album_id, "相册 ID")?;
+        let n = self
+            .conn()
+            .execute(
+                "UPDATE albums SET sync_root_album_id = ?2, sync_dir_path = ?3, updated_at = ?4
+                 WHERE id = ?1",
+                params![album_id, sync_root_album_id, sync_dir_path, now_iso()],
+            )
+            .map_err(|e| store_err("登记同步镜像相册", e))?;
+        if n == 0 {
+            return Err(HpError::NotFound(format!("相册不存在: {album_id}")));
+        }
+        Ok(())
+    }
+
+    /// 列出直接子相册（按创建时间升序）。
+    pub fn list_child_albums(&self, parent_album_id: &str) -> HpResult<Vec<Album>> {
+        let mut stmt = self
+            .conn()
+            .prepare(&format!(
+                "SELECT {ALBUM_COLUMNS} FROM albums WHERE parent_album_id = ?1 ORDER BY created_at"
+            ))
+            .map_err(|e| store_err("查询子相册列表", e))?;
+        let rows = stmt
+            .query_map(params![parent_album_id], row_to_album)
+            .map_err(|e| store_err("读取子相册列表", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析子相册列表", e))?;
+        Ok(rows)
+    }
+
+    /// 按 `(同步根, 源目录)` 查镜像子相册；不存在返回 `None`（D128 同步重建用）。
+    pub fn find_sync_mirror_album(
+        &self,
+        sync_root_album_id: &str,
+        sync_dir_path: &str,
+    ) -> HpResult<Option<Album>> {
+        self.conn()
+            .query_row(
+                &format!(
+                    "SELECT {ALBUM_COLUMNS} FROM albums
+                     WHERE sync_root_album_id = ?1 AND sync_dir_path = ?2"
+                ),
+                params![sync_root_album_id, sync_dir_path],
+                row_to_album,
+            )
+            .optional()
+            .map_err(|e| store_err("查询同步镜像相册", e))
+    }
+
+    /// 删除同步规则（取消同步用；不触碰成员关系，成员原地保留）。
+    pub fn delete_sync_rule(&mut self, album_id: &str) -> HpResult<()> {
+        require_nonempty(album_id, "相册 ID")?;
+        self.conn()
+            .execute(
+                "DELETE FROM album_sync_rule WHERE album_id = ?1",
+                params![album_id],
+            )
+            .map_err(|e| store_err("删除同步规则", e))?;
+        Ok(())
+    }
+
+    /// 删除同步状态（取消同步用）。
+    pub fn delete_sync_state(&mut self, album_id: &str) -> HpResult<()> {
+        require_nonempty(album_id, "相册 ID")?;
+        self.conn()
+            .execute(
+                "DELETE FROM album_sync_state WHERE album_id = ?1",
+                params![album_id],
+            )
+            .map_err(|e| store_err("删除同步状态", e))?;
+        Ok(())
+    }
+
+    /// 记录"用户手动从同步相册移除了该文件"（D128：下次同步不得把它加回来）。
+    pub fn add_album_sync_exclusion(&mut self, album_id: &str, file_id: &str) -> HpResult<()> {
+        require_nonempty(album_id, "相册 ID")?;
+        require_nonempty(file_id, "文件 ID")?;
+        self.conn()
+            .execute(
+                "INSERT OR IGNORE INTO album_sync_exclusion (album_id, file_id, excluded_at)
+                 VALUES (?1, ?2, ?3)",
+                params![album_id, file_id, now_iso()],
+            )
+            .map_err(|e| store_err("记录同步排除", e))?;
+        Ok(())
+    }
+
+    /// 清除排除留痕（用户手动把文件加回相册时调用）。
+    pub fn remove_album_sync_exclusion(&mut self, album_id: &str, file_id: &str) -> HpResult<()> {
+        require_nonempty(album_id, "相册 ID")?;
+        self.conn()
+            .execute(
+                "DELETE FROM album_sync_exclusion WHERE album_id = ?1 AND file_id = ?2",
+                params![album_id, file_id],
+            )
+            .map_err(|e| store_err("清除同步排除", e))?;
+        Ok(())
+    }
+
+    /// 列出同步排除留痕中的文件 ID。
+    pub fn list_album_sync_exclusions(&self, album_id: &str) -> HpResult<Vec<String>> {
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT file_id FROM album_sync_exclusion WHERE album_id = ?1")
+            .map_err(|e| store_err("查询同步排除列表", e))?;
+        let rows = stmt
+            .query_map(params![album_id], |row| row.get::<_, String>(0))
+            .map_err(|e| store_err("读取同步排除列表", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析同步排除列表", e))?;
+        Ok(rows)
+    }
+
+    /// 删除相册及其成员关系、同步规则、同步状态、同步排除留痕（外键无级联，需手动清理）。
     pub fn delete_album(&mut self, album_id: &str) -> HpResult<()> {
         require_nonempty(album_id, "相册 ID")?;
         let tx = self
             .conn()
             .unchecked_transaction()
             .map_err(|e| store_err("开启相册删除事务", e))?;
-        for table in ["album_member", "album_sync_rule", "album_sync_state"] {
+        for table in [
+            "album_member",
+            "album_sync_rule",
+            "album_sync_state",
+            "album_sync_exclusion",
+        ] {
             tx.execute(
                 &format!("DELETE FROM {table} WHERE album_id = ?1"),
                 params![album_id],
@@ -587,8 +754,10 @@ fn row_to_album(row: &Row) -> rusqlite::Result<Album> {
     let name: String = row.get(3)?;
     let kind: String = row.get(4)?;
     let media_type: Option<String> = row.get(5)?;
-    let created_at: String = row.get(6)?;
-    let updated_at: String = row.get(7)?;
+    let sync_root_album_id: Option<String> = row.get(6)?;
+    let sync_dir_path: Option<String> = row.get(7)?;
+    let created_at: String = row.get(8)?;
+    let updated_at: String = row.get(9)?;
     Ok(Album {
         id: AlbumId::from_raw(id),
         repo_id: RepoId::from_raw(repo_id),
@@ -596,6 +765,8 @@ fn row_to_album(row: &Row) -> rusqlite::Result<Album> {
         name,
         kind: AlbumKind::from_str(&kind).unwrap_or(AlbumKind::Fixed),
         media_type: media_type.as_deref().and_then(AlbumMediaType::from_str),
+        sync_root_album_id: sync_root_album_id.map(AlbumId::from_raw),
+        sync_dir_path,
         created_at,
         updated_at,
     })

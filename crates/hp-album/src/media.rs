@@ -6,7 +6,7 @@ use hp_core::{Album, AlbumMediaType, FileIndexRow, HpError, HpResult};
 use hp_store::RepoDb;
 
 /// 相册嵌套解析的最大深度，防止异常父子环导致死循环。
-const MAX_ALBUM_DEPTH: usize = 64;
+pub(crate) const MAX_ALBUM_DEPTH: usize = 64;
 
 /// 解析相册有效媒体属性：显式值优先；空值继承父相册；顶层空值视作 `multimedia`（D10）。
 pub(crate) fn resolve_media_type(db: &RepoDb, album: &Album) -> HpResult<AlbumMediaType> {

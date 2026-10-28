@@ -204,6 +204,10 @@ pub struct Album {
     pub kind: AlbumKind,
     /// 媒体属性；`None` 表示继承父相册（D10）。顶层空值视作 `multimedia`。
     pub media_type: Option<AlbumMediaType>,
+    /// 所属**同步根相册**；同步根自己指向自己，非镜像相册为 `None`（D128）。
+    pub sync_root_album_id: Option<AlbumId>,
+    /// 本相册镜像的源内相对目录（已归一化为 `/`、无首尾斜杠，`""` 表示源根）（D128）。
+    pub sync_dir_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

@@ -1,5 +1,5 @@
 /**
- * 相册组件 — 添加相册（子菜单）+ 已添加的相册列表（右键操作 / 拖放加入）。
+ * 相册组件 — 添加相册（子菜单）+ 已添加的相册列表（右键操作 / 拖放加入 / 拖拽改父子）。
  */
 
 import {
@@ -17,6 +17,12 @@ import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { ContextMenu } from "../menu/ContextMenu";
 import type { AlbumItem } from "../shared/types";
+
+/** 相册拖拽载荷的 MIME 类型（与文件的 `application/x-hp-files` 区分，D117/D128）。 */
+const ALBUM_DRAG_MIME = "application/x-hp-album";
+
+/** 拖拽命中目标相册时的三种提示：属性完全匹配 / 目标包含拖拽 / 冲突（D128）。 */
+type DropKind = "match" | "contain" | "conflict";
 
 interface ContextMenuState {
   x: number;
@@ -47,6 +53,48 @@ function buildAlbumTree(albums: AlbumItem[]): AlbumNode[] {
     }
   }
   return roots;
+}
+
+/**
+ * 解析相册的**有效**媒体属性：显式值优先，否则沿父链继承，顶层无值 = `multimedia`。
+ *
+ * 与后端 `hp-album::media::resolve_media_type` 同口径（D10），用于拖拽时的三色预判。
+ */
+function effectiveMediaType(albumId: string, byId: Map<string, AlbumItem>): string {
+  let cur = byId.get(albumId);
+  for (let guard = 0; cur && guard < 64; guard += 1) {
+    if (cur.media_type) return cur.media_type;
+    cur = cur.parent_album_id ? byId.get(cur.parent_album_id) : undefined;
+  }
+  return "multimedia";
+}
+
+/** 媒体属性是否"完全等价"（`null`/`""` 已由 {@link effectiveMediaType} 归一）。 */
+function sameMediaType(a: string, b: string): boolean {
+  return a === b;
+}
+
+/**
+ * 媒体属性包含关系：`multimedia` 是所有具体类型的超集（对齐 `AlbumMediaType::contains`）。
+ *
+ * `containsMedia(outer, inner)` 为真表示 `outer` 覆盖 `inner`。
+ */
+function containsMedia(outer: string, inner: string): boolean {
+  return outer === inner || outer === "multimedia";
+}
+
+/** `candidateId` 是否为 `albumId` 的后代（沿 parent 链上溯；用于禁止互相包含）。 */
+function isDescendantOf(
+  candidateId: string,
+  albumId: string,
+  byId: Map<string, AlbumItem>,
+): boolean {
+  let cur = byId.get(candidateId);
+  for (let guard = 0; cur && guard < 64; guard += 1) {
+    if (cur.id === albumId) return true;
+    cur = cur.parent_album_id ? byId.get(cur.parent_album_id) : undefined;
+  }
+  return false;
 }
 
 /** 折叠箭头（内联 SVG，currentColor；展开时旋转 90°）。 */
@@ -100,6 +148,10 @@ export function AlbumPanel(): JSX.Element {
 
   // 拖放高亮：当前被悬停的相册 id
   const [dropAlbumId, setDropAlbumId] = useState<string | null>(null);
+  // 相册拖相册的命中提示（`null` = 只是文件拖放，不画三色框）
+  const [dropKind, setDropKind] = useState<DropKind | null>(null);
+  // 正在被拖拽的相册 id（用于三色预判与禁环）
+  const [dragAlbumId, setDragAlbumId] = useState<string | null>(null);
   // 右键菜单内「重命名相册」行内输入状态
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -112,6 +164,11 @@ export function AlbumPanel(): JSX.Element {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const albumTree = useMemo(() => buildAlbumTree(albums), [albums]);
+  /** 右键菜单当前指向的相册（用于决定是否显示「取消同步」）。 */
+  const menuAlbum = useMemo(
+    () => albums.find((a) => a.id === menu?.albumId),
+    [albums, menu],
+  );
 
   const toggleCollapse = useCallback((id: string) => {
     setCollapsed((prev) => {
@@ -266,6 +323,73 @@ export function AlbumPanel(): JSX.Element {
     }
   };
 
+  /**
+   * 判定"把 `sourceAlbumId` 拖到 `targetAlbumId` 上"的提示色（D128）：
+   *
+   * - `conflict`：目标就是自己、或目标在自己子树内（会形成互相包含）；
+   * - `match`：两边有效媒体属性完全相同；
+   * - `contain`：目标属性覆盖拖拽方（例如目标 `multimedia`、拖拽方 `image`）。
+   *
+   * 目标属性**窄于**拖拽方（目标 `image`、拖拽方 `multimedia`）也算 `conflict`——
+   * 放进去之后子相册的成员永远不可能满足父相册的属性，属于无意义嵌套。
+   */
+  const computeDropKind = useCallback(
+    (sourceAlbumId: string, targetAlbumId: string): DropKind | null => {
+      if (sourceAlbumId === targetAlbumId) return "conflict";
+      const byId = new Map(albums.map((a) => [a.id, a]));
+      if (!byId.has(sourceAlbumId) || !byId.has(targetAlbumId)) return null;
+      // 目标在拖拽方子树内 → 互相包含，必须禁止
+      if (isDescendantOf(targetAlbumId, sourceAlbumId, byId)) return "conflict";
+      const source = effectiveMediaType(sourceAlbumId, byId);
+      const target = effectiveMediaType(targetAlbumId, byId);
+      if (sameMediaType(source, target)) return "match";
+      if (containsMedia(target, source)) return "contain";
+      return "conflict";
+    },
+    [albums],
+  );
+
+  // 拖拽相册到目标相册：改变 parent_album_id（后端再做一次禁环校验）
+  const moveAlbum = async (albumId: string, parentAlbumId: string | null) => {
+    if (!app.repoId) return;
+    const album = albums.find((a) => a.id === albumId);
+    if (!album) return;
+    if (album.parent_album_id === parentAlbumId) {
+      app.status(t("album.moved", { name: album.name }), "info");
+      return;
+    }
+    try {
+      const r = await api.albumMove({
+        repoId: app.repoId,
+        albumId,
+        parentAlbumId,
+      });
+      app.status(t("album.moved", { name: album.name }), "ok");
+      app.refresh();
+      return r;
+    } catch (e) {
+      app.status(t("album.moveFailed", { err: errorTextOf(t, e) }), "error");
+      return undefined;
+    }
+  };
+
+  // 取消同步：同步相册退化为一般（固定型）相册，成员全部保留
+  const unsyncAlbum = async (albumId: string) => {
+    if (!app.repoId) return;
+    const album = albums.find((a) => a.id === albumId);
+    try {
+      await api.albumUnsync({ repoId: app.repoId, albumId });
+      app.status(t("album.unsynced", { name: album?.name ?? albumId }), "ok");
+      app.refresh();
+    } catch (e) {
+      app.status(t("album.unsyncFailed", { err: errorTextOf(t, e) }), "error");
+    }
+  };
+
+  /** 该相册是否为同步根相册（只有同步根才可取消同步）。 */
+  const isSyncRoot = (a: AlbumItem): boolean =>
+    a.sync_root_album_id !== null && a.sync_root_album_id === a.id;
+
   const kindLabel = (k: string) =>
     k === "follow_source" ? t("album.kind.follow") : t("album.kind.fixed");
 
@@ -290,13 +414,18 @@ export function AlbumPanel(): JSX.Element {
     const expanded = !collapsed.has(node.id);
     const hasChildren = node.children.length > 0;
     const indent = depth * 14;
+    // 相册拖相册时的三色命中提示；文件拖放仍走旧的 drop-target 高亮
+    const albumHover = dragAlbumId !== null && dropAlbumId === node.id;
+    const dragClass = albumHover && dropKind ? ` drop-target-${dropKind}` : "";
+    const fileHover = dragAlbumId === null && dropAlbumId === node.id;
     return (
       <Fragment key={node.id}>
         <div
           className={`tree-node list-row${
             selectedAlbum === node.id ? " selected" : ""
-          }${dropAlbumId === node.id ? " drop-target" : ""}`}
+          }${fileHover ? " drop-target" : ""}${dragClass}`}
           style={{ paddingLeft: indent }}
+          draggable
           onClick={() => {
             app.setAlbumId(node.id);
             app.setSourceId(null);
@@ -312,10 +441,30 @@ export function AlbumPanel(): JSX.Element {
             setOpenMediaTypeSub(false);
             setMenu({ x: e.clientX, y: e.clientY, albumId: node.id });
           }}
+          onDragStart={(e) => {
+            // 只带相册 id：文件的 application/x-hp-files 载荷走另一条分支
+            e.dataTransfer.setData(ALBUM_DRAG_MIME, node.id);
+            e.dataTransfer.effectAllowed = "move";
+            setDragAlbumId(node.id);
+          }}
+          onDragEnd={() => {
+            setDragAlbumId(null);
+            setDropAlbumId(null);
+            setDropKind(null);
+          }}
           onDragOver={(e) => {
             e.preventDefault();
-            e.dataTransfer.dropEffect = "copy";
-            setDropAlbumId(node.id);
+            const movingId = dragAlbumId ?? "";
+            if (movingId) {
+              const kind = computeDropKind(movingId, node.id);
+              e.dataTransfer.dropEffect = kind === "conflict" ? "none" : "move";
+              setDropAlbumId(node.id);
+              setDropKind(kind);
+            } else {
+              e.dataTransfer.dropEffect = "copy";
+              setDropAlbumId(node.id);
+              setDropKind(null);
+            }
           }}
           onDragLeave={(e) => {
             // 仅当离开整行（含子元素）时才清除高亮，避免子元素间抖动
@@ -323,8 +472,26 @@ export function AlbumPanel(): JSX.Element {
             const related = e.relatedTarget;
             if (related instanceof Node && row.contains(related)) return;
             setDropAlbumId(null);
+            setDropKind(null);
           }}
-          onDrop={(e) => void dropFiles(node.id, e)}
+          onDrop={(e) => {
+            const albumId = e.dataTransfer.getData(ALBUM_DRAG_MIME);
+            if (albumId) {
+              // 相册拖相册：改变父子关系（红框 / 自包含 / 互相包含一律拒绝）
+              e.preventDefault();
+              setDropAlbumId(null);
+              setDropKind(null);
+              if (albumId === node.id) return;
+              const kind = computeDropKind(albumId, node.id);
+              if (kind === "conflict") {
+                app.status(t("album.moveCycle"), "error");
+                return;
+              }
+              void moveAlbum(albumId, node.id);
+              return;
+            }
+            void dropFiles(node.id, e);
+          }}
         >
           <span
             className={`tree-arrow${hasChildren ? "" : " is-empty"}${
@@ -481,6 +648,19 @@ export function AlbumPanel(): JSX.Element {
               >
                 {t("album.delete")}
               </button>
+
+              {/* 取消同步：仅同步相册（同步根）出现；取消后退化为一般相册，成员保留 */}
+              {menuAlbum !== undefined && isSyncRoot(menuAlbum) && (
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    void unsyncAlbum(menu.albumId);
+                    setMenu(null);
+                  }}
+                >
+                  {t("album.unsync")}
+                </button>
+              )}
 
               {/* 设置媒体属性：子菜单（全部 / 图像 / 视频 / 音频） */}
               <button

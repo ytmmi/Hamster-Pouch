@@ -59,6 +59,8 @@ pub struct SourceDataCounts {
     pub annotations: u64,
     /// AI 覆盖撤销记录条数。
     pub ai_undo: u64,
+    /// 同步相册成员排除条数（迁移 0012，D128）。
+    pub sync_exclusions: u64,
     /// 因该源被卸载而改为普通（fixed）的跟随相册数。
     pub sync_albums: u64,
     /// 被摘挂为顶层源的子源数。
@@ -80,6 +82,7 @@ impl SourceDataCounts {
             + self.marks
             + self.annotations
             + self.ai_undo
+            + self.sync_exclusions
     }
 }
 
@@ -122,7 +125,12 @@ pub enum PurgePhase {
 ///   显式登记把这件事从"依赖开关"变成"确定发生"。
 /// - `reader_annotations`（迁移 0011，D113）：同一条口径（书签 / 笔记 / 高亮）。
 ///
-/// 两张表都按 `file_id` 关联，因此可以直接走下面统一的
+/// **新增引用 `files(id)` 的表必须同时补三处**（D128 的 `album_sync_exclusion` 是最新一例）：
+/// 本清单、[`SourceDataCounts`] 的对应字段与 [`SourceDataCounts::derived_total`]。
+/// - `album_sync_exclusion`（迁移 0012，D128）：同步相册的成员排除留痕，卸载源后不清理
+///   会留下指向已删文件的孤儿行。
+///
+/// 上述派生表都按 `file_id` 关联，因此可以直接走下面统一的
 /// `DELETE FROM {table} WHERE file_id IN (SELECT id FROM files WHERE source_id = ?1)`。
 const DERIVED_TABLES: &[&str] = &[
     "album_member",
@@ -134,6 +142,7 @@ const DERIVED_TABLES: &[&str] = &[
     "file_covers",
     "reader_annotations",
     "ai_tag_undo",
+    "album_sync_exclusion",
 ];
 
 impl RepoDb {
@@ -164,6 +173,7 @@ impl RepoDb {
             marks: count("file_marks")?,
             annotations: count("reader_annotations")?,
             ai_undo: count("ai_tag_undo")?,
+            sync_exclusions: count("album_sync_exclusion")?,
             sync_albums: scalar("SELECT COUNT(*) FROM album_sync_rule WHERE source_id = ?1")?,
             child_sources: scalar("SELECT COUNT(*) FROM sources WHERE parent_source_id = ?1")?,
         })
@@ -279,6 +289,7 @@ impl RepoDb {
                 "file_marks" => removed.marks = n,
                 "reader_annotations" => removed.annotations = n,
                 "ai_tag_undo" => removed.ai_undo = n,
+                "album_sync_exclusion" => removed.sync_exclusions = n,
                 _ => {}
             }
             processed += n;

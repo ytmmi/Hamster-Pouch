@@ -12,18 +12,24 @@ import type {
   AlbumAddMemberArgs,
   AlbumCreateArgs,
   AlbumCreateResult,
+  AlbumCreateSnapshotArgs,
+  AlbumCreateSyncArgs,
   AlbumDeleteArgs,
   AlbumItem,
   AlbumListArgs,
   AlbumMemberResult,
   AlbumMembersArgs,
   AlbumMembersPage,
+  AlbumMoveArgs,
+  AlbumMoveResult,
   AlbumRemoveMemberArgs,
   AlbumRemoveResult,
   AlbumRenameArgs,
   AlbumSetMediaTypeArgs,
   AlbumSetMediaTypeResult,
   AlbumSyncArgs,
+  AlbumUnsyncArgs,
+  AlbumUnsyncResult,
 } from "../types";
 import { unwrapApi, type ApiResponse } from "./response";
 
@@ -40,6 +46,62 @@ export function albumCreate(args: AlbumCreateArgs): Promise<AlbumCreateResult> {
     includeSubsources: args.includeSubsources,
     filterJson: args.filterJson,
     fileIds: args.fileIds,
+  }).then(unwrapApi);
+}
+
+/**
+ * 「创建为相册（仅当前对象）」：把源/目录当前的对象一次性复制成固定型相册（D128）。
+ *
+ * 快照语义——创建之后不再跟随源；与 [`albumCreateSync`] 的唯一区别是"是否持续同步"。
+ */
+export function albumCreateSnapshot(
+  args: AlbumCreateSnapshotArgs,
+): Promise<AlbumCreateResult> {
+  return invoke<ApiResponse<AlbumCreateResult>>("album_create_snapshot", {
+    repoId: args.repoId,
+    name: args.name,
+    mediaType: args.mediaType,
+    parentAlbumId: args.parentAlbumId,
+    sourceId: args.sourceId,
+    relativePath: args.relativePath ?? null,
+    includeSubsources: args.includeSubsources,
+  }).then(unwrapApi);
+}
+
+/**
+ * 「创建为同步相册」：建立持续同步的相册，并按源目录层级自动维护镜像子相册（D128）。
+ *
+ * 只增不删：源里新出现的对象自动加入，用户手动移除的对象记入排除表不再被加回。
+ */
+export function albumCreateSync(args: AlbumCreateSyncArgs): Promise<AlbumCreateResult> {
+  return invoke<ApiResponse<AlbumCreateResult>>("album_create_sync", {
+    repoId: args.repoId,
+    name: args.name,
+    mediaType: args.mediaType,
+    parentAlbumId: args.parentAlbumId,
+    sourceId: args.sourceId,
+    relativePath: args.relativePath ?? null,
+  }).then(unwrapApi);
+}
+
+/**
+ * 移动相册到新的父相册（`parentAlbumId` 为 `null` = 移到顶层）（D128）。
+ *
+ * 自包含与互相包含会被后端拒绝（`validation` 错误）。
+ */
+export function albumMove(args: AlbumMoveArgs): Promise<AlbumMoveResult> {
+  return invoke<ApiResponse<AlbumMoveResult>>("album_move", {
+    repoId: args.repoId,
+    albumId: args.albumId,
+    parentAlbumId: args.parentAlbumId ?? null,
+  }).then(unwrapApi);
+}
+
+/** 取消同步：同步相册退化为一般（固定型）相册，成员全部保留（D128）。 */
+export function albumUnsync(args: AlbumUnsyncArgs): Promise<AlbumUnsyncResult> {
+  return invoke<ApiResponse<AlbumUnsyncResult>>("album_unsync", {
+    repoId: args.repoId,
+    albumId: args.albumId,
   }).then(unwrapApi);
 }
 

@@ -486,7 +486,7 @@ impl RepoDb {
         Ok(())
     }
 
-    /// 批量删除文件索引行及其引用数据（标签 / 评分 / 色彩 / 相册成员）。
+    /// 批量删除文件索引行及其引用数据（标签 / 评分 / 色彩 / 相册成员 / 同步排除）。
     ///
     /// `files` 的外键无级联，需先清理引用行再删主行；返回删除的文件行数。
     pub fn delete_files(&mut self, file_ids: &[String]) -> HpResult<u64> {
@@ -496,7 +496,13 @@ impl RepoDb {
             .map_err(|e| store_err("开启文件删除事务", e))?;
         let mut deleted = 0u64;
         for file_id in file_ids {
-            for table in ["file_tags", "ratings", "color_refs", "album_member"] {
+            for table in [
+                "file_tags",
+                "ratings",
+                "color_refs",
+                "album_member",
+                "album_sync_exclusion",
+            ] {
                 tx.execute(
                     &format!("DELETE FROM {table} WHERE file_id = ?1"),
                     params![file_id],
