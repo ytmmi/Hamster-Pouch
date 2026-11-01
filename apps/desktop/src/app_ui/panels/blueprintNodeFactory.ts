@@ -41,12 +41,17 @@ import type { PanelId } from "@hamster-pouch/config";
 import { PANEL_IDS } from "@hamster-pouch/config";
 
 /**
- * 该上级**能否**承载这个新类型（RFC 0010 决策 4 / 面板标准第 5.1 节 / D102）。
+ * 该上级**能否**承载这个新类型（RFC 0010 决策 4 / 面板标准第 5.1 节 / D102 / D134 / D135 / D136）。
  *
  * 两条收窄规则（都在编辑器侧拦，避免把使用者挂到必然被后端拒绝的位置上）：
- * 1. **类目 / 标记**挂在面板下时，该面板必须 `has_class = true`（面板声明"有类目"）；
- * 2. **子类**挂在类目下时，该类目的媒体类型必须**有子类取值域**
+ * 1. **类目**挂在面板下时，该面板必须 `has_class = true`（面板声明"有类目"）；
+ * 2. **子类**挂在类目下时，该类目的类型必须**有子类取值域**
  *    （当前只有 `text`；`image` 类目下建子类必然被校验拒绝）。
+ *
+ * **标记自 D136 起挂类目下**（与子类并列）：它的上级判据因此**照抄子类**——
+ * "父级必须是类目"，不再是"面板 hasClass"。早前那句"标记不受 has_class 约束"
+ * 说的是 D134 时期标记直挂面板时的口径；现在标记的挂载位从面板换成了类目，
+ * 那条判据由"类目能否挂下面板"间接承担（面板没有类目层时，本来也没有类目可挂）。
  *
  * 面板/类目当前无注册项或引用缺失时无从判定 → 放行，由蓝图侧按「未接通」处理
  * （缺失不得绑架用户数据）。
@@ -61,14 +66,18 @@ function parentAcceptsChild(
 ): boolean {
   const parent = doc.nodes.find((n) => n.key === parentKey);
   if (!parent) return true;
-  // 类目与标记都直接挂在面板下，受同一个开关约束。
-  if (childType === "class" || childType === "mark") {
+  // 只有**类目**受面板的 `has_class` 约束。
+  if (childType === "class") {
     const panelId = parent.panel_id?.trim();
     if (!panelId) return true;
     return panelSpec(panelId)?.hasClass !== false;
   }
   if (childType === "subclass") {
     return mediaTypeHasSubclass(parent.media_type ?? "");
+  }
+  // 标记（D136）：与子类同款——上级必须是**类目**。
+  if (childType === "mark") {
+    return parent.type === "class";
   }
   return true;
 }
@@ -130,7 +139,8 @@ export function parentKeyOf(
       : node.type === "subclass"
         ? ["class"]
         : node.type === "mark"
-          ? ["control"]
+          ? // 标记挂**类目**下（D136：与子类并列），不再是面板下的平行轴。
+            ["class"]
           : node.type === "object"
             ? ["class", "subclass", "mark"]
             : node.type === "event"
@@ -156,19 +166,28 @@ export function parentKeyOf(
 
 /**
  * 自动生成节点 key：优先「上级 key + 自身类型标识」，没有上级时退回类型前缀 + 序号。
+ *
+ * `classSuffix` 只对类目生效（D135）：类目的类型标识取**它所属面板分域的首项**
+ * （媒体预览 → `image`、相册 → `album`、源 → `source`）。早前它硬编码 `image`，
+ * 于是在相册面板下新建类目会得到 `c_albums_image` 却写着 `media_type = album`
+ * ——key 与真实类型自相矛盾。
  */
 export function nextNodeKey(
   nodes: BlueprintNode[],
   type: BlueprintNodeType,
   parentKey?: string,
+  classSuffix?: string,
 ): string {
   const suffix =
     type === "class"
-      ? "image"
+      ? (classSuffix ?? "image")
       : type === "subclass"
         ? "epub"
         : type === "mark"
-          ? "book"
+          ? // 标记的 key 用**清单首项**做后缀：默认 `mark` 就是首项（见 `createMark`），
+            // 两者同源才不会出现"节点 id 是 book、实际标记是 media"这种自相矛盾的命名
+            // （D134 把清单首项由 `book` 改成 `media`）。
+            BLUEPRINT_BUILTIN_MARKS[0]
           : type === "object"
             ? "dbl"
             : type === "action"
@@ -220,9 +239,14 @@ function createGroup(doc: BlueprintGraph, layer: string): { doc: BlueprintGraph;
 /**
  * 建一个类目节点（D109）：**引用一律留空**（`control` 由连线落定，见 `blueprintConnect`）。
  *
- * `media_type` 的缺省值按**使用者显式选中的面板**取（`defaultClassFieldsForPanel`）：
- * 图书预览下新建的类目默认是**文本**类目，而不是"图像类目"——否则用户每次都要
- * 手动改下拉框才能得到想要的类目。
+ * `media_type` 的缺省值按**使用者显式选中的面板**取（`defaultClassFieldsForPanel`，
+ * D135 起它等于 `classMediaTypesForPanel(panelId)[0]`）：图书预览下新建的类目默认是
+ * **文本**类目、相册面板下默认是**相册**类目、源面板下默认是**源**类目，而不是
+ * "图像类目"——否则用户每次都要手动改下拉框才能得到想要的类目，甚至建出一个
+ * 该面板根本不认识的类型值。
+ *
+ * key 的类型标识也跟随同一个缺省值（`image` / `text` / `album` / `source`），
+ * 避免出现 `c_albums_image` 这种"key 说图像、字段说相册"的自相矛盾命名。
  */
 function createClass(
   doc: BlueprintGraph,
@@ -230,11 +254,12 @@ function createClass(
   parentKeyForName?: string,
   panelId?: string,
 ): { doc: BlueprintGraph; key: string } {
+  const fields = defaultClassFieldsForPanel(panelId);
   const node: BlueprintNode = {
-    key: nextNodeKey(doc.nodes, "class", parentKeyForName),
+    key: nextNodeKey(doc.nodes, "class", parentKeyForName, fields.media_type),
     type: "class",
     layer,
-    ...defaultClassFieldsForPanel(panelId),
+    ...fields,
     position: tempPosition(doc),
   };
   return { doc: { ...doc, nodes: [...doc.nodes, node] }, key: node.key };
@@ -262,8 +287,8 @@ function createSubclass(
 }
 
 /**
- * 建一个**标记**节点（D102 / D109）：与类目树平行、直接挂在面板下，
- * `mark` 取清单第一个内置项；**`control` 引用留空**（由连线落定）。
+ * 建一个**标记**节点（D102 / D109 / **D136**）：从属**类目**（`class ⊃ mark ⊃ object`，
+ * 与子类并列），`mark` 取清单第一个内置项；**`class` 引用留空**（由连线落定）。
  */
 function createMark(
   doc: BlueprintGraph,
@@ -427,9 +452,9 @@ export function appendNode(
       break;
     }
     case "mark": {
-      // 标记的结构父是**面板**（与类目树平行、功能相似）。引用留空（D109）。
-      const ownerControl = parentNode?.type === "control" ? parentNode : undefined;
-      const created = createMark(work, layer, ownerControl?.key);
+      // 标记的结构父是**类目**（D136：与子类并列，从属类目）。引用留空（D109）。
+      const ownerClass = parentNode?.type === "class" ? parentNode : undefined;
+      const created = createMark(work, layer, ownerClass?.key);
       work = created.doc;
       key = created.key;
       break;
@@ -536,7 +561,8 @@ export function parentHintFor(
     type === "class"
       ? ["control"]
       : type === "mark"
-        ? ["control"]
+        ? // D136：标记的上级是**类目**（与子类同款判据）。
+          ["class"]
         : type === "subclass"
           ? ["class"]
           : type === "object"

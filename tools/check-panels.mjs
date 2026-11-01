@@ -137,9 +137,13 @@ check(
 );
 
 const hasClassTrue = config.BUILTIN_PANEL_SPECS.filter((s) => s.hasClass).map((s) => s.id);
+// `has_class` 由 `false` 改为 `true` 的两个面板是 **albums / sources**（D135）：它们确实有
+// "条目分类"这一层（相册 = 相册列表的条目、源 = 目录树的条目）。此前写 `false` 的后果不是
+// "少了个按钮"，而是类目一接上就被判 `panel-has-no-class`——前端灰显、Rust 对内置面板
+// 报硬错误（拒绝保存），用户看到的是"连上了却读不回"。因此这条断言必须跟着**值**走。
 check(
-  "has_class：内置面板中只有 media 与 bookpreview 为 true（面板标准第 5.1 节）",
-  eqList(hasClassTrue, ["media", "bookpreview"]),
+  "has_class：内置面板中 sources / albums / media / bookpreview 为 true（面板标准第 5.1 节）",
+  eqList(hasClassTrue, ["sources", "albums", "media", "bookpreview"]),
   `has_class=true: ${hasClassTrue.join(",") || "（无）"}`,
 );
 
@@ -3092,11 +3096,15 @@ check(
   `缺: ${missingParam.join(", ") || "无"}`,
 );
 // 文档声明的「有类目的内置面板」必须与注册表一致（防文档与代码脱节）。
+// **四个**面板各自必须出现 `**`true`**` 的写法（D135：albums / sources 由 false 改为 true）——
+// 只匹配 media / bookpreview 的旧正则会在"文档已经改、断言没改"时静默放过另外两个。
 check(
-  "文档与注册表在 has_class 上口径一致（media 与 bookpreview 是有类目的内置面板）",
+  "文档与注册表在 has_class 上口径一致（media / bookpreview / albums / sources 是有类目的内置面板）",
   doc.includes("`media`") &&
     /`media`（媒体预览）\s*\|\s*\*\*`true`\*\*/.test(doc) &&
-    /`bookpreview`（图书预览）\s*\|\s*\*\*`true`\*\*/.test(doc),
+    /`bookpreview`（图书预览）\s*\|\s*\*\*`true`\*\*/.test(doc) &&
+    /`albums`（相册）\s*\|\s*\*\*`true`\*\*/.test(doc) &&
+    /`sources`（源）\s*\|\s*\*\*`true`\*\*/.test(doc),
 );
 
 // ============================== 4. Rust ↔ TS 取值域 ==============================
@@ -3583,21 +3591,44 @@ check(
 
 // ==================== 三轴模型：类目 / 子类 / 标记（D102）====================
 check(
-  "类目取值域含 text 与 pdf；子类取值域按类目分域（text → epub / txt / md，pdf 无子类）",
-  eqList([...config.BLUEPRINT_MEDIA_TYPES], ["image", "video", "audio", "text", "pdf"]) &&
+  "类目取值域 9 项（D136 追加 unlimited 顶端 / empty 底端，含 text / pdf / album / source）；子类取值域按类目分域（text → epub / txt / md，其余无子类）",
+  eqList(
+    [...config.BLUEPRINT_MEDIA_TYPES],
+    ["unlimited", "image", "video", "audio", "text", "pdf", "album", "source", "empty"],
+  ) &&
     eqList([...config.subclassFormatsFor("text")], ["epub", "txt", "md"]) &&
-    // 其余媒体类型**没有**子类取值域（该类目下不能建子类）。
+    // 其余类目类型**没有**子类取值域（该类目下不能建子类）。
     // `pdf` 尤其重要：它只有一种格式，再分一层没有语义（2026-10-11）。
+    // `album` / `source`（D135）：它们是面板条目的分类，没有"格式"这一层。
+    // `unlimited` / `empty`（D136）：两个极端（匹配一切 / 排除全部），同样没有格式可分。
     config.subclassFormatsFor("image").length === 0 &&
     config.subclassFormatsFor("pdf").length === 0 &&
+    config.subclassFormatsFor("album").length === 0 &&
+    config.subclassFormatsFor("source").length === 0 &&
+    config.subclassFormatsFor("unlimited").length === 0 &&
+    config.subclassFormatsFor("empty").length === 0 &&
     config.mediaTypeHasSubclass("text") === true &&
     config.mediaTypeHasSubclass("pdf") === false &&
+    config.mediaTypeHasSubclass("album") === false &&
+    config.mediaTypeHasSubclass("source") === false &&
+    config.mediaTypeHasSubclass("unlimited") === false &&
+    config.mediaTypeHasSubclass("empty") === false &&
     config.mediaTypeHasSubclass("image") === false,
 );
+// 系统标记清单 = **10 项**（D134，2026-11-01）。顺序就是这一份，且是**唯一**顺序：
+// 蓝图下拉、面板右键标记树（相册 / 源）都按它排列——三处若各写一份清单，迟早出现
+// "菜单里有、蓝图下拉里没有"这种静默漂移。
+//
+// 树形（`媒体 ⊃ {图像, 视频, 音频 ⊃ {音乐}}`、`文档 ⊃ {文本, 图书, 漫画}`、`程序`）只是
+// **UI 呈现**用的嵌套关系，节点模型与存储都是**扁平**的 10 个 id（D134 ②）。
+const SYSTEM_MARK_IDS = [
+  "media", "image", "video", "audio", "music", "document", "text", "book", "manga", "program",
+];
 check(
-  "标记清单**可注册**：内置 book / manga，登记项可加入、可注销、不覆盖内置",
-  eqList([...config.BLUEPRINT_BUILTIN_MARKS], ["book", "manga"]) &&
+  "标记清单**可注册**：内置 10 项（媒体/图像/视频/音频/音乐/文档/文本/图书/漫画/程序），登记项可加入、可注销、不覆盖内置",
+  eqList([...config.BLUEPRINT_BUILTIN_MARKS], SYSTEM_MARK_IDS) &&
     config.isMarkRegistered("book") &&
+    config.isMarkRegistered("program") &&
     !config.isMarkRegistered("plugin.demo.extra") &&
     (() => {
       config.registerBlueprintMarks([{ mark: "plugin.demo.extra", origin: "demo" }]);
@@ -3605,6 +3636,70 @@ check(
       config.unregisterBlueprintMarks("demo");
       return added && !config.isMarkRegistered("plugin.demo.extra");
     })(),
+  `实际 ${[...config.BLUEPRINT_BUILTIN_MARKS].join(",")}`,
+);
+
+// **两点必须逐项相等且顺序一致**：TS 清单（`packages/config/src/blueprintValues.ts`）与
+// Rust 清单（`crates/hp-core/src/blueprint_types.rs` 的 `BUILTIN_MARKS`）。这两份是
+// "系统标记有哪些" 的**仅有两处**权威；数量对不上会被 `[&str; N]` 的 N 当场发现，但
+// **顺序**对不上只会让两边的下拉顺序悄悄错开（而且谁都不会报错）。
+/** 从 Rust 源码按**顺序**取 `const NAME: [&str; N] = [ ... ];`（标识符按同名 `const` 解析成值）。 */
+function rustStrArrayOrdered(src, name) {
+  // 先剥注释：数组里若写行内注释，注释里的英文单词会被当成标识符。
+  const code = src
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, " "))
+    .join("\n");
+  const m = new RegExp(`const ${name}\\s*:[^=]*=\\s*\\[([\\s\\S]*?)\\]\\s*;`).exec(code);
+  if (!m) return null;
+  const tokens = [...m[1].matchAll(/"[a-z0-9]+"|[A-Z][A-Z0-9_]*/g)].map((x) => x[0]);
+  const out = [];
+  for (const token of tokens) {
+    if (token.startsWith('"')) {
+      out.push(token.slice(1, -1));
+      continue;
+    }
+    // `BUILTIN_MARKS` 里放的是**常量名**（`MEDIA_MARK` …），值在同文件的 `const` 上。
+    const resolved = new RegExp(`const ${token}\\s*:\\s*&str\\s*=\\s*"([a-z0-9]+)"`).exec(code);
+    if (!resolved) return null;
+    out.push(resolved[1]);
+  }
+  return out;
+}
+const blueprintTypesForMarks = readFileSync(
+  join(ROOT, "crates/hp-core/src/blueprint_types.rs"),
+  "utf8",
+);
+const rustMarks = rustStrArrayOrdered(blueprintTypesForMarks, "BUILTIN_MARKS");
+check(
+  "系统标记清单 TS ↔ Rust `BUILTIN_MARKS` 逐项相等（含顺序）",
+  rustMarks !== null &&
+    eqList(rustMarks, [...config.BLUEPRINT_BUILTIN_MARKS]) &&
+    rustMarks.length === SYSTEM_MARK_IDS.length,
+  rustMarks === null
+    ? "Rust BUILTIN_MARKS 解析失败（常量名解析不出值）"
+    : `Rust=${rustMarks.join(",")}`,
+);
+
+// 三语字典必须**逐键**齐备：`blueprint.mark.<id>` 是蓝图属性面板与标记树共用的显示名。
+// 键集一致性由 TS 类型强制（`const` 字典同形），这里钉住**键真的存在**且**10 个都在**。
+check(
+  "系统标记的显示名三语齐备（`blueprint.mark.<id>` × 10 × zh-CN / zh-TW / en）",
+  (() => {
+    const dict = (file) =>
+      readFileSync(join(ROOT, `apps/desktop/src/app_ui/i18n/${file}`), "utf8");
+    const dicts = [dict("zh-CN.ts"), dict("zh-TW.ts"), dict("en.ts")];
+    const missing = [];
+    for (const [i, src] of dicts.entries()) {
+      const lang = ["zh-CN", "zh-TW", "en"][i];
+      for (const id of SYSTEM_MARK_IDS) {
+        if (!new RegExp(`"blueprint\\.mark\\.${id}":`).test(src)) missing.push(`${lang}:${id}`);
+      }
+    }
+    if (missing.length > 0) console.log(`  缺失键: ${missing.join(", ")}`);
+    return missing.length === 0;
+  })(),
 );
 check(
   "bookpreview 有类目（has_class = true，此前为 false：文本类当时没有类目能表达）",
@@ -3662,14 +3757,85 @@ check(
   `classTypes=${classPanelIds.join(",")} hasClass=${hasClassIds.join(",")}`,
 );
 check(
-  "defaultClassFieldsForPanel：图书预览下新建类目默认是**文本**类目，其余为 image",
+  "defaultClassFieldsForPanel：四个有类目的面板缺省值**不随扩项漂移**（media=image、bookpreview=text、albums=album、sources=source，未注册=image）",
   JSON.stringify(config.defaultClassFieldsForPanel("bookpreview")) ===
     JSON.stringify({ media_type: "text" }) &&
     JSON.stringify(config.defaultClassFieldsForPanel("media")) ===
       JSON.stringify({ media_type: "image" }) &&
+    // D135：相册 / 源两个面板的类目类型**只能**是本面板分域的值（album / source）。
+    JSON.stringify(config.defaultClassFieldsForPanel("albums")) ===
+      JSON.stringify({ media_type: "album" }) &&
+    JSON.stringify(config.defaultClassFieldsForPanel("sources")) ===
+      JSON.stringify({ media_type: "source" }) &&
     // 未注册 / 未知面板：与既有行为一致（image，零回归）。
     JSON.stringify(config.defaultClassFieldsForPanel(undefined)) ===
       JSON.stringify({ media_type: "image" }),
+);
+// **候选顺序 ≠ 缺省值**（D136 的正确形态，单独钉住）：四个面板的候选**首项**现在都是
+// `unlimited`，而缺省值仍是 image / text / album / source。若有人把两张表合并回去（"缺省取
+// 分域首项"），新建类目就会默认变成 `unlimited`——那会悄悄改变既有观感，且这条断言会红。
+check(
+  "D136：四个面板的候选首项是 unlimited，但缺省值与它**不同**（两张表没有被合并）",
+  ["media", "bookpreview", "albums", "sources"].every(
+    (panelId) => config.classMediaTypesForPanel(panelId)[0] === "unlimited",
+  ) &&
+    ["media", "bookpreview", "albums", "sources"].every(
+      (panelId) => config.defaultClassFieldsForPanel(panelId).media_type !== "unlimited",
+    ),
+  `首项=${["media", "bookpreview", "albums", "sources"].map((p) => config.classMediaTypesForPanel(p)[0]).join(",")} 缺省=${["media", "bookpreview", "albums", "sources"].map((p) => config.defaultClassFieldsForPanel(p).media_type).join(",")}`,
+);
+// **类目类型的按面板分域**（D135 引入，D136 扩到 9 项）：全量表回答"哪些取值合法"，分域回答
+// "该面板下该出现哪几个"。两个函数（TS `classMediaTypesForPanel` / Rust
+// `class_media_types_for_panel`）是**跨语言镜像点**，TS ↔ Rust 的逐项相等由
+// `check:blueprint-nodes` 断言；这里钉住 **TS 侧**逐面板的取值本身——只断言"长度对得上"会漏掉
+// "把 text 塞进 media 的面板"这种静默串位。
+const EXPECTED_CLASS_DOMAIN = {
+  media: ["unlimited", "image", "video", "audio", "empty"],
+  bookpreview: ["unlimited", "text", "pdf", "empty"],
+  albums: ["unlimited", "album", "empty"],
+  sources: ["unlimited", "source", "empty"],
+};
+check(
+  "classMediaTypesForPanel：四个已注册面板的分域逐项等于约定值（unlimited 首 / empty 尾），未注册 / 无参返回全量 9 项",
+  (() => {
+    const drift = [];
+    for (const [panelId, expected] of Object.entries(EXPECTED_CLASS_DOMAIN)) {
+      const actual = [...config.classMediaTypesForPanel(panelId)];
+      if (!eqList(actual, expected)) {
+        drift.push(`${panelId}: [${actual.join(",")}] ≠ [${expected.join(",")}]`);
+      }
+    }
+    // 未注册面板**不设限**：插件面板宿主不知道它内部有什么分类，给全量（与"未知面板不拦截"同口径）。
+    const full = [...config.BLUEPRINT_MEDIA_TYPES];
+    const unknown = [...config.classMediaTypesForPanel(undefined)];
+    const unregistered = [...config.classMediaTypesForPanel("plugin.demo.unknown")];
+    if (!eqList(unknown, full)) drift.push(`未注册: [${unknown.join(",")}] ≠ 全量 9 项`);
+    if (!eqList(unregistered, full)) drift.push(`plugin.demo.unknown: [${unregistered.join(",")}] ≠ 全量 9 项`);
+    // 分域必须**是**全量表的子集：越域取值一定也被"取值域非法"那条硬错误拦住。
+    for (const [panelId, list] of Object.entries(EXPECTED_CLASS_DOMAIN)) {
+      for (const value of list) {
+        if (!full.includes(value)) drift.push(`${panelId} 的分域含全量表外的取值 ${value}`);
+      }
+    }
+    return drift.length === 0;
+  })(),
+  `实际 media=[${[...config.classMediaTypesForPanel("media")]}] bookpreview=[${[...config.classMediaTypesForPanel("bookpreview")]}] albums=[${[...config.classMediaTypesForPanel("albums")]}] sources=[${[...config.classMediaTypesForPanel("sources")]}] 全量=${[...config.BLUEPRINT_MEDIA_TYPES].join(",")}`,
+);
+// `PANEL_CLASS_MEDIA_TYPE_DEFAULTS` 是**缺省值的权威表**（D136）；旧导出
+// `PANEL_CLASS_MEDIA_TYPES` 仍存在但**直接指向它**（同一对象 / 同值），供既有消费方无痛迁移。
+// 这条断言钉住"缺省表本身"的内容——它是"候选顺序与缺省值分离"里**缺省**那一半的真相。
+check(
+  "D136：`PANEL_CLASS_MEDIA_TYPE_DEFAULTS` 四面板缺省逐项正确，旧导出 PANEL_CLASS_MEDIA_TYPES 指向同一份缺省",
+  JSON.stringify(config.PANEL_CLASS_MEDIA_TYPE_DEFAULTS) ===
+    JSON.stringify({
+      media: "image",
+      bookpreview: "text",
+      albums: "album",
+      sources: "source",
+    }) &&
+    JSON.stringify(config.PANEL_CLASS_MEDIA_TYPES) ===
+      JSON.stringify(config.PANEL_CLASS_MEDIA_TYPE_DEFAULTS),
+  `DEFAULTS=${JSON.stringify(config.PANEL_CLASS_MEDIA_TYPE_DEFAULTS)} 旧导出=${JSON.stringify(config.PANEL_CLASS_MEDIA_TYPES)}`,
 );
 check(
   "defaultSubclassFormatFor：取该类目分域的第一个取值；无分域返回空串（据此拒绝建子类）",
@@ -4027,7 +4193,7 @@ const scannerMediaTypeSrc = readFileSync(
   join(ROOT, "crates/hp-scanner/src/media_type.rs"),
   "utf8",
 );
-// 蓝图取值域（内置标记清单 book / manga 在这里定义，D102）。
+// 蓝图取值域（系统标记清单 **10 项**在这里定义，D102 扩为 2 项、D134 扩为 10 项）。
 const blueprintTypesSrc = readFileSync(
   join(ROOT, "crates/hp-core/src/blueprint_types.rs"),
   "utf8",
@@ -4042,7 +4208,8 @@ check(
     // 而 epub → book 的**映射本身**在 hp-core（唯一来源）。
     /default_book_mark_for_ext/.test(scannerMediaTypeSrc) &&
     /default_book_mark_for_ext[\s\S]{0,200}?BOOK_MARK/.test(coreFileSrc) &&
-    // 内置标记清单含 book 与 manga（用户口径的例子）。
+    // 内置标记清单含 book 与 manga（用户口径的例子；D134 扩为 10 项后这两项仍在，
+    // 它们是 `file_marks` 存量值与 epub/pdf 默认标记的落库字面量，字面量不得改）。
     /BOOK_MARK/.test(blueprintTypesSrc) &&
     /MANGA_MARK/.test(blueprintTypesSrc) &&
     // 旧 `document` 子类型**已废弃**：扫描器不再产出它（`FileSubtype` 枚举本身已删除）。

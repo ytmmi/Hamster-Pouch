@@ -16,11 +16,14 @@ import { SwitchToggle } from "../shared/SwitchToggle";
 import { useApp } from "../core/AppContext";
 import {
   BLUEPRINT_ACTION_OPS,
-  BLUEPRINT_MEDIA_TYPES,
   type BlueprintGraph,
   type BlueprintHideDirection,
+  type BlueprintMediaType,
   type BlueprintNode,
   type BlueprintNodeType,
+  // D135：类目「类型」的**分域**由 config 的纯函数提供（与 Rust 镜像），
+  // 属性面板只消费、不另存分域表——两份表会静默分叉。
+  classMediaTypesForPanel,
   CONDITION_EXPR_HINTS,
   DEFAULT_OVERLAY_ANCHOR,
   HIDE_DIRECTIONS,
@@ -110,6 +113,57 @@ function actionTargets(
     .filter((n) => wanted.includes(n.type))
     .filter((n) => crossLayer || nodeLayerKey(doc, n) === layerKey)
     .map((n) => ({ v: n.key, l: nodeDisplayName(n, t, doc.nodes, doc.layers) }));
+}
+
+/**
+ * 类目「类型」下拉候选（D135）：取值域由**类目所属的面板**决定，
+ * 分域表本身来自 `@hamster-pouch/config` 的 `classMediaTypesForPanel`（A 线维护，
+ * 与 Rust `class_media_types_for_panel` 逐项镜像）——UI 这里**不另存一份**，
+ * 否则两边一起改动就会静默分叉。
+ *
+ * 用户口径：「所有选项面板都是反向读取的，源的面板的类目就不能出现媒体预览面板的类目的
+ * 图像、视频、音频」。
+ *
+ * 类目不直接带 `panel_id`：它从 `control` 连进来的控件节点推导面板，与"所属面板"只读展示
+ * 走同一条引用链。链上任一环节缺失（`control` 未连线 / 指向已删除节点 / 面板未注册）都
+ * **退回全量候选**——缺失不得绑架用户数据：一次断线不该把用户已选好的取值挤掉。
+ *
+ * 已写在节点上但**不在当前分域**的取值（例如先连到 media 选了「图像」、之后改建到
+ * albums）仍**原样保留**并标注「未接通」，与 `panel_id` / `mark` 的"不在清单的取值原样
+ * 保留"同一写法；保存不被拦截，切回原面板即自动恢复。
+ */
+function classMediaTypeOptions(
+  doc: BlueprintGraph,
+  panels: readonly PanelSpec[],
+  node: BlueprintNode,
+  t: Translate,
+): { v: BlueprintMediaType; l: string }[] {
+  const controlNode = node.control
+    ? doc.nodes.find((n) => n.key === node.control)
+    : undefined;
+  const panelId = controlNode?.type === "control" ? controlNode.panel_id : undefined;
+  const panelRegistered = panelId ? panels.some((p) => p.id === panelId) : false;
+  // 面板当前**无注册项**（插件未安装/未启用）时同样按未接通处理：拿不到可信的 panel_id
+  // 就不收窄（`classMediaTypesForPanel(undefined)` 本身就是全量）。
+  const domain: readonly BlueprintMediaType[] = panelRegistered
+    ? classMediaTypesForPanel(panelId)
+    : classMediaTypesForPanel(undefined);
+  // `domain` 已是 `readonly BlueprintMediaType[]`，无需再断言；`current` 是文档里可能存在的
+  // 任意字符串（旧文档/插件写入），因此单独按字符串保留，不做类型收窄。
+  const items = domain.map((m) => ({ v: m, l: mediaTypeLabel(m, t) }));
+  const current = node.media_type ?? "";
+  if (current && !domain.includes(current)) {
+    // `mediaTypeLabel` 对**未登记**取值会返回裸键；这时退回取值本身，不把键名显示给用户
+    // （分域之外的既有取值通常只是"面板换了"，文案多半还在，故通常能翻译）。
+    const resolved = mediaTypeLabel(current, t);
+    const shown =
+      resolved === `blueprint.mediaType.${current}` ? current : resolved;
+    items.push({
+      v: current as BlueprintMediaType,
+      l: `${shown}（${t("blueprint.unlinkedTag")}）`,
+    });
+  }
+  return items;
 }
 
 /**
@@ -261,14 +315,15 @@ function panelIdOptions(
           {t("blueprint.tabTitle")}: {resolveControlTitle(node, t) || "—"}
         </span>
       )}
-      {/* 类：本节点只需选媒体类型；control 从上级（控件）自动获取 */}
+      {/* 类：本节点只需选类型（D135：取值域**按所属面板分域**，见
+          `classMediaTypeOptions`）；control 从上级（控件）自动获取 */}
       {node.type === "class" &&
         select(
           t("blueprint.mediaType"),
           node.media_type ?? "",
-          BLUEPRINT_MEDIA_TYPES.map((m) => ({ v: m, l: mediaTypeLabel(m, t) })),
+          classMediaTypeOptions(doc, panels, node, t),
           // 类目只有 `media_type` 一个字段（D102）：细分是 `subclass`、与类目正交的
-          // 维度是 `mark`，两者都是**独立节点**，因此这里切换媒体类型不需要联动清理。
+          // 维度是 `mark`，两者都是**独立节点**，因此这里切换类型不需要联动清理。
           (v) => onPatch({ media_type: v }),
         )}
       {node.type === "class" && (
@@ -329,11 +384,14 @@ function panelIdOptions(
           ],
           (v) => onPatch({ mark: v === "" ? undefined : v }),
         )}
+      {/* 标记（D136）：结构父是**类目**（与子类并列），读 `node.class`。
+          旧文档可能残留 `control`（D136 之前标记直挂面板），这里不再读它——
+          残留字段由解析层接受、由 lint 判「未接通」，拖一条线接到类目即自愈。 */}
       {node.type === "mark" && (
         <DerivedField
           label={t("blueprint.markOf")}
-          value={node.control}
-          label_={derivedLabel(node.control)}
+          value={node.class}
+          label_={derivedLabel(node.class)}
           t={t}
         />
       )}

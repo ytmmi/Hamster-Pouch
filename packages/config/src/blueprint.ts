@@ -22,19 +22,28 @@ export {
   BLUEPRINT_BUILTIN_NODE_TYPES,
   BLUEPRINT_EDGE_KINDS,
   BLUEPRINT_GROUP_MODES,
+  BLUEPRINT_MARK_TREE,
   BLUEPRINT_MEDIA_TYPES,
   BLUEPRINT_NODE_TYPES,
   BLUEPRINT_SCHEMA_VERSION,
   BLUEPRINT_SUBCLASS_FORMATS,
   BLUEPRINT_TRIGGERS,
+  AUDIO_MARK,
   BOOK_MARK,
   DEFAULT_BLUEPRINT_VERSION,
+  DOCUMENT_MARK,
   FALLBACK_LAYER_KEY,
   FALLBACK_LAYER_NAME,
   HIDE_DIRECTIONS,
+  IMAGE_MARK,
   MANGA_MARK,
+  MEDIA_MARK,
+  MUSIC_MARK,
   OVERLAY_HEIGHT_MAX,
   OVERLAY_HEIGHT_MIN,
+  PROGRAM_MARK,
+  TEXT_MARK,
+  VIDEO_MARK,
   allMarkKinds,
   enumAllows,
   inList,
@@ -60,6 +69,7 @@ export type {
   BlueprintGroupMode,
   BlueprintHideDirection,
   BlueprintMarkKind,
+  BlueprintMarkTreeNode,
   BlueprintMediaType,
   BlueprintNodeType,
   BlueprintTrigger,
@@ -136,7 +146,7 @@ export interface BlueprintNode {
   // control
   panel_id?: string;
   title_key?: string;
-  // class
+  /** 所属**面板** key（`class` 节点；D135 的分域判定据此解析面板 id）。 */
   control?: string;
   media_type?: BlueprintMediaType;
   // subclass
@@ -151,7 +161,17 @@ export interface BlueprintNode {
   // mark
   /** 标记种类 id（`mark` 节点）：引用可注册的标记清单（`book` / `manga` …）。 */
   mark?: string;
-  // object（三条正交轴任选其一）
+  // object / mark（三条语义轴任选其一；标记节点自 D136 起也用它指向所属类目）
+  /**
+   * **所属类目** key。
+   *
+   * - `mark` 节点（D136）：标记**从属类目**（与子类并列），旧字段 `control` 已移除；
+   * - `object` 节点：三条语义轴之一（与 `subclass` / `mark_ref` 互斥）。
+   *
+   * ⚠️ 这是**同一含义在不同节点上的复用**（"我所属的类目"），**不是**同名不同义：
+   * `class` 节点用 `control` 表达"所属面板"，那是**另一个字段名**。
+   * 真正"同名不同义"的是 `subclass`（见 `format` 的说明）。
+   */
   class?: string;
   /**
    * 所属**子类** key（`object` 节点）/ 所属**类目** key（`subclass` 节点）。
@@ -487,6 +507,13 @@ function parseNode(value: unknown): BlueprintNode | null {
     // 按缺失处理，避免"清空某字段"反而让整份文档解析失败。
     if (fieldValue === undefined) continue;
     if (!spec) continue;
+    // **旧文档兼容（D136 迁移口径）**：D136 之前 `mark` 节点用 `control` 指向所属面板，
+    // 现在改用 `class` 指向所属类目。旧文档里残留的 `control` 若按"字段用在错误的类型上"
+    // 直接拒绝，会让"读进来就保存不了"变成迁移事故（用户库实测 0 个 mark 节点，
+    // 但口径仍要稳：解析层**放行**，由 `blueprintLint` 判成「未接通」软告警）。
+    if (node.type === "mark" && field === "control" && typeof fieldValue === "string") {
+      continue;
+    }
     const fieldSpec = spec.fields.find((f) => f.name === field);
     if (!fieldSpec) {
       return null;
@@ -498,12 +525,14 @@ function parseNode(value: unknown): BlueprintNode | null {
   if (node.hide_direction !== undefined && !isHideDirection(node.hide_direction)) {
     return null;
   }
-  // 类目**只按媒体类型分类**（D102）：细分交给 `subclass`、与类目正交的维度交给 `mark`。
+  // 类目**只按媒体类型分类**（D102）：细分交给 `subclass`、语义维度交给挂在类目
+  // **之下**的 `mark` 节点（D136 把标记从"面板下的平行轴"改成"类目下的从属轴"）。
   // 类目上出现 `format` / `mark` 是旧写法（或字段用错类型）→ 解析层拒绝（与 Rust 同口径）。
   if (node.type === "class" && (node.format !== undefined || node.mark !== undefined)) {
     return null;
   }
-  // 对象**三条轴互斥**：只能挂在 类目 / 子类 / 标记 三者之一（与 Rust 同口径）。
+  // 对象**三条语义轴互斥**：只能挂在 类目 / 子类 / 标记 三者之一（与 Rust 同口径）。
+  // 标记节点自 D136 起用 `class` 指向所属类目，那只是一种引用关系，**不参与互斥**。
   if (node.type === "object") {
     const declared = [node.class, node.subclass, node.mark_ref].filter(
       (k) => typeof k === "string" && k.trim() !== "",

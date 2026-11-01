@@ -104,11 +104,18 @@ pub struct BlueprintNode {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     // control
+    /// 面板注册表 id（`control` 节点；`title_key` 与显示名见 `docs/spec/panel-standard.md`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub panel_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_key: Option<String>,
-    // class（所属面板 key）
+    /// **所属面板** key（`class` 节点用；D135 的分域判定据此解析面板 id）。
+    ///
+    /// ⚠️ **旧文档兼容（D136 迁移口径）**：`mark` 节点在 D136 之前也用本字段表达
+    /// "所属面板"。D136 把标记改挂到类目下、字段改为 [`class`](Self::class) 之后，
+    /// 标记节点上残留的 `control` 值按**未接通软告警**处理（不是硬错误）——
+    /// 用户库实测 0 个 mark 节点，没有存量迁移负担，但口径仍要稳：旧文档读进来
+    /// 只灰显、不阻塞保存（详见 `blueprint_warnings::collect_issues`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<NodeKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -122,14 +129,22 @@ pub struct BlueprintNode {
     /// **标记 id**（`mark` 节点；引用可注册的标记清单：`book` / `manga` …）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mark: Option<String>,
-    // object（所属 类目 / 子类 / 标记 三条轴之一）
-    /// 对象所属的**类目** key（三条轴任选其一）。
+    // object / mark（所属 类目 / 子类 / 标记）
+    /// **所属类目** key。
+    ///
+    /// - `mark` 节点（D136）：标记**从属类目**，与子类并列；
+    /// - `object` 节点：三条语义轴之一（与 `subclass` / `mark_ref` 互斥）。
+    ///
+    /// ⚠️ 这是**同一含义在不同节点上的复用**（"我所属的类目"），**不是**同名不同义：
+    /// `class` 节点用 [`control`](Self::control) 表达"所属面板"，那是**另一个**字段名。
+    /// 真正"同名不同义"的是 [`subclass`](Self::subclass)（见其注释）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub class: Option<NodeKey>,
     /// 对象所属的**子类** key（三条轴任选其一）。
     ///
     /// 字段名与 TS 定义表一致；注意它在 `subclass` 节点上是"所属类目"的引用，
     /// 而在 `object` 节点上是"所属子类"的引用——**同名不同义**，按节点类型分流。
+    /// （与 `class` 字段那种"同一含义复用"不同：本字段是**同一个字段名承载两个含义**。）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subclass: Option<NodeKey>,
     /// 对象所属的**标记节点** key（三条轴任选其一）。

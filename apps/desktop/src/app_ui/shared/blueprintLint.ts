@@ -104,13 +104,16 @@ function hasSource(node: BlueprintNode, graph: BlueprintGraph): boolean {
  * 计算"未接通"节点：返回 key → 原因。
  *
  * 判定（与后端软告警口径一致，**不阻塞保存**）：
- * - 控件缺 `panel_id`、类缺 `control`、对象缺 `class`、状态缺 `target`；
+ * - 控件缺 `panel_id`、类缺 `control`、**标记缺 `class`**（D136：标记从属类目）、
+ *   对象三条轴一条都没接、状态缺 `target`；
  * - 引用指向**已不存在的节点**（删除关联节点后的常见状态）；
  * - 操作缺对象来源、条件/状态缺触发来源；
  * - **结构节点（布局块/标签组/面板）没有结构父**（D108：新增不再自动连线之后，
  *   它是"刚摆下还没接好"的可见形态；面板的兼容旧图形式 `memberOf` 也放行）；
  * - 节点类型**当前无注册项**（插件缺失，RFC 0010 决策 6）；
- * - 类目挂在**无类目**的面板下（`has_class = false`，RFC 0010 决策 4）。
+ * - 类目挂在**无类目**的面板下（`has_class = false`，RFC 0010 决策 4）；
+ * - **旧文档残留 `mark.control`**（D136 迁移口径：那个字段已不再是标记的结构父，
+ *   按未接通灰显，不阻塞保存）。
  *
  * 引用指向"存在但类型不对"的节点仍属硬错误（由后端拒绝），不算"未接通"。
  */
@@ -158,10 +161,14 @@ export function analyzeUnlinked(graph: BlueprintGraph): BlueprintUnlinkedMap {
         break;
       }
       case "mark": {
-        // 标记（D102）指向**面板**；缺引用/已删除 = 未接通；
-        // 填了但**不在可注册清单**里也按未接通（清单可注册，未注册不等于非法）。
-        if (!node.control || !byKey.has(node.control)) {
-          mark(node.key, "missing-control");
+        // 标记（D102 / **D136**）挂**类目**下（与子类并列）：缺 `class` 或指向已删除节点
+        // = 未接通。原因码沿用 `missing-class`（`subclass` / `object` 已复用它：
+        // 三者都在说同一件事——"类目这一侧没接好"），不新增原因码。
+        //
+        // 旧文档兼容：D136 之前标记用 `control` 指向面板，残留值不再被读取 →
+        // 同样按「未接通」灰显（与后端软告警同口径；允许保存、重新接线即恢复）。
+        if (!node.class || !byKey.has(node.class) || Boolean(node.control?.trim())) {
+          mark(node.key, "missing-class");
         }
         if (node.mark && !isMarkRegistered(node.mark)) {
           mark(node.key, "mark-unregistered");

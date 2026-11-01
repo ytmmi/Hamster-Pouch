@@ -237,6 +237,24 @@ pub(crate) fn collect_issues(
                     )),
                     Some(_) => {}
                 }
+                // **D136 迁移口径**：D136 之前标记用 `control` 指向面板；现在它挂
+                // **类目**下（`class` 字段）。旧文档里残留的 `control` 值不再被读取，
+                // 按**未接通软告警**提示（不是硬错误：用户库实测 0 个 mark 节点，
+                // 但"读进来就保存不了"绝不能成为迁移新事故）。
+                if node
+                    .control
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|s| !s.is_empty())
+                {
+                    warnings.push((
+                        format!(
+                            "标记节点 {key} 暂未接通：仍带旧字段 control（D136 起标记挂在类目下、用 class 指向所属类目），请在画布上把标记连到类目",
+                            key = node.key
+                        ),
+                        SeverityLevel::Soft,
+                    ));
+                }
             }
             NodeType::Overlay => {
                 // 浮层是容器：内容是**面板/标签组**（由 contains 边表达），
@@ -289,12 +307,12 @@ pub(crate) fn collect_issues(
                 Some(ck) => !by_key.contains_key(ck),
                 None => true,
             },
-            // 标记指向**面板**。
-            NodeType::Mark => match node.control.as_deref() {
+            // 标记指向**类目**（D136：标记从属类目，与子类并列）。
+            NodeType::Mark => match node.class.as_deref() {
                 Some(ck) => !by_key.contains_key(ck),
                 None => true,
             },
-            // 对象有**三条正交轴**：声明了哪一条就校验哪一条；一条都没声明 = 未接通。
+            // 对象有**三条语义轴**：声明了哪一条就校验哪一条；一条都没声明 = 未接通。
             NodeType::Object => {
                 let declared: Vec<&str> = [
                     node.class.as_deref(),

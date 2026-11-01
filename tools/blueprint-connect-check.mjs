@@ -227,7 +227,7 @@ const nodeOf = (doc, key) => doc.nodes.find((n) => n.key === key);
       mk("c1", "control", { panel_id: "media" }),
       mk("k1", "class", { control: "c1", media_type: "text" }),
       mk("sc1", "subclass", { subclass: "k1", format: "txt" }),
-      mk("m1", "mark", { control: "c1", mark: "book" }),
+      mk("m1", "mark", { class: "k1", mark: "book" }),
       mk("o1", "object", { class: "k1", scope: "double_clicked" }),
       mk("e1", "event", { trigger: "double_click" }),
       mk("cond1", "condition", { expr: "selection != empty" }),
@@ -252,7 +252,8 @@ const nodeOf = (doc, key) => doc.nodes.find((n) => n.key === key);
     ["g1", "contains", "c1"],
     ["g1", "memberOf", "c1"], // 反向（从组指向面板）不是合法边
     ["c1", "contains", "k1"],
-    ["c1", "contains", "m1"],
+    // D136：标记挂在**类目**下（与子类并列），不再由面板直连。
+    ["k1", "contains", "m1"],
     ["c1", "memberOf", "g1"],
     ["k1", "contains", "sc1"],
     ["k1", "contains", "o1"],
@@ -276,10 +277,40 @@ const nodeOf = (doc, key) => doc.nodes.find((n) => n.key === key);
   const missed = expected
     .filter(([fromKey, kind, toKey]) => !canConnect(fromKey, kind, toKey))
     .map(([fromKey, kind, toKey]) => `${byKey.get(fromKey).type} --${kind}--> ${byKey.get(toKey).type}`);
+  // 合法 `contains` 父子关系**由定义表派生**（不在断言里硬编码第二份清单——硬编码的那份
+  // 一定会与定义表漂移，而这正是"可连清单"要防的事）。这里的数字取自派生结果本身。
+  const derivedPairs = ports.CONTAINMENT.flatMap((entry) =>
+    entry.children.map((child) => `${entry.parent}→${child}`),
+  );
+  // D136 的关键成员位移：`control → mark`（旧）必须已被 `class → mark`（新）取代。
+  const illegalPairs = [
+    ["control", "mark"],
+    ["control", "subclass"],
+    ["subclass", "mark"],
+  ];
+  const illegalHit = illegalPairs
+    .filter(([fromType, toType]) => {
+      const from = bare.nodes.find((n) => n.type === fromType);
+      const to = bare.nodes.find((n) => n.type === toType);
+      if (!from || !to) return false;
+      return ports
+        .connectTargets(from, "contains", bare.nodes, bare.edges)
+        .some((t) => t.key === to.key && t.kind === "contains");
+    })
+    .map(([fromType, toType]) => `${fromType} --contains--> ${toType}`);
   check(
-    "可连清单：12 种类型的两两合法组合（contains 全部 8 组父子）+ 规则边（on/fires/guards/memberOf）逐一命中",
-    missed.length === 0,
-    missed.slice(0, 4).join("；") || `${expected.length} 组期望关系全部命中`,
+    "可连清单：12 种类型的合法组合逐一命中（contains 合法父子全部 + 规则边 on/fires/guards/memberOf）",
+    missed.length === 0 &&
+      // 派生表里必须**有** `class→mark`、且**没有** `control→mark`（成员位移的直接证据）。
+      derivedPairs.includes("class→mark") &&
+      !derivedPairs.includes("control→mark"),
+    missed.slice(0, 4).join("；") ||
+      `${expected.length} 组期望关系全部命中（contains 合法父子 ${derivedPairs.length} 条 / ${ports.CONTAINMENT.length} 组父级）`,
+  );
+  check(
+    "反向：`control → mark`（旧层级）与 `control → subclass`、`subclass → mark` 都**不在**可连清单里",
+    illegalHit.length === 0,
+    illegalHit.join("；") || `${illegalPairs.length} 组非法组合均不命中`,
   );
   // 反向自证：默认蓝图里**每一条真实存在的边**都能被清单推出来
   // （去掉去重因素后判定）——"能连出来"与"已经连上"是同一判据。

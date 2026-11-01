@@ -114,14 +114,16 @@ export const en: Record<keyof DictZhCN, string> = {
   "album.kind.fixed": "Fixed",
   "album.kind.follow": "Follow Source",
   "album.mediaType": "Media Type",
-  "album.media.all": "All",
+  // The four values of the "Set attribute" menu: Media (underlying `multimedia`) / Image / Video / Audio.
+  // "All" was removed in D134 in favour of the more accurate "Media" (it was always the superset of every media kind).
+  "album.media.media": "Media",
   "album.media.image": "Image",
   "album.media.video": "Video",
   "album.media.audio": "Audio",
   "album.inherit": "Inherit",
   "album.rename": "Rename album",
   "album.delete": "Delete album",
-  "album.mediaType.set": "Set media type",
+  "album.mediaType.set": "Set attribute",
   "album.dropHint": "Drop to add",
   "album.createChild": "Create sub-album",
   "album.members": "Members",
@@ -291,8 +293,21 @@ export const en: Record<keyof DictZhCN, string> = {
   "album.renameFailed": "Failed to rename album: {err}",
   "album.createChildFailed": "Failed to create sub-album: {err}",
   "album.deleteFailed": "Failed to delete album: {err}",
-  "album.setMediaTypeFailed": "Failed to set media type: {err}",
+  "album.setMediaTypeFailed": "Failed to set attribute: {err}",
   "album.addMemberFailed": "Failed to add members: {err}",
+
+  // Panel marks (D134): the "Add mark" submenu in the source and album context menus.
+  // Mark results and the custom-mark list are stored per repository in app_settings
+  // (`panelMarks.<repoId>`), one copy per panel.
+  "mark.add": "Add mark",
+  "mark.menu.custom": "Custom marks",
+  "mark.menu.customAdd": "+ New custom mark",
+  "mark.menu.customEmpty": "No custom marks yet",
+  "mark.menu.customPlaceholder": "Custom mark name",
+  "mark.menu.system": "System marks",
+  "mark.menu.orphan": "Other applied marks",
+  "mark.toggleFailed": "Failed to save mark: {err}",
+  "mark.derived": "Applied automatically from the album attribute",
 
   "media.loadFailed": "Failed to load media preview: {err}",
   "media.removedFromAlbum": "Removed from album ({count})",
@@ -572,7 +587,9 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.key": "key",
   "blueprint.panelId": "Panel",
   "blueprint.titleKey": "Title key",
-  "blueprint.mediaType": "Media type",
+  // D135: the category field label is just "Type" — the value domain now includes
+  // PDF / Album / Source, which are not "media" at all. Key name unchanged on purpose.
+  "blueprint.mediaType": "Type",
   "blueprint.subclassFormat": "Subclass format",
   "blueprint.classOfSubclass": "Owning category",
   "blueprint.subclassNoDomain": "This category has no subclass domain (currently only Text: EPUB / TXT / Markdown)",
@@ -631,6 +648,31 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.panHint": "Hold middle button and drag to pan the canvas",
   "blueprint.minimap": "Minimap",
   "blueprint.minimapHint": "Drag the minimap to move the canvas there",
+  // Help popover ("?" in the canvas bottom-right corner): content is **derived from the
+  // node definition table**, so D136 moving marks under categories automatically yields
+  // "category ⊃ {subclass, mark, object}". No parent/child relation is hard-coded here.
+  "blueprint.help.open": "Containment help",
+  "blueprint.help.title": "Node containment",
+  "blueprint.help.hierarchy": "Hierarchy (parent ⊃ child)",
+  "blueprint.help.rules": "Containment table",
+  "blueprint.help.edges": "Edge types",
+  "blueprint.help.ruleNodes": "Rule nodes do not take part in containment",
+  "blueprint.help.close": "Close",
+  "blueprint.help.hierarchyHint":
+    "Indentation = containment depth. A type may sit under several parents (the trailing ← lists all of them), so it can appear more than once.",
+  "blueprint.help.rulesHint":
+    "Left to right: parent → child. Each child has exactly one structural parent; each parent may have several children (connecting them on the canvas means “contains”).",
+  "blueprint.help.ruleNodesHint":
+    "Operation / condition / state are wired only through on / fires / guards and never enter the containment hierarchy — their definition entries declare no structural parents or children, which is why they do not appear in the tree above.",
+  "blueprint.help.edge.contains": "Structural hierarchy: a parent contains a child (dragged from the “contains” port)",
+  "blueprint.help.edge.memberOf": "Tab group ↔ panel membership (a panel belongs to a tab group)",
+  "blueprint.help.edge.on": "Object / category / subclass / mark / panel → operation: start of a rule chain",
+  "blueprint.help.edge.fires": "Operation / condition → condition or state: next step of a rule chain",
+  "blueprint.help.edge.guards": "Condition → state: the condition must pass before the action runs",
+  "blueprint.help.allowed": "Allowed: {from} → {to}",
+  "blueprint.help.columnParent": "Parent",
+  "blueprint.help.columnChild": "Child",
+  "blueprint.help.columnEdge": "Edge type",
   "blueprint.nodeAdded": "Node added at ({x}, {y})",
   "blueprint.withStructure": "Include current layout structure",
   "blueprint.structureHint": "Generate interface → layout block → tab group → panel skeleton from the current layout as the base of the new blueprint",
@@ -709,13 +751,38 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.mediaType.video": "Video",
   "blueprint.mediaType.audio": "Audio",
   "blueprint.mediaType.text": "Text",
+  // All three dictionaries were missing `blueprint.mediaType.pdf`, so PDF categories
+  // rendered the raw key. Latin acronym in every language.
+  "blueprint.mediaType.pdf": "PDF",
+  // D135: value domain 5 → 7, adding the two panel-level categories.
+  "blueprint.mediaType.album": "Album",
+  "blueprint.mediaType.source": "Source",
+  // D136 added two **special** category types (domain 7 → 9): `unlimited` matches every
+  // media type, `empty` excludes all. Labels land first; the value domain is extended
+  // by the D line.
+  "blueprint.mediaType.unlimited": "Unlimited",
+  "blueprint.mediaType.empty": "Empty",
   // Subclass formats (`subclass.format`): the three subclasses under the Text category.
   "blueprint.format.epub": "EPUB",
   "blueprint.format.txt": "TXT",
   "blueprint.format.md": "Markdown",
   // Marks (`mark.mark`): the axis **orthogonal** to categories, freely overlapping.
+  // D134 expanded the built-in list from 2 to 10 items; the order matches
+  // `BLUEPRINT_BUILTIN_MARKS` and the context-menu tree.
+  "blueprint.mark.media": "Media",
+  "blueprint.mark.image": "Image",
+  "blueprint.mark.video": "Video",
+  "blueprint.mark.audio": "Audio",
+  "blueprint.mark.music": "Music",
+  "blueprint.mark.document": "Document",
+  "blueprint.mark.text": "Text",
   "blueprint.mark.book": "Book",
   "blueprint.mark.manga": "Manga",
+  "blueprint.mark.program": "Program",
+  // Display name of an object node under a Mark parent (D134): only "Album" under the
+  // albums panel, only "Source" under the sources panel.
+  "blueprint.object.album": "Album",
+  "blueprint.object.source": "Source",
   "blueprint.hideDir.left": "Left",
   "blueprint.hideDir.right": "Right",
   "blueprint.hideDir.up": "Up",

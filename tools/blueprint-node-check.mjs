@@ -19,7 +19,7 @@
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -90,6 +90,8 @@ const rustWarnings = (doc) => {
 };
 
 const results = [];
+/** 两个字符串数组**逐项相等**（顺序敏感）——D135 的跨语言对账要用。 */
+const eqList = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 const check = (label, ok, detail = "") => {
   results.push({ label, ok });
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}${detail ? ` — ${detail}` : ""}`);
@@ -207,7 +209,11 @@ const hasEdge = (doc, from, to, kind) =>
 {
   let doc = config.makeEmptyBlueprint();
   const keys = [];
-  const types = ["interface", "layout_block", "overlay", "control", "class", "object", "group", "event", "condition", "action"];
+  // 全部内置类型逐个新增（**12 种**——D102 加入 `subclass` / `mark` 之后，"每个类型只追加自身"
+  // 这条口径要对**所有**类型成立，而不只是当时那 10 种）。
+  const types = [
+    "interface", "layout_block", "overlay", "control", "class", "subclass", "mark", "object", "group", "event", "condition", "action",
+  ];
   for (const type of types) {
     const r = factory.appendNode(doc, type, { x: 40 + doc.nodes.length * 260, y: 40 }, null);
     doc = r.doc;
@@ -219,9 +225,9 @@ const hasEdge = (doc, from, to, kind) =>
     new Set(doc.nodes.map((n) => n.key)).size === doc.nodes.length,
     keys.join(", "),
   );
-  // 只追加自身：10 次新增 = 10 个节点（旧行为在 event/condition/action 上会各补一串辅助链）。
+  // 只追加自身：12 次新增 = 12 个节点（旧行为在 event/condition/action 上会各补一串辅助链）。
   check(
-    "空图逐个新增：每个类型只追加一个节点（10 类 → 10 个节点）",
+    "空图逐个新增：每个类型只追加一个节点（12 类 → 12 个节点）",
     doc.nodes.length === types.length,
     `节点数=${doc.nodes.length}：${doc.nodes.map((n) => `${n.type}:${n.key}`).join(", ")}`,
   );
@@ -460,12 +466,17 @@ const hasEdge = (doc, from, to, kind) =>
     asymmetric.slice(0, 4).join("；") || "两侧声明逐项互指",
   );
 
-  // 正向：`class` 与 `mark` 是面板下**两条平行的轴**，都必须能由面板连出。
+  // 正向：D136 起 `标记` **挂在类目下**（与 `子类` 并列），不再是面板下与类目平行的第二条轴。
+  // 因此这里既要有"合法的三条"（面板→类目、类目→子类、类目→标记），也要有**反向断言**：
+  // 「面板 → 标记」必须是**非法**的（`kindForEdge` 返回 `null`）——只断言合法的那三条，
+  // 漏掉旧的 `control → mark` 就会被"两边都合法"悄悄放过，用户仍能把标记拖到面板下。
   check(
-    "面板下两条平行的轴都可连：control → class 与 control → mark 均为合法 contains",
+    "标记挂在类目下：control → class / class → subclass / class → mark 均合法，且 control → mark 已非法",
     ports.kindForEdge("control", "contains", "class") === "contains" &&
-      ports.kindForEdge("control", "contains", "mark") === "contains",
-    `class=${ports.kindForEdge("control", "contains", "class")} mark=${ports.kindForEdge("control", "contains", "mark")}`,
+      ports.kindForEdge("class", "contains", "subclass") === "contains" &&
+      ports.kindForEdge("class", "contains", "mark") === "contains" &&
+      ports.kindForEdge("control", "contains", "mark") === null,
+    `control→class=${ports.kindForEdge("control", "contains", "class")} class→subclass=${ports.kindForEdge("class", "contains", "subclass")} class→mark=${ports.kindForEdge("class", "contains", "mark")} control→mark=${ports.kindForEdge("control", "contains", "mark")}`,
   );
 
   /*
@@ -1063,12 +1074,14 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
       pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintPorts.ts")).href
     );
     check(
-      "随意创建≠随意连线：子类只能连到类目下、标记只能连到面板下（层级约束仍在）",
+      "随意创建≠随意连线：子类与标记都只能连到类目下（层级约束仍在）",
       containment.kindForEdge("class", "contains", "subclass") === "contains" &&
-        containment.kindForEdge("control", "contains", "mark") === "contains" &&
+        // D136：标记从"面板下"移到"类目下"，与子类**并列**（两者都只挂在类目下）。
+        containment.kindForEdge("class", "contains", "mark") === "contains" &&
         containment.kindForEdge("control", "contains", "subclass") === null &&
-        containment.kindForEdge("class", "contains", "mark") === null,
-      `class→subclass=${containment.kindForEdge("class", "contains", "subclass")} control→mark=${containment.kindForEdge("control", "contains", "mark")} control→subclass=${containment.kindForEdge("control", "contains", "subclass")} class→mark=${containment.kindForEdge("class", "contains", "mark")}`,
+        // 反向：旧的 `control → mark` 必须已经**不再**合法（漏掉这条，旧层级会静默保留）。
+        containment.kindForEdge("control", "contains", "mark") === null,
+      `class→subclass=${containment.kindForEdge("class", "contains", "subclass")} class→mark=${containment.kindForEdge("class", "contains", "mark")} control→subclass=${containment.kindForEdge("control", "contains", "subclass")} control→mark=${containment.kindForEdge("control", "contains", "mark")}`,
     );
   }
 }
@@ -1114,7 +1127,8 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
     doc,
     "mark",
     { x: 0, y: 0 },
-    factory.parentHintFor("mark", controlKey, doc, "l_main"),
+    // D136：标记的合法上级是**类目**（不再是面板），因此 parentHint 传 class key。
+    factory.parentHintFor("mark", k.node.key, doc, "l_main"),
     "l_main",
   );
   doc = m.doc;
@@ -1135,20 +1149,21 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
     added.map((n) => `${n.type}:${n.key}=${unlinked[n.key] ?? "（不灰显）"}`).join(", "),
   );
   check(
-    "四类新增即未接通：原因码正确（类目/标记 缺 control、子类/对象 缺结构父字段）",
+    "四类新增即未接通：原因码正确（类目 缺 control；子类/标记/对象 缺结构父字段 class）",
     unlinked[k.node.key] === "missing-control" &&
-      unlinked[m.node.key] === "missing-control" &&
+      // D136：标记、子类、对象三者都以 `class` 为结构父字段 → 原因码同为 `missing-class`。
+      unlinked[m.node.key] === "missing-class" &&
       unlinked[s.node.key] === "missing-class" &&
       unlinked[o.node.key] === "missing-class",
     `class=${unlinked[k.node.key]} subclass=${unlinked[s.node.key]} mark=${unlinked[m.node.key]} object=${unlinked[o.node.key]}`,
   );
   writeFixture("unattached_reference_types", doc);
 
-  // 四条线接上：面板→类目、类目→子类、面板→标记、类目→对象
+  // 四条线接上：面板→类目、类目→子类、**类目→标记**（D136：标记挂类目下，不再由面板直连）、类目→对象
   const wiring = [
     { from: controlKey, to: k.node.key, kind: "contains" },
     { from: k.node.key, to: s.node.key, kind: "contains" },
-    { from: controlKey, to: m.node.key, kind: "contains" },
+    { from: k.node.key, to: m.node.key, kind: "contains" },
     { from: k.node.key, to: o.node.key, kind: "contains" },
   ];
   let wired = doc;
@@ -1163,12 +1178,13 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
   );
   const byKey = new Map(wired.nodes.map((n) => [n.key, n]));
   check(
-    "连线落字段：类目.control / 子类.subclass / 标记.control / 对象.class 都被写对（与父节点类型对齐）",
+    "连线落字段：类目.control / 子类.subclass / 标记.class / 对象.class 都被写对（与父节点类型对齐）",
     byKey.get(k.node.key).control === controlKey &&
       byKey.get(s.node.key).subclass === k.node.key &&
-      byKey.get(m.node.key).control === controlKey &&
+      // D136：标记的引用字段是 `class`（指向所属类目），不再是 `control`。
+      byKey.get(m.node.key).class === k.node.key &&
       byKey.get(o.node.key).class === k.node.key,
-    `class.control=${byKey.get(k.node.key).control} subclass.subclass=${byKey.get(s.node.key).subclass} mark.control=${byKey.get(m.node.key).control} object.class=${byKey.get(o.node.key).class}`,
+    `class.control=${byKey.get(k.node.key).control} subclass.subclass=${byKey.get(s.node.key).subclass} mark.class=${byKey.get(m.node.key).class} object.class=${byKey.get(o.node.key).class}`,
   );
   // 三条正交轴分流：对象挂到标记下时写的是 `mark_ref`（不是 `class`）
   const objUnderMark = connect.applyConnect(doc, {
@@ -1340,7 +1356,7 @@ try {
 // ---- RFC 0010：节点类型注册表（声明参数 / 命名空间 / 未知 type 分流）----
 //
 // 决策 5/6 的落地断言：注册表声明参数完整性、`ports`/`severity`/`evaluation_role` 的
-// **缺省推导与内置 10 种现有行为逐项相同**、命名空间规则、以及"未知 `type`"的两种分流
+// **缺省推导与内置 12 种现有行为逐项相同**、命名空间规则、以及"未知 `type`"的两种分流
 // （不合命名规则 = 硬错误；命名合法但无注册项 = 未接通软告警且**允许保存**）。
 {
   const ports = config.BLUEPRINT_BUILTIN_NODE_TYPES.map((type) => ({
@@ -1368,13 +1384,13 @@ try {
     }
   }
   check(
-    "RFC 0010：内置 10 种节点类型的声明参数完整（且 origin = system）",
+    "RFC 0010：内置 12 种节点类型的声明参数完整（且 origin = system）",
     incomplete.length === 0,
     incomplete.join(", ") || `${config.BLUEPRINT_BUILTIN_NODE_TYPES.length} 种齐全`,
   );
 
-  // 2. `ports` 未声明时**推导**的结果必须与画布端口表（PORT_DEFS）逐项相同 → 内置 10 种
-  //    的行为与 RFC 0010 之前完全一致（零回归）。
+  // 2. `ports` 未声明时**推导**的结果必须与画布端口表（PORT_DEFS）逐项相同 → 内置 12 种
+  //    的行为与 RFC 0010 之前完全一致（零回归）；D102 追加的 `subclass` / `mark` 也走同一条推导。
   const deriveDrift = [];
   for (const { type, derived } of ports) {
     const declared = portsMod.PORT_DEFS[type] ?? [];
@@ -1391,7 +1407,7 @@ try {
     void a;
   }
   check(
-    "RFC 0010：`ports` 缺省推导结果与画布端口表逐项相同（内置 10 种零回归）",
+    "RFC 0010：`ports` 缺省推导结果与画布端口表逐项相同（内置 12 种零回归）",
     deriveDrift.length === 0,
     deriveDrift.slice(0, 4).join(" | ") || `${ports.length} 种类型的端口推导一致`,
   );
@@ -1419,7 +1435,7 @@ try {
   check(
     "RFC 0010：`severity` / `evaluation_role` 缺省推导与现状逐项相同",
     severityDrift.length === 0,
-    severityDrift.join(" | ") || "10 种类型全部一致",
+    severityDrift.join(" | ") || `${config.BLUEPRINT_BUILTIN_NODE_TYPES.length} 种类型全部一致`,
   );
 
   // 4. 命名空间规则：插件注册项必须 `plugin.<plugin_id>.<local_id>`；
@@ -1471,7 +1487,7 @@ try {
   config.unregisterBlueprintNodeTypes("dev.hamsterpouch.music");
   config.unregisterBlueprintNodeSpecs("dev.hamsterpouch.music");
   check(
-    "RFC 0010：插件卸载后注册项消失（未接通），内置 10 种不受影响",
+    "RFC 0010：插件卸载后注册项消失（未接通），内置 12 种不受影响",
     !config.isNodeTypeRegistered(pluginType) &&
       config.BLUEPRINT_BUILTIN_NODE_TYPES.every((t) => config.isNodeTypeRegistered(t)),
   );
@@ -1563,6 +1579,422 @@ try {
     "RFC 0010：内置面板 has_class=false 却挂类目 → hp-core 报硬错误",
     hasClassErrors > 0,
     `硬错误 ${hasClassErrors} 条`,
+  );
+}
+
+// ---- 类目「类型」取值域与按面板分域（D135，2026-11-01）：TS ↔ Rust 逐项对账 ----
+//
+// 本轮扩的是**一份清单**（5 → 7）并新增**一个跨语言镜像点**（按面板收窄候选），因此要钉
+// 的是两件事，都是"两侧各写一份、漏/错一处就静默漂移"的那种：
+//
+// ① `BLUEPRINT_MEDIA_TYPES`（`packages/config/src/blueprintValues.ts`，7 项）↔ Rust
+//    `CLASS_MEDIA_TYPES`（`crates/hp-core/src/blueprint_types.rs`，`[&str; 7]`）**逐项相等
+//    且顺序一致**。数量对不上会被 `[&str; N]` 的 N 当场发现（编译期），但**顺序**对不上
+//    只会让两边的下拉顺序悄悄错开、谁都不报错——所以必须逐项比。
+//
+// ② TS `classMediaTypesForPanel` ↔ Rust `class_media_types_for_panel` **逐面板逐项相等**
+//    （media / bookpreview / albums / sources + 未注册）。这是 D135 新增的镜像点：前端拿它
+//    出属性面板候选，后端拿它判"类目类型是否越出该面板分域"（越域 = 硬错误）。两侧一旦
+//    漂移，用户会看到"下拉里只有 3 项"却被后端报越域，或者反过来"下拉里给了一个一保存就被拒的值"。
+{
+  const typesSrc = readFileSync(join(ROOT, "crates/hp-core/src/blueprint_types.rs"), "utf8");
+
+  /**
+   * 从 Rust 源码按**顺序**取 `const NAME: [&str; N] = [ ... ];`（大写标识符按同名 `const` 解析成值）。
+   *
+   * 与 `tools/check-panels.mjs` 的同名函数**同一套套路**（各门禁自持一份，避免为一个小工具引入
+   * 共享模块——同 `stripComments` 的既有约定）。先剥注释：数组里若写行内注释，注释里的英文
+   * 单词会被当成标识符，解析出根本不存在的项。
+   */
+  const rustStrArrayOrdered = (src, name) => {
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/, " "))
+      .join("\n");
+    const m = new RegExp(`const ${name}\\s*:[^=]*=\\s*\\[([\\s\\S]*?)\\]\\s*;`).exec(code);
+    if (!m) return null;
+    const tokens = [...m[1].matchAll(/"[a-z0-9]+"|[A-Z][A-Z0-9_]*/g)].map((x) => x[0]);
+    const out = [];
+    for (const token of tokens) {
+      if (token.startsWith('"')) {
+        out.push(token.slice(1, -1));
+        continue;
+      }
+      // 清单里放的是**常量名**（`IMAGE_TYPE` …），值在同文件的 `const` 上。
+      const resolved = new RegExp(`const ${token}\\s*:\\s*&str\\s*=\\s*"([a-z0-9]+)"`).exec(code);
+      if (!resolved) return null;
+      out.push(resolved[1]);
+    }
+    return out;
+  };
+
+  const rustMediaTypes = rustStrArrayOrdered(typesSrc, "CLASS_MEDIA_TYPES");
+  const tsMediaTypes = [...config.BLUEPRINT_MEDIA_TYPES];
+  check(
+    "D136：类目类型取值域 TS `BLUEPRINT_MEDIA_TYPES` ↔ Rust `CLASS_MEDIA_TYPES` 逐项相等（9 项，含顺序）",
+    rustMediaTypes !== null &&
+      rustMediaTypes.length === 9 &&
+      tsMediaTypes.length === 9 &&
+      tsMediaTypes.every((v, i) => v === rustMediaTypes[i]),
+    rustMediaTypes === null
+      ? "Rust CLASS_MEDIA_TYPES 解析失败（常量名解析不出值）"
+      : `TS=${tsMediaTypes.join(",")} Rust=${rustMediaTypes.join(",")}`,
+  );
+  // 取值域本身：**9 项、顺序固定**。D135 追加 `album`/`source`；D136 追加 `unlimited`（**顶端**，
+  // 匹配一切、最粗一档）与 `empty`（**底端**，排除全部）。**位置不是装饰**：`unlimited` 放顶端
+  // 表示"最终兜底"，`empty` 放底端表示"最终排除"，把它们插在中间会让下拉里"越来越窄"的
+  // 直觉顺序被打断。同时断言**首尾**就是这两个值（不只断言长度，否则串位不红）。
+  check(
+    "D136：类目类型取值域是 9 项且顺序固定（unlimited 在顶端、empty 在底端）",
+    eqList(tsMediaTypes, [
+      "unlimited",
+      "image",
+      "video",
+      "audio",
+      "text",
+      "pdf",
+      "album",
+      "source",
+      "empty",
+    ]) && tsMediaTypes[0] === "unlimited" && tsMediaTypes.at(-1) === "empty",
+    `实际 ${tsMediaTypes.join(",")}`,
+  );
+  // `unlimited` / `empty` **没有子类分域**：它们是"匹配一切 / 排除全部"两个极端的类目类型，
+  // 说不上"收哪些格式"。其下建子类 = 硬错误（与 `image` 类目同口径）。
+  check(
+    "D136：`unlimited` / `empty` 都没有子类分域（其下建子类是硬错误，与 image 类目同口径）",
+    config.subclassFormatsFor("unlimited").length === 0 &&
+      config.subclassFormatsFor("empty").length === 0 &&
+      config.subclassFormatsFor("text").length > 0 &&
+      config.mediaTypeHasSubclass("unlimited") === false &&
+      config.mediaTypeHasSubclass("empty") === false,
+    `unlimited=${JSON.stringify(config.subclassFormatsFor("unlimited"))} empty=${JSON.stringify(config.subclassFormatsFor("empty"))} text=${JSON.stringify(config.subclassFormatsFor("text"))}`,
+  );
+
+  /**
+   * 从 Rust 取 `fn class_media_types_for_panel(...) -> &'static [&'static str]` 的**每个面板分域**。
+   *
+   * 只按**源码形状**解析（match 臂 `"<panel>" => <数组或常量>`；`_ =>` 为兜底），不执行 Rust。
+   * 解析不出任何一条即判失败并回报——"解析失败却静默算过"是最糟的一种绿。
+   */
+  const rustClassDomainForPanel = (src) => {
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/, " "))
+      .join("\n");
+    const start = code.indexOf("fn class_media_types_for_panel");
+    if (start < 0) return null;
+    // 用花括号配平取函数体（函数里可能有 if/else 或 match 的嵌套块）。
+    const open = code.indexOf("{", start);
+    if (open < 0) return null;
+    let depth = 0;
+    let end = -1;
+    for (let i = open; i < code.length; i += 1) {
+      if (code[i] === "{") depth += 1;
+      else if (code[i] === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end < 0) return null;
+    const body = code.slice(open + 1, end);
+    /** 把 `&["a", "b"]` 或常量名解析成取值数组。 */
+    const resolveValues = (expr) => {
+      const arr = /\[\s*((?:"[a-z0-9]+"\s*,?\s*)+)\]/.exec(expr);
+      if (arr) return [...arr[1].matchAll(/"([a-z0-9]+)"/g)].map((m) => m[1]);
+      const ident = /^(?:&)?\s*([A-Z][A-Z0-9_]*)\s*$/.exec(expr.trim());
+      if (ident) {
+        const constArr = rustStrArrayOrdered(code, ident[1]);
+        if (constArr) return constArr;
+        const single = new RegExp(`const ${ident[1]}\\s*:\\s*&\\[&'static str\\]\\s*=\\s*&\\[[^\\]]*\\]`)
+          .exec(code);
+        if (single) return [...single[0].matchAll(/"([a-z0-9]+)"/g)].map((m) => m[1]);
+      }
+      return null;
+    };
+    const domains = new Map();
+    // 只扫 `"panel" => ...` 与 `_ => ...`（含 `x | y => ...` 的并集写法）。
+    const armRe = /(\"[a-z0-9]+\"(?:\s*\|\s*\"[a-z0-9]+\")*|_)\s*=>\s*([^,;\n]*?(?:\[[^\]]*\]|[A-Z][A-Z0-9_]*))\s*(?:,|;|\n)/g;
+    for (const m of body.matchAll(armRe)) {
+      const values = resolveValues(m[2]);
+      if (!values) continue;
+      const patterns = m[1] === "_" ? ["_"] : [...m[1].matchAll(/"([a-z0-9]+)"/g)].map((x) => x[1]);
+      for (const p of patterns) domains.set(p, values);
+    }
+    return domains.size === 0 ? null : domains;
+  };
+
+  const rustDomains = rustClassDomainForPanel(typesSrc);
+  // D136：每个面板的候选 = **`unlimited` 顶端 + 原有项 + `empty` 底端**（所有面板都可选这两个极端）。
+  const EXPECTED_DOMAINS = {
+    media: ["unlimited", "image", "video", "audio", "empty"],
+    bookpreview: ["unlimited", "text", "pdf", "empty"],
+    albums: ["unlimited", "album", "empty"],
+    sources: ["unlimited", "source", "empty"],
+  };
+  check(
+    "D136：TS `classMediaTypesForPanel` ↔ Rust `class_media_types_for_panel` 逐面板逐项相等（含 unlimited/empty 首尾）",
+    (() => {
+      if (!rustDomains) {
+        console.log("  Rust class_media_types_for_panel 解析失败（函数或 match 臂形状未预期）");
+        return false;
+      }
+      const drift = [];
+      for (const [panelId, expected] of Object.entries(EXPECTED_DOMAINS)) {
+        const tsValues = [...config.classMediaTypesForPanel(panelId)];
+        const rustValues = rustDomains.get(panelId);
+        if (!rustValues) drift.push(`${panelId}: Rust 无该面板的 match 臂`);
+        else if (!eqList(tsValues, rustValues)) {
+          drift.push(`${panelId}: TS=[${tsValues.join(",")}] Rust=[${rustValues.join(",")}]`);
+        }
+        if (!eqList(tsValues, expected)) {
+          drift.push(`${panelId}: TS 本身与约定不符 [${tsValues.join(",")}] ≠ [${expected.join(",")}]`);
+        }
+      }
+      // 未注册 / 无参：两侧都必须给**全量 9 项**（插件面板宿主不设限）。
+      const rustUnknown = rustDomains.get("_");
+      const tsUnknown = [...config.classMediaTypesForPanel(undefined)];
+      if (!rustUnknown) drift.push("Rust 缺 `_` 兜底臂（未注册面板会拿不到全量候选）");
+      else if (!eqList(rustUnknown, tsMediaTypes)) {
+        drift.push(`未注册: Rust=[${rustUnknown.join(",")}] ≠ 全量=[${tsMediaTypes.join(",")}]`);
+      }
+      if (!eqList(tsUnknown, tsMediaTypes)) {
+        drift.push(`未注册: TS=[${tsUnknown.join(",")}] ≠ 全量=[${tsMediaTypes.join(",")}]`);
+      }
+      return drift.length === 0;
+    })(),
+    `Rust 分域: ${rustDomains ? [...rustDomains.entries()].map(([k, v]) => `${k}=[${v.join(",")}]`).join(" ") : "（解析失败）"}`,
+  );
+  // 越域是**硬错误**（类目有 `control` 且指向存在的面板时）：用真实校验器复核一份越域夹具。
+  // `albums` 面板下挂一个 `image` 类目——`albums` 的分域是 `unlimited/album/empty`，
+  // `image` **不在**其中，必须被拒绝保存。
+  // 反向对照（同分域的合法取值）必须 0 条硬错误，否则这条断言就只是"凡类目都拒绝"。
+  // D136 追加的两条对照：`unlimited` / `empty` **在任何有分域的面板下都合法**（它们首尾两端
+  // 对每个面板都开放）——若这两条报错，说明分域表漏了首尾项。
+  const crossDomainDoc = (mediaType) => ({
+    schema_version: 2,
+    layers: [{ key: "l_a", name: "主界面" }],
+    nodes: [
+      { key: "ui", type: "interface", layer: "l_a" },
+      { key: "blk", type: "layout_block", layer: "l_a", name: "栏" },
+      { key: "c", type: "control", panel_id: "albums", layer: "l_a" },
+      { key: "k", type: "class", control: "c", media_type: mediaType, layer: "l_a" },
+    ],
+    edges: [
+      { from: "ui", to: "blk", kind: "contains", order: 1 },
+      { from: "blk", to: "c", kind: "contains", order: 2 },
+      { from: "c", to: "k", kind: "contains", order: 3 },
+    ],
+  });
+  const crossDomainErrors = rustErrorCount(crossDomainDoc("image"));
+  const inDomainErrors = rustErrorCount(crossDomainDoc("album"));
+  const unlimitedErrors = rustErrorCount(crossDomainDoc("unlimited"));
+  const emptyErrors = rustErrorCount(crossDomainDoc("empty"));
+  check(
+    "D136：类目类型**越出面板分域** → hp-core 报硬错误（albums 下 image 类目被拒；album/unlimited/empty 放行）",
+    crossDomainErrors > 0 && inDomainErrors === 0 && unlimitedErrors === 0 && emptyErrors === 0,
+    `越域(image) ${crossDomainErrors} 条硬错误 / 同域(album) ${inDomainErrors} / unlimited ${unlimitedErrors} / empty ${emptyErrors}`,
+  );
+  // `control` 缺失（未接通）**不判分域**：取值仍在 9 项全量表内即可，不得因"还没接线"拒保存
+  // （缺失是软告警，不是错误——D109 的既有口径）。这里用 `source` 类型的类目试 `albums` 的分域外
+  // 取值，但故意不接 `control`。
+  const unattachedCrossDomain = {
+    schema_version: 2,
+    layers: [{ key: "l_a", name: "主界面" }],
+    nodes: [
+      { key: "ui", type: "interface", layer: "l_a" },
+      { key: "blk", type: "layout_block", layer: "l_a", name: "栏" },
+      { key: "k", type: "class", media_type: "source", layer: "l_a" },
+    ],
+    edges: [
+      { from: "ui", to: "blk", kind: "contains", order: 1 },
+    ],
+  };
+  check(
+    "D136：类目 `control` 缺失（未接通）**不做分域判定**——取值只须在 9 项全量表内（缺失不得绑架数据）",
+    rustErrorCount(unattachedCrossDomain) === 0,
+    `硬错误 ${rustErrorCount(unattachedCrossDomain)} 条`,
+  );
+
+  /*
+   * **候选顺序 ≠ 缺省值**（D136 本轮最容易踩的坑，单独钉住）。
+   *
+   * `unlimited` 被追加到**候选顶端**后，任何"取分域首项当缺省"的实现都会让新建类目默认变成
+   * `unlimited` —— 那会悄悄改变用户的既有观感（媒体预览下新建类目本该是"图像"）。因此
+   * 「候选表（DOMAINS）」与「缺省表（DEFAULTS）」**必须是两张表**，且缺省值**不随扩项漂移**。
+   *
+   * 断言两件：
+   * ① **缺省值稳定**：media→image、bookpreview→text、albums→album、sources→source、未注册→image；
+   * ② **缺省值与分域首项确实不同**（否则"分离"是假的：若两张表内容恰好一样，合并回去也不会红）。
+   * 同时把 Rust 的 `class_media_type_default_for_panel` 拉进来逐面板比对——它是同一个概念的
+   * 第二处落点，只改 TS 会让前端默认"图像"、后端默认"无限制"。
+   */
+  const tsDefaults = {};
+  for (const panelId of ["media", "bookpreview", "albums", "sources"]) {
+    tsDefaults[panelId] = config.defaultClassFieldsForPanel(panelId).media_type;
+  }
+  const rustDefaults = (() => {
+    const code = typesSrc
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/, " "))
+      .join("\n");
+    const start = code.indexOf("fn class_media_type_default_for_panel");
+    if (start < 0) return null;
+    const open = code.indexOf("{", start);
+    if (open < 0) return null;
+    let depth = 0;
+    let end = -1;
+    for (let i = open; i < code.length; i += 1) {
+      if (code[i] === "{") depth += 1;
+      else if (code[i] === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end < 0) return null;
+    const body = code.slice(open + 1, end);
+    const out = new Map();
+    for (const m of body.matchAll(
+      /("[a-z0-9]+"(?:\s*\|\s*"[a-z0-9]+")*)\s*=>\s*([A-Z][A-Z0-9_]*|"[a-z0-9]+")/g,
+    )) {
+      const panels = [...m[1].matchAll(/"([a-z0-9]+)"/g)].map((x) => x[1]);
+      let value = null;
+      if (m[2].startsWith('"')) value = m[2].slice(1, -1);
+      else {
+        const single = new RegExp(`const ${m[2]}\\s*:\\s*&str\\s*=\\s*"([a-z0-9]+)"`).exec(code);
+        if (single) value = single[1];
+      }
+      if (value) for (const p of panels) out.set(p, value);
+    }
+    const underscore = /_\s*=>\s*([A-Z][A-Z0-9_]*|"[a-z0-9]+")/.exec(body);
+    if (underscore) {
+      const raw = underscore[1];
+      const value = raw.startsWith('"')
+        ? raw.slice(1, -1)
+        : new RegExp(`const ${raw}\\s*:\\s*&str\\s*=\\s*"([a-z0-9]+)"`).exec(code)?.[1];
+      if (value) out.set("_", value);
+    }
+    return out.size === 0 ? null : out;
+  })();
+  check(
+    "D136：`defaultClassFieldsForPanel` 的缺省值**不随扩项漂移**（仍是 image/text/album/source，不是 unlimited）",
+    JSON.stringify(tsDefaults) ===
+      JSON.stringify({
+        media: "image",
+        bookpreview: "text",
+        albums: "album",
+        sources: "source",
+      }) && config.defaultClassFieldsForPanel(undefined).media_type === "image",
+    `TS=${JSON.stringify(tsDefaults)} 未注册=${config.defaultClassFieldsForPanel(undefined).media_type}`,
+  );
+  check(
+    "D136：缺省值 **≠** 分域首项（证明「候选顺序」与「缺省值」真的是两张表，不是恰好同形）",
+    // 四个面板的候选首项现在都是 `unlimited`，而缺省值分别是 image/text/album/source。
+    Object.keys(tsDefaults).every(
+      (panelId) => config.classMediaTypesForPanel(panelId)[0] === "unlimited",
+    ) && Object.values(tsDefaults).every((v) => v !== "unlimited"),
+    `分域首项=${["media", "bookpreview", "albums", "sources"].map((p) => config.classMediaTypesForPanel(p)[0]).join(",")} 缺省=${Object.values(tsDefaults).join(",")}`,
+  );
+  check(
+    "D136：Rust `class_media_type_default_for_panel` ↔ TS 缺省值逐面板相等（含未注册回落 image）",
+    (() => {
+      if (!rustDefaults) {
+        console.log("  Rust class_media_type_default_for_panel 解析失败（函数或 match 臂形状未预期）");
+        return false;
+      }
+      const drift = [];
+      for (const [panelId, tsValue] of Object.entries(tsDefaults)) {
+        const rustValue = rustDefaults.get(panelId);
+        if (!rustValue) drift.push(`${panelId}: Rust 无该面板的 match 臂`);
+        else if (tsValue !== rustValue) drift.push(`${panelId}: TS=${tsValue} Rust=${rustValue}`);
+      }
+      const tsUnknown = config.defaultClassFieldsForPanel(undefined).media_type;
+      const rustUnknown = rustDefaults.get("_");
+      if (tsUnknown !== rustUnknown) drift.push(`未注册: TS=${tsUnknown} Rust=${rustUnknown}`);
+      return drift.length === 0;
+    })(),
+    `Rust 缺省: ${rustDefaults ? [...rustDefaults.entries()].map(([k, v]) => `${k}=${v}`).join(" ") : "（解析失败）"}`,
+  );
+}
+
+// ---- 帮助面板「包含关系」的层级 == 定义表真正接受的层级（D136）----
+//
+// 蓝图画布右下角的「?」帮助面板展示的是**包含关系**。它最容易出的一类缺陷是：
+// **手写一份层级常量**（"凭印象"写的），于是 UI 上写着"面板 ⊃ 标记"，而画布与后端
+// 早就不允许这条边了——用户照着帮助面板去连线，连不出来，以为编辑器坏了。
+//
+// 因此断言**不是**"帮助面板里提到了标记"，而是「**UI 说的层级 == 校验真正接受的层级**」：
+// ① 类目下恰好 {子类, 标记, 对象}；② 面板下恰好 {类目}（**不再**有标记）；
+// ③ 树里**不存在** 面板 ⊃ 标记（旧层级直接点名）；④ 每一对父子都满足 `containmentAllows()`
+// ——第 ④ 条是"根治"：即便将来定义表再变，帮助面板也会自动跟着变（它是派生的）。
+{
+  const help = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintHelp.ts")).href
+  );
+  const ports = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintPorts.ts")).href
+  );
+
+  // 直接取 `children` 集合（不只比长度：长度对但成员错正是要抓的漂移形态）。
+  const childSet = (type) => {
+    const node = help.buildHierarchyTree().find((n) => n.type === type) ??
+      (function find(nodes) {
+        for (const n of nodes) {
+          if (n.type === type) return n;
+          const hit = find(n.children);
+          if (hit) return hit;
+        }
+        return null;
+      })(help.buildHierarchyTree());
+    return node ? [...node.children.map((c) => c.type)].sort() : null;
+  };
+  const classChildren = childSet("class");
+  const controlChildren = childSet("control");
+  check(
+    "D136：帮助面板层级——**类目**下恰好 {子类, 标记, 对象}、**面板**下恰好 {类目}",
+    eqList(classChildren ?? [], ["mark", "object", "subclass"]) &&
+      eqList(controlChildren ?? [], ["class"]),
+    `类目=${JSON.stringify(classChildren)} 面板=${JSON.stringify(controlChildren)}`,
+  );
+  // 旧层级直接点名：树里**不得**出现「面板 ⊃ 标记」这一对。
+  const pairs = help.hierarchyPairs();
+  const stalePairs = pairs
+    .filter((p) => p.parent === "control" && p.child === "mark")
+    .map((p) => `${p.parent} ⊃ ${p.child}`);
+  check(
+    "D136：帮助面板里**不存在**「面板 ⊃ 标记」（旧层级作废的直接证据）",
+    stalePairs.length === 0 && ports.kindForEdge("control", "contains", "mark") === null,
+    stalePairs.join("；") || `树里无该对（${pairs.length} 对父子）`,
+  );
+  // 根治：帮助面板画出的**每一对**都必须是画布/后端真的允许的边。
+  // `containmentAllows` 是定义表的判据函数（`packages/config` 导出，`blueprintPorts.ts`
+  // 的 `kindForEdge` 也 consume 它）——因此这一对断言的是"帮助面板 == 真判据"，不是自证。
+  const illegalInHelp = pairs
+    .filter((p) => !config.containmentAllows(p.parent, p.child))
+    .map((p) => `${p.parent} ⊃ ${p.child}`);
+  check(
+    "D136：帮助面板的**每一对父子**都满足 `containmentAllows()`（UI 层级 == 校验真正接受的层级）",
+    illegalInHelp.length === 0,
+    illegalInHelp.slice(0, 4).join("；") || `${pairs.length} 对全部合法`,
+  );
+  // 包含关系表（`buildEdgeRules`）与层级树同源：两边不能各说各话。
+  const rulePairs = help.buildEdgeRules().map((r) => `${r.parent} ⊃ ${r.child}`);
+  const treePairs = pairs.map((p) => `${p.parent} ⊃ ${p.child}`);
+  const onlyInRules = rulePairs.filter((p) => !treePairs.includes(p));
+  check(
+    "D136：帮助面板的「包含关系表」与「层级树」同源（表里出现的每一对都在树里出现，反之亦然）",
+    onlyInRules.length === 0 &&
+      treePairs.every((p) => rulePairs.includes(p)),
+    `表多出=${onlyInRules.join("；") || "无"}（树 ${treePairs.length} 对 / 表 ${rulePairs.length} 对）`,
   );
 }
 

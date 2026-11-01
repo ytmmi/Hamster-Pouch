@@ -183,15 +183,24 @@ const SYSTEM_ORIGIN: PanelOrigin = { kind: "system" };
 /**
  * 宿主内置 16 个面板的声明（顺序即 `PANEL_IDS` 顺序）。
  *
- * `has_class` 如实反映当前默认蓝图：**媒体预览（`media`）与图书预览（`bookpreview`）
- * 有类目**（前者图像 / 视频 / 音频，后者文本类的 epub / txt / md + book 标记），
- * 其余 13 个没有条目分类（第 5.1 节）。
+ * `has_class` 如实反映当前默认蓝图：**媒体预览（`media`）、图书预览（`bookpreview`）、
+ * 相册（`albums`）与源（`sources`）有类目**，其余 12 个没有条目分类（第 5.1 节）。
+ *
+ * **`albums` / `sources` 于 2026-11-01（D135）由 `false` 改为 `true`**：此前它们确实没有
+ * "按媒体类型分类"的层，但用户口径是"相册面板的条目就是相册、源面板的条目就是源"——
+ * 这两个面板**有各自的条目分类**，只是分类维度不是媒体类型（2026-11-01 / D135 起
+ * 类目类型取值域加入 `album` / `source`）。保持 `false` 的后果是**类目连上去反而读不回**：
+ * 前端 `blueprintLint` 判 `panel-has-no-class` 灰显、Rust `find_panel_class_violations`
+ * 对内置面板直接报硬错误（拒绝保存）。
+ *
  * `category` 用于「全部设置 → 面板」二级列表分组（第 3 节）。
  */
 export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
   { id: "repo", titleKey: "panel.repo", category: "source", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
-  { id: "sources", titleKey: "panel.sources", category: "source", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
-  { id: "albums", titleKey: "panel.albums", category: "source", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
+  // 源面板：条目是源目录树里的一支 → 类目类型 `source`（D135）。
+  { id: "sources", titleKey: "panel.sources", category: "source", hasClass: true, blueprintNode: "control", origin: SYSTEM_ORIGIN },
+  // 相册面板：条目是相册 → 类目类型 `album`（D135）。
+  { id: "albums", titleKey: "panel.albums", category: "source", hasClass: true, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   {
     id: "media",
     titleKey: "panel.media",

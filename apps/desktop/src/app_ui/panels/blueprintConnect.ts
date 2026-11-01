@@ -39,12 +39,17 @@ export interface ConnectResult {
  * | --- | --- | --- |
  * | 面板 → 类目 | `class` | `control` |
  * | 类目 → 子类 | `subclass` | `subclass`（同名不同义：子类节点上指**所属类目**）+ 缺省 `format` |
- * | 面板 → 标记 | `mark` | `control`（标记与类目树平行，挂在**面板**下） |
+ * | 类目 → 标记 | `mark` | `class`（D136：标记从属类目、与子类并列） |
  * | 类目 → 对象 | `object` | `class` |
  * | 子类 → 对象 | `object` | `subclass` |
  * | 标记 → 对象 | `object` | `mark_ref` |
  * | 面板/类目/子类/标记/对象 → 操作 | `event` | `target`（兼容旧图；正常来源是 `on` 入边） |
  * | 面板/标签组 → 状态 | `action` | `target`（仅当它还没有目标时） |
+ *
+ * ⚠️ **`class` 字段的两个含义是同一件事**：`mark` 节点与 `object` 节点上的 `class`
+ * 都指"所属**类目**"；而 `class` 节点自己用另一个字段名 `control` 指"所属**面板**"。
+ * 这与 `subclass` 字段的"同名不同义"（子类节点上指类目、对象节点上指子类）**不同**，
+ * 别把两类情况混为一谈（D136 的字段说明里写清了）。
  *
  * 已经写好同一个值时返回空补丁（**不产生无意义的新文档对象**）；字段为空时才写，
  * 不会清掉使用者在属性面板里填的其它轴字段（三条轴互斥由后端硬错误守住）。
@@ -70,8 +75,20 @@ export function connectPatch(
         patch.format = format;
       }
     }
-  } else if (child.type === "mark" && parent.type === "control" && child.control !== parent.key) {
-    patch.control = parent.key;
+  } else if (child.type === "mark" && parent.type === "class") {
+    // 标记从属**类目**（D136：`class ⊃ mark ⊃ object`，与子类并列）。
+    // 旧实现写的是 `patch.control = parent.key`（标记直挂面板）；那条边现在**非法**
+    // （`control.children` 已不含 `mark`），因此这里只会走到 `parent.type === "class"`。
+    if (child.class !== parent.key) {
+      patch.class = parent.key;
+    }
+    // **自愈**：旧文档里残留在标记上的 `control`（D136 之前的"所属面板"）在接通类目时
+    // 一并清掉，让"拖一条线接上即恢复彩色"与画布语言一致（否则线接好了、节点却仍灰着，
+    // 因为 `blueprintLint` 把残留 `control` 判成未接通）。写 `undefined` 而不是删键：
+    // 画布对象的更新是对象展开，`undefined` 表示"该字段未设置"，`parseNode` 同样按未设置处理。
+    if (child.control !== undefined) {
+      patch.control = undefined;
+    }
   } else if (child.type === "object" && parent.type === "class" && child.class !== parent.key) {
     patch.class = parent.key;
   } else if (

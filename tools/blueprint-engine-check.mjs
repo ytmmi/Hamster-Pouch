@@ -579,7 +579,115 @@ function run(graph, layer, trigger, mediaType, context) {
   }
 }
 
-// ---- 纯几何：hide_direction 邻居选择（与运行时共用同一实现） ----
+// ---- 类目类型 `unlimited` / `empty` 的运行期命中（D136）----
+//
+// 两类极端档位：
+// - `unlimited`（无限制）：该类目**匹配一切媒体类型**（跳过类型比较）；
+// - `empty`（空）：该类目**排除全部**，任何上报都不命中（用于"暂时停用这条类目链"）；
+// - `unlimited` **仍遵守子类优先**（照常调 `subclassClaimsFormat`）——否则"无限制"会连带把
+//   已被子类认领的情况也吃进来，D102 的子类优先就失效了。
+//
+// 这三条是**行为**断言（真驱动引擎），不是"看代码里有这几个字"——后者换个写法就假绿。
+{
+  /** 一张最小图：一个类目 → 对象 → 事件 → 动作（显示 metadata），可换类目的 media_type。 */
+  const graphWith = (mediaType, { withSubclass = false } = {}) => {
+    const nodes = [
+      { key: "ui", type: "interface", layer: "l_main", position: { x: 0, y: 0 } },
+      { key: "blk", type: "layout_block", layer: "l_main", name: "区", position: { x: 0, y: 100 } },
+      { key: "c_book", type: "control", layer: "l_main", panel_id: "bookpreview", position: { x: 0, y: 200 } },
+      { key: "k", type: "class", layer: "l_main", control: "c_book", media_type: mediaType, position: { x: 200, y: 200 } },
+      { key: "o", type: "object", layer: "l_main", class: "k", scope: "double_clicked", position: { x: 400, y: 300 } },
+      { key: "e", type: "event", layer: "l_main", trigger: "double_click", position: { x: 600, y: 300 } },
+      { key: "c_meta", type: "control", layer: "l_main", panel_id: "metadata", position: { x: 800, y: 300 } },
+      { key: "a", type: "action", layer: "l_main", op: "show", target: "c_meta", position: { x: 800, y: 400 } },
+    ];
+    const edges = [
+      { from: "ui", to: "blk", kind: "contains", order: 1 },
+      { from: "blk", to: "c_book", kind: "contains", order: 2 },
+      { from: "c_book", to: "k", kind: "contains", order: 3 },
+      { from: "k", to: "o", kind: "contains", order: 4 },
+      { from: "o", to: "e", kind: "on", order: 5 },
+      { from: "e", to: "a", kind: "fires", order: 6 },
+    ];
+    if (withSubclass) {
+      nodes.push({ key: "k_sc", type: "subclass", layer: "l_main", subclass: "k", format: "txt", position: { x: 400, y: 200 } });
+      nodes.push({ key: "o_sc", type: "object", layer: "l_main", subclass: "k_sc", scope: "double_clicked", position: { x: 600, y: 200 } });
+      nodes.push({ key: "e_sc", type: "event", layer: "l_main", trigger: "double_click", position: { x: 800, y: 200 } });
+      nodes.push({ key: "c_view", type: "control", layer: "l_main", panel_id: "viewer", position: { x: 1000, y: 200 } });
+      nodes.push({ key: "a_sc", type: "action", layer: "l_main", op: "show", target: "c_view", position: { x: 1000, y: 300 } });
+      edges.push({ from: "k", to: "k_sc", kind: "contains", order: 7 });
+      edges.push({ from: "k_sc", to: "o_sc", kind: "contains", order: 8 });
+      edges.push({ from: "o_sc", to: "e_sc", kind: "on", order: 9 });
+      edges.push({ from: "e_sc", to: "a_sc", kind: "fires", order: 10 });
+    }
+    return { schema_version: 2, layers: [{ key: "l_main", name: "主界面" }], nodes, edges };
+  };
+  /** 用一个上报媒体类型跑一遍，收集执行器动作。 */
+  const observe = (graph, mediaType, format) => {
+    const engine = new BlueprintEngine();
+    engine.setGraph(graph);
+    engine.setLayer("l_main");
+    const ops = [];
+    engine.setExecutor({
+      showPanel: (id) => ops.push(`show ${id}`),
+      hidePanel: (id) => ops.push(`hide ${id}`),
+      togglePanel: (id) => ops.push(`toggle ${id}`),
+      collapsePanels: () => undefined,
+      expandPanels: () => undefined,
+      playFile: () => undefined,
+      navigateLayer: (k) => ops.push(`navigate ${k}`),
+      applyOverlay: () => undefined,
+      showOverlayPanel: () => undefined,
+    });
+    engine.dispatch({
+      trigger: "double_click",
+      target: { mediaType, fileId: "f1", ...(format ? { format } : {}) },
+    });
+    return ops;
+  };
+
+  // ① `unlimited` 对**每一种**媒体类型都命中（image/video/audio/text/pdf 全跑一遍）。
+  const unlimitedGraph = graphWith("unlimited");
+  const unlimitedHits = ["image", "video", "audio", "text", "pdf"].map((mt) => ({
+    mt,
+    ops: observe(unlimitedGraph, mt),
+  }));
+  check(
+    "D136：`unlimited` 类目对 image/video/audio/text/pdf **全部命中**（无限制 = 匹配一切）",
+    unlimitedHits.every(({ ops }) => ops.includes("show metadata")),
+    unlimitedHits.map(({ mt, ops }) => `${mt}:${ops.includes("show metadata") ? "命中" : "未命中"}`).join(" "),
+  );
+
+  // ② `empty` 对**任何**媒体类型都不命中（含 archive 这类非媒体上报，不抛错）。
+  const emptyGraph = graphWith("empty");
+  const emptyProbes = ["image", "video", "audio", "text", "pdf"].map((mt) => ({
+    mt,
+    ops: observe(emptyGraph, mt),
+  }));
+  check(
+    "D136：`empty` 类目对任何媒体类型**都不命中**（空 = 排除全部；不抛错、不误命中）",
+    emptyProbes.every(({ ops }) => !ops.includes("show metadata")),
+    emptyProbes.map(({ mt, ops }) => `${mt}:${ops.length === 0 ? "不命中" : ops.join("|")}`).join(" "),
+  );
+
+  // ③ 对照：`image` 类目只命中 image（证明 ①② 不是"所有类目都放行"的假绿）。
+  const imageGraph = graphWith("image");
+  check(
+    "D136：对照——`image` 类目只命中 image，不命中 video（证明 unlimited/empty 的行为是特例而非普遍放行）",
+    observe(imageGraph, "image").includes("show metadata") &&
+      !observe(imageGraph, "video").includes("show metadata"),
+    `image→${observe(imageGraph, "image").join("|") || "无"} video→${observe(imageGraph, "video").join("|") || "无"}`,
+  );
+
+  // ④ `unlimited` **仍遵守子类优先**：txt 被该类目下的子类认领时，只走子类链路。
+  const unlimitedWithSub = graphWith("unlimited", { withSubclass: true });
+  const subOps = observe(unlimitedWithSub, "text", "txt");
+  check(
+    "D136：`unlimited` 仍遵守**子类优先**（txt 被子类认领 → 只走子类链路，不走无限类目链路）",
+    subOps.includes("show viewer") && !subOps.includes("show metadata"),
+    subOps.join(" ; ") || "（无动作）",
+  );
+}
 {
   const A = { id: "A", box: { left: 0, top: 0, width: 200, height: 400 } };
   const B = { id: "B", box: { left: 200, top: 0, width: 300, height: 400 } };

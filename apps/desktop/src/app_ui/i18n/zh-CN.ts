@@ -118,14 +118,16 @@ export const zhCN = {
   "album.kind.fixed": "固定型",
   "album.kind.follow": "跟随源",
   "album.mediaType": "媒体属性",
-  "album.media.all": "全部",
+  // 「设置属性」菜单项的四个取值：媒体（底层 `multimedia`）/ 图像 / 视频 / 音频。
+  // 「全部」一项在 D134 被删除并换成语义更准的「媒体」（它本来就是"包含全部媒体"的超集）。
+  "album.media.media": "媒体",
   "album.media.image": "图像",
   "album.media.video": "视频",
   "album.media.audio": "音频",
   "album.inherit": "继承",
   "album.rename": "重命名相册",
   "album.delete": "删除相册",
-  "album.mediaType.set": "设置媒体属性",
+  "album.mediaType.set": "设置属性",
   "album.dropHint": "拖到相册加入",
   "album.createChild": "创建子相册",
   "album.members": "成员",
@@ -298,8 +300,20 @@ export const zhCN = {
   "album.renameFailed": "重命名相册失败：{err}",
   "album.createChildFailed": "创建子相册失败：{err}",
   "album.deleteFailed": "删除相册失败：{err}",
-  "album.setMediaTypeFailed": "设置媒体属性失败：{err}",
+  "album.setMediaTypeFailed": "设置属性失败：{err}",
   "album.addMemberFailed": "加入成员失败：{err}",
+
+  // 面板打标记（D134）：源面板与相册面板右键菜单里的「添加标记」子区。
+  // 打标结果与自定义标记清单按仓库落在 app_settings（`panelMarks.<repoId>`，各面板一份）。
+  "mark.add": "添加标记",
+  "mark.menu.custom": "自定义标记",
+  "mark.menu.customAdd": "＋ 新建自定义标记",
+  "mark.menu.customEmpty": "暂无自定义标记",
+  "mark.menu.customPlaceholder": "自定义标记名",
+  "mark.menu.system": "系统标记",
+  "mark.menu.orphan": "其它已打标记",
+  "mark.toggleFailed": "标记保存失败：{err}",
+  "mark.derived": "由相册属性自动打上",
 
   // 媒体预览
   "media.loadFailed": "媒体预览加载失败：{err}",
@@ -595,7 +609,10 @@ export const zhCN = {
   "blueprint.key": "key",
   "blueprint.panelId": "面板",
   "blueprint.titleKey": "标题键",
-  "blueprint.mediaType": "媒体类型",
+  // D135：类目的「类型」二字是用户裁决口径——这个键在属性面板里是**类目字段标签**，
+  // 不再宣称"媒体"，因为取值域里已有 PDF / 相册 / 源这类非"媒体"的类型。键名沿用不改
+  // （改名会牵动三语与类型，收益为零）。
+  "blueprint.mediaType": "类型",
   "blueprint.subclassFormat": "子类格式",
   "blueprint.classOfSubclass": "所属类目",
   "blueprint.subclassNoDomain": "该类目没有子类取值域（当前只有文本类目有：EPUB / TXT / Markdown）",
@@ -654,6 +671,30 @@ export const zhCN = {
   "blueprint.panHint": "中键按住拖动 = 平移画布",
   "blueprint.minimap": "小地图",
   "blueprint.minimapHint": "拖动小地图 = 快速把画布移到该位置",
+  // 「?」帮助面板（画布右下角）：内容**由节点定义表派生**，因此 D136 把标记改挂到
+  // 类目之后，层级树会自动变成「类目 ⊃ {子类, 标记, 对象}」——文案里不写死任何父子关系。
+  "blueprint.help.open": "包含关系帮助",
+  "blueprint.help.title": "节点的包含关系",
+  "blueprint.help.hierarchy": "层级（父 ⊃ 子）",
+  "blueprint.help.rules": "包含关系表",
+  "blueprint.help.edges": "连线类型",
+  "blueprint.help.ruleNodes": "规则节点不参与包含",
+  "blueprint.help.close": "关闭",
+  "blueprint.help.hierarchyHint":
+    "缩进 = 包含层级。同一类型可挂在多个父下（行尾 ← 列出它的全部父级），因此会在树里重复出现。",
+  "blueprint.help.rulesHint":
+    "从左到右：父 → 子。每个子只有一个结构父；每个父可以有多个子（画布上连线即「包含」）。",
+  "blueprint.help.ruleNodesHint":
+    "操作 / 条件 / 状态只走 on / fires / guards 连线，不进入包含层级——它们在定义表里就没有结构父/子，因此不出现在上面的树里。",
+  "blueprint.help.edge.contains": "结构层级：父包含子（从「包含」端口拖出）",
+  "blueprint.help.edge.memberOf": "标签组 ↔ 面板的归属关系（面板属于某个标签组）",
+  "blueprint.help.edge.on": "对象 / 类目 / 子类 / 标记 / 面板 → 操作：规则链的起点",
+  "blueprint.help.edge.fires": "操作 / 条件 → 条件或状态：规则链的下一步",
+  "blueprint.help.edge.guards": "条件 → 状态：先满足条件再执行动作",
+  "blueprint.help.allowed": "允许：{from} → {to}",
+  "blueprint.help.columnParent": "父",
+  "blueprint.help.columnChild": "子",
+  "blueprint.help.columnEdge": "边类型",
   "blueprint.nodeAdded": "已新增节点于 ({x}, {y})",
   "blueprint.withStructure": "带当前布局结构",
   "blueprint.structureHint": "按当前布局生成 界面→布局块→标签组→面板 骨架，作为新蓝图的基础",
@@ -732,13 +773,37 @@ export const zhCN = {
   "blueprint.mediaType.video": "视频",
   "blueprint.mediaType.audio": "音频",
   "blueprint.mediaType.text": "文本",
+  // `blueprint.mediaType.pdf`：三语字典此前都缺这一条，PDF 类目直接显示裸键（用户报的
+  // "PDF 翻译缺失"）。值用拉丁缩写 PDF（三语同一写法），不做本地化。
+  "blueprint.mediaType.pdf": "PDF",
+  // D135：取值域 5→7，追加相册 / 源两个**面板层**类目（相册面板下只有「相册」、源面板下
+  // 只有「源」，见 `classMediaTypesForPanel` 的分域）。
+  "blueprint.mediaType.album": "相册",
+  "blueprint.mediaType.source": "源",
+  // D136 追加的两个**特殊**类目类型（取值域 7 → 9，D 线负责扩 `BLUEPRINT_MEDIA_TYPES`）：
+  // `unlimited` = 无限制（匹配一切媒体类型）、`empty` = 空（排除全部）。
+  // 文案先就位：这两个值由 `BLUEPRINT_MEDIA_TYPES` 动态渲染，键先加不会因取值域未扩而报错。
+  "blueprint.mediaType.unlimited": "无限制",
+  "blueprint.mediaType.empty": "空",
   // 子类格式（`subclass.format`）：文本类目下的三个子类。
   "blueprint.format.epub": "EPUB",
   "blueprint.format.txt": "TXT",
   "blueprint.format.md": "Markdown",
   // 标记（`mark.mark`）：与类目**正交、可交叉**的轴（用户口径：漫画.zip 可标记为 manga）。
+  // D134 由 2 项扩为 10 项；顺序与 `BLUEPRINT_BUILTIN_MARKS` / 菜单树一致。
+  "blueprint.mark.media": "媒体",
+  "blueprint.mark.image": "图像",
+  "blueprint.mark.video": "视频",
+  "blueprint.mark.audio": "音频",
+  "blueprint.mark.music": "音乐",
+  "blueprint.mark.document": "文档",
+  "blueprint.mark.text": "文本",
   "blueprint.mark.book": "书籍",
   "blueprint.mark.manga": "漫画",
+  "blueprint.mark.program": "程序",
+  // 对象节点在「标记」父级下的显示名（D134）：相册面板下只有「相册」，源面板下只有「源」。
+  "blueprint.object.album": "相册",
+  "blueprint.object.source": "源",
   "blueprint.hideDir.left": "左",
   "blueprint.hideDir.right": "右",
   "blueprint.hideDir.up": "上",

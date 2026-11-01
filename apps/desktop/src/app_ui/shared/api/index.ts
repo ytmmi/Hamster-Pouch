@@ -19,4 +19,5 @@ export * from "./taglib";
 export * from "./fsops";
 export * from "./blueprint";
 export * from "./interfacePages";
+export * from "./panelMarks";
 export * from "./mcp";

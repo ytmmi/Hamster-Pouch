@@ -41,6 +41,9 @@ import { nodeDisplayName, nodeSummary, nodeTypeLabel } from "./blueprintLabels";
 // 配色由纯模块 `blueprintNodeColors` 承载（画布与小地图共用同一份色板）。
 import { EDGE_COLORS, edgeColor, nodeColor } from "./blueprintNodeColors";
 import { BlueprintMinimap } from "./BlueprintMinimap";
+// 「?」包含关系帮助（D136-B）：内容由 `blueprintHelp` 从节点定义表派生，
+// 此处只持有"开/关"这一个画布本地状态（浮层挂在画布内，定位靠 `.bp-help-*`）。
+import { BlueprintHelpView } from "./BlueprintHelpView";
 import {
   nearestWithin,
   pointToPolylineDistance,
@@ -174,6 +177,14 @@ export function BlueprintCanvas({
   const [selectedEdge, setSelectedEdge] = useState<number | null>(null);
   /** 刀痕状态：右键长按拖拽（起点固定，终点跟随指针的**直线**删除线）。 */
   const [blade, setBlade] = useState<BladeState | null>(null);
+  /**
+   * 「?」帮助浮层是否展开（D136-B）。
+   *
+   * 状态放在画布而不是 `BlueprintHelp` 内部：浮层的"点外部关闭"要监听 `document`，
+   * 而画布已经在做指针命中（平移/刀痕）——开关只有画布知道，才能保证点 `?` 时
+   * 那一次 pointerdown **不会**同时触发画布的平移；两处各存一份状态则会不同步。
+   */
+  const [helpOpen, setHelpOpen] = useState(false);
   const [, setTick] = useState(0);
   /** 端口元素的实测坐标（`data-port` → 画布局部坐标）。 */
   const portMap = useRef<Map<string, { x: number; y: number }>>(new Map());
@@ -979,6 +990,15 @@ export function BlueprintCanvas({
         view={view}
         unlinked={unlinked}
         onFocus={focusWorld}
+        t={t}
+      />
+
+      {/* 「?」包含关系帮助（D136-B）：按钮在小地图**正上方**（不抢小地图的拖拽热区），
+          浮层在其上方展开、可滚动；内容派生自节点定义表（见 `blueprintHelp.ts`）。 */}
+      <BlueprintHelpView
+        open={helpOpen}
+        onToggle={() => setHelpOpen((v) => !v)}
+        onClose={() => setHelpOpen(false)}
         t={t}
       />
     </div>

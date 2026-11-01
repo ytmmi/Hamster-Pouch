@@ -39,8 +39,10 @@ pub use crate::blueprint_node_decl_validate::{
 
 /// 规则边（非结构边）的**输出侧来源**：`边类型 → 允许的输出节点类型`。
 ///
-/// `on` 的来源含**三条正交轴上的对象父**：类目、子类、标记（都能挂对象，
-/// 因此都能由对象发起规则），与 TS `RULE_EDGE_SOURCES` 逐项一致。
+/// `on` 的来源含**三条语义轴上的对象父**：类目、子类、标记（都能挂对象，
+/// 因此都能由对象发起规则）。⚠️ D136 把标记从"面板下的平行轴"改到"类目下的从属轴"，
+/// 但**对象仍可挂在标记下**（`parents` 里仍有 `mark`），所以 `on` 的来源集合**不变**。
+/// 与 TS `RULE_EDGE_SOURCES` 逐项一致。
 pub const RULE_EDGE_SOURCES: [(&str, &[&str]); 4] = [
     ("memberOf", &["control"]),
     ("on", &["control", "class", "subclass", "mark", "object"]),
@@ -100,15 +102,19 @@ pub struct PanelFact {
 /// 宿主内置面板的事实（与 `packages/config/src/panels.ts` 的 `BUILTIN_PANEL_SPECS`
 /// 逐项对齐，由 `pnpm check:panels` 断言）。
 ///
-/// 有类目的内置面板：**媒体预览**（`media`，图像 / 视频 / 音频）与
+/// 有类目的内置面板：**媒体预览**（`media`，图像 / 视频 / 音频）、
 /// **图书预览**（`bookpreview`，文本类的 epub / txt / md 三个子类 + **PDF** +
-/// book 标记，2026-10-10 用户口径、2026-10-11 加入 PDF）；其余没有条目分类
-/// （2026-10-16 新增的**图书阅读器** `bookreader` 同样没有：它只读书，不分类）。
-/// 内置面板都没收窄 `mount`（三项全开）。
+/// book 标记，2026-10-10 用户口径、2026-10-11 加入 PDF）、以及 2026-11-01（D135）
+/// 放开的**相册**（`albums`，类目类型 `album`）与**源**（`sources`，类目类型 `source`）
+/// ——这两个面板各自有"条目分类"，只是维度不是媒体类型。
+/// 其余 12 个没有条目分类（2026-10-16 新增的**图书阅读器** `bookreader` 同样没有：
+/// 它只读书，不分类）。内置面板都没收窄 `mount`（三项全开）。
 pub const BUILTIN_PANEL_FACTS: [(&str, bool); 16] = [
     ("repo", false),
-    ("sources", false),
-    ("albums", false),
+    // 源面板：条目是源目录树里的一支 → 有类目（D135）。
+    ("sources", true),
+    // 相册面板：条目是相册 → 有类目（D135）。
+    ("albums", true),
     ("media", true),
     ("bookpreview", true),
     ("viewer", false),

@@ -21,6 +21,9 @@ pub(crate) mod layout;
 // 启停本身由设置项 `mcp.*` 驱动，不给命令开第二个开关。
 pub(crate) mod mcp;
 pub(crate) mod media;
+// 源/相册面板「添加标记」的本地打标状态（D134）：按仓库读写一份不透明 JSON，
+// 语义在前端 `shared/panelMarks.ts`，桥接层不解析内容。
+pub(crate) mod panel_marks;
 pub(crate) mod plugin;
 pub(crate) mod plugin_catalog;
 pub(crate) mod plugin_contributions;

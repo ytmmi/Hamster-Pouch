@@ -15,7 +15,8 @@ use crate::blueprint::{
 use crate::blueprint_node::{BlueprintEdge, BlueprintNode};
 use crate::blueprint_registry::{NodeRegistry, SeverityLevel};
 use crate::blueprint_types::{
-    ActionOp, CLASS_MEDIA_TYPES, EdgeKind, GroupMode, NodeType, Trigger, is_valid_class_media_type,
+    ActionOp, CLASS_MEDIA_TYPES, EdgeKind, GroupMode, NodeType, Trigger,
+    class_media_type_in_panel_domain, class_media_types_for_panel, is_valid_class_media_type,
     subclass_formats_for,
 };
 
@@ -432,6 +433,27 @@ pub(crate) fn validate_node_with(
     }
 }
 
+/// 类目所属面板的 `panel_id`（D135 分域判定的输入）。
+///
+/// 返回 `None` 的三种情形都要按**未接通**对待、**不**做分域判定：
+/// `control` 字段为空、指向不存在的节点、指向的节点不是面板（后者已单独报硬错误）。
+/// `control` 节点自身没填 `panel_id`（面板未接通）同样返回 `None`。
+fn class_owner_panel_id(
+    node: &BlueprintNode,
+    by_key: &HashMap<&str, &BlueprintNode>,
+) -> Option<String> {
+    let control_key = node.control.as_deref()?.trim();
+    let control = by_key.get(control_key)?;
+    if control.node_type != NodeType::Control {
+        return None;
+    }
+    let panel_id = control.panel_id.as_deref()?.trim();
+    if panel_id.is_empty() {
+        return None;
+    }
+    Some(panel_id.to_string())
+}
+
 /// 内置类型的字段校验本体（只产生消息，分级由调用方按注册表的 `severity` 决定）。
 fn validate_node_fields(
     node: &BlueprintNode,
@@ -492,24 +514,42 @@ fn validate_node_fields(
                 ));
             }
             match node.media_type.as_deref() {
-                Some(mt) if is_valid_class_media_type(mt) => {}
+                Some(mt) if is_valid_class_media_type(mt) => {
+                    // **按面板分域**（D135）：类目有 `control` 且能解析出面板 id 时，
+                    // 取值还必须落在该面板的类型域内（如媒体预览下不能建「相册」类目）。
+                    // `control` 缺失 / 指向已删节点 = 未接通软告警，**不做分域判定**
+                    // ——缺失不得绑架用户数据（否则断一条线就把既有文档判成硬错误）。
+                    // 面板未注册（插件缺失）时 `class_media_types_for_panel` 返回全量，
+                    // 与 TS `classMediaTypesForPanel` 同口径，不把未知面板的取值判死。
+                    if let Some(panel_id) = class_owner_panel_id(node, by_key)
+                        && !class_media_type_in_panel_domain(&panel_id, mt)
+                    {
+                        errors.push(format!(
+                            "类节点 {key} 的 media_type = {mt} 不属于面板 {panel_id} 的类型域（该面板只允许 {}，节点标准第 2.1 节）",
+                            class_media_types_for_panel(&panel_id).join("/")
+                        ));
+                    }
+                }
                 _ => errors.push(format!(
                     "类节点 {key} 的 media_type 必须是 {}（当前: {}）",
                     CLASS_MEDIA_TYPES.join("/"),
                     node.media_type.as_deref().unwrap_or("")
                 )),
             }
-            // 类目**只按媒体类型分类**：细分交给 `subclass`、与类目正交的维度交给
-            // `mark`（D102）。类目上出现 `format` 是 2026-10-10 之前的旧写法，
+            // 类目**只按媒体类型分类**：细分交给 `subclass`、语义维度交给挂在它**之下**的
+            // `mark` 节点（D102；D136 把标记从"面板下的平行轴"改成"类目下的从属轴"，
+            // 与子类并列——所以这里"类目节点本身不带标记 id"这条**不变**，
+            // 变的是标记**节点自己**挂在哪一级，见下面的 `NodeType::Mark` 分支）。
+            // 类目上出现 `format` 是 2026-10-10 之前的旧写法，
             // 属"字段用在错误的类型上"→ 硬错误（与解析层同口径）。
             if node.format.is_some() {
                 errors.push(format!(
-                    "类节点 {key} 不得带 format：类目只按 media_type 分类，细分请用 subclass 节点、与类目正交的维度请用 mark 节点"
+                    "类节点 {key} 不得带 format：类目只按 media_type 分类，细分请用 subclass 节点、标记请用挂在类目之下的 mark 节点"
                 ));
             }
             if node.mark.is_some() {
                 errors.push(format!(
-                    "类节点 {key} 不得带 mark：标记是独立节点（与类目树平行）"
+                    "类节点 {key} 不得带 mark：标记是挂在类目**之下**的独立节点（与子类并列，D136）"
                 ));
             }
         }
@@ -569,12 +609,21 @@ fn validate_node_fields(
             }
         }
         NodeType::Mark => {
-            if let Some(ck) = node.control.as_deref()
+            // **所属类目**引用（D136）：标记挂在类目下、与子类并列。
+            // 缺失 / 指向已删除节点 → 未接通（软）；指向存在但类型不符 → 硬错误。
+            //
+            // 旧文档兼容：D136 之前标记用 `control` 指向面板。那个值现在既不是
+            // "结构父字段"也不再被读取——`missing_ref` 只看 `class`，因此旧文档
+            // 会命中软告警（未接通 / 灰显），**不会**被硬错误拒绝（用户库实测 0 个
+            // mark 节点，无存量负担，但口径要稳：旧文档照样能保存）。
+            // 这里**不**把残留的 `control` 报成硬错误——它是"字段用在错误的类型上"的
+            // 典型情形，可是把它判死会让"读进来就保存不了"变成新的迁移事故。
+            if let Some(ck) = node.class.as_deref()
                 && let Some(target) = by_key.get(ck)
-                && target.node_type != NodeType::Control
+                && target.node_type != NodeType::Class
             {
                 errors.push(format!(
-                    "标记节点 {key} 的 control 必须指向面板控件节点（当前指向 {}）",
+                    "标记节点 {key} 的 class 必须指向类目节点（当前指向 {}）",
                     target.node_type
                 ));
             }

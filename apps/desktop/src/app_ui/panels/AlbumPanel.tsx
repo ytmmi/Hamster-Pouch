@@ -16,6 +16,7 @@ import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { ContextMenu } from "../menu/ContextMenu";
+import { derivedMarksForAlbum, MarkMenuTree, usePanelMarks } from "./markMenu";
 import type { AlbumItem } from "../shared/types";
 
 /** 相册拖拽载荷的 MIME 类型（与文件的 `application/x-hp-files` 区分，D117/D128）。 */
@@ -202,6 +203,10 @@ export function AlbumPanel(): JSX.Element {
   const [renameValue, setRenameValue] = useState("");
   // 右键菜单内「设置媒体属性」子菜单开关
   const [openMediaTypeSub, setOpenMediaTypeSub] = useState(false);
+  // 右键菜单内「添加标记」子菜单开关（D134）
+  const [openMarkSub, setOpenMarkSub] = useState(false);
+  // 本面板内的打标状态（自定义标记只在本面板共享，不同步蓝图）
+  const { marks, persist: persistMarks } = usePanelMarks(app.repoId);
   // 右键菜单内「创建子相册」行内输入状态
   const [creatingChild, setCreatingChild] = useState(false);
   const [childName, setChildName] = useState("");
@@ -214,6 +219,16 @@ export function AlbumPanel(): JSX.Element {
     () => albums.find((a) => a.id === menu?.albumId),
     [albums, menu],
   );
+  /**
+   * 右键菜单目标相册**由属性自动带上**的标记（D134）：恒为已打、不可取消。
+   * 用**有效**媒体属性（沿父链继承），与相册行尾部 `mediaLabel` 的显示同源——
+   * 若只看显式值，"继承自己是图像的子相册"会在行上显示图像、菜单里却没有图像勾。
+   */
+  const menuDerivedMarks = useMemo(() => {
+    if (!menu) return [];
+    const byId = new Map(albums.map((a) => [a.id, a]));
+    return derivedMarksForAlbum(effectiveMediaType(menu.albumId, byId));
+  }, [albums, menu]);
 
   const toggleCollapse = useCallback((id: string) => {
     setCollapsed((prev) => {
@@ -571,7 +586,9 @@ export function AlbumPanel(): JSX.Element {
       case "audio":
         return t("album.media.audio");
       default:
-        return t("album.media.all");
+        // `multimedia`（"全部"已改名"媒体"，D134）：相册行尾部 `kindLabel · mediaLabel`
+        // 的显示要跟着名字变，否则菜单与列表里同一取值叫两个名字。
+        return t("album.media.media");
     }
   };
 
@@ -627,6 +644,7 @@ export function AlbumPanel(): JSX.Element {
             setCreatingChild(false);
             setChildName("");
             setOpenMediaTypeSub(false);
+            setOpenMarkSub(false);
             setMenu({ x: e.clientX, y: e.clientY, albumId: node.id });
           }}
           onDragStart={(e) => {
@@ -938,7 +956,27 @@ export function AlbumPanel(): JSX.Element {
                 </button>
               )}
 
-              {/* 设置媒体属性：子菜单（全部 / 图像 / 视频 / 音频） */}
+              {/* 添加标记：子菜单（树状系统标记 + 本面板自定义标记，默认全折叠，D134） */}
+              <button
+                className="menu-item has-sub"
+                onClick={() => setOpenMarkSub((v) => !v)}
+              >
+                {t("mark.add")} <span className="sub-arrow">{openMarkSub ? "▾" : "▸"}</span>
+              </button>
+              {openMarkSub && (
+                <div className="menu-sub">
+                  <MarkMenuTree
+                    scope="albums"
+                    targetKey={menu.albumId}
+                    derived={menuDerivedMarks}
+                    marks={marks}
+                    onPersist={persistMarks}
+                    onClose={() => setMenu(null)}
+                  />
+                </div>
+              )}
+
+              {/* 设置属性：子菜单（媒体 / 图像 / 视频 / 音频，D134 删「全部」加「媒体」） */}
               <button
                 className="menu-item has-sub"
                 onClick={() => setOpenMediaTypeSub((v) => !v)}
@@ -955,7 +993,7 @@ export function AlbumPanel(): JSX.Element {
                       setMenu(null);
                     }}
                   >
-                    {t("album.media.all")}
+                    {t("album.media.media")}
                   </button>
                   <button
                     className="menu-item"

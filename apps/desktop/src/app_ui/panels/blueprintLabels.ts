@@ -21,6 +21,22 @@ import type { Translate, TranslationKey } from "../i18n";
  * 节点显示名称：用户自定义 `name` 优先；面板节点回退到本地化标签名
  * （`title_key` → 「媒体预览」等，随语言切换）；界面节点取**层名**（D51）；其余按类型
  * 本地化生成（如 zh-CN 下「面板 1」「操作 2」）。
+ *
+ * **相册 / 源面板下的类目（2026-11-01 / D135；D134 的误实现已纠正）**：这两类面板的
+ * 类目类型就是「相册」/「源」本身（`media_type = album` / `source`），若按类型本地化
+ * 会显示成「类目 1」——在一个"列出相册"的面板里这等于什么都没说。因此当**类目**节点
+ * 指向的面板是 `albums` / `sources` 时，显示为「相册」/「源」。
+ *
+ * ⚠️ **这是一处纠正**：D134 把这条判定写在了 **object** 分支上（按"对象挂在标记轴、
+ * 标记所属面板是 albums/sources"推导），但用户 2026-11-01 澄清那句话实际指**类目**：
+ * 「（上文的"相册面板对象节点只有「相册」、源面板的对象节点只有「源」"实际上是类目）」。
+ * 对象节点因此恢复**通用命名**（`nodeSummary` 用「结构父名 · 范围」），否则"相册面板下
+ * 每个对象都叫相册"会让同一面板里的多个对象无法区分。
+ *
+ * i18n 键名沿用 D134 的 `blueprint.object.album` / `blueprint.object.source`
+ * （键名只是标识符；改键名要牵动三语字典，收益为零）。判定位置必须在
+ * **自定义 name 之后**（用户命名的节点仍以用户命名为准）、**面板标题之前**
+ * （类目不是面板，不该显示面板标题）。
  */
 export function nodeDisplayName(
   node: BlueprintNode,
@@ -38,6 +54,12 @@ export function nodeDisplayName(
   if (node.name?.trim()) {
     return node.name.trim();
   }
+  if (node.type === "class") {
+    const panelLabel = classOfSpecialPanelLabel(node, t, nodes);
+    if (panelLabel) {
+      return panelLabel;
+    }
+  }
   if (node.type === "control") {
     const title = resolveControlTitle(node, t);
     if (title) {
@@ -46,7 +68,48 @@ export function nodeDisplayName(
   }
   const sameType = nodes.filter((n) => n.type === node.type);
   const idx = sameType.findIndex((n) => n.key === node.key);
-  return `${nodeTypeLabel(node.type, t)} ${idx + 1}`;
+  // 标记有 10 种（D134）：按类型编号（「标记 1」「标记 2」）读不出"这是哪种标记"，
+  // 因此标记节点用**标记清单的本地化名**（「媒体」「图书」…）做类型位，编号规则不变
+  // （与「面板 1」「操作 2」同一套风格，同一个画布上仍能区分两个同类标记）。
+  const typeLabel =
+    node.type === "mark" && node.mark
+      ? (() => {
+          const label = markLabel(node.mark, t);
+          return label && label !== node.mark ? label : nodeTypeLabel(node.type, t);
+        })()
+      : nodeTypeLabel(node.type, t);
+  return `${typeLabel} ${idx + 1}`;
+}
+
+/**
+ * **相册 / 源面板下类目**的专用显示名（D135）：类目 → 它所属的**面板**（`control`）→
+ * 面板的 `panel_id`。
+ *
+ * 只认 `albums` / `sources` 两个面板：其余面板下的类目仍按「类型 编号」呈现
+ * （例如媒体预览下的类目是"图像/视频/音频"，说成「媒体预览」就没有信息量）。
+ *
+ * 引用链上任一环缺失（未接通）就返回空串，交给既有回退链——**不得**猜一个标签出来，
+ * 否则"没接线"与"接好了"在显示上无法区分。i18n 键缺失（语言包未跟上）时同样返回空串。
+ */
+function classOfSpecialPanelLabel(
+  node: BlueprintNode,
+  t: Translate,
+  nodes: BlueprintNode[],
+): string {
+  const controlKey = node.control?.trim();
+  if (!controlKey) return "";
+  const controlNode = nodes.find((n) => n.key === controlKey);
+  if (!controlNode || controlNode.type !== "control") return "";
+  const key: string =
+    controlNode.panel_id === "albums"
+      ? "blueprint.object.album"
+      : controlNode.panel_id === "sources"
+        ? "blueprint.object.source"
+        : "";
+  if (!key) return "";
+  const resolved = t(key as TranslationKey);
+  // 键未落地时返回空串（不把裸键显示给用户，也不假装这里已经有专用文案）。
+  return resolved === key ? "" : resolved;
 }
 
 /**
@@ -72,7 +135,13 @@ export function nodeTypeLabel(type: string, t: Translate): string {
   return "";
 }
 
-/** 媒体类型中文标签（图像/视频/音频/文本；未知值原样返回）。 */
+/**
+ * 类目**类型**的本地化标签（图像 / 视频 / 音频 / 文本 / PDF / 相册 / 源；未知值原样返回）。
+ *
+ * 键名仍是 `blueprint.mediaType.<value>`：D135 只把**字段标签**改叫「类型」
+ * （`blueprint.mediaType` 的值 =「类型」，D135-B 线负责那一条），取值文案这组键**不变**
+ * ——7 个取值各有自己的键（`pdf` / `album` / `source` 三条于 D135 补齐三语）。
+ */
 export function mediaTypeLabel(value: string, t: Translate): string {
   return t(`blueprint.mediaType.${value}` as TranslationKey);
 }
@@ -87,9 +156,10 @@ export function subclassFormatLabel(value: string, t: Translate): string {
 }
 
 /**
- * **标记**标签（`mark` 节点的 `mark` 字段：`book` / `manga` …）。
+ * **标记**标签（`mark` 节点的 `mark` 字段：`media` / `book` / `manga` …）。
  *
- * 标记与类目**正交、可交叉**（用户口径：`漫画.zip` 的类目是压缩包、可标记为 `manga`），
+ * 标记在**语义上**与类目正交、可交叉（用户口径：`漫画.zip` 的类目是压缩包、可标记为
+ * `manga`），**结构上**从属类目（D136：`class ⊃ mark ⊃ object`，与子类并列）。
  * 因此文案与"格式"分开一组键——同一个 `book` 在标记里的含义是"这是一本书"，
  * 而不是"这是 book 格式"。
  */
@@ -101,8 +171,9 @@ export function markLabel(value: string, t: Translate): string {
 }
 
 /**
- * 类目的显示摘要：**只有媒体类型**（D102 起细分属于 `subclass` 节点，
- * 不再挂在类目上）。
+ * 类目的显示摘要：**只有类型值**（D102 起细分属于 `subclass` 节点，不再挂在类目上；
+ * D135 起「媒体类型」在 UI 上叫「类型」——同一份取值域多了 `album` / `source` 两项，
+ * 它们不是扫描器的媒体类型）。
  */
 export function classSummary(
   node: Pick<BlueprintNode, "media_type">,
@@ -197,8 +268,16 @@ export function nodeSummary(
       const owner = node.subclass ? nodes.find((n) => n.key === node.subclass) : undefined;
       return subclassSummary(node, t, owner ? nodeDisplayName(owner, t, nodes) : undefined);
     }
-    case "mark":
-      return markLabel(node.mark ?? "", t);
+    case "mark": {
+      // 标记（D136）：显示 `标记名 · 所属类目名`——光有「媒体」读不出"挂在哪个类目下"，
+      // 而"从属类目"正是 D136 的核心语义（照 `subclassSummary` 的写法）。
+      // 所属类目名由**引用字段** `node.class` 解析（不是边）：运行期认的就是字段
+      // （见 D109 的"字段只由连线落定"），因此显示它也如实反映运行期口径。
+      // 引用缺失/指向已删除节点时只显示标记名，不猜一个类目出来。
+      const owner = node.class ? nodes.find((n) => n.key === node.class) : undefined;
+      const head = markLabel(node.mark ?? "", t);
+      return owner ? `${head} · ${nodeDisplayName(owner, t, nodes, graph.layers)}` : head;
+    }
     case "object": {
       // 对象的结构父有**三条正交轴**（类目 / 子类 / 标记，三者互斥）：显示实际声明的那条。
       const parentKey = node.class ?? node.subclass ?? node.mark_ref;

@@ -4592,6 +4592,236 @@ button.danger {
   text-align: center;
 }
 
+/* ── 「?」包含关系帮助（D136-B；画布右下角，小地图正上方） ──
+ *
+   右下角竖排三层，互不重叠（从下往上：小地图 → ? 按钮 → 浮层）：
+   - 小地图 `.bp-minimap`：`bottom: 8px`、`width: 176px`；高度实测约 **136px**
+     （`box-sizing: border-box` 下内容宽 166 → SVG 按 viewBox 176×120 缩到 ~113px，
+     再加内边距 8、边框 2、标签行 ~13），因此它的**顶边距底约 144px**；
+   - `?` 按钮：`bottom: 154px` = 小地图顶边再留 **10px**（≥8px 的间距要求）。
+     154 是唯一与下方面板尺寸耦合的常量；小地图尺寸改动时同步改它即可；
+   - 浮层：`top: 8px` / `bottom: 190px`（= 154 + 按钮 28 + 8 间距），**撑满剩余高度**，
+     因此任何画布高度下都不被裁切，内容超出时在浮层内滚动。
+
+   按钮不叠在小地图上：小地图整块是拖拽热区，叠上去会抢走拖动（"点 ?"变成"拖视口"）。
+*/
+
+.bp-help-toggle {
+  position: absolute;
+  right: 8px;
+  /* 小地图顶边（距底约 144px）+ 10px 间距：不遮挡小地图的拖拽热区。 */
+  bottom: 154px;
+  /* 高于画布内容与小地图/图例（它们无 z-index 或只在变换层内 1/2），
+     **低于**设置浮层（60）与右键菜单（2000）：帮助是常驻查询面板，不该盖住它们。 */
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--fg-dim);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.bp-help-toggle:hover,
+.bp-help-toggle:focus-visible {
+  color: var(--fg);
+  border-color: var(--focus-ring);
+  background: var(--bg-3);
+}
+
+.bp-help-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* 浮层打开时按钮保持"按下"观感（它是开关，用户要能看出当前状态）。 */
+.bp-help-toggle.active {
+  color: var(--active-fg);
+  background: var(--active-bg);
+  border-color: var(--active-bg);
+}
+
+/* 浮层：可滚动；宽度 `min(340px, 46%)`（窄画布不至于挤满）；z-index 与按钮同档（30）——
+   高于画布内容与小地图，**低于**设置浮层（60）与右键菜单（2000）。 */
+.bp-help-popover {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  bottom: 190px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(340px, 46%);
+  padding: 8px 10px;
+  overflow-y: auto;
+  font-size: 11px;
+  color: var(--fg);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.32);
+  overscroll-behavior: contain;
+}
+
+.bp-help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.bp-help-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.bp-help-close {
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--fg-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.bp-help-close:hover {
+  color: var(--fg);
+}
+
+.bp-help-section {
+  flex-shrink: 0;
+}
+
+.bp-help-heading {
+  margin: 6px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-dim);
+}
+
+.bp-help-note {
+  margin: 0 0 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--fg-dim);
+}
+
+/* 层级树（缩进由行内 `padding-left` 下发，见 `BlueprintHelp.renderNode`）。 */
+.bp-help-tree {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bp-help-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 0;
+  line-height: 1.5;
+}
+
+.bp-help-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+}
+
+.bp-help-type {
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+/* 行尾的反向信息（该类型可以挂在哪些父下）。 */
+.bp-help-parents {
+  font-size: 10px;
+  color: var(--fg-dim);
+  opacity: 0.85;
+}
+
+/* 包含关系表 */
+.bp-help-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.bp-help-table th {
+  padding: 2px 4px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--border);
+}
+
+.bp-help-table td {
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--bg-3);
+  white-space: nowrap;
+}
+
+.bp-help-edge-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bp-help-edge-list li {
+  margin-bottom: 4px;
+  line-height: 1.5;
+}
+
+.bp-help-edge-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+  padding: 0 4px;
+  font-size: 10px;
+  color: var(--fg);
+  background: var(--bg-3);
+  border-radius: 3px;
+}
+
+.bp-help-edge-badge i {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.bp-help-edge-desc {
+  display: block;
+  color: var(--fg-dim);
+}
+
+.bp-help-edge-io {
+  display: block;
+  font-size: 10px;
+  color: var(--fg-dim);
+  opacity: 0.85;
+}
+
+.bp-help-rule-nodes {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
 /* 属性检查器 */
 .bp-inspector {
   width: 232px;
@@ -5584,3 +5814,79 @@ button.danger {
   outline-offset: 1px;
 }
 
+
+/* ===== 面板「添加标记」菜单（D134） =====
+ *
+ * 行结构是 [折叠箭头][✓/空][标记名]，箭头与勾选符号各自占固定宽度，名字左边缘
+ * 才能跨层级对齐（父行与子行的名字必须看得出"缩进"，否则树形感消失）。
+ *
+ * 树区**必须**自限高度：`ContextMenu` 按 `scrollHeight` 判断是否翻到光标上方，
+ * 树全部展开会让菜单整体跳位——用户在树里滚动，菜单本体保持不动。
+ */
+.mark-menu-tree {
+  max-height: 220px;
+  overflow: auto;
+  /* 与 `.menu-sub` 的左侧竖线同款：树在子菜单里，视觉上仍是菜单的一部分。 */
+  padding-right: 2px;
+}
+
+.mark-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* 折叠箭头：无子项的标记留空位（不画箭头），保证同层名字对齐。 */
+.mark-menu-arrow {
+  flex: none;
+  width: 14px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.mark-menu-arrow.is-empty {
+  cursor: default;
+}
+
+/* 展开态旋转：复用目录树那条 `.tree-arrow.on .tree-chevron-icon` 的同一份动效。 */
+.mark-menu-arrow.on .tree-chevron-icon {
+  transform: rotate(90deg);
+}
+
+/* 勾选行：整行可点（`.menu-item` 已是块级按钮），勾选符号占位避免文字左右跳动。 */
+.mark-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mark-menu-check {
+  flex: none;
+  width: 12px;
+  color: var(--fg-dim);
+}
+
+/* 已勾选：勾号与文字都提到正文色（未勾选的勾号位置用不换行空格占位）。 */
+.mark-menu-item[aria-pressed="true"] .mark-menu-check {
+  color: var(--fg);
+}
+
+/* 派生标记（相册属性自动带上）：不可取消，用弱化色表达"不是用户打的"。 */
+.mark-menu-row.is-derived .mark-menu-item {
+  color: var(--fg-dim);
+  cursor: default;
+}
+
+.mark-menu-row.is-derived .mark-menu-item:hover {
+  /* 不给 hover 底色：它不可取消，给反馈会被读成"能点掉"。 */
+  background: transparent;
+}

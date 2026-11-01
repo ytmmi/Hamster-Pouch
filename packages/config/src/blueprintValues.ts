@@ -71,7 +71,7 @@ export type BlueprintBuiltinNodeType = (typeof BLUEPRINT_BUILTIN_NODE_TYPES)[num
 export const BLUEPRINT_NODE_TYPES: string[] = [...BLUEPRINT_BUILTIN_NODE_TYPES];
 
 /**
- * 节点类型：**开放取值域**（内置 10 种 + 插件注册项 + 当前无注册项的合法类型）。
+ * 节点类型：**开放取值域**（内置 12 种 + 插件注册项 + 当前无注册项的合法类型）。
  *
  * 用 `string` 而非字面量联合是有意为之：注册表可扩展，写死联合类型会与
  * 「插件可注册」互相矛盾。内置子集请用 [`BlueprintBuiltinNodeType`]。
@@ -121,19 +121,58 @@ export type BlueprintEdgeKind = (typeof BLUEPRINT_EDGE_KINDS)[number];
  * `pdf` 于 2026-10-11 加入（与扫描器 `MediaType::Pdf` 同源）：PDF 是**独立的类目**
  * 而不是 `text` 的一种——它是二进制容器（`%PDF-` magic bytes），
  * 编码判定 / 按字符分页那一整套对它不适用，并进 `text` 会让那个类目变成一句谎话。
- * 取值域与 `hp-core` 的 `CLASS_MEDIA_TYPES` 逐项对齐。
+ *
+ * `album` / `source` 于 2026-11-01 加入（D135，用户口径）：「相册」与「源」这两个面板
+ * **也有自己的条目分类**——相册面板的条目是「相册」、源面板的条目是「源目录」，因此它们
+ * 从"无类目"（`hasClass = false`。那时它们确实没有按媒体类型分类的层）改为"有类目"，
+ * 并各获得一个专属类型值。**它们不是媒体类型**（不来自扫描器 `MediaType`）：这里是
+ * 「类目**类型**」取值域，`media_type` 这个字段名是历史命名（D135 起 UI 显示为「类型」）。
+ *
+ * `unlimited` / `empty` 于 2026-11-01 加入（D136，用户口径：「类目新增类型"无限制"，
+ * 表示无限制，和类型"空"表示排除全部」）——它们是**两端的语义档位**，不是媒体类型：
+ * - `unlimited`：该类目**匹配一切**媒体类型（最粗一档，因此排在清单**首项**）；
+ * - `empty`：该类目**排除全部**（不匹配任何条目，因此排在**末项**）。
+ *   `empty` 的用途是"暂时停用这条类目链"——不删节点、不破坏连线，只把命中集清空。
+ * 两者与 `album` / `source` 一样属于**类目层的分类档位**，与磁盘上的 `MediaType`
+ * （仍是 image/video/audio/text/pdf）不是一回事。
+ *
+ * **取值域是"全量"而不是"每个面板都能选全部"**：具体面板能用哪些类型由
+ * `blueprintNodes.ts` 的 `classMediaTypesForPanel(panelId)` 按面板收窄（D135）；
+ * 本清单只是**并集**（解析层"是不是一个合法类型值"的判据）。
+ *
+ * 取值域与 `hp-core` 的 `CLASS_MEDIA_TYPES` 逐项对齐（顺序也一致）。
  */
-export const BLUEPRINT_MEDIA_TYPES = ["image", "video", "audio", "text", "pdf"] as const;
+export const BLUEPRINT_MEDIA_TYPES = [
+  // 无限制（D136）：类目匹配一切媒体类型。放首项——它是最粗的一档。
+  "unlimited",
+  "image",
+  "video",
+  "audio",
+  "text",
+  "pdf",
+  // 相册面板（`albums`）的条目分类：一个类目 = 一组"相册条目"。
+  "album",
+  // 源面板（`sources`）的条目分类：一个类目 = 源目录树里的一支。
+  "source",
+  // 空（D136）：类目排除全部媒体类型。放末项——它是最窄的一档（什么都不收）。
+  "empty",
+] as const;
 export type BlueprintMediaType = (typeof BLUEPRINT_MEDIA_TYPES)[number];
+
+/** 匹配一切类目类型（D136 两端档位之一）。 */
+export const CLASS_MEDIA_UNLIMITED = "unlimited";
+/** 排除全部类目类型（D136 两端档位之一）。 */
+export const CLASS_MEDIA_EMPTY = "empty";
 
 /**
  * **子类取值域**（`subclass` 节点的 `format` 字段，2026-10-10 / D102）——**按类目分域**。
  *
  * 子类挂在**类目**之下，因此它的取值域由**所属类目的媒体类型**决定：
  * - `text` 类目 → `epub` / `txt` / `md`（三个文本格式，既是扩展名也是子类名）；
- * - 其余媒体类型（`image` / `video` / `audio` / **`pdf`**）当前**没有**子类取值域
- *   （`pdf` 只有一种格式，再分一层没有语义；留空的含义是"该类目下不能建子类"，
- *   不是"还没填"）。
+ * - 其余类目类型（`image` / `video` / `audio` / **`pdf`** / D135 新增的 **`album`** /
+ *   **`source`**）当前**没有**子类取值域（`pdf` 只有一种格式，再分一层没有语义；
+ *   `album` / `source` 的"细分"是条目本身，不是格式）。留空的含义是"该类目下不能建子类"，
+ *   不是"还没填"。
  *
  * `book` **不在**这里——它是**标记**（见 [`BLUEPRINT_MARK_KINDS`]），
  * 与子类是**两条正交的轴**：一个 `txt` 子类下的文件可以**同时**带 `book` 标记。
@@ -152,6 +191,41 @@ export function mediaTypeHasSubclass(mediaType: string): boolean {
   return subclassFormatsFor(mediaType).length > 0;
 }
 
+// ---------------------------- 标记 id（逐个常量，顺序即清单顺序） ----------------------------
+//
+// 每个 id 单独一个常量（而不是在清单里写裸字符串字面量）：清单、树、Rust 侧常量与
+// 各处"默认取第一项"都引用同一处定义，避免同一个 `"book"` 在十几个文件里各写一遍。
+
+/** 媒体标记 id（**父级标记**：图像 / 视频 / 音频的并集，用于"任何媒体"这类粗判）。 */
+export const MEDIA_MARK = "media";
+
+/** 图像标记 id（"图像就是图片"，不再另设 `picture` 这类同义 id）。 */
+export const IMAGE_MARK = "image";
+
+/** 视频标记 id。 */
+export const VIDEO_MARK = "video";
+
+/** 音频标记 id（其下细分出音乐，见 [`MUSIC_MARK`]）。 */
+export const AUDIO_MARK = "audio";
+
+/** 音乐标记 id（音频之下的细分语义，而非"音频"的同义词）。 */
+export const MUSIC_MARK = "music";
+
+/** 文档标记 id（**父级标记**：文本 / 图书 / 漫画的并集）。 */
+export const DOCUMENT_MARK = "document";
+
+/** 文本标记 id（纯文本类条目；与"文本类目"不是同一维度，见节点标准第 2.0.1 节）。 */
+export const TEXT_MARK = "text";
+
+/** 电子书 / PDF 标记 id（`epub` 与 `pdf` 默认带它；与库表里的存储值同字面量）。 */
+export const BOOK_MARK = "book";
+
+/** 漫画标记 id（用户口径的例子：`漫画.zip` 可标为 `manga`，据此走漫画阅读器蓝图）。 */
+export const MANGA_MARK = "manga";
+
+/** 程序标记 id（可执行 / 脚本 / 工程目录这类"非媒体、非文档"的条目）。 */
+export const PROGRAM_MARK = "program";
+
 /**
  * **标记清单**（`mark` 节点的 `mark` 字段引用它，2026-10-10 / D102）——**可注册**。
  *
@@ -167,19 +241,67 @@ export function mediaTypeHasSubclass(mediaType: string): boolean {
  *
  * 内置项与用户自定义项（`mark.<plugin_id>.<local_id>` 式的宿主/插件注册）同形，
  * 由 [`registerBlueprintMarks`] 登记；未注册的取值按「未接通」处理（与节点类型同口径）。
+ *
+ * **2026-11-01（D134）由 2 项扩为 10 项**：标记不只用于"文件级"打标（媒体预览 / 图书预览
+ * 当初就是这么实现的），也用于**文件夹级**（例如"把某个漫画文件夹标记为一本漫画"，
+ * 其内的图像就是这本漫画的页）。因此清单要覆盖"媒体 / 文档 / 程序"三层常见语义，
+ * 而不只是电子书与漫画两项。
+ *
+ * 清单的**顺序即树顺序**（见 [`BLUEPRINT_MARK_TREE`]），也是蓝图属性面板下拉的顺序：
+ * 蓝图按稳定 id 分派行为，顺序漂移会让同一份文档在不同版本里读到不同的默认候选。
  */
 export const BLUEPRINT_BUILTIN_MARKS = [
-  /** 电子书 / PDF 标记（`epub` 与 `pdf` 默认带它；`txt` / `md` 可由用户打上）。 */
-  "book",
-  /** 漫画标记（用户口径的例子：`漫画.zip` 可标为 `manga`，据此走漫画阅读器蓝图）。 */
-  "manga",
+  MEDIA_MARK,
+  IMAGE_MARK,
+  VIDEO_MARK,
+  AUDIO_MARK,
+  MUSIC_MARK,
+  DOCUMENT_MARK,
+  TEXT_MARK,
+  BOOK_MARK,
+  MANGA_MARK,
+  PROGRAM_MARK,
 ] as const;
 
-/** 电子书标记 id（与库表里的存储值同字面量，只有一处定义）。 */
-export const BOOK_MARK = "book";
+/**
+ * 系统标记的**树形视图**（2026-11-01 / D134）——**纯数据，仅供 UI 与文档同源**。
+ *
+ * 关键前提：**蓝图节点模型是扁平的**（`面板 ⊃ 标记 ⊃ 对象`，每个标记一个节点，
+ * 标记之间**没有**父标记关系）。这里的树只回答"右键菜单里这 10 项该怎么折叠显示"，
+ * 以及文档怎么描述它们的分组语义；**不要**据此推出"标记可以挂标记"——那会引入
+ * 第 13 种层级、破坏既有校验与端口表。
+ *
+ * 分组（用户 2026-11-01 裁决原话："第一级是媒体、文档、程序"）：
+ * - 媒体 ⊃ {图像, 视频, 音频 ⊃ {音乐}}
+ * - 文档 ⊃ {文本, 图书, 漫画}
+ * - 程序
+ *
+ * 树的**先序遍历**结果必须与 [`BLUEPRINT_BUILTIN_MARKS`] **逐项相等**（C 线门禁断言）；
+ * 两者是"同一份清单的两种视图"，任一处单独增删都会让菜单与蓝图下拉分家。
+ */
+export const BLUEPRINT_MARK_TREE: readonly BlueprintMarkTreeNode[] = [
+  {
+    id: MEDIA_MARK,
+    children: [
+      { id: IMAGE_MARK },
+      { id: VIDEO_MARK },
+      { id: AUDIO_MARK, children: [{ id: MUSIC_MARK }] },
+    ],
+  },
+  {
+    id: DOCUMENT_MARK,
+    children: [{ id: TEXT_MARK }, { id: BOOK_MARK }, { id: MANGA_MARK }],
+  },
+  { id: PROGRAM_MARK },
+];
 
-/** 漫画标记 id（用户口径的例子，单独常量避免各处硬编码字符串）。 */
-export const MANGA_MARK = "manga";
+/** 系统标记树的一个节点（`id` 即标记 id；`children` 只影响菜单/文档的分组显示）。 */
+export interface BlueprintMarkTreeNode {
+  /** 标记 id（宿主内置为裸 id，如 `media` / `book`）。 */
+  id: string;
+  /** 树形**显示**用的子项；节点模型本身不表达这层父子关系（模型是扁平的）。 */
+  children?: readonly BlueprintMarkTreeNode[];
+}
 
 /** 标记 id 的命名规则：宿主裸 id，或插件命名空间 id（同节点类型的规则）。 */
 export type BlueprintMarkKind = string;
@@ -265,7 +387,7 @@ export function pluginRegisteredNodeTypes(): readonly RegisteredNodeType[] {
   return registeredNodeTypes;
 }
 
-/** 该节点类型当前是否有注册项（宿主内置 10 种恒为 `true`）。 */
+/** 该节点类型当前是否有注册项（宿主内置 12 种恒为 `true`）。 */
 export function isNodeTypeRegistered(type: string): boolean {
   return (
     (BLUEPRINT_BUILTIN_NODE_TYPES as readonly string[]).includes(type) ||

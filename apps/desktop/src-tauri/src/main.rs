@@ -313,6 +313,9 @@ fn main() {
             // 垂直「界面页」标签条（D124）：按仓库读写页面组 JSON。
             commands::interface_pages::interface_pages_get,
             commands::interface_pages::interface_pages_set,
+            // 源/相册面板「添加标记」（D134）：按仓库读写面板本地打标 JSON。
+            commands::panel_marks::panel_marks_get,
+            commands::panel_marks::panel_marks_set,
             // 内置 MCP 服务（D119）：只有"看状态 / 立即重应用"两条命令，
             // 启停由设置项 `mcp.*` 驱动。
             commands::mcp::mcp_status,

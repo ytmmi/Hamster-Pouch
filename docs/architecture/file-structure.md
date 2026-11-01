@@ -92,6 +92,12 @@ crates/hp-store/src/
     interface_pages.rs  # 界面页分组结构桥接（2026-10-26，D124）：只有 interfacePages.get / .set
                         #   两条，整包 JSON 字符串存 `app_settings` 的 `interfacePages.<repoId>`；
                         #   **不新增库表**——分组是用户导航状态，不参与蓝图校验
+    panel_marks.rs      # 源 / 相册面板「添加标记」的状态桥接（2026-11-01，D134）：只有
+                        #   panelMarks.get / .set 两条，整包 JSON 字符串存 `app_settings` 的
+                        #   `panelMarks.<repoId>`；**不新增库表、也不写 `file_marks`**——面板标记
+                        #   的对象可以是相册 id 或源目录 key，不是文件。语义（自定义标记
+                        #   `custom:<名称>`、目标键、版本闸门）全在前端 `shared/panelMarks.ts`，
+                        #   桥接层不解析内容
     book.rs             # 图书元数据桥接（book.meta：EPUB 作者/简介/内嵌封面、**PDF 第一页封面**；
                         #   book.content：txt/md/epub 正文 + **PDF 逐页栅格化**；磁盘缓存按内容哈希失效）
     book_reader.rs      # 图书阅读器一侧的取数（2026-10-16，D113）：book.toc 目录
@@ -191,6 +197,13 @@ apps/desktop/src/app_ui/
     blueprintLint.ts      # 由图结构派生「未接通」节点（画布灰显）；含 D108 结构父缺失
                           #   （布局块/标签组/面板 无 contains 入边）——与 hp-core
                           #   `blueprint_warnings.rs` **两侧同口径**，由 check:blueprint-nodes 比对
+    panelMarks.ts         # 源 / 相册面板「添加标记」的**纯逻辑**（2026-11-01，D134）：状态模型
+                          #   （自定义标记清单 + 目标键 → 标记 token）+ 容错解析（任何脏数据 /
+                          #   更高版本都落回空状态，绝不抛异常）+ 序列化 + 打标/取消 + 自定义
+                          #   标记增删；另含 `derivedMarkOfMediaType`（相册属性 → 同名标记，**不落库**）。
+                          #   无 React / Tauri 依赖——落库形状与版本闸门是纯函数，才能被门禁断言
+    api/panelMarks.ts     # `panel_marks_get` / `panel_marks_set` 的 IPC 封装（D134；整包 JSON
+                          #   字符串，本层只搬运，解析在 shared/panelMarks.ts）
     control/              # 控件标准的宿主侧（受控渲染；`docs/spec/control-standard.md`）
       ControlPanelView.tsx  # 面板级入口：解析 + 两级校验通过才渲染，失败降级为错误态
       ControlNodeView.tsx   # 单节点渲染（可见性求值 + 节点级错误边界 + 递归子节点）
@@ -200,6 +213,13 @@ apps/desktop/src/app_ui/
       controlData.ts        # 数据快照、谓词求值、行/标量取值 helpers
       controlTypes.ts       # 宿主渲染上下文（主题/i18n/数据/事件/状态注入）
   panels/             # 各功能面板（同类组件，平铺即可；含 PluginPanel、TagTablePanel、BlueprintPanel）
+    markMenu.tsx      # 源 / 相册面板右键「添加标记」的**共享组件**（2026-11-01，D134）：
+                      #   `MarkMenuTree`（系统标记树状排列、默认折叠、顶端「自定义标记」入口；
+                      #   树区给 max-height + overflow，避免 `ContextMenu` 按 scrollHeight
+                      #   整体翻转后展开即跳位）+ `usePanelMarks`（按 repoId 读一次 + 写回，
+                      #   仿 useInterfacePages 的 persist，失败静默不弹窗）+ `derivedMarksForAlbum`
+                      #   （相册属性 → 同名标记）。两个面板只接线约 20 行——菜单层级、默认折叠、
+                      #   派生标记不可取消这套口径各写一份必然漂移
     imageviewer/      # 图像查看器（多文件功能域：主面板 / 舞台 / 导航器 / 胶片栏 / 信息栏
                       #   + 纯逻辑模块 viewerZoom·viewerPlacement·viewerFormat·viewerKeymap·viewerPreload
                       #   + DOM 工具 viewerDecode（换图前离屏解码：解码完成才原子替换 url+尺寸，缺陷 0028）
@@ -327,7 +347,9 @@ apps/desktop/src/app_ui/
     bookpreview/      # 图书预览（panel.bookpreview；**"书" = 文本类 txt/md/epub + pdf**；
                       #   **has_class = true**，
                       #   三轴模型见 blueprintValues.ts 的 BLUEPRINT_SUBCLASS_FORMATS /
-                      #   BLUEPRINT_BUILTIN_MARKS，D102；PDF 是**独立类目**且**无子类**，D110）
+                      #   BLUEPRINT_BUILTIN_MARKS，D102；PDF 是**独立类目**且**无子类**，D110；
+                      #   类目**类型分域 = text / pdf**（D135 按面板收窄候选，权威是 blueprintNodes.ts
+                      #   的 classMediaTypesForPanel，与 Rust class_media_types_for_panel 逐项镜像）
                       #   BookPreviewPanel.tsx 主面板（工具条 + 三种视图容器 + 封面宽度滑条
                       #     + 右键菜单装配：复用 ../mediaPreviewMenu 与 ../mediaPreviewActions，
                       #     删除动作 `albumScoped: false`——"书"进不了相册成员列表；
@@ -391,6 +413,13 @@ apps/desktop/src/app_ui/
                             #   连线体验 D107：**几何命中**（连线 10px / 节点外扩 6px）+ **就近吸附**（端口 34px）+
                             #   拖线时**绿圈高亮可连端口**；端点坐标**四级回落**→ 数据里有边就画得出线）
     BlueprintMinimap.tsx    # 小地图（缩略当前层节点/连线 + 视口指示框；拖动即把视口中心移到该处）
+    BlueprintHelpView.tsx   # 画布右下角「?」帮助浮层的**展示层**（2026-11-01，D136）：缩进层级树 + 包含关系表 +
+                            #   边类型说明；关闭三途（再点 ? / 点浮层外 / Esc）。位置在小地图**正上方**——小地图整块
+                            #   是拖拽热区，叠上去会把"点 ?"变成"拖视口"。数据来源见 `blueprintHelp.ts`
+    blueprintHelp.ts        # 「?」帮助浮层的**纯数据/纯函数**（D136，零 React）：层级树与包含关系表**全部由定义表派生**
+                            #   （`nodeSpecOrNull(t).children` / `CONTAINMENT` / `RULE_EDGE_SOURCES`），**不手写第二份父子常量**
+                            #   —— 手写表会在下一次层级变更（如 D136 把标记改挂类目）时与定义表漂移；门禁直接 import 它断言
+                            #   「帮助层级 == 定义表」
     BlueprintInspector.tsx  # 节点属性面板（浮层 visible/height/size/anchor/offset/shadow/radius/hide_label）
     BlueprintLayerBar.tsx   # 层工具条（切换/新增/重命名/删除/排序 + 无根层标记）
     useBlueprintEditorState.ts # 编辑器界面状态（文档 / JSON 文本 / 选中项 / 视图模式 / 提示 / **refreshKey**）
@@ -461,7 +490,7 @@ apps/desktop/src/test_ui/
 | `apps/desktop/src-tauri/src/commands/plugin.rs`（1153） | `plugin.rs` 插件包安装·发现·版本回滚 · `plugin_lifecycle.rs` 按仓库启用·禁用·状态·加载 · `plugin_contributions.rs` 三张注册表的插件注册视图 · `plugin_control_channel.rs` 控件通道地基与 schema/业务级校验命令 · `plugin_control_event.rs` 控件事件回传链 |
 | `crates/hp-core/src/plugin.rs`（1053） | `plugin.rs` 清单结构与只读访问器 · `plugin_types.rs` 取值域（信任/来源/运行形态/能力/宿主 API 版本）· `plugin_validate.rs` 清单校验 · `plugin_row.rs` 存储行 · `plugin_tests.rs` 测试清单（`include!`） |
 | `apps/desktop/src/app_ui/panels/MediaPreviewPanel.tsx`（965） | `MediaPreviewPanel.tsx` 主面板（列表行渲染 + 三种视图容器 + 尺寸 CSS 变量）· `mediaPreviewData.ts` 取数 · `mediaPreviewSession.ts` 设置读取与本会话覆盖 · `mediaPreviewToolbar.tsx` 顶部工具条 · `mediaPreviewActions.ts` 文件操作动作 · `mediaPreviewMenu.tsx` 右键菜单 · `mediaPreviewSelection.ts` 选中集与 `selection_change` 上报（既有：`mediaPreviewCell.tsx` / `mediaPreviewDropdown.tsx` / `mediaPreviewView.ts`）；**2026-10 缺陷 0018 P1-A 再拆三件**：`mediaPreviewPaging.ts` 游标翻页纯逻辑 · `mediaPreviewVirtual.ts` 行/列模型纯函数 · `mediaPreviewVirtualRows.tsx` 行虚拟化共享钩子；**第 6 轮**再拆 `mediaPreviewScroll.ts` 滚动恢复纯逻辑（`check:panels` 的 `MEDIA_FAMILY_FILES` 同步登记这四件） |
-| `crates/hp-core/src/blueprint_registry.rs`（870） | `blueprint_registry.rs` 注册表与查询视图 · `blueprint_node_decl.rs` 节点声明取值域与结构 · `blueprint_node_decl_validate.rs` 声明校验与端口推导 · `blueprint_builtin_nodes.rs` 宿主内置 10 种定义表 |
+| `crates/hp-core/src/blueprint_registry.rs`（870） | `blueprint_registry.rs` 注册表与查询视图 · `blueprint_node_decl.rs` 节点声明取值域与结构 · `blueprint_node_decl_validate.rs` 声明校验与端口推导 · `blueprint_builtin_nodes.rs` 宿主内置 12 种定义表 |
 | `apps/desktop/src/app_ui/panels/BlueprintPanel.tsx`（874） | `BlueprintPanel.tsx` 编辑器装配 · `BlueprintDocList.tsx` 文档列表 · `BlueprintToolbar.tsx` 工具条 · `BlueprintJsonView.tsx` JSON 视图 · `BlueprintPalette.tsx` 节点添加面板 · `useBlueprintEditorState.ts` 界面状态 · `useBlueprintDocuments.ts` 文档命令 · `useBlueprintLayerTools.ts` 层工具接线 · `useBlueprintGraphEdits.ts` 图编辑接线 · `useBlueprintUnlinked.ts` 未接通派生 |
 | `apps/desktop/src/app_ui/core/AppUiApp.tsx`（872） | `AppUiApp.tsx` 外壳根组件 · `blueprintExecutor.ts` 蓝图动作执行器 · `useBlueprintRuntimeWiring.ts` 引擎生命周期接线 · `overlayHost.ts` 浮层宿主 · `panelDetach.ts` 面板脱窗 · `usePluginRegistrations.ts` 插件注册表重建 · `useShellSettings.ts` 界面偏好 · `useTaskWiring.ts` 任务浮窗接线 · `workspaceBootstrap.ts` 启动装载 · `defaultWorkspaceLayout.ts` 默认首屏布局 |
 

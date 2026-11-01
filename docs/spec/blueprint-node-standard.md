@@ -43,10 +43,10 @@
 | `layout_block` | Layout Block | 布局块（区域/栏） | 结构中间层 | `name` | `position` | `interface` | `group`、`control` |
 | `overlay` | Overlay | 浮层（容器） | 与布局块同级 | —（显示名派生） | `name`、`position`、`visible`、`height`、`size`、`anchor`、`offset_x`、`offset_y`、`shadow`、`radius`、`hide_label` | `interface` | `group`、`control` |
 | `group` | Group | 标签组 | 面板容器 | `mode` | `default_visible`、`hide_direction`、`position`、`name` | `layout_block`、`overlay` | `control` |
-| `control` | Panel | **面板** | 面板实例 | `panel_id` | `title_key`、`name` | `layout_block`、`group`、`overlay` | `class`、`mark` |
-| `class` | Category | **类目** | 面板内条目分类（按媒体类型） | `control`、`media_type` | `name` | `control` | `subclass`、`object` |
+| `control` | Panel | **面板** | 面板实例 | `panel_id` | `title_key`、`name` | `layout_block`、`group`、`overlay` | `class` |
+| `class` | Category | **类目** | 面板内条目分类（按类型） | `control`、`media_type` | `name` | `control` | `subclass`、`mark`、`object` |
 | `subclass` | Subclass | **子类** | 类目之下的细分（如文本 → epub/txt/md） | `subclass`、`format` | `name` | `class`（**必须**） | `object` |
-| `mark` | Mark | **标记** | 与类目树**平行**的标记（book / manga …） | `control`、`mark` | `name` | `control`（**必须**） | `object` |
+| `mark` | Mark | **标记** | 类目下与子类**并列**的标记（内置 **10 项**：media / image / video / audio / music / document / text / book / manga / program） | `class`、`mark` | `name` | `class`（**必须**） | `object` |
 | `object` | Object | 对象 | 条目实例（挂在**三条轴之一**下） | `scope` | `class` / `subclass` / `mark_ref`（三选一）、`name` | `class`、`subclass`、`mark` | — |
 | `event` | Event | 操作（事件） | 规则起点 | `trigger` | `target`、`name` | 无结构边 | — |
 | `condition` | Condition | 条件 | 规则中间 | `expr` | `name` | 无结构边 | — |
@@ -58,9 +58,9 @@
 - `layout_block` 不能嵌套 `layout_block`（布局块嵌套列为 RFC 0007 开放点）；`overlay` 不能 contains `layout_block` / `overlay` / `class` / `subclass` / `mark` / `object`。
 - 规则三节点（`event`/`condition`/`action`）**不参与结构 `contains`**，只通过 `on` / `fires` / `guards` 连线。
 - `interface` 的显示名取自**层名**（D51）；节点上**不存** `name`。
-- `control`（面板）的 `panel_id` 引用**面板注册表**（`docs/spec/panel-standard.md`）；该面板的 `has_class` 决定其下**能否**挂 `class`（类目）与 `mark`（标记）节点——两者都直接挂在面板下，受**同一个**开关约束。
+- `control`（面板）的 `panel_id` 引用**面板注册表**（`docs/spec/panel-standard.md`）；该面板的 `has_class` 决定其下**能否**挂 `class`（类目）节点——**它只约束类目，不约束标记**。回调历史（2026-11-01 / D134 按实现修正）：本节此前写"两者受同一个开关约束"，而 Rust `find_panel_class_violations`（`crates/hp-core/src/blueprint_validate.rs`）只拦 `control → class`；实际上"面板内部有没有条目分类"（类目）与"这个面板的条目属于哪一类内容"（标记）是两件事。**D135 起**相册 / 源面板也已 `has_class = true`（它们各自有条目分类层），因此现在的例子是**其余 12 个面板**：`has_class = false` 却照样能挂标记。
 
-#### 2.0.1 三轴模型：类目 / 子类 / 标记（2026-10-10 / D102）
+#### 2.0.1 三轴模型：类目 / 子类 / 标记（2026-10-10 / D102；标记取值域 2026-11-01 / D134 扩为 10 项）
 
 用户口径（原话）：
 
@@ -68,27 +68,62 @@
 > 类目为压缩包，可以标记为 manga（漫画），当漫画标记的文件被打开时，会按照漫画标记的蓝图
 > 设定打开，如漫画阅读器面板。"
 
+**标记的取值域由 2 项扩为 10 项**（2026-11-01 / D134）：`media`（媒体）/ `image`（图像）/
+`video`（视频）/ `audio`（音频）/ `music`（音乐）/ `document`（文档）/ `text`（文本）/
+`book`（图书）/ `manga`（漫画）/ `program`（程序）。**顺序即清单顺序**，也是蓝图属性面板
+下拉与面板右键标记树的顺序。树形（`媒体 ⊃ {图像, 视频, 音频 ⊃ {音乐}}`、
+`文档 ⊃ {文本, 图书, 漫画}`、`程序`）**只用于 UI 呈现**——节点模型与存储都是**扁平**的 10 个
+id，标记之间不建立父子引用（D102 已定"可多值、互不嵌套"）。原话里提到的"图片"**不单设 id**：
+用户明确"图像就是图片"。
+
+**标记可挂任何面板**：`mark` 的结构父是 `control`，而面板的 `has_class` **只约束类目**，
+不约束标记——`has_class = false` 的面板（D135 起是**其余 12 个**，相册 / 源已转为 `true`）
+照样能挂标记（见第 2 节要点）。
+
 因此条目由**三条正交的轴**定位，各有自己的节点类型：
 
 | 轴 | 节点类型 | 取值来源 | 例子 |
 | --- | --- | --- | --- |
-| **类目** | `class` | `media_type`：`image` / `video` / `audio` / `text`（扫描判定） | 「文本」类目 |
+| **类目** | `class` | `media_type`：`image` / `video` / `audio` / `text` / `pdf` / `album` / `source`（**7 项**，随面板分域，见 §2.0.2） | 「文本」类目 |
 | **子类** | `subclass` | `format`：**按类目分域**（`text` → `epub` / `txt` / `md`） | 「txt」子类 |
-| **标记** | `mark` | `mark`：**可注册清单**（内置 `book` / `manga`） | 「漫画」标记 |
+| **标记** | `mark` | `mark`：**可注册清单**（内置 **10 项**，见上） | 「漫画」标记 |
 
-三者的结构位置不同，这是本模型的关键：
+三者的结构位置不同，这是本模型的关键（**结构位置 2026-11-01 / D136 已改，见下**）：
 
 ```
-面板 ⊃ 类目 ⊃ 子类 ⊃ 对象        （类目—子类是**层级**关系）
-面板 ⊃ 标记 ⊃ 对象               （标记与类目树**平行**）
+面板 ⊃ 类目 ⊃ { 子类, 标记 } ⊃ 对象
+              （类目—子类是层级；类目—标记是**并列从属**，两者都挂在类目之下）
 ```
 
 - **子类挂在类目之下**（`class ⊃ subclass`）：它是该类目的细分，因此 `format` 的取值域
-  **由所属类目的 `media_type` 决定**（`text` → `epub`/`txt`/`md`；其余媒体类型当前**没有**
-  子类取值域，即该类目下不能建子类）。挂在 `image` 类目下的子类 = **硬错误**。
-- **标记挂在面板之下**（与类目树平行）：它**不属于任何类目**，因此**与类目正交**。
+  **由所属类目的 `media_type` 决定**（`text` → `epub`/`txt`/`md`；其余类目类型（含 `album` /
+  `source` / `unlimited` / `empty`）当前**没有**子类取值域，即该类目下不能建子类）。挂在 `image` 类目下的子类 = **硬错误**。
+- **标记也挂在类目之下**（`class ⊃ mark`，**与子类并列**，D136 修订）：它的结构父引用字段是
+  **`class`**（"所属类目"），不是 `control`（"所属面板"）——旧文档里的 `mark.control` 按
+  **未接通软告警**处理，连线时自动清除。
 - **`object` 的结构父是三者之一**（`class` / `subclass` / `mark_ref`，**互斥**）：
   一个对象要么描述"某类目里的条目"、要么"某子类里的条目"、要么"带某标记的条目"。
+
+> ⚠️ **「语义正交」与「结构从属」是两件事（本轮最容易读错的地方）**：
+> D102 说"标记与类目**正交**、可交叉"，那句话讲的是**匹配维度**——标记只看
+> `mark` 值、不看类目的 `media_type`，因此 `manga` 可以跨类目匹配（一个被标为 manga 的
+> zip 与一本被标为 manga 的 epub 命中**同一条**漫画规则），这条语义**原样保留**。
+> D136 改的是**结构位置**：标记节点从此挂在**类目**之下（与子类并列），不再直挂面板。
+> 换句话说：**匹配上仍可交叉，结构上不再平行**。把这两句混读会得出"标记要写在类目
+> 节点里"的错误结论（类目节点仍**禁止**带 `mark` 字段，那是 D102 硬错误）。
+
+
+**「文件夹标记」语义（2026-11-01 / D134）**：标记的**对象不一定是文件**。既有的
+`file_marks` 表与 `media → mark` 的路径来自"媒体预览 / 图书预览的两个面板对象是文件"这一
+具体实现，但标记的语义本身更宽——**漫画标记可以标一个文件夹**，表示"这一整个文件夹是
+一本漫画，其中的图像就是这本漫画的页"。因此：
+
+- 面板把标记打在**相册**（`albumId`）与**源目录节点**（`src:<id>` / `dir:<sourceId>/<rel>`）上
+  时，用的是**面板视图状态**（`app_settings` 的 `panelMarks.<repoId>`），**不写 `file_marks`**
+  ——`file_marks` 只表达"**某个文件**带某个标记"，把相册 id 或目录 key 塞进它会让"哪些文件
+  带 manga"这类既有查询读到根本不是文件的 id；
+- 蓝图节点（`mark ⊃ object`）本身就是**声明式**的：它描述"命中这个标记时按这套设定打开"，
+  与标记的载体是文件还是文件夹无关。
 
 **「补充节点」的层级位置（2026-10-10 用户口径；同日更正）**：
 
@@ -154,6 +189,73 @@
 - 标记的 `mark` 取值**不在当前可注册清单**内 → **软告警**（与"插件缺失的节点类型"同口径：
   清单可注册，未注册不等于非法，**允许保存**，注册后自动生效）。
 
+#### 2.0.2 类目「类型」取值域与按面板分域（2026-11-01 / D135，D136 扩为 9 项）
+
+> **术语**：类目字段 `media_type` 的**显示名**由「媒体类型」改为「**类型**」（i18n 键 `blueprint.mediaType` 的**值**改了，**键名不变**）。JSON 字段名 `media_type` **一律不变**（向后兼容）。`album` / `source` / `unlimited` / `empty` 都不是"媒体"，所以旧叫法在 9 项取值域下已经不准确。
+
+**取值域 9 项（全量，顺序即下拉顺序）**：
+`unlimited`（无限制）/ `image`（图像）/ `video`（视频）/ `audio`（音频）/
+`text`（文本）/ `pdf`（PDF）/ `album`（相册）/ `source`（源）/ `empty`（空）。权威两处：TS
+`packages/config/src/blueprintValues.ts` 的 `BLUEPRINT_MEDIA_TYPES` 与 Rust
+`crates/hp-core/src/blueprint_types.rs` 的 `CLASS_MEDIA_TYPES`（`[&str; 9]`），由
+`pnpm check:blueprint-nodes` **逐项比对含顺序**。
+
+- 中间 5 项来自扫描判定（D101 / D110）；
+- `album` / `source`（D135）**不是文件媒体类型**——它们是「相册 / 源」这两类**面板条目**的分类；
+- **`unlimited` / `empty`（D136）是两端的语义档位**，不是媒体类型：
+  `unlimited`（**首项**）表示"该类目**匹配一切**媒体类型"（最粗一档）；
+  `empty`（**末项**）表示"该类目**排除全部**媒体类型"（最窄一档）。
+  `empty` 的用途是**暂时停用这条类目链**——不删节点、不破坏连线，只把命中集清空，
+  比删节点更适合"先留着但先别生效"。**位置不是装饰**：首/末两项让下拉呈现
+  "最粗 → 具体 → 最窄"的梯度；插在中间会让"越来越窄"的直觉失效。
+
+**按面板分域（候选收窄）**：全量表回答"哪些取值合法"，**分域**回答"这个面板下该出现哪几个"。
+唯一权威是 TS `classMediaTypesForPanel(panelId)` 与 Rust 镜像
+`class_media_types_for_panel(panel_id) -> &'static [&'static str]`；两侧**逐面板逐项相等**
+由 `pnpm check:blueprint-nodes` 断言。**每个分域都以 `unlimited` 开、`empty` 收**
+（两端档位对任何面板都成立）。
+
+| 面板 | 分域（顺序即候选顺序） | 理由 |
+| --- | --- | --- |
+| `media`（媒体预览） | `unlimited` / `image` / `video` / `audio` / `empty` | 它只收这三类，类目按这三类分 |
+| `bookpreview`（图书预览） | `unlimited` / `text` / `pdf` / `empty` | 它收文本类与 PDF；`text` 下再分**子类**（epub / txt / md），`pdf` **无子类** |
+| `albums`（相册） | `unlimited` / `album` / `empty` | 相册的条目分类层只有「相册」这一层（列表项 = 相册） |
+| `sources`（源） | `unlimited` / `source` / `empty` | 源的条目分类层是目录树（源根 / 子目录），统一为「源」 |
+| **未注册 / 无参 / 插件面板** | **全量 9 项** | 宿主不知道它内部有什么分类，**不设限**（与"未知面板不拦截"同一口径）；插件面板的候选由插件自述再收窄（开放点，第 12 节） |
+
+规则：
+
+- **⚠️ 缺省值 ≠ 分域首项（D136 的关键修正）**：D135 时缺省取分域第一项；D136 给首项加了
+  `unlimited`，若沿用就会让四个面板的新建类目**静默**全部变成「无限制」（用户不会察觉，
+  直到发现新建类目什么文件都收）。因此缺省值独立成表：
+  TS `PANEL_CLASS_MEDIA_TYPE_DEFAULTS` / Rust `class_media_type_default_for_panel(panel_id)`，
+  值仍是 `media` → `image`、`bookpreview` → `text`、`albums` → `album`、`sources` → `source`、
+  未注册 → `image`（**与改动前逐项相同，零回归**）。旧导出 `PANEL_CLASS_MEDIA_TYPES`
+  保留但改为指向缺省表。**门禁新增「缺省 ≠ 分域首项」断言**。
+- **越域是硬错误**（第 6 节硬错误第 14 条）：类目有 `control` 且指向存在的面板、取值不在该面板分域
+  → 拒绝保存。**`control` 缺失（未接通）不判分域**，只校验 9 项全量表——"还没接线"不得绑架数据
+  （同 D109 口径）。
+- **属性面板按分域出候选**（`BlueprintInspector`）：已选值**不在分域内时原样保留并标注未接通**
+  （照抄 `panel_id` / `mark` 那种"不在清单的取值原样保留"的既有写法）；`control` 未连线 / 指向已删节点 /
+  面板未注册 → **退回全量候选**（同样"缺失不得绑架数据"）。
+- **`unlimited` / `empty` / `album` / `source` 都没有子类分域**：`BLUEPRINT_SUBCLASS_FORMATS`
+  下不含这四项，因此它们下面**不能建子类**（`subclassFormatsFor("album")` 返回空数组，
+  调用方据此拒绝建子类）。`unlimited` 类目下建子类是**硬错误**，与 `image` 类目同口径。
+- **引擎命中（D136）**：`unlimited` 类目**跳过类型比较**（任何上报媒体类型都命中）；
+  `empty` 类目**直接不命中**（排除全部）；其余取值保持精确比较。**`unlimited` 仍遵守
+  「子类优先」**——若该类目下有覆盖某细分的子类，那个细分只走子类链，其余才走 `unlimited` 类目链
+  （否则"无限制"会吞掉子类认领的细分，子类链永远轮不到）。
+- **条件表达式同源**：`condition.expr` 的 `media_type == <值>` 与类目取值域同一份判据
+  （`is_valid_class_media_type`），因此**自动接受** `unlimited` / `empty`。
+
+
+**类目的显示名（相册 / 源）**：`albums` 面板下的类目显示为「**相册**」、`sources` 面板下显示为「**源**」——
+判定在 `blueprintLabels.nodeDisplayName` 的 **`class` 分支**（`type === "class"` 且其 `control` 指向的
+面板 `panel_id` 是 `albums` / `sources`）。i18n 键 `blueprint.object.album` / `blueprint.object.source`
+**沿用 D134 的字面量**（键名不改，**语义已于 D135 纠正为类目**——D134 曾把它加在 `object` 分支，
+那是误实现）。自定义 `name` 仍**优先**于这个专用名；引用链任一环缺失（未接通）**返回空串**交回既有
+回退链（不得把"接不上"显示成"它是相册"）。`object` 节点恢复**通用命名**（`结构父名 · 范围`）。
+
 ### 2.1 字段定义（逐一）
 
 | 字段 | 所属类型 | 类型 | 取值域 / 约束 | 缺省 |
@@ -166,9 +268,9 @@
 | `panel_id` | `control` | string | 面板注册表内 id（后端不校验注册表，见第 6 节） | — |
 | `title_key` | `control` | string | i18n 键（D27） | 取面板注册表标题 |
 | `control` | `class` / `mark` | key 引用 | 必须指向 `control`（类目与标记都直接挂在面板下） | — |
-| `media_type` | `class` | enum | `image` / `video` / `audio` / `text` | —（必需） |
+| `media_type` | `class` | enum | `unlimited` / `image` / `video` / `audio` / `text` / `pdf` / `album` / `source` / `empty`（**9 项全量**；已接通面板时还须落在**该面板分域**内，见 §2.0.2） | —（必需） |
 | `format` | `subclass` | enum | **按所属类目的 `media_type` 分域**（`text` → `epub` / `txt` / `md`） | —（缺失按未接通软告警） |
-| `mark` | `mark` | enum | **可注册标记清单** id（内置 `book` / `manga`）；未注册按未接通软告警 | —（必需） |
+| `mark` | `mark` | enum | **可注册标记清单** id（内置 **10 项**：`media` / `image` / `video` / `audio` / `music` / `document` / `text` / `book` / `manga` / `program`）；未注册按未接通软告警 | —（必需） |
 | `class` | `object` | key 引用 | 必须指向 `class`（三条轴之一，与下面两个**互斥**） | — |
 | `subclass` | `subclass` / `object` | key 引用 | 在 `subclass` 节点上指**所属类目**；在 `object` 节点上指**所属子类**（同名不同义） | — |
 | `mark_ref` | `object` | key 引用 | 必须指向 `mark`（三条轴之一；**不是**标记 id） | — |
@@ -219,7 +321,7 @@
 | `parents` | type[] | 可作为 `contains` 父的类型 | ✅ | 两者 | 空数组 = 不参与结构边 |
 | `children` | type[] | 可作为 `contains` 子的类型 | ✅ | 两者 | 空数组 = 不参与结构边 |
 | `events` | enum[] | `click` / `double_click` / `selection_change` | ✅ | 两者 | 可声明的事件（仅事件节点非空） |
-| `ports` | object[] | `{ id, side, edge }` | — | 两者 | **端口与允许的边类型**；未声明即按 `role` + `parents`/`children` **推导**（保持内置 10 种行为不变） |
+| `ports` | object[] | `{ id, side, edge }` | — | 两者 | **端口与允许的边类型**；未声明即按 `role` + `parents`/`children` **推导**（保持内置 12 种行为不变） |
 | `severity` | object | `{ fieldIssue, missingRef }` ∈ `hard` / `soft` | — | 两者 | **校验策略**：该类型的字段问题与引用缺失按硬错误还是软告警（缺省沿用第 6 节既有口径） |
 | `evaluation_role` | enum | `structural` / `trigger` / `condition` / `action` | — | 两者 | **引擎语义**：是否进结构树、是否为规则节点、是否可做动作目标（缺省由 `role` 推导） |
 | `origin` | object | `{ kind: "system" \| "plugin", plugin_id? }`；**宿主填充，插件不得自称** | ✅（宿主） | 宿主 | 来源与启用状态；用于灰显、审计与「全部设置」展示 |
@@ -364,6 +466,8 @@ has_tag == <tag_name>
 11. **主界面标记重复**（D67）：`layers` 里多于一个层带 `is_home: true` → 硬错误（同层至多一个）。
 12. **类目挂在无类目的面板下**（RFC 0010 / `docs/spec/panel-standard.md` 第 5.1 节）：**宿主内置**面板的 `has_class = false` 时出现 `control → class` 的 `contains` 边 → 硬错误（宿主声明是不变量）。**插件注册面板**的同类情形按**未接通软告警**处理（见下方软告警第 7 条），因为插件的 `has_class` 会随版本变化。
 13. **浮层内容不合法**：面板声明 `mount.overlay_content = false` 却被浮层 `contains` → 硬错误。
+14. **类目的类型不属于其面板分域**（D135，D136 扩为 9 项）：类目**有** `control` 且指向**存在**的面板节点、而其 `media_type` 不在该面板的**分域**内（如 `albums` 面板下挂 `image` 类目）→ 硬错误（`§2.0.2`）。**`control` 缺失（未接通）不做分域判定**——那时取值只须在 9 项全量表内（缺字段本身按软告警第 1 条处理），缺失不得绑架既有数据。
+15. **`mark` 的结构父不是类目**（D136）：`mark.class` 指向非 `class` 节点 → 硬错误（引用存在但类型不符，同第 4 条）；缺 `class` = 未接通软告警。**`unlimited` / `empty` 类目下建子类** → 硬错误（该类目没有子类分域，同第 4b 条）。
 
 **软告警（`warnings`，不阻塞保存，画布灰显「未接通」）**：
 
@@ -433,7 +537,9 @@ has_tag == <tag_name>
   - 命名空间规则：插件注册项必须 `plugin.<plugin_id>.<local_id>`；不得与内置裸 type 冲突。
   - **未知 `type` 分流**：不合命名规则 → 硬错误；命名合法但无注册项 → **软告警且可保存**，且该节点与其边原样保留。
   - `control.panel_id` ↔ 面板注册表 `blueprint_node` 双向一致（`docs/spec/panel-standard.md` 第 5.2 节）。
-  - `has_class = false` 的面板下 `control → class` 被拒（硬错误）。
+  - `has_class = false` 的面板下 `control → class` 被拒（硬错误）；**`control → mark` 不受这条约束**（标记挂任何面板都合法，D134）。
+- **标记清单（D134，2026-11-01）**：系统标记 **10 项**的清单在 TS（`packages/config/src/blueprintValues.ts` 的 `BLUEPRINT_BUILTIN_MARKS`）与 Rust（`crates/hp-core/src/blueprint_types.rs` 的 `BUILTIN_MARKS`）**两处**，`pnpm check:panels` 逐项比对**含顺序**（数量对不上会被 `[&str; N]` 当场发现，但顺序对不上只会让两边下拉顺序悄悄错开、谁都不报错）；同一条断言还钉住 `blueprint.mark.<id>` × 10 × 三语（zh-CN / zh-TW / en）逐键存在——缺一个就是某种语言下菜单出现空白项。
+- **类目「类型」取值域与分域（D135，2026-11-01）**：`BLUEPRINT_MEDIA_TYPES`（7 项）↔ Rust `CLASS_MEDIA_TYPES`（`[&str; 7]`）**逐项相等且顺序一致**（数量对不上会被 `[&str; N]` 当场发现，**顺序**对不上只会让两边下拉顺序悄悄错开、谁都不报错）；TS `classMediaTypesForPanel` ↔ Rust `class_media_types_for_panel` **逐面板逐项相等**（`media` / `bookpreview` / `albums` / `sources` + 未注册）——这是**新增的跨语言镜像点**，两侧各写一份必然漂移。`pnpm check:panels` 另钉住 `defaultClassFieldsForPanel` 的四个面板缺省值、`PANEL_CLASS_MEDIA_TYPES` 键集 ↔ `has_class = true` 面板集相等、以及 `docs/spec/panel-standard.md` 第 5.1 节 has_class 表里四个面板的 `**true**` 字样。
 - **端口推导一致性（两条门禁，防"连线被静默丢弃"）**：
   - `portIdFor 只返回 PORT_DEFS 声明过的端口`：遍历全部已注册类型 × 2 侧 × 5 边类型。画布渲染连线时按 `portMap.get(`${key}::${side}::${portIdFor(type, side, kind)}`)` 找端口坐标，而 DOM 标记用 `PORT_DEFS` 里的 id —— 返回一个未声明的 id 会让查表落空、连线被 `return null` 丢掉。**真实回归**：输入侧曾被边类型名覆盖（`action.in.fires` 返回 `"fires"`，而操作节点的输入口实际是 `"in"`），导致「操作 → 状态」在画布上永远没有线；同一处错误还让"拖线到操作输入口"永远判不等（`in !== contains`），即用户反馈的"操作节点接不到触发节点"。
   - `每种规则边两端都能在画布上连出来（on/fires/guards/memberOf）`：遍历允许的端点组合。
@@ -448,6 +554,7 @@ has_tag == <tag_name>
 - **面板（Panel）**：蓝图节点 `control`，dockview 面板实例（`docs/spec/panel-standard.md`）。**可注册**（宿主内置 13 个 + 插件）。
 - **控件（Control）**：面板**内部**的标准 UI 单元，26 种 `kind`，挂在面板**渲染树**里（`docs/spec/control-standard.md`）。**不可注册**（D62）。
 - **类目（Category）**：蓝图节点 `class`，面板内条目分类（本文第 2 节）。挂在面板**结构树**里，受面板 `has_class` 约束。
+- **标记（Mark）**：蓝图节点 `mark`，**类目之下与子类并列**的标记（本文第 2.0.1 节，D136 修订；结构父引用字段是 `class`）。挂在面板**结构树**里、位于类目之下，**不受** `has_class` 约束（`has_class` 只约束类目）——标记表达"条目属于哪一类内容"，与"面板内部有没有按媒体类型分类"是两件事（D134）。
 
 两张表的关系：**面板注册表**声明 `blueprint_node`（该面板由哪种节点承载），**节点类型注册表**声明是否允许 `panel_id` 字段——两侧必须互相对应，由门禁断言。
 

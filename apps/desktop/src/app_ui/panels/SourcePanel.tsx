@@ -12,6 +12,7 @@ import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { getTask, setTask, useTask } from "../core/taskStore";
 import { ContextMenu } from "../menu/ContextMenu";
+import { MarkMenuTree, usePanelMarks } from "./markMenu";
 import type { SourceTreeNode } from "../shared/types";
 
 /** 取路径最后一段文件夹名。 */
@@ -129,6 +130,10 @@ export function SourcePanel(): JSX.Element {
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameRef = useRef<HTMLInputElement>(null);
+  // 右键菜单内「添加标记」子菜单开关（D134）
+  const [openMarkSub, setOpenMarkSub] = useState(false);
+  // 本面板内的打标状态：与相册面板**各存一份**，自定义标记互不可见（用户口径）
+  const { marks, persist: persistMarks } = usePanelMarks(app.repoId);
 
   const load = useCallback(async () => {
     if (!app.repoId) {
@@ -157,6 +162,16 @@ export function SourcePanel(): JSX.Element {
       return next;
     });
   }, []);
+
+  /**
+   * 右键目标节点的打标键（D134）：与后端 `commands/source.rs` 生成的节点 key **同口径**——
+   * 源根 `src:<sourceId>`，子目录 `dir:<sourceId>/<relativePath>`。
+   *
+   * 为什么复用节点 key 而不是另造一套：树里的持久化坐标本来就是它，另造一套要维护
+   * 两份"同一节点的身份"，重命名/移动源之后必然分家。
+   */
+  const markTargetKey = (sourceId: string, relativePath: string | null): string =>
+    relativePath === null ? `src:${sourceId}` : `dir:${sourceId}/${relativePath}`;
 
   // 点击任意处关闭右键菜单
   useEffect(() => {
@@ -471,6 +486,9 @@ export function SourcePanel(): JSX.Element {
             }
             onContextMenu={(e) => {
               e.preventDefault();
+              // 每次右键都重置子菜单展开态：不重置会让上一次展开的「添加标记」
+              // 在新位置凭空跟着一起打开（菜单对象换了、开关还是旧的 true）。
+              setOpenMarkSub(false);
               if (isSource) {
                 // 源根节点：右键同步选中，不切换预览
                 app.setSourceId(node.source_id!);
@@ -628,6 +646,26 @@ export function SourcePanel(): JSX.Element {
               >
                 {t("source.createSyncAlbum")}
               </button>
+
+              {/* 添加标记：子菜单（树状系统标记 + 本面板自定义标记，默认全折叠，D134） */}
+              <div className="menu-sep" />
+              <button
+                className="menu-item has-sub"
+                onClick={() => setOpenMarkSub((v) => !v)}
+              >
+                {t("mark.add")} <span className="sub-arrow">{openMarkSub ? "▾" : "▸"}</span>
+              </button>
+              {openMarkSub && (
+                <div className="menu-sub">
+                  <MarkMenuTree
+                    scope="sources"
+                    targetKey={markTargetKey(menu.sourceId, menu.relativePath)}
+                    marks={marks}
+                    onPersist={persistMarks}
+                    onClose={() => setMenu(null)}
+                  />
+                </div>
+              )}
               {menu.relativePath === null && (
                 <>
                   <div className="menu-sep" />

@@ -586,6 +586,83 @@
         assert!(ghost.validate().is_empty(), "{:?}", ghost.validate());
     }
 
+    /// 节点标准第 2.1 节（D135）：类目的 `media_type` 必须**属于它所属面板的类型域**。
+    ///
+    /// 用户口径：「所有选项面板都是反向读取的，源的面板的类目就不能出现媒体预览面板的
+    /// 类目的图像、视频、音频」。三件事要一起成立：
+    /// 1. **越域**（源面板下写 `image`）= 硬错误；
+    /// 2. **同域**（源面板下写 `source`、相册面板下写 `album`）= 合法（D135 放开的两个面板）；
+    /// 3. `control` **缺失**（未接通软告警）时**不判分域**——缺失不得绑架用户数据，
+    ///    否则断一条线就把既有文档判成"保存失败"。
+    #[test]
+    fn class_media_type_must_fit_owner_panel_domain() {
+        /// 类目**接线到面板**（`control` 有值）的夹具：这是分域判定真正生效的情形。
+        fn wired(panel_id: &str, media_type: &str) -> String {
+            format!(
+                r#"{{"schema_version":2,
+                    "layers":[{{"key":"l_a","name":"主界面"}}],
+                    "nodes":[
+                      {{"key":"ui","type":"interface","layer":"l_a"}},
+                      {{"key":"blk","type":"layout_block","layer":"l_a","name":"栏"}},
+                      {{"key":"c","type":"control","panel_id":"{panel_id}","layer":"l_a"}},
+                      {{"key":"k","type":"class","control":"c","media_type":"{media_type}","layer":"l_a"}}
+                    ],
+                    "edges":[
+                      {{"from":"ui","to":"blk","kind":"contains","order":1}},
+                      {{"from":"blk","to":"c","kind":"contains","order":2}},
+                      {{"from":"c","to":"k","kind":"contains","order":3}}
+                    ]}}"#
+            )
+        }
+        /// 类目**未接线**（`control` 缺失）的夹具：分域判定必须**不生效**。
+        fn unwired(panel_id: &str, media_type: &str) -> String {
+            format!(
+                r#"{{"schema_version":2,
+                    "layers":[{{"key":"l_a","name":"主界面"}}],
+                    "nodes":[
+                      {{"key":"ui","type":"interface","layer":"l_a"}},
+                      {{"key":"blk","type":"layout_block","layer":"l_a","name":"栏"}},
+                      {{"key":"c","type":"control","panel_id":"{panel_id}","layer":"l_a"}},
+                      {{"key":"k","type":"class","media_type":"{media_type}","layer":"l_a"}}
+                    ],
+                    "edges":[
+                      {{"from":"ui","to":"blk","kind":"contains","order":1}},
+                      {{"from":"blk","to":"c","kind":"contains","order":2}}
+                    ]}}"#
+            )
+        }
+
+        // 1. 越域：源面板下不能出现媒体预览的类目类型（用户报的那个现象）。
+        let crossed = BlueprintGraph::from_json(&wired("sources", "image")).unwrap();
+        let errors = crossed.validate();
+        assert!(
+            errors.iter().any(|e| e.contains("类型域")),
+            "源面板下的 image 类目应为硬错误：{errors:?}"
+        );
+
+        // 2. 同域：D135 放开的两个面板各自只收自己的类型值。
+        let source_ok = BlueprintGraph::from_json(&wired("sources", "source")).unwrap();
+        assert!(source_ok.validate().is_empty(), "{:?}", source_ok.validate());
+        let album_ok = BlueprintGraph::from_json(&wired("albums", "album")).unwrap();
+        assert!(album_ok.validate().is_empty(), "{:?}", album_ok.validate());
+        // 媒体预览只收三个媒体类型：album / source 在它下面同样是越域。
+        let media_album = BlueprintGraph::from_json(&wired("media", "album")).unwrap();
+        assert!(
+            media_album.validate().iter().any(|e| e.contains("类型域")),
+            "{:?}",
+            media_album.validate()
+        );
+
+        // 3. `control` 缺失（未接通软告警）：不做分域判定，允许保存。
+        let orphan = BlueprintGraph::from_json(&unwired("sources", "image")).unwrap();
+        assert!(orphan.validate().is_empty(), "{:?}", orphan.validate());
+        assert!(
+            orphan.warnings().iter().any(|w| w.contains("暂未接通")),
+            "{:?}",
+            orphan.warnings()
+        );
+    }
+
     /// 面板标准第 7.1 节第 6 条：`mount.overlay_content = false` 的面板被浮层 contains
     /// = **硬错误**（与"浮层不得 contains 布局块"同级）。
     #[test]
@@ -693,4 +770,213 @@
         assert_eq!(legal_unknown.nodes.len(), 1);
         assert_eq!(legal_unknown.edges.len(), 1);
         assert_eq!(legal_unknown.nodes[0].node_type.as_str(), "magic");
+    }
+
+    /// **D136**：标记从"面板下的平行轴"改为"类目下的从属轴"（与子类并列）。
+    ///
+    /// 用户原话：「修改蓝图节点逻辑，标记连接到类目上，标记和子类类似。」
+    /// 这里钉住三件事：
+    /// 1. `class --contains--> mark` 合法（**新增**的合法边，D136 之前是被拒的）；
+    /// 2. `control --contains--> mark` **非法**（旧关系的反向断言，防"旧关系偷偷残留"）；
+    /// 3. `class --contains--> subclass` 仍合法（子类与标记**并列共存**，不是替换）。
+    #[test]
+    fn mark_contains_parent_is_class_not_panel() {
+        // 1) 类目 → 标记：合法（标记挂在类目下）。
+        let ok = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"主界面"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"blk","type":"layout_block","layer":"l_a","name":"栏"},
+                  {"key":"c","type":"control","panel_id":"media","layer":"l_a"},
+                  {"key":"k","type":"class","control":"c","media_type":"image","layer":"l_a"},
+                  {"key":"m","type":"mark","class":"k","mark":"manga","layer":"l_a"}
+                ],
+                "edges":[
+                  {"from":"ui","to":"blk","kind":"contains","order":1},
+                  {"from":"blk","to":"c","kind":"contains","order":2},
+                  {"from":"c","to":"k","kind":"contains","order":3},
+                  {"from":"k","to":"m","kind":"contains","order":4}
+                ]}"#,
+        )
+        .unwrap();
+        assert!(
+            ok.validate().is_empty(),
+            "类目 → 标记 是 D136 的新合法边：{:?}",
+            ok.validate()
+        );
+        assert!(ok.warnings().is_empty(), "{:?}", ok.warnings());
+
+        // 2) 面板 → 标记：**非法**（标记不再直挂面板）。
+        let old_relation = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"主界面"}],
+                "nodes":[
+                  {"key":"c","type":"control","panel_id":"media","layer":"l_a"},
+                  {"key":"m","type":"mark","mark":"manga","layer":"l_a"}
+                ],
+                "edges":[{"from":"c","to":"m","kind":"contains","order":1}]}"#,
+        )
+        .unwrap();
+        assert!(
+            old_relation
+                .validate()
+                .iter()
+                .any(|e| e.contains("非法边")),
+            "面板 → 标记 在 D136 之后必须被拒：{:?}",
+            old_relation.validate()
+        );
+
+        // 3) 类目下子类与标记**并列共存**：同一条线接上两者都合法。
+        let both = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"主界面"}],
+                "nodes":[
+                  {"key":"c","type":"control","panel_id":"bookpreview","layer":"l_a"},
+                  {"key":"k","type":"class","control":"c","media_type":"text","layer":"l_a"},
+                  {"key":"s","type":"subclass","subclass":"k","format":"txt","layer":"l_a"},
+                  {"key":"m","type":"mark","class":"k","mark":"manga","layer":"l_a"}
+                ],
+                "edges":[
+                  {"from":"c","to":"k","kind":"contains","order":1},
+                  {"from":"k","to":"s","kind":"contains","order":2},
+                  {"from":"k","to":"m","kind":"contains","order":3}
+                ]}"#,
+        )
+        .unwrap();
+        assert!(
+            both.validate().is_empty(),
+            "子类与标记在类目下应并列共存：{:?}",
+            both.validate()
+        );
+    }
+
+    /// **D136 迁移口径**：旧文档里标记节点仍带 `control`（指向面板）时，
+    /// 按**未接通软告警**处理——**不阻塞保存**（用户库实测 0 个 mark 节点，
+    /// 但"读进来就保存不了"绝不能成为迁移事故）。
+    #[test]
+    fn legacy_mark_control_is_soft_warning_not_error() {
+        let legacy = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"主界面"}],
+                "nodes":[
+                  {"key":"c","type":"control","panel_id":"media","layer":"l_a"},
+                  {"key":"m","type":"mark","control":"c","mark":"manga","layer":"l_a"}
+                ],
+                "edges":[]}"#,
+        )
+        .unwrap();
+        assert!(
+            legacy.validate().is_empty(),
+            "旧 mark.control 不得阻塞保存：{:?}",
+            legacy.validate()
+        );
+        let warnings = legacy.warnings();
+        assert!(
+            warnings.iter().any(|w| w.contains("旧字段 control")),
+            "应报「仍带旧字段 control」软告警：{warnings:?}"
+        );
+        assert!(
+            warnings.iter().any(|w| w.contains(&"m".to_string())),
+            "告警应指向这个标记节点：{warnings:?}"
+        );
+        // 节点与字段**原样保留**（不因迁移口径删数据）。
+        assert_eq!(legacy.nodes[1].control.as_deref(), Some("c"));
+    }
+
+    /// 标记的 `class` 引用**存在但类型不符**仍是**硬错误**（与"未接通"区分）：
+    /// 指向面板节点而非类目节点。
+    #[test]
+    fn mark_class_must_point_to_class_node() {
+        let wrong = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "layers":[{"key":"l_a","name":"主界面"}],
+                "nodes":[
+                  {"key":"c","type":"control","panel_id":"media","layer":"l_a"},
+                  {"key":"m","type":"mark","class":"c","mark":"manga","layer":"l_a"}
+                ],
+                "edges":[]}"#,
+        )
+        .unwrap();
+        assert!(
+            wrong
+                .validate()
+                .iter()
+                .any(|e| e.contains("class 必须指向类目节点")),
+            "{:?}",
+            wrong.validate()
+        );
+
+        // 缺 `class`（未接通）→ 软告警，不阻塞保存。
+        let missing = BlueprintGraph::from_json(
+            r#"{"schema_version":2,
+                "nodes":[{"key":"m","type":"mark","mark":"manga"}],
+                "edges":[]}"#,
+        )
+        .unwrap();
+        assert!(missing.validate().is_empty(), "{:?}", missing.validate());
+        assert!(!missing.warnings().is_empty(), "缺 class 应报未接通");
+    }
+
+    /// **双向对称**（D104 教训的 Rust 侧同款护栏）：内置定义表的
+    /// `children` 与 `parents` 必须**逐项互指**——只声明一侧会让该边静默连不出来
+    /// （`can_contain` 只读父节点的 `children`，不读子节点的 `parents`）。
+    ///
+    /// TS 侧同一份判据在 `tools/blueprint-node-check.mjs`（`pnpm check:blueprint-nodes`），
+    /// 这里是**后端**的独立副本：门禁脚本扫不到 Rust，Rust 测试也扫不到 TS，两侧各钉一次。
+    #[test]
+    fn builtin_parent_children_declarations_are_symmetric() {
+        use crate::blueprint_registry::BUILTIN_NODE_SPECS;
+        let mut asymmetric: Vec<String> = Vec::new();
+        for spec in BUILTIN_NODE_SPECS.iter() {
+            for child in spec.children {
+                let Some(child_spec) = BUILTIN_NODE_SPECS
+                    .iter()
+                    .find(|s| s.node_type.as_str() == *child)
+                else {
+                    asymmetric.push(format!("{}.children 含未注册类型 {child}", spec.node_type));
+                    continue;
+                };
+                if !child_spec.parents.contains(&spec.node_type.as_str()) {
+                    asymmetric.push(format!(
+                        "{}.children 含 {child}，但 {child}.parents 不含 {}（引用方向不一致）",
+                        spec.node_type, spec.node_type
+                    ));
+                }
+            }
+            for parent in spec.parents {
+                let Some(parent_spec) = BUILTIN_NODE_SPECS
+                    .iter()
+                    .find(|s| s.node_type.as_str() == *parent)
+                else {
+                    asymmetric.push(format!("{}.parents 含未注册类型 {parent}", spec.node_type));
+                    continue;
+                };
+                if !parent_spec.children.contains(&spec.node_type.as_str()) {
+                    asymmetric.push(format!(
+                        "{}.parents 含 {parent}，但 {parent}.children 不含 {}（该边连不出来）",
+                        spec.node_type, spec.node_type
+                    ));
+                }
+            }
+        }
+        assert!(
+            asymmetric.is_empty(),
+            "父子声明必须双向互指：{asymmetric:?}"
+        );
+        // D136 的三处改动**逐项互指**（显式钉住，防止整体对称成立但这条关系被改到别处）。
+        let spec_of = |t: &str| {
+            BUILTIN_NODE_SPECS
+                .iter()
+                .find(|s| s.node_type.as_str() == t)
+                .expect("内置类型必须存在")
+        };
+        assert_eq!(spec_of("mark").parents, &["class"], "标记的父是类目（D136）");
+        assert!(spec_of("class").children.contains(&"mark"));
+        assert!(
+            !spec_of("control").children.contains(&"mark"),
+            "面板的 children 不得再含 mark（D136：标记不再直挂面板）"
+        );
+        assert!(spec_of("class").children.contains(&"subclass"));
+        assert_eq!(spec_of("object").parents, &["class", "subclass", "mark"]);
     }

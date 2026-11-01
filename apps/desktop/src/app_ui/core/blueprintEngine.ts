@@ -270,7 +270,15 @@ export class BlueprintEngine {
       return node.panel_id === target.panelId;
     }
     if (node.type === "class") {
-      if (node.media_type !== target.mediaType) {
+      // **两端的语义档位（D136）**：
+      // - `unlimited`（无限制）**匹配一切媒体类型**——跳过类型比较，任何上报都算命中；
+      // - `empty`（空）**排除全部**——直接不命中（用于"暂时停用这条类目链"：
+      //   不删节点、不破坏连线，只把命中集清空）。
+      // 其余取值保持精确比较（`album` / `source` 与各自面板上报的枚举同名，故仍走精确比较）。
+      if (node.media_type === "empty") {
+        return false;
+      }
+      if (node.media_type !== "unlimited" && node.media_type !== target.mediaType) {
         return false;
       }
       // **子类优先（用户口径）**：子类是类目的**子集**，只负责一种情况。因此当该类目下
@@ -278,6 +286,8 @@ export class BlueprintEngine {
       // 否则同一份交互会同时命中「类目 → 对象 → 操作 → 状态」与
       // 「类目 → 子类 → 对象 → 操作 → 状态」两条链，产生互相打架的状态。
       // 未被任何子类覆盖的细分（或没有细分的条目）仍由类目链路负责。
+      // **`unlimited` 类目同样遵守这条**（用户口径 D136）：否则"无限制"会连带把
+      // 已被子类认领的细分也吞掉，子类链就永远轮不到。
       return !this.subclassClaimsFormat(graph, node.key, target.format);
     }
     if (node.type === "subclass") {

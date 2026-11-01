@@ -198,7 +198,7 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 
 > **"书"的两个类目**：`text`（2026-10 新增的文本媒体类型：`txt` / `md` / `markdown` / `epub`，扩展名判定、不做内容兜底）与 **`pdf`**（2026-10-11 新增：`pdf` 扩展名**且** `%PDF-` magic bytes 内容兜底——PDF 有可靠的 magic bytes，与文本类刻意相反）。两者是否属于"书"由 `hp-core` 的 `MediaType::is_book()` **唯一**判定；相册的排除集与图书预览的收录集**共用它**。
 
-> **蓝图侧的同名取值域也在 2026-10-10 补齐**（D101；**2026-10-11 加入 `pdf`**，D110）：类目节点的 `media_type` 增加 `text`（此前只有 image/video/audio，文本类**没有任何类目能表达**）与 `pdf`（PDF 是**独立类目**，不并入 `text`）。注意两者**不是同一个东西**：`file.query` 的 `mediaTypes` 是**取数过滤**（前端分区），类目的 `media_type` 是**蓝图匹配**（规则求值）；它们共用 `text` / `pdf` 这些字面量，但消费方不同。
+> **蓝图侧的同名取值域也在 2026-10-10 补齐**（D101；**2026-10-11 加入 `pdf`**，D110；**2026-11-01 / D135 扩为 7 项**并追加 `album` / `source`）：类目节点的 `media_type` 增加 `text`（此前只有 image/video/audio，文本类**没有任何类目能表达**）与 `pdf`（PDF 是**独立类目**，不并入 `text`），再追加 `album`（相册）与 `source`（源）——后两者**不是文件媒体类型**，只用于 `albums` / `sources` 两个面板的类目，且**按面板分域**（`media` → image/video/audio、`bookpreview` → text/pdf、`albums` → album、`sources` → source、未注册 → 全量 7 项，见 `docs/spec/blueprint-node-standard.md` §2.0.2）。注意两者**不是同一个东西**：`file.query` 的 `mediaTypes` 是**取数过滤**（前端分区，仍是 image/video/audio/text/pdf **五项**，不含 `album` / `source`），类目的 `media_type` 是**蓝图匹配**（规则求值）；它们共用 `text` / `pdf` 这些字面量，但消费方不同。
 
 `file.rename` / `file.trash` 是**真实磁盘操作**，当前**不留操作记录**（无 `opRecordId`），与第 3.6 节 `fsops.*`「真实文件操作必须返回操作记录 ID」的口径不一致；缺口如实记录，是否补记录属另议（见 `docs/architecture/command-event-drift.md`）。`file.trash` 只删除索引行，不连带清理 tag/评分/相册成员。
 
@@ -540,6 +540,21 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 **为什么是"整包 JSON 字符串"而不是拆成组/归属两条命令**：分组结构是**用户导航状态**，不是蓝图语义。它不参与 Rust 蓝图校验（`blueprint_validate`）、不进 `blueprints` 表，因此没有"逐条原子修改"的必要；一次交互只改一个字段，整包写回反而让落库值与内存状态天然一致（不会出现"组删了、归属还在"的中间态）。前端的增删改全是纯函数（`shared/interfacePages.ts`），后端只做键值存取。
 
 **与蓝图的关系**：界面 = 蓝图的一层（`BlueprintLayer`）。**归属里的界面 key 不在这里校验**，原因是不想为"删层"再开一条跨存储的写路径：标签条渲染时只按**当前生效蓝图的层列表**过滤，蓝图里没有的层其归属自然不显示；反过来，归属指向已不存在的组则在解析时丢弃（否则界面会挂在一个看不见的组下）。两条规则合起来，删层与删组都不必反写这份 JSON。
+
+### 3.18 `panelMarks.*`（源 / 相册面板的「添加标记」状态，D134）
+
+源面板与相册面板右键「添加标记」（D134）的**面板标记状态**存取：自定义标记清单 + 目标对象 → 标记 token。只有两条：读一份、写一份整包 JSON。
+
+| 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
+| --- | --- | --- | --- | --- | --- |
+| `panelMarks.get` | 读某仓库的面板标记状态 | `{ repoId }` | `{ ok, data: string \| null }` | **已包装** | 线上 `data` 是**序列化字符串**（未存过或存的是空白串则 `null`）；解析容错 + 版本闸门在前端 `apps/desktop/src/app_ui/shared/panelMarks.ts`，后端不解释内容。落库键 `panelMarks.{repoId}`（`app_settings`）；`repoId` 为空 → `invalidArgument` |
+| `panelMarks.set` | 整包覆盖某仓库的面板标记状态 | `{ repoId, marksJson }` | `{ ok, data: () }` | **已包装** | `marksJson` **空串 = 清空**（与 §3.17 的 `interfacePages.set` 同口径）；**不新增库表** |
+
+**为什么又是"整包 JSON 字符串"**：这门状态是**面板本地的观感状态**（"我在相册面板里把哪个相册标成了漫画"），不是蓝图语义——它不进 `blueprints` 表、不过 Rust 蓝图校验、**也不写 `file_marks`**。`file_marks` 表达的是"**某个文件**带某个标记"（媒体预览 / 图书预览的对象是文件），而面板标记的对象可以是**相册 id**，也可以是**源目录 key**（`src:<id>` / `dir:<sourceId>/<relativePath>`）；混进 `file_marks` 会让"哪些文件带 manga"这类既有查询读到根本不是文件的 id。一次交互只改一个字段，整包写回让落库值与内存状态天然一致（不会出现"自定义标记删了、打标结果里还挂着它"的中间态）。
+
+**桥接层不解析内容**：系统标记清单的权威定义在 `packages/config`（`BLUEPRINT_BUILTIN_MARKS`），自定义标记是用户在面板里起的名字（落库 token 形如 `custom:<名称>`）——桥接层若校验标记 id，就等于把"面板本地打标"与"蓝图标记清单"两份真相焊死，插件注册新标记时还要改 Rust。
+
+**与蓝图标记的区别（同一只手、两种落点）**：蓝图里的 `mark` 节点是**声明式**的（"命中这个标记时按这套设定打开"）；这里存的是**面板里给对象打了哪些标记**。两者共用同一份**系统标记清单**，但**不共用存储**：蓝图节点由用户手动新增（不会因为打了标记就自动生成节点），自定义标记也不产生蓝图节点（它没有稳定 id 可引用）。
 
 ## 4. 事件目录
 

@@ -215,7 +215,10 @@ CREATE INDEX idx_files_media_type ON files(media_type);
 > ```sql
 > CREATE TABLE file_marks (
 >   file_id  TEXT NOT NULL,
->   mark     TEXT NOT NULL,               -- 标记 id（可注册清单：book / manga / …）
+>   mark     TEXT NOT NULL,               -- 标记 id（可注册清单，2026-11-01 / D134 起 10 项：
+>                                         --   media / image / video / audio / music / document /
+>                                         --   text / book / manga / program；本表只存**文件级**标记，
+>                                         --   面板级标记在 app_settings 的 panelMarks.<repoId>）
 >   added_at TEXT NOT NULL,
 >   PRIMARY KEY (file_id, mark),          -- 同一文件同一标记只存一行（天然幂等）
 >   FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE

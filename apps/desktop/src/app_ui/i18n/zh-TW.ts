@@ -114,14 +114,16 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "album.kind.fixed": "固定型",
   "album.kind.follow": "跟隨來源",
   "album.mediaType": "媒體屬性",
-  "album.media.all": "全部",
+  // 「設定屬性」選單項的四個取值：媒體（底層 `multimedia`）/ 圖像 / 影片 / 音訊。
+  // 「全部」一項在 D134 被刪除並換成語意更準的「媒體」（它本來就是「包含全部媒體」的超集）。
+  "album.media.media": "媒體",
   "album.media.image": "圖像",
   "album.media.video": "影片",
   "album.media.audio": "音訊",
   "album.inherit": "繼承",
   "album.rename": "重新命名相簿",
   "album.delete": "刪除相簿",
-  "album.mediaType.set": "設定媒體屬性",
+  "album.mediaType.set": "設定屬性",
   "album.dropHint": "拖到相簿加入",
   "album.createChild": "建立子相簿",
   "album.members": "成員",
@@ -290,8 +292,20 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "album.renameFailed": "重新命名相簿失敗：{err}",
   "album.createChildFailed": "建立子相簿失敗：{err}",
   "album.deleteFailed": "刪除相簿失敗：{err}",
-  "album.setMediaTypeFailed": "設定媒體屬性失敗：{err}",
+  "album.setMediaTypeFailed": "設定屬性失敗：{err}",
   "album.addMemberFailed": "加入成員失敗：{err}",
+
+  // 面板打標記（D134）：源面板與相簿面板右鍵選單裡的「新增標記」子區。
+  // 打標結果與自訂標記清單按倉庫落在 app_settings（`panelMarks.<repoId>`，各面板一份）。
+  "mark.add": "新增標記",
+  "mark.menu.custom": "自訂標記",
+  "mark.menu.customAdd": "＋ 新增自訂標記",
+  "mark.menu.customEmpty": "尚無自訂標記",
+  "mark.menu.customPlaceholder": "自訂標記名稱",
+  "mark.menu.system": "系統標記",
+  "mark.menu.orphan": "其它已打標記",
+  "mark.toggleFailed": "標記儲存失敗：{err}",
+  "mark.derived": "由相簿屬性自動打上",
 
   "media.loadFailed": "媒體預覽載入失敗：{err}",
   "media.removedFromAlbum": "已移出相簿（{count}）",
@@ -571,7 +585,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.key": "key",
   "blueprint.panelId": "面板",
   "blueprint.titleKey": "標題鍵",
-  "blueprint.mediaType": "媒體類型",
+  // D135：類目的「類型」口徑（鍵名沿用，改鍵名會牽動三語與型別）。
+  "blueprint.mediaType": "類型",
   "blueprint.subclassFormat": "子類格式",
   "blueprint.classOfSubclass": "所屬類目",
   "blueprint.subclassNoDomain": "該類目沒有子類取值域（目前只有文字類目有：EPUB / TXT / Markdown）",
@@ -630,6 +645,30 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.panHint": "按住中鍵拖曳 = 平移畫布",
   "blueprint.minimap": "小地圖",
   "blueprint.minimapHint": "拖曳小地圖 = 快速把畫布移到該位置",
+  // 「?」說明面板（畫布右下角）：內容**由節點定義表派生**，D136 把標記改掛到類目之後，
+  // 階層樹會自動變成「類目 ⊃ {子類, 標記, 物件}」——文案裡不寫死任何父子關係。
+  "blueprint.help.open": "包含關係說明",
+  "blueprint.help.title": "節點的包含關係",
+  "blueprint.help.hierarchy": "階層（父 ⊃ 子）",
+  "blueprint.help.rules": "包含關係表",
+  "blueprint.help.edges": "連線類型",
+  "blueprint.help.ruleNodes": "規則節點不參與包含",
+  "blueprint.help.close": "關閉",
+  "blueprint.help.hierarchyHint":
+    "縮排 = 包含階層。同一類型可掛在多個父下（行尾 ← 列出它的全部父級），因此會在樹裡重複出現。",
+  "blueprint.help.rulesHint":
+    "由左至右：父 → 子。每個子只有一個結構父；每個父可以有多個子（畫布上連線即「包含」）。",
+  "blueprint.help.ruleNodesHint":
+    "操作 / 條件 / 狀態只走 on / fires / guards 連線，不進入包含階層——它們在定義表裡就沒有結構父/子，因此不出現在上面的樹裡。",
+  "blueprint.help.edge.contains": "結構階層：父包含子（從「包含」埠拖出）",
+  "blueprint.help.edge.memberOf": "標籤組 ↔ 面板的歸屬關係（面板屬於某個標籤組）",
+  "blueprint.help.edge.on": "物件 / 類目 / 子類 / 標記 / 面板 → 操作：規則鏈的起點",
+  "blueprint.help.edge.fires": "操作 / 條件 → 條件或狀態：規則鏈的下一步",
+  "blueprint.help.edge.guards": "條件 → 狀態：先滿足條件再執行動作",
+  "blueprint.help.allowed": "允許：{from} → {to}",
+  "blueprint.help.columnParent": "父",
+  "blueprint.help.columnChild": "子",
+  "blueprint.help.columnEdge": "邊類型",
   "blueprint.nodeAdded": "已新增節點於 ({x}, {y})",
   "blueprint.withStructure": "帶目前佈局結構",
   "blueprint.structureHint": "依目前佈局產生 介面→佈局塊→標籤組→面板 骨架，作為新藍圖的基礎",
@@ -708,13 +747,34 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.mediaType.video": "影片",
   "blueprint.mediaType.audio": "音訊",
   "blueprint.mediaType.text": "文字",
+  // 三語字典此前都缺 `blueprint.mediaType.pdf`，PDF 類目顯示裸鍵；值用拉丁縮寫 PDF。
+  "blueprint.mediaType.pdf": "PDF",
+  // D135：取值域 5→7，追加相簿 / 來源兩個面板層類目。
+  "blueprint.mediaType.album": "相簿",
+  "blueprint.mediaType.source": "來源",
+  // D136 追加的兩個**特殊**類目類型（取值域 7 → 9）：`unlimited` = 無限制（匹配一切媒體
+  // 類型）、`empty` = 空（排除全部）。文案先就位，取值域由 D 線擴充。
+  "blueprint.mediaType.unlimited": "無限制",
+  "blueprint.mediaType.empty": "空",
   // 子類格式（`subclass.format`）：文字類目下的三個子類。
   "blueprint.format.epub": "EPUB",
   "blueprint.format.txt": "TXT",
   "blueprint.format.md": "Markdown",
   // 標記（`mark.mark`）：與類目**正交、可交叉**的軸。
+  // D134 由 2 項擴為 10 項；順序與 `BLUEPRINT_BUILTIN_MARKS` / 選單樹一致。
+  "blueprint.mark.media": "媒體",
+  "blueprint.mark.image": "圖像",
+  "blueprint.mark.video": "影片",
+  "blueprint.mark.audio": "音訊",
+  "blueprint.mark.music": "音樂",
+  "blueprint.mark.document": "文件",
+  "blueprint.mark.text": "文字",
   "blueprint.mark.book": "書籍",
   "blueprint.mark.manga": "漫畫",
+  "blueprint.mark.program": "程式",
+  // 物件節點在「標記」父級下的顯示名（D134）：相簿面板下只有「相簿」，源面板下只有「源」。
+  "blueprint.object.album": "相簿",
+  "blueprint.object.source": "源",
   "blueprint.hideDir.left": "左",
   "blueprint.hideDir.right": "右",
   "blueprint.hideDir.up": "上",

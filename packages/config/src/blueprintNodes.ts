@@ -69,7 +69,7 @@ export interface BlueprintNodeSeverity {
   missingRef: BlueprintSeverityLevel;
 }
 
-/** `severity` 缺省：字段问题 = 硬错误、引用缺失 = 软告警（与内置 10 种现状一致）。 */
+/** `severity` 缺省：字段问题 = 硬错误、引用缺失 = 软告警（与内置 12 种现状一致）。 */
 export const DEFAULT_NODE_SEVERITY: BlueprintNodeSeverity = {
   fieldIssue: "hard",
   missingRef: "soft",
@@ -108,7 +108,7 @@ export interface BlueprintFieldSpec {
   note?: string;
 }
 
-/** 一种节点类型的定义（宿主内置 10 种与插件注册项**同形**，只有 `origin` 不同）。 */
+/** 一种节点类型的定义（宿主内置 12 种与插件注册项**同形**，只有 `origin` 不同）。 */
 export interface BlueprintNodeSpec {
   type: BlueprintNodeType;
   /** 中文名（内置类型；插件项的显示名走 `label_key`）。 */
@@ -129,7 +129,7 @@ export interface BlueprintNodeSpec {
   /**
    * 端口与允许的边类型（RFC 0010 决策 5）。
    * **未声明**时按 `role` + `parents`/`children` **推导**（`resolveNodePorts`），
-   * 保证内置 10 种行为完全不变。
+   * 保证内置 12 种行为完全不变。
    */
   ports?: readonly BlueprintPortSpec[];
   /** 校验策略；缺省 `DEFAULT_NODE_SEVERITY`。 */
@@ -225,12 +225,14 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
       { name: "position", type: "position", note: "画布坐标（所有节点通用）" },
     ],
     parents: ["layout_block", "group", "overlay"],
-    // 面板之下有**两条平行的轴**（D102）：类目（`class`，按媒体类型分类）与
-    // **标记**（`mark`，与类目正交、可交叉）。两者都直接挂在面板下，受同一个
-    // `has_class` 约束，因此**都必须**出现在这里——漏掉 `mark` 会让
-    // 「面板 → 标记」被判为非法边（画布连线 `containmentAllows` 与 Rust
-    // `can_contain` 都只读**父节点的 children**，不读子节点的 parents）。
-    children: ["class", "mark"],
+    // 面板之下**只有类目这一条结构轴**（D136）：标记从"与类目平行的独立轴"改为
+    // "类目之下的从属轴"（与子类并列），因此 `control.children` **不再含 `mark`**。
+    // ⚠️ 这是一处**双向声明**：`mark.parents` 必须同时写成 `["class"]`——两侧只改一侧
+    // 会让该边静默连不出来（画布 `containmentAllows` 与 Rust `can_contain` 都只读
+    // **父节点的 children**、不读子节点的 parents；D104 的教训）。
+    // 面板的 `hasClass` 仍然**只约束类目**（D134 口径不变）；标记现在间接落在类目下，
+    // 它的"能不能挂"由类目是否存在决定，不再单独看面板开关。
+    children: ["class"],
     events: [],
   },
   {
@@ -241,13 +243,20 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
     fields: [
       { name: "name", type: "string" },
       { name: "control", type: "ref", required: true, softWhenMissing: true, values: ["control"] },
-      // 类目按**媒体类型**分类，仅此一个字段（2026-10-10 / D102：细分交给 `subclass`，
+      // 类目按**类型**分类（字段名 `media_type` 是历史命名，D135 起 UI 显示为「类型」），
+      // 仅此一个字段（2026-10-10 / D102：细分交给 `subclass`，
       // `book` 那类与类目正交的维度交给 `mark`——不再往类目上挂 `format`）。
+      // 取值域是**全量 7 项**（合法取值的并集）；某个面板下能用哪几项由
+      // `classMediaTypesForPanel(panelId)` 收窄（属性面板下拉与工厂缺省都按它）。
       { name: "media_type", type: "enum", required: true, values: BLUEPRINT_MEDIA_TYPES },
       { name: "position", type: "position" },
     ],
     parents: ["control"],
-    children: ["subclass", "object"],
+    // 类目之下**两条并列的从属轴**（D136）：子类（细分）与**标记**（可交叉的语义维度）。
+    // 两者都挂在类目下、彼此独立（一个对象可挂子类、另一个挂标记，互不干扰）。
+    // ⚠️ 必须与 `mark.parents = ["class"]` 双向互指：漏写 `mark` 会让「类目 → 标记」
+    // 被判成非法边（`can_contain` 只读父节点的 children），连线静默连不出来。
+    children: ["subclass", "mark", "object"],
     events: [],
   },
   {
@@ -278,17 +287,29 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
     events: [],
   },
   {
-    // 标记（2026-10-10 / D102）：与类目树**平行**的轴（`control ⊃ mark ⊃ object`），
-    // 引用**可注册的标记清单**；与类目正交、可交叉。
+    // 标记（D102 / **D136 改挂载位置**）：语义上仍与类目"正交、可交叉"（`manga` 标记可以
+    // 跨类目命中），但**结构上从属类目**（`class ⊃ mark ⊃ object`，与子类并列）。
+    // 为什么这样改（用户原话 2026-11-01）：「标记连接到类目上，标记和子类类似。」
+    // ——"语义正交"与"结构从属"是两件事，别把前一句读成后一句被撤销。
     type: "mark",
     label: "标记",
     role: "structural",
     providesName: true,
     fields: [
       { name: "name", type: "string" },
-      // 标记直接挂在**面板**下（与类目树平行），因此引用目标是 `control`。
-      { name: "control", type: "ref", required: true, softWhenMissing: true, values: ["control"], note: "所属面板 key" },
+      // **`class` 字段在 `mark` 节点上 = "所属类目"**（D136；旧字段 `control` 已移除）。
+      //
+      // ⚠️ 这是**同一含义在不同节点上的复用**，**不是**"同名不同义"：
+      // - `class` 节点上的 `control` = 所属**面板**（它有自己独立的面板引用字段名）；
+      // - `mark` / `object` 节点上的 `class` = 所属**类目**——两个节点说的是同一件事，
+      //   只是被引用的对象不同，字段语义完全一致。
+      // 与此相对，`subclass` 字段才是真正的"同名不同义"：在 `subclass` 节点上指
+      // **所属类目**、在 `object` 节点上指**所属子类**（见 `subclass` 条的注释）。
+      // 后人若要改字段名，请按"含义"分组，不要机械地按"字段名相同"合并语义。
+      { name: "class", type: "ref", required: true, softWhenMissing: true, values: ["class"], note: "所属类目 key" },
       {
+        // 取值域**自动跟随**标记清单（D134 起 10 项）：这里不重抄一遍 id，
+        // 否则清单扩项时下拉会静默少项（`check:panels` 断言 TS ↔ Rust 逐项相等）。
         name: "mark",
         type: "enum",
         required: true,
@@ -298,7 +319,9 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
       },
       { name: "position", type: "position" },
     ],
-    parents: ["control"],
+    // 标记挂在**类目**下（D136），与子类并列成为类目的两条从属轴之一。
+    // 必须与 `class.children` 双向互指（漏一侧 = 该类连线静默连不出来，D104 教训）。
+    parents: ["class"],
     children: ["object"],
     events: [],
   },
@@ -309,13 +332,17 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
     providesName: true,
     fields: [
       { name: "name", type: "string" },
-      // 结构父有**三种**（三条正交的轴任选其一）：类目、子类、标记。
+      // 结构父有**三种**（三条语义轴，任选其一；`class` 字段 = 所属类目，与 `mark`
+      // 节点上的 `class` 同一含义，见 `mark` 条的说明）：
+      // 类目 / 子类 / 标记。
       { name: "class", type: "ref", softWhenMissing: true, values: ["class"], note: "所属类目 key" },
       { name: "subclass", type: "ref", softWhenMissing: true, values: ["subclass"], note: "所属子类 key" },
       { name: "mark_ref", type: "ref", softWhenMissing: true, values: ["mark"], note: "所属标记节点 key（不是标记 id）" },
       { name: "scope", type: "string", required: true, note: "selected / clicked / double_clicked / file_id" },
       { name: "position", type: "position" },
     ],
+    // 三条轴仍是三选一，故 `mark` 仍在 `parents` 里（D136 只改了标记**自己的**父级：
+    // 标记节点现在挂类目下，但"对象挂标记下"这条没有变）。
     parents: ["class", "subclass", "mark"],
     children: [],
     events: [],
@@ -377,7 +404,7 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
 ];
 
 /**
- * 宿主内置 10 种节点类型的定义表（**单一事实来源**，节点标准第 2 节）。
+ * 宿主内置 12 种节点类型的定义表（**单一事实来源**，节点标准第 2 节）。
  *
  * 顺序与 `BLUEPRINT_BUILTIN_NODE_TYPES` 一致；`origin` 恒为宿主。
  * 插件注册项**不在**这里（它们随插件包存在，见 `registerBlueprintNodeSpecs`）。
@@ -422,7 +449,7 @@ export function registeredPluginNodeSpecs(): readonly BlueprintNodeSpec[] {
   return pluginNodeSpecs;
 }
 
-/** 全部节点类型定义（宿主内置 10 种 + 插件注册项）。 */
+/** 全部节点类型定义（宿主内置 12 种 + 插件注册项）。 */
 export function allNodeSpecs(): readonly BlueprintNodeSpec[] {
   return pluginNodeSpecs.length === 0
     ? BLUEPRINT_NODE_REGISTRY
@@ -463,7 +490,7 @@ export function resolveEvaluationRole(spec: BlueprintNodeSpec): BlueprintEvaluat
 /**
  * 解析类型的端口（`ports` 未声明时**由定义表推导**）。
  *
- * 推导与 Rust `blueprint_registry::derive_ports` **逐项一致**，因此内置 10 种的行为
+ * 推导与 Rust `blueprint_registry::derive_ports` **逐项一致**，因此内置 12 种的行为
  * 与 RFC 0010 之前完全相同（由 `pnpm check:blueprint-nodes` 断言）。
  */
 export function resolveNodePorts(spec: BlueprintNodeSpec): BlueprintPortSpec[] {
@@ -603,37 +630,104 @@ export const BLUEPRINT_STRUCTURAL_CHILD_TYPES: readonly BlueprintNodeType[] = ST
 ) as readonly BlueprintNodeType[];
 
 /**
- * **有类目**的面板各自的类目类型域（面板标准第 5.1 节；2026-10-10 加入图书预览）。
+ * **有类目**的面板各自的类目类型域（面板标准第 5.1 节；2026-10-10 加入图书预览，
+ * 2026-11-01 / D135 加入相册与源）。
  *
- * 这张表只服务于**编辑器工厂的缺省值**：在某个面板下新增类目时，`media_type`
- * 该默认成什么。没有它就是"任何面板下新建的类目都默认 `image`"——在图书预览
- * （文本面板）下会直接建出一个**图像**类目，用户得手动改两个下拉框才拿到想要的类目。
+ * 这张表只服务于**编辑器**：属性面板的「类型」下拉候选按面板收窄
+ * （[`classMediaTypesForPanel`]），工厂的缺省值取该分域的**首项**
+ * （[`defaultClassFieldsForPanel`]）。没有它就是"任何面板下新建的类目都默认 `image`"——
+ * 在图书预览（文本面板）下会直接建出一个**图像**类目，用户得手动改两个下拉框；
+ * 在相册 / 源面板下更是**建出一个对方根本不认识的类型**（用户口径：*"所有选项面板都是
+ * 反向读取的，源的面板的类目就不能出现媒体预览面板的类目的图像、视频、音频"*）。
  *
  * 它与面板注册表的 `hasClass` **不是一回事**：`hasClass` 说"能不能挂类目"，
- * 本表说"挂上去默认是哪个类型域"。两处的面板集合必须一致（都由 `pnpm check:panels` 断言）。
+ * 本表说"挂上去能用哪些类型、缺省是哪个"。两处的面板集合必须一致
+ * （都由 `pnpm check:panels` 断言）。
  *
- * 取值域不必穷举该面板支持的所有类型——`media` 的类目类型域就是
- * `image` / `video` / `audio` / `text` / `pdf` 里的前三个，`bookpreview` 默认 `text`
- * （它同时收 `pdf`，只是"新建类目"的缺省值只能有一个，取更常见的那个）。
+ * 取值域**必须穷举该面板支持的类目类型**（属性面板的候选就是这份；漏一项 = 下拉里少一项）：
+ * - `media` → 图像 / 视频 / 音频：媒体预览只列这三类条目（不用 `text` / `pdf`，
+ *   那是图书预览的领域）；
+ * - `bookpreview` → 文本 / PDF（这两类是它唯一的取数口径）；
+ * - `albums` → 相册：面板条目就是相册；
+ * - `sources` → 源：面板条目就是源目录。
+ *
+ * **`unlimited`（首项）/ `empty`（末项）在每个分域里都在（D136）**：它们不是"某种媒体类型"，
+ * 而是**两端的语义档位**（匹配一切 / 排除全部），因此对任何面板都成立——放在首尾是为了让
+ * 下拉一眼看出"最粗 → 具体 → 最窄"的梯度。
+ *
+ * ⚠️ **候选顺序 ≠ 缺省值**：这张表的首项是 `unlimited`，而新建类目的缺省值是
+ * [`PANEL_CLASS_MEDIA_TYPE_DEFAULTS`]（`image` / `text` / `album` / `source`）。
+ * 两者**刻意分成两张表**：若让缺省 = 分域首项，D136 一加 `unlimited` 就会把所有面板的
+ * 新建类目缺省悄悄变成"无限制"——那是"扩大候选"顺带改了行为，属静默回归。
  */
-export const PANEL_CLASS_MEDIA_TYPES: Readonly<Record<string, BlueprintMediaType>> = {
-  media: "image",
-  bookpreview: "text",
+export const PANEL_CLASS_MEDIA_TYPE_DOMAINS: Readonly<
+  Record<string, readonly BlueprintMediaType[]>
+> = {
+  media: ["unlimited", "image", "video", "audio", "empty"],
+  bookpreview: ["unlimited", "text", "pdf", "empty"],
+  albums: ["unlimited", "album", "empty"],
+  sources: ["unlimited", "source", "empty"],
 };
 
 /**
- * 某面板下新增类目时的**缺省 `media_type`**。
+ * 各面板**新建类目时的缺省类型**（D136：与候选顺序**分开**维护）。
  *
- * - `media`（默认未登记的面板）→ `image`（与既有行为一致，零回归）；
- * - `bookpreview` → `text`（图书预览收的是文本类与 PDF，缺省给更常见的文本）。
+ * 语义是"用户没动过下拉时落到哪个值"，因此它回答的是**惯例**（哪个类型最常见），
+ * 不是"候选里第一个是什么"。两者合并会出事：D136 给候选首项加了 `unlimited`，
+ * 若缺省还取首项，四个面板的新建类目会全部变成"无限制"——用户不会察觉，
+ * 直到某天发现新建的类目把什么文件都收进来。
  *
- * 类目**只**有 `media_type`（细分是 `subclass` 节点的事，见 `defaultSubclassFieldsFor`）。
+ * - `media` → `image`；`bookpreview` → `text`；`albums` → `album`；`sources` → `source`；
+ * - 未注册 / 无参 → `image`（既有行为，零回归）。
+ */
+export const PANEL_CLASS_MEDIA_TYPE_DEFAULTS: Readonly<Record<string, BlueprintMediaType>> = {
+  media: "image",
+  bookpreview: "text",
+  albums: "album",
+  sources: "source",
+};
+
+/**
+ * 某面板下可用的**类目类型**清单（属性面板下拉候选的来源）。
+ *
+ * 判定顺序（与 Rust `class_media_types_for_panel` **逐项一致**，新的跨语言镜像点）：
+ * 1. 该面板在 [`PANEL_CLASS_MEDIA_TYPE_DOMAINS`] 里 → 返回它的分域（**按定义顺序**）；
+ * 2. 未登记（插件面板 / 无参 / 面板无注册项）→ 返回**全量 9 项**。
+ *    插件面板的类型域由插件自己声明，宿主**不设限**——收窄错了会把插件面板能用的类型
+ *    判成非法；另有"面板当前无注册项"（插件未安装）时也无从判定，按未接通处理。
+ *
+ * **`control` 缺失/指向已删节点时不要拿它来判死数据**：调用方拿不到 `panel_id` 时传
+ * `undefined` → 全量候选，已选值原样保留（D135：「缺失不得绑架用户数据」）。
+ */
+export function classMediaTypesForPanel(
+  panelId: string | undefined,
+): readonly BlueprintMediaType[] {
+  const domain = panelId ? PANEL_CLASS_MEDIA_TYPE_DOMAINS[panelId] : undefined;
+  return domain ?? BLUEPRINT_MEDIA_TYPES;
+}
+
+/**
+ * 某面板下新增类目时的**缺省 `media_type`**（D136：取 [`PANEL_CLASS_MEDIA_TYPE_DEFAULTS`]，
+ * **不是**分域首项——见那张表里"候选顺序 ≠ 缺省值"的说明）。
+ *
+ * 类目**只**有 `media_type`（细分是 `subclass` 节点的事，见 `defaultSubclassFormatFor`）。
  */
 export function defaultClassFieldsForPanel(panelId: string | undefined): {
   media_type: BlueprintMediaType;
 } {
-  return { media_type: PANEL_CLASS_MEDIA_TYPES[panelId ?? ""] ?? "image" };
+  return { media_type: PANEL_CLASS_MEDIA_TYPE_DEFAULTS[panelId ?? ""] ?? "image" };
 }
+
+/**
+ * 各面板**缺省**类目类型的扁平快照（D136 起指向 [`PANEL_CLASS_MEDIA_TYPE_DEFAULTS`]）。
+ *
+ * 保留这个旧导出是为了让既有引用（面板 ↔ 缺省一致性断言、文档对照）继续按
+ * "面板 → 一个缺省值"看待；**权威是 [`PANEL_CLASS_MEDIA_TYPE_DEFAULTS`]**，
+ * 本表与它同源，不再由分域首项派生（D135 期间曾由分域首项派生——
+ * 那在 D136 加入 `unlimited` 首项后会让缺省全部漂成 `unlimited`）。
+ */
+export const PANEL_CLASS_MEDIA_TYPES: Readonly<Record<string, BlueprintMediaType>> =
+  PANEL_CLASS_MEDIA_TYPE_DEFAULTS;
 
 /**
  * 某**类目**下新增子类时的缺省 `format`：取该类目媒体类型分域里的第一个取值。

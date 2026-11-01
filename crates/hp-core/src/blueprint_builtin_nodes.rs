@@ -78,11 +78,12 @@ pub const BUILTIN_NODE_SPECS: [BuiltinNodeSpec; 12] = [
         name_from_layer: false,
         provides_name: true,
         parents: &["layout_block", "group", "overlay"],
-        // 面板之下有**两条平行的轴**（D102）：类目（`class`）与**标记**（`mark`）。
-        // 两者都直接挂在面板下、受同一个 `has_class` 约束，因此**都必须**在这里——
-        // `can_contain` 只读父节点的 `children`，漏掉 `mark` 会让「面板 → 标记」
-        // 被判为非法边（与 TS `blueprintNodes.ts` 的 `control.children` 逐项一致）。
-        children: &["class", "mark"],
+        // 面板之下**只有类目这一条结构轴**（D136）：标记从"与类目平行的独立轴"改为
+        // "类目之下的从属轴"（与子类并列），因此 `control.children` **不再含 `mark`**。
+        // ⚠️ 必须与 `Mark` 的 `parents = ["class"]` 双向互指：`can_contain` 只读父节点的
+        // `children`，漏一侧会让该边静默连不出来（与 TS `blueprintNodes.ts` 逐项一致，
+        // D104 的教训）。
+        children: &["class"],
         events: &[],
     },
     BuiltinNodeSpec {
@@ -92,8 +93,9 @@ pub const BUILTIN_NODE_SPECS: [BuiltinNodeSpec; 12] = [
         name_from_layer: false,
         provides_name: true,
         parents: &["control"],
-        // 类目之下有**两条**：子类（细分）与对象（条目实例）。
-        children: &["subclass", "object"],
+        // 类目之下**两条并列的从属轴**（D136）：子类（细分）与标记（可交叉的语义维度）。
+        // 必须在 `children` 里写上 `mark`，否则「类目 → 标记」被判为非法边。
+        children: &["subclass", "mark", "object"],
         events: &[],
     },
     BuiltinNodeSpec {
@@ -112,8 +114,10 @@ pub const BUILTIN_NODE_SPECS: [BuiltinNodeSpec; 12] = [
         evaluation_role: EvaluationRole::Structural,
         name_from_layer: false,
         provides_name: true,
-        // 标记与类目树**平行**：直接挂在面板下（不是挂在类目下）。
-        parents: &["control"],
+        // 标记**从属类目**（D136：`class ⊃ mark ⊃ object`，与子类并列）。
+        // 语义上标记仍与类目"正交、可交叉"，但**结构上**它不再是面板下的平行轴
+        // ——用户口径：「标记连接到类目上，标记和子类类似。」
+        parents: &["class"],
         children: &["object"],
         events: &[],
     },
@@ -123,7 +127,8 @@ pub const BUILTIN_NODE_SPECS: [BuiltinNodeSpec; 12] = [
         evaluation_role: EvaluationRole::Structural,
         name_from_layer: false,
         provides_name: true,
-        // 结构父有**三种**（三条正交的轴任选其一）。
+        // 对象的结构父有**三种**（三条语义轴任选其一）：类目、子类、标记。
+        // D136 只改了标记**自己的**父级，这条没有变。
         parents: &["class", "subclass", "mark"],
         children: &[],
         events: &[],
