@@ -99,6 +99,7 @@ export function BlueprintPanel(): JSX.Element {
                 onNameChange={state.setName}
                 onSave={docs.save}
                 onArrange={edits.onArrange}
+                onSyncLayout={edits.onSyncLayout}
                 onRefresh={onRefresh}
                 onRestore={docs.restoreBuiltin}
                 onRemove={docs.remove}

@@ -27,6 +27,7 @@
     "check:blueprint-geometry": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/blueprint-geometry-check.mjs",
     "check:blueprint-slots": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/blueprint-slots-check.mjs",
     "check:blueprint-minimap": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/blueprint-minimap-check.mjs",
+    "check:blueprint-layout-sync": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/blueprint-layout-sync-check.mjs",
     "check:controls": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/control-check.mjs",
     "check:panels": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/check-panels.mjs",
     "check:settings": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/check-settings.mjs",

@@ -2,9 +2,9 @@
  * 蓝图图编辑动作接线（RFC 0007 决策 7 / D31）——画布与属性面板发出的"改图"动作。
  *
  * 一个域：新增节点（避开已占用槽位、归属当前层）、改节点字段、软删除节点、删边、
- * 连线后自动落引用字段、一键整理。算法都在纯模块里（`blueprintNodeFactory` /
- * `blueprintDelete` / `blueprintArrange` / `blueprintSlots`），本文件只把它们接到
- * 编辑器状态与提示上。
+ * 连线后自动落引用字段、一键整理、同步布局。算法都在纯模块里（`blueprintNodeFactory` /
+ * `blueprintDelete` / `blueprintArrange` / `blueprintSlots` / `blueprintLayoutSync`），
+ * 本文件只把它们接到编辑器状态与提示上。
  */
 
 import { useCallback } from "react";
@@ -23,8 +23,10 @@ import { arrangeTree } from "./blueprintArrange";
 import { applyConnect } from "./blueprintConnect";
 import { softRemove, softRemoveMany } from "./blueprintDelete";
 import { ensureInterface } from "./blueprintLayers";
+import { syncLayoutIntoGraph } from "./blueprintLayoutSync";
 import { appendNode, parentHintFor } from "./blueprintNodeFactory";
 import { canvasCenter, freeSlotPosition } from "./blueprintSlots";
+import { readStructure, snapshotFromDockview } from "./blueprintStructure";
 import type { BlueprintEditorState } from "./useBlueprintEditorState";
 
 /** 图编辑动作的依赖：编辑器状态、新增层、静默落库。 */
@@ -53,6 +55,11 @@ export interface BlueprintGraphEdits {
   onConnect: (edge: { from: string; to: string; kind: BlueprintEdge["kind"] }) => void;
   /** 一键整理：以选中节点为根树状展开（纯算法在 `blueprintArrange`），随后静默落库。 */
   onArrange: () => void;
+  /**
+   * 同步布局：把**当前页面布局**写回当前界面的节点结构（纯算法在 `blueprintLayoutSync`）。
+   * 面板换了所属标签组时，面板与它的**后续（尾部）节点当作一个整体**一起移动。
+   */
+  onSyncLayout: () => void;
 }
 
 export function useBlueprintGraphEdits({
@@ -240,5 +247,55 @@ export function useBlueprintGraphEdits({
     persistDoc(next);
   }, [selectedKey, doc, mutate, persistDoc]);
 
-  return { addNode, updateNode, removeNode, removeBladeHits, removeEdgeAt, onConnect, onArrange };
+  /**
+   * 同步布局：读一次**当前页面布局**的结构快照，把「布局块（一栏）→ 标签组 → 控件（面板）」
+   * 写回当前界面的节点结构；面板换了所属标签组时，面板与它的**后续（尾部）节点当作一个
+   * 整体**一起搬到新容器之下（用户口径 m00001 / m00071：两句话是同一个要求）。
+   *
+   * 快照来源有两条（本面板**可能被拖成独立窗口**，那种窗口里没有 dockview 实例）：
+   * ① 本窗口有 dockview 就直接抓，最准；② 没有就取主窗口在**每次布局变化**时发布的
+   * 跨窗口共享结构（`AppUiApp` 的 `publishStructure` / 这里的 `readStructure`）——
+   * 与「新建蓝图带结构骨架」用的是同一条通道。
+   *
+   * 只在**归属真的变了**（或布局里新出现面板）时才动节点，所以本动作是增量的、不是重整
+   * ——要重新排布整张图请用「一键整理」。结构没变化时**不写库**，避免白白产生一次保存。
+   */
+  const onSyncLayout = useCallback(() => {
+    try {
+      const dv = app.getDockview();
+      const snapshot = dv ? snapshotFromDockview(dv) : readStructure();
+      if (!snapshot || snapshot.regions.length === 0) {
+        app.status(app.t("blueprint.syncLayoutNoLayout"), "info");
+        return;
+      }
+      const outcome = syncLayoutIntoGraph({ doc, snapshot, layerKey });
+      if (outcome.count === 0 && !outcome.structureChanged) {
+        app.status(app.t("blueprint.syncLayoutNone"), "info");
+        return;
+      }
+      mutate(outcome.doc);
+      persistDoc(outcome.doc);
+      app.status(
+        app.t("blueprint.syncLayoutDone", {
+          added: outcome.added.length,
+          regrouped: outcome.regrouped.length,
+          moved: outcome.moved.length,
+        }),
+        "ok",
+      );
+    } catch (err) {
+      app.status(app.t("blueprint.syncLayoutFailed", { err: String(err) }), "error");
+    }
+  }, [app, doc, layerKey, mutate, persistDoc]);
+
+  return {
+    addNode,
+    updateNode,
+    removeNode,
+    removeBladeHits,
+    removeEdgeAt,
+    onConnect,
+    onArrange,
+    onSyncLayout,
+  };
 }

@@ -384,7 +384,7 @@ apps/desktop/src/app_ui/
     BlueprintPanel.tsx      # 蓝图编辑器主面板（**入口装配**：状态 + 文档命令 + 层工具 + 图编辑动作；
                             #   界面拼给下面四个区块组件；含当前层状态）
     BlueprintDocList.tsx    # 蓝图文档列表（新建/带结构创建开关/选中/设为默认/模板下拉）
-    BlueprintToolbar.tsx    # 编辑器工具条（名称/保存/一键整理/**刷新**/恢复内置默认/删除/视图切换）
+    BlueprintToolbar.tsx    # 编辑器工具条（名称/保存/一键整理/**同步布局**/**刷新**/恢复内置默认/删除/视图切换）
     BlueprintPalette.tsx    # 节点添加面板（**所有类型都可随意创建**，无置灰；层级约束体现在连线上）
     BlueprintJsonView.tsx   # JSON 文本视图（直接改 JSON + 解析回文档）
     BlueprintCanvas.tsx     # 节点画布（拖拽/连线/平移缩放/右键直线刀痕**批量删除**；**只渲染当前层**；挂右下角小地图；
@@ -396,7 +396,7 @@ apps/desktop/src/app_ui/
     useBlueprintEditorState.ts # 编辑器界面状态（文档 / JSON 文本 / 选中项 / 视图模式 / 提示 / **refreshKey**）
     useBlueprintDocuments.ts   # 蓝图文档的后端命令（列表 / 装载 / 保存 / 新建 / 删除 / 设为默认 / 恢复 / 静默保存）
     useBlueprintLayerTools.ts  # 层工具接线（切层 / 新增 / 重命名 / 排序 / 删除 / 设为主界面 + 无根层派生）
-    useBlueprintGraphEdits.ts  # 图编辑动作接线（新增节点 / 改字段 / 软删除 / 删边 / **连线原子落引用** / 一键整理）
+    useBlueprintGraphEdits.ts  # 图编辑动作接线（新增节点 / 改字段 / 软删除 / 删边 / **连线原子落引用** / 一键整理 / **同步布局**）
     useBlueprintUnlinked.ts    # 未接通节点的面板侧派生（画布灰显与顶部提示用的 key 集合；随 refreshKey 重算）
     blueprintNodeFactory.ts # 新节点工厂（**只追加自身**：不补最小链、**不产生任何边、也不落定引用字段**；
                             #   显式选中的上级只用于 ① key 命名 ② 缺省字段取值——D107/D109）
@@ -414,6 +414,9 @@ apps/desktop/src/app_ui/
                             #   `worldToCanvas`、点到折线/矩形距离、`nearestWithin`（就近吸附））
     blueprintMinimapGeometry.ts # 小地图纯几何（包围盒/等比缩放/坐标换算/视口矩形）
     blueprintStructure.ts   # 由当前布局生成结构骨架（单层）+ 跨窗口结构快照
+    blueprintLayoutSync.ts  # 「同步布局」纯算法（把**当前页面布局**写回当前层的节点结构；面板换了
+                            #   标签组时，面板与其**后续（尾部）节点当作整体**平移；**浮层拥有的子树
+                            #   整体排除**——结构父唯一）——D133
     repoDisplay.ts          # 仓库面板的**当前仓库显示名**解析（纯函数：按 repoId 查名字，
                             #   查不到即占位符——**永不回落 repoId**，内部主键不是显示值）
   dialogs/            # 独立窗口对话框

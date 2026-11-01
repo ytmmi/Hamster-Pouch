@@ -831,6 +831,15 @@ export const en: Record<keyof DictZhCN, string> = {
   "iface.pageDeleteFailed": "Failed to delete interface: {err}",
   "settings.language.interface": "Interface language",
   "settings.blueprint.syncOnSave": "Sync layout into the blueprint on save",
+  // Blueprint panel — sync layout (writes the current page layout into this interface's nodes, D133)
+  "blueprint.syncLayout": "Sync layout",
+  "blueprint.syncLayoutHint":
+    "Write the current page layout into this interface's nodes; when a panel changes tab group, the panel and its downstream (tail) nodes move together as one unit",
+  "blueprint.syncLayoutDone":
+    "Layout synced: {added} node(s) added, {regrouped} panel(s) regrouped, {moved} node(s) moved",
+  "blueprint.syncLayoutNone": "Layout and nodes already match; nothing to sync",
+  "blueprint.syncLayoutNoLayout": "There is no page layout to sync right now",
+  "blueprint.syncLayoutFailed": "Failed to sync layout: {err}",
   "settings.scope.repo": "Per repository",
   "settings.requiresCapability": "Requires capability {cap} (grayed out while not granted)",
   "settings.panelCategory.source": "Repositories and sources",

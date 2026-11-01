@@ -2,7 +2,7 @@
  * 蓝图编辑器工具条（RFC 0007「前端编辑器」）。
  *
  * 一个域：把**当前选中蓝图**的文档级操作排成一行——名称输入、保存（校验后落库）、
- * 一键整理、恢复内置默认、删除蓝图，以及在画布视图与 JSON 视图之间切换。
+ * 一键整理、同步布局、恢复内置默认、删除蓝图，以及在画布视图与 JSON 视图之间切换。
  *
  * 纯展示 + 回调：命令语义在 `useBlueprintDocuments`，图编辑动作在 `useBlueprintGraphEdits`。
  */
@@ -19,6 +19,11 @@ export interface BlueprintToolbarProps {
   onSave: () => Promise<void>;
   /** 一键整理：以选中节点为起始节点树状展开（起始节点位置不变）。 */
   onArrange: () => void;
+  /**
+   * 同步布局：把**当前页面布局**同步进当前界面的节点结构。面板换了所属标签组时，
+   * 面板与它的后续（尾部）节点当作**一个整体**一起移动（纯算法在 `blueprintLayoutSync`）。
+   */
+  onSyncLayout: () => void;
   /**
    * 刷新：重算派生状态（未接通灰显 / 端口测量 / JSON 文本），**不改文档**。
    * 用于"连线后节点状态仍显示未接通"这类需要重新对齐的场合。
@@ -40,6 +45,7 @@ export function BlueprintToolbar({
   onNameChange,
   onSave,
   onArrange,
+  onSyncLayout,
   onRefresh,
   onRestore,
   onRemove,
@@ -61,6 +67,9 @@ export function BlueprintToolbar({
         onClick={onArrange}
       >
         {t("blueprint.arrange")}
+      </button>
+      <button title={t("blueprint.syncLayoutHint")} onClick={onSyncLayout}>
+        {t("blueprint.syncLayout")}
       </button>
       <button title={t("blueprint.refreshHint")} onClick={onRefresh}>
         {t("blueprint.refresh")}

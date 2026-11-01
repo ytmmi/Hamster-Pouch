@@ -854,6 +854,15 @@ export const zhCN = {
   "iface.pageDeleteFailed": "删除界面失败：{err}",
   "settings.language.interface": "界面语言",
   "settings.blueprint.syncOnSave": "保存布局时自动同步进蓝图",
+  // 蓝图面板 - 同步布局（把当前页面布局同步进当前界面的节点结构，D133）
+  "blueprint.syncLayout": "同步布局",
+  "blueprint.syncLayoutHint":
+    "把当前页面布局同步到当前界面的节点：面板换了标签组时，面板与其后续（尾部）节点作为整体一起移动",
+  "blueprint.syncLayoutDone":
+    "已同步布局：新增 {added} 个节点、重新归组 {regrouped} 个面板、移动 {moved} 个节点",
+  "blueprint.syncLayoutNone": "布局与节点已一致，无需同步",
+  "blueprint.syncLayoutNoLayout": "当前没有可同步的页面布局",
+  "blueprint.syncLayoutFailed": "同步布局失败：{err}",
   "settings.scope.repo": "按仓库",
   "settings.requiresCapability": "需要能力 {cap}（未授权时置灰）",
   "settings.panelCategory.source": "仓库与源",

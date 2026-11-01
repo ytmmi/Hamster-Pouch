@@ -830,6 +830,15 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "iface.pageDeleteFailed": "刪除介面失敗：{err}",
   "settings.language.interface": "介面語言",
   "settings.blueprint.syncOnSave": "儲存佈局時自動同步進藍圖",
+  // 藍圖面板 - 同步佈局（把目前頁面佈局同步進目前介面的節點結構，D133）
+  "blueprint.syncLayout": "同步佈局",
+  "blueprint.syncLayoutHint":
+    "把目前頁面佈局同步到目前介面的節點：面板換了標籤組時，面板與其後續（尾部）節點作為整體一起移動",
+  "blueprint.syncLayoutDone":
+    "已同步佈局：新增 {added} 個節點、重新歸組 {regrouped} 個面板、移動 {moved} 個節點",
+  "blueprint.syncLayoutNone": "佈局與節點已一致，無需同步",
+  "blueprint.syncLayoutNoLayout": "目前沒有可同步的頁面佈局",
+  "blueprint.syncLayoutFailed": "同步佈局失敗：{err}",
   "settings.scope.repo": "按倉庫",
   "settings.requiresCapability": "需要能力 {cap}（未授權時置灰）",
   "settings.panelCategory.source": "倉庫與源",
