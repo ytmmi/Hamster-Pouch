@@ -158,8 +158,9 @@ export function subclassFormatLabel(value: string, t: Translate): string {
 /**
  * **标记**标签（`mark` 节点的 `mark` 字段：`media` / `book` / `manga` …）。
  *
- * 标记在**语义上**与类目正交、可交叉（用户口径：`漫画.zip` 的类目是压缩包、可标记为
- * `manga`），**结构上**从属类目（D136：`class ⊃ mark ⊃ object`，与子类并列）。
+ * 标记在**语义上**是"细化条目的标签"（用户口径：`漫画.zip` 的类目是压缩包、可标记为
+ * `manga`），**结构上**从属**对象**（v3：`class ⊃ object ⊃ mark`——标记是对单个对象的
+ * 细分；D136 时期曾直接从属类目、与子类并列，那条口径已废止）。
  * 因此文案与"格式"分开一组键——同一个 `book` 在标记里的含义是"这是一本书"，
  * 而不是"这是 book 格式"。
  */
@@ -269,18 +270,22 @@ export function nodeSummary(
       return subclassSummary(node, t, owner ? nodeDisplayName(owner, t, nodes) : undefined);
     }
     case "mark": {
-      // 标记（D136）：显示 `标记名 · 所属类目名`——光有「媒体」读不出"挂在哪个类目下"，
-      // 而"从属类目"正是 D136 的核心语义（照 `subclassSummary` 的写法）。
-      // 所属类目名由**引用字段** `node.class` 解析（不是边）：运行期认的就是字段
-      // （见 D109 的"字段只由连线落定"），因此显示它也如实反映运行期口径。
-      // 引用缺失/指向已删除节点时只显示标记名，不猜一个类目出来。
-      const owner = node.class ? nodes.find((n) => n.key === node.class) : undefined;
+      // 标记（v3：`class ⊃ object ⊃ mark`）：显示 `标记名 · 所属对象名`——光有「媒体」
+      // 读不出"细分的是哪个对象"，而"从属对象"正是 v3 的核心语义（照 `subclassSummary`
+      // 的写法）。所属对象名由**引用字段** `node.object` 解析（不是边）：运行期认的就是
+      // 字段（见 D109 的"字段只由连线落定"），因此显示它也如实反映运行期口径。
+      // 引用缺失/指向已删除节点时只显示标记名，不猜一个对象出来。
+      // 旧文档残留的 `class`（D136 的"从属类目"）**不读**：v3 起它不再是结构父，
+      // 读了会显示一个运行期根本不生效的父级（未接通状态由 `blueprintLint` 报）。
+      const owner = node.object ? nodes.find((n) => n.key === node.object) : undefined;
       const head = markLabel(node.mark ?? "", t);
       return owner ? `${head} · ${nodeDisplayName(owner, t, nodes, graph.layers)}` : head;
     }
     case "object": {
-      // 对象的结构父有**三条正交轴**（类目 / 子类 / 标记，三者互斥）：显示实际声明的那条。
-      const parentKey = node.class ?? node.subclass ?? node.mark_ref;
+      // 对象的语义轴有**两条**（类目 / 子类，二者互斥）：显示实际声明的那条。
+      // v3 起 `mark_ref`（D136 的"对象挂标记"）已废弃——方向反过来，标记挂在对象之下，
+      // 因此这里不再把它当父级解析（残留值由 `blueprintLint` 按「未接通」处理）。
+      const parentKey = node.class ?? node.subclass;
       const parent = parentKey ? nodes.find((n) => n.key === parentKey) : undefined;
       const parentName = parent ? nodeDisplayName(parent, t, nodes) : parentKey ?? "?";
       return `${parentName} · ${scopeLabel(node.scope ?? "", t)}`;

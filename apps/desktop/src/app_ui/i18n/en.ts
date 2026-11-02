@@ -594,7 +594,16 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.classOfSubclass": "Owning category",
   "blueprint.subclassNoDomain": "This category has no subclass domain (currently only Text: EPUB / TXT / Markdown)",
   "blueprint.markKind": "Mark",
-  "blueprint.markOf": "Owning panel",
+  "blueprint.markOf": "Owning object",
+  // v3 (`class ⊃ object ⊃ mark`): marks hang under an **object** (no longer under a
+  // category). Legacy `class` (D136 "owning category") and the even older `control`
+  // (mark attached straight to a panel) are no longer read — the inspector shows a soft
+  // hint only (saving is never blocked; connecting the mark to an object clears them).
+  "blueprint.markStaleAxis":
+    "Stale “owning category / owning panel” from an older document no longer applies (marks now hang under objects): connecting the mark to an object clears it automatically.",
+  // Same soft hint for the `mark_ref` axis retired by v3 (D136 "object hangs under a mark").
+  "blueprint.objectStaleAxis":
+    "Stale “owning mark” from an older document no longer applies (marks now hang under objects): reconnect to clear it automatically.",
   "blueprint.scope": "Object scope",
   "blueprint.mode": "Group mode",
   "blueprint.mode.exclusive": "Exclusive",
@@ -649,8 +658,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.minimap": "Minimap",
   "blueprint.minimapHint": "Drag the minimap to move the canvas there",
   // Help popover ("?" in the canvas bottom-right corner): content is **derived from the
-  // node definition table**, so D136 moving marks under categories automatically yields
-  // "category ⊃ {subclass, mark, object}". No parent/child relation is hard-coded here.
+  // node definition table**, so v3 moving marks under objects automatically yields
+  // "category ⊃ {subclass, object ⊃ mark}". No parent/child relation is hard-coded here.
   "blueprint.help.open": "Containment help",
   "blueprint.help.title": "Node containment",
   "blueprint.help.hierarchy": "Hierarchy (parent ⊃ child)",
@@ -766,7 +775,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.format.epub": "EPUB",
   "blueprint.format.txt": "TXT",
   "blueprint.format.md": "Markdown",
-  // Marks (`mark.mark`): the axis **orthogonal** to categories, freely overlapping.
+  // Marks (`mark.mark`): values of the mark list (since v3 a **subdivision** axis under an
+  // object — it tells entries of the same object apart, e.g. manga.zip marked as manga).
   // D134 expanded the built-in list from 2 to 10 items; the order matches
   // `BLUEPRINT_BUILTIN_MARKS` and the context-menu tree.
   "blueprint.mark.media": "Media",
@@ -779,8 +789,11 @@ export const en: Record<keyof DictZhCN, string> = {
   "blueprint.mark.book": "Book",
   "blueprint.mark.manga": "Manga",
   "blueprint.mark.program": "Program",
-  // Display name of an object node under a Mark parent (D134): only "Album" under the
-  // albums panel, only "Source" under the sources panel.
+  // Display name of a **category** node (D135): only "Album" under the albums panel,
+  // only "Source" under the sources panel. Since v3 marks hang under objects, this is no
+  // longer about a "mark parent"; the key names keep D134's `blueprint.object.*` form
+  // (renaming them would churn all three dictionaries for no gain). The actual decision
+  // lives in `classOfSpecialPanelLabel` (the class branch of `blueprintLabels`).
   "blueprint.object.album": "Album",
   "blueprint.object.source": "Source",
   "blueprint.hideDir.left": "Left",

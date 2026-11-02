@@ -17,6 +17,7 @@ import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { ContextMenu } from "../menu/ContextMenu";
 import { derivedMarksForAlbum, MarkMenuTree, usePanelMarks } from "./markMenu";
+import { effectiveMarksFor } from "../shared/panelMarks";
 import type { AlbumItem } from "../shared/types";
 
 /** 相册拖拽载荷的 MIME 类型（与文件的 `application/x-hp-files` 区分，D117/D128）。 */
@@ -229,6 +230,8 @@ export function AlbumPanel(): JSX.Element {
     const byId = new Map(albums.map((a) => [a.id, a]));
     return derivedMarksForAlbum(effectiveMediaType(menu.albumId, byId));
   }, [albums, menu]);
+  /** 相册 id → 相册：行点击上报要算派生标记（沿父链取**有效**媒体属性）。 */
+  const albumById = useMemo(() => new Map(albums.map((a) => [a.id, a])), [albums]);
 
   const toggleCollapse = useCallback((id: string) => {
     setCollapsed((prev) => {
@@ -635,6 +638,30 @@ export function AlbumPanel(): JSX.Element {
             app.setAlbumId(node.id);
             app.setSourceId(null);
             app.setDirPath(null);
+            // 上报蓝图引擎（原实现**完全不上报**，相册链因此永远断在事件源，
+            // 用户画布上「类目 → 对象 → … → 操作」永远求值不到，task-5 修正 2）。
+            // `mediaType` 必须写字面量 `"album"`：类目节点 `c_albums_album` 的
+            // `media_type` 是 `"album"`（`blueprintNodes.ts` 的相册取值域），而相册行的
+            // 真实 `media_type` 是 `multimedia`/`image`/空（沿父链继承）——直接透传会与
+            // `blueprintEngine.ts` 的精确比较失败（task-5 修正 2）。
+            // `fileId` = 相册 id（对象节点的 `scope` 也可写具体 id，RFC 0007 决策 1）。
+            // `marks` = 该相册的**有效标记**（用户标记 ∪ 派生标记，D138）：
+            // 相册没有 `file_marks`（那是文件表的存储），它的标记在面板本地的
+            // `panel_marks`（`shared/panelMarks.ts`，`albums` 域，按相册 id 挂）。
+            // 旧实现恒给 `[]`（注释理由是"面板打标不经 dispatch"）⇒ 标记轴对相册
+            // 天然不可命中，而标记的语义正是**对象的限制条件**，不给就等于这条链
+            // 没有条件可判。派生标记必须一并并入：右键菜单里它恒勾不可取消，
+            // 菜单说打了而上报不报就是两套事实（`effectiveMarksFor` 有详述）。
+            // 本调用**只上报**，不产生任何面板副作用。
+            const mediaType = effectiveMediaType(node.id, albumById);
+            app.dispatch({
+              trigger: "click",
+              target: {
+                mediaType: "album",
+                fileId: node.id,
+                marks: effectiveMarksFor(marks, "albums", node.id, derivedMarksForAlbum(mediaType)),
+              },
+            });
           }}
           onContextMenu={(e) => {
             e.preventDefault();

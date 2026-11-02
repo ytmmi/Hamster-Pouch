@@ -101,24 +101,113 @@ function hasSource(node: BlueprintNode, graph: BlueprintGraph): boolean {
 }
 
 /**
+ * **触发方式 → 对象 `scope` 的配对**（D138 补，与运行时
+ * `blueprintEngine.SCOPE_FOR_TRIGGER` **同一张表**）。
+ *
+ * 运行时的判定顺序是"事件 trigger 决定本次上报的 scope"（`dispatch` 里
+ * `input.target.scope ?? SCOPE_FOR_TRIGGER[trigger]`），然后对象分支要求
+ * `node.scope === scope`。因此 `scope` 与 `trigger` 一旦错配，这条链**永远不会命中**：
+ * 图看起来完全接好（彩色、无引用缺失），点了却没有任何反应。
+ */
+const SCOPE_FOR_TRIGGER: Partial<Record<string, string>> = {
+  click: "clicked",
+  double_click: "double_clicked",
+  selection_change: "selected",
+};
+
+/** `scope` 是否为"按触发方式推导"的那三种之一（其余值是具体 `file_id`，不参与配对）。 */
+const TRIGGER_DERIVED_SCOPES: ReadonlySet<string> = new Set([
+  "clicked",
+  "double_clicked",
+  "selected",
+]);
+
+/**
+ * 求一个**规则源**节点最终落到哪个对象上（D138）：
+ * `object` 自己；`mark` 走它的 `object`（v3：`class ⊃ object ⊃ mark`）。
+ * 其余类型（面板/类目/子类）按 `mediaType` 命中，没有 `scope`，返回 `undefined`。
+ */
+function effectiveObject(
+  sourceKey: string,
+  graph: BlueprintGraph,
+  byKey: ReadonlyMap<string, BlueprintNode>,
+): BlueprintNode | undefined {
+  const source = byKey.get(sourceKey);
+  if (!source) {
+    return undefined;
+  }
+  if (source.type === "object") {
+    return source;
+  }
+  if (source.type === "mark" && source.object) {
+    const parent = byKey.get(source.object);
+    return parent?.type === "object" ? parent : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * 该事件的**所有**规则源是否都因 `scope`／`trigger` 错配而永远不可能命中（D138）。
+ *
+ * 只判"全部落空"：只要还有一条源能配上（例如同一事件既有 `clicked` 对象、
+ * 又有面板直连），这条事件仍然是有用的，不该灰显。
+ * `scope` 写成具体 `file_id` 的对象也能被对应实例命中，同样不算错配。
+ */
+function triggerScopeMismatches(
+  event: BlueprintNode,
+  graph: BlueprintGraph,
+  byKey: ReadonlyMap<string, BlueprintNode>,
+): boolean {
+  const expected = event.trigger ? SCOPE_FOR_TRIGGER[event.trigger] : undefined;
+  if (!expected) {
+    return false;
+  }
+  const sourceKeys = graph.edges
+    .filter((e) => e.kind === "on" && e.to === event.key)
+    .map((e) => e.from);
+  if (sourceKeys.length === 0) {
+    // 兼容旧图：没有 `on` 入边时按 `target` 反查（与运行时 `eventMatches` 同序）。
+    if (event.target) {
+      sourceKeys.push(event.target);
+    } else {
+      return false;
+    }
+  }
+  const objects = sourceKeys
+    .map((key) => effectiveObject(key, graph, byKey))
+    .filter((node): node is BlueprintNode => node !== undefined);
+  if (objects.length === 0) {
+    return false;
+  }
+  return objects.every(
+    (object) =>
+      object.scope !== undefined &&
+      TRIGGER_DERIVED_SCOPES.has(object.scope) &&
+      object.scope !== expected,
+  );
+}
+
+/**
  * 计算"未接通"节点：返回 key → 原因。
  *
  * 判定（与后端软告警口径一致，**不阻塞保存**）：
- * - 控件缺 `panel_id`、类缺 `control`、**标记缺 `class`**（D136：标记从属类目）、
- *   对象三条轴一条都没接、状态缺 `target`；
+ * - 控件缺 `panel_id`、类缺 `control`、**标记缺 `object`**（v3：`class ⊃ object ⊃ mark`，
+ *   标记从属**对象**）、对象两条轴（类目 / 子类）一条都没接、状态缺 `target`；
  * - 引用指向**已不存在的节点**（删除关联节点后的常见状态）；
  * - 操作缺对象来源、条件/状态缺触发来源；
  * - **结构节点（布局块/标签组/面板）没有结构父**（D108：新增不再自动连线之后，
  *   它是"刚摆下还没接好"的可见形态；面板的兼容旧图形式 `memberOf` 也放行）；
  * - 节点类型**当前无注册项**（插件缺失，RFC 0010 决策 6）；
  * - 类目挂在**无类目**的面板下（`has_class = false`，RFC 0010 决策 4）；
- * - **旧文档残留 `mark.control`**（D136 迁移口径：那个字段已不再是标记的结构父，
- *   按未接通灰显，不阻塞保存）。
+ * - **旧文档残留字段**：标记上残留的 `class`（D136 的"从属类目"）与更早的 `control`
+ *   （标记直挂面板）、对象上残留的 `mark_ref`（D136 的"对象挂标记"，v3 方向反过来）
+ *   —— 这些字段都不再被读取，按未接通灰显，不阻塞保存。
  *
  * 引用指向"存在但类型不对"的节点仍属硬错误（由后端拒绝），不算"未接通"。
  */
 export function analyzeUnlinked(graph: BlueprintGraph): BlueprintUnlinkedMap {
   const byKey = new Set(graph.nodes.map((n) => n.key));
+  const byKeyMap = new Map(graph.nodes.map((n) => [n.key, n] as const));
   const result: BlueprintUnlinkedMap = {};
   const mark = (key: string, reason: BlueprintUnlinkedReason) => {
     if (!result[key]) {
@@ -161,13 +250,20 @@ export function analyzeUnlinked(graph: BlueprintGraph): BlueprintUnlinkedMap {
         break;
       }
       case "mark": {
-        // 标记（D102 / **D136**）挂**类目**下（与子类并列）：缺 `class` 或指向已删除节点
-        // = 未接通。原因码沿用 `missing-class`（`subclass` / `object` 已复用它：
-        // 三者都在说同一件事——"类目这一侧没接好"），不新增原因码。
+        // 标记（**v3**：`class ⊃ object ⊃ mark`）挂**对象**下——标记是对**单个对象**的
+        // 细分：缺 `object` 或指向已删除节点 = 未接通。原因码沿用 `missing-class`
+        // （`subclass` / `object` 已复用它：三者都在说同一件事——"结构父这一侧没接好"），
+        // 不新增原因码（`BlueprintUnlinkedReason` 是共享类型，扩它要动 packages/config）。
         //
-        // 旧文档兼容：D136 之前标记用 `control` 指向面板，残留值不再被读取 →
-        // 同样按「未接通」灰显（与后端软告警同口径；允许保存、重新接线即恢复）。
-        if (!node.class || !byKey.has(node.class) || Boolean(node.control?.trim())) {
+        // 旧文档兼容：D136 的标记写 `class`（从属类目）、更早直挂面板写 `control`；
+        // 两个残留值都不再被读取 → 同样按「未接通」灰显（与后端软告警同口径；
+        // 允许保存、重新接线即恢复）。
+        if (
+          !node.object ||
+          !byKey.has(node.object) ||
+          Boolean(node.class?.trim()) ||
+          Boolean(node.control?.trim())
+        ) {
           mark(node.key, "missing-class");
         }
         if (node.mark && !isMarkRegistered(node.mark)) {
@@ -176,11 +272,15 @@ export function analyzeUnlinked(graph: BlueprintGraph): BlueprintUnlinkedMap {
         break;
       }
       case "object":
-        // 对象有**三条正交轴**（类目 / 子类 / 标记）：一条都没声明 = 未接通；
+        // 对象有**两条语义轴**（类目 / 子类）：一条都没声明 = 未接通；
         // 声明了的那条引用已删除 = 未接通。（同时声明多条是**硬错误**，由后端拒绝，
         // 不算"未接通"。）
+        //
+        // v3 起第三条轴 `mark_ref`（D136 的"对象挂标记"）**已废弃**——方向反过来：
+        // 标记挂在对象之下。残留值不再被读取，因此这里只看类目/子类两条；
+        // 两轴都没接好时按未接通灰显（软告警，不阻塞保存）。
         if (
-          ![node.class, node.subclass, node.mark_ref].some(
+          ![node.class, node.subclass].some(
             (k) => typeof k === "string" && k.trim() !== "" && byKey.has(k),
           )
         ) {
@@ -224,6 +324,13 @@ export function analyzeUnlinked(graph: BlueprintGraph): BlueprintUnlinkedMap {
         node.key,
         node.type === "event" ? "missing-object-source" : "missing-trigger",
       );
+    }
+    // **触发方式与对象 `scope` 错配**（D138）：图是合法的、引用也都在，画布上是一条
+    // 彩色接好的链，但运行时永远不会命中（`scope` 决定"哪种交互才轮到它"）。
+    // 用户看到的就是"点了没反应且无任何提示"——必须与缺引用一样灰显出来。
+    // 只给事件节点标：它才是 `trigger` 的载体，也最贴近"这条链为什么不生效"。
+    if (node.type === "event" && !result[node.key] && triggerScopeMismatches(node, graph, byKeyMap)) {
+      mark(node.key, "scope-trigger-mismatch");
     }
   }
   return result;

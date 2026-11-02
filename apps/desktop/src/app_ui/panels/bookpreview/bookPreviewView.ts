@@ -233,6 +233,11 @@ export function fileMarks(item: { marks: string[] }): string[] {
  *
  * 后两者**正交**：一个被标为 `manga` 的 `txt` 会同时命中「txt 子类」与「manga 标记」
  * ——这正是用户口径"标记可以交叉"的落点。
+ *
+ * ⚠️ **v3 起 `marks` 单独命中不再足够**（`class ⊃ object ⊃ mark`）：引擎的 `mark` 分支
+ * 两段合一——条目要命中该标记，**且**标记所属的那个对象也要命中（契约 task-4 §3）。
+ * 本函数照旧原样透传条目自带的标记集合即可，无需为此改动（本面板是唯一已实现的上报点，
+ * task-5 修正 1）。
  */
 export function bookDispatchTarget(item: {
   id: string;

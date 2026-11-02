@@ -41,17 +41,17 @@ import type { PanelId } from "@hamster-pouch/config";
 import { PANEL_IDS } from "@hamster-pouch/config";
 
 /**
- * 该上级**能否**承载这个新类型（RFC 0010 决策 4 / 面板标准第 5.1 节 / D102 / D134 / D135 / D136）。
+ * 该上级**能否**承载这个新类型（RFC 0010 决策 4 / 面板标准第 5.1 节 / D102 / D134 / D135 / v3）。
  *
  * 两条收窄规则（都在编辑器侧拦，避免把使用者挂到必然被后端拒绝的位置上）：
  * 1. **类目**挂在面板下时，该面板必须 `has_class = true`（面板声明"有类目"）；
  * 2. **子类**挂在类目下时，该类目的类型必须**有子类取值域**
  *    （当前只有 `text`；`image` 类目下建子类必然被校验拒绝）。
  *
- * **标记自 D136 起挂类目下**（与子类并列）：它的上级判据因此**照抄子类**——
- * "父级必须是类目"，不再是"面板 hasClass"。早前那句"标记不受 has_class 约束"
- * 说的是 D134 时期标记直挂面板时的口径；现在标记的挂载位从面板换成了类目，
- * 那条判据由"类目能否挂下面板"间接承担（面板没有类目层时，本来也没有类目可挂）。
+ * **标记自 v3 起挂对象下**（`class ⊃ object ⊃ mark`：标记是对**单个对象**的细分）：
+ * 它的上级判据是"父级必须是**对象**"。D136 时期的口径是"标记挂类目下、与子类并列"，
+ * 那条已废止——`class.children` 不再含 `mark`，`object.children` 才含 `mark`。
+ * 更早 D134 时期标记直挂面板（受"面板 has_class"约束），也已退役。
  *
  * 面板/类目当前无注册项或引用缺失时无从判定 → 放行，由蓝图侧按「未接通」处理
  * （缺失不得绑架用户数据）。
@@ -75,9 +75,9 @@ function parentAcceptsChild(
   if (childType === "subclass") {
     return mediaTypeHasSubclass(parent.media_type ?? "");
   }
-  // 标记（D136）：与子类同款——上级必须是**类目**。
+  // 标记（v3：`class ⊃ object ⊃ mark`）：上级必须是**对象**。
   if (childType === "mark") {
-    return parent.type === "class";
+    return parent.type === "object";
   }
   return true;
 }
@@ -127,9 +127,11 @@ export function parentKeyOf(
   graph: BlueprintGraph,
   node: BlueprintNode,
 ): string | undefined {
-  // 结构父的**字段引用**优先（三条正交轴上的引用都算）。
+  // 结构父的**字段引用**优先（各层各自的引用字段都算）。
+  // `object` 是 v3 标记的「所属对象」；`mark_ref` 只剩读旧文档的作用（v3 已废弃），
+  // 放在链末——旧文档里对象挂标记的老图仍能沿它上溯，但不影响新图。
   const explicit =
-    node.control ?? node.class ?? node.subclass ?? node.mark_ref;
+    node.control ?? node.object ?? node.class ?? node.subclass ?? node.mark_ref;
   if (explicit) {
     return explicit;
   }
@@ -139,10 +141,11 @@ export function parentKeyOf(
       : node.type === "subclass"
         ? ["class"]
         : node.type === "mark"
-          ? // 标记挂**类目**下（D136：与子类并列），不再是面板下的平行轴。
-            ["class"]
+          ? // 标记挂**对象**下（v3：`class ⊃ object ⊃ mark`，标记是单个对象的细分）。
+            ["object"]
           : node.type === "object"
-            ? ["class", "subclass", "mark"]
+            ? // v3：对象只有「类目 / 子类」两条语义轴（`mark_ref` 轴已废弃）。
+              ["class", "subclass"]
             : node.type === "event"
               ? ["control", "class", "subclass", "mark", "object"]
               : node.type === "condition" || node.type === "action"
@@ -287,8 +290,9 @@ function createSubclass(
 }
 
 /**
- * 建一个**标记**节点（D102 / D109 / **D136**）：从属**类目**（`class ⊃ mark ⊃ object`，
- * 与子类并列），`mark` 取清单第一个内置项；**`class` 引用留空**（由连线落定）。
+ * 建一个**标记**节点（D102 / D109 / **v3**）：从属**对象**（`class ⊃ object ⊃ mark`，
+ * 标记是对**单个对象**的细分），`mark` 取清单第一个内置项；**`object` 引用留空**
+ * （由连线落定——没有选中对象时节点保持「未接通」，不瞎猜父级）。
  */
 function createMark(
   doc: BlueprintGraph,
@@ -306,10 +310,11 @@ function createMark(
 }
 
 /**
- * 建一个对象节点（默认双击；D109）：**三条正交轴的引用一律留空**。
+ * 建一个对象节点（默认双击；D109）：**两条语义轴（类目 / 子类）的引用一律留空**。
  *
- * 具体挂到 `class` / `subclass` / `mark_ref` 哪一条轴，由**连线**决定
+ * 具体挂到 `class` / `subclass` 哪一条轴，由**连线**决定
  * （`blueprintConnect.applyConnect` 按**父节点类型**分流写字段）。
+ * v3 起对象**不再挂标记**（方向反过来：标记挂在对象之下），`mark_ref` 轴已废弃。
  */
 function createObject(
   doc: BlueprintGraph,
@@ -452,18 +457,20 @@ export function appendNode(
       break;
     }
     case "mark": {
-      // 标记的结构父是**类目**（D136：与子类并列，从属类目）。引用留空（D109）。
-      const ownerClass = parentNode?.type === "class" ? parentNode : undefined;
-      const created = createMark(work, layer, ownerClass?.key);
+      // 标记的结构父是**对象**（v3：`class ⊃ object ⊃ mark`）。引用留空（D109）：
+      // 选中对象时只借它的 key 命名；没选中对象时保持「未接通」，不瞎猜类目/子类。
+      const ownerObject = parentNode?.type === "object" ? parentNode : undefined;
+      const created = createMark(work, layer, ownerObject?.key);
       work = created.doc;
       key = created.key;
       break;
     }
     case "object": {
-      // 对象的**三条正交轴**（类目 / 子类 / 标记）选定哪一条由**连线**决定；
-      // 新增时全部留空（D109）。选中的是三条轴之一时，只借它命名。
+      // 对象的**两条语义轴**（类目 / 子类）选定哪一条由**连线**决定；
+      // 新增时全部留空（D109）。选中的是两条轴之一时，只借它命名。
+      // v3 起「标记」不再是对象的父级（方向反过来），故 `mark` 不在此列。
       const axisParent =
-        parentNode && ["class", "subclass", "mark"].includes(parentNode.type)
+        parentNode && ["class", "subclass"].includes(parentNode.type)
           ? parentNode
           : undefined;
       const created = createObject(work, layer, axisParent?.key);
@@ -561,12 +568,13 @@ export function parentHintFor(
     type === "class"
       ? ["control"]
       : type === "mark"
-        ? // D136：标记的上级是**类目**（与子类同款判据）。
-          ["class"]
+        ? // v3：标记的上级是**对象**（标记是单个对象的细分）。
+          ["object"]
         : type === "subclass"
           ? ["class"]
           : type === "object"
-            ? ["class", "subclass", "mark"]
+            ? // v3：对象只有「类目 / 子类」两条语义轴（`mark_ref` 轴已废弃）。
+              ["class", "subclass"]
             : type === "event"
               ? ["object"]
               : type === "condition" || type === "action"

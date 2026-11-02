@@ -94,7 +94,7 @@
 
 ### 5.1 `has_class`（有无类目）
 
-`has_class` 是「面板」与「类目」之间的**唯一开关**——**它只管类目，不管标记**（2026-11-01 / D134 按实现修正，见下方注记）：
+`has_class` 是「面板」与「类目」之间的**唯一开关**——**它只管类目**：面板下**能否挂标记不由它决定**（2026-11-01 / D134 修正），而由**结构链**决定（**v3 / D137** 起标记挂在**对象**之下，故标记仍只能经类目链到达；见下方注记）：
 
 | `has_class` | 含义 | 蓝图行为 |
 | --- | --- | --- |
@@ -106,22 +106,52 @@
 | 面板 | `has_class` | 说明 |
 | --- | --- | --- |
 | `media`（媒体预览） | **`true`** | 内部有 图像 / 视频 / 音频 三个类目（**类型分域 = image / video / audio**） |
-| `bookpreview`（图书预览） | **`true`** | 内部有**文本**类目；其下按子类细分（epub / txt / md），另有与类目树**平行**的**标记**（系统标记 10 项，见 `docs/spec/blueprint-node-standard.md` 第 2.0.1 节）（**类型分域 = text / pdf**） |
-| `albums`（相册） | **`true`** | **条目分类层 = 相册列表的条目**（每一行就是一个相册条目）；类目的类型分域 = **`album`**（D135）；与类目树**平行**地也可挂标记（D134） |
-| `sources`（源） | **`true`** | **条目分类层 = 目录树**（源根及其下的子目录行，`src:<id>` / `dir:<sourceId>/<rel>`）；类目的类型分域 = **`source`**（D135）；同样可挂标记（D134） |
+| `bookpreview`（图书预览） | **`true`** | 内部有**文本**类目；其下按子类细分（epub / txt / md）；**标记挂在对象之下**（`类目/子类 → 对象 → 标记`，**v3 / D137**；系统标记 10 项，见 `docs/spec/blueprint-node-standard.md` 第 2.0.1 节）（**类型分域 = text / pdf**） |
+| `albums`（相册） | **`true`** | **条目分类层 = 相册列表的条目**（每一行就是一个相册条目）；类目的类型分域 = **`album`**（D135）；**标记挂在对象之下**（v3 / D137）；**行点击上报 `mediaType:"album"` + 有效标记**（用户标记 ∪ 派生标记，D138；相册没有 `file_marks`，走 `panel_marks` 投影，见下方注记） |
+| `sources`（源） | **`true`** | **条目分类层 = 目录树**（源根及其下的子目录行，`src:<id>` / `dir:<sourceId>/<rel>`）；类目的类型分域 = **`source`**（D135）；**标记挂在对象之下**（v3 / D137，D134 的"与类目树平行"口径已撤销）；**行点击首次上报 `mediaType:"source"` + `sources` 域标记**（D138） |
 | 其余 **12** 个（含 `viewer`、**`bookreader`**、`imageviewer`） | `false` | 无条目分类；**图书阅读器**只"读一本书"，不按条目分类（挑书在图书预览里做） |
 
 > **`bookpreview` 的类目（2026-10-10 用户口径 / D102）**：本面板下挂一个**文本**类目
-> （`media_type = text`），其下再分**子类**（`subclass`：epub / txt / md）；与类目树**平行**
-> 地还可以挂**标记**节点（`mark`）。三者的关系是**两条正交的轴**，
-> 详见 `docs/spec/blueprint-node-standard.md` 第 2.0.1 节。
+> （`media_type = text`），其下再分**子类**（`subclass`：epub / txt / md）；**标记**节点
+> （`mark`）挂在**对象**之下（`类目/子类 → 对象 → 标记`，**2026-11-02 / D137** 起；
+> D136 的"标记与子类并列挂类目"与 D134 的"与类目树平行"两种结构**均已废弃**）。
+> 标记与类目在**匹配维度**上仍正交，
+> 详见 `docs/spec/blueprint-node-standard.md` 第 2.0.1 节与第 0 节。
 >
-> **`has_class` 只约束类目，不约束标记**（2026-11-01 / D134 修正）：本节此前写"`has_class`
+> **`has_class` 只约束类目**（2026-11-01 / D134 修正，**v3 / D137 再次收窄**）：本节此前写"`has_class`
 > 是类目与标记的同一个开关"，与 Rust 实现不符——`find_panel_class_violations`
-> （`crates/hp-core/src/blueprint_validate.rs`）只拦 `control → class`，`control → mark`
-> 根本不经过这个判据。语义上也该如此：**`has_class` 回答的是"面板内部有没有条目分类**（按
-> 类型分类的那一层）"，而**标记回答的是"这个面板的条目属于哪一类内容"**——两者正交，
-> 面板可以"有类目层、也能挂标记"，也可以"没有类目层、仍能挂标记"。
+> （`crates/hp-core/src/blueprint_validate.rs`）只拦 `control → class`。但**"标记不归它管"
+> 不等于"任何面板都能挂标记"**：D134 时代后一句成立，是因为那时 `mark.parents` 是
+> `["control"]`；**v3 / D137 起 `mark.parents` 是 `["object"]`**，于是 `control → mark`
+> 这条边在**任何**面板下都非法（`containmentAllows` 按 `control.children` 直接拒绝）——
+> 标记只能经 `类目/子类 → 对象 → 标记` 出现。`has_class = false` 的面板因此**整条链从类目处
+> 断开**（既建不了类目、也到不了标记），这仍是"`has_class` 只管类目"的直接推论，
+> 不是新增的开关。
+>
+> **标记的上报方（v3 / D137 补齐第一层，2026-11-02 / D138 补齐第二层）**：标记要能命中，
+> 上报目标里就必须带 `marks` 集合（`BlueprintTargetRef.marks`）；**两套存储不合并，只在
+> `dispatch` 时刻投影**——
+>
+> | 面板 | 目标对象 | 上报的 `mediaType` | 上报的 `marks` 来源 |
+> | --- | --- | --- | --- |
+> | 媒体预览 | 文件 | `file.media_type`（image / video / audio / …） | `file.marks`（`file_marks` 表） |
+> | 图书预览 | 文件 | `item.media_type` + `format` | `item.marks`（`file_marks` 表） |
+> | 相册 | 真实相册（行） | **字面量 `"album"`** | `effectiveMarksFor(marks, "albums", 相册 id, derivedMarksForAlbum(有效媒体属性))` = **用户标记 ∪ 派生标记**（`app_settings` 的 `panelMarks.<repoId>` 投影） |
+> | 源 | 源根 / 源内目录（行） | **字面量 `"source"`** | `marksOf(marks, "sources", 节点 key)`（`src:<id>` / `dir:<sourceId>/<rel>`） |
+>
+> **为什么相册/源的 `mediaType` 是字面量**：类目的类型分域是 `albums: ["unlimited","album","empty"]`
+> 与 `sources: ["unlimited","source","empty"]`（D135），而行里的真实媒体属性是
+> multimedia / image / 空，透传过来一个都对不上——**面板身份优先于行内属性**。
+> **为什么派生标记必须并入**：派生标记（相册属性 → 同名标记，multimedia→`media`、
+> image→`image`，D134 ⑤）在右键菜单里**恒勾且不可取消**；上报时不带，就是菜单一套事实、
+> 引擎另一套事实。**标记仍是可选项、不改对象性质**：引擎的 `mark` 分支是两段式
+> （`target.marks` 含 `node.mark` **且**递归回父对象的类目/`scope`），标记只在被接进链路时
+> 才参与判定，且**不能替代**父对象判定。门禁：`check:panels` 368/368（D138 的 6 条）、
+> `check:blueprint-engine` 62/62（D138 的 7 条，含"同一标记换类目上报必须不命中"这条回归锚点）。
+>
+> **历史注记（D137 当时如实登记、现已由 D138 修订）**：相册里的真实相册没有 `file_marks`，
+> 相册标记存在 `panel_marks` 里且不进 `dispatch` 目标 ⇒ 当时"只要链里保留 `mark` 节点，
+> 标记轴对相册恒不命中"；媒体预览的选中变化/单击/双击三处 `marks` 上报当时也待补。
 >
 > **`albums` / `sources` 由 `false` 改为 `true`（2026-11-01 / D135）**：这两个面板**确实有**
 > 条目分类这一层（相册 = 相册列表的条目、源 = 目录树的条目）——**这是原因，不是借口**。
@@ -143,7 +173,7 @@
 > （`media_type` 只有 image/video/audio），本次随 `media_type` 增加 `text` 一并打开。
 
 - `has_class` **不是**"该面板是否显示媒体"：查看器、图像查看器、媒体播放器都显示媒体，但它们的条目由外部选中驱动，不自分类型。
-- **标记的挂载不归 `has_class` 管**：`panel → mark` 的 `contains` 边对**任何**面板都合法（`mark` 的 `parents` 只有 `["control"]`，与面板的 `has_class` 取值无关）。编辑器新增标记节点时**不得**按 `has_class` 过滤父级，属性面板也不得按它过滤——否则相册 / 源面板永远挂不上标记。
+- **标记的挂载不归 `has_class` 管，但归结构链管**（**v3 / D137 修正**）：`panel → mark` 的 `contains` 边**一律非法**（`mark.parents` 是 `["object"]`，而 `control.children` 只有 `class`），标记只能挂在**对象**之下。编辑器新增标记节点时**不得**按 `has_class` 过滤父级（标记的父级候选是**对象**），属性面板也不得按它过滤——否则会去挡一条本来就与该开关无关的边。相册 / 源面板要挂标记，前提是它们的**类目链已经接通**。
 - **`has_class = false` 面板下已有类目节点时的口径，按声明者区分**（避免"要么全硬要么全软"的两难）：
 
   | 面板来源 | `has_class` 可否变化 | `panel → class` 边 | 理由 |
@@ -340,7 +370,7 @@
     - **迁移 0008 → 0010**：0008（`ALTER TABLE files ADD COLUMN subtype TEXT`）是**历史**，其列**已废弃**（新代码不读不写）；**0010** 建 `file_marks` 一对多表并把存量 `subtype = 'book'` 的行搬成 `book` 标记（`document` 不搬——它不是标记状态）。`files.media_type` 是裸 TEXT 列、**没有 CHECK 约束**（0001 如此），因此新增取值不需要重建表。**forward-only**：`0001` 不得被改，`files.subtype` 列保留不删（DROP COLUMN 在旧 SQLite 不可用，且会让降级直接崩），明确标注为已废弃。
     - **已知边界（如实记录）**：① 相册成员分页（`hp-store` 的 `query_album_members_page`）与相册属性（`AlbumMediaType`）都只认 `image` / `video` / `audio`，**"书"（文本类 + PDF）进不了相册**；要不要把相册扩到文本类属未排期决定（列入 §10 开放点）。**相册属性这一侧已按同一口径收紧**：`AlbumMediaType::contains` 对所有取值（含 `Multimedia`）都返回"不含书"（判据是 `MediaType::is_book()`）——否则 `multimedia` 的跟随源相册会把文本 / PDF 文件**写成成员**，而成员分页永远列不出它们（"有成员但看不见"），卸载源的影响评估也会多算。② **媒体预览不含"书"**（用户 2026-10-08 裁决，D95；2026-10-11 PDF 沿同一条口径）：媒体预览的类型筛选里「全部」= **图片 / 视频 / 音频这三个**，不是"不筛"——`file.query` 的 `filter.mediaTypes` 因此是**集合**（缺省/空 = 不筛），单值 `mediaType` 已废弃。两条口径互不重叠：**"书"只在图书预览显示**。`pnpm check:panels` 按行为断言这一点（任何档位的请求集合都不含 `text` / `pdf`，且筛选选项由取值域生成而不是手写 `<option>`）。
     - `pnpm check:panels` 断言：Rust 侧 `text` 与**标记**取值域齐备、文本类**不参与内容兜底**、迁移 **0010** 建多值标记表且只搬 `book`、已登记进 `REPO_MIGRATIONS`、`0001_init.sql` **不得**被改（forward-only）。
-    - **类目 / 子类 / 标记（2026-10-10，D102；标记取值域 2026-11-01 / D134 扩为 10 项）**：本面板的 `has_class` 由 `false` 改为 `true`——此前为 `false` 正是因为"文本类没有任何类目能表达"（`media_type` 只有 image/video/audio）。本面板下挂**文本**类目 → 其下分**子类**（epub / txt / md）；与类目树**平行**地可挂**标记**（系统标记 10 项，其中 `book` / `manga` 是本面板最常用的两个）。三轴的取值域与匹配口径见 `docs/spec/blueprint-node-standard.md` 第 2.0.1 节与 §5.1。
+    - **类目 / 子类 / 标记（2026-10-10，D102；标记取值域 2026-11-01 / D134 扩为 10 项）**：本面板的 `has_class` 由 `false` 改为 `true`——此前为 `false` 正是因为"文本类没有任何类目能表达"（`media_type` 只有 image/video/audio）。本面板下挂**文本**类目 → 其下分**子类**（epub / txt / md）；**标记**挂在**对象**之下（**v3 / D137**；D134 的"与类目树平行"口径已撤销；系统标记 10 项，其中 `book` / `manga` 是本面板最常用的两个）。三轴的取值域与匹配口径见 `docs/spec/blueprint-node-standard.md` 第 2.0.1 节与 §5.1。
 
 17. **图书阅读器（`bookreader`，2026-10-16 用户立项）**：宿主内置的**第 16 个**面板，`has_class = false`（只"读一本书"，挑书在图书预览里做），`category = media`，`blueprint_node = control`，`defaultSize = 900×700`（阅读需要行宽，窄面板下页宽/字号都退化成摆设）。它补齐的是 D98/D110 明确**留空**的那部分（"完整的阅读器：目录跳转、书签、字号 / 分栏的用户设置项"）。
     - **分工**：查看器（`viewer`）的口径仍是"显示**开头**内容、范围为面板大小、滚动看更多"；阅读器复用**同一套**正文命令与块渲染（`book.content` + `BookBlocks.tsx`），另加目录（`book.toc`）与阅读选项。两者共用 `book.content` 的分页实现——**纯文本改为按窗口渐进读取**（2026-10-18 需求 2：不再整本解码、不再有单本缓存，见 `hp_book::text_stream`），因此目录能覆盖全书（第 800 章不在 2 MiB 之内）而内存与文件大小无关（详见 D113）。

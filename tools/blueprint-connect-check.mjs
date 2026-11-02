@@ -227,7 +227,7 @@ const nodeOf = (doc, key) => doc.nodes.find((n) => n.key === key);
       mk("c1", "control", { panel_id: "media" }),
       mk("k1", "class", { control: "c1", media_type: "text" }),
       mk("sc1", "subclass", { subclass: "k1", format: "txt" }),
-      mk("m1", "mark", { class: "k1", mark: "book" }),
+      mk("m1", "mark", { object: "o1", mark: "book" }),
       mk("o1", "object", { class: "k1", scope: "double_clicked" }),
       mk("e1", "event", { trigger: "double_click" }),
       mk("cond1", "condition", { expr: "selection != empty" }),
@@ -252,15 +252,14 @@ const nodeOf = (doc, key) => doc.nodes.find((n) => n.key === key);
     ["g1", "contains", "c1"],
     ["g1", "memberOf", "c1"], // 反向（从组指向面板）不是合法边
     ["c1", "contains", "k1"],
-    // D136：标记挂在**类目**下（与子类并列），不再由面板直连。
-    ["k1", "contains", "m1"],
-    ["c1", "memberOf", "g1"],
+    // v3：标记挂在**对象**下（`class ⊃ object ⊃ mark`），不再与子类并列挂在类目下。
     ["k1", "contains", "sc1"],
+    ["c1", "memberOf", "g1"],
     ["k1", "contains", "o1"],
     ["k1", "on", "e1"],
     ["sc1", "contains", "o1"],
     ["sc1", "on", "e1"],
-    ["m1", "contains", "o1"],
+    ["o1", "contains", "m1"],
     ["m1", "on", "e1"],
     ["o1", "on", "e1"],
     ["e1", "fires", "cond1"],
@@ -282,9 +281,12 @@ const nodeOf = (doc, key) => doc.nodes.find((n) => n.key === key);
   const derivedPairs = ports.CONTAINMENT.flatMap((entry) =>
     entry.children.map((child) => `${entry.parent}→${child}`),
   );
-  // D136 的关键成员位移：`control → mark`（旧）必须已被 `class → mark`（新）取代。
+  // D136 → v3 的关键成员位移：`control → mark`（更旧）与 `class → mark`（D136）都必须已被
+  // `object → mark`（v3）取代——**两代旧层级都要点名**，只断言"新的存在"会放过旧的残留。
   const illegalPairs = [
     ["control", "mark"],
+    ["class", "mark"],
+    ["mark", "object"],
     ["control", "subclass"],
     ["subclass", "mark"],
   ];
@@ -301,14 +303,16 @@ const nodeOf = (doc, key) => doc.nodes.find((n) => n.key === key);
   check(
     "可连清单：12 种类型的合法组合逐一命中（contains 合法父子全部 + 规则边 on/fires/guards/memberOf）",
     missed.length === 0 &&
-      // 派生表里必须**有** `class→mark`、且**没有** `control→mark`（成员位移的直接证据）。
-      derivedPairs.includes("class→mark") &&
+      // 派生表里必须**有** `object→mark`（v3 成员位移的直接证据），且**没有** `class→mark`
+      // 与更旧的 `control→mark`（否则旧层级仍在可连清单里，用户还能把标记拖到类目/面板下）。
+      derivedPairs.includes("object→mark") &&
+      !derivedPairs.includes("class→mark") &&
       !derivedPairs.includes("control→mark"),
     missed.slice(0, 4).join("；") ||
       `${expected.length} 组期望关系全部命中（contains 合法父子 ${derivedPairs.length} 条 / ${ports.CONTAINMENT.length} 组父级）`,
   );
   check(
-    "反向：`control → mark`（旧层级）与 `control → subclass`、`subclass → mark` 都**不在**可连清单里",
+    "反向：`class → mark`（D136 层级）与 `control → mark`（更旧层级）、`mark → object`（反向）及 `control → subclass`、`subclass → mark` 都**不在**可连清单里",
     illegalHit.length === 0,
     illegalHit.join("；") || `${illegalPairs.length} 组非法组合均不命中`,
   );

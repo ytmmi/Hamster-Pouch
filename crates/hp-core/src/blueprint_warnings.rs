@@ -4,6 +4,9 @@
 //! 求值链缺触发来源、无根层（D55）、跳转失效（D55）、浮层未连接到界面（D50 修订）、
 //! **结构节点缺少结构父**（D108：`layout_block` / `group` / `control` 没有 `contains` 入边，
 //! 面板的兼容旧图形式 `memberOf` 也算接好）、
+//! **操作节点的触发方式与来源对象的 `scope` 不配对**（D138：图合法、引用齐全，
+//! 但 `click ↔ clicked` / `double_click ↔ double_clicked` / `selection_change ↔ selected`
+//! 错开之后这条链在运行时**永远不会命中**）、
 //! **节点类型当前无注册项**（插件未安装 / 未启用 / 宿主 API 不兼容，RFC 0010 决策 6）。
 //!
 //! 设计意图：删除节点/断线后**不级联删除关联节点**，允许先保存中间状态；
@@ -22,7 +25,7 @@ use std::collections::HashMap;
 use crate::blueprint::{BlueprintGraph, OVERLAY_MIN_HEIGHT, OVERLAY_MIN_WIDTH};
 use crate::blueprint_node::BlueprintNode;
 use crate::blueprint_registry::{NodeRegistry, SeverityLevel};
-use crate::blueprint_types::{ActionOp, EdgeKind, NodeType};
+use crate::blueprint_types::{ActionOp, EdgeKind, NodeType, Trigger};
 
 /// 收集全部未接通软告警（空 = 无告警）。
 pub(crate) fn collect(graph: &BlueprintGraph) -> Vec<String> {
@@ -47,6 +50,104 @@ fn has_structural_parent(graph: &BlueprintGraph, node: &BlueprintNode) -> bool {
         && graph.edges.iter().any(|e| {
             e.edge_kind == EdgeKind::MemberOf && e.from == node.key && graph.node(&e.to).is_some()
         })
+}
+
+/// 触发方式 ➜ 对象 `scope` 的配对（D138，与运行时 `blueprintEngine.SCOPE_FOR_TRIGGER`
+/// **同一张表**，也与前端 `blueprintLint.TRIGGER_SCOPE` 同口径）。
+///
+/// 运行时的判定顺序是"事件 `trigger` 决定本次上报的 `scope`"，然后对象分支要求
+/// `node.scope == scope`。因此 `scope` 与 `trigger` 一旦错配，这条链**永远不会命中**：
+/// 图看起来完全接好（彩色、引用齐全），点了却没有任何反应——必须像缺引用一样报软告警。
+fn scope_for_trigger(trigger: Trigger) -> &'static str {
+    match trigger {
+        Trigger::Click => "clicked",
+        Trigger::DoubleClick => "double_clicked",
+        Trigger::SelectionChange => "selected",
+    }
+}
+
+/// `scope` 是否为"按触发方式推导"的三种之一（其余值是具体 `file_id`，不参与配对）。
+fn is_trigger_derived_scope(scope: &str) -> bool {
+    matches!(scope, "clicked" | "double_clicked" | "selected")
+}
+
+/// 规则源节点最终落到哪个**对象**上（D138）：`object` 自己；`mark` 走它的 `object`
+/// （v3 / D137：`类目 ⊃ 对象 ⊃ 标记`）。其余类型（面板/类目/子类）按 `media_type`
+/// 命中、没有 `scope`，返回 `None`。
+fn effective_object<'a>(
+    graph: &'a BlueprintGraph,
+    source: &'a BlueprintNode,
+) -> Option<&'a BlueprintNode> {
+    match source.node_type {
+        NodeType::Object => Some(source),
+        NodeType::Mark => {
+            let parent = graph.node(source.object.as_deref()?)?;
+            (parent.node_type == NodeType::Object).then_some(parent)
+        }
+        _ => None,
+    }
+}
+
+/// 该事件的**所有**规则源是否都因 `scope` / `trigger` 错配而永远不可能命中（D138）。
+///
+/// 只判"全部落空"：只要还有一条源能配上（同一事件既有 `clicked` 对象、又有面板直连），
+/// 这条事件仍然有用，不该报未接通。`scope` 写成具体 `file_id` 的对象也能被对应实例命中，
+/// 同样不算错配。
+fn trigger_scope_mismatched(graph: &BlueprintGraph, event: &BlueprintNode) -> bool {
+    let Some(trigger) = event.trigger else {
+        return false;
+    };
+    let expected = scope_for_trigger(trigger);
+    // 兼容旧图：没有 `on` 入边时按 `target` 反查（与运行时 `eventMatches` 同序）。
+    let objects: Vec<&BlueprintNode> = rule_source_keys(graph, event)
+        .iter()
+        .filter_map(|key| graph.node(key))
+        .filter_map(|source| effective_object(graph, source))
+        .collect();
+    if objects.is_empty() {
+        return false;
+    }
+    objects.iter().all(|object| {
+        object
+            .scope
+            .as_deref()
+            .is_some_and(|scope| is_trigger_derived_scope(scope) && scope != expected)
+    })
+}
+
+/// 该事件的**规则源** key 列表（`on` 入边的 `from`；没有入边时兼容旧的 `target`）。
+///
+/// 与运行时 `blueprintEngine.eventMatches` 的候选顺序一致：先看 `on` 入边，
+/// 空则回落到 `event.target`。
+fn rule_source_keys<'a>(graph: &'a BlueprintGraph, event: &'a BlueprintNode) -> Vec<&'a str> {
+    let mut keys: Vec<&str> = graph
+        .edges
+        .iter()
+        .filter(|e| e.edge_kind == EdgeKind::On && e.to == event.key)
+        .map(|e| e.from.as_str())
+        .collect();
+    if keys.is_empty()
+        && let Some(target) = event.target.as_deref()
+    {
+        keys.push(target);
+    }
+    keys
+}
+
+/// 把该事件所有来源对象的 `scope` 拼成可读串（只用于 D138 告警文案）。
+fn object_scopes(graph: &BlueprintGraph, event: &BlueprintNode) -> String {
+    let mut scopes: Vec<String> = rule_source_keys(graph, event)
+        .iter()
+        .filter_map(|key| graph.node(key))
+        .filter_map(|source| effective_object(graph, source))
+        .map(|object| object.scope.as_deref().unwrap_or("（未设置）").to_string())
+        .collect();
+    scopes.sort();
+    scopes.dedup();
+    if scopes.is_empty() {
+        return "（无对象）".to_string();
+    }
+    scopes.join(" / ")
 }
 
 /// 收集全部未接通软告警（带节点类型注册表）。
@@ -174,6 +275,19 @@ pub(crate) fn collect_issues(
                         ),
                         SeverityLevel::Soft,
                     ));
+                } else if trigger_scope_mismatched(graph, node) {
+                    // **触发方式与对象 scope 错配**（D138）：图合法、引用齐全，但运行时
+                    // 永远不会命中。用户看到的是"点了没反应且没有任何提示"，
+                    // 必须像缺引用一样报出来。
+                    warnings.push((
+                        format!(
+                            "操作节点 {key} 暂未接通：触发方式 {trigger} 与来源对象的 scope {scope} 不配对（click↔clicked / double_click↔double_clicked / selection_change↔selected）",
+                            key = node.key,
+                            trigger = node.trigger.as_ref().map(Trigger::as_str).unwrap_or("?"),
+                            scope = object_scopes(graph, node),
+                        ),
+                        SeverityLevel::Soft,
+                    ));
                 }
             }
             NodeType::Condition => {
@@ -237,10 +351,14 @@ pub(crate) fn collect_issues(
                     )),
                     Some(_) => {}
                 }
-                // **D136 迁移口径**：D136 之前标记用 `control` 指向面板；现在它挂
-                // **类目**下（`class` 字段）。旧文档里残留的 `control` 值不再被读取，
-                // 按**未接通软告警**提示（不是硬错误：用户库实测 0 个 mark 节点，
-                // 但"读进来就保存不了"绝不能成为迁移新事故）。
+                // **旧文档兼容残留字段（两层）**，一律**未接通软告警**、绝不硬错误
+                // （"读进来就保存不了"绝不能成为迁移新事故）：
+                // - `control`：D136 之前标记用 `control` 指向面板；
+                // - `class`：D136 那一版标记用 `class` 指向类目，**v3（D137）改挂对象后
+                //   改用 `object`**，故 `class` 也成了残留字段。
+                // 正常路径上这两个值会被 v2→v3 迁移清掉（`blueprint_migrate.rs`），
+                // 走到这里说明文档是**直接**以旧结构载入的（如未走迁移的单元测试、
+                // 或迁移判定为孤儿标记的情形）。
                 if node
                     .control
                     .as_deref()
@@ -249,7 +367,46 @@ pub(crate) fn collect_issues(
                 {
                     warnings.push((
                         format!(
-                            "标记节点 {key} 暂未接通：仍带旧字段 control（D136 起标记挂在类目下、用 class 指向所属类目），请在画布上把标记连到类目",
+                            "标记节点 {key} 暂未接通：仍带旧字段 control（D136 起标记不再直挂面板），请在画布上把标记连到对象",
+                            key = node.key
+                        ),
+                        SeverityLevel::Soft,
+                    ));
+                }
+                if node
+                    .class
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|s| !s.is_empty())
+                {
+                    warnings.push((
+                        format!(
+                            "标记节点 {key} 暂未接通：仍带旧字段 class（v3/D137 起标记挂在对象下、用 object 指向所属对象），请在画布上把标记连到对象",
+                            key = node.key
+                        ),
+                        SeverityLevel::Soft,
+                    ));
+                }
+            }
+            NodeType::Object => {
+                // **旧文档兼容残留字段**：v2 及更早对象有第三条语义轴 `mark_ref`
+                // （D136 那一版标记挂在类目下、由对象反向引用）。v3（D137）改为
+                // 「标记挂在对象下」，该轴**废弃**：残留值只报**未接通软告警**、
+                // 绝不硬错误——理由与标记的 `control`/`class` 残留完全一致
+                // （"打开旧蓝图就存不回去"不能成为迁移事故，RFC 0007 /
+                // 《蓝图节点标准》第 10 条把 `mark.class` / `mark.control` /
+                // `object.mark_ref` 三者并列为同一类软告警）。
+                // 正常路径上迁移会清掉它（`blueprint_migrate.rs`），走到这里说明文档
+                // 是**直接**以旧结构载入的（未走迁移，或迁移没拿到可挂的对象）。
+                if node
+                    .mark_ref
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|s| !s.is_empty())
+                {
+                    warnings.push((
+                        format!(
+                            "对象节点 {key} 暂未接通：仍带旧字段 mark_ref（v3/D137 起该轴已废弃、标记改为挂在对象下），请在画布上把该标记连到本对象",
                             key = node.key
                         ),
                         SeverityLevel::Soft,
@@ -307,22 +464,20 @@ pub(crate) fn collect_issues(
                 Some(ck) => !by_key.contains_key(ck),
                 None => true,
             },
-            // 标记指向**类目**（D136：标记从属类目，与子类并列）。
-            NodeType::Mark => match node.class.as_deref() {
-                Some(ck) => !by_key.contains_key(ck),
+            // 标记指向**对象**（D137/v3：标记从属对象，是链的末梢）
+            // ——v2 及更早的 `class` 残留由上面的专用软告警负责，不在这里读。
+            NodeType::Mark => match node.object.as_deref() {
+                Some(ok) => !by_key.contains_key(ok),
                 None => true,
             },
-            // 对象有**三条语义轴**：声明了哪一条就校验哪一条；一条都没声明 = 未接通。
+            // 对象有**两条语义轴**：声明了哪一条就校验哪一条；一条都没声明 = 未接通。
+            // （v2 的第三条轴 `mark_ref` 已废弃，残留值走上面的专用软告警。）
             NodeType::Object => {
-                let declared: Vec<&str> = [
-                    node.class.as_deref(),
-                    node.subclass.as_deref(),
-                    node.mark_ref.as_deref(),
-                ]
-                .into_iter()
-                .flatten()
-                .filter(|k| !k.trim().is_empty())
-                .collect();
+                let declared: Vec<&str> = [node.class.as_deref(), node.subclass.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .filter(|k| !k.trim().is_empty())
+                    .collect();
                 if declared.is_empty() {
                     true
                 } else {

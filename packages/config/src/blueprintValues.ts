@@ -17,7 +17,7 @@ import { isIdInPluginNamespace, isPluginNamespacedId, isValidNamespacedId } from
 import { OVERLAY_ANCHORS, TOKEN_LEVELS } from "./blueprintOverlay";
 
 /** 蓝图 schema 版本（与 hp-core `BLUEPRINT_SCHEMA_VERSION` 同源）。 */
-export const BLUEPRINT_SCHEMA_VERSION = 2;
+export const BLUEPRINT_SCHEMA_VERSION = 3;
 
 /** 当前内置默认蓝图版本（引擎据此自动升级旧库存默认）。 */
 export const DEFAULT_BLUEPRINT_VERSION = 7;
@@ -25,11 +25,14 @@ export const DEFAULT_BLUEPRINT_VERSION = 7;
 /**
  * **宿主内置**节点类型取值域（RFC 0007 决策 1 / D46/D47/D50）——封闭清单，**12 种**。
  *
- * 2026-10-10（D102）由 10 种扩为 12 种，加入**两条正交的细分轴**：
+ * 2026-10-10（D102）由 10 种扩为 12 种，加入两条细分轴；两条轴的结构位置在
+ * 2026-11-02（v3 / D137）**同时落在对象之上**，成为"对象之下 / 对象之后"的两条细分：
  * - `subclass`（**子类**）：类目**之下**的细分（`class ⊃ subclass ⊃ object`），
  *   取值域由所属类目的媒体类型决定（`text` → `epub` / `txt` / `md`）；
- * - `mark`（**标记**）：与类目树**平行**的标记（`control ⊃ mark ⊃ object`），
- *   引用**可注册的标记清单**（`book` / `manga` …），与类目**正交、可交叉**。
+ * - `mark`（**标记**）：**对象之下**的细分（`class ⊃ object ⊃ mark`，v3 起）。
+ *   引用**可注册的标记清单**（`book` / `manga` …）。语义上仍是"给一个具体条目打一个
+ *   可交叉的标记"，但结构上标记**只对一个对象生效**（用户口径：标记是对单个对象的分类）——
+ *   旧口径 `class ⊃ mark ⊃ object`（D136）由 `migrate_document` 的 v2→v3 迁移改形。
  *
  * 编辑器下拉、画布端口表、节点定义表与**解析层校验**共用同一份清单；
  * 插件注册的节点类型不在其中（RFC 0010 决策 5/6），见 [`BLUEPRINT_NODE_TYPES`]。
@@ -266,7 +269,8 @@ export const BLUEPRINT_BUILTIN_MARKS = [
 /**
  * 系统标记的**树形视图**（2026-11-01 / D134）——**纯数据，仅供 UI 与文档同源**。
  *
- * 关键前提：**蓝图节点模型是扁平的**（`面板 ⊃ 标记 ⊃ 对象`，每个标记一个节点，
+ * 关键前提：**蓝图节点模型是扁平的**（v3 / D137 起结构树为
+ * `面板 ⊃ 类目 ⊃ {子类, 对象} ⊃ 标记`，每个标记一个节点，
  * 标记之间**没有**父标记关系）。这里的树只回答"右键菜单里这 10 项该怎么折叠显示"，
  * 以及文档怎么描述它们的分组语义；**不要**据此推出"标记可以挂标记"——那会引入
  * 第 13 种层级、破坏既有校验与端口表。

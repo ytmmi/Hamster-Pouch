@@ -116,6 +116,39 @@ export function marksOf(
   return state.marks[scope][targetKey] ?? [];
 }
 
+/**
+ * 上报给蓝图引擎的**有效标记集合**（D138）：用户标记 ∪ 派生标记，去重保序。
+ *
+ * 为什么派生标记必须并入上报：右键菜单里派生标记是**恒勾、不可取消**的
+ * （`MarkMenuTree`，D134），它描述的是对象自身的属性（相册的媒体属性推出来的
+ * `image`/`video`/`audio`/`media`）。如果菜单显示它已打上、而 `dispatch` 不报它，
+ * 就会出现"UI 说打了、蓝图说没打"的两套事实——而标记的语义是**对象的限制条件**，
+ * 说不一致就等于条件本身不可信。
+ *
+ * 注意这里**只做集合合并**，不影响匹配语义：标记仍是可选项（链上没有标记节点时
+ * 完全不参与判定），也仍然必须与父对象的两段式判定同时成立（不替代类目/scope）。
+ */
+export function effectiveMarksFor(
+  state: PanelMarksState,
+  scope: PanelMarkScope,
+  targetKey: string,
+  derived: readonly string[] = [],
+): readonly string[] {
+  const own = marksOf(state, scope, targetKey);
+  if (derived.length === 0) {
+    return own;
+  }
+  const seen = new Set<string>(own);
+  const merged = [...own];
+  for (const token of derived) {
+    if (!seen.has(token)) {
+      seen.add(token);
+      merged.push(token);
+    }
+  }
+  return merged;
+}
+
 /** 该目标是否已打上某个 token。 */
 export function hasMark(
   state: PanelMarksState,

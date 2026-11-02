@@ -989,6 +989,361 @@ if (dbPath && existsSync(dbPath)) {
   }
 }
 
+// ---- 合成用例（v3）：标记（mark）**两段式**匹配 ----
+//
+// v3 契约（task-4 §3，实测口径以 task-5 为准）：标记从"挂在类目下、与子类并列"
+// 改为"挂在**对象**下"（`class ⊃ object ⊃ mark`），因此引擎的 mark 分支变成
+// **两段合一**：① `target.marks` 含该标记；② 它所属的父对象（`mark.object`）
+// 也必须命中（`blueprintEngine.ts:299-320`）。
+//
+// 本文件此前**没有任何 mark 夹具**——引擎的 mark 分支零覆盖（task-10 点名要求补齐）。
+// 下面补三类用例：
+//   (a) 两段都成立 ⇒ 命中；
+//   (b) 只成立第一段（父对象所属**类目**不匹配 / 父对象 **scope** 不匹配）⇒ 不命中，
+//       并给出"同一次交互里同一个标记名换一条链"的因果对照，证明两段都在起作用；
+//   (c) 旧文档残留字段（`mark.class` / `object.mark_ref`）⇒ 引擎行为与干净 v3 图
+//       **逐项一致**（残留零影响），且旧层级（`类目 ⊃ 标记`）**不复活**。
+{
+  /** 一条"面板→类目→对象→标记"链 + 其事件/动作；同一个标记名 `book` 挂不同父对象。 */
+  const marksGraph = () => ({
+    schema_version: 3,
+    layers: [{ key: "l_main", name: "主界面" }],
+    nodes: [
+      { key: "ui", type: "interface", layer: "l_main" },
+      { key: "blk", type: "layout_block", layer: "l_main", name: "主区" },
+      { key: "c_media", type: "control", layer: "l_main", panel_id: "media" },
+      { key: "c_viewer", type: "control", layer: "l_main", panel_id: "viewer" },
+      { key: "c_player", type: "control", layer: "l_main", panel_id: "player" },
+      { key: "c_meta", type: "control", layer: "l_main", panel_id: "metadata" },
+      { key: "c_tasks", type: "control", layer: "l_main", panel_id: "tasks" },
+      { key: "k_text", type: "class", layer: "l_main", control: "c_media", media_type: "text" },
+      { key: "k_image", type: "class", layer: "l_main", control: "c_media", media_type: "image" },
+      // 三支同标记名的链：**只有父对象不同**，用来证明第二段（父对象）真的在过滤。
+      { key: "o_book", type: "object", layer: "l_main", class: "k_text", scope: "double_clicked" },
+      { key: "mk_book", type: "mark", layer: "l_main", mark: "book", object: "o_book" },
+      { key: "o_book_img", type: "object", layer: "l_main", class: "k_image", scope: "double_clicked" },
+      { key: "mk_book_img", type: "mark", layer: "l_main", mark: "book", object: "o_book_img" },
+      { key: "o_book_click", type: "object", layer: "l_main", class: "k_text", scope: "clicked" },
+      { key: "mk_book_click", type: "mark", layer: "l_main", mark: "book", object: "o_book_click" },
+      // 孤儿标记：没有 `object`（未接通）——v3 下任何上报都不得命中。
+      { key: "mk_orphan", type: "mark", layer: "l_main", mark: "book" },
+      { key: "e_text", type: "event", layer: "l_main", trigger: "double_click" },
+      { key: "e_img", type: "event", layer: "l_main", trigger: "double_click" },
+      { key: "e_click", type: "event", layer: "l_main", trigger: "click" },
+      { key: "e_orphan", type: "event", layer: "l_main", trigger: "double_click" },
+      { key: "a_viewer", type: "action", layer: "l_main", op: "show", target: "c_viewer" },
+      { key: "a_player", type: "action", layer: "l_main", op: "show", target: "c_player" },
+      { key: "a_meta", type: "action", layer: "l_main", op: "show", target: "c_meta" },
+      { key: "a_orphan", type: "action", layer: "l_main", op: "show", target: "c_tasks" },
+    ],
+    edges: [
+      { from: "ui", to: "blk", kind: "contains", order: 1 },
+      { from: "blk", to: "c_media", kind: "contains", order: 2 },
+      { from: "c_media", to: "k_text", kind: "contains", order: 3 },
+      { from: "c_media", to: "k_image", kind: "contains", order: 4 },
+      { from: "k_text", to: "o_book", kind: "contains", order: 5 },
+      { from: "o_book", to: "mk_book", kind: "contains", order: 6 },
+      { from: "k_image", to: "o_book_img", kind: "contains", order: 7 },
+      { from: "o_book_img", to: "mk_book_img", kind: "contains", order: 8 },
+      { from: "k_text", to: "o_book_click", kind: "contains", order: 9 },
+      { from: "o_book_click", to: "mk_book_click", kind: "contains", order: 10 },
+      { from: "mk_book", to: "e_text", kind: "on", order: 11 },
+      { from: "mk_book_img", to: "e_img", kind: "on", order: 12 },
+      { from: "mk_book_click", to: "e_click", kind: "on", order: 13 },
+      { from: "mk_orphan", to: "e_orphan", kind: "on", order: 14 },
+      { from: "e_text", to: "a_viewer", kind: "fires", order: 15 },
+      { from: "e_img", to: "a_player", kind: "fires", order: 16 },
+      { from: "e_click", to: "a_meta", kind: "fires", order: 17 },
+      { from: "e_orphan", to: "a_orphan", kind: "fires", order: 18 },
+    ],
+  });
+
+  /** 驱动引擎并把执行器收到的操作拼成一行（只关心 `show`，与本组断言同口径）。 */
+  const drive = (graph, input) => {
+    const engine = new BlueprintEngine();
+    engine.setGraph(graph);
+    engine.setLayer("l_main");
+    const ops = [];
+    engine.setExecutor({
+      showPanel: (id, floating) => ops.push(`show ${id}${floating ? " (floating)" : ""}`),
+      hidePanel: (id) => ops.push(`hide ${id}`),
+      togglePanel: (id) => ops.push(`toggle ${id}`),
+      collapsePanels: (ids) => ops.push(`collapse [${ids.join(", ")}]`),
+      expandPanels: (ids) => ops.push(`expand [${ids.join(", ")}]`),
+      playFile: (fileId) => ops.push(`play ${fileId}`),
+      navigateLayer: (layerKey) => ops.push(`navigate ${layerKey}`),
+      applyOverlay: () => ops.push("overlay"),
+      showOverlayPanel: () => ops.push("float"),
+    });
+    engine.dispatch(input);
+    return ops.join(" ; ");
+  };
+
+  const graph = marksGraph();
+  const dispatch = (trigger, mediaType, marks) =>
+    drive(graph, { trigger, target: { mediaType, fileId: "file-1", marks } });
+
+  // (a) 两段都成立：标记命中 + 父对象（k_text / double_clicked）命中 → 只该走文字链。
+  const hit = dispatch("double_click", "text", ["book"]);
+  check(
+    "v3 标记两段式：标记命中且父对象命中 → 命中该链（且不牵连同标记名的另两条链）",
+    hit === "show viewer",
+    hit || "（无动作）",
+  );
+  check(
+    "v3 标记两段式：`target.marks` 不含该标记 → 一条都不命中（第一段是必要条件）",
+    dispatch("double_click", "text", []) === "",
+    dispatch("double_click", "text", []) || "（无动作）",
+  );
+
+  // (b) 只成立第一段：同一个标记名 `book`，父对象换成 image 类目 / clicked 作用域。
+  const byMedia = dispatch("double_click", "image", ["book"]);
+  check(
+    "v3 标记两段式：标记名相同、仅**父对象所属类目**不同 → 换链命中（第二段按父对象判定，而非按标记名）",
+    byMedia === "show player",
+    byMedia || "（无动作）",
+  );
+  const byScope = dispatch("click", "text", ["book"]);
+  check(
+    "v3 标记两段式：标记名相同、仅**父对象 scope** 不同（clicked vs double_clicked）→ 换链命中",
+    byScope === "show metadata",
+    byScope || "（无动作）",
+  );
+  check(
+    "v3 标记两段式：父对象不匹配时必须**不命中**（否则等于只看标记名，退化成 D136 的一段式）",
+    !hit.includes("player") && !hit.includes("metadata") && !byMedia.includes("viewer") &&
+      !byScope.includes("viewer"),
+    `text/double_click=${hit || "（无）"} image/double_click=${byMedia || "（无）"} text/click=${byScope || "（无）"}`,
+  );
+  const orphan = dispatch("double_click", "text", ["book"]);
+  check(
+    "v3 标记两段式：没有 `object` 的孤儿标记**永不**命中（缺失父对象 = 未接通，不是通配）",
+    !orphan.includes("tasks"),
+    orphan || "（无动作）",
+  );
+
+  // (c) 旧文档残留字段：引擎行为与干净 v3 图**逐项一致**（残留零影响）。
+  const residueGraph = marksGraph();
+  const mkResidue = residueGraph.nodes.find((n) => n.key === "mk_book");
+  // D136 的"所属类目"（v3 废弃，仅旧文档残留）。
+  mkResidue.class = "k_text";
+  // D136 的第三条轴（v3 废弃，仅旧文档残留）。
+  residueGraph.nodes.find((n) => n.key === "o_book").mark_ref = "mk_book";
+  const residueRuns = [
+    { trigger: "double_click", target: { mediaType: "text", fileId: "file-1", marks: ["book"] } },
+    { trigger: "double_click", target: { mediaType: "image", fileId: "file-1", marks: ["book"] } },
+    { trigger: "click", target: { mediaType: "text", fileId: "file-1", marks: ["book"] } },
+    { trigger: "double_click", target: { mediaType: "text", fileId: "file-1", marks: [] } },
+  ];
+  const residueSame = residueRuns.every(
+    (input) => drive(residueGraph, input) === drive(graph, input),
+  );
+  check(
+    "旧文档残留字段（v3）：`mark.class` / `object.mark_ref` 对引擎**零影响**（四种上报逐项与干净图一致）",
+    residueSame,
+    residueRuns
+      .map((input) => `${input.trigger}/${input.target.mediaType ?? "-"}/[${(input.target.marks ?? []).join(",")}]=${drive(residueGraph, input) || "（无）"}`)
+      .join(" | "),
+  );
+
+  // (c1) 旧层级不复活：D136 形状（`类目 ⊃ 标记`，标记只带 `class`、无 `object`）不得命中。
+  const legacyGraph = {
+    schema_version: 3,
+    layers: [{ key: "l_main", name: "主界面" }],
+    nodes: [
+      { key: "c_media", type: "control", layer: "l_main", panel_id: "media" },
+      { key: "k_text", type: "class", layer: "l_main", control: "c_media", media_type: "text" },
+      { key: "mk_old", type: "mark", layer: "l_main", mark: "book", class: "k_text" },
+      { key: "e_old", type: "event", layer: "l_main", trigger: "double_click" },
+      { key: "c_old", type: "control", layer: "l_main", panel_id: "old" },
+      { key: "a_old", type: "action", layer: "l_main", op: "show", target: "c_old" },
+    ],
+    edges: [
+      { from: "c_media", to: "k_text", kind: "contains", order: 1 },
+      // D136 的旧层级形状：类目直连标记（v3 下这条边非法，但旧库文件里仍存在）。
+      { from: "k_text", to: "mk_old", kind: "contains", order: 2 },
+      { from: "mk_old", to: "e_old", kind: "on", order: 3 },
+      { from: "e_old", to: "a_old", kind: "fires", order: 4 },
+    ],
+  };
+  const legacyHit = drive(legacyGraph, {
+    trigger: "double_click",
+    target: { mediaType: "text", fileId: "file-1", marks: ["book"] },
+  });
+  check(
+    "旧层级不复活（v3）：只带旧字段 `mark.class` 的标记**不再参与匹配**（引擎只读 `object`）",
+    legacyHit === "",
+    legacyHit || "（无动作）",
+  );
+}
+
+// ---- 合成用例（D138）：相册 / 源面板的标记链**真的能命中** ----
+//
+// 用户口径（2026-11-02）：「相册链里的标记需要命中，并把源面板的标记也一起修复，标记就是
+// 为了给单个对象进行精确细分，注意，标记不改变对象性质，只是作为对象的限制条件，是可选项，
+// 功能和名称一致，即"标记"。」
+//
+// 这两条链的上报方（`AlbumPanel` / `SourcePanel`）此前一个恒报 `marks: []`、一个根本不
+// 上报，所以引擎侧永远收不到标记 —— 引擎本身没错，错在没人上报。本节用**真实上报形态**
+// 驱动引擎（`mediaType: "album"` / `"source"`，`fileId` = 相册 id / 源节点 key），钉住：
+//   (a) 两段都齐 ⇒ 命中；
+//   (b) 没有标记 ⇒ 不命中（标记是**可选项**，但一旦链上有标记节点就必须满足）；
+//   (c) 标记不同名 ⇒ 不命中（标记是**限制条件**，是过滤而不是"有标记就行"）；
+//   (d) 标记命中但父对象 scope 不符 ⇒ 不命中（不改变对象性质：类目/scope 判定仍在前）。
+{
+  /** 面板本地打标 → 上报用的 marks（与 UI 同口径：用户标记 ∪ 派生标记，见 D138）。 */
+  const reportedMarks = (own, derived = []) => {
+    const seen = new Set(own);
+    const out = [...own];
+    for (const token of derived) if (!seen.has(token)) { seen.add(token); out.push(token); }
+    return out;
+  };
+
+  /** 驱动引擎并把执行器收到的操作拼成一行（只关心 `show`，与本组断言同口径）。 */
+  const driveGraph = (graph, input) => {
+    const engine = new BlueprintEngine();
+    engine.setGraph(graph);
+    engine.setLayer("l_main");
+    const ops = [];
+    engine.setExecutor({
+      showPanel: (id) => ops.push(`show ${id}`),
+      hidePanel: (id) => ops.push(`hide ${id}`),
+      togglePanel: (id) => ops.push(`toggle ${id}`),
+      collapsePanels: (ids) => ops.push(`collapse [${ids.join(", ")}]`),
+      expandPanels: (ids) => ops.push(`expand [${ids.join(", ")}]`),
+      playFile: (fileId) => ops.push(`play ${fileId}`),
+      navigateLayer: (layerKey) => ops.push(`navigate ${layerKey}`),
+      applyOverlay: () => ops.push("overlay"),
+      showOverlayPanel: () => ops.push("float"),
+    });
+    engine.dispatch(input);
+    return ops.join(" ; ");
+  };
+
+  const albumGraph = () => ({
+    schema_version: 3,
+    layers: [{ key: "l_main", name: "主界面" }],
+    nodes: [
+      { key: "ui", type: "interface", layer: "l_main" },
+      { key: "blk", type: "layout_block", layer: "l_main", name: "左侧" },
+      { key: "c_albums", type: "control", layer: "l_main", panel_id: "albums" },
+      { key: "c_media", type: "control", layer: "l_main", panel_id: "media" },
+      { key: "c_viewer", type: "control", layer: "l_main", panel_id: "viewer" },
+      // 相册面板的类目：media_type 必须是本面板分域里的 "album"（`blueprintNodes.ts`
+      // `PANEL_CLASS_MEDIA_TYPE_DOMAINS.albums`），而不是行内的 multimedia/image。
+      { key: "k_album", type: "class", layer: "l_main", control: "c_albums", media_type: "album" },
+      // 对象：单个相册（scope = 具体相册 id，RFC 0007 决策 1）与"任一相册单击"两支。
+      { key: "o_album_one", type: "object", layer: "l_main", class: "k_album", scope: "alb-1" },
+      { key: "mk_album_manga", type: "mark", layer: "l_main", mark: "manga", object: "o_album_one" },
+      { key: "o_album_click", type: "object", layer: "l_main", class: "k_album", scope: "clicked" },
+      { key: "mk_album_image", type: "mark", layer: "l_main", mark: "image", object: "o_album_click" },
+      { key: "e_album_one", type: "event", layer: "l_main", trigger: "click" },
+      { key: "e_album_image", type: "event", layer: "l_main", trigger: "click" },
+      { key: "a_viewer", type: "action", layer: "l_main", op: "show", target: "c_viewer" },
+      { key: "a_media", type: "action", layer: "l_main", op: "show", target: "c_media" },
+    ],
+    edges: [
+      { from: "ui", to: "blk", kind: "contains", order: 1 },
+      { from: "blk", to: "c_albums", kind: "contains", order: 2 },
+      { from: "blk", to: "c_media", kind: "contains", order: 3 },
+      { from: "c_albums", to: "k_album", kind: "contains", order: 4 },
+      { from: "k_album", to: "o_album_one", kind: "contains", order: 5 },
+      { from: "o_album_one", to: "mk_album_manga", kind: "contains", order: 6 },
+      { from: "k_album", to: "o_album_click", kind: "contains", order: 7 },
+      { from: "o_album_click", to: "mk_album_image", kind: "contains", order: 8 },
+      { from: "mk_album_manga", to: "e_album_one", kind: "on", order: 9 },
+      { from: "mk_album_image", to: "e_album_image", kind: "on", order: 10 },
+      { from: "e_album_one", to: "a_viewer", kind: "fires", order: 11 },
+      { from: "e_album_image", to: "a_media", kind: "fires", order: 12 },
+    ],
+  });
+
+  const albumDispatch = (trigger, albumId, marks) =>
+    driveGraph(albumGraph(), { trigger, target: { mediaType: "album", fileId: albumId, marks } });
+
+  // (a) 两段齐：单击「带 manga 标记的指定相册」→ 命中按 id 限定的那条链。
+  const albumHit = albumDispatch("click", "alb-1", reportedMarks(["manga"], ["media"]));
+  check(
+    "D138 相册链：click + mediaType=album + 标记命中 + 对象 scope=相册 id ⇒ **命中**（标记轴对相册生效）",
+    albumHit === "show viewer",
+    albumHit || "（无动作）",
+  );
+  // (b) 标记是可选项，但链上有标记节点就必须满足：同一相册不带标记 ⇒ 一条都不命中。
+  check(
+    "D138 相册链：同一相册但 `marks=[]` ⇒ **不命中**（标记是链上的限制条件，不是装饰）",
+    albumDispatch("click", "alb-1", []) === "",
+    albumDispatch("click", "alb-1", []) || "（无动作）",
+  );
+  // (c) 标记是**过滤**而非"有任意标记即可"：带别的标记不命中。
+  check(
+    "D138 相册链：带不相干的标记（book）⇒ **不命中**（标记名精确匹配，不是「有标记就算」）",
+    albumDispatch("click", "alb-1", reportedMarks(["book"], ["media"])) === "",
+    albumDispatch("click", "alb-1", reportedMarks(["book"], ["media"])) || "（无动作）",
+  );
+  // (d) 不改变对象性质：标记命中、scope 也命中，但**类目**必须仍是 album；
+  //     用 media 类目的条目（image 文件带同一标记）不得顺带命中相册链。
+  check(
+    'D138 相册链：换成 `mediaType: "image"` 上报同一标记 ⇒ **不命中**（标记不改变对象所属的类目）',
+    albumDispatch("click", "alb-1", reportedMarks(["manga"], ["media"])) === "show viewer" &&
+      driveGraph(albumGraph(), {
+        trigger: "click",
+        target: { mediaType: "image", fileId: "alb-1", marks: reportedMarks(["manga"], ["image"]) },
+      }) === "",
+    '类目判定仍在标记之前（两段式的第二段递归回类目/scope）',
+  );
+  // (e) 派生标记真的能当条件用：另一支链只认 `image` 标记（`scope: "clicked"`）。
+  //     同一次单击、同一个相册，只换上报里的派生标记 ⇒ 命中与否跟着标记走，
+  //     证明"派生标记并入上报"（D138 的 `effectiveMarksFor`）不是摆设。
+  const derivedImage = albumDispatch("click", "other-album", reportedMarks([], ["image"]));
+  const derivedMedia = albumDispatch("click", "other-album", reportedMarks([], ["media"]));
+  check(
+    "D138 相册链：派生标记能作为条件命中（image 派生 → 命中该链；media 派生 → 不命中）",
+    derivedImage === "show media" && derivedMedia === "",
+    `image=${derivedImage || "（无）"} media=${derivedMedia || "（无）"}`,
+  );
+
+  // 源面板同一条契约的另一半：`mediaType: "source"`，`fileId` = 节点 key。
+  const sourceGraph = () => ({
+    schema_version: 3,
+    layers: [{ key: "l_main", name: "主界面" }],
+    nodes: [
+      { key: "ui", type: "interface", layer: "l_main" },
+      { key: "blk", type: "layout_block", layer: "l_main", name: "左侧" },
+      { key: "c_sources", type: "control", layer: "l_main", panel_id: "sources" },
+      { key: "c_media", type: "control", layer: "l_main", panel_id: "media" },
+      { key: "k_source", type: "class", layer: "l_main", control: "c_sources", media_type: "source" },
+      { key: "o_src_dir", type: "object", layer: "l_main", class: "k_source", scope: "dir:src-1/manga" },
+      { key: "mk_src_manga", type: "mark", layer: "l_main", mark: "manga", object: "o_src_dir" },
+      { key: "e_src", type: "event", layer: "l_main", trigger: "click" },
+      { key: "a_media", type: "action", layer: "l_main", op: "show", target: "c_media" },
+    ],
+    edges: [
+      { from: "ui", to: "blk", kind: "contains", order: 1 },
+      { from: "blk", to: "c_sources", kind: "contains", order: 2 },
+      { from: "blk", to: "c_media", kind: "contains", order: 3 },
+      { from: "c_sources", to: "k_source", kind: "contains", order: 4 },
+      { from: "k_source", to: "o_src_dir", kind: "contains", order: 5 },
+      { from: "o_src_dir", to: "mk_src_manga", kind: "contains", order: 6 },
+      { from: "mk_src_manga", to: "e_src", kind: "on", order: 7 },
+      { from: "e_src", to: "a_media", kind: "fires", order: 8 },
+    ],
+  });
+  const sourceDispatch = (nodeKey, marks) =>
+    driveGraph(sourceGraph(), { trigger: "click", target: { mediaType: "source", fileId: nodeKey, marks } });
+  const sourceHit = sourceDispatch("dir:src-1/manga", ["manga"]);
+  check(
+    'D138 源面板链：click + mediaType="source" + fileId=节点 key + 标记命中 ⇒ **命中**',
+    sourceHit === "show media",
+    sourceHit || "（无动作）",
+  );
+  check(
+    "D138 源面板链：不带标记 / 换成别的节点 key ⇒ **不命中**（标记与对象两个条件都不可省）",
+    sourceDispatch("dir:src-1/manga", []) === "" &&
+      sourceDispatch("dir:src-1/other", ["manga"]) === "",
+    `无标记=${sourceDispatch("dir:src-1/manga", []) || "（无）"} 换 key=${sourceDispatch("dir:src-1/other", ["manga"]) || "（无）"}`,
+  );
+}
+
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} 通过`);
 process.exit(failed.length === 0 ? 0 : 1);

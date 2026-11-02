@@ -111,11 +111,11 @@ pub struct BlueprintNode {
     pub title_key: Option<String>,
     /// **所属面板** key（`class` 节点用；D135 的分域判定据此解析面板 id）。
     ///
-    /// ⚠️ **旧文档兼容（D136 迁移口径）**：`mark` 节点在 D136 之前也用本字段表达
-    /// "所属面板"。D136 把标记改挂到类目下、字段改为 [`class`](Self::class) 之后，
-    /// 标记节点上残留的 `control` 值按**未接通软告警**处理（不是硬错误）——
-    /// 用户库实测 0 个 mark 节点，没有存量迁移负担，但口径仍要稳：旧文档读进来
-    /// 只灰显、不阻塞保存（详见 `blueprint_warnings::collect_issues`）。
+    /// ⚠️ **旧文档兼容（D136 / D137 迁移口径）**：`mark` 节点在 D136 之前也用本字段
+    /// 表达"所属面板"，D136 改为 [`class`](Self::class)，D137 起标记再改挂到**对象**之下
+    /// （[`object`](Self::object)）。标记节点上残留的 `control` 值一律按**未接通软告警**
+    /// 处理（不是硬错误）：旧文档读进来只灰显、不阻塞保存，由 v2 → v3 迁移清除
+    /// （详见 `blueprint_warnings::collect_issues` 与 `blueprint_migrate`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<NodeKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -129,25 +129,43 @@ pub struct BlueprintNode {
     /// **标记 id**（`mark` 节点；引用可注册的标记清单：`book` / `manga` …）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mark: Option<String>,
-    // object / mark（所属 类目 / 子类 / 标记）
+    /// **所属对象** key（`mark` 节点；D137/v3 新增）。
+    ///
+    /// 用户裁决（D137）：「标记要接在**对象**后面，标记是对**单个对象**的细分。」
+    /// 因此 v3 的结构是 `object ⊃ mark`，标记通过本字段与 `contains` 边**双向**表达
+    /// "我属于哪个对象"（字段⇔边一致性由 `blueprint_validate` / `blueprint_warnings`
+    /// 按 D109 口径检查）。
+    ///
+    /// 与 [`mark_ref`](Self::mark_ref) **方向相反**：那个是 v2 的"对象指向标记"，
+    /// 本字段是 v3 的"标记指向对象"；两者不会在同一份 v3 文档里同时出现。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object: Option<NodeKey>,
+    // object（所属 类目 / 子类）
     /// **所属类目** key。
     ///
-    /// - `mark` 节点（D136）：标记**从属类目**，与子类并列；
-    /// - `object` 节点：三条语义轴之一（与 `subclass` / `mark_ref` 互斥）。
+    /// - `object` 节点：两条语义轴之一（与 `subclass` 互斥）；
+    /// - `mark` 节点：**仅旧文档兼容**（v3 起标记用 [`object`](Self::object)）——
+    ///   v2 及更早的 `mark.class` 读进来只报**未接通软告警**，不阻塞保存
+    ///   （处置方式与 [`control`](Self::control) 上的 D136 残留一致）。
     ///
     /// ⚠️ 这是**同一含义在不同节点上的复用**（"我所属的类目"），**不是**同名不同义：
     /// `class` 节点用 [`control`](Self::control) 表达"所属面板"，那是**另一个**字段名。
     /// 真正"同名不同义"的是 [`subclass`](Self::subclass)（见其注释）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub class: Option<NodeKey>,
-    /// 对象所属的**子类** key（三条轴任选其一）。
+    /// 对象所属的**子类** key（两条轴任选其一）。
     ///
     /// 字段名与 TS 定义表一致；注意它在 `subclass` 节点上是"所属类目"的引用，
     /// 而在 `object` 节点上是"所属子类"的引用——**同名不同义**，按节点类型分流。
     /// （与 `class` 字段那种"同一含义复用"不同：本字段是**同一个字段名承载两个含义**。）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subclass: Option<NodeKey>,
-    /// 对象所属的**标记节点** key（三条轴任选其一）。
+    /// 对象所属的**标记节点** key（v2 的第三条轴）。
+    ///
+    /// ⚠️ **自 v3（D137）起废弃**：标记的方向反转为 `object ⊃ mark`，对象不再引用标记，
+    /// 该字段**不再被解析/校验/告警使用**，仅为**读取旧文档**而保留字段位——
+    /// 迁移（`blueprint_migrate`）会把对象上的旧值转写为 mark 节点上的
+    /// [`object`](Self::object)，再清空本字段。新代码**不得**写入本字段。
     ///
     /// 刻意**不叫** `mark`：`mark` 已经是"标记 id"（`mark` 节点上的枚举字段），
     /// 而本字段是"挂在哪个标记节点下"的 **key 引用**；扁平的 JSON 结构不允许

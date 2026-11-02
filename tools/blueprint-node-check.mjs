@@ -60,6 +60,35 @@ const rustErrorCount = (doc) => {
 };
 
 /**
+ * 硬错误**消息清单**（与 `rustErrorCount` 同一解析口径；解析失败返回 `null`）。
+ *
+ * 断言"硬错误 = 0 条"时只给条数，失败现场无从下手——这里把 E 行原文带出来，
+ * 让门禁变红时能直接看到是哪条校验在拒绝（例如分域/命名空间/取值域）。
+ */
+const rustErrorLines = (doc) => {
+  let out = "";
+  try {
+    out = execFileSync("cargo", ["run", "-q", "-p", "hp-core", "--example", "check-blueprint"], {
+      cwd: ROOT,
+      input: JSON.stringify(doc),
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  } catch (e) {
+    out = `${e?.stdout ?? ""}${e?.stderr ?? ""}`;
+  }
+  const plain = String(out).replace(/\u001b\[[0-9;]*m/g, "");
+  if (/硬错误 \([0-9]+\)/.test(plain) === false) {
+    return null;
+  }
+  return plain
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("E "))
+    .map((l) => l.slice(2).trim());
+};
+
+/**
  * 用 hp-core 真实校验器取**软告警（未接通）**消息清单（stdin 喂 JSON）。
  *
  * 解析失败返回 `null`（调用方据此判失败，而不是静默通过）——两侧一致性是**断言的目标**，
@@ -466,17 +495,22 @@ const hasEdge = (doc, from, to, kind) =>
     asymmetric.slice(0, 4).join("；") || "两侧声明逐项互指",
   );
 
-  // 正向：D136 起 `标记` **挂在类目下**（与 `子类` 并列），不再是面板下与类目平行的第二条轴。
-  // 因此这里既要有"合法的三条"（面板→类目、类目→子类、类目→标记），也要有**反向断言**：
-  // 「面板 → 标记」必须是**非法**的（`kindForEdge` 返回 `null`）——只断言合法的那三条，
-  // 漏掉旧的 `control → mark` 就会被"两边都合法"悄悄放过，用户仍能把标记拖到面板下。
+  // 正向：**v3（task-4 §1 / task-5）起 `标记` 挂在对象下**（`class ⊃ object ⊃ mark`）——
+  // 标记是对**单个对象**的细分，不再是类目下与子类并列的那条轴（D136 口径）。
+  // 因此这里既要有"合法的三条"（面板→类目、类目→子类、**对象→标记**），也要有**反向断言**：
+  // 两代旧边「面板 → 标记」（D136 之前）与「类目 → 标记」（D136 那一版）都必须**非法**
+  // （`kindForEdge` 返回 `null`）——只断言合法的那三条，漏掉旧边就会被"两边都合法"
+  // 悄悄放过，用户仍能把标记拖回旧的挂点上。
   check(
-    "标记挂在类目下：control → class / class → subclass / class → mark 均合法，且 control → mark 已非法",
+    "标记挂在对象下（v3）：control → class / class → subclass / object → mark 均合法，且 class → mark 已非法",
     ports.kindForEdge("control", "contains", "class") === "contains" &&
       ports.kindForEdge("class", "contains", "subclass") === "contains" &&
-      ports.kindForEdge("class", "contains", "mark") === "contains" &&
-      ports.kindForEdge("control", "contains", "mark") === null,
-    `control→class=${ports.kindForEdge("control", "contains", "class")} class→subclass=${ports.kindForEdge("class", "contains", "subclass")} class→mark=${ports.kindForEdge("class", "contains", "mark")} control→mark=${ports.kindForEdge("control", "contains", "mark")}`,
+      ports.kindForEdge("object", "contains", "mark") === "contains" &&
+      ports.kindForEdge("class", "contains", "mark") === null &&
+      ports.kindForEdge("control", "contains", "mark") === null &&
+      // 反向的旧方向也一并点名：D136 时代标记是对象的**父**（`mark ⊃ object`），v3 反过来。
+      ports.kindForEdge("mark", "contains", "object") === null,
+    `control→class=${ports.kindForEdge("control", "contains", "class")} class→subclass=${ports.kindForEdge("class", "contains", "subclass")} object→mark=${ports.kindForEdge("object", "contains", "mark")} class→mark=${ports.kindForEdge("class", "contains", "mark")} control→mark=${ports.kindForEdge("control", "contains", "mark")} mark→object=${ports.kindForEdge("mark", "contains", "object")}`,
   );
 
   /*
@@ -878,7 +912,8 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
   // 造一棵深 3 层、同层多节点的树，起始节点故意放在远离原点处。
   const rootPos = { x: 3000, y: 2200 };
   const doc = {
-    schema_version: 2,
+    // 夹具口径与 v3 文档一致（本块只验几何整理，版本号不参与断言，但写出的夹具必须是当前版本）。
+    schema_version: 3,
     layers: [{ key: "l_main", name: "主界面" }],
     nodes: [
       { key: "n_root", type: "interface", layer: "l_main", position: rootPos },
@@ -1074,14 +1109,18 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
       pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintPorts.ts")).href
     );
     check(
-      "随意创建≠随意连线：子类与标记都只能连到类目下（层级约束仍在）",
+      "随意创建≠随意连线：子类挂在类目下、标记挂在**对象**下（层级约束仍在）",
       containment.kindForEdge("class", "contains", "subclass") === "contains" &&
-        // D136：标记从"面板下"移到"类目下"，与子类**并列**（两者都只挂在类目下）。
-        containment.kindForEdge("class", "contains", "mark") === "contains" &&
+        // v3：标记从"类目下"再下移到"**对象**下"（`class ⊃ object ⊃ mark`），
+        // 合法挂点是 `object → mark`；`class → mark`（D136 那一版）已作废。
+        containment.kindForEdge("object", "contains", "mark") === "contains" &&
+        containment.kindForEdge("class", "contains", "mark") === null &&
         containment.kindForEdge("control", "contains", "subclass") === null &&
-        // 反向：旧的 `control → mark` 必须已经**不再**合法（漏掉这条，旧层级会静默保留）。
-        containment.kindForEdge("control", "contains", "mark") === null,
-      `class→subclass=${containment.kindForEdge("class", "contains", "subclass")} class→mark=${containment.kindForEdge("class", "contains", "mark")} control→subclass=${containment.kindForEdge("control", "contains", "subclass")} control→mark=${containment.kindForEdge("control", "contains", "mark")}`,
+        // 反向：更早的 `control → mark` 必须已经**不再**合法（漏掉这条，旧层级会静默保留）。
+        containment.kindForEdge("control", "contains", "mark") === null &&
+        // 反向的旧方向：D136 时代对象挂在标记下，v3 反转。
+        containment.kindForEdge("mark", "contains", "object") === null,
+      `class→subclass=${containment.kindForEdge("class", "contains", "subclass")} object→mark=${containment.kindForEdge("object", "contains", "mark")} class→mark=${containment.kindForEdge("class", "contains", "mark")} control→subclass=${containment.kindForEdge("control", "contains", "subclass")} control→mark=${containment.kindForEdge("control", "contains", "mark")} mark→object=${containment.kindForEdge("mark", "contains", "object")}`,
     );
   }
 }
@@ -1123,15 +1162,7 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
     "l_main",
   );
   doc = s.doc;
-  const m = factory.appendNode(
-    doc,
-    "mark",
-    { x: 0, y: 0 },
-    // D136：标记的合法上级是**类目**（不再是面板），因此 parentHint 传 class key。
-    factory.parentHintFor("mark", k.node.key, doc, "l_main"),
-    "l_main",
-  );
-  doc = m.doc;
+  // v3：标记的合法上级是**对象**，所以先建对象（挂在类目下），再建标记并把对象 key 当 parentHint。
   const o = factory.appendNode(
     doc,
     "object",
@@ -1140,6 +1171,15 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
     "l_main",
   );
   doc = o.doc;
+  const m = factory.appendNode(
+    doc,
+    "mark",
+    { x: 0, y: 0 },
+    // v3（task-4 §1）：标记的合法上级是**对象**，故 parentHint 传 object key。
+    factory.parentHintFor("mark", o.node.key, doc, "l_main"),
+    "l_main",
+  );
+  doc = m.doc;
 
   const added = [k.node, s.node, m.node, o.node];
   const unlinked = lint.analyzeUnlinked(doc);
@@ -1149,9 +1189,10 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
     added.map((n) => `${n.type}:${n.key}=${unlinked[n.key] ?? "（不灰显）"}`).join(", "),
   );
   check(
-    "四类新增即未接通：原因码正确（类目 缺 control；子类/标记/对象 缺结构父字段 class）",
+    "四类新增即未接通：原因码正确（类目 缺 control；子类/标记/对象 缺结构父字段）",
     unlinked[k.node.key] === "missing-control" &&
-      // D136：标记、子类、对象三者都以 `class` 为结构父字段 → 原因码同为 `missing-class`。
+      // 子类缺 `subclass`、对象缺 class/subclass、**标记缺 `object`**（v3）——
+      // 三者都复用同一个原因码 `missing-class`（结构父这一侧没接好，语义同一条）。
       unlinked[m.node.key] === "missing-class" &&
       unlinked[s.node.key] === "missing-class" &&
       unlinked[o.node.key] === "missing-class",
@@ -1159,12 +1200,13 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
   );
   writeFixture("unattached_reference_types", doc);
 
-  // 四条线接上：面板→类目、类目→子类、**类目→标记**（D136：标记挂类目下，不再由面板直连）、类目→对象
+  // 四条线接上：面板→类目、类目→子类、类目→对象、**对象→标记**
+  // （v3：标记挂在**对象**下，既不再由面板直连，也不再与子类并列挂在类目下。）
   const wiring = [
     { from: controlKey, to: k.node.key, kind: "contains" },
     { from: k.node.key, to: s.node.key, kind: "contains" },
-    { from: k.node.key, to: m.node.key, kind: "contains" },
     { from: k.node.key, to: o.node.key, kind: "contains" },
+    { from: o.node.key, to: m.node.key, kind: "contains" },
   ];
   let wired = doc;
   for (const edge of wiring) {
@@ -1178,24 +1220,27 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
   );
   const byKey = new Map(wired.nodes.map((n) => [n.key, n]));
   check(
-    "连线落字段：类目.control / 子类.subclass / 标记.class / 对象.class 都被写对（与父节点类型对齐）",
+    "连线落字段：类目.control / 子类.subclass / 对象.class / 标记.object 都被写对（与父节点类型对齐）",
     byKey.get(k.node.key).control === controlKey &&
       byKey.get(s.node.key).subclass === k.node.key &&
-      // D136：标记的引用字段是 `class`（指向所属类目），不再是 `control`。
-      byKey.get(m.node.key).class === k.node.key &&
-      byKey.get(o.node.key).class === k.node.key,
-    `class.control=${byKey.get(k.node.key).control} subclass.subclass=${byKey.get(s.node.key).subclass} mark.class=${byKey.get(m.node.key).class} object.class=${byKey.get(o.node.key).class}`,
+      byKey.get(o.node.key).class === k.node.key &&
+      // v3：标记的引用字段是 `object`（指向所属**对象**）；D136 那一版的 `class` 已作废。
+      byKey.get(m.node.key).object === o.node.key,
+    `class.control=${byKey.get(k.node.key).control} subclass.subclass=${byKey.get(s.node.key).subclass} object.class=${byKey.get(o.node.key).class} mark.object=${byKey.get(m.node.key).object}`,
   );
-  // 三条正交轴分流：对象挂到标记下时写的是 `mark_ref`（不是 `class`）
+  // 旧的**反向**连线方向已作废：D136 时代是「对象挂到标记下、写 `mark_ref`」，
+  // v3 方向反过来（`对象 → 标记` 写 `object`，上面刚落定）。这里对**未接线的原文档**
+  // 走一次旧方向，断言它**不再**写任何字段——否则旧方向会静默留下一份 mark_ref，
+  // 让"残留字段按未接通处理"的迁移口径被绕过。
   const objUnderMark = connect.applyConnect(doc, {
     from: m.node.key,
     to: o.node.key,
     kind: "contains",
   });
   check(
-    "连线落字段：对象挂到**标记**下时写 `mark_ref`（三条正交轴按父节点类型分流）",
-    objUnderMark.patch.mark_ref === m.node.key &&
-      objUnderMark.doc.nodes.find((n) => n.key === o.node.key).mark_ref === m.node.key,
+    "反向旧方向已作废：`标记 --contains--> 对象` 不再写 `mark_ref`（v3 改为 `对象 --contains--> 标记` 写 `object`）",
+    Object.keys(objUnderMark.patch).length === 0 &&
+      objUnderMark.doc.nodes.find((n) => n.key === o.node.key).mark_ref === undefined,
     `patch=${JSON.stringify(objUnderMark.patch)}`,
   );
   // 去重：同一条线再连一次不改文档（与画布"亮绿圈"的判据同源）
@@ -1410,6 +1455,45 @@ try {
     "RFC 0010：`ports` 缺省推导结果与画布端口表逐项相同（内置 12 种零回归）",
     deriveDrift.length === 0,
     deriveDrift.slice(0, 4).join(" | ") || `${ports.length} 种类型的端口推导一致`,
+  );
+
+  // 2b. **数据驱动端口护栏**（v3 口径，判据形态见 `docs/spec/blueprint-node-standard.md` 第 443 行）：
+  //     `on` 规则边的**每一个源**都必须真的带 `out:on` 口；而 `children === ["control"]` 的容器
+  //     （`group` / `layout_block` / `overlay`）**不得**有 `out:on`。
+  //     为什么要钉在端口表上：`packages/config` 的 `isRuleSource` 仍保留 `isObjectLike`（「无子级」）
+  //     这条**间接**兜底判据，目前只是靠 `children.includes("mark")` 才没复发。将来 `object` 再加一个
+  //     子级（或容器被误判成规则源）时，`on` 口会**静默消失**——这条断言让那一刻直接变红，
+  //     而不是靠人记得回去读推导函数。
+  const ruleOnSources = portsMod.RULE_EDGE_SOURCES.on;
+  const missingOnPort = ruleOnSources.filter((type) => {
+    const spec = config.nodeSpecOrNull(type);
+    return !spec || !config.resolveNodePorts(spec).some((p) => p.side === "out" && p.id === "on");
+  });
+  // 反向：**每一个非规则源都必须没有** `out:on`（同样数据驱动，随定义表变化自动适配）。
+  // 容器（`group` / `layout_block` / `overlay`）必须落在这组里：它们只表达结构，不该
+  // 直接触发规则；`event` / `condition` / `action` 的触发口是 `fires` / `guards` / 无。
+  const nonRuleSources = config.BLUEPRINT_BUILTIN_NODE_TYPES.filter(
+    (type) => !ruleOnSources.includes(type),
+  );
+  const unexpectedOnPort = nonRuleSources.filter((type) => {
+    const spec = config.nodeSpecOrNull(type);
+    return !!spec && config.resolveNodePorts(spec).some((p) => p.side === "out" && p.id === "on");
+  });
+  check(
+    `数据驱动：on 规则边的 ${ruleOnSources.length} 个源（${ruleOnSources.join("/")}）逐个都有 out:on 口`,
+    ruleOnSources.join("/") === "control/class/subclass/mark/object" && missingOnPort.length === 0,
+    missingOnPort.length
+      ? `缺 on 口的源：${missingOnPort.join(",")}`
+      : `${ruleOnSources.length} 个源齐全：${ruleOnSources.join("/")}`,
+  );
+  check(
+    `反例：非规则源（${nonRuleSources.length} 种，含容器 group/layout_block/overlay）一律不得有 out:on 口`,
+    nonRuleSources.length === 7 &&
+      ["group", "layout_block", "overlay"].every((t) => nonRuleSources.includes(t)) &&
+      unexpectedOnPort.length === 0,
+    unexpectedOnPort.length
+      ? `意外带 out:on 的非规则源：${unexpectedOnPort.join(",")}`
+      : `非规则源均无 out:on（${nonRuleSources.join("/")}）`,
   );
 
   // 3. `severity` / `evaluation_role` 的缺省推导：字段问题 = hard、引用缺失 = soft（沿用
@@ -1958,22 +2042,28 @@ try {
     return node ? [...node.children.map((c) => c.type)].sort() : null;
   };
   const classChildren = childSet("class");
+  const objectChildren = childSet("object");
   const controlChildren = childSet("control");
   check(
-    "D136：帮助面板层级——**类目**下恰好 {子类, 标记, 对象}、**面板**下恰好 {类目}",
-    eqList(classChildren ?? [], ["mark", "object", "subclass"]) &&
+    "v3：帮助面板层级——**类目**下恰好 {子类, 对象}、**对象**下恰好 {标记}、**面板**下恰好 {类目}",
+    eqList(classChildren ?? [], ["object", "subclass"]) &&
+      eqList(objectChildren ?? [], ["mark"]) &&
       eqList(controlChildren ?? [], ["class"]),
-    `类目=${JSON.stringify(classChildren)} 面板=${JSON.stringify(controlChildren)}`,
+    `类目=${JSON.stringify(classChildren)} 对象=${JSON.stringify(objectChildren)} 面板=${JSON.stringify(controlChildren)}`,
   );
-  // 旧层级直接点名：树里**不得**出现「面板 ⊃ 标记」这一对。
+  // 旧层级直接点名：树里**不得**出现「面板 ⊃ 标记」与「类目 ⊃ 标记」这两对
+  // （前者是 D136 之前的位置，后者是 D136 那一版的位置——v3 两代都已作废）。
   const pairs = help.hierarchyPairs();
   const stalePairs = pairs
-    .filter((p) => p.parent === "control" && p.child === "mark")
+    .filter((p) => (p.parent === "control" || p.parent === "class") && p.child === "mark")
     .map((p) => `${p.parent} ⊃ ${p.child}`);
   check(
-    "D136：帮助面板里**不存在**「面板 ⊃ 标记」（旧层级作废的直接证据）",
-    stalePairs.length === 0 && ports.kindForEdge("control", "contains", "mark") === null,
-    stalePairs.join("；") || `树里无该对（${pairs.length} 对父子）`,
+    "v3：帮助面板里**不存在**「面板 ⊃ 标记」与「类目 ⊃ 标记」（两代旧层级作废的直接证据）",
+    stalePairs.length === 0 &&
+      ports.kindForEdge("control", "contains", "mark") === null &&
+      ports.kindForEdge("class", "contains", "mark") === null &&
+      ports.kindForEdge("object", "contains", "mark") === "contains",
+    stalePairs.join("；") || `树里无该两对（${pairs.length} 对父子）`,
   );
   // 根治：帮助面板画出的**每一对**都必须是画布/后端真的允许的边。
   // `containmentAllows` 是定义表的判据函数（`packages/config` 导出，`blueprintPorts.ts`
@@ -2104,6 +2194,198 @@ try {
       rustDangling.some((w) => w.includes("没有结构父")),
     `前端=${lint.analyzeUnlinked(dangling).c ?? "（未标记）"} 后端=${rustDangling?.some((w) => w.includes("没有结构父")) ?? "解析失败"}`,
   );
+}
+
+// ---- scope ↔ trigger 错配（D138）：前端灰显 ↔ 后端软告警**同口径** ----
+//
+// 用户现象（2026-11-02）：蓝图画得完整、画布全彩色，点真实相册却毫无反应。
+// 根因不是引用缺失，而是 `trigger` 与对象 `scope` 错开（事件 click、对象 double_clicked）——
+// 图**合法**（所以校验不报、画布不灰），但运行时永远不命中，属于"静默不生效"。
+// 因此与"缺引用"同级：前端 `analyzeUnlinked` 标 `scope-trigger-mismatch`（画布灰显），
+// 后端 `blueprint_warnings::collect_issues` 报同名软告警（不阻塞保存）。
+// 这里用**同一批夹具**跑两侧，逐项同结论，禁止只改一侧。
+{
+  const lint = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/blueprintLint.ts")).href
+  );
+
+  /** 完整可用的链：界面 → 布局块 → 面板(media) → 类目(image) → 对象 → 标记 --on--> 操作。 */
+  const chainDoc = (scope) => ({
+    schema_version: 3,
+    layers: [{ key: "l_a", name: "A" }],
+    nodes: [
+      { key: "ui", type: "interface", layer: "l_a" },
+      { key: "blk", type: "layout_block", name: "栏", layer: "l_a" },
+      { key: "c", type: "control", panel_id: "media", layer: "l_a" },
+      { key: "k", type: "class", control: "c", media_type: "image", layer: "l_a" },
+      { key: "o", type: "object", class: "k", scope, layer: "l_a" },
+      { key: "m", type: "mark", object: "o", mark: "image", layer: "l_a" },
+      { key: "e", type: "event", trigger: "click", layer: "l_a" },
+    ],
+    edges: [
+      { from: "ui", to: "blk", kind: "contains", order: 1 },
+      { from: "blk", to: "c", kind: "contains", order: 2 },
+      { from: "c", to: "k", kind: "contains", order: 3 },
+      { from: "k", to: "o", kind: "contains", order: 4 },
+      { from: "o", to: "m", kind: "contains", order: 5 },
+      { from: "m", to: "e", kind: "on", order: 6 },
+    ],
+  });
+
+  const mismatched = chainDoc("double_clicked"); // click 事件配 double_clicked 对象
+  const matched = chainDoc("clicked"); // 配对正确
+  const fileIdScope = chainDoc("alb-1"); // 具体实例 id，不算错配
+
+  const tsMismatched = lint.analyzeUnlinked(mismatched);
+  const tsMatched = lint.analyzeUnlinked(matched);
+  const tsFileId = lint.analyzeUnlinked(fileIdScope);
+
+  check(
+    "scope 错配（前端）：click 事件 + double_clicked 对象 ⇒ 操作节点标为未接通（原因 scope-trigger-mismatch）",
+    tsMismatched.e === "scope-trigger-mismatch" && Object.keys(tsMismatched).length === 1,
+    `未接通=[${Object.keys(tsMismatched).map((k2) => `${k2}:${tsMismatched[k2]}`).join(", ") || "无"}]`,
+  );
+  check(
+    "scope 错配（前端）：配对正确（clicked ↔ click）⇒ 不标；scope 写成具体 file_id ⇒ 不标",
+    Object.keys(tsMatched).length === 0 && Object.keys(tsFileId).length === 0,
+    `配对=${Object.keys(tsMatched).join(", ") || "无"} file_id=${Object.keys(tsFileId).join(", ") || "无"}`,
+  );
+
+  const rustMismatched = rustWarnings(mismatched);
+  const rustMatched = rustWarnings(matched);
+  const rustFileId = rustWarnings(fileIdScope);
+  check(
+    "scope 错配（后端）：同一夹具报 1 条「不配对」软告警、配对正确与具体 file_id 各 0 条，且**不阻塞保存**",
+    rustMismatched !== null &&
+      rustMismatched.filter((w) => w.includes("不配对")).length === 1 &&
+      rustMismatched.some((w) => w.includes("click↔clicked")) &&
+      rustMatched !== null &&
+      rustMatched.length === 0 &&
+      rustFileId !== null &&
+      rustFileId.length === 0 &&
+      rustErrorCount(mismatched) === 0,
+    `错配=${rustMismatched === null ? "解析失败" : rustMismatched.length} 配对=${rustMatched === null ? "解析失败" : rustMatched.length} file_id=${rustFileId === null ? "解析失败" : rustFileId.length} 硬错误=${rustErrorCount(mismatched)}`,
+  );
+  check(
+    "scope 错配：前端与后端**逐项同结论**（3 个夹具：1 ≡ 1、0 ≡ 0、0 ≡ 0）",
+    rustMismatched !== null &&
+      rustMatched !== null &&
+      rustFileId !== null &&
+      Object.keys(tsMismatched).length === rustMismatched.length &&
+      Object.keys(tsMatched).length === rustMatched.length &&
+      Object.keys(tsFileId).length === rustFileId.length,
+    `前端=${Object.keys(tsMismatched).length}/${Object.keys(tsMatched).length}/${Object.keys(tsFileId).length} 后端=${rustMismatched?.length ?? "-"}/${rustMatched?.length ?? "-"}/${rustFileId?.length ?? "-"}`,
+  );
+}
+// ---- 旧文档残留字段（v3）：前端灰显 ↔ 后端软告警**同口径**，且**不产生硬错误** ----
+//
+// v3 把标记的父级从"类目"改到"对象"（`mark.object`），并废弃 `object.mark_ref`。
+// 旧文档里残留的 `mark.class`（D136 的"所属类目"）与 `object.mark_ref`（D136 的
+// "对象挂标记"）从此**不再被读取**——但绝不能因此变成"旧图一读进来就保存不了"：
+// 口径是**结构边保持 v3 合法形状、残留字段只按未接通软告警**（不阻塞保存）。
+// 硬错误这一侧只有真实校验器能证（TS 侧证不了）；前端侧证"是否正确灰显"。
+//
+// 两个残留轴各用一份**单轴**夹具：
+// - `legacyMarkClass`：只有 `mark.class` 残留 ⇒ 前端灰显该标记、后端点名 `class`，
+//   两侧**逐项同结论**（1 ≡ 1）可以严格比较；
+// - `legacyObjectMarkRef`：只有 `object.mark_ref` 残留 ⇒ 后端点名 `mark_ref`，
+//   且前端不得因此误判**正确接线**的标记。
+//
+// **已知缺口（已报 lead 的 task-7 编辑器侧）**：`object.mark_ref` 残留目前只有后端报
+// 软告警；前端 `analyzeUnlinked` 的对象分支（`blueprintLint.ts:194-200`）只查类目/子类
+// 两轴，与它自己文件头第 115-117 行"对象上残留的 `mark_ref` 也按未接通灰显"的承诺不一致。
+// 因此夹具 B 只钉"不误判正确接线"，**不**把"前端不报"写成断言——那会把缺口冻成期望值。
+{
+  const lint = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/blueprintLint.ts")).href
+  );
+
+  /**
+   * v3 合法结构边（界面→布局块→面板→类目→对象→标记）+ 可选残留字段。
+   *
+   * 文字类目必须挂在允许 `text` 的面板下（`bookpreview`），否则夹具本身就报分域硬错误；
+   * 根链（界面→布局块→面板）也要补齐，否则后端会多报"层无界面节点"这类**层级**告警，
+   * 节点级的逐项对齐就被它污染。
+   */
+  const legacyDoc = ({ object = {}, mark = {} } = {}) => ({
+    schema_version: 3,
+    layers: [{ key: "l_a", name: "A" }],
+    nodes: [
+      { key: "ui1", type: "interface", layer: "l_a" },
+      { key: "blk1", type: "layout_block", name: "主区", layer: "l_a" },
+      { key: "c1", type: "control", panel_id: "bookpreview", layer: "l_a" },
+      { key: "k1", type: "class", control: "c1", media_type: "text", layer: "l_a" },
+      {
+        key: "o1",
+        type: "object",
+        class: "k1",
+        scope: "double_clicked",
+        layer: "l_a",
+        ...object,
+      },
+      { key: "m1", type: "mark", mark: "book", object: "o1", layer: "l_a", ...mark },
+    ],
+    edges: [
+      { from: "ui1", to: "blk1", kind: "contains", order: 1 },
+      { from: "blk1", to: "c1", kind: "contains", order: 2 },
+      { from: "c1", to: "k1", kind: "contains", order: 3 },
+      { from: "k1", to: "o1", kind: "contains", order: 4 },
+      { from: "o1", to: "m1", kind: "contains", order: 5 },
+    ],
+  });
+
+  const hardSummary = (count, lines) =>
+    count === -1
+      ? "解析失败（拿不到校验结论）"
+      : `${count} 条${lines && lines.length ? `：${lines.join(" | ")}` : ""}`;
+  const tsSummary = (map) =>
+    `前端未接通=[${Object.keys(map).map((k) => `${k}:${map[k]}`).join(", ") || "无"}]`;
+
+  // ---- 夹具 A：标记侧残留（`mark.class`）----
+  const legacyMarkClass = legacyDoc({ mark: { class: "k1" } });
+  const tsA = lint.analyzeUnlinked(legacyMarkClass);
+  const hardA = rustErrorCount(legacyMarkClass);
+  const softA = rustWarnings(legacyMarkClass);
+  check(
+    "旧文档残留字段（v3）· 标记侧：**不产生硬错误**（后端硬错误 0 条）——旧图可读、可保存",
+    hardA === 0,
+    hardSummary(hardA, rustErrorLines(legacyMarkClass)),
+  );
+  check(
+    "旧文档残留字段（v3）· 标记侧：`mark.class` 残留按**未接通**处理（前端灰显该标记）",
+    tsA.m1 === "missing-class",
+    tsSummary(tsA),
+  );
+  check(
+    "旧文档残留字段（v3）· 标记侧：前端与后端**逐项同结论**，且后端软告警点名 `class` 残留",
+    softA !== null &&
+      softA.length === Object.keys(tsA).length &&
+      softA.some((w) => w.includes("旧字段 class")),
+    `前端=${Object.keys(tsA).length} 条 后端=${softA === null ? "解析失败" : softA.length} 条${softA === null ? "" : `：${softA.join(" | ")}`}`,
+  );
+  writeFixture("legacy_residual_mark_fields", legacyMarkClass);
+
+  // ---- 夹具 B：对象侧残留（`object.mark_ref`）----
+  const legacyObjectMarkRef = legacyDoc({ object: { mark_ref: "m1" } });
+  const tsB = lint.analyzeUnlinked(legacyObjectMarkRef);
+  const hardB = rustErrorCount(legacyObjectMarkRef);
+  const softB = rustWarnings(legacyObjectMarkRef);
+  check(
+    "旧文档残留字段（v3）· 对象侧：`object.mark_ref` 残留同样**不产生硬错误**（硬错误 0 条）",
+    hardB === 0,
+    hardSummary(hardB, rustErrorLines(legacyObjectMarkRef)),
+  );
+  check(
+    "旧文档残留字段（v3）· 对象侧：后端软告警点名 `mark_ref` 残留且**只报一条**（不重复、不硬拒）",
+    softB !== null && softB.length === 1 && softB[0].includes("旧字段 mark_ref"),
+    softB === null ? "解析失败" : `${softB.length} 条${softB.length ? `：${softB.join(" | ")}` : ""}`,
+  );
+  check(
+    "旧文档残留字段（v3）· 对象侧：前端不误判**正确接线**的标记（`m1.object` 指对象 ⇒ 不灰显）",
+    tsB.m1 === undefined,
+    tsSummary(tsB),
+  );
+  writeFixture("legacy_object_mark_ref_residue", legacyObjectMarkRef);
 }
 
 const failed = results.filter((r) => !r.ok);

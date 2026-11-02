@@ -536,20 +536,21 @@ fn validate_node_fields(
                     node.media_type.as_deref().unwrap_or("")
                 )),
             }
-            // 类目**只按媒体类型分类**：细分交给 `subclass`、语义维度交给挂在它**之下**的
-            // `mark` 节点（D102；D136 把标记从"面板下的平行轴"改成"类目下的从属轴"，
-            // 与子类并列——所以这里"类目节点本身不带标记 id"这条**不变**，
-            // 变的是标记**节点自己**挂在哪一级，见下面的 `NodeType::Mark` 分支）。
+            // 类目**只按媒体类型分类**：细分交给 `subclass`、语义维度交给挂在对象**之下**的
+            // `mark` 节点（D102；D136 把标记从"面板下的平行轴"改到"类目之下"，
+            // **D137/v3** 又改到"对象之下"——所以"类目节点本身不带标记 id"这条
+            // 从 D102 起就**从未变过**，变的一直是标记**节点自己**挂在哪一级，
+            // 见下面的 `NodeType::Mark` 分支）。
             // 类目上出现 `format` 是 2026-10-10 之前的旧写法，
             // 属"字段用在错误的类型上"→ 硬错误（与解析层同口径）。
             if node.format.is_some() {
                 errors.push(format!(
-                    "类节点 {key} 不得带 format：类目只按 media_type 分类，细分请用 subclass 节点、标记请用挂在类目之下的 mark 节点"
+                    "类节点 {key} 不得带 format：类目只按 media_type 分类，细分请用 subclass 节点、标记请用挂在对象之下的 mark 节点"
                 ));
             }
             if node.mark.is_some() {
                 errors.push(format!(
-                    "类节点 {key} 不得带 mark：标记是挂在类目**之下**的独立节点（与子类并列，D136）"
+                    "类节点 {key} 不得带 mark：标记是挂在**对象**之下的独立节点（D137/v3，链的末梢）"
                 ));
             }
         }
@@ -609,21 +610,22 @@ fn validate_node_fields(
             }
         }
         NodeType::Mark => {
-            // **所属类目**引用（D136）：标记挂在类目下、与子类并列。
+            // **所属对象**引用（D137/v3）：标记挂在对象下、是链的末梢。
             // 缺失 / 指向已删除节点 → 未接通（软）；指向存在但类型不符 → 硬错误。
             //
-            // 旧文档兼容：D136 之前标记用 `control` 指向面板。那个值现在既不是
-            // "结构父字段"也不再被读取——`missing_ref` 只看 `class`，因此旧文档
-            // 会命中软告警（未接通 / 灰显），**不会**被硬错误拒绝（用户库实测 0 个
-            // mark 节点，无存量负担，但口径要稳：旧文档照样能保存）。
-            // 这里**不**把残留的 `control` 报成硬错误——它是"字段用在错误的类型上"的
-            // 典型情形，可是把它判死会让"读进来就保存不了"变成新的迁移事故。
-            if let Some(ck) = node.class.as_deref()
-                && let Some(target) = by_key.get(ck)
-                && target.node_type != NodeType::Class
+            // 旧文档兼容（两层，都**不**判硬错误）：
+            // - D136 之前标记用 `control` 指向面板；
+            // - D136 那一版标记用 `class` 指向类目（v3 起改用 `object`）。
+            // 两个残留字段都只在 `blueprint_warnings` 里报软告警（未接通 / 灰显），
+            // 因此**旧文档读进来不会命中硬错误**（否则"读进来就保存不了"会变成新的
+            // 迁移事故；正常路径上 `validate_json` 会先跑 `migrate_graph`，
+            // 残留字段由迁移清掉，见 `blueprint_migrate.rs`）。
+            if let Some(ok) = node.object.as_deref()
+                && let Some(target) = by_key.get(ok)
+                && target.node_type != NodeType::Object
             {
                 errors.push(format!(
-                    "标记节点 {key} 的 class 必须指向类目节点（当前指向 {}）",
+                    "标记节点 {key} 的 object 必须指向对象节点（当前指向 {}）",
                     target.node_type
                 ));
             }
@@ -641,12 +643,15 @@ fn validate_node_fields(
             }
         }
         NodeType::Object => {
-            // 结构父有**三种**（三条正交的轴任选其一）：类目、子类、标记。
+            // 结构父有**两种**（两条正交的轴任选其一）：类目、子类。
             // 指向存在但类型不符 → 硬错误；缺失 → 未接通（软）。
-            let parents: [(&str, Option<&str>, NodeType); 3] = [
+            //
+            // ⚠️ **D137/v3**：v2 的第三条轴 `mark_ref`（对象 → 标记）已废弃——
+            // 方向反转为"标记挂在对象之下"，本分支**不再读** `mark_ref`；
+            // 旧文档上的残留值由 `blueprint_warnings` 报软告警、由 v2→v3 迁移清掉。
+            let parents: [(&str, Option<&str>, NodeType); 2] = [
                 ("class", node.class.as_deref(), NodeType::Class),
                 ("subclass", node.subclass.as_deref(), NodeType::Subclass),
-                ("mark_ref", node.mark_ref.as_deref(), NodeType::Mark),
             ];
             let mut declared = 0usize;
             for (field, key_opt, want) in parents {
@@ -665,10 +670,10 @@ fn validate_node_fields(
                     ));
                 }
             }
-            // **三条轴互斥**：对象只属于一个结构父（与"结构父唯一性"同一条约束）。
+            // **两条轴互斥**：对象只属于一个结构父（与"结构父唯一性"同一条约束）。
             if declared > 1 {
                 errors.push(format!(
-                    "对象节点 {key} 同时声明了 {declared} 个结构父：对象只能挂在 类目 / 子类 / 标记 三者之一"
+                    "对象节点 {key} 同时声明了 {declared} 个结构父：对象只能挂在 类目 / 子类 两者之一"
                 ));
             }
             if node.scope.as_deref().unwrap_or("").trim().is_empty() {
@@ -708,11 +713,11 @@ fn validate_node_fields(
                 && let Some(target) = by_key.get(t)
                 && !matches!(
                     target.node_type,
-                    NodeType::Control | NodeType::Class | NodeType::Object
+                    NodeType::Control | NodeType::Class | NodeType::Object | NodeType::Mark
                 )
             {
                 errors.push(format!(
-                    "操作节点 {key} 的 target 必须指向面板控件/类/对象节点（当前指向 {}）",
+                    "操作节点 {key} 的 target 必须指向面板控件/类/对象/标记节点（当前指向 {}）",
                     target.node_type
                 ));
             }

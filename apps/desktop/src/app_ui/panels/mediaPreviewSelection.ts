@@ -100,7 +100,13 @@ export function useMediaSelection(
         }
         app.dispatch({
           trigger: "selection_change",
-          target: { mediaType: file.media_type, fileId: file.id },
+          // 上报必须带 `marks`：v3 起「标记挂在对象之下」（`class ⊃ object ⊃ mark`），
+          // 引擎的 mark 分支要两段合一（条目命中该标记 **且** 其所属对象命中），
+          // 缺 `marks` 时该分支恒不命中（task-4 §3「补齐上报」）——这正是旧版
+          // `[engine] dispatch … → 命中事件=[无]` 的直接病因之一。
+          // `file.marks` 已在内存（`FileItem.marks`，源自 `file_marks` 表），
+          // 故**零额外 IPC**，不引入阻塞式同步查询。
+          target: { mediaType: file.media_type, fileId: file.id, marks: file.marks },
           context: { rating, tags },
         });
       })();
@@ -147,7 +153,8 @@ export function useMediaSelection(
       // 单击事件上报蓝图引擎（默认蓝图无单击规则，行为不变；用户蓝图可响应）。
       app.dispatch({
         trigger: "click",
-        target: { mediaType: file.media_type, fileId: file.id },
+        // 同上：带 `marks`（零额外 IPC），否则经标记节点的链永不命中。
+        target: { mediaType: file.media_type, fileId: file.id, marks: file.marks },
       });
     },
     [app, items, dispatchSelectionChange],
@@ -158,7 +165,8 @@ export function useMediaSelection(
     (file: FileItem) => {
       app.dispatch({
         trigger: "double_click",
-        target: { mediaType: file.media_type, fileId: file.id },
+        // 同上：带 `marks`（零额外 IPC）。
+        target: { mediaType: file.media_type, fileId: file.id, marks: file.marks },
       });
     },
     [app],

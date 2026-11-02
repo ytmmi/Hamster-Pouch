@@ -11,6 +11,68 @@
 
 本文**不改变既有 JSON 字段名与枚举取值**（向后兼容）：内容全部来自 RFC 0007 / D28–D70、RFC 0010 与现有实现（`crates/hp-core/src/blueprint_*.rs`、`packages/config/src/blueprint*.ts`、`apps/desktop/src/app_ui/panels/blueprintPorts.ts`）。若本文与 RFC 0007 / RFC 0010 正文冲突，以 RFC 与 `docs/architecture/decision-checklist.md` 为准，并须修正本文。
 
+## 0. 2026-11-02 结构修订：标记改挂到对象之下（文档 schema v2 → v3 / D137）
+
+**标记（`mark`）不再挂在类目之下与子类并列，而是挂在对象（`object`）之下**——标记是**对单个对象**的细分。结构由 D136 的 `面板 ⊃ 类目 ⊃ {子类, 标记} ⊃ 对象` 改为：
+
+```text
+面板 ⊃ 类目 ⊃ { 子类, 对象 }
+                     └ 对象 ⊃ 标记
+```
+
+逐项改动：
+
+| 项 | D136（v2） | v3（D137） |
+| --- | --- | --- |
+| `mark.parents` | `["class"]` | **`["object"]`** |
+| `mark.children` | `["object"]` | **`[]`** |
+| `object.parents` | `["class", "subclass", "mark"]` | **`["class", "subclass"]`** |
+| `object.children` | `[]` | **`["mark"]`** |
+| `class.children` | `["subclass", "mark", "object"]` | **`["subclass", "object"]`** |
+| `subclass.children` | `["object"]` | `["object"]`（不变） |
+| 标记的结构父引用字段 | `class`（"所属类目"） | **`object`（"所属对象"）** |
+| `object.mark_ref` | 三轴之一 | **废弃**（仅兼容旧文档） |
+| `event.target` 取值域 | `["class", "object"]` | **`["class", "object", "mark"]`** |
+| 文档 `schema_version` | 2 | **3** |
+
+- **`RULE_EDGE_SOURCES.on` 保持五源**（`["control", "class", "subclass", "mark", "object"]`）：对象与标记**都能**发起操作——接**对象** = 不筛标记，接**标记** = 只对该标记命中时生效（`apps/desktop/src/app_ui/panels/blueprintPorts.ts:107`）。
+- **为什么改**：D136 下 `object.children = []`，因此 `can_contain(object, mark) = false`——**画布上根本画不出「对象 → 标记」这条线**，用户在相册蓝图里手工搭"类目 → 对象 → 标记"时链路直接卡死（用户裁决原话："标记要接在对象后面，标记是对单个对象的分类……相册中，相册是类目，里面创建的真实相册则是对象，是执行的对象，标记也是对真实的相册进行细分"）。
+- **自动迁移**：带**语义保持**的 v2 → v3 迁移规则见 `docs/rfc/0007-blueprint.md` 的「v2 → v3」一节与 D137；规范形态 `K --contains--> M --contains--> O` → `K --contains--> O --contains--> M`。
+- **双向互指不变**（D104/D105 的教训）：`object.children` 必须含 `mark`，`mark.parents` 必须是 `["object"]`，`class.children` **不得**含 `mark`；同侧 `children` ↔ `parents` 的双向对称由 `pnpm check:blueprint-nodes` 断言，Rust 侧另有 cargo 测试 `builtin_parent_children_declarations_are_symmetric` 独立钉住（脚本扫不到 Rust）。
+
+### 0.1 本节的实现状态（2026-11-02 落地后实测）
+
+本轮 v3 改动**已全层落地并跑通门禁**——本文第 2–4 节的 v3 规范口径与实现一致：
+
+| 层 | 文件 | 实测现状 |
+| --- | --- | --- |
+| 前端节点定义表（单一事实来源） | `packages/config/src/blueprintNodes.ts` | **v3**：`class.children = ["subclass", "object"]`（`:262`）、`mark.parents = ["object"]` / `mark.children = []`（`:329`-`330`）、`object.children = ["mark"]`（`:353`）、`object.parents = ["class", "subclass"]`（`:352`）、`mark` 字段 `object`（`:314`）、`event.target` 含 `mark`（`:365`） |
+| 版本常量 | `packages/config/src/blueprintValues.ts:20` | **3**（`BLUEPRINT_SCHEMA_VERSION = 3`；注释 `:29` 记 D137）；Rust 同源 `crates/hp-core/src/blueprint.rs:56` |
+| Rust 内置节点表 | `crates/hp-core/src/blueprint_builtin_nodes.rs` | **v3**：`class.children = ["subclass", "object"]`（`:101`）、`mark.parents = ["object"]`（`:124`）/ `mark.children = []`（`:126`）、`object.parents = ["class", "subclass"]`（`:140`）/ `object.children = ["mark"]`（`:142`） |
+| Rust 迁移 | `crates/hp-core/src/blueprint_migrate.rs` | **v2 → v3 已落地**：`migrate_graph`（`:86`）改**逐版本推进**（`:91`-`99` v1→v2 后置 2、`:101`-`104` 跑 `migrate_marks_under_objects` 后置 3，故 v1 文档一次走到 v3）；`migrate_marks_under_objects`（`:150`）四阶段：只读快照 → 计划 → 孤儿启发式 → 字段/结构边/规则边改写。早退条件 `:87` 只对**已是 v3** 的文档生效 |
+| 编辑器落库 | `apps/desktop/src/app_ui/panels/blueprintConnect.ts` | **v3**：新增「对象 → 标记 ⇒ `patch.object`」（`:82`-`99`，并自愈清掉残留 `class`/`control`）；「类目 → 标记 ⇒ `patch.class`」「标记 → 对象 ⇒ `patch.mark_ref`」两条**已删除** |
+| 编辑器灰显判据 | `apps/desktop/src/app_ui/shared/blueprintLint.ts` | **v3**：`mark` 判 `!node.object \|\| !byKey.has(node.object) \|\| Boolean(node.class?.trim())` → `missing-class`（`:166`-`179`）；`object` 只看 `[node.class, node.subclass]`（`:191`-`199`，`mark_ref` 刻意不判灰） |
+| 运行时匹配 | `apps/desktop/src/app_ui/core/blueprintEngine.ts` | **v3 两段式**：mark 分支先查 `target.marks` 含 `node.mark`，再递归 `node.object` 的父对象判定（`:299`-`319`）；object 的 `parentKey` 为 `node.class ?? node.subclass`（`:337`，已去掉 `mark_ref`） |
+| 上报方 | `panels/mediaPreviewSelection.ts` / `panels/AlbumPanel.tsx` / `panels/SourcePanel.tsx` / `panels/bookpreview/bookPreviewView.ts` | 媒体预览三处（`:101`/`:154`/`:166` 一带）与图书预览均带 `marks`；**相册点击上报 `mediaType:"album"` + `effectiveMarksFor(…,"albums",…)`（用户标记 ∪ 派生标记）**；**源面板行点击首次上报 `mediaType:"source"` + `marksOf(…,"sources",node.key)`**（2026-11-02 / **D138**，详见 §2.0.1「标记的上报方」） |
+
+**门禁实测（2026-11-02 17:2x，`$env:PATH` 前置 corepack 钉版 shim 后 `pnpm run <gate>`）全部 exit 0**：
+
+| 门禁 | 结果 |
+| --- | --- |
+| `check:blueprint-nodes` | **114/114 通过** |
+| `check:blueprint-connect` | **24/24 通过** |
+| `check:blueprint-engine` | **62/62 通过** |
+| `check:blueprint-runtime` | **3/3 通过** |
+| `check:panels` | **368/368 通过**（含 D138 的 6 条相册/源面板上报断言） |
+
+（原 §0.1 的 7 条 FAIL 表已全部清零，故本节不再保留该表；历史明细可从 git 忽略前的版本或本轮讨论记录回溯。）
+
+⚠️ **`object` 丢 `on` 端口这条真实回归：已修，但判据仍是"间接判据 + 兜底"的组合——不要误读成"完全按显式清单实现"**：
+`packages/config/src/blueprintNodes.ts` 的 `resolveNodePorts` 仍以 `isObjectLike = hasParents && children.length === 0`（`:516`）为主判据，v3 给 `object` 加了 `mark` 子级后该判据对它**已失效**，`out:on` 目前**只靠** `:524`-`525` 的 `|| children.includes("mark")` 这一支保住；Rust 镜像 `crates/hp-core/src/blueprint_node_decl_validate.rs:221` 同样保留 `is_object_like` 并追加 `child_names.contains(&"mark")`。这与本节第 38 行/第 443 行一带要求的"按 `RULE_EDGE_SOURCES.on` 显式清单判定"**不完全一致**。
+为防"将来 `object` 再加子级时端口静默消失"，`tools/blueprint-node-check.mjs:1460`-`1497` 新增了**数据驱动端口护栏**（两条断言）：① `RULE_EDGE_SOURCES.on` 的五个源 `control/class/subclass/mark/object` **逐个**必须真有 `out:on` 口，且五源名单逐字钉住；② 反例——7 个非规则源**一律不得**有 `out:on`，并逐个点名 `group` / `layout_block` / `overlay` 必须落在非规则源里。判据升级为显式清单仍列为后续清理项（见第 12 节开放点）。
+
+**结论**：本文第 2–4 节的 v3 口径由 TS 定义表与 Rust 内置表**两侧同口径**承载，迁移/编辑器/运行时/门禁均已落地并由门禁钉住；端到端（GUI 拖线→保存→点击命中）仍需按第 10 节的运行时验证口径人工复核。
+
 ## 1. 权威与落点
 
 | 关注点 | 权威实现 | 说明 |
@@ -44,10 +106,10 @@
 | `overlay` | Overlay | 浮层（容器） | 与布局块同级 | —（显示名派生） | `name`、`position`、`visible`、`height`、`size`、`anchor`、`offset_x`、`offset_y`、`shadow`、`radius`、`hide_label` | `interface` | `group`、`control` |
 | `group` | Group | 标签组 | 面板容器 | `mode` | `default_visible`、`hide_direction`、`position`、`name` | `layout_block`、`overlay` | `control` |
 | `control` | Panel | **面板** | 面板实例 | `panel_id` | `title_key`、`name` | `layout_block`、`group`、`overlay` | `class` |
-| `class` | Category | **类目** | 面板内条目分类（按类型） | `control`、`media_type` | `name` | `control` | `subclass`、`mark`、`object` |
+| `class` | Category | **类目** | 面板内条目分类（按类型） | `control`、`media_type` | `name` | `control` | `subclass`、`object` |
 | `subclass` | Subclass | **子类** | 类目之下的细分（如文本 → epub/txt/md） | `subclass`、`format` | `name` | `class`（**必须**） | `object` |
-| `mark` | Mark | **标记** | 类目下与子类**并列**的标记（内置 **10 项**：media / image / video / audio / music / document / text / book / manga / program） | `class`、`mark` | `name` | `class`（**必须**） | `object` |
-| `object` | Object | 对象 | 条目实例（挂在**三条轴之一**下） | `scope` | `class` / `subclass` / `mark_ref`（三选一）、`name` | `class`、`subclass`、`mark` | — |
+| `mark` | Mark | **标记** | **对象之下**的细分（标记是对**单个对象**的细分，v3 / D137；内置 **10 项**：media / image / video / audio / music / document / text / book / manga / program） | `object`、`mark` | `name` | `object`（**必须**） | — |
+| `object` | Object | 对象 | 条目实例（挂在**两条轴之一**下） | `scope` | `class` / `subclass`（二选一）、`name` | `class`、`subclass` | `mark` |
 | `event` | Event | 操作（事件） | 规则起点 | `trigger` | `target`、`name` | 无结构边 | — |
 | `condition` | Condition | 条件 | 规则中间 | `expr` | `name` | 无结构边 | — |
 | `action` | Action | 状态（动作） | 规则终点 | `op`、`target` | `payload`、`name` | 无结构边 | — |
@@ -58,7 +120,8 @@
 - `layout_block` 不能嵌套 `layout_block`（布局块嵌套列为 RFC 0007 开放点）；`overlay` 不能 contains `layout_block` / `overlay` / `class` / `subclass` / `mark` / `object`。
 - 规则三节点（`event`/`condition`/`action`）**不参与结构 `contains`**，只通过 `on` / `fires` / `guards` 连线。
 - `interface` 的显示名取自**层名**（D51）；节点上**不存** `name`。
-- `control`（面板）的 `panel_id` 引用**面板注册表**（`docs/spec/panel-standard.md`）；该面板的 `has_class` 决定其下**能否**挂 `class`（类目）节点——**它只约束类目，不约束标记**。回调历史（2026-11-01 / D134 按实现修正）：本节此前写"两者受同一个开关约束"，而 Rust `find_panel_class_violations`（`crates/hp-core/src/blueprint_validate.rs`）只拦 `control → class`；实际上"面板内部有没有条目分类"（类目）与"这个面板的条目属于哪一类内容"（标记）是两件事。**D135 起**相册 / 源面板也已 `has_class = true`（它们各自有条目分类层），因此现在的例子是**其余 12 个面板**：`has_class = false` 却照样能挂标记。
+- `control`（面板）的 `panel_id` 引用**面板注册表**（`docs/spec/panel-standard.md`）；该面板的 `has_class` 决定其下**能否**挂 `class`（类目）节点——Rust `find_panel_class_violations`（`crates/hp-core/src/blueprint_validate.rs`）**只拦 `control → class`** 这一条边，别的不管（2026-11-01 / D134 按实现修正）。
+- **v3 起标记不再直挂面板**（D137，**撤销** D134/D136 的"标记直挂面板、不受 `has_class` 约束"口径）：标记的结构父是**对象**，而对象的结构父是**类目或子类**。于是 `has_class = false` 的面板下**既**建不了类目、**也**到不了标记——"面板开关只管类目"这件事现在表现为"整条 `面板 ⊃ 类目 ⊃ 对象 ⊃ 标记` 链从类目处断开"。**D135 起**相册 / 源面板的 `has_class` 已是 `true`（它们各自有条目分类层）。
 
 #### 2.0.1 三轴模型：类目 / 子类 / 标记（2026-10-10 / D102；标记取值域 2026-11-01 / D134 扩为 10 项）
 
@@ -76,9 +139,7 @@
 id，标记之间不建立父子引用（D102 已定"可多值、互不嵌套"）。原话里提到的"图片"**不单设 id**：
 用户明确"图像就是图片"。
 
-**标记可挂任何面板**：`mark` 的结构父是 `control`，而面板的 `has_class` **只约束类目**，
-不约束标记——`has_class = false` 的面板（D135 起是**其余 12 个**，相册 / 源已转为 `true`）
-照样能挂标记（见第 2 节要点）。
+**标记的结构位置（v3 / D137）**：`mark` 的结构父是**对象**（`object ⊃ mark`），**不再是面板、也不再与子类并列**。D134/D136 的"标记直挂面板、不受 `has_class` 约束"口径**已撤销**——标记现在只能经 `类目/子类 → 对象 → 标记` 出现（见第 2 节要点）。
 
 因此条目由**三条正交的轴**定位，各有自己的节点类型：
 
@@ -88,29 +149,38 @@ id，标记之间不建立父子引用（D102 已定"可多值、互不嵌套"�
 | **子类** | `subclass` | `format`：**按类目分域**（`text` → `epub` / `txt` / `md`） | 「txt」子类 |
 | **标记** | `mark` | `mark`：**可注册清单**（内置 **10 项**，见上） | 「漫画」标记 |
 
-三者的结构位置不同，这是本模型的关键（**结构位置 2026-11-01 / D136 已改，见下**）：
+三者的结构位置不同，这是本模型的关键（**结构位置 2026-11-02 / D137 已改，见下**）：
 
 ```
-面板 ⊃ 类目 ⊃ { 子类, 标记 } ⊃ 对象
-              （类目—子类是层级；类目—标记是**并列从属**，两者都挂在类目之下）
+面板 ⊃ 类目 ⊃ { 子类, 对象 }
+                     └── 对象 ⊃ 标记
+  （类目—子类、类目/子类—对象是**层级**；对象—标记是**对象之下的细分**）
 ```
 
 - **子类挂在类目之下**（`class ⊃ subclass`）：它是该类目的细分，因此 `format` 的取值域
   **由所属类目的 `media_type` 决定**（`text` → `epub`/`txt`/`md`；其余类目类型（含 `album` /
   `source` / `unlimited` / `empty`）当前**没有**子类取值域，即该类目下不能建子类）。挂在 `image` 类目下的子类 = **硬错误**。
-- **标记也挂在类目之下**（`class ⊃ mark`，**与子类并列**，D136 修订）：它的结构父引用字段是
-  **`class`**（"所属类目"），不是 `control`（"所属面板"）——旧文档里的 `mark.control` 按
-  **未接通软告警**处理，连线时自动清除。
-- **`object` 的结构父是三者之一**（`class` / `subclass` / `mark_ref`，**互斥**）：
-  一个对象要么描述"某类目里的条目"、要么"某子类里的条目"、要么"带某标记的条目"。
+- **标记挂在对象之下**（`object ⊃ mark`，**v3 / D137**）：标记是**对单个对象**的细分，它的
+  结构父引用字段是 **`object`**（"所属对象"）。旧文档里的 `mark.class`（D136 口径）与
+  `mark.control`（更早口径）都按 **未接通软告警**处理，并由 v2 → v3 迁移清除。
+- **`object` 的结构父是二者之一**（`class` / `subclass`，**互斥**）：
+  一个对象要么描述"某类目里的条目"、要么"某子类里的条目"。D136 的三轴之一
+  `object.mark_ref` **v3 起废弃**，残留值按未接通软告警处理。
 
 > ⚠️ **「语义正交」与「结构从属」是两件事（本轮最容易读错的地方）**：
 > D102 说"标记与类目**正交**、可交叉"，那句话讲的是**匹配维度**——标记只看
 > `mark` 值、不看类目的 `media_type`，因此 `manga` 可以跨类目匹配（一个被标为 manga 的
 > zip 与一本被标为 manga 的 epub 命中**同一条**漫画规则），这条语义**原样保留**。
-> D136 改的是**结构位置**：标记节点从此挂在**类目**之下（与子类并列），不再直挂面板。
-> 换句话说：**匹配上仍可交叉，结构上不再平行**。把这两句混读会得出"标记要写在类目
+> D136 把标记挂到**类目**之下（与子类并列）；**D137（v3）再改一次**：标记挂到**对象**之下。
+> 换句话说：**匹配上仍可交叉，结构上则层层从属**。把这两句混读会得出"标记要写在类目
 > 节点里"的错误结论（类目节点仍**禁止**带 `mark` 字段，那是 D102 硬错误）。
+>
+> ⚠️ **v3 新增的一条运行时约束（与 D102 的"只看标记"是不同层次，必须分清）**：标记**节点自身**的
+> 匹配判据仍是"`mark` 值在 `target.marks` 里"；但由于结构改挂对象之下，**一条标记规则要成立
+> 还须它所属的那个对象也命中**——`node.object` 指向的父对象按 `object` 分支的判据与 `scope`
+> 求值，父对象不存在即不命中。也就是说：**筛选维度没变（只看 `mark`），生效范围被对象收窄了**，
+> 这正是用户要的"标记是对**单个对象**的细分"。迁移时把 `on` 边从对象改挂标记之所以**语义保持**，
+> 是因为旧口径下"对象命中"**已经蕴含**"标记命中"（见 RFC 0007 的「v2 → v3」一节）。
 
 
 **「文件夹标记」语义（2026-11-01 / D134）**：标记的**对象不一定是文件**。既有的
@@ -122,8 +192,20 @@ id，标记之间不建立父子引用（D102 已定"可多值、互不嵌套"�
   时，用的是**面板视图状态**（`app_settings` 的 `panelMarks.<repoId>`），**不写 `file_marks`**
   ——`file_marks` 只表达"**某个文件**带某个标记"，把相册 id 或目录 key 塞进它会让"哪些文件
   带 manga"这类既有查询读到根本不是文件的 id；
-- 蓝图节点（`mark ⊃ object`）本身就是**声明式**的：它描述"命中这个标记时按这套设定打开"，
+- 蓝图节点（`object ⊃ mark`）本身就是**声明式**的：它描述"命中这个标记时按这套设定打开"，
   与标记的载体是文件还是文件夹无关。
+
+**标记的上报方（v3 / D137 之后补齐，D138）**：标记节点能不能命中，取决于**上报方有没有把标记集合送进引擎**——`dispatch` 的 `target.marks` 是唯一入口（`BlueprintTargetRef.marks`，引擎只看这个集合、不看 `mediaType`）。补齐后各家如实如下：
+
+| 上报方 | 对象身份 | 上报的 `mediaType` | `marks` 来源 |
+| --- | --- | --- | --- |
+| 媒体预览（选中变化 / 单击 / 双击） | 文件 | `file.media_type` | `file.marks`（`file_marks`，零额外 IPC） |
+| 图书预览（单击 / 双击） | 文件 | `item.media_type` + `format` | `item.marks`（`bookDispatchTarget`） |
+| **相册面板（行点击）** | 真实相册 | **字面量 `"album"`**（相册行的真实 `media_type` 是 multimedia / image / 空，与类目取值域不同名） | `effectiveMarksFor(marks, "albums", 相册 id, derivedMarksForAlbum(有效媒体属性))` —— **用户标记 ∪ 派生标记** |
+| **源面板（行点击）** | 源根 / 源内目录 | **字面量 `"source"`**（取值域 `sources: unlimited / source / empty`） | `marksOf(marks, "sources", 节点 key)`，节点 key 与 `src:<id>` / `dir:<sourceId>/<rel>` 及后端节点 key **三方同源** |
+| 插件控件 | 控件 | 无 | 带 `panelId` 过滤，走控件级派发 |
+
+两条配套口径：(a) **派生标记必须并入上报**——相册的派生标记（属性 → 同名标记，D134）在右键菜单里恒勾且不可取消，菜单说"带这个标记"而引擎收不到就是两套事实；(b) **标记是对象的可选限制条件**，因此上报缺标记只是"这条链不命中"（链上不接标记节点时行为完全不变），不会误命中，也不会改变对象所属的类目。相册与源的自定义标记**互不可见**（`albums` / `sources` 两个域各一份，D134 ⑨），两处都不写 `file_marks`。
 
 **「补充节点」的层级位置（2026-10-10 用户口径；同日更正）**：
 
@@ -139,7 +221,7 @@ id，标记之间不建立父子引用（D102 已定"可多值、互不嵌套"�
   任何类型在**任何时机**都能落下来（**空图上 12 种类型全部可创建**，由
   `pnpm check:blueprint-nodes` 断言），**没有置灰、没有拒绝**。
 - **层级约束体现在"连接方式"上，不是"创建许可"**：
-  - **结构位置**：子类 → `class`（类目），标记 → `control`（面板）——由定义表的
+  - **结构位置**：子类 → `class`（类目），标记 → `object`（对象，v3 / D137）——由定义表的
     `parents` / `children` 声明，画布连线（`containmentAllows`）与后端
     （`can_contain`）据此判**非法边**；
   - **新增时的自动挂载**（`blueprintNodeFactory` 的 `requiresMountParent` /
@@ -149,8 +231,10 @@ id，标记之间不建立父子引用（D102 已定"可多值、互不嵌套"�
 - **创建与连线是两件事**：早前版本曾把子类/标记在"层内无可用父级"时**拒绝新增**
   （连创建都拦住），那是把**层级约束误当成创建许可**——它会打断"先摆节点、后连线"
   这种正常搭图顺序。现已更正为**创建一律放行、缺父留空**（见 D106）。
-- **父子约束是硬性的**：`subclass` 的 `parents` 只有 `["class"]`、`mark` 只有 `["control"]`，
-  因此画布上**不可能**把子类连到面板下、或把标记连到类目下（`containmentAllows` 直接拒绝）。
+- **父子约束是硬性的**：`subclass` 的 `parents` 只有 `["class"]`、`mark` 只有 `["object"]`，
+  因此画布上**不可能**把子类连到面板下、或把标记连到类目/面板下（`containmentAllows` 直接拒绝）。
+  这也是 D137 改结构的直接理由：D136 下 `mark.parents` 是 `["class"]` 且 `object.children` 是 `[]`，
+  **「对象 → 标记」这条线在画布上根本画不出来**（`can_contain(object, mark) = false`）。
 
 **子类优先：类目链路自动排除已被子类定义的情况（2026-10-10 用户口径）**：
 
@@ -178,6 +262,10 @@ id，标记之间不建立父子引用（D102 已定"可多值、互不嵌套"�
 
 这正是用户例子里"类目为压缩包、标记为 manga"能驱动同一套行为的原因：**标记是跨类目的**。
 
+> **v3（D137）补充**：上面说的是**标记节点自身**的筛选维度（跨类目、只看 `mark`）。挂到对象之下后，
+> 一条标记规则还须**它所属的那个对象**也命中（见上文 ⚠️ 的运行时约束）。因此"跨类目"仍成立，
+> 但前提是两条链**各自把对象接对**——标记不再有"直挂面板、与对象无关"的形态。
+
 **`book` 与 `epub` 的关系**（最容易读错的一处）：`epub` 是**子类**（由扩展名判定，
 用户不可改），`book` 是**标记**（用户可改，`epub` 默认带它）。两者**不是**同一维度的两个取值，
 因此"一本 epub 不带 book 标记"是合法状态（用户取消了标记）。
@@ -188,6 +276,10 @@ id，标记之间不建立父子引用（D102 已定"可多值、互不嵌套"�
   缺 `format` 本身是**软告警**（允许保存，补上即恢复）。
 - 标记的 `mark` 取值**不在当前可注册清单**内 → **软告警**（与"插件缺失的节点类型"同口径：
   清单可注册，未注册不等于非法，**允许保存**，注册后自动生效）。
+- **标记缺 `object`（未接通）→ 软告警**（灰显，与"结构父缺失"同口径，见第 6 节软告警第 9 条）。
+  **旧文档残留的 `mark.class` 与 `object.mark_ref` 也是软告警**（不是硬错误）——它们由 v2 → v3
+  迁移清除；解析层与后端都按"旧字段存在 ⇒ 该节点按未接通灰显、但**允许保存**"处理，用户在
+  画布上拖一条「对象 → 标记」的线即恢复彩色（下一条的既有口径）。
 
 #### 2.0.2 类目「类型」取值域与按面板分域（2026-11-01 / D135，D136 扩为 9 项）
 
@@ -267,20 +359,20 @@ id，标记之间不建立父子引用（D102 已定"可多值、互不嵌套"�
 | `position` | 全部 | `{x, y}` | 数值；组节点还表示目标锚点 | 画布自动落位 |
 | `panel_id` | `control` | string | 面板注册表内 id（后端不校验注册表，见第 6 节） | — |
 | `title_key` | `control` | string | i18n 键（D27） | 取面板注册表标题 |
-| `control` | `class` / `mark` | key 引用 | 必须指向 `control`（类目与标记都直接挂在面板下） | — |
+| `control` | `class` | key 引用 | 必须指向 `control`（类目直挂面板）。**v3 / D137 起 `mark` 不再用这个字段**——残留的 `mark.control` 按未接通软告警处理 | — |
 | `media_type` | `class` | enum | `unlimited` / `image` / `video` / `audio` / `text` / `pdf` / `album` / `source` / `empty`（**9 项全量**；已接通面板时还须落在**该面板分域**内，见 §2.0.2） | —（必需） |
 | `format` | `subclass` | enum | **按所属类目的 `media_type` 分域**（`text` → `epub` / `txt` / `md`） | —（缺失按未接通软告警） |
 | `mark` | `mark` | enum | **可注册标记清单** id（内置 **10 项**：`media` / `image` / `video` / `audio` / `music` / `document` / `text` / `book` / `manga` / `program`）；未注册按未接通软告警 | —（必需） |
-| `class` | `object` | key 引用 | 必须指向 `class`（三条轴之一，与下面两个**互斥**） | — |
+| `object` | `mark` | key 引用 | 必须指向 `object`（**所属对象**，v3 / D137 新增）；缺失或指向已删除节点 = 未接通软告警。**旧文档残留的 `class`（D136 口径）同样只报软告警**，由 v2 → v3 迁移清除 | —（必需） |
+| `class` | `object` | key 引用 | 必须指向 `class`（两条轴之一，与 `subclass` **互斥**） | — |
 | `subclass` | `subclass` / `object` | key 引用 | 在 `subclass` 节点上指**所属类目**；在 `object` 节点上指**所属子类**（同名不同义） | — |
-| `mark_ref` | `object` | key 引用 | 必须指向 `mark`（三条轴之一；**不是**标记 id） | — |
-| `class` | `object` | key 引用 | 必须指向 `class` | — |
+| `mark_ref` | `object` | key 引用 | **v3 / D137 起废弃**（D136 的三条轴之一）；仅用于读取旧文档，残留值按未接通软告警处理，由 v2 → v3 迁移清除。**不是**标记 id | — |
 | `scope` | `object` | string | `selected` / `clicked` / `double_clicked` / 具体 `file_id` | —（必需） |
 | `mode` | `group` | enum | `exclusive` / `independent` | —（必需） |
 | `default_visible` | `group` | key[] | 成员 key；互斥组**至多一个** | `[]` |
 | `hide_direction` | `group` | string | `left` / `right` / `up` / `down` / `toward:<groupKey>`（必须指向同层 `group`） | `left`（前端） |
 | `trigger` | `event` | enum | `click` / `double_click` / `selection_change` | —（必需） |
-| `target` | `event` | key 引用 | 必须指向 `class` 或 `object`（兼容旧图；正常来源是 `on` 入边） | — |
+| `target` | `event` | key 引用 | 必须指向 `class` / `object` / `mark`（v3 / D137 扩；兼容旧图；正常来源是 `on` 入边） | — |
 | `expr` | `condition` | string | 固定最小集，见第 5 节 | —（必需） |
 | `op` | `action` | enum | `show` / `hide` / `toggle` / `collapse` / `expand` / `navigate` | —（必需） |
 | `target` | `action` | key 引用 | 按 `op` 决定，见 2.2 | —（必需） |
@@ -355,14 +447,18 @@ id，标记之间不建立父子引用（D102 已定"可多值、互不嵌套"�
 | `out.struct` | `layout_block` / `overlay` | 输出 | `group` / `control` 的 `in.struct` |
 | `out.struct` | `group` | 输出 | `control` 的 `in.struct` |
 | `out.struct` | `control` | 输出 | `class` 的 `in.struct` |
-| `out.struct` | `class` | 输出 | `object` 的 `in.struct` |
-| `in.struct` | `layout_block` / `overlay` / `group` / `control` / `class` / `object` | 输入 | 见上（**只能一个**结构父） |
-| `out.rule` | `control` / `class` / `object` | 输出 | `event` 的 `in.rule`（边类型 `on`） |
+| `out.struct` | `class` | 输出 | `subclass` / `object` 的 `in.struct` |
+| `out.struct` | `subclass` | 输出 | `object` 的 `in.struct` |
+| `out.struct` | `object` | 输出 | `mark` 的 `in.struct`（v3 / D137） |
+| `in.struct` | `layout_block` / `overlay` / `group` / `control` / `class` / `subclass` / `object` / `mark` | 输入 | 见上（**只能一个**结构父） |
+| `out.rule` | `control` / `class` / `subclass` / `mark` / `object` | 输出 | `event` 的 `in.rule`（边类型 `on`） |
 | `out.rule` | `event` | 输出 | `condition` / `action` 的 `in.rule`（边类型 `fires`） |
 | `out.rule` | `condition` | 输出 | `action` 的 `in.rule`（边类型 `guards`） |
 | `in.rule` | `event` / `condition` / `action` | 输入 | 规则三节点可按语义多条入边（见下） |
 
-**结构父唯一性（构造性约束，编辑器必须校验）**：`layout_block` / `overlay` / `group` / `control` / `class` / `object` **只能有一个结构父**（否则"我属于谁"有歧义）。后端校验以 `control` / `class` 的字段引用为准（硬错误），画布连线即写字段。
+**结构父唯一性（构造性约束，编辑器必须校验）**：`layout_block` / `overlay` / `group` / `control` / `class` / `subclass` / `object` / `mark` **只能有一个结构父**（否则"我属于谁"有歧义）。后端校验以字段引用为准（硬错误）：`class.control`、`subclass.subclass`、`object.class`/`object.subclass`（互斥）、`mark.object`；画布连线即写字段。
+
+> ⚠️ **`object` 与 `mark` 的 `on` 输出端口（v3 实现注意）**：`object` 在 v3 仍有 `mark` 子级，**不得**再用"没有子级 ⇒ 像对象 ⇒ 给 `on` 口"这类**间接判据**推导它的规则输出口——那会让 `object` **静默丢掉** `on` 口、「对象 → 操作」画布上连不出来（本次实测已发生，见第 0.1 节）。判据必须是**显式清单** `RULE_EDGE_SOURCES.on`（`apps/desktop/src/app_ui/panels/blueprintPorts.ts:107`，五源不变）。
 
 **规则入边数量**：
 
@@ -408,9 +504,9 @@ id，标记之间不建立父子引用（D102 已定"可多值、互不嵌套"�
 
 | `kind` | 方向 | 允许的端点类型 | 含义 |
 | --- | --- | --- | --- |
-| `contains` | 父 → 子 | `interface`→`layout_block`/`overlay`；`layout_block`/`overlay`→`group`/`control`；`group`→`control`；`control`→`class`；`class`→`object` | 结构包含（第 2 节表） |
+| `contains` | 父 → 子 | `interface`→`layout_block`/`overlay`；`layout_block`/`overlay`→`group`/`control`；`group`→`control`；`control`→`class`；`class`→`subclass`；`class`/`subclass`→`object`；**`object`→`mark`** | 结构包含（第 2 节表） |
 | `memberOf` | `control` → `group` | 面板归属标签组（**兼容旧图**；新图一律用 `group --contains--> control`，D59） | — |
-| `on` | (`control`/`class`/`object`) → `event` | 规则三元组：在对象上发生操作 | — |
+| `on` | (`control`/`class`/`subclass`/`mark`/`object`) → `event` | 规则三元组：在对象上发生操作。**五源不变**（v3 / D137）：接**对象** = 不筛标记，接**标记** = 只在该标记命中且其父对象也命中时生效 | — |
 | `fires` | `event` → `condition`/`action` | 操作触发后续求值 | — |
 | `guards` | `condition` → `action` | 条件为真才执行该动作 | — |
 
@@ -439,12 +535,13 @@ has_tag == <tag_name>
 1. 节点 `key` 为空或重复；**未知 `type`**——**仅当 `type` 本身不合命名规则**（第 2.4 节）时为硬错误；**命名合法但当前无对应注册项**（插件未安装/未启用/API 不兼容）按**未接通软告警**处理（RFC 0010 决策 6，见下方软告警第 0 条）。
 2. 悬空边、重复边、端点类型与边类型不匹配；`fires`/`guards` 成环。
 3. 取值域非法：`trigger` / `op` / `mode` / `media_type` / `expr` / `hide_direction` / `anchor` / `shadow` / `radius` 不在白名单。
-4. 引用**存在但类型不符**：`class.control` 非 `control`、`object.class` 非 `class`、`action.target` 与 `op` 不配对、`default_visible` / `hide_direction` 指向错误类型。
+4. 引用**存在但类型不符**：`class.control` 非 `control`、`object.class` 非 `class`、**`mark.object` 非 `object`**（v3 / D137）、`action.target` 与 `op` 不配对、`default_visible` / `hide_direction` 指向错误类型。
 4b. **`format` 用在非子类节点上**，或子类的 `format` **不在其所属类目的分域内**
     （如 `image` 类目下建子类、或 `text` 类目下写 `format = "png"`）——与"字段用在错误的
     类型上"同级（第 2.0.1 节）。
-4c. **对象的三个结构父同时声明**（`class` / `subclass` / `mark_ref` 多于一个）：
-    对象只能挂在**三条轴之一**下（与"结构父唯一性"同一条约束）。
+4c. **对象的两个结构父同时声明**（`class` / `subclass` 都写了）：
+    对象只能挂在**两条轴之一**下（与"结构父唯一性"同一条约束）。`mark_ref` 属 **v3 废弃字段**，
+    残留值**只报软告警**、不参与这条硬错误判定（D136 时代的"三轴互斥"已随 D137 收窄为两轴）。
 5. 必备字段缺失：`class.media_type`、`object.scope`、`group.mode`、`condition.expr`、`action.op`、`control.panel_id`（缺 `panel_id` 见软告警例外）。
 6. 互斥组 `default_visible` 多于一个成员。
 7. 分层：层 `key` 唯一非空、层 `name` 非空且蓝图内唯一（D60）、至少一层；节点 `layer` 指向不存在的层（**`layers` 存在而节点缺 `layer` 也是硬错误**，不静默压成单层）；跨层结构/规则边。
@@ -467,12 +564,12 @@ has_tag == <tag_name>
 12. **类目挂在无类目的面板下**（RFC 0010 / `docs/spec/panel-standard.md` 第 5.1 节）：**宿主内置**面板的 `has_class = false` 时出现 `control → class` 的 `contains` 边 → 硬错误（宿主声明是不变量）。**插件注册面板**的同类情形按**未接通软告警**处理（见下方软告警第 7 条），因为插件的 `has_class` 会随版本变化。
 13. **浮层内容不合法**：面板声明 `mount.overlay_content = false` 却被浮层 `contains` → 硬错误。
 14. **类目的类型不属于其面板分域**（D135，D136 扩为 9 项）：类目**有** `control` 且指向**存在**的面板节点、而其 `media_type` 不在该面板的**分域**内（如 `albums` 面板下挂 `image` 类目）→ 硬错误（`§2.0.2`）。**`control` 缺失（未接通）不做分域判定**——那时取值只须在 9 项全量表内（缺字段本身按软告警第 1 条处理），缺失不得绑架既有数据。
-15. **`mark` 的结构父不是类目**（D136）：`mark.class` 指向非 `class` 节点 → 硬错误（引用存在但类型不符，同第 4 条）；缺 `class` = 未接通软告警。**`unlimited` / `empty` 类目下建子类** → 硬错误（该类目没有子类分域，同第 4b 条）。
+15. **`mark` 的结构父不是对象**（**v3 / D137**，取代 D136 的"不是类目"）：`mark.object` 指向**存在的节点但类型不是 `object`** → 硬错误（引用存在但类型不符，同第 4 条）；**缺 `object` = 未接通软告警**（不是硬错误）。**`unlimited` / `empty` 类目下建子类** → 硬错误（该类目没有子类分域，同第 4b 条）。
 
 **软告警（`warnings`，不阻塞保存，画布灰显「未接通」）**：
 
 0. **节点类型当前无注册项**（插件未安装/未启用/宿主 API 不兼容）：该节点及其边**原样保留**、不参与求值与结构对账、画布灰显标注「未接通」，**允许保存**；插件恢复后**自动恢复**，无需用户重建（RFC 0010 决策 6）。这是"未知 `type`"的第二种情形，与硬错误第 1 条区分。
-1. 必填引用缺失或指向已删除节点：`control.panel_id`、`class.control`、`object.class`、`action.target`。
+1. 必填引用缺失或指向已删除节点：`control.panel_id`、`class.control`、**`mark.object`**（v3 / D137）、`object.class` / `object.subclass`、`action.target`。
 2. 求值链缺触发来源：`event` 无 `on` 入边且无 `target`；`condition` 无 `fires` 入边；`action` 无 `fires`/`guards` 入边。
 3. 无根层（`interface` 被软删除，D55）；`navigate` 跳转失效（D55）。
 4. `overlay` 未连接到界面（缺 `界面 --contains--> 浮层`，D50 修订）。
@@ -494,6 +591,23 @@ has_tag == <tag_name>
    - **两侧同步**：前端 `blueprintLint.analyzeUnlinked`（画布灰显 / 顶部提示）与后端
      `blueprint_warnings::collect_issues`（保存时软告警）**逐项同结论**，由
      `pnpm check:blueprint-nodes` 的"结构父缺失"断言块用**同一批夹具**跑两侧钉住。
+10. **旧文档残留的废弃结构字段（v3 / D137）**：`mark.class`（D136 口径的"所属类目"）、
+    `mark.control`（更早口径的"所属面板"）、`object.mark_ref`（D136 的三条轴之一）——这三个
+    字段 v3 起**不再是任何节点的结构父**。它们**只报未接通软告警、允许保存**（沿用 D136 时代
+    残留 `mark.control` 的同一条先例），并由 v2 → v3 迁移清除。**不要为它们加硬错误**——否则
+    旧文档一打开就被拒保存。判定还要与**引用类型不符**区分开：字段**指向了存在的节点但类型
+    不对**（如 `mark.object` 指向类目）= 硬错误（第 4 条）；指向不存在/未设置 = 软告警。
+11. **`scope` 与 `trigger` 不配对（D138）**：`event` 的触发方式与它来源对象的 `scope` 错开
+    （`click` ↔ `clicked`、`double_click` ↔ `double_clicked`、`selection_change` ↔ `selected`）→
+    图**合法**（引用齐全、`validate` 不报），但运行时的判定顺序是「`trigger` 决定本次上报的 `scope`」，
+    再要求对象的 `scope` 相等，所以这条链**永远不会命中**：用户看到的是「点了没反应、也没有任何提示」。
+    它与「缺引用」同级 → 画布灰显「未接通」、**允许保存**，把对象 `scope` 改对即恢复。判据：
+    - **只判「全部落空」**：同一事件只要还有一条来源能配上（例如既有 `clicked` 对象、又有面板直连），就不报；
+    - `scope` 写成**具体 `file_id`**（如相册 id）是对实例的精确匹配，**不算**错配；
+    - **兼容旧图**：没有 `on` 入边、只在事件上写 `target` 时同样判定（与运行时 `eventMatches` 的候选顺序一致）；
+    - 来源若是 `mark`，按它的 `object` 取对象（v3 / D137：`对象 ⊃ 标记`）；
+    - **两侧同步**：前端原因码 `scope-trigger-mismatch`，后端文案「触发方式 … 与来源对象的 scope … 不配对」，
+      由 `pnpm check:blueprint-nodes` 的「scope 错配」断言块用**同一批夹具**跑两侧钉住。
 
 **编辑器职责（后端不校验，避免耦合面板注册表）**：`panel_id` 是否在面板注册表内、`hide_direction: toward:<groupKey>` 引用的组是否存在、结构父唯一性、候选引用按**同层**过滤（`navigate` 例外）、**补充节点（子类/标记）新增时自动解析挂载父**（§2.0.1：解析不到就**留空引用**，不拒绝创建）。
 
@@ -501,7 +615,7 @@ has_tag == <tag_name>
 
 - **节点 `key`**：全蓝图唯一；由编辑器**自动生成**，用户不手填：优先「上级 key + 自身类型标识」（`c_media` 下的图像类目 → `c_media_image`；其下双击对象 → `c_media_image_dbl`），冲突才追加序号。
 - **新增节点只追加自身**：编辑器的"新增"只为**被点选的那一个类型**创建节点；缺上级/缺引用时**留空**（画布灰显「未接通」，按第 6 节软告警处理），**不得**为了"补合法链路"新建面板/类目/对象/操作/状态，也**不得**自动接到既有规则上。状态的 `action.target` 只由属性面板指定。
-- **引用字段不在新增时落定，只由「连线」落定（2026-10-10 用户口径 / D109）**：`class.control`、`subclass.subclass`、`mark.control`、`object.class`/`subclass`/`mark_ref` 这些 key 型引用**一律留空**（属性面板里只读展示、用户永不手填）——新增的四类节点因此**必然灰显「未接通」**，使用者在画布上**拖一条线**才接上。连线时由 `blueprintConnect.applyConnect` 在**一份文档**上把**边 + 字段**一次落好。
+- **引用字段不在新增时落定，只由「连线」落定（2026-10-10 用户口径 / D109）**：`class.control`、`subclass.subclass`、**`mark.object`**（v3 / D137）、`object.class`/`subclass` 这些 key 型引用**一律留空**（属性面板里只读展示、用户永不手填）——新增的四类节点因此**必然灰显「未接通」**，使用者在画布上**拖一条线**才接上。连线时由 `blueprintConnect.applyConnect` 在**一份文档**上把**边 + 字段**一次落好。
   - **为什么**：这四类的"未接通"判据**只看字段**（第 6 节软告警第 1 条），而运行期认的也是字段；若新增时就偷偷写好字段，节点就**画布上没线、却不灰显**（用户反馈："类目、子类、标记、对象没有灰显"）。让字段只由连线产生，则四者等价：**画布上没线 ⇔ 字段为空 ⇔ 运行期真的不生效 ⇔ 灰显**（与 D108 给结构节点的口径一致）。
   - **显式选中的上级只用于两件事**：① key 命名（选中 `c_media` 后新增类目 → `c_media_image`）；② 缺省字段取值（类目的 `media_type` 按选中面板取，图书预览下默认 `text`）。**不再"同层兜底复用既有父节点"**——那正是"不可见绑定"的来源。
   - **子类例外一条**：连线到类目时，若子类缺 `format`，按**所属类目的分域**补第一项（text → `epub`，与属性面板下拉缺省同源，可改）；否则"一条线接完仍灰显"（缺 `format` = 未接通，第 6 节软告警第 8 条）。
@@ -515,15 +629,15 @@ has_tag == <tag_name>
 - **层 `key`**：`l_` 前缀 + 语义名（如 `l_browse`），蓝图内唯一且非空；**层名**（`name`，显示名）蓝图内唯一（D60）。
 - **主界面（`is_home`，D67）**：层的可选布尔标记，标记"进入该仓库时默认显示的界面"；**同一蓝图至多一个**（多个为硬错误），**无标记时回退第一个层**。编辑器层工具条提供「设为主界面」按钮，下拉中主界面带 ★。解析优先级：`blueprint.currentLayer`（上次所在层，仍存在时优先）→ `is_home` 层 → 第一个层。
 - **蓝图名**（`blueprints.name`）与层名互相独立（D60）。
-- **`panel_id`** 用**面板注册表** id（内置：`media` / `viewer` / `player` / `metadata` / `color` / `tags` / `repo` / `sources` / `albums` / `tagtable` / `tasks` / `plugins` / `blueprint`；插件面板：`plugin.<plugin_id>.<local_id>`，见 `docs/spec/panel-standard.md` 第 6 节），不使用 key 形式。
+- **`panel_id`** 用**面板注册表** id（内置 **16** 个，按 `packages/config/src/panels.ts:157-174` 的 `BUILTIN_PANEL_IDS` 顺序：`repo` / `sources` / `albums` / `media` / `bookpreview` / `viewer` / `bookreader` / `imageviewer` / `metadata` / `tags` / `tagtable` / `color` / `player` / `tasks` / `plugins` / `blueprint`；插件面板：`plugin.<plugin_id>.<local_id>`，见 `docs/spec/panel-standard.md` 第 6 节），不使用 key 形式。
 - **`type`** 用节点类型注册表 id（内置裸 type；插件 `plugin.<plugin_id>.<local_id>`，第 2.4 节）。
 - **i18n**：`title_key` 必须走键（D27），前端显示名走 `blueprintLabels.ts`，不得内联文案；插件注册的节点类型由插件在自己的语言资源里提供显示名。
 - **默认蓝图**：唯一权威是 `packages/config/src/blueprintDefault.ts` 的 `DEFAULT_BLUEPRINT`；Rust 夹具由 `pnpm generate:blueprint-fixture` 生成，两侧不手工维护。
 
 ## 10. 验证
 
-- **`pnpm check:blueprint-nodes`**（**89 项**）：结构层级/边类型一致性（`CONTAINMENT` ↔ `kindForEdge` ↔ `PORT_DEFS`，均由定义表派生）、**父子声明的双向对称性**（`children` 与 `parents` 逐项互指——只声明一侧会让该边静默连不出来，见第 2 节的实测缺口注记）、节点工厂**只追加自身**（不连带补链、**不产生任何边、也不落定引用字段**）、**所有节点都可随意创建**（**空图上 12 种类型全部可创建**；引用一律留空）、**新增绝不自动连线**（**12 种类型 × 默认蓝图每一个已选中节点**逐个新增后边集逐项不变；容器路径与规则路径各一条显式断言）、**引用型四类"新增即灰显、连线即恢复"**（`analyzeUnlinked` × `applyConnect`：四类新增全部灰显且原因码正确 → 四条线接上后都不再灰显 → 字段按父类型分流含 `mark_ref` → 重复连线去重 → **后端逐 key 同口径**）、**结构父缺失的 TS ↔ Rust 同口径**（同一批夹具跑两侧：未接父的 布局块/标签组/面板 两侧都报 3 条、接好后两侧都 0 条、`memberOf` 兼容旧图两侧都放行、悬空边两侧都不算接好）、上级推导（只认显式选中）、层归属、浮层容器与外观/定位/尺寸、层增删改名、结构骨架、**「一键整理」几何**（起始节点位置不变、同层间距 ≥ 卡片高 + 余量、全图不重叠且避让孤立节点）、状态冲突的 TS↔Rust 同结论，并用 hp-core 真实校验器复核全部夹具。
-- **`pnpm check:blueprint-connect`**（**23 项**，2026-10-10 / D107）：连线体验的**纯函数 + 源码锚点**——
+- **`pnpm check:blueprint-nodes`**（**114 项**；2026-11-02 v3 + D138 落地后实测 **114/114 通过、exit 0**）：结构层级/边类型一致性（`CONTAINMENT` ↔ `kindForEdge` ↔ `PORT_DEFS`，均由定义表派生）、**父子声明的双向对称性**（`children` 与 `parents` 逐项互指——只声明一侧会让该边静默连不出来，见第 2 节的实测缺口注记；Rust 侧另有 cargo 测试独立钉住，脚本扫不到 Rust）、节点工厂**只追加自身**（不连带补链、**不产生任何边、也不落定引用字段**）、**所有节点都可随意创建**（**空图上 12 种类型全部可创建**；引用一律留空）、**新增绝不自动连线**（**12 种类型 × 默认蓝图每一个已选中节点**逐个新增后边集逐项不变；容器路径与规则路径各一条显式断言）、**引用型四类"新增即灰显、连线即恢复"**（`analyzeUnlinked` × `applyConnect`：四类新增全部灰显且原因码正确 → 四条线接上后都不再灰显 → 字段按父类型分流（v3 为 `mark.object`）→ 重复连线去重 → **后端逐 key 同口径**）、**结构父缺失的 TS ↔ Rust 同口径**（同一批夹具跑两侧：未接父的 布局块/标签组/面板 两侧都报 3 条、接好后两侧都 0 条、`memberOf` 兼容旧图两侧都放行、悬空边两侧都不算接好）、**`scope` ↔ `trigger` 错配的 TS ↔ Rust 同口径**（D138：同一批三夹具——错配 1 条 / 配对 0 条 / 具体 `file_id` 0 条——两侧逐项同结论且硬错误 0）、上级推导（只认显式选中）、层归属、浮层容器与外观/定位/尺寸、层增删改名、结构骨架、**「一键整理」几何**（起始节点位置不变、同层间距 ≥ 卡片高 + 余量、全图不重叠且避让孤立节点）、状态冲突的 TS↔Rust 同结论，并用 hp-core 真实校验器复核全部夹具。
+- **`pnpm check:blueprint-connect`**（**24 项**；2026-10-10 / D107，v3 口径下 24/24 通过）：连线体验的**纯函数 + 源码锚点**——
   渲染端口推导（该侧有端口就**一定推得出**一个声明过的端口：12 类型 × 2 侧 × 5 边类型；
   **端口 id 与边类型不同名**的注册类型仍画得出；无端口的侧保持为空）、**可连端口清单**
   （21 组期望关系逐一命中；**默认蓝图 26 条既有边全部可重放**，即"能连出来 ⇔ 已经连上"同一判据；
@@ -537,13 +651,13 @@ has_tag == <tag_name>
   - 命名空间规则：插件注册项必须 `plugin.<plugin_id>.<local_id>`；不得与内置裸 type 冲突。
   - **未知 `type` 分流**：不合命名规则 → 硬错误；命名合法但无注册项 → **软告警且可保存**，且该节点与其边原样保留。
   - `control.panel_id` ↔ 面板注册表 `blueprint_node` 双向一致（`docs/spec/panel-standard.md` 第 5.2 节）。
-  - `has_class = false` 的面板下 `control → class` 被拒（硬错误）；**`control → mark` 不受这条约束**（标记挂任何面板都合法，D134）。
-- **标记清单（D134，2026-11-01）**：系统标记 **10 项**的清单在 TS（`packages/config/src/blueprintValues.ts` 的 `BLUEPRINT_BUILTIN_MARKS`）与 Rust（`crates/hp-core/src/blueprint_types.rs` 的 `BUILTIN_MARKS`）**两处**，`pnpm check:panels` 逐项比对**含顺序**（数量对不上会被 `[&str; N]` 当场发现，但顺序对不上只会让两边下拉顺序悄悄错开、谁都不报错）；同一条断言还钉住 `blueprint.mark.<id>` × 10 × 三语（zh-CN / zh-TW / en）逐键存在——缺一个就是某种语言下菜单出现空白项。
-- **类目「类型」取值域与分域（D135，2026-11-01）**：`BLUEPRINT_MEDIA_TYPES`（7 项）↔ Rust `CLASS_MEDIA_TYPES`（`[&str; 7]`）**逐项相等且顺序一致**（数量对不上会被 `[&str; N]` 当场发现，**顺序**对不上只会让两边下拉顺序悄悄错开、谁都不报错）；TS `classMediaTypesForPanel` ↔ Rust `class_media_types_for_panel` **逐面板逐项相等**（`media` / `bookpreview` / `albums` / `sources` + 未注册）——这是**新增的跨语言镜像点**，两侧各写一份必然漂移。`pnpm check:panels` 另钉住 `defaultClassFieldsForPanel` 的四个面板缺省值、`PANEL_CLASS_MEDIA_TYPES` 键集 ↔ `has_class = true` 面板集相等、以及 `docs/spec/panel-standard.md` 第 5.1 节 has_class 表里四个面板的 `**true**` 字样。
+  - `has_class = false` 的面板下 `control → class` 被拒（硬错误）；**`control → mark` 在 v3 下同样非法**，但理由不同——`mark` 的结构父是 `object`，`control.children` 只有 `class`，因此这条边被 `containmentAllows` 直接拒绝（**取代** D134 的"标记挂任何面板都合法"口径，见第 0 节）。
+- **标记的上报与匹配（D138，2026-11-02）**：`pnpm check:panels` 新增 **6 条**（362 → **368**）——相册行必须上报 `mediaType:"album"` + `fileId: node.id`，`marks` 必须走 `effectiveMarksFor(marks,"albums",node.id,derivedMarksForAlbum(` 且**反面断言 `marks: []` 恒空形态不得再出现**；源面板行必须上报 `click` + `mediaType:"source"` + `fileId: node.key`，`marks` 必须走 `marksOf(marks,"sources",node.key)`；`effectiveMarksFor` 的**行为**断言（并集、去重保序、`serializePanelMarksState` 后派生标记**不落库**）；派生标记必须取自 `effectiveMediaType(node.id, albumById)`（沿父链继承后的有效属性，非节点自身字段）。`pnpm check:blueprint-engine` 新增 **7 条**（55 → **62**），用真实引擎跑合成图的"同一次点击只换一个变量"对照：标记命中+对象命中 ⇒ 命中；`marks=[]` ⇒ 不命中；不相干标记 ⇒ 不命中；**同一标记换成 `mediaType:"image"` 上报 ⇒ 不命中（标记不改变对象所属类目）**；派生标记可作条件；源面板三件套 ⇒ 命中；源无标记/换 key ⇒ 不命中（两个条件都不可省）。\n- **标记清单（D134，2026-11-01）**：系统标记 **10 项**的清单在 TS（`packages/config/src/blueprintValues.ts` 的 `BLUEPRINT_BUILTIN_MARKS`）与 Rust（`crates/hp-core/src/blueprint_types.rs` 的 `BUILTIN_MARKS`）**两处**，`pnpm check:panels` 逐项比对**含顺序**（数量对不上会被 `[&str; N]` 当场发现，但顺序对不上只会让两边下拉顺序悄悄错开、谁都不报错）；同一条断言还钉住 `blueprint.mark.<id>` × 10 × 三语（zh-CN / zh-TW / en）逐键存在——缺一个就是某种语言下菜单出现空白项。
+- **类目「类型」取值域与分域（D135 起 7 项、D136 扩为 **9** 项，2026-11-01）**：`BLUEPRINT_MEDIA_TYPES`（**9 项**）↔ Rust `CLASS_MEDIA_TYPES`（`[&str; 9]`）**逐项相等且顺序一致**（数量对不上会被 `[&str; N]` 当场发现，**顺序**对不上只会让两边下拉顺序悄悄错开、谁都不报错）；TS `classMediaTypesForPanel` ↔ Rust `class_media_types_for_panel` **逐面板逐项相等**（`media` / `bookpreview` / `albums` / `sources` + 未注册）——这是**新增的跨语言镜像点**，两侧各写一份必然漂移。`pnpm check:panels` 另钉住 `defaultClassFieldsForPanel` 的四个面板缺省值、`PANEL_CLASS_MEDIA_TYPES` 键集 ↔ `has_class = true` 面板集相等、以及 `docs/spec/panel-standard.md` 第 5.1 节 has_class 表里四个面板的 `**true**` 字样。
 - **端口推导一致性（两条门禁，防"连线被静默丢弃"）**：
   - `portIdFor 只返回 PORT_DEFS 声明过的端口`：遍历全部已注册类型 × 2 侧 × 5 边类型。画布渲染连线时按 `portMap.get(`${key}::${side}::${portIdFor(type, side, kind)}`)` 找端口坐标，而 DOM 标记用 `PORT_DEFS` 里的 id —— 返回一个未声明的 id 会让查表落空、连线被 `return null` 丢掉。**真实回归**：输入侧曾被边类型名覆盖（`action.in.fires` 返回 `"fires"`，而操作节点的输入口实际是 `"in"`），导致「操作 → 状态」在画布上永远没有线；同一处错误还让"拖线到操作输入口"永远判不等（`in !== contains`），即用户反馈的"操作节点接不到触发节点"。
   - `每种规则边两端都能在画布上连出来（on/fires/guards/memberOf）`：遍历允许的端点组合。
-- 其余蓝图自检：`check:blueprint-engine`（**43 项**：求值/浮层/navigate/hide_direction/**子类优先**）、`check:blueprint-delete`（软删除）、`check:blueprint-runtime`（装载/升级/回退/补种）、`check:blueprint-geometry`、`check:blueprint-slots`。
+- 其余蓝图自检：`check:blueprint-engine`（**62 项**，2026-11-02 v3 + D138 落地后实测 62/62 通过：求值/浮层/navigate/hide_direction/**子类优先**/**标记两段式匹配**）、`check:blueprint-delete`（软删除，14/14）、`check:blueprint-runtime`（装载/升级/回退/补种，3/3）、`check:blueprint-geometry`（7/7）、`check:blueprint-slots`（5/5）、`check:blueprint-minimap`（11/11）、`check:blueprint-layout-sync`（43/43）。
 - **解析层新增拦截**：字段用在**不支持它的节点类型**上即拒绝（由定义表驱动），与后端"引用存在但类型不符"的硬错误口径一致。
 - `cargo test --workspace`：存储往返、仓库隔离、默认蓝图、模板、validate 拒绝（悬空边/环/未知类型/key 重复/互斥组多默认可见/非法 `hide_direction`/状态冲突/主界面标记重复/类目挂无类目面板）。
 
@@ -551,10 +665,10 @@ has_tag == <tag_name>
 
 三个词各有归属，**不得混用**（RFC 0010 决策 1）：
 
-- **面板（Panel）**：蓝图节点 `control`，dockview 面板实例（`docs/spec/panel-standard.md`）。**可注册**（宿主内置 13 个 + 插件）。
+- **面板（Panel）**：蓝图节点 `control`，dockview 面板实例（`docs/spec/panel-standard.md`）。**可注册**（宿主内置 **16** 个 + 插件）。
 - **控件（Control）**：面板**内部**的标准 UI 单元，26 种 `kind`，挂在面板**渲染树**里（`docs/spec/control-standard.md`）。**不可注册**（D62）。
 - **类目（Category）**：蓝图节点 `class`，面板内条目分类（本文第 2 节）。挂在面板**结构树**里，受面板 `has_class` 约束。
-- **标记（Mark）**：蓝图节点 `mark`，**类目之下与子类并列**的标记（本文第 2.0.1 节，D136 修订；结构父引用字段是 `class`）。挂在面板**结构树**里、位于类目之下，**不受** `has_class` 约束（`has_class` 只约束类目）——标记表达"条目属于哪一类内容"，与"面板内部有没有按媒体类型分类"是两件事（D134）。
+- **标记（Mark）**：蓝图节点 `mark`，**对象之下的细分**（本文第 0 节与第 2.0.1 节，**v3 / D137**；结构父引用字段是 `object`）。在结构树里的位置是最内层：`面板 ⊃ 类目 ⊃ {子类, 对象} ⊃ 标记`——标记表达"对这个**具体对象**的进一步细分"，D134/D136 的"标记直挂类目 / 面板、位于类目之下"口径**已撤销**。
 
 两张表的关系：**面板注册表**声明 `blueprint_node`（该面板由哪种节点承载），**节点类型注册表**声明是否允许 `panel_id` 字段——两侧必须互相对应，由门禁断言。
 

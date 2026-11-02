@@ -161,16 +161,16 @@ export interface BlueprintNode {
   // mark
   /** 标记种类 id（`mark` 节点）：引用可注册的标记清单（`book` / `manga` …）。 */
   mark?: string;
-  // object / mark（三条语义轴任选其一；标记节点自 D136 起也用它指向所属类目）
+  // 结构引用字段（父指向）：v3 起 object 只有「类目 / 子类」两条轴，mark 改挂 object 之下
   /**
-   * **所属类目** key。
-   *
-   * - `mark` 节点（D136）：标记**从属类目**（与子类并列），旧字段 `control` 已移除；
-   * - `object` 节点：三条语义轴之一（与 `subclass` / `mark_ref` 互斥）。
+   * **所属类目** key（`object` 节点：两条语义轴之一，与 `subclass` 互斥）。
    *
    * ⚠️ 这是**同一含义在不同节点上的复用**（"我所属的类目"），**不是**同名不同义：
    * `class` 节点用 `control` 表达"所属面板"，那是**另一个字段名**。
    * 真正"同名不同义"的是 `subclass`（见 `format` 的说明）。
+   *
+   * v3 起 `mark` 节点**不再**用本字段（改用 [`object`]）；旧文档残留值按「未接通」
+   * 软告警处理（解析层放行，见 `parseNode` 的旧文档兼容分支）。
    */
   class?: string;
   /**
@@ -179,7 +179,15 @@ export interface BlueprintNode {
    * ⚠️ 按节点类型分流，见 `format` 的说明。
    */
   subclass?: string;
-  /** 所属**标记节点** key（`object` 节点，三条轴之一；**不是**标记 id）。 */
+  /** **所属对象** key（`mark` 节点；v3 起 `class ⊃ object ⊃ mark`，标记是对象的细分）。 */
+  object?: string;
+  /**
+   * 所属**标记节点** key（`object` 节点）。
+   *
+   * @deprecated v3 起对象不再挂标记——方向反过来了：**标记挂在对象之下**。本字段仅为
+   * 读入旧文档而保留；v2→v3 迁移会把该轴改写成「对象挂类目 + 标记挂对象」，迁移之外的
+   * 残留值按「未接通」软告警处理（不阻塞保存）。
+   */
   mark_ref?: string;
   scope?: string;
   // group
@@ -252,7 +260,18 @@ export type BlueprintUnlinkedReason =
   /** **子类缺 `format`**：说不清收哪些文件，运行时不命中任何条目（软告警，可保存）。 */
   | "subclass-missing-format"
   /** **标记不在可注册清单内**：清单可注册，未注册按未接通（可保存，注册后自动生效）。 */
-  | "mark-unregistered";
+  | "mark-unregistered"
+  /**
+   * **操作永远不会被触发**（D138 补）：操作唯一的来源对象（或其所属标记、标记的上级对象）
+   * 的 `scope` 与操作自己的 `trigger` 对不上——`clicked` 只跟 `click` 配对、
+   * `double_clicked` 只跟 `double_click`、`selected` 只跟 `selection_change`。
+   *
+   * 为什么算"未接通"而不是硬错误：图本身是合法的（引用都在、边也合法），
+   * 但用户在画布上看到的是一条彩色、接好的链——点了却毫无反应，
+   * 且没有任何提示。这正是"静默不生效"，必须与"缺引用"一样可见（灰显）。
+   * 允许保存：把 `scope` 或 `trigger` 改成配对的一对即恢复。
+   */
+  | "scope-trigger-mismatch";
 
 /** 派生分析结果：未接通节点 key → 原因。 */
 export type BlueprintUnlinkedMap = Record<string, BlueprintUnlinkedReason>;
@@ -507,11 +526,19 @@ function parseNode(value: unknown): BlueprintNode | null {
     // 按缺失处理，避免"清空某字段"反而让整份文档解析失败。
     if (fieldValue === undefined) continue;
     if (!spec) continue;
-    // **旧文档兼容（D136 迁移口径）**：D136 之前 `mark` 节点用 `control` 指向所属面板，
-    // 现在改用 `class` 指向所属类目。旧文档里残留的 `control` 若按"字段用在错误的类型上"
-    // 直接拒绝，会让"读进来就保存不了"变成迁移事故（用户库实测 0 个 mark 节点，
-    // 但口径仍要稳：解析层**放行**，由 `blueprintLint` 判成「未接通」软告警）。
+    // **旧文档兼容（v3 迁移口径）**：v3 起标记改挂到对象之下，结构引用字段从
+    // `class`（所属类目）换成 `object`（所属对象）；对象的 `mark_ref` 轴同时废弃
+    // （方向反了）。旧文档里残留的这两个字段若按"字段用在错误的类型上"直接拒绝，
+    // 会让"读进来就保存不了"变成迁移事故——解析层**放行**，由 `blueprintLint`
+    // 判成「未接通」软告警，真正的改形由 `migrate_document`（v2→v3）完成。
+    // 与 D136 时代放行残留 `control` 是同一处置口径（见上一段）。
     if (node.type === "mark" && field === "control" && typeof fieldValue === "string") {
+      continue;
+    }
+    if (node.type === "mark" && field === "class" && typeof fieldValue === "string") {
+      continue;
+    }
+    if (node.type === "object" && field === "mark_ref" && typeof fieldValue === "string") {
       continue;
     }
     const fieldSpec = spec.fields.find((f) => f.name === field);
@@ -525,16 +552,17 @@ function parseNode(value: unknown): BlueprintNode | null {
   if (node.hide_direction !== undefined && !isHideDirection(node.hide_direction)) {
     return null;
   }
-  // 类目**只按媒体类型分类**（D102）：细分交给 `subclass`、语义维度交给挂在类目
-  // **之下**的 `mark` 节点（D136 把标记从"面板下的平行轴"改成"类目下的从属轴"）。
+  // 类目**只按媒体类型分类**（D102）：细分交给 `subclass`（类目之下），语义维度交给
+  // 挂在**对象之下**的 `mark` 节点（v3 起 `class ⊃ object ⊃ mark`）。
   // 类目上出现 `format` / `mark` 是旧写法（或字段用错类型）→ 解析层拒绝（与 Rust 同口径）。
   if (node.type === "class" && (node.format !== undefined || node.mark !== undefined)) {
     return null;
   }
-  // 对象**三条语义轴互斥**：只能挂在 类目 / 子类 / 标记 三者之一（与 Rust 同口径）。
-  // 标记节点自 D136 起用 `class` 指向所属类目，那只是一种引用关系，**不参与互斥**。
+  // 对象**两条语义轴互斥**：只能挂在 类目 / 子类 二者之一（与 Rust 同口径）。
+  // v3 起「标记」不再是对象的父（方向反过来：标记挂对象之下），因此 `mark_ref`
+  // **不参与互斥**——旧文档残留值放行，由软告警层判成「未接通」。
   if (node.type === "object") {
-    const declared = [node.class, node.subclass, node.mark_ref].filter(
+    const declared = [node.class, node.subclass].filter(
       (k) => typeof k === "string" && k.trim() !== "",
     );
     if (declared.length > 1) {

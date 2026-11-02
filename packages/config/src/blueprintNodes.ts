@@ -225,13 +225,14 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
       { name: "position", type: "position", note: "画布坐标（所有节点通用）" },
     ],
     parents: ["layout_block", "group", "overlay"],
-    // 面板之下**只有类目这一条结构轴**（D136）：标记从"与类目平行的独立轴"改为
-    // "类目之下的从属轴"（与子类并列），因此 `control.children` **不再含 `mark`**。
-    // ⚠️ 这是一处**双向声明**：`mark.parents` 必须同时写成 `["class"]`——两侧只改一侧
+    // 面板之下**只有类目这一条结构轴**（D136 确立，v3 仍然成立）：子类与对象都挂在
+    // 类目之下，标记则挂在**对象**之下，因此 `control.children` 里既没有 `mark`、
+    // 也没有 `subclass` / `object`（它们经由类目间接落在面板下）。
+    // ⚠️ 这是一处**双向声明**：`class.parents` 必须同时写成 `["control"]`——两侧只改一侧
     // 会让该边静默连不出来（画布 `containmentAllows` 与 Rust `can_contain` 都只读
     // **父节点的 children**、不读子节点的 parents；D104 的教训）。
-    // 面板的 `hasClass` 仍然**只约束类目**（D134 口径不变）；标记现在间接落在类目下，
-    // 它的"能不能挂"由类目是否存在决定，不再单独看面板开关。
+    // 面板的 `hasClass` 仍然**只约束类目**（D134 口径不变）；标记现在间接落在
+    // 类目 → 对象之下，它的"能不能挂"由对象是否存在决定，不再单独看面板开关。
     children: ["class"],
     events: [],
   },
@@ -245,18 +246,20 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
       { name: "control", type: "ref", required: true, softWhenMissing: true, values: ["control"] },
       // 类目按**类型**分类（字段名 `media_type` 是历史命名，D135 起 UI 显示为「类型」），
       // 仅此一个字段（2026-10-10 / D102：细分交给 `subclass`，
-      // `book` 那类与类目正交的维度交给 `mark`——不再往类目上挂 `format`）。
+      // `book` 那类"可交叉"的维度交给 `mark`——**但 `mark` 是对象的细分（v3），
+      // 不是类目的维度**，所以类目上不挂 `mark`、也不挂 `format`）。
       // 取值域是**全量 7 项**（合法取值的并集）；某个面板下能用哪几项由
       // `classMediaTypesForPanel(panelId)` 收窄（属性面板下拉与工厂缺省都按它）。
       { name: "media_type", type: "enum", required: true, values: BLUEPRINT_MEDIA_TYPES },
       { name: "position", type: "position" },
     ],
     parents: ["control"],
-    // 类目之下**两条并列的从属轴**（D136）：子类（细分）与**标记**（可交叉的语义维度）。
-    // 两者都挂在类目下、彼此独立（一个对象可挂子类、另一个挂标记，互不干扰）。
-    // ⚠️ 必须与 `mark.parents = ["class"]` 双向互指：漏写 `mark` 会让「类目 → 标记」
-    // 被判成非法边（`can_contain` 只读父节点的 children），连线静默连不出来。
-    children: ["subclass", "mark", "object"],
+    // 类目之下**两条并列的从属轴**：子类（细分）与对象（具体执行对象）。
+    // **标记不在其中**（v3）：标记改挂到对象之下（`class ⊃ object ⊃ mark`），
+    // 它不再由类目直接包含——D136 的 `class.children` 含 `mark` 已撤销。
+    // ⚠️ 必须与 `subclass.parents = ["class"]`、`object.parents` 含 `class` 双向互指：
+    // 漏写会让该边被判成非法边（`can_contain` 只读父节点的 children），连线静默连不出来。
+    children: ["subclass", "object"],
     events: [],
   },
   {
@@ -287,26 +290,28 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
     events: [],
   },
   {
-    // 标记（D102 / **D136 改挂载位置**）：语义上仍与类目"正交、可交叉"（`manga` 标记可以
-    // 跨类目命中），但**结构上从属类目**（`class ⊃ mark ⊃ object`，与子类并列）。
-    // 为什么这样改（用户原话 2026-11-01）：「标记连接到类目上，标记和子类类似。」
-    // ——"语义正交"与"结构从属"是两件事，别把前一句读成后一句被撤销。
+    // 标记（D102 / D136 / **v3 改挂载位置**）：语义上仍是"给一个具体条目打一个可交叉的
+    // 标记"（同一个 `manga` 标记可以出现在多个类目下的不同对象上），但**结构上从属对象**
+    // （`class ⊃ object ⊃ mark`，链的末梢）。
+    //
+    // 为什么这样改（用户原话 2026-11-02）：「标记要接在对象后面，标记是对单个对象的分类」
+    // ——媒体预览里 图像/视频/音频 是**类目**（大类）、具体条目是**对象**（执行对象），
+    // 标记则是对这个对象的细分；相册里 相册 是类目、里面创建的真实相册是对象。
+    //
+    // 旧口径（D136：`class ⊃ mark ⊃ object`，标记与子类并列挂类目下）由
+    // `migrate_document` 的 **v2→v3** 迁移改形，语义保持不变（迁移把操作连线一并
+    // 从对象改挂到标记，见 `blueprint_migrate.rs`）。
     type: "mark",
     label: "标记",
     role: "structural",
     providesName: true,
     fields: [
       { name: "name", type: "string" },
-      // **`class` 字段在 `mark` 节点上 = "所属类目"**（D136；旧字段 `control` 已移除）。
-      //
-      // ⚠️ 这是**同一含义在不同节点上的复用**，**不是**"同名不同义"：
-      // - `class` 节点上的 `control` = 所属**面板**（它有自己独立的面板引用字段名）；
-      // - `mark` / `object` 节点上的 `class` = 所属**类目**——两个节点说的是同一件事，
-      //   只是被引用的对象不同，字段语义完全一致。
-      // 与此相对，`subclass` 字段才是真正的"同名不同义"：在 `subclass` 节点上指
-      // **所属类目**、在 `object` 节点上指**所属子类**（见 `subclass` 条的注释）。
-      // 后人若要改字段名，请按"含义"分组，不要机械地按"字段名相同"合并语义。
-      { name: "class", type: "ref", required: true, softWhenMissing: true, values: ["class"], note: "所属类目 key" },
+      // **`object` 字段在 `mark` 节点上 = "所属对象"**（v3）。与 `class` / `subclass`
+      // 引用字段同一套命名口径：**字段名 = 被引用节点的类型**。
+      // （`class` 节点上的 `control` 是唯一例外：它指"所属面板"，有独立字段名。）
+      // 旧文档里残留的 `class`（D136 的"所属类目"）按**未接通软告警**处理，不阻塞保存。
+      { name: "object", type: "ref", required: true, softWhenMissing: true, values: ["object"], note: "所属对象 key" },
       {
         // 取值域**自动跟随**标记清单（D134 起 10 项）：这里不重抄一遍 id，
         // 否则清单扩项时下拉会静默少项（`check:panels` 断言 TS ↔ Rust 逐项相等）。
@@ -319,10 +324,10 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
       },
       { name: "position", type: "position" },
     ],
-    // 标记挂在**类目**下（D136），与子类并列成为类目的两条从属轴之一。
-    // 必须与 `class.children` 双向互指（漏一侧 = 该类连线静默连不出来，D104 教训）。
-    parents: ["class"],
-    children: ["object"],
+    // 标记挂在**对象**下（v3）：对象是"具体执行对象"，标记是对它的细分。
+    // 必须与 `object.children` 双向互指（漏一侧 = 该类连线静默连不出来，D104 教训）。
+    parents: ["object"],
+    children: [],
     events: [],
   },
   {
@@ -332,19 +337,20 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
     providesName: true,
     fields: [
       { name: "name", type: "string" },
-      // 结构父有**三种**（三条语义轴，任选其一；`class` 字段 = 所属类目，与 `mark`
-      // 节点上的 `class` 同一含义，见 `mark` 条的说明）：
-      // 类目 / 子类 / 标记。
+      // 结构父有**两种**（两条语义轴，任选其一）：类目、子类。
+      // （v3 起"标记"不再是对象的父——方向反了：标记现在挂在对象**之下**。）
+      // `class` 字段 = 所属类目，与 `subclass` 节点上的 `subclass` 字段同义、
+      // 与 `class` 节点上的 `control`（所属面板）不同义，见 `mark` 条的说明。
       { name: "class", type: "ref", softWhenMissing: true, values: ["class"], note: "所属类目 key" },
       { name: "subclass", type: "ref", softWhenMissing: true, values: ["subclass"], note: "所属子类 key" },
-      { name: "mark_ref", type: "ref", softWhenMissing: true, values: ["mark"], note: "所属标记节点 key（不是标记 id）" },
       { name: "scope", type: "string", required: true, note: "selected / clicked / double_clicked / file_id" },
       { name: "position", type: "position" },
     ],
-    // 三条轴仍是三选一，故 `mark` 仍在 `parents` 里（D136 只改了标记**自己的**父级：
-    // 标记节点现在挂类目下，但"对象挂标记下"这条没有变）。
-    parents: ["class", "subclass", "mark"],
-    children: [],
+    // 两条轴二选一。v3 起对象**可以带标记子节点**（`children` 含 `mark`），
+    // 但标记不是对象的"父"，因此不在 `parents` 里；旧文档残留的 `mark_ref`
+    // 按未接通软告警处理（由 v2→v3 迁移清掉）。
+    parents: ["class", "subclass"],
+    children: ["mark"],
     events: [],
   },
   {
@@ -356,7 +362,7 @@ const BUILTIN_SPECS: readonly Omit<BlueprintNodeSpec, "origin">[] = [
     fields: [
       { name: "name", type: "string" },
       { name: "trigger", type: "enum", required: true, values: BLUEPRINT_TRIGGERS },
-      { name: "target", type: "ref", softWhenMissing: true, values: ["class", "object"], note: "兼容旧图；正常来源是 on 入边" },
+      { name: "target", type: "ref", softWhenMissing: true, values: ["class", "object", "mark"], note: "兼容旧图；正常来源是 on 入边" },
       { name: "position", type: "position" },
     ],
     parents: [],
@@ -508,12 +514,21 @@ export function resolveNodePorts(spec: BlueprintNodeSpec): BlueprintPortSpec[] {
   const isPanelLike = children.includes("class");
   const isObjectParent = children.includes("object");
   const isObjectLike = hasParents && children.length === 0;
+  // 「可作规则源」（`on` 出边）的结构类型 = 面板 / 类目 / 子类 / 标记 / 对象，
+  // 与 `apps/desktop/src/app_ui/panels/blueprintPorts.ts` 的 `RULE_EDGE_SOURCES.on` 同集合。
+  //
+  // ⚠️ v3（`class ⊃ object ⊃ mark`）回归修正：`object` 有了 `mark` 子级之后**不再是叶子**，
+  // 若仍然只按"叶子"判定，`object` 会**静默丢掉 `on` 输出口**——画布上「对象 → 操作」
+  // 连不出来、默认蓝图的 `object --on--> event` 也无法重放（与 :510-513 记的旧回归同源：
+  // 判据必须按语义集合，不能按"当下恰好长什么样"）。故显式把 `mark` 子级并入判据。
+  const isRuleSource =
+    isPanelLike || isObjectParent || isObjectLike || children.includes("mark");
 
   if (role === "structural") {
     if (hasParents) push(isPanelLike ? "in" : "contains", "in", "contains");
     if (children.length > 0) push("contains", "out", "contains");
     if (isPanelLike) push("memberOf", "out", "memberOf");
-    if (isPanelLike || isObjectParent || isObjectLike) push("on", "out", "on");
+    if (isRuleSource) push("on", "out", "on");
   } else if (role === "trigger") {
     push("on", "in", "on");
     push("fires", "out", "fires");

@@ -297,11 +297,26 @@ export class BlueprintEngine {
       return node.format !== undefined && node.format === target.format;
     }
     if (node.type === "mark") {
-      // 标记（D102）：与类目**正交、可交叉**，因此**只**看标记是否命中，
-      // **不看** `mediaType`——一个被标为 `manga` 的 zip 与一本被标为 `manga`
-      // 的 epub 都该命中同一个「漫画」规则（这正是"可交叉"的含义）。
-      // 标记是**集合**：上报的 `marks` 里含它即命中。
-      return node.mark !== undefined && (target.marks ?? []).includes(node.mark);
+      // 第一段：标记是**集合**——上报的 `marks` 里含它即命中。这一轴与类目/子类**正交**，
+      // 因此**不看** `mediaType`：一个被标为 `manga` 的 zip 与一本被标为 `manga` 的 epub
+      // 都该命中同一个「漫画」规则（这正是"可交叉"的含义，D102）。
+      if (node.mark === undefined || !(target.marks ?? []).includes(node.mark)) {
+        return false;
+      }
+      // 第二段（v3：`class ⊃ object ⊃ mark`，契约 task-4 §3）：**标记只对它所属的那个
+      // 对象生效**——用户口径「标记是对单个对象的分类」。因此光有标记命中不够，父对象
+      // （`node.object`）也必须命中；否则给某个对象打的标记会连带命中挂在别的对象下、
+      // 恰好同名的标记链（D136 时代标记挂类目之下、与对象无关，故只需第一段）。
+      // ⚠️ 这里只判父是否存在，不额外判 `parent.type === "object"`：指向存在但类型不对
+      // 由校验层判硬错误（task-4 §2），引擎按契约原样走递归。
+      const parentKey = node.object;
+      const parent = parentKey
+        ? graph.nodes.find((n) => n.key === parentKey)
+        : undefined;
+      if (!parent) {
+        return false;
+      }
+      return this.objectNodeMatches(parent, target, scope, graph);
     }
     if (node.type === "object") {
       // `scope` 既可以是三个交互关键字（clicked / double_clicked / selected），
@@ -313,9 +328,13 @@ export class BlueprintEngine {
       if (!scopeMatches) {
         return false;
       }
-      // 对象的**三条正交轴**（类目 / 子类 / 标记）：按实际声明的那一条判定。
-      // 三者互斥（同时声明多条是硬错误，由校验拒绝），因此这里取第一个非空的。
-      const parentKey = node.class ?? node.subclass ?? node.mark_ref;
+      // 对象的**两条正交轴**（类目 / 子类）：按实际声明的那一条判定。
+      // 两者互斥（同时声明是硬错误，由校验拒绝），因此这里取第一个非空的。
+      // **v3 起 `mark_ref` 不再参与匹配**（契约 task-4 §3）：标记方向反过来了
+      // （标记挂对象之下，见上面 `mark` 分支），旧文档里残留的 `mark_ref` 由迁移改形，
+      // 残留值按「未接通」软告警处理——这里若还当第三条轴用，会把本应不命中的旧对象
+      // 重新接活，等于绕过迁移。
+      const parentKey = node.class ?? node.subclass;
       const parent = parentKey
         ? graph.nodes.find((n) => n.key === parentKey)
         : undefined;

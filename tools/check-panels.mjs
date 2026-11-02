@@ -5965,6 +5965,75 @@ check(
   })(),
 );
 
+// ---- D138：相册 / 源面板把**面板标记**并入蓝图上报 ----
+//
+// 用户口径（2026-11-02）：「相册链里的标记需要命中，并把源面板的标记也一起修复，标记就是
+// 为了给单个对象进行精确细分，注意，标记不改变对象性质，只是作为对象的限制条件，是可选项，
+// 功能和名称一致，即"标记"。」
+//
+// 这两个面板的标记存在**面板本地**（`shared/panelMarks.ts`，落 `app_settings` 的
+// `panelMarks.<repoId>`），与文件表的 `file_marks` 是两套存储。D138 之前，相册行的
+// `app.dispatch` 恒报 `marks: []`、源面板行根本不 dispatch ⇒ 画布上
+// 「类目 → 对象 → 标记 → 操作」在运行时永远求值不到，而标记的语义正是**对象的限制条件**，
+// 不上报就等于这条链没有任何条件可判。本组断言钉住"上报真的带上了标记"。
+{
+  const panelSrc = (rel) => stripComments(readFileSync(join(ROOT, rel), "utf8"));
+  const albumSrc = panelSrc("apps/desktop/src/app_ui/panels/AlbumPanel.tsx");
+  const sourceSrc = panelSrc("apps/desktop/src/app_ui/panels/SourcePanel.tsx");
+  const marksMod = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/panelMarks.ts")).href
+  );
+
+  check(
+    'D138：相册行上报 `mediaType: "album"` + `fileId: 相册 id`（面板身份 > 行内 media_type）',
+    /mediaType:\s*"album"/.test(albumSrc) && /fileId:\s*node\.id/.test(albumSrc),
+    '相册行的真实 media_type 是 multimedia/image/空，透传会与类目的 "album" 精确比较失败',
+  );
+  check(
+    'D138：相册上报的 `marks` 是**用户标记 ∪ 派生标记**（`effectiveMarksFor(…, "albums", …)`），不再恒为 `[]`',
+    /effectiveMarksFor\(\s*marks,\s*"albums",\s*node\.id,\s*derivedMarksForAlbum\(/.test(albumSrc) &&
+      // 反面：旧实现那句 `marks: []` 不得复活（否则标记轴对相册天然不可命中）。
+      !/marks:\s*\[\s*\]/.test(albumSrc),
+  );
+  check(
+    'D138：源面板行点击**真的上报**（此前完全不上报）：`click` + `mediaType: "source"` + `fileId: 节点 key`',
+    /app\.dispatch\(\{\s*trigger:\s*"click"/.test(sourceSrc) &&
+      /mediaType:\s*"source"/.test(sourceSrc) &&
+      /fileId:\s*node\.key/.test(sourceSrc),
+    "源面板此前只有 setSourceId/setDirPath/setAlbumId，没有任何 dispatch",
+  );
+  check(
+    "D138：源面板 `marks` 取 `sources` 域并按节点 key 取（与右键菜单 `markTargetKey()` 同口径）",
+    /marks:\s*marksOf\(\s*marks,\s*"sources",\s*node\.key\s*\)/.test(sourceSrc),
+  );
+
+  // 行为断言：`effectiveMarksFor` = 用户标记 ∪ 派生标记（去重保序），且**不改匹配语义**
+  // ——它只做集合合并，标记仍是可选项（链上没有标记节点时完全不参与判定）。
+  const marksBase = marksMod.emptyPanelMarksState();
+  const userMarked = marksMod.setMark(marksBase, "albums", "a1", "manga", true);
+  const merged = marksMod.effectiveMarksFor(userMarked, "albums", "a1", ["image"]);
+  check(
+    "D138：`effectiveMarksFor` 把派生标记并入用户标记（去重保序、纯集合合并、派生不落库）",
+    JSON.stringify(merged) === JSON.stringify(["manga", "image"]) &&
+      // 派生项与用户标记重名时不重复追加。
+      JSON.stringify(marksMod.effectiveMarksFor(userMarked, "albums", "a1", ["manga", "image"])) ===
+        JSON.stringify(["manga", "image"]) &&
+      // 没打标且无派生 ⇒ 空集合（标记是可选项，不是隐式约束）。
+      marksMod.effectiveMarksFor(marksBase, "albums", "a1").length === 0 &&
+      // 上报是只读的：存储里仍然只有用户标记。
+      JSON.stringify(marksMod.marksOf(userMarked, "albums", "a1")) === JSON.stringify(["manga"]),
+    `merged=${JSON.stringify(merged)} 存储=${JSON.stringify(marksMod.marksOf(userMarked, "albums", "a1"))}`,
+  );
+  check(
+    "D138：相册的动作派生标记来自**有效**媒体属性（multimedia → media、image → image）",
+    marksMod.derivedMarkOfMediaType("multimedia") === "media" &&
+      marksMod.derivedMarkOfMediaType("image") === "image" &&
+      // 必须用沿父链继承后的 media_type，否则子相册（image）会被算成 media。
+      /derivedMarksForAlbum\(mediaType\)/.test(albumSrc) &&
+      /effectiveMediaType\(node\.id,\s*albumById\)/.test(albumSrc),
+  );
+}
+
 // ============================== 汇总 ==============================
 
 const passed = results.filter((r) => r.ok).length;

@@ -13,6 +13,7 @@ import { useApp } from "../core/AppContext";
 import { getTask, setTask, useTask } from "../core/taskStore";
 import { ContextMenu } from "../menu/ContextMenu";
 import { MarkMenuTree, usePanelMarks } from "./markMenu";
+import { marksOf } from "../shared/panelMarks";
 import type { SourceTreeNode } from "../shared/types";
 
 /** 取路径最后一段文件夹名。 */
@@ -472,17 +473,36 @@ export function SourcePanel(): JSX.Element {
             onClick={
               renaming
                 ? undefined
-                : isSource
-                  ? () => {
+                : () => {
+                    if (isSource) {
                       app.setSourceId(node.source_id!);
                       app.setDirPath(null);
-                      app.setAlbumId(null);
-                    }
-                  : () => {
+                    } else {
                       app.setSourceId(ownerSourceId);
                       app.setDirPath(node.relative_path);
-                      app.setAlbumId(null);
                     }
+                    app.setAlbumId(null);
+                    // 上报蓝图引擎（D138）：源面板此前**完全不上报**，与相册面板同一缺口
+                    // ——「源类目 → 对象 → 标记 → 操作」在运行时求值不到。
+                    // `mediaType` 写字面量 `"source"`：类目节点的类型取值域是
+                    // `sources:[unlimited, source, empty]`（`blueprintNodes.ts`），源行
+                    // 本身没有 media_type 可透传；这份上报与 `AlbumPanel` 的 `"album"`
+                    // 是同一条契约的两半（面板身份 > 行内数据）。
+                    // `fileId` 复用**节点 key**：它与右键菜单 `markTargetKey()` 以及后端
+                    // `commands/source.rs` 生成的 key 三方同源（`src:<id>` /
+                    // `dir:<id>/<rel>`），不另造身份。对象节点把 `scope` 写成具体 key
+                    // 即可精确命中某个源/目录（RFC 0007 决策 1）。
+                    // `marks` 取本面板 `sources` 域打在该节点上的标记；源面板不传派生
+                    // （派生标记由相册的媒体属性推出，源没有该属性，D134）。
+                    app.dispatch({
+                      trigger: "click",
+                      target: {
+                        mediaType: "source",
+                        fileId: node.key,
+                        marks: marksOf(marks, "sources", node.key),
+                      },
+                    });
+                  }
             }
             onContextMenu={(e) => {
               e.preventDefault();

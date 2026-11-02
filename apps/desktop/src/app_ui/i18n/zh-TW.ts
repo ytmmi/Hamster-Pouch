@@ -591,7 +591,15 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.classOfSubclass": "所屬類目",
   "blueprint.subclassNoDomain": "該類目沒有子類取值域（目前只有文字類目有：EPUB / TXT / Markdown）",
   "blueprint.markKind": "標記",
-  "blueprint.markOf": "所屬面板",
+  "blueprint.markOf": "所屬物件",
+  // v3（`class ⊃ object ⊃ mark`）：標記掛**物件**之下（不再掛類目）——舊文件殘留的
+  // `class`（D136 的「從屬類目」）與更早的 `control`（標記直掛面板）都不再被讀取，
+  // 屬性面板給一條軟提示（不阻擋儲存，連線到物件即自動清理）。
+  "blueprint.markStaleAxis":
+    "舊文件殘留的「所屬類目 / 所屬面板」已失效（標記現在掛在物件之下）：連線到物件即自動清理。",
+  // 物件節點上被 v3 廢棄的 `mark_ref`（D136 的「物件掛標記」）殘留提示，同為軟告警。
+  "blueprint.objectStaleAxis":
+    "舊文件殘留的「所屬標記」已失效（現在標記掛在物件之下）：重新連線即自動清理。",
   "blueprint.scope": "物件範圍",
   "blueprint.mode": "群組模式",
   "blueprint.mode.exclusive": "互斥群組",
@@ -645,8 +653,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.panHint": "按住中鍵拖曳 = 平移畫布",
   "blueprint.minimap": "小地圖",
   "blueprint.minimapHint": "拖曳小地圖 = 快速把畫布移到該位置",
-  // 「?」說明面板（畫布右下角）：內容**由節點定義表派生**，D136 把標記改掛到類目之後，
-  // 階層樹會自動變成「類目 ⊃ {子類, 標記, 物件}」——文案裡不寫死任何父子關係。
+  // 「?」說明面板（畫布右下角）：內容**由節點定義表派生**，v3 把標記改掛到物件之後，
+  // 階層樹會自動變成「類目 ⊃ {子類, 物件 ⊃ 標記}」——文案裡不寫死任何父子關係。
   "blueprint.help.open": "包含關係說明",
   "blueprint.help.title": "節點的包含關係",
   "blueprint.help.hierarchy": "階層（父 ⊃ 子）",
@@ -760,7 +768,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.format.epub": "EPUB",
   "blueprint.format.txt": "TXT",
   "blueprint.format.md": "Markdown",
-  // 標記（`mark.mark`）：與類目**正交、可交叉**的軸。
+  // 標記（`mark.mark`）：標記清單的取值（v3 起它是**物件**下的細分軸——用來進一步區分
+  // 同一個物件裡的條目，例如漫畫.zip 可標記為 manga）。
   // D134 由 2 項擴為 10 項；順序與 `BLUEPRINT_BUILTIN_MARKS` / 選單樹一致。
   "blueprint.mark.media": "媒體",
   "blueprint.mark.image": "圖像",
@@ -772,7 +781,10 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "blueprint.mark.book": "書籍",
   "blueprint.mark.manga": "漫畫",
   "blueprint.mark.program": "程式",
-  // 物件節點在「標記」父級下的顯示名（D134）：相簿面板下只有「相簿」，源面板下只有「源」。
+  // **類目**節點的專用顯示名（D135）：相簿面板下只有「相簿」，源面板下只有「源」。
+  // v3 起標記掛在物件之下，本條不再與「標記父級」有關；鍵名沿用 D134 的
+  // `blueprint.object.*`（改鍵名要牽動三語，收益為零），實際判定在 `blueprintLabels`
+  // 的 class 分支（`classOfSpecialPanelLabel`）。
   "blueprint.object.album": "相簿",
   "blueprint.object.source": "源",
   "blueprint.hideDir.left": "左",

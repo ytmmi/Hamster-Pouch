@@ -42,8 +42,18 @@ pub use crate::blueprint_types::{
 };
 pub use crate::blueprint_validate::NodeIssue;
 
-/// 蓝图文档 schema 版本（当前 = 2；v1 → v2 为「引入分层」迁移，D52/D58）。
-pub const BLUEPRINT_SCHEMA_VERSION: i64 = 2;
+/// 蓝图文档 schema 版本（当前 = 3）。
+///
+/// 版本史：
+/// - v1 → v2：「引入分层」迁移（D52/D58）；
+/// - v2 → v3：**标记改挂到对象之下**（D137）——结构由 `class ⊃ mark ⊃ object`
+///   改为 `object ⊃ mark`，字段由 `object.mark_ref` 改为 `mark.object`。
+///   迁移在 `blueprint_migrate.rs` 内**语义保持**地完成（旧口径下"对象命中即蕴含
+///   标记命中"，故 on 规则边从对象改挂到标记是等价的）。
+///
+/// 与 `packages/config/src/blueprintValues.ts` 的 `BLUEPRINT_SCHEMA_VERSION` **同源**，
+/// 两处必须同时改（否则前端写出的文档会被后端判为待迁移）。
+pub const BLUEPRINT_SCHEMA_VERSION: i64 = 3;
 
 /// 浮层高度参数下界（D57：默认 1，1 最低）。
 pub const OVERLAY_HEIGHT_MIN: i64 = 1;

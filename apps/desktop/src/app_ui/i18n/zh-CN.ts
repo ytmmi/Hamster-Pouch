@@ -617,7 +617,15 @@ export const zhCN = {
   "blueprint.classOfSubclass": "所属类目",
   "blueprint.subclassNoDomain": "该类目没有子类取值域（当前只有文本类目有：EPUB / TXT / Markdown）",
   "blueprint.markKind": "标记",
-  "blueprint.markOf": "所属面板",
+  "blueprint.markOf": "所属对象",
+  // v3（`class ⊃ object ⊃ mark`）：标记挂**对象**之下（不再挂类目）——旧文档残留的
+  // `class`（D136 的"从属类目"）与更早的 `control`（标记直挂面板）都不再被读取，
+  // 属性面板给一条软提示（不阻塞保存，连线到对象即自动清理）。
+  "blueprint.markStaleAxis":
+    "旧文档残留的「所属类目 / 所属面板」已失效（标记现在挂在对象之下）：连线到对象即自动清理。",
+  // 对象节点上被 v3 废弃的 `mark_ref`（D136 的"对象挂标记"）残留提示，同样是软告警。
+  "blueprint.objectStaleAxis":
+    "旧文档残留的「所属标记」已失效（现在标记挂在对象之下）：重新连线即自动清理。",
   "blueprint.scope": "对象范围",
   "blueprint.mode": "组模式",
   "blueprint.mode.exclusive": "互斥组",
@@ -671,8 +679,8 @@ export const zhCN = {
   "blueprint.panHint": "中键按住拖动 = 平移画布",
   "blueprint.minimap": "小地图",
   "blueprint.minimapHint": "拖动小地图 = 快速把画布移到该位置",
-  // 「?」帮助面板（画布右下角）：内容**由节点定义表派生**，因此 D136 把标记改挂到
-  // 类目之后，层级树会自动变成「类目 ⊃ {子类, 标记, 对象}」——文案里不写死任何父子关系。
+  // 「?」帮助面板（画布右下角）：内容**由节点定义表派生**，因此 v3 把标记改挂到
+  // 对象之后，层级树会自动变成「类目 ⊃ {子类, 对象 ⊃ 标记}」——文案里不写死任何父子关系。
   "blueprint.help.open": "包含关系帮助",
   "blueprint.help.title": "节点的包含关系",
   "blueprint.help.hierarchy": "层级（父 ⊃ 子）",
@@ -789,7 +797,8 @@ export const zhCN = {
   "blueprint.format.epub": "EPUB",
   "blueprint.format.txt": "TXT",
   "blueprint.format.md": "Markdown",
-  // 标记（`mark.mark`）：与类目**正交、可交叉**的轴（用户口径：漫画.zip 可标记为 manga）。
+  // 标记（`mark.mark`）：标记清单的取值（v3 起它是**对象**下的细分轴——用来进一步区分
+  // 同一个对象里的条目，例如漫画.zip 可标记为 manga）。
   // D134 由 2 项扩为 10 项；顺序与 `BLUEPRINT_BUILTIN_MARKS` / 菜单树一致。
   "blueprint.mark.media": "媒体",
   "blueprint.mark.image": "图像",
@@ -801,7 +810,10 @@ export const zhCN = {
   "blueprint.mark.book": "书籍",
   "blueprint.mark.manga": "漫画",
   "blueprint.mark.program": "程序",
-  // 对象节点在「标记」父级下的显示名（D134）：相册面板下只有「相册」，源面板下只有「源」。
+  // **类目**节点的专用显示名（D135）：相册面板下只有「相册」，源面板下只有「源」。
+  // v3 起标记挂在对象之下，本条不再与「标记父级」有关；键名沿用 D134 的
+  // `blueprint.object.*`（改键名要牵动三语，收益为零），实际判定在 `blueprintLabels`
+  // 的 class 分支（`classOfSpecialPanelLabel`）。
   "blueprint.object.album": "相册",
   "blueprint.object.source": "源",
   "blueprint.hideDir.left": "左",

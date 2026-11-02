@@ -27,7 +27,7 @@ fn temp_repo_path(tag: &str) -> PathBuf {
 /// 最小合法蓝图图文档（单层 + 面板控件 + 互斥组 + 事件→动作），当前 schema 版本。
 fn valid_blueprint_json() -> String {
     r#"{
-      "schema_version": 2,
+      "schema_version": 3,
       "layers": [{"key":"l_main","name":"主界面"}],
       "nodes": [
         {"key":"ui","type":"interface","layer":"l_main","position":{"x":40,"y":40}},

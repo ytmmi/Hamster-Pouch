@@ -487,7 +487,7 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 
 本节原声明两条只读命令 `panel.registry` / `panel.settings`。**经 2026-09 裁决，二者均不实现为 Tauri 命令**，理由与 `setting.registry` / `setting.search` 同源（见 3.13 规则第一条）：
 
-- **面板注册表是声明式数据**：宿主内置 13 项在 `packages/config/src/panels.ts`（`BUILTIN_PANEL_SPECS`），插件项经既有 `plugin.contributions` 命令到达前端并登记进注册表。做成命令必须在 Rust 侧重新推导同一份数据。
+- **面板注册表是声明式数据**：宿主内置 16 项在 `packages/config/src/panels.ts`（`BUILTIN_PANEL_SPECS`），插件项经既有 `plugin.contributions` 命令到达前端并登记进注册表。做成命令必须在 Rust 侧重新推导同一份数据。
 - **面板设置项 = 声明（TS）+ 当前值**：声明在面板 `settings[]`，当前值由 `setting.get` / `setting.list` 取。属前端组合，不需要专用命令。
 
 | 原声明 | 裁决 | 前端落点 |
@@ -555,6 +555,8 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 **桥接层不解析内容**：系统标记清单的权威定义在 `packages/config`（`BLUEPRINT_BUILTIN_MARKS`），自定义标记是用户在面板里起的名字（落库 token 形如 `custom:<名称>`）——桥接层若校验标记 id，就等于把"面板本地打标"与"蓝图标记清单"两份真相焊死，插件注册新标记时还要改 Rust。
 
 **与蓝图标记的区别（同一只手、两种落点）**：蓝图里的 `mark` 节点是**声明式**的（"命中这个标记时按这套设定打开"）；这里存的是**面板里给对象打了哪些标记**。两者共用同一份**系统标记清单**，但**不共用存储**：蓝图节点由用户手动新增（不会因为打了标记就自动生成节点），自定义标记也不产生蓝图节点（它没有稳定 id 可引用）。
+
+**两套存储只在 `dispatch` 时刻投影（D138，2026-11-02）**：面板标记要能参与蓝图求值，就必须在**上报目标**里投影成 `marks` 集合——相册面板行点击上报 `mediaType:"album"` + `effectiveMarksFor(marks, "albums", 相册 id, derivedMarksForAlbum(有效媒体属性))`（用户标记 ∪ 派生标记），源面板行点击上报 `mediaType:"source"` + `marksOf(marks, "sources", 节点 key)`。**仍然不合并存储**：`panelMarks.get/set` 不写 `file_marks`、不写 `blueprints`；投影只发生在那一刻的上报目标里（`BlueprintTargetRef.marks`）。两个字段的硬理由与"标记是对象的可选限制条件、不改变对象性质"的口径见 `docs/spec/panel-standard.md` 第 5.1 节的「标记的上报方」表。
 
 ## 4. 事件目录
 

@@ -185,8 +185,8 @@ pub fn validate_node_decl(
 ///
 /// - **结构节点**（`Structural`）：有 `parents` 即有一个输入口——**面板**（`children =
 ///   ["class"]`）用统一输入口 `in`（它另可接收 `memberOf` 旧图兼容边），其余结构子节点用
-///   `contains`；有 `children` 即有 `contains` 输出口；**类目**（`children = ["object"]`）、
-///   **对象**（有 `parents`、无 `children`）与**面板**另有 `on` 输出口，面板另有
+///   `contains`；有 `children` 即有 `contains` 输出口；**可作规则源**的节点（面板、
+///   类目、子类、对象、标记，见 `is_rule_source`）另有 `on` 输出口，面板另有
 ///   `memberOf` 输出口；
 /// - **操作**（`Trigger`）：`on` 入 / `fires` 出；
 /// - **条件**（`Condition`）：`fires` 入 / `guards` 出；
@@ -210,6 +210,16 @@ pub fn derive_ports(
     let is_panel_like = child_names.contains(&"class");
     let is_object_parent = child_names.contains(&"object");
     let is_object_like = has_parents && !has_children;
+    // D137（v3）起「标记」是**对象**的子级，于是对象不再是「无 children 的叶子」：
+    // 旧判据 `is_object_like` 会把对象排除，静默丢掉 `out:on`，画布上「对象 → 操作」
+    // 再也连不出来、默认蓝图里既有的 `object --on--> event` 也无法重放（真实回归）。
+    // 因此「可作规则源」必须写成显式并集（面板 / 类目 / 子类 / 对象 / 标记），与 TS 侧
+    // `packages/config/src/blueprintNodes.ts` 的 `resolveNodePorts` 逐项一致
+    // （由 `pnpm check:blueprint-nodes` 断言）。
+    // 注意：**不能**用 `!is_panel_like && !is_object_parent` 之类反推——那会把
+    // group / layout_block（children = ["control"]）也带上 `on` 口。
+    let is_rule_source =
+        is_panel_like || is_object_parent || is_object_like || child_names.contains(&"mark");
 
     let mut push = |id: &str, side: PortSide, edge: &str| {
         ports.push(NodePortDecl {
@@ -242,7 +252,7 @@ pub fn derive_ports(
                     EdgeKind::MemberOf.as_str(),
                 );
             }
-            if is_panel_like || is_object_parent || is_object_like {
+            if is_rule_source {
                 push(EdgeKind::On.as_str(), PortSide::Out, EdgeKind::On.as_str());
             }
         }

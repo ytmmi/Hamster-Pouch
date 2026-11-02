@@ -368,7 +368,7 @@ function panelIdOptions(
           </>
         );
       })()}
-      {/* 标记（D102）：与类目树**平行**的轴，引用可注册的标记清单；与类目正交、可交叉。 */}
+      {/* 标记（D102）：引用可注册的标记清单（`mark` 字段）；v3 起它是**对象**下的细分轴。 */}
       {node.type === "mark" &&
         select<string>(
           t("blueprint.markKind"),
@@ -384,18 +384,24 @@ function panelIdOptions(
           ],
           (v) => onPatch({ mark: v === "" ? undefined : v }),
         )}
-      {/* 标记（D136）：结构父是**类目**（与子类并列），读 `node.class`。
-          旧文档可能残留 `control`（D136 之前标记直挂面板），这里不再读它——
-          残留字段由解析层接受、由 lint 判「未接通」，拖一条线接到类目即自愈。 */}
+      {/* 标记（v3：`class ⊃ object ⊃ mark`）：结构父是**对象**（标记是对**单个对象**的
+          细分），读 `node.object`。旧文档可能残留 `class`（D136 的"从属类目"）与更早的
+          `control`（标记直挂面板）：两者都不再被读取，残留值由解析层接受、由 lint 判
+          「未接通」，拖一条线接到对象即自愈（`blueprintConnect.connectPatch` 会顺手清掉）。 */}
       {node.type === "mark" && (
-        <DerivedField
-          label={t("blueprint.markOf")}
-          value={node.class}
-          label_={derivedLabel(node.class)}
-          t={t}
-        />
+        <>
+          <DerivedField
+            label={t("blueprint.markOf")}
+            value={node.object}
+            label_={derivedLabel(node.object)}
+            t={t}
+          />
+          {(Boolean(node.class?.trim()) || Boolean(node.control?.trim())) && (
+            <span className="dim bp-hints">{t("blueprint.markStaleAxis")}</span>
+          )}
+        </>
       )}
-      {/* 对象：本节点只需选作用范围；结构父（类目 / 子类 / 标记）从连线自动获取 */}
+      {/* 对象：本节点只需选作用范围；结构父（类目 / 子类）从连线自动获取 */}
       {node.type === "object" &&
         select(
           t("blueprint.scope"),
@@ -404,13 +410,20 @@ function panelIdOptions(
           (v) => onPatch({ scope: v }),
         )}
       {node.type === "object" && (
-        <DerivedField
-          label={t("blueprint.tab.classes")}
-          // 三条正交轴任选其一：显示**实际声明的那一条**（三者互斥，Rust 与解析层同口径）。
-          value={node.class ?? node.subclass ?? node.mark_ref}
-          label_={derivedLabel(node.class ?? node.subclass ?? node.mark_ref)}
-          t={t}
-        />
+        <>
+          <DerivedField
+            label={t("blueprint.tab.classes")}
+            // 两条语义轴任选其一：显示**实际声明的那一条**（二者互斥，Rust 与解析层同口径）。
+            // v3 起 `mark_ref`（D136 的"对象挂标记"）已废弃——方向反过来：标记挂在对象之下，
+            // 因此不再把它当归属解析；残留值只给软提示（不阻塞保存）。
+            value={node.class ?? node.subclass}
+            label_={derivedLabel(node.class ?? node.subclass)}
+            t={t}
+          />
+          {Boolean(node.mark_ref?.trim()) && (
+            <span className="dim bp-hints">{t("blueprint.objectStaleAxis")}</span>
+          )}
+        </>
       )}
       {/* 浮层（D50）：容器——内容由连进来的面板控件/标签组表达；这里只设显隐/叠放/外观 */}
       {node.type === "overlay" &&

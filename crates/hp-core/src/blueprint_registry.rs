@@ -39,10 +39,11 @@ pub use crate::blueprint_node_decl_validate::{
 
 /// 规则边（非结构边）的**输出侧来源**：`边类型 → 允许的输出节点类型`。
 ///
-/// `on` 的来源含**三条语义轴上的对象父**：类目、子类、标记（都能挂对象，
-/// 因此都能由对象发起规则）。⚠️ D136 把标记从"面板下的平行轴"改到"类目下的从属轴"，
-/// 但**对象仍可挂在标记下**（`parents` 里仍有 `mark`），所以 `on` 的来源集合**不变**。
-/// 与 TS `RULE_EDGE_SOURCES` 逐项一致。
+/// `on` 的来源是**可被命中的目标**：面板控件、类目、子类、标记、对象。
+/// ⚠️ **D137/v3 下 `mark` 仍在集合里**：v2 里对象可以挂在标记下（`mark ⊃ object`），
+/// v3 反转为 `object ⊃ mark` 之后，**标记自己成了被命中的末梢**——v2→v3 迁移会把
+/// 规则边从对象改挂到标记（旧口径下"对象命中"已蕴含"标记命中"，语义等价），
+/// 因此 `mark --on--> event` 必须合法，集合**不变**（与 TS `RULE_EDGE_SOURCES` 逐项一致）。
 pub const RULE_EDGE_SOURCES: [(&str, &[&str]); 4] = [
     ("memberOf", &["control"]),
     ("on", &["control", "class", "subclass", "mark", "object"]),

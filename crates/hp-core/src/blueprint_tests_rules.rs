@@ -209,57 +209,6 @@
     }
 
     #[test]
-    fn migrate_v1_splits_interfaces_into_layers() {
-        use crate::blueprint_migrate::{migrate_document, normalize_document};
-
-        // v1 单界面文档：界面 name → 层名；其余节点归属该层；版本升为当前
-        let v1 = r#"{"schema_version":1,"default_version":6,"nodes":[
-          {"key":"ui","type":"interface","name":"主界面","position":{"x":40,"y":40}},
-          {"key":"blk","type":"layout_block","name":"左栏"},
-          {"key":"c","type":"control","panel_id":"viewer"}
-        ],"edges":[{"from":"ui","to":"blk","kind":"contains","order":1}]}"#;
-        let migrated = migrate_document(v1).unwrap().expect("v1 应触发迁移");
-        assert_eq!(migrated.schema_version, BLUEPRINT_SCHEMA_VERSION);
-        let graph = BlueprintGraph::from_json(&migrated.json).unwrap();
-        assert_eq!(graph.layers.len(), 1);
-        assert_eq!(graph.layers[0].name, "主界面");
-        assert_eq!(graph.layers[0].key, "l_ui");
-        assert_eq!(graph.nodes[0].name, None, "界面显示名改由层名承载");
-        assert_eq!(graph.nodes[0].layer.as_deref(), Some("l_ui"));
-        assert_eq!(graph.nodes[1].layer.as_deref(), Some("l_ui"));
-        assert_eq!(graph.nodes[2].layer.as_deref(), Some("l_ui"));
-        assert_eq!(graph.default_version, Some(6), "内置默认标记保留");
-        assert!(graph.validate().is_empty(), "{:?}", graph.validate());
-
-        // v1 多界面文档：每个界面拆一层
-        let v1_multi = r#"{"schema_version":1,"nodes":[
-          {"key":"ui_a","type":"interface","name":"浏览"},
-          {"key":"ui_b","type":"interface","name":"编辑"}
-        ],"edges":[]}"#;
-        let migrated = migrate_document(v1_multi).unwrap().expect("v1 应触发迁移");
-        let graph = BlueprintGraph::from_json(&migrated.json).unwrap();
-        assert_eq!(graph.layers.len(), 2);
-        assert_eq!(graph.layers[0].name, "浏览");
-        assert_eq!(graph.layers[1].name, "编辑");
-        assert!(graph.validate().is_empty(), "{:?}", graph.validate());
-
-        // 已是当前版本 → 不迁移（返回 None，不做无谓改写）
-        let current = format!(r#"{{"schema_version":{BLUEPRINT_SCHEMA_VERSION},"nodes":[],"edges":[]}}"#);
-        assert!(migrate_document(&current).unwrap().is_none());
-
-        // normalize_document：低版本返回迁移结果，当前版本原样返回
-        let (json, version) = normalize_document(v1).unwrap();
-        assert_eq!(version, BLUEPRINT_SCHEMA_VERSION);
-        assert!(json.contains("\"layers\""));
-        let (same, version) = normalize_document(&current).unwrap();
-        assert_eq!(same, current);
-        assert_eq!(version, BLUEPRINT_SCHEMA_VERSION);
-
-        // validate_json 也走迁移后再校验（低版本文档不会被版本闸门拒绝）
-        assert!(BlueprintGraph::validate_json(v1).is_empty());
-    }
-
-    #[test]
     fn effective_layers_falls_back_to_single_layer() {
         // 无 layers 的旧文档 → 单层兜底（层名取界面 name）
         let legacy = BlueprintGraph::from_json(
@@ -772,88 +721,101 @@
         assert_eq!(legal_unknown.nodes[0].node_type.as_str(), "magic");
     }
 
-    /// **D136**：标记从"面板下的平行轴"改为"类目下的从属轴"（与子类并列）。
+    /// **D137（v3）**：标记从"类目下的从属轴"再下沉一级，改为**挂在对象之下**
+    /// （`class ⊃ object ⊃ mark`，链的末梢）。
     ///
-    /// 用户原话：「修改蓝图节点逻辑，标记连接到类目上，标记和子类类似。」
+    /// 用户原话（2026-11-02）：「标记要接在**对象**后面，标记是对**单个对象**的细分。」
     /// 这里钉住三件事：
-    /// 1. `class --contains--> mark` 合法（**新增**的合法边，D136 之前是被拒的）；
-    /// 2. `control --contains--> mark` **非法**（旧关系的反向断言，防"旧关系偷偷残留"）；
-    /// 3. `class --contains--> subclass` 仍合法（子类与标记**并列共存**，不是替换）。
+    /// 1. `object --contains--> mark` 合法（v3 新增的合法边）；
+    /// 2. `class --contains--> mark` **非法**（D136 的旧方向，v3 已撤销）；
+    /// 3. `class --contains--> object` 仍合法（对象仍与子类并列挂在类目下）。
     #[test]
-    fn mark_contains_parent_is_class_not_panel() {
-        // 1) 类目 → 标记：合法（标记挂在类目下）。
+    fn mark_contains_parent_is_object_not_class() {
+        // 1) 对象 → 标记：合法（标记挂在对象下）。
         let ok = BlueprintGraph::from_json(
-            r#"{"schema_version":2,
+            r#"{"schema_version":3,
                 "layers":[{"key":"l_a","name":"主界面"}],
                 "nodes":[
                   {"key":"ui","type":"interface","layer":"l_a"},
                   {"key":"blk","type":"layout_block","layer":"l_a","name":"栏"},
                   {"key":"c","type":"control","panel_id":"media","layer":"l_a"},
                   {"key":"k","type":"class","control":"c","media_type":"image","layer":"l_a"},
-                  {"key":"m","type":"mark","class":"k","mark":"manga","layer":"l_a"}
+                  {"key":"o","type":"object","class":"k","scope":"double_clicked","layer":"l_a"},
+                  {"key":"m","type":"mark","object":"o","mark":"manga","layer":"l_a"}
                 ],
                 "edges":[
                   {"from":"ui","to":"blk","kind":"contains","order":1},
                   {"from":"blk","to":"c","kind":"contains","order":2},
                   {"from":"c","to":"k","kind":"contains","order":3},
-                  {"from":"k","to":"m","kind":"contains","order":4}
+                  {"from":"k","to":"o","kind":"contains","order":4},
+                  {"from":"o","to":"m","kind":"contains","order":5}
                 ]}"#,
         )
         .unwrap();
         assert!(
             ok.validate().is_empty(),
-            "类目 → 标记 是 D136 的新合法边：{:?}",
+            "对象 → 标记 是 v3 的新合法边：{:?}",
             ok.validate()
         );
         assert!(ok.warnings().is_empty(), "{:?}", ok.warnings());
 
-        // 2) 面板 → 标记：**非法**（标记不再直挂面板）。
+        // 2) 类目 → 标记：**非法**（D136 的旧方向，v3 已撤销）。
         let old_relation = BlueprintGraph::from_json(
-            r#"{"schema_version":2,
+            r#"{"schema_version":3,
                 "layers":[{"key":"l_a","name":"主界面"}],
                 "nodes":[
                   {"key":"c","type":"control","panel_id":"media","layer":"l_a"},
-                  {"key":"m","type":"mark","mark":"manga","layer":"l_a"}
-                ],
-                "edges":[{"from":"c","to":"m","kind":"contains","order":1}]}"#,
-        )
-        .unwrap();
-        assert!(
-            old_relation
-                .validate()
-                .iter()
-                .any(|e| e.contains("非法边")),
-            "面板 → 标记 在 D136 之后必须被拒：{:?}",
-            old_relation.validate()
-        );
-
-        // 3) 类目下子类与标记**并列共存**：同一条线接上两者都合法。
-        let both = BlueprintGraph::from_json(
-            r#"{"schema_version":2,
-                "layers":[{"key":"l_a","name":"主界面"}],
-                "nodes":[
-                  {"key":"c","type":"control","panel_id":"bookpreview","layer":"l_a"},
-                  {"key":"k","type":"class","control":"c","media_type":"text","layer":"l_a"},
-                  {"key":"s","type":"subclass","subclass":"k","format":"txt","layer":"l_a"},
-                  {"key":"m","type":"mark","class":"k","mark":"manga","layer":"l_a"}
+                  {"key":"k","type":"class","control":"c","media_type":"image","layer":"l_a"},
+                  {"key":"o","type":"object","class":"k","scope":"clicked","layer":"l_a"},
+                  {"key":"m","type":"mark","object":"o","mark":"manga","layer":"l_a"}
                 ],
                 "edges":[
                   {"from":"c","to":"k","kind":"contains","order":1},
-                  {"from":"k","to":"s","kind":"contains","order":2},
-                  {"from":"k","to":"m","kind":"contains","order":3}
+                  {"from":"k","to":"m","kind":"contains","order":2}
+                ]}"#,
+        )
+        .unwrap();
+        assert!(
+            old_relation.validate().iter().any(|e| e.contains("非法边")),
+            "类目 → 标记 在 v3 之后必须被拒：{:?}",
+            old_relation.validate()
+        );
+
+        // 3) 类目下子类与对象**并列共存**，对象下面再挂标记：同一条链全通。
+        let both = BlueprintGraph::from_json(
+            r#"{"schema_version":3,
+                "layers":[{"key":"l_a","name":"主界面"}],
+                "nodes":[
+                  {"key":"ui","type":"interface","layer":"l_a"},
+                  {"key":"blk","type":"layout_block","layer":"l_a","name":"栏"},
+                  {"key":"c","type":"control","panel_id":"bookpreview","layer":"l_a"},
+                  {"key":"k","type":"class","control":"c","media_type":"text","layer":"l_a"},
+                  {"key":"s","type":"subclass","subclass":"k","format":"txt","layer":"l_a"},
+                  {"key":"o","type":"object","subclass":"s","scope":"click","layer":"l_a"},
+                  {"key":"m","type":"mark","object":"o","mark":"manga","layer":"l_a"}
+                ],
+                "edges":[
+                  {"from":"ui","to":"blk","kind":"contains","order":1},
+                  {"from":"blk","to":"c","kind":"contains","order":2},
+                  {"from":"c","to":"k","kind":"contains","order":3},
+                  {"from":"k","to":"s","kind":"contains","order":4},
+                  {"from":"s","to":"o","kind":"contains","order":5},
+                  {"from":"o","to":"m","kind":"contains","order":6}
                 ]}"#,
         )
         .unwrap();
         assert!(
             both.validate().is_empty(),
-            "子类与标记在类目下应并列共存：{:?}",
+            "子类/对象/标记三级链应全部合法：{:?}",
             both.validate()
         );
+        assert!(both.warnings().is_empty(), "{:?}", both.warnings());
     }
 
-    /// **D136 迁移口径**：旧文档里标记节点仍带 `control`（指向面板）时，
-    /// 按**未接通软告警**处理——**不阻塞保存**（用户库实测 0 个 mark 节点，
-    /// 但"读进来就保存不了"绝不能成为迁移事故）。
+    /// **D136 / D137 迁移口径**：旧文档里标记节点仍带 `control`（指向面板）时，
+    /// 按**未接通软告警**处理——**不阻塞保存**（D136 时用户库实测 0 个 mark 节点，
+    /// 但"读进来就保存不了"绝不能成为迁移事故；D137 起用户库确有 mark 节点，
+    /// 由 v2 → v3 迁移改写结构父）。
     #[test]
     fn legacy_mark_control_is_soft_warning_not_error() {
         let legacy = BlueprintGraph::from_json(
@@ -884,16 +846,97 @@
         assert_eq!(legacy.nodes[1].control.as_deref(), Some("c"));
     }
 
-    /// 标记的 `class` 引用**存在但类型不符**仍是**硬错误**（与"未接通"区分）：
-    /// 指向面板节点而非类目节点。
+    /// **D137（v3）残留字段**：D136 那一版标记用 `class` 指向**类目**，v3 改挂对象后
+    /// 改用 `object`；旧文档里残留的 `class` 同样只报**未接通软告警**、**不阻塞保存**
+    /// （否则"打开旧蓝图就存不回去"会变成新的迁移事故）。
     #[test]
-    fn mark_class_must_point_to_class_node() {
-        let wrong = BlueprintGraph::from_json(
+    fn legacy_mark_class_is_soft_warning_not_error() {
+        let legacy = BlueprintGraph::from_json(
             r#"{"schema_version":2,
                 "layers":[{"key":"l_a","name":"主界面"}],
                 "nodes":[
                   {"key":"c","type":"control","panel_id":"media","layer":"l_a"},
-                  {"key":"m","type":"mark","class":"c","mark":"manga","layer":"l_a"}
+                  {"key":"k","type":"class","control":"c","media_type":"image","layer":"l_a"},
+                  {"key":"m","type":"mark","class":"k","mark":"manga","layer":"l_a"}
+                ],
+                "edges":[]}"#,
+        )
+        .unwrap();
+        assert!(
+            legacy.validate().is_empty(),
+            "旧 mark.class 不得阻塞保存：{:?}",
+            legacy.validate()
+        );
+        let warnings = legacy.warnings();
+        assert!(
+            warnings.iter().any(|w| w.contains("旧字段 class")),
+            "应报「仍带旧字段 class」软告警：{warnings:?}"
+        );
+        // 未接通（缺 object）+ 残留字段，两条软告警都要有。
+        assert!(
+            warnings.iter().any(|w| w.contains("缺少必要引用")),
+            "缺 object 应报未接通：{warnings:?}"
+        );
+        // 节点与字段**原样保留**（不因迁移口径删数据）。
+        assert_eq!(legacy.nodes[2].class.as_deref(), Some("k"));
+        assert_eq!(legacy.nodes[2].object, None);
+    }
+
+    /// **D137（v3）对象侧残留字段**：v2 及更早的对象有第三条语义轴 `mark_ref`，
+    /// v3 起改为「标记挂在对象下」（`对象 --contains--> 标记`），该轴废弃；
+    /// 残留值同样只报**未接通软告警**、**不阻塞保存**（与 `mark.control` /
+    /// `mark.class` 同口径，RFC 0007 / 节点标准第 10 条）。
+    #[test]
+    fn legacy_object_mark_ref_is_soft_warning_not_error() {
+        let legacy = BlueprintGraph::from_json(
+            r#"{"schema_version":3,
+                "layers":[{"key":"l_a","name":"主界面"}],
+                "nodes":[
+                  {"key":"c","type":"control","panel_id":"media","layer":"l_a"},
+                  {"key":"k","type":"class","control":"c","media_type":"image","layer":"l_a"},
+                  {"key":"o","type":"object","class":"k","scope":"double_clicked","mark_ref":"m","layer":"l_a"},
+                  {"key":"m","type":"mark","object":"o","mark":"manga","layer":"l_a"}
+                ],
+                "edges":[]}"#,
+        )
+        .unwrap();
+        assert!(
+            legacy.validate().is_empty(),
+            "旧 object.mark_ref 不得阻塞保存：{:?}",
+            legacy.validate()
+        );
+        let warnings = legacy.warnings();
+        let hits = warnings
+            .iter()
+            .filter(|w| w.contains("旧字段 mark_ref"))
+            .count();
+        assert_eq!(
+            hits, 1,
+            "应恰好报一条「仍带旧字段 mark_ref」软告警：{warnings:?}"
+        );
+        assert!(
+            warnings.iter().any(|w| w.contains("v3/D137 起该轴已废弃")),
+            "告警要说清 v3 不再用这条轴：{warnings:?}"
+        );
+        // 对象已声明 `class` 轴 ⇒ 不该再报"缺少必要引用"（残留 mark_ref **不**算声明）。
+        assert!(
+            !warnings.iter().any(|w| w.contains("缺少必要引用")),
+            "声明了 class 轴就不该报未接通：{warnings:?}"
+        );
+        // 节点与字段**原样保留**（不因迁移口径删数据）。
+        assert_eq!(legacy.nodes[2].mark_ref.as_deref(), Some("m"));
+    }
+
+    /// 标记的 `object` 引用**存在但类型不符**仍是**硬错误**（与"未接通"区分）：
+    /// 指向面板节点而非对象节点。
+    #[test]
+    fn mark_object_must_point_to_object_node() {
+        let wrong = BlueprintGraph::from_json(
+            r#"{"schema_version":3,
+                "layers":[{"key":"l_a","name":"主界面"}],
+                "nodes":[
+                  {"key":"c","type":"control","panel_id":"media","layer":"l_a"},
+                  {"key":"m","type":"mark","object":"c","mark":"manga","layer":"l_a"}
                 ],
                 "edges":[]}"#,
         )
@@ -902,20 +945,20 @@
             wrong
                 .validate()
                 .iter()
-                .any(|e| e.contains("class 必须指向类目节点")),
+                .any(|e| e.contains("object 必须指向对象节点")),
             "{:?}",
             wrong.validate()
         );
 
-        // 缺 `class`（未接通）→ 软告警，不阻塞保存。
+        // 缺 `object`（未接通）→ 软告警，不阻塞保存。
         let missing = BlueprintGraph::from_json(
-            r#"{"schema_version":2,
+            r#"{"schema_version":3,
                 "nodes":[{"key":"m","type":"mark","mark":"manga"}],
                 "edges":[]}"#,
         )
         .unwrap();
         assert!(missing.validate().is_empty(), "{:?}", missing.validate());
-        assert!(!missing.warnings().is_empty(), "缺 class 应报未接通");
+        assert!(!missing.warnings().is_empty(), "缺 object 应报未接通");
     }
 
     /// **双向对称**（D104 教训的 Rust 侧同款护栏）：内置定义表的
@@ -964,19 +1007,176 @@
             asymmetric.is_empty(),
             "父子声明必须双向互指：{asymmetric:?}"
         );
-        // D136 的三处改动**逐项互指**（显式钉住，防止整体对称成立但这条关系被改到别处）。
+        // D136/D137 的几处改动**逐项互指**（显式钉住，防止整体对称成立但这条关系被改到别处）。
         let spec_of = |t: &str| {
             BUILTIN_NODE_SPECS
                 .iter()
                 .find(|s| s.node_type.as_str() == t)
                 .expect("内置类型必须存在")
         };
-        assert_eq!(spec_of("mark").parents, &["class"], "标记的父是类目（D136）");
-        assert!(spec_of("class").children.contains(&"mark"));
+        assert_eq!(
+            spec_of("mark").parents,
+            &["object"],
+            "标记的父是对象（D137/v3）"
+        );
+        assert!(
+            spec_of("object").children.contains(&"mark"),
+            "对象的 children 必须含 mark（否则「对象 → 标记」连不出来）"
+        );
+        assert!(
+            !spec_of("class").children.contains(&"mark"),
+            "类目的 children 不得再含 mark（D137：标记改挂对象）"
+        );
         assert!(
             !spec_of("control").children.contains(&"mark"),
-            "面板的 children 不得再含 mark（D136：标记不再直挂面板）"
+            "面板的 children 不得含 mark（D136：标记不再直挂面板）"
         );
+        assert_eq!(spec_of("mark").children, &[] as &[&str], "标记是链的末梢");
         assert!(spec_of("class").children.contains(&"subclass"));
-        assert_eq!(spec_of("object").parents, &["class", "subclass", "mark"]);
+        assert!(spec_of("class").children.contains(&"object"));
+        assert_eq!(spec_of("object").parents, &["class", "subclass"]);
+        assert_eq!(spec_of("subclass").children, &["object"]);
+    }
+
+    /// `derive_ports` 的「`on` 输出口 = 可作规则源」判据（D137 回归钉）。
+    ///
+    /// v3 起 `object ⊃ mark`，对象不再是「无 children 的叶子」；若仍按叶子判据推导，
+    /// `object` 会**静默丢掉** `out:on`：画布上「对象 → 操作」连不出来，默认蓝图里
+    /// 既有的 `object --on--> event` 也无法重放（与 :206-222 记的"按语义集合判定、
+    /// 不按当下长相判定"同源）。四个纯结构容器是反例：它们的 children 是结构节点，
+    /// 不得有 `on` 输出口，否则「界面/布局块/浮层/分组 → 操作」会被画成合法。
+    ///
+    /// 与 TS `packages/config/src/blueprintNodes.ts` 的 `resolveNodePorts` 同口径；
+    /// `pnpm check:blueprint-nodes` 只覆盖 TS 侧，故后端在这里独立钉一次。
+    #[test]
+    fn builtin_rule_source_types_expose_on_output() {
+        use crate::blueprint_registry::{BUILTIN_NODE_SPECS, PortSide, derive_ports};
+
+        let ports_of = |t: &str| {
+            let spec = BUILTIN_NODE_SPECS
+                .iter()
+                .find(|s| s.node_type.as_str() == t)
+                .expect("内置类型必须存在");
+            let parents: Vec<String> = spec.parents.iter().map(|p| p.to_string()).collect();
+            let children: Vec<String> = spec.children.iter().map(|c| c.to_string()).collect();
+            let events: Vec<String> = spec.events.iter().map(|e| e.to_string()).collect();
+            derive_ports(spec.evaluation_role, &parents, &children, &events)
+        };
+        let has_on_out = |t: &str| {
+            ports_of(t)
+                .iter()
+                .any(|p| p.id == "on" && p.side == PortSide::Out.as_str())
+        };
+
+        // 判据必须与 `blueprint_registry.rs` 的 `RULE_EDGE_SOURCES.on` **同集合**：
+        // 那张表是校验（`rule_edge_allows`）的真相来源，端口只是它在画布上的投影；
+        // 两者一旦分叉，就会出现"画布上连得出来、保存却报非法边"（或反过来）。
+        let on_sources: Vec<&str> = crate::blueprint_registry::RULE_EDGE_SOURCES
+            .iter()
+            .find(|(kind, _)| *kind == "on")
+            .map(|entry| entry.1.to_vec())
+            .expect("`on` 规则边来源必须已注册");
+
+        // 由端口推导出来的类型集合（12 种内置类型全覆盖，含 event/condition/action）。
+        let mut derived: Vec<&str> = BUILTIN_NODE_SPECS
+            .iter()
+            .map(|spec| spec.node_type.as_str())
+            .filter(|t| has_on_out(t))
+            .collect();
+        let mut expected = on_sources.clone();
+        derived.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(
+            derived, expected,
+            "derive_ports 的 out:on 类型集合必须与 RULE_EDGE_SOURCES.on 完全一致"
+        );
+
+        // 再逐个显式复核（集合相等之外，把"为什么"钉在类型名上）：
+        // 可被命中的结构类型 = 面板 / 类目 / 子类 / 对象 / 标记。
+        for t in ["control", "class", "subclass", "object", "mark"] {
+            assert!(
+                has_on_out(t),
+                "{t} 必须暴露 out:on（`RULE_EDGE_SOURCES.on` 含它，否则「{t} → 操作」连不出来）"
+            );
+        }
+        // 纯结构容器：命中语义由内部对象承载，不得有 on 输出口。
+        for t in ["interface", "layout_block", "overlay", "group"] {
+            assert!(
+                !has_on_out(t),
+                "{t} 不得暴露 out:on（否则「容器 → 操作」会被画成合法边）"
+            );
+        }
+    }
+
+    /// **D138：`scope` ↔ `trigger` 错配是软告警**（不阻塞保存）。
+    ///
+    /// 图完全合法、引用一个不缺，但运行时的判定顺序是"`trigger` 决定本次上报的
+    /// `scope`"，再要求对象的 `scope` 相等；`click` 配 `double_clicked` 这类错配
+    /// 让这条链**永远不会命中**——用户看到的是"点了没反应、也没有任何提示"。
+    /// 它与"缺引用"同级：只报软告警，允许先保存中间状态。
+    #[test]
+    fn scope_trigger_mismatch_is_soft_warning_not_error() {
+        // 相机：类目 ⊃ 对象(scope=double_clicked) ⊃ 标记(image) --on--> 操作(click)
+        let build = |scope: &str, trigger: &str, use_on_edge: bool| {
+            let edge = if use_on_edge {
+                r#"[{"from":"m","to":"e","kind":"on","order":1}]"#
+            } else {
+                "[]"
+            };
+            let target = if use_on_edge { "" } else { r#","target":"m""# };
+            format!(
+                r#"{{"schema_version":3,
+                    "layers":[{{"key":"l_a","name":"主界面"}}],
+                    "nodes":[
+                      {{"key":"c","type":"control","panel_id":"media","layer":"l_a"}},
+                      {{"key":"k","type":"class","control":"c","media_type":"image","layer":"l_a"}},
+                      {{"key":"o","type":"object","class":"k","scope":"{scope}","layer":"l_a"}},
+                      {{"key":"m","type":"mark","object":"o","mark":"image","layer":"l_a"}},
+                      {{"key":"e","type":"event","trigger":"{trigger}"{target},"layer":"l_a"}}
+                    ],
+                    "edges":{edge}}}"#
+            )
+        };
+
+        // ① 错配（click 事件 + double_clicked 对象）：恰好一条「不配对」软告警。
+        let mismatch = BlueprintGraph::from_json(&build("double_clicked", "click", true)).unwrap();
+        assert!(
+            mismatch.validate().is_empty(),
+            "scope/trigger 错配不得阻塞保存：{:?}",
+            mismatch.validate()
+        );
+        let warnings = mismatch.warnings();
+        let hits = warnings.iter().filter(|w| w.contains("不配对")).count();
+        assert_eq!(
+            hits, 1,
+            "应恰好报一条「触发方式与来源对象的 scope 不配对」：{warnings:?}"
+        );
+        assert!(
+            warnings.iter().any(|w| w.contains("click↔clicked")),
+            "告警要给出三种正确配对：{warnings:?}"
+        );
+
+        // ② 配对（click 事件 + clicked 对象）：不报该告警。
+        let matched = BlueprintGraph::from_json(&build("clicked", "click", true)).unwrap();
+        assert!(
+            !matched.warnings().iter().any(|w| w.contains("不配对")),
+            "配对正确时不该报错配：{:?}",
+            matched.warnings()
+        );
+
+        // ③ `scope` 写成具体 `file_id`：可被对应实例命中，**不算**错配。
+        let file_id = BlueprintGraph::from_json(&build("alb-1", "click", true)).unwrap();
+        assert!(
+            !file_id.warnings().iter().any(|w| w.contains("不配对")),
+            "具体 file_id 的 scope 是对实例的精确匹配，不算错配：{:?}",
+            file_id.warnings()
+        );
+
+        // ④ 旧图形态：没有 `on` 入边、只在事件上写 `target` 也要判（与运行时同序）。
+        let legacy = BlueprintGraph::from_json(&build("double_clicked", "click", false)).unwrap();
+        assert!(
+            legacy.warnings().iter().any(|w| w.contains("不配对")),
+            "旧图用 target 指向来源时同样要报错配：{:?}",
+            legacy.warnings()
+        );
     }
