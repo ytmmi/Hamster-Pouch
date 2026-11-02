@@ -60,8 +60,8 @@
  *
  * **判据是"包内确实新于活动数据源"，不是"包比源新"**（时间戳只说明构建先后）：
  * 逐项比 `repo_meta.schema_version` / `PRAGMA user_version`、蓝图字节数与节点数、
- * 缩略图文件集包含关系、布局 `updated_at`。实测记录见 `docs/issues/README.md` 第 21 轮状态段
- * （`dev-20261017-150402`：schema 10→11、蓝图 42→43 节点、缩略图 1254→1417 文件）。
+ * 缩略图文件集包含关系、布局 `updated_at`。实测记录见 `docs/issues/README.md` 第 22 轮状态段
+ * （`dev-20261102-185733`：schema 13→13 未变、蓝图 48→51 节点、缩略图 1429→1473 文件）。
  *
  * 用法：
  *   node tools/package-build.mjs      # 或 pnpm app:package
