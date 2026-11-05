@@ -2,6 +2,9 @@
 
 pub(crate) mod ai;
 pub(crate) mod album;
+// 「关于」页的运行时事实（版本 / 构建时间 / 许可证）与"用浏览器打开 GitHub"（D140）：
+// 这些都不是可写设置，因此不进设置注册表，独立成一条小命令族 `app.*`。
+pub(crate) mod app_info;
 pub(crate) mod blueprint;
 pub(crate) mod book;
 // 图书阅读器一侧的取数（`book.toc` 目录 + 整本正文缓存）：`book.rs` 已承担

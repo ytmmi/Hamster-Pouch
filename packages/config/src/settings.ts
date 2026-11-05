@@ -41,6 +41,8 @@ export const SETTING_KEYS = {
   mcpPort: "mcp.port",
   /** MCP 是否允许写操作（复制/移动/重命名/回收站；默认关）。 */
   mcpAllowWrite: "mcp.allowWrite",
+  /** 打开「关于」页时自动检查一次 GitHub 新版本（D140，默认开）。 */
+  autoCheckUpdate: "ui.autoCheckUpdate",
 } as const;
 
 /** 默认主题：白天浅色。 */
@@ -174,6 +176,24 @@ export function resolveMcpAllowWrite(value: unknown): boolean {
   return typeof value === "boolean" ? value : DEFAULT_MCP_ALLOW_WRITE;
 }
 
+// ==================== 更新检查设置（D140；「全部设置 → 关于 → 更新」） ====================
+
+/**
+ * **自动检查更新**默认开启。
+ *
+ * 更新走 GitHub Releases（`docs/spec/commands-events.md` §3.19）：只发一个匿名
+ * `GET /releases` 读 tag，不上传任何本机数据。默认开是为了让用户知道有新版本，
+ * 关掉后只有手动点「检查更新」才会发请求。
+ *
+ * 触发时机是**打开「关于」页时检查一次**（每次挂载一次，不后台轮询、不在启动时
+ * 偷偷发请求）：用户没打开关于页就不该有网络行为。
+ */
+export const DEFAULT_AUTO_CHECK_UPDATE = true;
+
+export function resolveAutoCheckUpdate(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_AUTO_CHECK_UPDATE;
+}
+
 // ============================== 设置注册表 ==============================
 
 /** 设置**大类**（封闭枚举，顺序即界面的固定顺序）。 */
@@ -184,6 +204,7 @@ export const SETTING_CATEGORIES = [
   "plugin",
   "language",
   "mcp",
+  "about",
 ] as const;
 export type SettingCategory = (typeof SETTING_CATEGORIES)[number];
 
@@ -413,6 +434,19 @@ export const SYSTEM_SETTING_DECLS: readonly SettingDecl[] = [
     divider_before: true,
     keywords: ["mcp", "write", "copy", "move", "trash", "写", "复制", "移动", "回收站"],
     section_key: "settings.section.mcpServer",
+  },
+  // 更新检查（D140）。为什么放在「关于」大类而不是「界面」：这是**版本与更新**的
+  // 事实区（版本号、构建时间、许可证、GitHub 链接都在同一屏），开关留在它旁边
+  // 才看得出"关掉自动检查"意味着什么；塞进「界面」会变成一条孤立的网络开关。
+  {
+    id: SETTING_KEYS.autoCheckUpdate,
+    category: "about",
+    owner: { kind: "system" },
+    title_key: "settings.about.autoCheckUpdate",
+    kind: "switch",
+    default: DEFAULT_AUTO_CHECK_UPDATE,
+    keywords: ["update", "check", "version", "github", "更新", "检查更新", "版本", "自动"],
+    section_key: "settings.section.aboutUpdate",
   },
 ];
 

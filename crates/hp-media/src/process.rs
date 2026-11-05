@@ -19,8 +19,12 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// AVIF/HEIC（ffmpeg 有界解码、`preview.get` 全分辨率预览）时就闪出黑色 cmd 窗口。
 ///
 /// 因此 hp-media 内的所有外部进程一律经本函数（或 [`run_with_timeout`]，它自带兜底）
-/// 构造，`pub(crate)` 供 `probe` / `decode` / `thumbnail` / `player` 共用。
-pub(crate) fn hidden_command(program: impl AsRef<OsStr>) -> Command {
+/// 构造，供 `probe` / `decode` / `thumbnail` / `player` 共用。
+///
+/// 桌面壳同样需要它（`app.openUrl` 用 `cmd /C start` 把 URL 交给默认浏览器），
+/// 所以这里对 crate 外开放：`check:hidden-console` 的口径是"白名单以外零裸
+/// `Command::new`"，与其给桌面壳开白名单例外，不如共用同一处实现。
+pub fn hidden_command(program: impl AsRef<OsStr>) -> Command {
     let mut cmd = Command::new(program);
     hide_console_window(&mut cmd);
     cmd

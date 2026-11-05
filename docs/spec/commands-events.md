@@ -558,6 +558,23 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 
 **两套存储只在 `dispatch` 时刻投影（D138，2026-11-02；D139 修订）**：面板标记要能参与蓝图求值，就必须在**上报目标**里投影成 `marks` 集合——相册面板行点击上报 `mediaType:"album"` + `effectiveMarksFor(marks, "albums", 相册 id)`（该相册已落库的标记：用户标记 + 自动同步标记），源面板行点击上报 `mediaType:"source"` + `marksOf(marks, "sources", 节点 key)`。**仍然不合并存储**：`panelMarks.get/set` 不写 `file_marks`、不写 `blueprints`；投影只发生在那一刻的上报目标里（`BlueprintTargetRef.marks`）。**D139（2026-11-05）**改的是**面板标记自身**的模型而不是投影方式：相册属性变化时自动同步的同名标记现在**落库**在 `panelMarks` 里（与手打标记同一张表，另记一位 `auto` 来源用于菜单配色、一位 `dismissed` 记"用户亲手取消过"），因此它可以被取消、取消后不再自动加回——旧口径「派生标记不落库、恒勾不可取消」已作废。两个字段的硬理由与"标记是对象的可选限制条件、不改变对象性质"的口径见 `docs/spec/panel-standard.md` 第 5.1 节的「标记的上报方」表。
 
+### 3.19 `app.*`（应用身份与外部跳转，D140）
+
+「全部设置 → 关于」页（D140）所需的两条**运行时事实 / 外部动作**命令。它不属于任何业务域，也**不参与仓库上下文**（没有 `repoId` 参数）。
+
+| 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
+| --- | --- | --- | --- | --- | --- |
+| `app.info` | 读构建期烙进二进制的应用身份 | `{}` | `{ ok, data: { version, build_time, commit, license, repo_url } }` | **已包装** | 线上 `data` 字段为**蛇形**；`version` 取 `env!("CARGO_PKG_VERSION")`（= `apps/desktop/src-tauri/Cargo.toml` 的 `version`，形如 `0.1.0-Alpha`）；`build_time` / `commit` 由 `build.rs` 经 `cargo:rustc-env` 注入（`HP_BUILD_TIME` 形如 `2026/11/05 23:10:42` 本地时间、`HP_BUILD_COMMIT` 为 git 短哈希），取不到时为空串——界面显示「未知」而不是报错；`license` 是 SPDX 标识 `GPL-3.0-or-later`；`repo_url` 为项目仓库地址，更新检查与「去 GitHub 点赞」共用 |
+| `app.openUrl` | 用系统默认浏览器打开一个**GitHub** 链接 | `{ url }` | `{ ok, data: () }` | **已包装** | 只接受 `https://github.com/` 前缀，其余一律 `validation`；空串同样 `validation`；spawn 失败为 `io`。实现走 `hp_media::hidden_command`（GUI 子系统下裸 spawn 会闪控制台窗口，且 `check:hidden-console` 禁止白名单外的裸 `Command::new`） |
+
+**为什么版本事实在 Rust 而不在前端常量**：`tauri build` 打的包用的是 `apps/desktop/src-tauri/Cargo.toml` 的 `version`，前端 `package.json` 的版本与它没有强制同步关系；只有 `env!("CARGO_PKG_VERSION")` **必然**等于安装包自己的版本，而这正是更新比较要用的那一个。同理，构建时间与提交哈希只有构建期才知道，前端 `define` 注入会随 `vite build` 与 `tauri build` 两次构建漂移（`beforeBuildCommand` 先跑 `vite build`，那时还拿不到最终的二进制身份）。
+
+**为什么「检查更新」没有命令**：它是一次普通的 `fetch` 打 GitHub 公开 API（`GET /repos/{owner}/{repo}/releases`），**不改任何状态**、也不需要 Access Token；走 Rust 只是多一层无意义的 IPC，还得为此引入 HTTP 客户端依赖（当前 `Cargo.lock` 里没有任何 HTTP 客户端）。版本比较与 Release 挑选是纯函数（`apps/desktop/src/app_ui/settings/aboutUpdate.ts`），前端直接跑。结论是**三态**而非布尔：`latest`（确认列表里有版本号且没有更高的）/ `outdated`（有更高的，按钮变「去 GitHub 更新」跳到该 Release 页）/ `unavailable`（列表为空或 tag 都不像 `x.y.z`——此时既不说"已是最新"也不说"有新版"）；请求失败（离线 / 限流 / 非 2xx）是第四种结果 `error`，**不折叠成 `latest`**。
+
+**为什么「打开链接」必须有命令**：WebView2 里 `window.open` 默认被拦（未开 `dangerousUseHttpScheme`，也没有 shell 插件），"点击更新跳转 GitHub"在纯前端做不到。把 URL 边界收成一个前缀常量，既防注入（URL 会进 `cmd /C start`），也保证这条命令不会变成"打开任意本地文件"的通道。
+
+**自动检查更新不给命令开第二个开关**：是否自动检查由设置项 `ui.autoCheckUpdate` 单一决定（缺省**开**）。触发时机是**打开「关于」页时检查一次**（每次挂载一次，不后台轮询、不在启动时发请求——用户没打开关于页就不该有网络行为），因此也不需要"检查状态"命令：状态只活在这个面板里。该设置项属于 `about` 大类（`docs/spec/settings-standard.md` 第 3 节），是这一族里**唯一**的用户可写状态。
+
 ## 4. 事件目录
 
 | 事件 | 载荷 |

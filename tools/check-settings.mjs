@@ -53,10 +53,10 @@ const t = (key) => zhCN[key] ?? zhTW[key] ?? en[key] ?? key;
 // ============================== 1. 大类（封闭枚举 + 空态） ==============================
 
 check(
-  "大类是封闭枚举且顺序固定（界面 / 蓝图 / 面板 / 插件 / 语言 / MCP）",
+  "大类是封闭枚举且顺序固定（界面 / 蓝图 / 面板 / 插件 / 语言 / MCP / 关于）",
   eqList(
     [...config.SETTING_CATEGORIES],
-    ["interface", "blueprint", "panel", "plugin", "language", "mcp"],
+    ["interface", "blueprint", "panel", "plugin", "language", "mcp", "about"],
   ),
   [...config.SETTING_CATEGORIES].join(","),
 );

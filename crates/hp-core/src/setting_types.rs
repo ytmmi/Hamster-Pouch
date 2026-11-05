@@ -41,17 +41,25 @@ pub enum SettingCategory {
     /// 独立成大类而不是塞进「界面」：它是**外部进程接入本机数据**的边界，
     /// 开关、端口与写权限必须集中在一处可见可关，和界面观感无关。
     Mcp,
+    /// 关于：版本号、构建时间、许可证、GitHub 链接与更新检查（D140）。
+    ///
+    /// 它只有**一个**真正的设置项（自动检查更新开关），其余是运行时事实
+    /// （版本 / 构建时间 / 最新版），因此这一大类的右侧主体是**事实区 + 自我
+    /// 更新操作**，不是设置项列表——与 `docs/spec/settings-standard.md` 第 3 节
+    /// 其他大类的形态不同，理由见该节「关于」行的说明。
+    About,
 }
 
 impl SettingCategory {
-    /// 全部大类（顺序固定：界面 / 蓝图 / 面板 / 插件 / 语言 / MCP）。
-    pub const ALL: [SettingCategory; 6] = [
+    /// 全部大类（顺序固定：界面 / 蓝图 / 面板 / 插件 / 语言 / MCP / 关于）。
+    pub const ALL: [SettingCategory; 7] = [
         SettingCategory::Interface,
         SettingCategory::Blueprint,
         SettingCategory::Panel,
         SettingCategory::Plugin,
         SettingCategory::Language,
         SettingCategory::Mcp,
+        SettingCategory::About,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -62,6 +70,7 @@ impl SettingCategory {
             SettingCategory::Plugin => "plugin",
             SettingCategory::Language => "language",
             SettingCategory::Mcp => "mcp",
+            SettingCategory::About => "about",
         }
     }
 
@@ -73,6 +82,7 @@ impl SettingCategory {
             "plugin" => Some(SettingCategory::Plugin),
             "language" => Some(SettingCategory::Language),
             "mcp" => Some(SettingCategory::Mcp),
+            "about" => Some(SettingCategory::About),
             _ => None,
         }
     }

@@ -320,6 +320,9 @@ fn main() {
             // 启停由设置项 `mcp.*` 驱动。
             commands::mcp::mcp_status,
             commands::mcp::mcp_reload,
+            // 「关于」页（D140）：运行时事实 + 用浏览器打开 GitHub。
+            commands::app_info::app_info,
+            commands::app_info::app_open_url,
             commands::shared::debug_log,
             commands::tagdict::tag_dict_suggest,
             commands::tagdict::taglib_status,

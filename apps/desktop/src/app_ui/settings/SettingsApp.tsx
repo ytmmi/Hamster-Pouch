@@ -17,7 +17,9 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type JSX } from "r
 
 import {
   SETTING_CATEGORIES,
+  SETTING_KEYS,
   allSettingDecls,
+  settingDeclByKey,
   type SettingCategory,
   type SettingDecl,
   type SettingValue,
@@ -29,6 +31,7 @@ import { SwitchToggle } from "../shared/SwitchToggle";
 import { useApp } from "../core/AppContext";
 import { publishSettingChanged } from "../core/settingChangeStore";
 import type { Translate, TranslationKey } from "../i18n";
+import { AboutPanel } from "./AboutPanel";
 import { McpServiceStatus } from "./McpServiceStatus";
 import {
   allSettingCategories,
@@ -159,6 +162,23 @@ export function SettingsApp({
     () => searchSettings(query, (key) => t(key as TranslationKey)),
     [query, t],
   );
+  /**
+   * 「关于」大类的唯一设置项（`ui.autoCheckUpdate`）。它由 `AboutPanel` 自己渲染成
+   * 「更新」卡片里的胶囊开关，而不是走通用 `SettingRow`——所以这里手动解码/写回。
+   */
+  const autoCheckUpdateDecl = useMemo(() => settingDeclByKey(SETTING_KEYS.autoCheckUpdate), []);
+  const autoCheckUpdateOn = useMemo(() => {
+    if (autoCheckUpdateDecl === undefined) return false;
+    const raw = values[storageKeyOf(autoCheckUpdateDecl)];
+    return raw === undefined ? autoCheckUpdateDecl.default === true : raw === "true";
+  }, [autoCheckUpdateDecl, values]);
+  const setAutoCheckUpdate = useCallback(
+    (next: boolean) => {
+      if (autoCheckUpdateDecl === undefined) return;
+      void writeValue(autoCheckUpdateDecl, next);
+    },
+    [autoCheckUpdateDecl, writeValue],
+  );
   /** 当前选择没有任何设置项（含"整类为空"）→ 右侧只留一行空态。 */
   const detailEmpty = sections.every((section) => section.decls.length === 0);
   /**
@@ -249,11 +269,12 @@ export function SettingsApp({
                 ))}
               </div>
             )}
-            {!query.trim() && detailEmpty && (
+            {!query.trim() && detailEmpty && category !== "about" && (
               <span className="placeholder">{t("settings.empty")}</span>
             )}
             {!query.trim() &&
               !detailEmpty &&
+              category !== "about" &&
               sections.map((section) => (
                 <section key={section.anchor} className="settings-section">
                   <div className="section-title">{t(section.titleKey as TranslationKey)}</div>
@@ -286,6 +307,19 @@ export function SettingsApp({
             */}
             {!query.trim() && category === "mcp" && (
               <McpServiceStatus t={t} reloadKey={mcpReloadKey} />
+            )}
+            {/*
+              「关于」大类（D140）整块自渲染：右侧是"构建时事实卡片 + 更新卡片"，
+              不是"一行一个设置项"的通用排版。它下面唯一的设置项 `ui.autoCheckUpdate`
+              由 `AboutPanel` 画成更新卡片里的胶囊开关，所以上面那段通用渲染对它关掉。
+            */}
+            {!query.trim() && category === "about" && (
+              <AboutPanel
+                t={t}
+                theme={app.theme}
+                autoCheckUpdate={autoCheckUpdateOn}
+                onAutoCheckUpdate={setAutoCheckUpdate}
+              />
             )}
           </div>
         </div>

@@ -10,8 +10,9 @@
     "dev": "pnpm --filter @hamster-pouch/desktop dev",
     "typecheck": "pnpm --filter @hamster-pouch/desktop typecheck",
     "build": "pnpm --filter @hamster-pouch/desktop build",
-    "app:build": "pnpm --filter @hamster-pouch/desktop exec tauri build --no-bundle && node tools/package-build.mjs",
+    "app:build": "node tools/version.mjs --apply && pnpm --filter @hamster-pouch/desktop exec tauri build --no-bundle && node tools/package-build.mjs",
     "app:package": "node tools/package-build.mjs",
+    "version:next": "node tools/version.mjs --next",
     "clean": "node tools/clean-build.mjs",
     "prepare": "node tools/install-hooks.mjs",
     "hooks:install": "node tools/install-hooks.mjs",
@@ -43,6 +44,7 @@
     "check:bundled-runtime": "node tools/check-bundled-runtime.mjs",
     "check:event-names": "node tools/check-event-names.mjs",
     "check:doc-status": "node tools/check-doc-status.mjs",
+    "check:version": "node tools/version.mjs --self-test",
     "check:status": "node tools/check-status.mjs"
   }
 }

@@ -117,6 +117,13 @@ crates/hp-store/src/
     ai.rs fsops.rs      # AI 打标桥接 / 文件操作桥接
     mcp.rs              # 内置 MCP 服务桥接（2026-10-24，D119）：只有 mcp.status / mcp.reload
                         #   两条命令——**启停由设置项 `mcp.enabled` 单一决定**，不另开开关
+    app_info.rs         # 「关于」页的运行时事实（2026-11-05，D140）：app.info（版本 = `env!("CARGO_PKG_VERSION")`、
+                        #   构建时间 / 提交哈希由 `build.rs` 经 `cargo:rustc-env` 注入、许可证、仓库地址）
+                        #   + app.openUrl（**只放行 `https://github.com/` 前缀**——URL 会进 `cmd /C start`，
+                        #   收成一个常量前缀既防注入，也保证它不会变成"打开任意本地文件"的通道；
+                        #   走 `hp_media::hidden_command` 以免 GUI 子系统闪控制台窗口）。
+                        #   **构建期事实不进设置注册表**：用户既不能写也不该写，`setting.reset`
+                        #   把版本号"恢复默认"语义荒谬
 
   mcp/                  # 内置 MCP 服务（2026-10-24，D119）：本机 HTTP + JSON-RPC 2.0
     mod.rs              # 生命周期 McpRuntime：读设置 → 幂等 apply（配置没变不重启）→ 起停；
@@ -175,6 +182,17 @@ apps/desktop/src/app_ui/
     settingsRegistry.ts # 设置注册表（宿主项 + 面板项 + 插件项；`kind` 只取控件输入类）
     McpServiceStatus.tsx # 「MCP」大类底部的服务状态块（D119）：运行状态 / 端点 / 令牌 /
                         #   工具数，端点与令牌可一键复制；`mcp_status` 命令的唯一界面消费点
+    AboutPanel.tsx      # 「关于」大类的整块详情（D140）：两类内容——①**构建时事实**（版本 /
+                        #   构建时间 / 提交哈希 / 许可证 / 链接，走 `app.info` 命令，**不进设置注册表**，
+                        #   因为用户既不能写也不该写）；②**自我更新**（检查更新 / 非最新时跳 Release 页 +
+                        #   唯一设置项 `ui.autoCheckUpdate`）。图标是内联 SVG（不新增二进制资产）
+    aboutUpdate.ts      # 更新检查的**纯逻辑**（D140，可无 Tauri 断言）：`parseVersion` / `compareVersions` /
+                        #   `pickLatestRelease` / `evaluateUpdate` / `checkForUpdate`。数据源是 GitHub
+                        #   Releases（tag 形如 `v0.1.1-Alpha`）；只认 x.y.z 三段、容忍 v 前缀与 `-Alpha` 后缀；
+                        #   **失败关闭**（解析失败返回 0、`!response.ok` 抛错而不是谎报"已是最新"）；
+                        #   跳过 draft、**不跳过 prerelease**（本项目所有版本都带 `-Alpha`）；
+                        #   结论是**三态** `latest` / `outdated` / `unavailable`——"列表为空或 tag
+                        #   都不像版本号"必须与"确认已最新"分开，否则首发前会谎称已是最新
   menu/               # 顶部功能条、右键菜单
   shared/             # **AudioWaveform**（音频波形图：三处面板共用的一套显示 + 取图；
                       #     纯几何在 waveformView：waveDrawnBox/waveCursorPercent/waveSeekSeconds）、

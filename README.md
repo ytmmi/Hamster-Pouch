@@ -112,7 +112,9 @@ pnpm app:build    # 编译并打出便携发布包
 
 - 产物是自包含文件夹（`apps/desktop/src-tauri/target/release/`），整夹搬走仍可运行：exe + `external-cli\`（[FFmpeg](https://ffmpeg.org/) 运行时子集、[mpv](https://mpv.io/)）+ `plugins\system\` + 基底词库。开发包用 NTFS 硬链接，发布包为真实复制。
 - 扩展插件以独立压缩包分发（`plugins-dist/*.zip`），解压后从「扩展」菜单安装，不与主程序合包。
-- 发布走手动流程：`Actions → Release Package → Run workflow`，输入 `version`（留空取 `tauri.conf.json`）、`publish`（是否创建 GitHub Release）、`notes`。同一版本重跑会覆盖资产。
+- 发布走手动流程：`Actions → Release Package → Run workflow`，输入 `version`（**留空则把当前版本的 patch 数字 +1、后缀原样保留**，如 `0.1.0-Alpha` → `0.1.1-Alpha`；填写则原样使用）、`publish`（是否创建 GitHub Release）、`notes`。同一版本重跑会覆盖资产。
+- 版本号三处同源（`tauri.conf.json` / 桥接 crate 的 `Cargo.toml` / `apps/desktop/package.json`），由 `node tools/version.mjs` 统一读写：`--current` 显示当前版本、`--next` 预览 +1 结果、`--write <v>` 指定版本、`--apply` 按 `HP_VERSION` 或 +1 落盘。`pnpm app:build` 的第一步就是 `--apply`，所以本地构建同样遵循"无指定版本号就 +1"。
+- 「全部设置 → 关于」页展示的版本 / 构建时间 / 提交哈希来自构建期注入（`build.rs` 的 `cargo:rustc-env`），更新检查读 GitHub Releases 的 `v<version>` 标签。
 
 ## 持续集成
 

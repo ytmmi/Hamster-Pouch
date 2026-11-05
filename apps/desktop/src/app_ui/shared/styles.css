@@ -5381,6 +5381,76 @@ button.danger {
   transition: left 120ms ease;
 }
 
+/* ---- 「全部设置 → 关于」卡片（D140） ---- */
+
+/*
+ * 关于页是**唯一**带卡片的大类：上面一块是构建时事实（图标 + 名称 + 描述 + 四行），
+ * 下面一块是更新（状态 + 检查按钮 + 自动检查开关）。其余大类都是"一行一个设置项"，
+ * 所以卡片样式只在这里局部定义，不进通用 `settings-*` 家族。
+ */
+.about-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  padding: 12px 14px;
+}
+
+.about-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+/* 图标配色随主题：深色下不沿用浅色的暖米色块。 */
+.about-logo {
+  flex: 0 0 auto;
+  --about-logo-bg: #eceef1;
+  --about-logo-ear: #8b95a1;
+  --about-logo-face: #ffffff;
+  --about-logo-nose: #e08a8a;
+}
+
+.app-root.theme-dark .about-logo {
+  --about-logo-bg: #2b2f33;
+  --about-logo-ear: #9aa1a8;
+  --about-logo-face: #3a3f45;
+  --about-logo-nose: #c97a7a;
+}
+
+.about-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.about-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.about-desc {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.about-facts {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+/* 三个链接按钮横向排布（值区在 `.settings-row-control` 里，默认已 flex）。 */
+.about-links {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* 有新版时状态文案用强调色（截图里是普通文字色，这里只做轻微区分，不喧宾夺主）。 */
+.about-status-new {
+  color: var(--sel-ring);
+}
+
 
 /* ===== 垂直「界面页」标签条（D124） ===== */
 

@@ -30,6 +30,7 @@ pub use palette::{
 };
 pub use player::{DEFAULT_PIPE_PATH, MediaProcess};
 pub use probe::{MediaProbe, probe};
+pub use process::hidden_command;
 pub use svg::{SVG_EXTS, is_svg, rasterize_svg};
 pub use thumbnail::{
     IMAGE_THUMB_MAX_DIM, IMAGE_THUMB_WEBP_QUALITY, extract_thumbnail, generate_image_preview,

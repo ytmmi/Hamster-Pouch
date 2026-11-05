@@ -175,6 +175,20 @@ pub const SYSTEM_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &[],
         requires_capability: None,
     },
+    // 更新检查（D140）：「全部设置 → 关于 → 更新」。
+    //
+    // 只镜像这一条开关：版本号 / 构建时间 / 许可证 / 最新版都是**运行时事实**，
+    // 走 `app.info` 命令（`docs/spec/commands-events.md` §3.19），不进设置注册表——
+    // 设置项是"用户可写的声明"，事实不是。
+    SettingDeclFact {
+        id: "ui.autoCheckUpdate",
+        owner_kind: "system",
+        owner_id: None,
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
 ];
 
 /// 面板设置声明（**镜像** `packages/config/src/panels.ts` 各面板的 `settings`）。

@@ -36,6 +36,14 @@
 #    `mpv/fonts.conf`）走普通 git；checkout 必须带 `lfs: true`，否则包里的 mpv 是
 #    130 字节的指针文件（下面自检按体积兜底）。因此发布包**会带 mpv**。
 # 包内不含 `data\system\` 全局库与任何用户数据：目标机首次运行自建（便携布局）。
+#
+# ## 版本号口径
+#
+# 权威是 `apps/desktop/src-tauri/tauri.conf.json`，三处副本由 `node tools/version.mjs`
+# 同步（tauri.conf.json / 桥接 crate 的 Cargo.toml / apps/desktop/package.json）。
+# 手动触发时 `version` 留空 ⇒ 当前版本的 **patch 数字 +1、后缀原样保留**
+# （`0.1.0-Alpha` → `0.1.1-Alpha`）；填了 ⇒ 原样使用。两种情况都由构建步写回文件，
+# 因此打出的包、BUILD-INFO.txt 与 Release 标签天然一致。
 
 name: Release Package
 
@@ -43,7 +51,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "版本号（默认取 apps/desktop/src-tauri/tauri.conf.json 的 version）"
+        description: "版本号（留空则把当前版本的 patch 数字 +1 并保留后缀，例如 0.1.0-Alpha → 0.1.1-Alpha；填写则原样使用，需形如 X.Y.Z 或 X.Y.Z-后缀）"
         required: false
         default: ""
       publish:
@@ -128,6 +136,19 @@ jobs:
       - name: 安装前端依赖
         run: pnpm install --frozen-lockfile
 
+      # 版本推导的**唯一入口**是 `node tools/version.mjs --apply`（app:build 的第一步）：
+      #   - 这里给了版本号 ⇒ 导出 HP_VERSION，脚本原样采用；
+      #   - 留空 ⇒ 什么也不设，脚本把当前 tauri.conf.json 的 patch 数字 +1（后缀保留）。
+      # 推导结果由脚本回写三处副本（tauri.conf.json / Cargo.toml / package.json），
+      # 所以下面「解析版本号」读到的已是**本次构建真正用的**版本，不再是构建前的旧值。
+      - name: 指定版本（可选）
+        if: inputs.version != ''
+        # 经 env 中转而不是直接插值进脚本：版本号是自由文本，直接 `${{ }}` 拼进 shell
+        # 会被引号/反引号注入。中转后它只是一个环境变量的值，脚本行为由 version.mjs 校验。
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: echo "HP_VERSION=$INPUT_VERSION" >> "$GITHUB_ENV"
+
       # 复用仓库自己的打包脚本（不在 workflow 里重写打包逻辑）：
       # tauri build --no-bundle 产出 exe，package-build 产出自包含文件夹。
       - name: 构建（pnpm app:build）
@@ -167,13 +188,16 @@ jobs:
             echo "::error::不该带 ffplay.exe（运行时子集不含它）"; exit 1; } || true
           echo "发布包内容自检通过"
 
+      # 这里**只读文件、不做推导**：最终版本已由构建步的 `version.mjs --apply` 写进
+      # tauri.conf.json（三处同源），此处读到的一定是包内 exe 的版本，标签不会与包错位。
       - name: 解析版本号
         id: version
         run: |
           set -euo pipefail
-          V="${{ inputs.version }}"
+          V=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
           if [ -z "$V" ]; then
-            V=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
+            echo "::error::tauri.conf.json 里没有 version"
+            exit 1
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "版本号: $V"
