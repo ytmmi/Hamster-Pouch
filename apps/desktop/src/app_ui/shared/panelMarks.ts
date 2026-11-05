@@ -1,5 +1,5 @@
 /**
- * 源面板 / 相册面板「添加标记」的**纯逻辑**（D134）：状态模型、容错解析、序列化与增删改。
+ * 源面板 / 相册面板「添加标记」的**纯逻辑**（D134 / D139）：状态模型、容错解析、序列化与增删改。
  *
  * 为什么单独成文件、且不含任何 React / Tauri 依赖：
  * 1. 打标是**面板本地状态**，不是蓝图语义——它不能写进 `blueprints` 表，否则"给相册
@@ -8,14 +8,18 @@
  * 2. `app_settings` 里的值可能来自旧版本、被外部工具改坏，甚至是一段不相关字符串——
  *    **任何输入都必须落回一个可用状态**，不能让右键菜单白屏（同 `interfacePages.ts`）。
  *
- * 三个口径（用户裁决，D134）：
+ * 四个口径（用户裁决，D134 / D139）：
  * - **自定义标记只在面板内共享**：相册面板一份、源面板一份，互不可见、不同步蓝图；
  *   落库值是 `custom:<名称>`，所以"哪些名字算自定义标记"由前缀判定，不需要另一张表。
  * - **打标结果挂在目标对象上**：相册用 `albumId`，源用节点 key（`src:<id>` /
  *   `dir:<sourceId>/<relativePath>`，与后端 `commands/source.rs` 生成 key 的口径一致）。
- * - **派生标记不落库**：相册按媒体属性自动带上同名标记（`multimedia→media`、
- *   `image→image`、`video→video`、`audio→audio`），它恒为已打、不可取消，因此
- *   存下来只会与"当前属性"产生第二份真相；由 {@link derivedMarkOfMediaType} 实时算。
+ * - **自动标记落库、且可取消**（D139，2026-11-05 用户口径）：相册设了媒体属性后，
+ *   系统自动给它打上同名标记（`image→image`、`video→video`、`audio→audio`、
+ *   `multimedia→media`）。它是**普通的已打标记**——和用户自己点的完全一样：可以取消，
+ *   取消后再点回来就是用户标记（菜单里由灰黑色变黑）。"哪些是自动打上的"记在
+ *   `auto` 里（配色用），"用户亲手取消过哪些"记在 `dismissed` 里（同步时不再加回）。
+ * - **`unlimited`（无限制）不派生任何标记**：它的语义就是"没有限制条件"，
+ *   给它打一个标记等于凭空多出一条恒真条件（{@link autoMarksForMediaType} 返回空）。
  */
 
 /** 面板 scope：两个面板各一份自定义标记清单与打标结果（互不可见）。 */
@@ -33,26 +37,41 @@ const CUSTOM_MARK_NAME_MAX = 32;
 /** 单个标记 id / token 的最大长度（脏数据兜底用）。 */
 const MARK_TOKEN_MAX = 64;
 
+/** 每个 scope 的「目标键 → token 列表」两列表。 */
+type MarksByTarget = Record<PanelMarkScope, Record<string, string[]>>;
+
 /**
  * 面板标记状态（按仓库持久化在 `app_settings` 的 `panelMarks.<repoId>`）。
  *
  * - `custom`：每个 scope 的自定义标记**名称**（数组顺序即菜单里的展示顺序）；
- * - `marks`：每个 scope 的打标结果，`目标键 → 标记 token 数组`。
- *   只存**用户打上**的标记（系统标记 id 与 `custom:<名称>`），派生标记不入库。
+ * - `marks`：每个 scope 的打标结果，`目标键 → 标记 token 数组`。**自动标记也在这里**，
+ *   因为对用户来说它与手动打上的没有任何行为差别（可取消、可重新打上）；
+ * - `auto`：`marks` 的子集，只记"这条是系统按属性同步打上的"——菜单据此画灰黑色；
+ * - `dismissed`：用户亲手取消过的自动标记——属性再次同步到同一个 token 时**不加回**，
+ *   这是"取消"这个动作唯一的持久后果（否则每次设属性都会把用户取消的标记复活）。
  */
 export interface PanelMarksState {
   custom: Record<PanelMarkScope, string[]>;
-  marks: Record<PanelMarkScope, Record<string, string[]>>;
+  marks: MarksByTarget;
+  auto: MarksByTarget;
+  dismissed: MarksByTarget;
 }
 
-/** 落库格式版本。读到更高版本时按"不认识"处理并回落空状态（同 D52 的版本闸门口径）。 */
-export const PANEL_MARKS_VERSION = 1;
+/**
+ * 落库格式版本。读到更高版本时按"不认识"处理并回落空状态（同 D52 的版本闸门口径）。
+ *
+ * v2（D139）：新增 `auto` / `dismissed` 两个来源表；v1 只有 `custom` / `marks`，
+ * 解析时按"没有自动标记来源记录"读入即可（{@link parsePanelMarksState} 兼容 v1）。
+ */
+export const PANEL_MARKS_VERSION = 2;
 
 /** 空状态：没有自定义标记，也没有任何打标结果。 */
 export function emptyPanelMarksState(): PanelMarksState {
   return {
     custom: { albums: [], sources: [] },
     marks: { albums: {}, sources: {} },
+    auto: { albums: {}, sources: {} },
+    dismissed: { albums: {}, sources: {} },
   };
 }
 
@@ -107,7 +126,19 @@ export function derivedMarkOfMediaType(mediaType: string | null | undefined): st
   }
 }
 
-/** 某目标对象当前已打上的标记（不含派生标记；派生由调用方另算）。 */
+/**
+ * 相册媒体属性 → **要自动打上的标记列表**（D139）。
+ *
+ * `unlimited` / 空值 → 空列表：无限制不是一种限制条件，空值是"继承父相册"（属性还没定，
+ * 此刻不该凭继承值给子相册落一个标记——用户改父相册的属性时，子相册的标记不该被连带
+ * 改写，那会让"子相册自己的设置"看起来被偷偷改了）。
+ */
+export function autoMarksForMediaType(mediaType: string | null | undefined): readonly string[] {
+  if (!mediaType || mediaType === "unlimited") return [];
+  return [derivedMarkOfMediaType(mediaType)];
+}
+
+/** 某目标对象当前已打上的标记（自动标记也在其中）。 */
 export function marksOf(
   state: PanelMarksState,
   scope: PanelMarkScope,
@@ -116,31 +147,58 @@ export function marksOf(
   return state.marks[scope][targetKey] ?? [];
 }
 
+/** 某目标对象里由系统同步打上的自动标记（`marks` 的子集，仅用于配色）。 */
+export function autoMarksOf(
+  state: PanelMarksState,
+  scope: PanelMarkScope,
+  targetKey: string,
+): readonly string[] {
+  const own = marksOf(state, scope, targetKey);
+  if (own.length === 0) return [];
+  const auto = state.auto[scope][targetKey] ?? [];
+  // 只保留"确实还打在这个目标上"的项：取消过又没重新勾的 token 不该再出现。
+  return auto.filter((token) => own.includes(token));
+}
+
+/** 某目标对象上被用户亲手取消过的自动标记（同步时不再加回）。 */
+export function dismissedMarksOf(
+  state: PanelMarksState,
+  scope: PanelMarkScope,
+  targetKey: string,
+): readonly string[] {
+  return state.dismissed[scope][targetKey] ?? [];
+}
+
+/** 该标记在该目标上是否"系统自动打上的"（菜单据此画灰黑色）。 */
+export function isAutoMark(
+  state: PanelMarksState,
+  scope: PanelMarkScope,
+  targetKey: string,
+  token: string,
+): boolean {
+  return autoMarksOf(state, scope, targetKey).includes(token);
+}
+
 /**
- * 上报给蓝图引擎的**有效标记集合**（D138）：用户标记 ∪ 派生标记，去重保序。
+ * 上报给蓝图引擎的**有效标记集合**（D138）：`marks` 本身（自动标记已落库其中）。
  *
- * 为什么派生标记必须并入上报：右键菜单里派生标记是**恒勾、不可取消**的
- * （`MarkMenuTree`，D134），它描述的是对象自身的属性（相册的媒体属性推出来的
- * `image`/`video`/`audio`/`media`）。如果菜单显示它已打上、而 `dispatch` 不报它，
- * 就会出现"UI 说打了、蓝图说没打"的两套事实——而标记的语义是**对象的限制条件**，
- * 说不一致就等于条件本身不可信。
- *
- * 注意这里**只做集合合并**，不影响匹配语义：标记仍是可选项（链上没有标记节点时
- * 完全不参与判定），也仍然必须与父对象的两段式判定同时成立（不替代类目/scope）。
+ * 保留 `extra` 形参是为了让"还没落库、但逻辑上已生效"的标记也能并入（当前调用方
+ * 不再需要它——D139 之后自动标记一产生就写进 `marks`，不存在"UI 打了、库里没有"
+ * 的两套事实）。这里仍做去重保序的集合合并，语义不变：标记是可选项，不影响匹配语义。
  */
 export function effectiveMarksFor(
   state: PanelMarksState,
   scope: PanelMarkScope,
   targetKey: string,
-  derived: readonly string[] = [],
+  extra: readonly string[] = [],
 ): readonly string[] {
   const own = marksOf(state, scope, targetKey);
-  if (derived.length === 0) {
+  if (extra.length === 0) {
     return own;
   }
   const seen = new Set<string>(own);
   const merged = [...own];
-  for (const token of derived) {
+  for (const token of extra) {
     if (!seen.has(token)) {
       seen.add(token);
       merged.push(token);
@@ -159,6 +217,30 @@ export function hasMark(
   return marksOf(state, scope, targetKey).includes(token);
 }
 
+/** 在"目标键 → token 列表"这张表上增删一个 token（空列表即删条目，保持落库值收敛）。 */
+function writeTokenList(
+  table: Record<string, string[]>,
+  targetKey: string,
+  token: string,
+  on: boolean,
+): Record<string, string[]> {
+  const current = table[targetKey] ?? [];
+  const already = current.includes(token);
+  if (on === already) return table;
+  const next: Record<string, string[]> = { ...table };
+  if (on) {
+    next[targetKey] = [...current, token];
+  } else {
+    const rest = current.filter((m) => m !== token);
+    if (rest.length === 0) {
+      delete next[targetKey];
+    } else {
+      next[targetKey] = rest;
+    }
+  }
+  return next;
+}
+
 /**
  * 打上 / 取消一个标记（**不可变**，返回新状态，便于单元测试与 `useSyncExternalStore` 判重）。
  *
@@ -175,25 +257,9 @@ export function setMark(
   const key = targetKey.trim();
   const mark = token.trim();
   if (!key || !mark) return state;
-  const current = marksOf(state, scope, key);
-  const already = current.includes(mark);
-  if (on === already) return state;
-
-  const nextMarks: Record<string, string[]> = { ...state.marks[scope] };
-  if (on) {
-    nextMarks[key] = [...current, mark];
-  } else {
-    const rest = current.filter((m) => m !== mark);
-    if (rest.length === 0) {
-      delete nextMarks[key];
-    } else {
-      nextMarks[key] = rest;
-    }
-  }
-  return {
-    custom: { ...state.custom },
-    marks: { ...state.marks, [scope]: nextMarks },
-  };
+  const nextMarks = writeTokenList(state.marks[scope], key, mark, on);
+  if (nextMarks === state.marks[scope]) return state;
+  return { ...state, marks: { ...state.marks, [scope]: nextMarks } };
 }
 
 /** 切换一个标记（`on` 由调用方按当前勾选态取反后传入 {@link setMark}）。 */
@@ -204,6 +270,102 @@ export function toggleMark(
   token: string,
 ): PanelMarksState {
   return setMark(state, scope, targetKey, token, !hasMark(state, scope, targetKey, token));
+}
+
+/**
+ * 右键菜单里勾选 / 取消一个标记（D139 的唯一入口，比 {@link setMark} 多维护来源表）。
+ *
+ * 用户口径（2026-11-05）：「如果用户没有更改此标记，就同步，如果改了就不同步，系统同步的
+ * 标记为灰黑色（不是灰色，灰色是不可编辑），点击取消再点击回来就是用户标记，为黑色了」。
+ * 落实到三件事：
+ * 1. 取消一个**自动**标记 → 记进 `dismissed`，此后属性怎么变都不再自动加回；
+ * 2. 取消一个**用户**标记 → 只从 `marks` 删掉，不留痕（它本来就不是系统给的）；
+ * 3. 重新勾上任何一个标记 → 从 `dismissed` 与 `auto` 里都摘掉，它现在是**用户标记**
+ *    （菜单里画成黑色），此后属性变更也不会把它当成"未改动的自动标记"同步掉。
+ */
+export function toggleMarkFromMenu(
+  state: PanelMarksState,
+  scope: PanelMarkScope,
+  targetKey: string,
+  token: string,
+  on: boolean,
+): PanelMarksState {
+  const key = targetKey.trim();
+  const mark = token.trim();
+  if (!key || !mark) return state;
+  const wasAuto = isAutoMark(state, scope, key, mark);
+  const next = setMark(state, scope, key, mark, on);
+  if (next === state) return state;
+  const autoTable = writeTokenList(next.auto[scope], key, mark, false);
+  const dismissedTable = writeTokenList(
+    next.dismissed[scope],
+    key,
+    mark,
+    !on && wasAuto,
+  );
+  return {
+    ...next,
+    auto: { ...next.auto, [scope]: autoTable },
+    dismissed: { ...next.dismissed, [scope]: dismissedTable },
+  };
+}
+
+/**
+ * 按"对象当前应自动带上的标记"同步一次（D139）：属性变了就跟着变，用户改过的不动。
+ *
+ * 规则（对每个目标）：
+ * 1. 已在 `auto` 里、但不在 `desired` 里的标记 → 从 `marks` 与 `auto` 一起摘掉
+ *    （这是属性变更导致的失效，**不算**用户取消，不写 `dismissed`）；
+ * 2. 在 `desired` 里、却还没打上、也不在 `dismissed` 里 → 打上并记进 `auto`；
+ * 3. 已经在 `dismissed` 里的 → 跳过（用户改过它，系统不再插手）；
+ * 4. 用户自己打过同一个标记的（在 `marks` 但不在 `auto`）→ 原样保留（黑着，不动）。
+ *
+ * 纯函数、幂等：同样的 `desired` 再同步一次不产生任何变化（调用方可以直接每次
+ * 属性变更/列表刷新后跑一遍）。
+ */
+export function syncObjectMarks(
+  state: PanelMarksState,
+  scope: PanelMarkScope,
+  targetKey: string,
+  desiredAuto: readonly string[],
+): PanelMarksState {
+  const key = targetKey.trim();
+  if (!key) return state;
+  const desired = desiredAuto.map((t) => t.trim()).filter((t) => t !== "");
+
+  let next = state;
+  for (const token of autoMarksOf(next, scope, key)) {
+    if (desired.includes(token)) continue;
+    next = setMark(next, scope, key, token, false);
+    next = {
+      ...next,
+      auto: { ...next.auto, [scope]: writeTokenList(next.auto[scope], key, token, false) },
+    };
+  }
+  for (const token of desired) {
+    if (hasMark(next, scope, key, token)) continue;
+    if (dismissedMarksOf(next, scope, key).includes(token)) continue;
+    next = setMark(next, scope, key, token, true);
+    next = {
+      ...next,
+      auto: { ...next.auto, [scope]: writeTokenList(next.auto[scope], key, token, true) },
+    };
+  }
+  return next;
+}
+
+/**
+ * 相册专用：按**显式**媒体属性同步自动标记（`unlimited` / 空 → 一个都不打）。
+ *
+ * 用显式值而不是"沿父链继承后的有效值"：继承值不是这个相册自己的设置，
+ * 父相册改属性时不该顺手改掉子相册的标记（用户看到的是"子相册也变了"）。
+ */
+export function syncAlbumAutoMark(
+  state: PanelMarksState,
+  albumId: string,
+  mediaType: string | null | undefined,
+): PanelMarksState {
+  return syncObjectMarks(state, "albums", albumId, autoMarksForMediaType(mediaType));
 }
 
 /** {@link addCustomMark} 的结果：新状态 + 归一化后的名字（调用方据此拼 token）。 */
@@ -230,11 +392,30 @@ export function addCustomMark(
   }
   return {
     state: {
+      ...state,
       custom: { ...state.custom, [scope]: [...state.custom[scope], name] },
-      marks: { ...state.marks },
     },
     name,
   };
+}
+
+/** 解析一张「目标键 → token 列表」表（容错：非对象/空表回落空表）。 */
+function parseMarksTable(raw: unknown): Record<string, string[]> {
+  const source = isRecord(raw) ? raw : {};
+  const result: Record<string, string[]> = {};
+  for (const [targetKey, tokens] of Object.entries(source)) {
+    const key = targetKey.trim();
+    if (!key || !Array.isArray(tokens)) continue;
+    const marks: string[] = [];
+    for (const token of tokens) {
+      if (typeof token !== "string") continue;
+      const mark = token.trim();
+      if (!mark || mark.length > MARK_TOKEN_MAX || marks.includes(mark)) continue;
+      marks.push(mark);
+    }
+    if (marks.length > 0) result[key] = marks;
+  }
+  return result;
 }
 
 /**
@@ -243,8 +424,11 @@ export function addCustomMark(
  * 容错口径：
  * - 空串 / 非 JSON / 非对象 / 版本高于本版 → 空状态；
  * - `custom.<scope>` 只认数组里的字符串，逐项归一化、丢弃空名与重复名；
- * - `marks.<scope>` 只认 `对象`，目标键去空白后为空即丢弃，token 逐项去空白、
- *   丢弃空 token 与重复 token，空数组条目直接丢弃（保持落库值收敛）。
+ * - `marks` / `auto` / `dismissed` 各是一张「目标键 → token 列表」表，逐项 trim、
+ *   丢弃空 token 与重复 token，空数组条目直接丢弃；
+ * - **两个来源表都要与 `marks` 对账**（v1 没有它们 ⇒ 全空）：`auto` 只保留确实还打在
+ *   目标上的项；`dismissed` 里若与 `marks` 冲突（同一 token 又被打上），以 `marks`
+ *   为准删掉——同一个 token 不能既"已打上"又"用户取消过"。
  */
 export function parsePanelMarksState(raw: string | null | undefined): PanelMarksState {
   if (typeof raw !== "string" || raw.trim() === "") return emptyPanelMarksState();
@@ -277,22 +461,25 @@ export function parsePanelMarksState(raw: string | null | undefined): PanelMarks
   }
 
   const rawMarks = isRecord(parsed.marks) ? parsed.marks : {};
+  const rawAuto = isRecord(parsed.auto) ? parsed.auto : {};
+  const rawDismissed = isRecord(parsed.dismissed) ? parsed.dismissed : {};
   for (const scope of PANEL_MARK_SCOPES) {
-    const byTarget = isRecord(rawMarks[scope]) ? rawMarks[scope] : {};
-    const result: Record<string, string[]> = {};
-    for (const [targetKey, tokens] of Object.entries(byTarget)) {
-      const key = targetKey.trim();
-      if (!key || !Array.isArray(tokens)) continue;
-      const marks: string[] = [];
-      for (const token of tokens) {
-        if (typeof token !== "string") continue;
-        const mark = token.trim();
-        if (!mark || mark.length > MARK_TOKEN_MAX || marks.includes(mark)) continue;
-        marks.push(mark);
-      }
-      if (marks.length > 0) result[key] = marks;
+    const marks = parseMarksTable(rawMarks[scope]);
+    const autoRaw = parseMarksTable(rawAuto[scope]);
+    const dismissedRaw = parseMarksTable(rawDismissed[scope]);
+    const auto: Record<string, string[]> = {};
+    for (const [key, tokens] of Object.entries(autoRaw)) {
+      const kept = tokens.filter((token) => (marks[key] ?? []).includes(token));
+      if (kept.length > 0) auto[key] = kept;
     }
-    state.marks[scope] = result;
+    const dismissed: Record<string, string[]> = {};
+    for (const [key, tokens] of Object.entries(dismissedRaw)) {
+      const kept = tokens.filter((token) => !(marks[key] ?? []).includes(token));
+      if (kept.length > 0) dismissed[key] = kept;
+    }
+    state.marks[scope] = marks;
+    state.auto[scope] = auto;
+    state.dismissed[scope] = dismissed;
   }
 
   return state;
@@ -309,6 +496,14 @@ export function serializePanelMarksState(state: PanelMarksState): string {
     marks: {
       albums: { ...state.marks.albums },
       sources: { ...state.marks.sources },
+    },
+    auto: {
+      albums: { ...state.auto.albums },
+      sources: { ...state.auto.sources },
+    },
+    dismissed: {
+      albums: { ...state.dismissed.albums },
+      sources: { ...state.dismissed.sources },
     },
   });
 }

@@ -406,6 +406,9 @@ export function SourcePanel(): JSX.Element {
       const r = await api.albumCreateSnapshot({
         repoId: app.repoId,
         name,
+        // 新建相册默认「无限制」（D139，与相册面板的新建同口径）：
+        // 显式传值而不是留空，免得"按继承算"在将来顶层默认值变化时行为漂移。
+        mediaType: "unlimited",
         sourceId,
         relativePath,
         includeSubsources: false,
@@ -435,6 +438,9 @@ export function SourcePanel(): JSX.Element {
       const r = await api.albumCreateSync({
         repoId: app.repoId,
         name,
+        // 新建相册默认「无限制」（D139）：同步相册的媒体属性同时决定同步规则拉哪些文件，
+        // `unlimited` 与 `multimedia` 的可收集合同为三种媒体，因此不改变同步结果。
+        mediaType: "unlimited",
         sourceId,
         relativePath,
       });

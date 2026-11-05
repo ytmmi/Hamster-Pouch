@@ -5980,6 +5980,7 @@ check(
   const panelSrc = (rel) => stripComments(readFileSync(join(ROOT, rel), "utf8"));
   const albumSrc = panelSrc("apps/desktop/src/app_ui/panels/AlbumPanel.tsx");
   const sourceSrc = panelSrc("apps/desktop/src/app_ui/panels/SourcePanel.tsx");
+  const markMenuSrc = panelSrc("apps/desktop/src/app_ui/panels/markMenu.tsx");
   const marksMod = await import(
     pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/panelMarks.ts")).href
   );
@@ -5990,8 +5991,8 @@ check(
     '相册行的真实 media_type 是 multimedia/image/空，透传会与类目的 "album" 精确比较失败',
   );
   check(
-    'D138：相册上报的 `marks` 是**用户标记 ∪ 派生标记**（`effectiveMarksFor(…, "albums", …)`），不再恒为 `[]`',
-    /effectiveMarksFor\(\s*marks,\s*"albums",\s*node\.id,\s*derivedMarksForAlbum\(/.test(albumSrc) &&
+    'D138/D139：相册上报的 `marks` 是**已落库的有效标记**（`effectiveMarksFor(…, "albums", 相册 id)`），不再恒为 `[]`',
+    /effectiveMarksFor\(\s*marks,\s*"albums",\s*node\.id\s*\)/.test(albumSrc) &&
       // 反面：旧实现那句 `marks: []` 不得复活（否则标记轴对相册天然不可命中）。
       !/marks:\s*\[\s*\]/.test(albumSrc),
   );
@@ -6007,30 +6008,116 @@ check(
     /marks:\s*marksOf\(\s*marks,\s*"sources",\s*node\.key\s*\)/.test(sourceSrc),
   );
 
-  // 行为断言：`effectiveMarksFor` = 用户标记 ∪ 派生标记（去重保序），且**不改匹配语义**
-  // ——它只做集合合并，标记仍是可选项（链上没有标记节点时完全不参与判定）。
+  // 行为断言：`effectiveMarksFor` 只做集合合并，不改匹配语义
+  // ——标记仍是可选项（链上没有标记节点时完全不参与判定）。
   const marksBase = marksMod.emptyPanelMarksState();
   const userMarked = marksMod.setMark(marksBase, "albums", "a1", "manga", true);
-  const merged = marksMod.effectiveMarksFor(userMarked, "albums", "a1", ["image"]);
   check(
-    "D138：`effectiveMarksFor` 把派生标记并入用户标记（去重保序、纯集合合并、派生不落库）",
-    JSON.stringify(merged) === JSON.stringify(["manga", "image"]) &&
-      // 派生项与用户标记重名时不重复追加。
-      JSON.stringify(marksMod.effectiveMarksFor(userMarked, "albums", "a1", ["manga", "image"])) ===
-        JSON.stringify(["manga", "image"]) &&
-      // 没打标且无派生 ⇒ 空集合（标记是可选项，不是隐式约束）。
+    "D138：`effectiveMarksFor` 就是已落库的标记集合（无额外并入时不复制、不追加）",
+    JSON.stringify(marksMod.effectiveMarksFor(userMarked, "albums", "a1")) ===
+      JSON.stringify(["manga"]) &&
+      // 没打标 ⇒ 空集合（标记是可选项，不是隐式约束）。
       marksMod.effectiveMarksFor(marksBase, "albums", "a1").length === 0 &&
-      // 上报是只读的：存储里仍然只有用户标记。
-      JSON.stringify(marksMod.marksOf(userMarked, "albums", "a1")) === JSON.stringify(["manga"]),
-    `merged=${JSON.stringify(merged)} 存储=${JSON.stringify(marksMod.marksOf(userMarked, "albums", "a1"))}`,
+      // 目标键隔离：别的相册打不上。
+      marksMod.effectiveMarksFor(userMarked, "albums", "a2").length === 0,
+  );
+
+  // ---- D139：自动标记落库、可取消、与用户标记行为一致 ----
+  //
+  // 用户口径（2026-11-05）：「如果用户没有更改此标记，就同步，如果改了就不同步，系统同步的
+  // 标记为灰黑色（不是灰色，灰色是不可编辑），点击取消再点击回来就是用户标记，为黑色了」。
+  check(
+    "D139：`autoMarksForMediaType` —— `unlimited`/空不自动打标记，其余打同名标记",
+    marksMod.autoMarksForMediaType("unlimited").length === 0 &&
+      marksMod.autoMarksForMediaType(null).length === 0 &&
+      marksMod.autoMarksForMediaType("")?.length === 0 &&
+      JSON.stringify(marksMod.autoMarksForMediaType("multimedia")) === JSON.stringify(["media"]) &&
+      JSON.stringify(marksMod.autoMarksForMediaType("image")) === JSON.stringify(["image"]),
+  );
+  {
+    // 属性 = image → 自动打上 image，且记进 auto（菜单据此画灰黑色）。
+    let s = marksMod.syncAlbumAutoMark(marksBase, "a1", "image");
+    const autoOn = marksMod.isAutoMark(s, "albums", "a1", "image");
+    const markedOn = JSON.stringify(marksMod.marksOf(s, "albums", "a1")) === JSON.stringify(["image"]);
+    // 用户取消它 ⇒ 从 marks 摘掉并记进 dismissed（此后属性再变也不自动加回）。
+    let s2 = marksMod.toggleMarkFromMenu(s, "albums", "a1", "image", false);
+    const afterCancel = JSON.stringify(marksMod.marksOf(s2, "albums", "a1")) === "[]";
+    const dismissed = marksMod.dismissedMarksOf(s2, "albums", "a1").includes("image");
+    // 属性再变回 image（同步一次）⇒ 仍不加回。
+    const s3 = marksMod.syncAlbumAutoMark(s2, "a1", "image");
+    const stayedOff = marksMod.marksOf(s3, "albums", "a1").length === 0;
+    // 用户再勾回来 ⇒ 变回**用户标记**（不在 auto、也不在 dismissed），画黑色。
+    const s4 = marksMod.toggleMarkFromMenu(s3, "albums", "a1", "image", true);
+    const backAsUser =
+      JSON.stringify(marksMod.marksOf(s4, "albums", "a1")) === JSON.stringify(["image"]) &&
+      !marksMod.isAutoMark(s4, "albums", "a1", "image") &&
+      !marksMod.dismissedMarksOf(s4, "albums", "a1").includes("image");
+    check(
+      "D139：自动标记落库且**可取消**；取消后不再自动加回；重新勾上即转为用户标记（不再灰黑）",
+      autoOn && markedOn && afterCancel && dismissed && stayedOff && backAsUser,
+      `auto=${autoOn} marked=${markedOn} cancel=${afterCancel} dismissed=${dismissed} stay=${stayedOff} user=${backAsUser}`,
+    );
+  }
+  {
+    // 属性变更同步：auto 跟着变，用户亲手打过的不动，`unlimited` 会摘掉旧的自动标记。
+    const s = marksMod.setMark(marksBase, "albums", "a1", "manga", true);
+    const sAuto = marksMod.syncAlbumAutoMark(s, "a1", "video");
+    const gotVideo = marksMod.marksOf(sAuto, "albums", "a1").includes("video");
+    const sSwitch = marksMod.syncAlbumAutoMark(sAuto, "a1", "image");
+    const afterSwitch =
+      JSON.stringify(marksMod.marksOf(sSwitch, "albums", "a1")) ===
+      JSON.stringify(["manga", "image"]);
+    const sUnlimited = marksMod.syncAlbumAutoMark(sSwitch, "a1", "unlimited");
+    const afterUnlimited =
+      JSON.stringify(marksMod.marksOf(sUnlimited, "albums", "a1")) === JSON.stringify(["manga"]);
+    // 幂等：同样的属性再同步一次不产生任何变化（同一个对象引用）。
+    const sIdem = marksMod.syncAlbumAutoMark(sUnlimited, "a1", "unlimited");
+    check(
+      "D139：属性变更时自动标记跟着同步（换属性替换、`unlimited` 摘掉、用户标记不动、幂等）",
+      gotVideo && afterSwitch && afterUnlimited && sIdem === sUnlimited,
+      `video=${gotVideo} switch=${afterSwitch} unlimited=${afterUnlimited} idem=${sIdem === sUnlimited}`,
+    );
+  }
+  check(
+    "D139：自动标记同步接在**显式**媒体属性上（`syncAlbumAutoMark` + `album.media_type`，不沿父链继承）",
+    /syncAlbumAutoMark\(/.test(albumSrc) &&
+      /album\.media_type/.test(albumSrc) &&
+      // 右键菜单要按 auto 集合配色（灰黑 vs 黑），不能再用旧的"恒勾不可取消"。
+      /autoMarks=\{menuAutoMarks\}/.test(albumSrc) &&
+      /autoMarksOf\(\s*marks,\s*"albums"/.test(albumSrc) &&
+      !/is-derived/.test(albumSrc) &&
+      !/derivedMarksForAlbum/.test(albumSrc),
   );
   check(
-    "D138：相册的动作派生标记来自**有效**媒体属性（multimedia → media、image → image）",
+    "D139：`unlimited` 参与拖拽包含判定（与 `multimedia` 一样覆盖全部具体媒体）",
+    /outer === "unlimited"/.test(albumSrc),
+  );
+  check(
+    "D139：相册属性菜单有「无限制」项，且新建相册默认 `unlimited`",
+    /setAlbumMediaType\(menu\.albumId,\s*"unlimited"\)/.test(albumSrc) &&
+      /album\.media\.unlimited/.test(albumSrc) &&
+      // 新建（含子相册）显式传 unlimited，不再靠"继承"兜底。
+      (albumSrc.match(/mediaType:\s*"unlimited"/g) ?? []).length >= 2 &&
+      // 反面：旧默认 multimedia 的创建调用不得复活。
+      !/mediaType:\s*"multimedia"/.test(albumSrc),
+  );
+  check(
+    "D139：标记菜单只留「＋ 新建自定义标记」，自定义标记排在它下面（删掉旧标题与空态）",
+    /mark\.menu\.customAdd/.test(markMenuSrc) &&
+      // 反面：(a) 旧标题「自定义标记」与空态「暂无自定义标记」不得复活；
+      !/mark\.menu\.customEmpty/.test(markMenuSrc) &&
+      !/t\("mark\.menu\.custom"\)/.test(markMenuSrc) &&
+      // (b) 自定义标记行必须出现在新建按钮**之后**（按钮在前、已建的在下）。
+      markMenuSrc.indexOf("mark.menu.customAdd") <
+        markMenuSrc.lastIndexOf("customNames.map") &&
+      // (c) 旧的"不可取消"拦截点不得复活：勾选走 toggleMarkFromMenu，菜单里不再有 info 拦截。
+      /toggleMarkFromMenu\(/.test(markMenuSrc) &&
+      !/mark\.derived/.test(markMenuSrc),
+  );
+  check(
+    "D138：相册的自动标记来自**显式**媒体属性（multimedia → media、image → image、unlimited → 空）",
     marksMod.derivedMarkOfMediaType("multimedia") === "media" &&
-      marksMod.derivedMarkOfMediaType("image") === "image" &&
-      // 必须用沿父链继承后的 media_type，否则子相册（image）会被算成 media。
-      /derivedMarksForAlbum\(mediaType\)/.test(albumSrc) &&
-      /effectiveMediaType\(node\.id,\s*albumById\)/.test(albumSrc),
+      marksMod.derivedMarkOfMediaType("image") === "image",
   );
 }
 

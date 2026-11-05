@@ -201,12 +201,16 @@ apps/desktop/src/app_ui/
                           #   （`scope-trigger-mismatch`：click↔clicked / double_click↔double_clicked
                           #   / selection_change↔selected；图合法但该链运行时永不命中）——与 hp-core
                           #   `blueprint_warnings.rs` **两侧同口径**，由 check:blueprint-nodes 比对
-    panelMarks.ts         # 源 / 相册面板「添加标记」的**纯逻辑**（2026-11-01，D134）：状态模型
-                          #   （自定义标记清单 + 目标键 → 标记 token）+ 容错解析（任何脏数据 /
-                          #   更高版本都落回空状态，绝不抛异常）+ 序列化 + 打标/取消 + 自定义
-                          #   标记增删；另含 `derivedMarkOfMediaType`（相册属性 → 同名标记，**不落库**）
-                          #   与 `effectiveMarksFor`（D138：用户标记 ∪ 派生标记，纯集合合并——
-                          #   相册 `dispatch` 的上报口径；只并集合、不改匹配语义）。
+    panelMarks.ts         # 源 / 相册面板「添加标记」的**纯逻辑**（2026-11-01，D134；2026-11-05，D139
+                          #   改为 v2 四表模型）：状态模型（自定义标记清单 + 目标键 → 标记 token +
+                          #   `auto` 自动同步来源表 + `dismissed` 用户亲手取消表）+ 容错解析（任何脏
+                          #   数据 / 更高版本都落回空状态，绝不抛异常，v1 旧值按"全为手工标记"兼容）
+                          #   + 序列化 + 打标/取消 + 自定义标记增删；另含 `derivedMarkOfMediaType`
+                          #   （相册属性 → 同名标记）、`autoMarksForMediaType`（`unlimited` / 空 →
+                          #   不打标记）、`toggleMarkFromMenu`（菜单唯一入口：取消自动标记记 `dismissed`、
+                          #   重新勾上即转为用户标记）与 `syncObjectMarks` / `syncAlbumAutoMark`
+                          #   （属性变更时幂等同步自动标记）；`effectiveMarksFor` 仍是 `dispatch` 的
+                          #   上报口径，但 D139 起自动标记已落库在 `marks` 里，只并集合、不改匹配语义。
                           #   无 React / Tauri 依赖——落库形状与版本闸门是纯函数，才能被门禁断言
     api/panelMarks.ts     # `panel_marks_get` / `panel_marks_set` 的 IPC 封装（D134；整包 JSON
                           #   字符串，本层只搬运，解析在 shared/panelMarks.ts）
@@ -219,13 +223,15 @@ apps/desktop/src/app_ui/
       controlData.ts        # 数据快照、谓词求值、行/标量取值 helpers
       controlTypes.ts       # 宿主渲染上下文（主题/i18n/数据/事件/状态注入）
   panels/             # 各功能面板（同类组件，平铺即可；含 PluginPanel、TagTablePanel、BlueprintPanel）
-    markMenu.tsx      # 源 / 相册面板右键「添加标记」的**共享组件**（2026-11-01，D134）：
-                      #   `MarkMenuTree`（系统标记树状排列、默认折叠、顶端「自定义标记」入口；
-                      #   树区给 max-height + overflow，避免 `ContextMenu` 按 scrollHeight
-                      #   整体翻转后展开即跳位）+ `usePanelMarks`（按 repoId 读一次 + 写回，
-                      #   仿 useInterfacePages 的 persist，失败静默不弹窗）+ `derivedMarksForAlbum`
-                      #   （相册属性 → 同名标记）。两个面板只接线约 20 行——菜单层级、默认折叠、
-                      #   派生标记不可取消这套口径各写一份必然漂移
+    markMenu.tsx      # 源 / 相册面板右键「添加标记」的**共享组件**（2026-11-01，D134；2026-11-05，D139
+                      #   修订交互）：`MarkMenuTree`（系统标记树状排列、默认折叠；自定义标记区只剩
+                      #   「＋ 新建自定义标记」一件入口，已建的自定义标记列在它**下面**——旧的
+                      #   「自定义标记」标题与「暂无自定义标记」空态已删；树区给 max-height +
+                      #   overflow，避免 `ContextMenu` 按 scrollHeight 整体翻转后展开即跳位）
+                      #   + `usePanelMarks`（按 repoId 读一次 + 写回，仿 useInterfacePages 的
+                      #   persist，失败静默不弹窗）+ `autoMarksForAlbum`。D139 起**自动标记与
+                      #   用户标记行为完全一致**（可取消、落库），`autoMarks` 只用于把系统同步
+                      #   来的那几项画成灰黑色；「不可取消」那套口径已整体作废
     imageviewer/      # 图像查看器（多文件功能域：主面板 / 舞台 / 导航器 / 胶片栏 / 信息栏
                       #   + 纯逻辑模块 viewerZoom·viewerPlacement·viewerFormat·viewerKeymap·viewerPreload
                       #   + DOM 工具 viewerDecode（换图前离屏解码：解码完成才原子替换 url+尺寸，缺陷 0028）

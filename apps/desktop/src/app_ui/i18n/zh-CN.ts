@@ -118,8 +118,11 @@ export const zhCN = {
   "album.kind.fixed": "固定型",
   "album.kind.follow": "跟随源",
   "album.mediaType": "媒体属性",
-  // 「设置属性」菜单项的四个取值：媒体（底层 `multimedia`）/ 图像 / 视频 / 音频。
-  // 「全部」一项在 D134 被删除并换成语义更准的「媒体」（它本来就是"包含全部媒体"的超集）。
+  // 「设置属性」菜单项的五个取值：无限制（底层 `unlimited`）/ 媒体（`multimedia`）/ 图像 / 视频 / 音频。
+  // 「全部」一项在 D134 被删除并换成语义更准的「媒体」（它本来就是"包含全部媒体"的超集）；
+  // D139 新增「无限制」并定为**新建相册的默认值**——它包含的仍是同样的三种媒体，
+  // 但它不是一个"限制条件"，因此不会自动打标记（见 `shared/panelMarks.ts`）。
+  "album.media.unlimited": "无限制",
   "album.media.media": "媒体",
   "album.media.image": "图像",
   "album.media.video": "视频",
@@ -306,14 +309,12 @@ export const zhCN = {
   // 面板打标记（D134）：源面板与相册面板右键菜单里的「添加标记」子区。
   // 打标结果与自定义标记清单按仓库落在 app_settings（`panelMarks.<repoId>`，各面板一份）。
   "mark.add": "添加标记",
-  "mark.menu.custom": "自定义标记",
   "mark.menu.customAdd": "＋ 新建自定义标记",
-  "mark.menu.customEmpty": "暂无自定义标记",
   "mark.menu.customPlaceholder": "自定义标记名",
   "mark.menu.system": "系统标记",
   "mark.menu.orphan": "其它已打标记",
   "mark.toggleFailed": "标记保存失败：{err}",
-  "mark.derived": "由相册属性自动打上",
+  "mark.auto": "由相册属性自动同步（可取消）",
 
   // 媒体预览
   "media.loadFailed": "媒体预览加载失败：{err}",

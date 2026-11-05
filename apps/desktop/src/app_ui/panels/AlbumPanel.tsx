@@ -16,8 +16,8 @@ import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { ContextMenu } from "../menu/ContextMenu";
-import { derivedMarksForAlbum, MarkMenuTree, usePanelMarks } from "./markMenu";
-import { effectiveMarksFor } from "../shared/panelMarks";
+import { MarkMenuTree, syncAlbumAutoMark, usePanelMarks } from "./markMenu";
+import { autoMarksOf, effectiveMarksFor } from "../shared/panelMarks";
 import type { AlbumItem } from "../shared/types";
 
 /** 相册拖拽载荷的 MIME 类型（与文件的 `application/x-hp-files` 区分，D117/D128）。 */
@@ -118,12 +118,13 @@ function sameMediaType(a: string, b: string): boolean {
 }
 
 /**
- * 媒体属性包含关系：`multimedia` 是所有具体类型的超集（对齐 `AlbumMediaType::contains`）。
+ * 媒体属性包含关系：`multimedia` 与 `unlimited` 都是所有具体类型的超集
+ * （对齐 `AlbumMediaType::contains`：两者对可收集合是同一件事，差别只在缺省语义与自动标记）。
  *
  * `containsMedia(outer, inner)` 为真表示 `outer` 覆盖 `inner`。
  */
 function containsMedia(outer: string, inner: string): boolean {
-  return outer === inner || outer === "multimedia";
+  return outer === inner || outer === "multimedia" || outer === "unlimited";
 }
 
 /** `candidateId` 是否为 `albumId` 的后代（沿 parent 链上溯；用于禁止互相包含）。 */
@@ -221,17 +222,30 @@ export function AlbumPanel(): JSX.Element {
     [albums, menu],
   );
   /**
-   * 右键菜单目标相册**由属性自动带上**的标记（D134）：恒为已打、不可取消。
-   * 用**有效**媒体属性（沿父链继承），与相册行尾部 `mediaLabel` 的显示同源——
-   * 若只看显式值，"继承自己是图像的子相册"会在行上显示图像、菜单里却没有图像勾。
+   * 右键菜单目标相册上**由系统自动同步打上**的标记（D139）。
+   *
+   * 它们已经落库（与用户手打的在同一个 `marks` 表里、行为完全一致：可取消、可重新打上），
+   * 这里取出来只为**配色**——灰黑色表示"这条是系统按属性打上的"，用户手动打的是黑色。
    */
-  const menuDerivedMarks = useMemo(() => {
+  const menuAutoMarks = useMemo(() => {
     if (!menu) return [];
-    const byId = new Map(albums.map((a) => [a.id, a]));
-    return derivedMarksForAlbum(effectiveMediaType(menu.albumId, byId));
-  }, [albums, menu]);
-  /** 相册 id → 相册：行点击上报要算派生标记（沿父链取**有效**媒体属性）。 */
-  const albumById = useMemo(() => new Map(albums.map((a) => [a.id, a])), [albums]);
+    return autoMarksOf(marks, "albums", menu.albumId);
+  }, [marks, menu]);
+  /**
+   * 自动标记与相册属性对齐（D139）：首次进入、旧数据补写、属性在别处改过都在这里收敛。
+   *
+   * 用**显式** `media_type`（不是沿父链继承后的有效值）：继承值不是这个相册自己的设置，
+   * 父相册改属性时不该顺手改掉子相册的标记。`syncAlbumAutoMark` 是幂等的纯函数，
+   * 状态没变就返回原对象，所以这里 `next !== marks` 才写回，不会自激循环。
+   */
+  useEffect(() => {
+    if (albums.length === 0) return;
+    let next = marks;
+    for (const album of albums) {
+      next = syncAlbumAutoMark(next, album.id, album.media_type);
+    }
+    if (next !== marks) persistMarks(next);
+  }, [albums, marks, persistMarks]);
 
   const toggleCollapse = useCallback((id: string) => {
     setCollapsed((prev) => {
@@ -277,11 +291,13 @@ export function AlbumPanel(): JSX.Element {
       return;
     }
     try {
-      // 简化：只创建固定型相册（不指定 mediaType → 继承）
+      // 新建相册默认「无限制」（D139，用户口径）：显式传 `unlimited`，不再靠"继承"兜底。
+      // 这样相册一落地就有一条确定的属性，而不是"等父相册说了算"。
       const r = await api.albumCreate({
         repoId: app.repoId,
         name: name.trim(),
         kind: "fixed",
+        mediaType: "unlimited",
       });
       app.status(`${t("album.add")}: ${name.trim()}`, "ok");
       setName("");
@@ -309,7 +325,7 @@ export function AlbumPanel(): JSX.Element {
     }
   };
 
-  // 创建子相册（右键菜单内联输入；固定型 + 全部媒体属性）
+  // 创建子相册（右键菜单内联输入；固定型 + 与顶层新建同口径的「无限制」）
   const createChild = async (parentId: string, childNameValue: string) => {
     if (!app.repoId || !childNameValue.trim()) {
       app.status(t("album.name"), "error");
@@ -320,7 +336,7 @@ export function AlbumPanel(): JSX.Element {
         repoId: app.repoId,
         name: childNameValue.trim(),
         kind: "fixed",
-        mediaType: "multimedia",
+        mediaType: "unlimited",
         parentAlbumId: parentId,
       });
       app.status(`${t("album.createChild")}: ${childNameValue.trim()}`, "ok");
@@ -348,11 +364,17 @@ export function AlbumPanel(): JSX.Element {
     }
   };
 
-  // 设置相册媒体属性（multimedia / image / video / audio）
+  /**
+   * 设置相册媒体属性（unlimited / multimedia / image / video / audio）。
+   *
+   * 属性变了，它的自动标记要跟着变（D139）：手动改过的标记不动、被用户取消过的不再加回。
+   * 同步放在**写库成功之后**用新属性算，失败路径完全不碰标记，避免"属性没改成但标记变了"。
+   */
   const setAlbumMediaType = async (albumId: string, mt: string) => {
     if (!app.repoId) return;
     try {
       await api.albumSetMediaType({ repoId: app.repoId, albumId, mediaType: mt });
+      persistMarks(syncAlbumAutoMark(marks, albumId, mt));
       app.status(`${t("album.mediaType.set")}: ${mediaLabel(mt)}`, "ok");
       app.refresh();
     } catch (e) {
@@ -582,6 +604,10 @@ export function AlbumPanel(): JSX.Element {
       case null:
       case "":
         return t("album.inherit");
+      case "unlimited":
+        // 「无限制」是新建相册的默认属性（D139），与 `multimedia` 的可收集合相同，
+        // 但它是"没有限制"而不是"包含全部媒体"——行尾显示要能看出这个区别。
+        return t("album.media.unlimited");
       case "image":
         return t("album.media.image");
       case "video":
@@ -645,21 +671,21 @@ export function AlbumPanel(): JSX.Element {
             // 真实 `media_type` 是 `multimedia`/`image`/空（沿父链继承）——直接透传会与
             // `blueprintEngine.ts` 的精确比较失败（task-5 修正 2）。
             // `fileId` = 相册 id（对象节点的 `scope` 也可写具体 id，RFC 0007 决策 1）。
-            // `marks` = 该相册的**有效标记**（用户标记 ∪ 派生标记，D138）：
+            // `marks` = 该相册的**有效标记**（用户标记 ∪ 系统自动同步标记，D138/D139）：
             // 相册没有 `file_marks`（那是文件表的存储），它的标记在面板本地的
             // `panel_marks`（`shared/panelMarks.ts`，`albums` 域，按相册 id 挂）。
             // 旧实现恒给 `[]`（注释理由是"面板打标不经 dispatch"）⇒ 标记轴对相册
             // 天然不可命中，而标记的语义正是**对象的限制条件**，不给就等于这条链
-            // 没有条件可判。派生标记必须一并并入：右键菜单里它恒勾不可取消，
-            // 菜单说打了而上报不报就是两套事实（`effectiveMarksFor` 有详述）。
+            // 没有条件可判。D139 起自动标记**已经落库**在 `marks` 里（与手打的行为一致），
+            // 所以这里直接读状态即可——不再需要"临时并入派生标记"那一步，也就不会
+            // 把用户亲手取消掉的标记又报成已打。
             // 本调用**只上报**，不产生任何面板副作用。
-            const mediaType = effectiveMediaType(node.id, albumById);
             app.dispatch({
               trigger: "click",
               target: {
                 mediaType: "album",
                 fileId: node.id,
-                marks: effectiveMarksFor(marks, "albums", node.id, derivedMarksForAlbum(mediaType)),
+                marks: effectiveMarksFor(marks, "albums", node.id),
               },
             });
           }}
@@ -995,7 +1021,7 @@ export function AlbumPanel(): JSX.Element {
                   <MarkMenuTree
                     scope="albums"
                     targetKey={menu.albumId}
-                    derived={menuDerivedMarks}
+                    autoMarks={menuAutoMarks}
                     marks={marks}
                     onPersist={persistMarks}
                     onClose={() => setMenu(null)}
@@ -1003,7 +1029,7 @@ export function AlbumPanel(): JSX.Element {
                 </div>
               )}
 
-              {/* 设置属性：子菜单（媒体 / 图像 / 视频 / 音频，D134 删「全部」加「媒体」） */}
+              {/* 设置属性：子菜单（无限制 / 媒体 / 图像 / 视频 / 音频，D139 增「无限制」） */}
               <button
                 className="menu-item has-sub"
                 onClick={() => setOpenMediaTypeSub((v) => !v)}
@@ -1013,6 +1039,15 @@ export function AlbumPanel(): JSX.Element {
               </button>
               {openMediaTypeSub && (
                 <div className="menu-sub">
+                  <button
+                    className="menu-item"
+                    onClick={() => {
+                      void setAlbumMediaType(menu.albumId, "unlimited");
+                      setMenu(null);
+                    }}
+                  >
+                    {t("album.media.unlimited")}
+                  </button>
                   <button
                     className="menu-item"
                     onClick={() => {

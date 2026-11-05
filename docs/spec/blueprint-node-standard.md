@@ -53,7 +53,7 @@
 | 编辑器落库 | `apps/desktop/src/app_ui/panels/blueprintConnect.ts` | **v3**：新增「对象 → 标记 ⇒ `patch.object`」（`:82`-`99`，并自愈清掉残留 `class`/`control`）；「类目 → 标记 ⇒ `patch.class`」「标记 → 对象 ⇒ `patch.mark_ref`」两条**已删除** |
 | 编辑器灰显判据 | `apps/desktop/src/app_ui/shared/blueprintLint.ts` | **v3**：`mark` 判 `!node.object \|\| !byKey.has(node.object) \|\| Boolean(node.class?.trim())` → `missing-class`（`:166`-`179`）；`object` 只看 `[node.class, node.subclass]`（`:191`-`199`，`mark_ref` 刻意不判灰） |
 | 运行时匹配 | `apps/desktop/src/app_ui/core/blueprintEngine.ts` | **v3 两段式**：mark 分支先查 `target.marks` 含 `node.mark`，再递归 `node.object` 的父对象判定（`:299`-`319`）；object 的 `parentKey` 为 `node.class ?? node.subclass`（`:337`，已去掉 `mark_ref`） |
-| 上报方 | `panels/mediaPreviewSelection.ts` / `panels/AlbumPanel.tsx` / `panels/SourcePanel.tsx` / `panels/bookpreview/bookPreviewView.ts` | 媒体预览三处（`:101`/`:154`/`:166` 一带）与图书预览均带 `marks`；**相册点击上报 `mediaType:"album"` + `effectiveMarksFor(…,"albums",…)`（用户标记 ∪ 派生标记）**；**源面板行点击首次上报 `mediaType:"source"` + `marksOf(…,"sources",node.key)`**（2026-11-02 / **D138**，详见 §2.0.1「标记的上报方」） |
+| 上报方 | `panels/mediaPreviewSelection.ts` / `panels/AlbumPanel.tsx` / `panels/SourcePanel.tsx` / `panels/bookpreview/bookPreviewView.ts` | 媒体预览三处（`:101`/`:154`/`:166` 一带）与图书预览均带 `marks`；**相册点击上报 `mediaType:"album"` + `effectiveMarksFor(…,"albums",…)`（已落库的用户标记 + 自动同步标记）**；**源面板行点击首次上报 `mediaType:"source"` + `marksOf(…,"sources",node.key)`**（2026-11-02 / **D138**；2026-11-05 / **D139** 改为自动标记同表落库，详见 §2.0.1「标记的上报方」） |
 
 **门禁实测（2026-11-02 17:2x，`$env:PATH` 前置 corepack 钉版 shim 后 `pnpm run <gate>`）全部 exit 0**：
 
@@ -63,7 +63,7 @@
 | `check:blueprint-connect` | **24/24 通过** |
 | `check:blueprint-engine` | **62/62 通过** |
 | `check:blueprint-runtime` | **3/3 通过** |
-| `check:panels` | **368/368 通过**（含 D138 的 6 条相册/源面板上报断言） |
+| `check:panels` | **375/375 通过**（含 D138 的相册/源面板上报断言与 D139 的 7 条自动标记断言） |
 
 （原 §0.1 的 7 条 FAIL 表已全部清零，故本节不再保留该表；历史明细可从 git 忽略前的版本或本轮讨论记录回溯。）
 
@@ -201,11 +201,11 @@ id，标记之间不建立父子引用（D102 已定"可多值、互不嵌套"�
 | --- | --- | --- | --- |
 | 媒体预览（选中变化 / 单击 / 双击） | 文件 | `file.media_type` | `file.marks`（`file_marks`，零额外 IPC） |
 | 图书预览（单击 / 双击） | 文件 | `item.media_type` + `format` | `item.marks`（`bookDispatchTarget`） |
-| **相册面板（行点击）** | 真实相册 | **字面量 `"album"`**（相册行的真实 `media_type` 是 multimedia / image / 空，与类目取值域不同名） | `effectiveMarksFor(marks, "albums", 相册 id, derivedMarksForAlbum(有效媒体属性))` —— **用户标记 ∪ 派生标记** |
+| **相册面板（行点击）** | 真实相册 | **字面量 `"album"`**（相册行的真实 `media_type` 是 multimedia / image / unlimited / 空，与类目取值域不同名） | `effectiveMarksFor(marks, "albums", 相册 id)` —— 该相册**已落库**的标记集合（用户标记 + 自动同步标记，D139 起同表同行为） |
 | **源面板（行点击）** | 源根 / 源内目录 | **字面量 `"source"`**（取值域 `sources: unlimited / source / empty`） | `marksOf(marks, "sources", 节点 key)`，节点 key 与 `src:<id>` / `dir:<sourceId>/<rel>` 及后端节点 key **三方同源** |
 | 插件控件 | 控件 | 无 | 带 `panelId` 过滤，走控件级派发 |
 
-两条配套口径：(a) **派生标记必须并入上报**——相册的派生标记（属性 → 同名标记，D134）在右键菜单里恒勾且不可取消，菜单说"带这个标记"而引擎收不到就是两套事实；(b) **标记是对象的可选限制条件**，因此上报缺标记只是"这条链不命中"（链上不接标记节点时行为完全不变），不会误命中，也不会改变对象所属的类目。相册与源的自定义标记**互不可见**（`albums` / `sources` 两个域各一份，D134 ⑨），两处都不写 `file_marks`。
+两条配套口径：(a) **自动标记必须落库、并且可取消**（D139）——相册属性变化时会同步一个同名标记（属性 → 同名标记，D134），但它和用户自己勾的标记**行为完全一致**：可以取消，取消后属性再变也不会自己回来（记在 `dismissed` 里），重新勾上就变成用户标记。它落库在 `marks` 里，只额外记一位来源（`auto`）用于菜单配色（**灰黑色** = 系统同步、**黑色** = 用户标记），所以上报是一次普通读库，不存在"菜单一套事实、引擎另一套事实"；(b) **标记是对象的可选限制条件**，因此上报缺标记只是"这条链不命中"（链上不接标记节点时行为完全不变），不会误命中，也不会改变对象所属的类目。相册与源的自定义标记**互不可见**（`albums` / `sources` 两个域各一份，D134 ⑨），两处都不写 `file_marks`。
 
 **「补充节点」的层级位置（2026-10-10 用户口径；同日更正）**：
 
@@ -652,7 +652,8 @@ has_tag == <tag_name>
   - **未知 `type` 分流**：不合命名规则 → 硬错误；命名合法但无注册项 → **软告警且可保存**，且该节点与其边原样保留。
   - `control.panel_id` ↔ 面板注册表 `blueprint_node` 双向一致（`docs/spec/panel-standard.md` 第 5.2 节）。
   - `has_class = false` 的面板下 `control → class` 被拒（硬错误）；**`control → mark` 在 v3 下同样非法**，但理由不同——`mark` 的结构父是 `object`，`control.children` 只有 `class`，因此这条边被 `containmentAllows` 直接拒绝（**取代** D134 的"标记挂任何面板都合法"口径，见第 0 节）。
-- **标记的上报与匹配（D138，2026-11-02）**：`pnpm check:panels` 新增 **6 条**（362 → **368**）——相册行必须上报 `mediaType:"album"` + `fileId: node.id`，`marks` 必须走 `effectiveMarksFor(marks,"albums",node.id,derivedMarksForAlbum(` 且**反面断言 `marks: []` 恒空形态不得再出现**；源面板行必须上报 `click` + `mediaType:"source"` + `fileId: node.key`，`marks` 必须走 `marksOf(marks,"sources",node.key)`；`effectiveMarksFor` 的**行为**断言（并集、去重保序、`serializePanelMarksState` 后派生标记**不落库**）；派生标记必须取自 `effectiveMediaType(node.id, albumById)`（沿父链继承后的有效属性，非节点自身字段）。`pnpm check:blueprint-engine` 新增 **7 条**（55 → **62**），用真实引擎跑合成图的"同一次点击只换一个变量"对照：标记命中+对象命中 ⇒ 命中；`marks=[]` ⇒ 不命中；不相干标记 ⇒ 不命中；**同一标记换成 `mediaType:"image"` 上报 ⇒ 不命中（标记不改变对象所属类目）**；派生标记可作条件；源面板三件套 ⇒ 命中；源无标记/换 key ⇒ 不命中（两个条件都不可省）。\n- **标记清单（D134，2026-11-01）**：系统标记 **10 项**的清单在 TS（`packages/config/src/blueprintValues.ts` 的 `BLUEPRINT_BUILTIN_MARKS`）与 Rust（`crates/hp-core/src/blueprint_types.rs` 的 `BUILTIN_MARKS`）**两处**，`pnpm check:panels` 逐项比对**含顺序**（数量对不上会被 `[&str; N]` 当场发现，但顺序对不上只会让两边下拉顺序悄悄错开、谁都不报错）；同一条断言还钉住 `blueprint.mark.<id>` × 10 × 三语（zh-CN / zh-TW / en）逐键存在——缺一个就是某种语言下菜单出现空白项。
+- **标记的上报与匹配（D138，2026-11-02；D139 修订自动标记口径）**：`pnpm check:panels` 新增 **6 条**（362 → **368**）——相册行必须上报 `mediaType:"album"` + `fileId: node.id`，`marks` 必须走 `effectiveMarksFor(marks,"albums",node.id)` 且**反面断言 `marks: []` 恒空形态不得再出现**；源面板行必须上报 `click` + `mediaType:"source"` + `fileId: node.key`，`marks` 必须走 `marksOf(marks,"sources",node.key)`。**D139 追加 7 条**（368 → **375**）：`autoMarksForMediaType` 对 `unlimited` / 空返回空、其余返回同名标记；自动标记落库且**可取消**、取消后属性再变不加回、重新勾上即转为用户标记；属性变更时自动标记跟着同步（换属性替换 / `unlimited` 摘掉 / 用户标记不动 / 幂等）；同步接在**显式** `album.media_type` 上（`syncAlbumAutoMark`）而不是沿父链继承；`unlimited` 参与拖拽包含判定；相册属性菜单有「无限制」项且新建相册默认 `unlimited`；标记菜单只留「＋ 新建自定义标记」并把已建自定义标记排在其下（旧标题与空态删除）。`pnpm check:blueprint-engine` 新增 **7 条**（55 → **62**），用真实引擎跑合成图的"同一次点击只换一个变量"对照：标记命中+对象命中 ⇒ 命中；`marks=[]` ⇒ 不命中；不相干标记 ⇒ 不命中；**同一标记换成 `mediaType:"image"` 上报 ⇒ 不命中（标记不改变对象所属类目）**；自动标记可作条件；源面板三件套 ⇒ 命中；源无标记/换 key ⇒ 不命中（两个条件都不可省）。
+- **标记清单（D134，2026-11-01）**：系统标记 **10 项**的清单在 TS（`packages/config/src/blueprintValues.ts` 的 `BLUEPRINT_BUILTIN_MARKS`）与 Rust（`crates/hp-core/src/blueprint_types.rs` 的 `BUILTIN_MARKS`）**两处**，`pnpm check:panels` 逐项比对**含顺序**（数量对不上会被 `[&str; N]` 当场发现，但顺序对不上只会让两边下拉顺序悄悄错开、谁都不报错）；同一条断言还钉住 `blueprint.mark.<id>` × 10 × 三语（zh-CN / zh-TW / en）逐键存在——缺一个就是某种语言下菜单出现空白项。
 - **类目「类型」取值域与分域（D135 起 7 项、D136 扩为 **9** 项，2026-11-01）**：`BLUEPRINT_MEDIA_TYPES`（**9 项**）↔ Rust `CLASS_MEDIA_TYPES`（`[&str; 9]`）**逐项相等且顺序一致**（数量对不上会被 `[&str; N]` 当场发现，**顺序**对不上只会让两边下拉顺序悄悄错开、谁都不报错）；TS `classMediaTypesForPanel` ↔ Rust `class_media_types_for_panel` **逐面板逐项相等**（`media` / `bookpreview` / `albums` / `sources` + 未注册）——这是**新增的跨语言镜像点**，两侧各写一份必然漂移。`pnpm check:panels` 另钉住 `defaultClassFieldsForPanel` 的四个面板缺省值、`PANEL_CLASS_MEDIA_TYPES` 键集 ↔ `has_class = true` 面板集相等、以及 `docs/spec/panel-standard.md` 第 5.1 节 has_class 表里四个面板的 `**true**` 字样。
 - **端口推导一致性（两条门禁，防"连线被静默丢弃"）**：
   - `portIdFor 只返回 PORT_DEFS 声明过的端口`：遍历全部已注册类型 × 2 侧 × 5 边类型。画布渲染连线时按 `portMap.get(`${key}::${side}::${portIdFor(type, side, kind)}`)` 找端口坐标，而 DOM 标记用 `PORT_DEFS` 里的 id —— 返回一个未声明的 id 会让查表落空、连线被 `return null` 丢掉。**真实回归**：输入侧曾被边类型名覆盖（`action.in.fires` 返回 `"fires"`，而操作节点的输入口实际是 `"in"`），导致「操作 → 状态」在画布上永远没有线；同一处错误还让"拖线到操作输入口"永远判不等（`in !== contains`），即用户反馈的"操作节点接不到触发节点"。

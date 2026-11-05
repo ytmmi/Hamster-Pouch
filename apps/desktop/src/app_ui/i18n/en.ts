@@ -114,8 +114,11 @@ export const en: Record<keyof DictZhCN, string> = {
   "album.kind.fixed": "Fixed",
   "album.kind.follow": "Follow Source",
   "album.mediaType": "Media Type",
-  // The four values of the "Set attribute" menu: Media (underlying `multimedia`) / Image / Video / Audio.
-  // "All" was removed in D134 in favour of the more accurate "Media" (it was always the superset of every media kind).
+  // The five values of the "Set attribute" menu: Unlimited (underlying `unlimited`) / Media
+  // (`multimedia`) / Image / Video / Audio. "All" was removed in D134 in favour of the more
+  // accurate "Media"; D139 adds "Unlimited" and makes it the default for new albums — it still
+  // contains the same three media kinds, but it is not a restriction, so it applies no mark.
+  "album.media.unlimited": "Unlimited",
   "album.media.media": "Media",
   "album.media.image": "Image",
   "album.media.video": "Video",
@@ -300,14 +303,12 @@ export const en: Record<keyof DictZhCN, string> = {
   // Mark results and the custom-mark list are stored per repository in app_settings
   // (`panelMarks.<repoId>`), one copy per panel.
   "mark.add": "Add mark",
-  "mark.menu.custom": "Custom marks",
   "mark.menu.customAdd": "+ New custom mark",
-  "mark.menu.customEmpty": "No custom marks yet",
   "mark.menu.customPlaceholder": "Custom mark name",
   "mark.menu.system": "System marks",
   "mark.menu.orphan": "Other applied marks",
   "mark.toggleFailed": "Failed to save mark: {err}",
-  "mark.derived": "Applied automatically from the album attribute",
+  "mark.auto": "Synced from the album attribute (can be removed)",
 
   "media.loadFailed": "Failed to load media preview: {err}",
   "media.removedFromAlbum": "Removed from album ({count})",

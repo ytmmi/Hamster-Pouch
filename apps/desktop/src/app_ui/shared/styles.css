@@ -5880,13 +5880,15 @@ button.danger {
   color: var(--fg);
 }
 
-/* 派生标记（相册属性自动带上）：不可取消，用弱化色表达"不是用户打的"。 */
-.mark-menu-row.is-derived .mark-menu-item {
-  color: var(--fg-dim);
-  cursor: default;
+/*
+ * 系统自动同步的标记（相册属性 → 同名标记，D139）：**可取消**，只是用灰黑色表达
+ * "这条不是你亲手打的"（用户口径：灰黑色不是不可编辑的灰色；取消再勾上就变回黑色）。
+ * 因此这里只有配色，没有 `cursor: default`、也没有去掉 hover——它与普通行一样可点。
+ */
+.mark-menu-row.is-auto .mark-menu-item {
+  color: color-mix(in srgb, var(--fg) 55%, var(--fg-dim));
 }
 
-.mark-menu-row.is-derived .mark-menu-item:hover {
-  /* 不给 hover 底色：它不可取消，给反馈会被读成"能点掉"。 */
-  background: transparent;
+.mark-menu-row.is-auto .mark-menu-item[aria-pressed="true"] .mark-menu-check {
+  color: color-mix(in srgb, var(--fg) 55%, var(--fg-dim));
 }

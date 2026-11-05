@@ -446,7 +446,9 @@ pub(crate) fn album_members(
         // 有效媒体属性（含嵌套继承）→ 展开成三个布尔标志，交给 SQL 过滤。
         let media_type = AlbumService::effective_media_type(db, &album_id)?;
         let (want_image, want_video, want_audio) = match media_type {
-            AlbumMediaType::Multimedia => (true, true, true),
+            // `unlimited` 与 `multimedia` 在成员查询上同义：SQL 只认三个文件媒体字面量
+            // （见 `query_album_members_page`），两者都放行全部三种。
+            AlbumMediaType::Multimedia | AlbumMediaType::Unlimited => (true, true, true),
             AlbumMediaType::Image => (true, false, false),
             AlbumMediaType::Video => (false, true, false),
             AlbumMediaType::Audio => (false, false, true),

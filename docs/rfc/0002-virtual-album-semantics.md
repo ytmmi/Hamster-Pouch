@@ -16,7 +16,7 @@
 3. 媒体源和虚拟相册都允许嵌套。
 4. 虚拟相册不复制真实文件；真实文件只在媒体源之间发生复制/剪切/移动时才改变硬盘位置。
 5. 相册成员关系按仓库隔离；同一个本地媒体源被多个仓库挂载时，各仓库的相册成员、tag、评分互不影响。
-6. 相册媒体属性枚举为 `image` / `video` / `audio` / `multimedia`（=图片+视频+音频）；可选，默认 `multimedia`；创建后可修改。后续可扩展新枚举值。
+6. 相册媒体属性枚举为 `unlimited` / `image` / `video` / `audio` / `multimedia`（=图片+视频+音频）；可选，**界面新建相册时默认 `unlimited`**（D139，2026-11-05）；创建后可修改。后续可扩展新枚举值。
 7. 相册只显示 `media_type` 包含类型的文件；修改属性时自动移除不匹配成员，移除前 UI 确认并写操作历史；手动添加成员时拒绝不匹配类型的文件。
 8. 嵌套相册的 `media_type` 默认继承父相册，可显式覆盖。
 9. 跟随源型相册的同步规则含独立 `media_type` 过滤字段，同步时只拉取匹配类型；相册属性变更时联动更新该字段。
@@ -30,7 +30,7 @@ album
 - parent_album_id 可空
 - name
 - kind: fixed | follow_source
-- media_type: image | video | audio | multimedia   # 可空 = 继承父相册；顶层可空视作 multimedia
+- media_type: unlimited | image | video | audio | multimedia   # 可空 = 继承父相册；顶层可空视作 multimedia
 - created_at
 - updated_at
 
@@ -45,7 +45,7 @@ album_sync_rule
 - album_id
 - source_id
 - include_subsources: bool
-- media_type: image | video | audio | multimedia  # 独立过滤字段，与相册属性联动
+- media_type: unlimited | image | video | audio | multimedia  # 独立过滤字段，与相册属性联动
 - filter_json                  # tag/评分/类型/路径等筛选；具体 DSL 属于实现期开放点
 - sync_mode: add_only | mirror # 只增量加入，还是镜像移除
 - enabled: bool
@@ -64,9 +64,14 @@ album_sync_state
 
 - 相册只显示 `media_type` 包含类型的文件；显示层过滤，不改变成员关系。
 - `multimedia` 包含 image + video + audio；`image`/`video`/`audio` 只含单一类型。
+- `unlimited`（D139）在**成员可收集合**上与 `multimedia` 一致（都是 image + video + audio），差别有两处：
+  (a) 它是**界面新建相册的默认属性**；(b) 它**不自动给相册打标记**（`multimedia` 会打 `media`，
+  `image`/`video`/`audio` 各打同名标记），因为"无限制"本身不是一种限制条件，给它打标记会让
+  标记轴凭空多出一个恒真条件。相册一律不含"书"（text / pdf），这一条两者相同。
 - 修改相册属性时：自动移除不匹配的新属性的成员；移除前必须 UI 确认并写入操作历史。
 - 手动向相册添加成员时：不匹配相册属性的文件被拒绝并提示。
-- 嵌套相册：`media_type` 为空表示继承父相册；显式设置则覆盖。顶层相册空值视作 `multimedia`。
+- 嵌套相册：`media_type` 为空表示继承父相册；显式设置则覆盖。顶层相册空值视作 `multimedia`
+  （**协议/存储层**的回落；界面新建时一律显式写 `unlimited`，所以实际新建出的相册不会是空值，D139）。
 
 ### 固定型相册
 
@@ -77,7 +82,7 @@ album_sync_state
 ### 跟随源型相册
 
 - 创建时保存 `album_sync_rule`，并按规则初始化成员。
-- 同步时只拉取与 `media_type` 匹配的文件（`multimedia` 拉取全部）。
+- 同步时只拉取与 `media_type` 匹配的文件（`multimedia` 与 `unlimited` 都拉取全部三种媒体）。
 - 源新增文件且匹配规则：加入成员，`added_by=sync_rule`。
 - 源文件缺失或不再匹配规则：
   - `add_only`：保留成员，标记为规则不再匹配。

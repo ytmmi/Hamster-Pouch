@@ -107,7 +107,7 @@
 | --- | --- | --- |
 | `media`（媒体预览） | **`true`** | 内部有 图像 / 视频 / 音频 三个类目（**类型分域 = image / video / audio**） |
 | `bookpreview`（图书预览） | **`true`** | 内部有**文本**类目；其下按子类细分（epub / txt / md）；**标记挂在对象之下**（`类目/子类 → 对象 → 标记`，**v3 / D137**；系统标记 10 项，见 `docs/spec/blueprint-node-standard.md` 第 2.0.1 节）（**类型分域 = text / pdf**） |
-| `albums`（相册） | **`true`** | **条目分类层 = 相册列表的条目**（每一行就是一个相册条目）；类目的类型分域 = **`album`**（D135）；**标记挂在对象之下**（v3 / D137）；**行点击上报 `mediaType:"album"` + 有效标记**（用户标记 ∪ 派生标记，D138；相册没有 `file_marks`，走 `panel_marks` 投影，见下方注记） |
+| `albums`（相册） | **`true`** | **条目分类层 = 相册列表的条目**（每一行就是一个相册条目）；类目的类型分域 = **`album`**（D135）；**标记挂在对象之下**（v3 / D137）；**行点击上报 `mediaType:"album"` + 有效标记**（自动同步标记与用户标记同表落库，D138 / D139；相册没有 `file_marks`，走 `panel_marks` 投影，见下方注记） |
 | `sources`（源） | **`true`** | **条目分类层 = 目录树**（源根及其下的子目录行，`src:<id>` / `dir:<sourceId>/<rel>`）；类目的类型分域 = **`source`**（D135）；**标记挂在对象之下**（v3 / D137，D134 的"与类目树平行"口径已撤销）；**行点击首次上报 `mediaType:"source"` + `sources` 域标记**（D138） |
 | 其余 **12** 个（含 `viewer`、**`bookreader`**、`imageviewer`） | `false` | 无条目分类；**图书阅读器**只"读一本书"，不按条目分类（挑书在图书预览里做） |
 
@@ -136,17 +136,19 @@
 > | --- | --- | --- | --- |
 > | 媒体预览 | 文件 | `file.media_type`（image / video / audio / …） | `file.marks`（`file_marks` 表） |
 > | 图书预览 | 文件 | `item.media_type` + `format` | `item.marks`（`file_marks` 表） |
-> | 相册 | 真实相册（行） | **字面量 `"album"`** | `effectiveMarksFor(marks, "albums", 相册 id, derivedMarksForAlbum(有效媒体属性))` = **用户标记 ∪ 派生标记**（`app_settings` 的 `panelMarks.<repoId>` 投影） |
+> | 相册 | 真实相册（行） | **字面量 `"album"`** | `effectiveMarksFor(marks, "albums", 相册 id)` = 该相册**已落库**的标记集合（用户标记 + 自动同步标记，D139 起两者同一张表） |
 > | 源 | 源根 / 源内目录（行） | **字面量 `"source"`** | `marksOf(marks, "sources", 节点 key)`（`src:<id>` / `dir:<sourceId>/<rel>`） |
 >
 > **为什么相册/源的 `mediaType` 是字面量**：类目的类型分域是 `albums: ["unlimited","album","empty"]`
 > 与 `sources: ["unlimited","source","empty"]`（D135），而行里的真实媒体属性是
 > multimedia / image / 空，透传过来一个都对不上——**面板身份优先于行内属性**。
-> **为什么派生标记必须并入**：派生标记（相册属性 → 同名标记，multimedia→`media`、
-> image→`image`，D134 ⑤）在右键菜单里**恒勾且不可取消**；上报时不带，就是菜单一套事实、
-> 引擎另一套事实。**标记仍是可选项、不改对象性质**：引擎的 `mark` 分支是两段式
+> **为什么自动标记与用户标记同表**（D139，2026-11-05 用户口径）：相册属性变化时会自动同步一个
+> 同名标记（multimedia→`media`、image→`image`，D134 ⑤），但**这个标记可以取消**，且取消后
+> 属性再变也不会自己回来——所以它必须落库、必须有"是不是系统给的"这一位来源记录（`auto`），
+> 否则"用户取消过"这个事实无处存放，下次属性变更又会把它加回来。落库后上报就是一次普通读库，
+> 不存在"菜单一套事实、引擎另一套事实"。**标记仍是可选项、不改对象性质**：引擎的 `mark` 分支是两段式
 > （`target.marks` 含 `node.mark` **且**递归回父对象的类目/`scope`），标记只在被接进链路时
-> 才参与判定，且**不能替代**父对象判定。门禁：`check:panels` 368/368（D138 的 6 条）、
+> 才参与判定，且**不能替代**父对象判定。门禁：`check:panels` 375/375（D139 新增 7 条）、
 > `check:blueprint-engine` 62/62（D138 的 7 条，含"同一标记换类目上报必须不命中"这条回归锚点）。
 >
 > **历史注记（D137 当时如实登记、现已由 D138 修订）**：相册里的真实相册没有 `file_marks`，

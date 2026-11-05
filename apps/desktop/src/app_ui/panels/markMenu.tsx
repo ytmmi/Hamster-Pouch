@@ -52,14 +52,15 @@ import { useApp } from "../core/AppContext";
 import { markLabel } from "./blueprintLabels";
 import {
   addCustomMark,
+  autoMarksForMediaType,
   customMarkName,
   customMarkToken,
-  derivedMarkOfMediaType,
   emptyPanelMarksState,
   marksOf,
   parsePanelMarksState,
   serializePanelMarksState,
   setMark,
+  toggleMarkFromMenu,
   type PanelMarkScope,
   type PanelMarksState,
 } from "../shared/panelMarks";
@@ -91,10 +92,14 @@ export interface MarkMenuTreeProps {
   /** 当前目标对象的 key（相册 = `albumId`；源 = `src:<id>` / `dir:<sourceId>/<相对路径>`）。 */
   targetKey: string;
   /**
-   * 当前目标**由属性自动带上**的派生标记（相册按媒体属性算出；源面板不传）。
-   * 恒为已打、不可取消——它们**不落库**（见 `shared/panelMarks.ts` 文件头）。
+   * 当前目标上**由系统自动同步打上**的标记（相册按媒体属性同步；源面板不传）。
+   *
+   * 它们已经落库、也在 `marks` 里，与用户手打的标记**行为完全一致**（可取消、可重新打上）；
+   * 这个列表只用于**配色**：自动打上的画灰黑色，用户手动打上的画黑色（D139 用户口径：
+   * 「系统同步的标记为灰黑色（不是灰色，灰色是不可编辑），点击取消再点击回来就是用户标记，
+   * 为黑色了」）。因此这里既不能 `aria-disabled`，也不能去掉 hover 反馈。
    */
-  derived?: readonly string[];
+  autoMarks?: readonly string[];
   /** 当前状态（来自 {@link usePanelMarks}）。 */
   marks: PanelMarksState;
   /** 写回（来自 {@link usePanelMarks}）。 */
@@ -104,7 +109,7 @@ export interface MarkMenuTreeProps {
 }
 
 /**
- * 「添加标记」子区：顶端「自定义标记」入口 + 系统标记树（默认全折叠）+ 勾选态。
+ * 「添加标记」子区：新建自定义标记入口 + 已建的自定义标记 + 系统标记树（默认全折叠）+ 勾选态。
  *
  * 每行结构是 `[折叠箭头][✓/空][标记名]`：箭头只对有子项的标记可点；勾选按钮复用
  * `.menu-item`（菜单里所有可点项都是同一套观感），勾选符号与图书预览的标记菜单同款
@@ -113,7 +118,7 @@ export interface MarkMenuTreeProps {
 export function MarkMenuTree({
   scope,
   targetKey,
-  derived = [],
+  autoMarks = [],
   marks,
   onPersist,
   onClose,
@@ -138,26 +143,19 @@ export function MarkMenuTree({
     });
   }, []);
 
-  const derivedSet = useMemo(() => new Set(derived), [derived]);
+  const autoSet = useMemo(() => new Set(autoMarks), [autoMarks]);
   const current = marksOf(marks, scope, targetKey);
   const customNames = marks.custom[scope];
 
   /**
-   * 一次静默的"目标标记集合"查询（判断勾选态）：已打上的 + 派生带上的。
-   * 派生标记也算已勾，但**不可取消**——点它只给一句 info 说明由来（见下）。
+   * 打上 / 取消一个标记（D139：自动标记与用户标记**行为完全一致**）。
+   *
+   * 区别只在来源记录：取消一个自动标记会记进 `dismissed`，此后属性怎么变都不再自动加回；
+   * 取消后又勾上则转成用户标记（黑色）。这套账由 `toggleMarkFromMenu` 统一维护，
+   * 菜单里不再有"点了但点了没用"的项。
    */
-  const isOn = (token: string): boolean =>
-    derivedSet.has(token) || current.includes(token);
-
-  /** 打上 / 取消一个标记。 */
   const apply = (token: string, nextOn: boolean) => {
-    if (derivedSet.has(token) && !nextOn) {
-      // 恒为已打、不可取消：不写库，只解释"为什么它自己勾上了"，否则用户会反复点
-      // 一个看起来永远勾着的项、以为界面坏了。
-      app.status(t("mark.derived"), "info");
-      return;
-    }
-    onPersist(setMark(marks, scope, targetKey, token, nextOn));
+    onPersist(toggleMarkFromMenu(marks, scope, targetKey, token, nextOn));
   };
 
   /** 渲染一行（系统标记与自定义标记共用；`branch` 为 `null` 表示没有子项可折叠）。 */
@@ -167,13 +165,14 @@ export function MarkMenuTree({
     depth: number,
     branch: readonly string[] | null,
   ): JSX.Element => {
-    const on = isOn(token);
+    const on = current.includes(token);
+    const auto = on && autoSet.has(token);
     const hasBranch = branch !== null && branch.length > 0;
     const isOpen = hasBranch && expanded.has(token);
     return (
       <div
         key={token}
-        className={`mark-menu-row${derivedSet.has(token) ? " is-derived" : ""}`}
+        className={`mark-menu-row${auto ? " is-auto" : ""}`}
         style={{ paddingLeft: depth * 12 }}
       >
         <span
@@ -189,7 +188,7 @@ export function MarkMenuTree({
         <button
           className="menu-item mark-menu-item"
           aria-pressed={on}
-          title={derivedSet.has(token) ? t("mark.derived") : undefined}
+          title={auto ? t("mark.auto") : undefined}
           onClick={() => apply(token, !on)}
         >
           <span className="mark-menu-check">{on ? "✓" : "\u00a0"}</span>
@@ -235,12 +234,12 @@ export function MarkMenuTree({
 
   return (
     <>
-      {/* 「自定义标记」入口固定在**顶端**（用户口径）：先给"没有现成标记可用"一条出路。 */}
-      <div className="menu-label dim">{t("mark.menu.custom")}</div>
-      {customNames.length === 0 && (
-        <div className="menu-label dim">{t("mark.menu.customEmpty")}</div>
-      )}
-      {customNames.map((name) => renderRow(customMarkToken(name), name, 0, null))}
+      {/*
+        自定义标记区（用户口径，D139）：只留「＋ 新建自定义标记」这一个入口，
+        已建的自定义标记排**在它下面**——新建是"造工具"，打标是"用工具"，
+        按钮在前符合从上到下的操作流。这里不再有「自定义标记」标题与「暂无自定义标记」
+        空态：只有一个按钮时，标题纯属多一行占位。
+      */}
       {creating ? (
         <div className="menu-item-row">
           <input
@@ -277,6 +276,7 @@ export function MarkMenuTree({
           {t("mark.menu.customAdd")}
         </button>
       )}
+      {customNames.map((name) => renderRow(customMarkToken(name), name, 0, null))}
 
       <div className="menu-sep" />
 
@@ -430,7 +430,17 @@ export function usePanelMarks(repoId: string | null): PanelMarksController {
   return { marks, persist };
 }
 
-/** 相册媒体属性 → 派生标记列表（`multimedia→media`；其余同名）。源面板不传派生。 */
-export function derivedMarksForAlbum(mediaType: string | null | undefined): readonly string[] {
-  return [derivedMarkOfMediaType(mediaType)];
+/**
+ * 相册媒体属性 → **自动同步标记**列表（`multimedia→media`、其余同名；`unlimited`/空 → 空）。
+ *
+ * 与旧的 `derivedMarksForAlbum` 的差别不是命名：那个函数算的是"上报时临时并入"的派生标记
+ * （不落库）；这个算的是"应该自动打上的标记"（D139 起会真的落库、可取消）。`unlimited`
+ * 一个都不打，所以新建相册默认不会凭空多出一条标记。
+ */
+export function autoMarksForAlbum(mediaType: string | null | undefined): readonly string[] {
+  return autoMarksForMediaType(mediaType);
 }
+
+// 相册面板历史上一律从本文件取"属性 → 标记"的口径（`derivedMarksForAlbum`），
+// 改名后仍从这里转出去，免得两个面板对同一件事各 import 一个来源。
+export { syncAlbumAutoMark } from "../shared/panelMarks";

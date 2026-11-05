@@ -238,7 +238,7 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 ### 3.4 `album.*`
 | 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| `album.create` | 创建相册 | `{ repoId, name, kind, mediaType?, parentAlbumId?, sourceId?, fileIds? }` | `{ ok, data: { albumId } }` | **已包装** | 代码 `commands/album.rs` 的 `album_create`；**D76 批次 `album` 已迁移**（2026-09）。线上 `data` 是 `{ album_id }`（蛇形）；另接受 `syncMode` / `includeSubsources` / `filterJson`。空名 / 未知 `kind` / 跟随源缺 `sourceId` → `validation` |
+| `album.create` | 创建相册 | `{ repoId, name, kind, mediaType?, parentAlbumId?, sourceId?, fileIds? }` | `{ ok, data: { albumId } }` | **已包装** | 代码 `commands/album.rs` 的 `album_create`；**D76 批次 `album` 已迁移**（2026-09）。线上 `data` 是 `{ album_id }`（蛇形）；另接受 `syncMode` / `includeSubsources` / `filterJson`。`mediaType` 取值域含 **`unlimited`**（D139）。空名 / 未知 `kind` / 跟随源缺 `sourceId` / 未知媒体属性 → `validation` |
 | `album.setMediaType` | 修改媒体属性 | `{ repoId, albumId, mediaType }` | `{ ok, data: { removedCount, opRecordId } }` | **已包装** | 线上 `data` 是 `{ removed_count, op_record_id }`（蛇形）；未知媒体属性 → `validation` |
 | `album.addMember` | 手动加成员 | `{ repoId, albumId, fileIds }` | `{ ok, data: { added } }` | **已包装** | 线上 `data` 是 `{ added }`（与文档的 `{ ok: true }` 形状不同，差异随收尾统一） |
 | `album.removeMember` | 移除成员 | `{ repoId, albumId, fileIds }` | `{ ok, data: { removed } }` | **已包装** | 线上 `data` 是 `{ removed }` |
@@ -252,7 +252,7 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 | `album.move` | 拖拽改变相册的父相册（`parentAlbumId` 为 `null` = 移到顶层），并可在同级中插到指定兄弟之前 | `{ repoId, albumId, parentAlbumId?, beforeAlbumId? }` | `{ ok, data: { parent_changed, parent_album_id, order_changed } }` | **已包装** | 代码 `commands/album.rs` 的 `album_move`（D128 / D132）。**禁止互相包含**：目标是自己 → `validation`（`相册不能成为自己的子相册`）；目标在当前相册子树内 → `validation`（`目标相册是当前相册的子相册，不能形成互相包含`）。上溯最多 `MAX_ALBUM_DEPTH`(64) 层，超限即视为成环；`parentAlbumId = null` 同时是相册面板「拖到列表空白处 = 移出为独立相册」的落点（D131）。**排序（D132）**：`beforeAlbumId` 指定同级落点（插到该兄弟之前），省略 / `null` = 排到同级末尾；落点必须属于 `parentAlbumId` 那一级，否则 → `validation`（`排序落点不是目标父级下的相册`）——静默塞到别处会让"插在中间"变成"随便放一个地方"。只重排目标父级的 `sort_order`（`reorder_albums` 事务内整体重编号），父级未变且插回原位时 `parent_changed = false`、`order_changed = false` 且**不写库**（空操作不产生无意义的 `updated_at` 抖动） |
 | `album.unsync` | **取消同步**：同步相册退化为一般（固定型）相册，成员全部保留 | `{ repoId, albumId }` | `{ ok, data: { released_children } }` | **已包装** | 代码 `commands/album.rs` 的 `album_unsync`（D128）。同步根连同其镜像子相册一起解绑（`released_children` = 随同解绑的镜像子相册数）：删 `album_sync_rule` / `album_sync_state`、`kind` 改回 `fixed`、清空 `sync_root_album_id` / `sync_dir_path`。非同步根 → `validation`（`该相册不是同步相册`） |
 
-- `mediaType` 缺省为 `multimedia`（D10）；`album.setMediaType` 会移除不匹配成员，移除前 UI 确认并写操作历史（返回 `opRecordId`）。
+- `mediaType` 取值域 = `unlimited` / `multimedia` / `image` / `video` / `audio`（**D139 新增 `unlimited`**，2026-11-05）。**协议层缺省仍是 `multimedia`**（D10：省略 = 继承父相册、顶层视作 `multimedia`），但**界面创建相册时一律显式传 `unlimited`**（相册面板的新建与新建子相册、源面板的 `album.createSnapshot` / `album.createSync`）——「无限制」是新建相册的默认属性；两者在成员查询上**同义**（`query_album_members_page` 只认 image/video/audio 三个文件媒体字面量），差别在：`unlimited` **不自动打标记**、且可作为相册属性被用户显式选回来。`album.setMediaType` 会移除不匹配成员，移除前 UI 确认并写操作历史（返回 `opRecordId`）。
 - `album.addMember` 对不匹配相册 `media_type` 的文件返回 `validation` 并拒绝（D10）。
 - 固定型无同步规则；跟随源型按 `add_only|mirror` 维护成员（RFC 0002）。`album.setMediaType` 对跟随型相册联动更新 `album_sync_rule.media_type`（D13）。
 - **同步相册（D128）**：只能由源创建（`album.createSync`），创建后与一般相册无异——可被包含进其他相册、可创建子相册、可增删移成员。同步时**只增不删**，且按源目录层级自动维护镜像子相册（`sync_dir_path` 定位，源子相册被删则在下次同步时重建，位置与源一致，用户改的名字保留）。取消同步用 `album.unsync`。
@@ -556,7 +556,7 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 
 **与蓝图标记的区别（同一只手、两种落点）**：蓝图里的 `mark` 节点是**声明式**的（"命中这个标记时按这套设定打开"）；这里存的是**面板里给对象打了哪些标记**。两者共用同一份**系统标记清单**，但**不共用存储**：蓝图节点由用户手动新增（不会因为打了标记就自动生成节点），自定义标记也不产生蓝图节点（它没有稳定 id 可引用）。
 
-**两套存储只在 `dispatch` 时刻投影（D138，2026-11-02）**：面板标记要能参与蓝图求值，就必须在**上报目标**里投影成 `marks` 集合——相册面板行点击上报 `mediaType:"album"` + `effectiveMarksFor(marks, "albums", 相册 id, derivedMarksForAlbum(有效媒体属性))`（用户标记 ∪ 派生标记），源面板行点击上报 `mediaType:"source"` + `marksOf(marks, "sources", 节点 key)`。**仍然不合并存储**：`panelMarks.get/set` 不写 `file_marks`、不写 `blueprints`；投影只发生在那一刻的上报目标里（`BlueprintTargetRef.marks`）。两个字段的硬理由与"标记是对象的可选限制条件、不改变对象性质"的口径见 `docs/spec/panel-standard.md` 第 5.1 节的「标记的上报方」表。
+**两套存储只在 `dispatch` 时刻投影（D138，2026-11-02；D139 修订）**：面板标记要能参与蓝图求值，就必须在**上报目标**里投影成 `marks` 集合——相册面板行点击上报 `mediaType:"album"` + `effectiveMarksFor(marks, "albums", 相册 id)`（该相册已落库的标记：用户标记 + 自动同步标记），源面板行点击上报 `mediaType:"source"` + `marksOf(marks, "sources", 节点 key)`。**仍然不合并存储**：`panelMarks.get/set` 不写 `file_marks`、不写 `blueprints`；投影只发生在那一刻的上报目标里（`BlueprintTargetRef.marks`）。**D139（2026-11-05）**改的是**面板标记自身**的模型而不是投影方式：相册属性变化时自动同步的同名标记现在**落库**在 `panelMarks` 里（与手打标记同一张表，另记一位 `auto` 来源用于菜单配色、一位 `dismissed` 记"用户亲手取消过"），因此它可以被取消、取消后不再自动加回——旧口径「派生标记不落库、恒勾不可取消」已作废。两个字段的硬理由与"标记是对象的可选限制条件、不改变对象性质"的口径见 `docs/spec/panel-standard.md` 第 5.1 节的「标记的上报方」表。
 
 ## 4. 事件目录
 

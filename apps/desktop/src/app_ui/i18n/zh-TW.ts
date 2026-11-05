@@ -114,8 +114,10 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "album.kind.fixed": "固定型",
   "album.kind.follow": "跟隨來源",
   "album.mediaType": "媒體屬性",
-  // 「設定屬性」選單項的四個取值：媒體（底層 `multimedia`）/ 圖像 / 影片 / 音訊。
-  // 「全部」一項在 D134 被刪除並換成語意更準的「媒體」（它本來就是「包含全部媒體」的超集）。
+  // 「設定屬性」選單項的五個取值：無限制（底層 `unlimited`）/ 媒體（`multimedia`）/ 圖像 / 影片 / 音訊。
+  // 「全部」一項在 D134 被刪除並換成語意更準的「媒體」；D139 新增「無限制」並定為**新建相簿的預設值**，
+  // 它包含的仍是同樣三種媒體，但它不是「限制條件」，因此不會自動打標記。
+  "album.media.unlimited": "無限制",
   "album.media.media": "媒體",
   "album.media.image": "圖像",
   "album.media.video": "影片",
@@ -298,14 +300,12 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   // 面板打標記（D134）：源面板與相簿面板右鍵選單裡的「新增標記」子區。
   // 打標結果與自訂標記清單按倉庫落在 app_settings（`panelMarks.<repoId>`，各面板一份）。
   "mark.add": "新增標記",
-  "mark.menu.custom": "自訂標記",
   "mark.menu.customAdd": "＋ 新增自訂標記",
-  "mark.menu.customEmpty": "尚無自訂標記",
   "mark.menu.customPlaceholder": "自訂標記名稱",
   "mark.menu.system": "系統標記",
   "mark.menu.orphan": "其它已打標記",
   "mark.toggleFailed": "標記儲存失敗：{err}",
-  "mark.derived": "由相簿屬性自動打上",
+  "mark.auto": "由相簿屬性自動同步（可取消）",
 
   "media.loadFailed": "媒體預覽載入失敗：{err}",
   "media.removedFromAlbum": "已移出相簿（{count}）",

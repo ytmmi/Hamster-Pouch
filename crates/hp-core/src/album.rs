@@ -66,15 +66,24 @@ impl fmt::Display for AlbumKind {
     }
 }
 
-/// 相册媒体属性（D10）。与文件媒体类型 [`MediaType`] 不同，额外包含 `multimedia`。
+/// 相册媒体属性（D10）。与文件媒体类型 [`MediaType`] 不同，额外包含 `multimedia`
+/// 与 `unlimited`。
 ///
-/// 相册只显示属性包含类型的文件；`multimedia` 包含 image + video + audio。
+/// 相册只显示属性包含类型的文件；`multimedia` / `unlimited` 都包含 image + video + audio。
+///
+/// **`unlimited` 与 `multimedia` 的差别不在"收哪些文件"上**（见 [`AlbumMediaType::contains`]
+/// 的注释：两者对可收集合是同一件事），而在两处口径：
+/// 1. `unlimited` 是**缺省语义**——新建相册默认就是它（用户 2026-11-05 口径），
+///    "没有限制"要让用户一眼看出来，而不是默认就叫"媒体"；
+/// 2. `unlimited` **不派生任何自动标记**（`multimedia` 会派生 `media` 标记），
+///    因为"无限制"本身不是一种限制条件，给它打标记会让标记轴凭空多出一个恒真条件。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlbumMediaType {
     Image,
     Video,
     Audio,
     Multimedia,
+    Unlimited,
 }
 
 impl AlbumMediaType {
@@ -85,6 +94,7 @@ impl AlbumMediaType {
             AlbumMediaType::Video => "video",
             AlbumMediaType::Audio => "audio",
             AlbumMediaType::Multimedia => "multimedia",
+            AlbumMediaType::Unlimited => "unlimited",
         }
     }
 
@@ -95,6 +105,7 @@ impl AlbumMediaType {
             "video" => Some(AlbumMediaType::Video),
             "audio" => Some(AlbumMediaType::Audio),
             "multimedia" => Some(AlbumMediaType::Multimedia),
+            "unlimited" => Some(AlbumMediaType::Unlimited),
             _ => None,
         }
     }
@@ -110,12 +121,18 @@ impl AlbumMediaType {
     ///
     /// 判据用 [`MediaType::is_book`] 而不是逐个列 `Text | Pdf`：相册的排除集
     /// 就是"图书预览的那些"，两处必须是同一件事。
+    ///
+    /// `unlimited` 在这里与 `Multimedia` **完全一致**：两者都放行 image/video/audio。
+    /// 它们的分歧只在"缺省语义"与"是否派生自动标记"（见枚举文档），不在收集合上——
+    /// 若让 `unlimited` 连 text/PDF 都收，相册成员会写出 `query_album_members_page`
+    /// 永远列不出的行（它只认三个媒体字面量），即"有成员但看不见"。
     pub fn contains(&self, file_type: MediaType) -> bool {
         if file_type.is_book() {
             return false;
         }
         match self {
             AlbumMediaType::Multimedia => true,
+            AlbumMediaType::Unlimited => true,
             AlbumMediaType::Image => file_type == MediaType::Image,
             AlbumMediaType::Video => file_type == MediaType::Video,
             AlbumMediaType::Audio => file_type == MediaType::Audio,
@@ -274,6 +291,11 @@ mod tests {
         assert!(AlbumMediaType::Audio.contains(MediaType::Audio));
         assert!(!AlbumMediaType::Audio.contains(MediaType::Image));
         assert!(!AlbumMediaType::Audio.contains(MediaType::Video));
+
+        // `unlimited` 对可收集合与 `multimedia` 一致（差别在缺省语义与是否派生标记）。
+        assert!(AlbumMediaType::Unlimited.contains(MediaType::Image));
+        assert!(AlbumMediaType::Unlimited.contains(MediaType::Video));
+        assert!(AlbumMediaType::Unlimited.contains(MediaType::Audio));
     }
 
     /// **相册不含"书"**（D95；PDF 于 2026-10-11 沿同一条口径）：
@@ -288,6 +310,7 @@ mod tests {
             AlbumMediaType::Video,
             AlbumMediaType::Audio,
             AlbumMediaType::Multimedia,
+            AlbumMediaType::Unlimited,
         ] {
             for book in [MediaType::Text, MediaType::Pdf] {
                 assert!(
@@ -318,6 +341,7 @@ mod tests {
             AlbumMediaType::Video,
             AlbumMediaType::Audio,
             AlbumMediaType::Multimedia,
+            AlbumMediaType::Unlimited,
         ] {
             assert_eq!(AlbumMediaType::from_str(v.as_str()), Some(v));
         }
