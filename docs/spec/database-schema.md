@@ -62,7 +62,7 @@ CREATE UNIQUE INDEX idx_panel_layouts_layer ON panel_layouts(repo_id, workspace,
 
 > **默认布局标记**不在本表：实现走 `app_settings` 的键 `layout.default.{repo_id}`（与 `layout.setDefault/getDefault` 对应）。
 >
-> **`app_settings` 键空间**（见 3.2）：`ui.theme`、`ui.language`、`layout.default.{repo_id}`、`blueprint.currentLayer.{repo_id}`（D54：该仓库的当前层，层切换时写入、启动时读取）等；新增键必须登记，避免与列方案混淆。
+> **`app_settings` 键空间**（见 3.2）：`ui.theme`、`ui.language`、`ui.autoCheckUpdate`（D140：打开「关于」页时是否自动检查 GitHub 新版本，缺省 `true`）、`layout.default.{repo_id}`、`blueprint.currentLayer.{repo_id}`（D54：该仓库的当前层，层切换时写入、启动时读取）、`interfacePages.{repo_id}`（D124）、`panelMarks.{repo_id}`（D134）等；新增键必须登记，避免与列方案混淆。
 
 ### 3.4 插件注册表 `plugin_registry`
 

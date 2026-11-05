@@ -234,7 +234,7 @@ LocalPath   -> local-dev（永不提升）
 - **RFC 0010 新增断言**：
   - `panel` 贡献点的必需声明参数齐全（`category` / `has_class` / `blueprint_node`），取值域合法，`blueprint_node` 命中已注册的节点类型；`settings[].kind` 只能取控件输入类。
   - `blueprintNode` 贡献点：`type` 必须是 `plugin.<plugin_id>.<local_id>` 形式；声明参数完整；**不得**携带自定义渲染/逻辑字段；`fields` / `parents` / `children` / `ports` 引用必须命中已注册类型与边类型。
-  - `settingsSection` 贡献点：`category` 必须是既有的五个大类之一（**不得新增或改名大类**）；落库键前缀强制 `plugin.<plugin_id>.`；与宿主设置项同名 id 一律拒绝（不覆盖、不合并）。
+  - `settingsSection` 贡献点：`category` 必须命中 `SettingCategory` 封闭枚举里已有的大类（**不得新增或改名大类**；判据是 `SettingCategory::from_str` 解析成功，故宿主日后扩枚举时插件无需改代码）；落库键前缀强制 `plugin.<plugin_id>.`；与宿主设置项同名 id 一律拒绝（不覆盖、不合并）。
   - **注册权边界**：贡献点里出现控件 `kind` 注册一律忽略并记录。
   - **命名空间**：插件注册项与宿主内置裸 id 不可能冲突（形式保证），且不存在"先到先得"的覆盖路径。
   - **插件缺失容错**：卸载/禁用插件后，蓝图里由它注册的节点类型与面板引用按未接通处理——**可保存**、原样保留、恢复后自动恢复。

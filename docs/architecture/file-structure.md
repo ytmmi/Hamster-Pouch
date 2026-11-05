@@ -75,6 +75,11 @@ crates/hp-store/src/
   tests/              # 集成测试 + 夹具（default_blueprint.json、blueprint_factory/）
 
   main.rs             # 入口装配 + AppState
+  build.rs            # 构建脚本：经 `cargo:rustc-env` 注入 `HP_BUILD_TIME`（本地时间 `YYYY/MM/DD HH:MM:SS`，
+                      #   先读同名环境变量以便 CI 固定时间戳，否则调 `powershell.exe Get-Date -Format`；
+                      #   不用 `cmd` 的 `%DATE%`——随 locale 变形）与 `HP_BUILD_COMMIT`（`git rev-parse --short HEAD`），
+                      #   两者取不到都写空串（`app_info.rs` 用 `option_env!` 读，界面显示「未知」）；
+                      #   末行才是 `tauri_build::build()`。D140
   embed_window.rs     # Win32 原生渲染子窗口宿主（D14）
   commands/           # Tauri 命令桥接（按领域拆分）
     shared.rs
@@ -704,6 +709,13 @@ HamsterPouch/
                               #   **`check-status.mjs`**（`pnpm check:status`）：守护 `docs/architecture/
                               #   implementation-status.md` 的机械一致性（§1↔§2 计数与状态分布、状态取值、
                               #   `路径:行号` 引用可解析且在界内）；权威描述见该文档第 5 节。
+                              # **版本号工具 `version.mjs`**（D140，纯 Node 无依赖，`pnpm version:next` /
+                              #   `pnpm check:version`）：`--current` 显示当前版本、`--next` 预览 +1、`--write <v>`
+                              #   指定版本、`--apply` 按 `HP_VERSION` 或 +1 落盘；`bumpPatch` 只对 x.y.z 的 z 段
+                              #   数字 +1，后缀 `-Alpha` 与 `+build` **逐字保留**（`0.1.0-Alpha` → `0.1.1-Alpha`）。
+                              #   三处版本文件（`tauri.conf.json` / 桥接 `Cargo.toml` / `apps/desktop/package.json`）
+                              #   同源写入，用**定点替换而非 `JSON.stringify`**（后者会把 `"scope": ["**"]`
+                              #   展开成多行，产生与版本无关的 diff 噪声）。
                               # 修数据工具（默认 dry-run，需 `--apply` 才写库，写前自动备份到 `backups/`）：
                               #   `fix-layer-layout.mjs`（给缺布局的层补该层专属布局）、
                               #   `fix-blueprint-home.mjs`（把某层标为主界面并清掉"上次所在层"）。
@@ -748,7 +760,7 @@ hp-dto -> hp-core（跨层 DTO；由 ts-rs 生成 packages/shared-types）
 - 面板布局表放全局配置库，每行带 `repo_id`；读取布局时必须按当前仓库过滤。
 - 桌面应用构建走 `pnpm app:build`（= `tauri build --no-bundle`），**不要直接用 `cargo build --release`**：前者会重新打包 `apps/desktop/dist` 前端产物并嵌入二进制，后者在前端已构建过时会认为资产未变而**静默沿用旧的内嵌产物**，表现为"改了前端但运行的是旧界面"。
 - **换图标必须逼 `build.rs` 重跑**（D125）：`tauri_build` 的 `cargo:rerun-if-changed` 只盯 `tauri.conf.json` 与 `capabilities`，**不盯 `icons/icon.ico`**；只换图标文件时构建脚本不重跑，链接沿用旧 `resource.lib` ⇒ **"编译成功"但 exe 里还是旧图标**。做法：换完 `apps/desktop/src-tauri/icons/icon.ico` 后 `touch apps/desktop/src-tauri/tauri.conf.json`（只改 mtime、内容不变，git 仍干净）再 `pnpm app:build`，最后取 exe 内嵌帧与 `icon.ico` 的 32px 帧逐像素比对确认（`magick compare -metric AE` 应为 0；取帧用 `[System.Drawing.Icon]::ExtractAssociatedIcon`）。
-- **应用图标只有一处**：`apps/desktop/src-tauri/icons/icon.ico`（七帧 16/24/32/48/64/128/256、全部 32 位，256 帧为 PNG 载荷）。`tauri.conf.json` 没有 `bundle` 段、构建走 `--no-bundle`，故 PNG 组与 `.icns` 非必需；前端没有 favicon / logo 引用 ⇒ 这个 `.ico` 就是唯一品牌面。**不要用 ImageMagick 的 ICO writer 生成它**——它会把小帧降成 8 位调色板 DIB，透明只剩 1 位 AND mask，圆角发毛（详见 D125）。
+- **应用图标只有一处**：`apps/desktop/src-tauri/icons/icon.ico`（七帧 16/24/32/48/64/128/256、全部 32 位，256 帧为 PNG 载荷）。`tauri.conf.json` 没有 `bundle` 段、构建走 `--no-bundle`，故 PNG 组与 `.icns` 非必需；前端**唯一**的引用点是「关于」页（D140-R1：`AboutPanel.tsx` 直接 `import appIconUrl from "../../../src-tauri/icons/icon.ico"`，Vite 认 `*.ico` 资产、WebView2 能原生解码该 ICO 的 256×256 帧，因此不需要 PNG 副本，也不新增第二份二进制）⇒ 这个 `.ico` 就是唯一品牌面。**不要用 ImageMagick 的 ICO writer 生成它**——它会把小帧降成 8 位调色板 DIB，透明只剩 1 位 AND mask，圆角发毛（详见 D125）。
 - 前端资产文件名带内容哈希，重建后旧哈希文件会被删除；若 WebView2 缓存了旧 `index.html`，可能引用已删除的 chunk 而白屏，排查时可清理 `%LOCALAPPDATA%\<identifier>\EBWebView`。
 - 打包运行（无 devtools）下排查前端链路的诊断通道：前端调用 `debug_log` 命令，日志追加到应用数据目录 `debug.log`。
 - git 插件更新保留旧插件包目录；回滚是目录切换，不依赖网络。
