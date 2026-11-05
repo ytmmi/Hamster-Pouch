@@ -857,7 +857,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "settings.mcp.toolsValue": "{total} 個（其中寫入操作 {write} 個）",
   "settings.mcp.copy": "複製",
   "settings.mcp.hint": "在 MCP 用戶端新增 HTTP 服務，填入上方的端點位址，並在請求標頭帶上 Authorization: Bearer <存取權杖>。服務只監聽本機回環位址，區域網路無法存取。",
-  "settings.about.description": "面向大型本機相片庫的離線優先相片管理器。",
+  "settings.about.description": "面向大型本機資源庫的離線優先資源管理器。",
   "settings.about.version": "版本",
   "settings.about.buildTime": "建置時間",
   "settings.about.license": "授權條款",

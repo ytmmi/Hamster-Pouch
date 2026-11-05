@@ -185,7 +185,9 @@ apps/desktop/src/app_ui/
     AboutPanel.tsx      # 「关于」大类的整块详情（D140）：两类内容——①**构建时事实**（版本 /
                         #   构建时间 / 提交哈希 / 许可证 / 链接，走 `app.info` 命令，**不进设置注册表**，
                         #   因为用户既不能写也不该写）；②**自我更新**（检查更新 / 非最新时跳 Release 页 +
-                        #   唯一设置项 `ui.autoCheckUpdate`）。图标是内联 SVG（不新增二进制资产）
+                        #   唯一设置项 `ui.autoCheckUpdate`）。排版与其它大类一致（标题 + 横线分隔 +
+                        #   一行行值），**不套卡片**；图标直接 `import` `src-tauri/icons/icon.ico`
+                        #   （Vite 认 `*.ico` 资源、WebView2 原生可解码），不复制第二份二进制
     aboutUpdate.ts      # 更新检查的**纯逻辑**（D140，可无 Tauri 断言）：`parseVersion` / `compareVersions` /
                         #   `pickLatestRelease` / `evaluateUpdate` / `checkForUpdate`。数据源是 GitHub
                         #   Releases（tag 形如 `v0.1.1-Alpha`）；只认 x.y.z 三段、容忍 v 前缀与 `-Alpha` 后缀；

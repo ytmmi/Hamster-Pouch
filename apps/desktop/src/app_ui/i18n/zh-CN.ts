@@ -887,7 +887,7 @@ export const zhCN = {
   "settings.mcp.toolsValue": "{total} 个（其中写操作 {write} 个）",
   "settings.mcp.copy": "复制",
   "settings.mcp.hint": "在 MCP 客户端里新增 HTTP 服务，填入上面的端点地址，并在请求头带上 Authorization: Bearer <访问令牌>。服务只监听本机回环地址，局域网无法访问。",
-  "settings.about.description": "面向大型本地照片库的离线优先照片管理器。",
+  "settings.about.description": "面向大型本地资源库的离线优先资源管理器。",
   "settings.about.version": "版本",
   "settings.about.buildTime": "构建时间",
   "settings.about.license": "许可证",

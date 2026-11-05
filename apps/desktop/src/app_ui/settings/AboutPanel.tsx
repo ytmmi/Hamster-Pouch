@@ -6,8 +6,11 @@
  *    也不该写，所以不进设置注册表，走 `app.info` 命令；
  * 2. **自我更新操作**（检查更新 / 跳转 GitHub）与**一个**用户可写的开关
  *    （`ui.autoCheckUpdate`）。
- * 事实区与更新区都要按卡片排版，与"一行一个设置项"的通用渲染器不同，因此本组件
- * 自己排整块界面，`SettingsApp` 在 `category === "about"` 时改为渲染它（同
+ * 排版仍是「全部设置」的通用形态——`section-title` + `hr.settings-divider` + 一行行值，
+ * 与「界面」「蓝图」「面板」等大类一致，**不加卡片边框/底色**（D140-R1 用户明确要求
+ * "不要用矩形圈起来，和设置里的其它大类一样使用横线分隔"）。区别只在第一块没有按
+ * 设置项渲染，而是"图标 + 名称 + 描述 + 构建时事实"。
+ * 因此本组件自己排整块界面，`SettingsApp` 在 `category === "about"` 时改为渲染它（同
  * `McpServiceStatus` 之于 MCP 大类，但那里只是"设置项之后再挂一块"）。
  *
  * 更新检查的数据源是 GitHub Releases（`release.yml` 打的 tag 形如 `v0.1.1-Alpha`），
@@ -22,6 +25,10 @@ import { SwitchToggle } from "../shared/SwitchToggle";
 import type { AppInfo } from "../shared/types/app";
 import type { Translate } from "../i18n";
 import { checkForUpdate, type UpdateFound, type UpdateState } from "./aboutUpdate";
+// 应用图标直接用仓库里那一份真源（`apps/desktop/src-tauri/icons/icon.ico`，也是 exe 内嵌的
+// 同一份），不复制成第二份二进制资产。Vite 的 `client.d.ts` 声明了 `*.ico` 模块，
+// WebView2（Chromium）能直接解码 ICO 的 256×256 帧，无需先转 PNG。
+import appIconUrl from "../../../src-tauri/icons/icon.ico";
 
 export interface AboutPanelProps {
   t: Translate;
@@ -32,30 +39,11 @@ export interface AboutPanelProps {
   onAutoCheckUpdate: (next: boolean) => void;
 }
 
-/** 应用图标：仓库里唯一的图形资源是 `src-tauri/icons/icon.ico`（Windows 图标格式），
- * 前端直接引用它既没类型也没法跟随主题，所以这里用内联 SVG 画一个同色系的圆角方块 +
- * 仓鼠头像，**不新增二进制资产**。 */
+/** 应用图标：直接显示 exe 内嵌的同一份图标（`src-tauri/icons/icon.ico`）。
+ * 这是全仓唯一的图形真源——图标换一次，任务栏、exe 与关于页同时变，不存在"关于页
+ * 画的是另一只动物"的风险。`aria-hidden`：紧邻的文字已经报了应用名。 */
 function AppLogo(): JSX.Element {
-  return (
-    <svg className="about-logo" viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
-      <rect x="2" y="2" width="60" height="60" rx="14" fill="var(--about-logo-bg)" />
-      <circle cx="20" cy="21" r="7" fill="var(--about-logo-ear)" />
-      <circle cx="44" cy="21" r="7" fill="var(--about-logo-ear)" />
-      <ellipse
-        cx="32"
-        cy="37"
-        rx="18"
-        ry="16"
-        fill="var(--about-logo-face)"
-        stroke="var(--about-logo-ear)"
-        strokeWidth="2"
-      />
-      <circle cx="25.5" cy="34" r="2.4" fill="var(--fg)" />
-      <circle cx="38.5" cy="34" r="2.4" fill="var(--fg)" />
-      <ellipse cx="32" cy="41" rx="3" ry="2.2" fill="var(--about-logo-nose)" />
-      <path d="M32 43v3" stroke="var(--about-logo-ear)" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
+  return <img className="about-logo" src={appIconUrl} alt="" width={64} height={64} aria-hidden="true" />;
 }
 
 /** 事实区的一行：左标签右值（复用 `.settings-row` 的排版，语义与设置项一致）。 */
@@ -160,7 +148,7 @@ export function AboutPanel({
 
   return (
     <>
-      <section className="settings-section about-card">
+      <section className="settings-section">
         <div className="about-head">
           <AppLogo />
           <div className="about-head-text">
@@ -168,40 +156,40 @@ export function AboutPanel({
             <div className="about-desc dim">{t("settings.about.description")}</div>
           </div>
         </div>
-        <div className="about-facts">
-          <InfoRow label={t("settings.about.version")} value={versionText} />
-          <InfoRow label={t("settings.about.buildTime")} value={buildTimeText} />
-          <InfoRow label={t("settings.about.license")} value={licenseText} />
-          <div className="settings-row">
-            <div className="settings-row-label">
-              <label>{t("settings.about.links")}</label>
-            </div>
-            <div className="settings-row-control about-links">
-              <button className="menu-item small" disabled={repoUrl === ""} onClick={() => void open(repoUrl)}>
-                {t("settings.about.github")}
-              </button>
-              <button
-                className="menu-item small"
-                disabled={repoUrl === ""}
-                onClick={() => void open(`${repoUrl}/issues/new`)}
-              >
-                {t("settings.about.feedback")}
-              </button>
-              <button
-                className="menu-item small"
-                disabled={repoUrl === ""}
-                onClick={() => void open(`${repoUrl}/blob/main/README.md`)}
-              >
-                {t("settings.about.privacy")}
-              </button>
-            </div>
+        {/* 与「界面」「蓝图」等大类同款：标题下一道横线，之后一行行值。身份区不套卡片。 */}
+        <hr className="settings-divider" />
+        <InfoRow label={t("settings.about.version")} value={versionText} />
+        <InfoRow label={t("settings.about.buildTime")} value={buildTimeText} />
+        <InfoRow label={t("settings.about.license")} value={licenseText} />
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <label>{t("settings.about.links")}</label>
+          </div>
+          <div className="settings-row-control about-links">
+            <button className="menu-item small" disabled={repoUrl === ""} onClick={() => void open(repoUrl)}>
+              {t("settings.about.github")}
+            </button>
+            <button
+              className="menu-item small"
+              disabled={repoUrl === ""}
+              onClick={() => void open(`${repoUrl}/issues/new`)}
+            >
+              {t("settings.about.feedback")}
+            </button>
+            <button
+              className="menu-item small"
+              disabled={repoUrl === ""}
+              onClick={() => void open(`${repoUrl}/blob/main/README.md`)}
+            >
+              {t("settings.about.privacy")}
+            </button>
           </div>
         </div>
         {infoError !== null && <span className="placeholder">{infoError}</span>}
         {openError !== null && <span className="placeholder">{openError}</span>}
       </section>
 
-      <section className="settings-section about-card">
+      <section className="settings-section">
         <div className="section-title">{t("settings.section.aboutUpdate")}</div>
         <hr className="settings-divider" />
         {/* 状态文案直接占左侧标签位（截图同款：左"您已是最新版本"、右"检查更新"），

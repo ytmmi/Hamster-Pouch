@@ -5381,41 +5381,27 @@ button.danger {
   transition: left 120ms ease;
 }
 
-/* ---- 「全部设置 → 关于」卡片（D140） ---- */
+/* ---- 「全部设置 → 关于」（D140） ---- */
 
 /*
- * 关于页是**唯一**带卡片的大类：上面一块是构建时事实（图标 + 名称 + 描述 + 四行），
- * 下面一块是更新（状态 + 检查按钮 + 自动检查开关）。其余大类都是"一行一个设置项"，
- * 所以卡片样式只在这里局部定义，不进通用 `settings-*` 家族。
+ * 排版与「界面」「蓝图」「面板」等大类完全一致：`section-title` + `hr.settings-divider`
+ * + 一行行值，**不用卡片边框/底色**（D140-R1：用户明确要求"不要用矩形圈起来，和
+ * 设置里的其它大类一样使用横线分隔"）。这里只定义身份区特有的三件事：图标与文字的
+ * 横排、名称/描述的字号、以及三个链接按钮的换行。
  */
-.about-card {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-2);
-  padding: 12px 14px;
-}
-
 .about-head {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 2px;
 }
 
-/* 图标配色随主题：深色下不沿用浅色的暖米色块。 */
+/* 图标是 `src-tauri/icons/icon.ico` 的 256×256 帧（PNG 编码的 ICO，自带透明圆角），
+ * 缩到 64px 由浏览器插值，因此这里只管尺寸，不加描边/圆角/背景。 */
 .about-logo {
   flex: 0 0 auto;
-  --about-logo-bg: #eceef1;
-  --about-logo-ear: #8b95a1;
-  --about-logo-face: #ffffff;
-  --about-logo-nose: #e08a8a;
-}
-
-.app-root.theme-dark .about-logo {
-  --about-logo-bg: #2b2f33;
-  --about-logo-ear: #9aa1a8;
-  --about-logo-face: #3a3f45;
-  --about-logo-nose: #c97a7a;
+  width: 64px;
+  height: 64px;
 }
 
 .about-head-text {
@@ -5435,11 +5421,6 @@ button.danger {
   line-height: 1.5;
 }
 
-.about-facts {
-  border-top: 1px solid var(--border);
-  padding-top: 6px;
-}
-
 /* 三个链接按钮横向排布（值区在 `.settings-row-control` 里，默认已 flex）。 */
 .about-links {
   flex-wrap: wrap;
@@ -5450,7 +5431,6 @@ button.danger {
 .about-status-new {
   color: var(--sel-ring);
 }
-
 
 /* ===== 垂直「界面页」标签条（D124） ===== */
 

@@ -867,7 +867,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "settings.mcp.toolsValue": "{total} total ({write} write)",
   "settings.mcp.copy": "Copy",
   "settings.mcp.hint": "Add an HTTP server in your MCP client, enter the endpoint above, and send Authorization: Bearer <access token> with each request. The service only listens on the loopback address, so it is not reachable from the local network.",
-  "settings.about.description": "An offline-first photo manager for large local photo libraries.",
+  "settings.about.description": "An offline-first resource manager for large local libraries.",
   "settings.about.version": "Version",
   "settings.about.buildTime": "Build time",
   "settings.about.license": "License",
