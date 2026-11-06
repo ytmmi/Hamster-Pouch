@@ -4612,7 +4612,7 @@ button.danger {
   /* 小地图顶边（距底约 144px）+ 10px 间距：不遮挡小地图的拖拽热区。 */
   bottom: 154px;
   /* 高于画布内容与小地图/图例（它们无 z-index 或只在变换层内 1/2），
-     **低于**设置浮层（60）与右键菜单（2000）：帮助是常驻查询面板，不该盖住它们。 */
+     **低于**设置浮层（1150）与右键菜单（2000）：帮助是常驻查询面板，不该盖住它们。 */
   z-index: 30;
   display: flex;
   align-items: center;
@@ -4652,7 +4652,7 @@ button.danger {
 }
 
 /* 浮层：可滚动；宽度 `min(340px, 46%)`（窄画布不至于挤满）；z-index 与按钮同档（30）——
-   高于画布内容与小地图，**低于**设置浮层（60）与右键菜单（2000）。 */
+   高于画布内容与小地图，**低于**设置浮层（1150）与右键菜单（2000）。 */
 .bp-help-popover {
   position: absolute;
   top: 8px;
@@ -4907,7 +4907,24 @@ button.danger {
 }
 
 /* ===== 「全部设置」系统界面（RFC 0010 决策 7 / settings-standard） =====
-   应用级系统界面：盖在布局/面板之上，不参与布局持久化、不写死像素（用设计 token 变量）。 */
+   应用级系统界面：盖在布局/面板之上，不参与布局持久化、不写死像素（用设计 token 变量）。
+
+   ## 层级：z-index 1150（D141）
+
+   必须**高于 dockview 的浮动层**才能真正盖住布局块——浮层的 `--dv-overlay-z-index`
+   取 `999 + 叠放高度`（`overlayChrome.ts` 的 `OVERLAY_Z_BASE` + `overlayZIndex()`，
+   高度域 1–10 见 `packages/config/src/blueprintValues.ts` 的 `OVERLAY_HEIGHT_MAX`），
+   派生出的实际层高：浮动容器 `calc(var(--dv-overlay-z-index) - 2)` = 997…1007、
+   浮动渲染层 `calc(... - 1)` = 998…1008、八个缩放手柄用**原值** = 999…1009、
+   `.dv-smart-guides` = `+100` = 999…1109（该层 `pointer-events: none`，不吃指针）。
+   所以 **1110 以上**才确定高于全部浮动层，取 1150 留出余量。
+
+   上界同样是硬约束：必须**低于**右键菜单 2000 与浮窗（`.task-overlay`）3000——
+   设置界面打开时用户仍要能看见并点击右键菜单；也高于菜单弹层 100。
+
+   光靠 z-index 不够（新增浮层/新主题改 `--dv-overlay-z-index` 都可能再翻转），
+   宿主同时在浮层打开时给工作区加 `inert`（`AppUiApp.tsx` 的 `.app-workspace`）：
+   z 序负责"画在上面"，`inert` 负责"命中测试根本到不了下层"，两者互为兜底。 */
 
 .settings-overlay {
   position: fixed;
@@ -4916,7 +4933,8 @@ button.danger {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 60;
+  /* 1150：高于 dockview 全部浮动层（≤1109）、低于右键菜单 2000 与浮窗 3000。见上方注释。 */
+  z-index: 1150;
 }
 
 .settings-window {
@@ -5445,7 +5463,8 @@ button.danger {
  *
  * 它始终是**界面导航**（点击切层），不属于任何面板组。
  * 展开面板的 z-index 高于 dockview 面板本体（5 / 10），
- * 低于拖拽占位（9999）、右键菜单（2000）、浮窗（3000）、「全部设置」覆盖层（60）。
+ * 低于拖拽占位（9999）、右键菜单（2000）、浮窗（3000）、「全部设置」覆盖层（1150，
+ * 高于 dockview 的浮动层 997–1109，见 `.settings-overlay` 的注释）。
  */
 .app-workspace > .iface-bar {
   /* 覆盖 `.app-workspace > div { flex: 1 }`：窄条固定占位，不参与伸缩。 */

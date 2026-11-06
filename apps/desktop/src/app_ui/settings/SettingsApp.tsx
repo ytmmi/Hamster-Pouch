@@ -197,7 +197,7 @@ export function SettingsApp({
   };
 
   return (
-    <div className="settings-overlay" role="dialog" aria-label={t("settings.title")}>
+    <div className="settings-overlay" role="dialog" aria-modal="true" aria-label={t("settings.title")}>
       <div className="settings-window">
         <header className="settings-header">
           <span className="settings-title">{t("settings.title")}</span>

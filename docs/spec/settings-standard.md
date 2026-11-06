@@ -73,6 +73,11 @@
    - 因此**不再使用"选中即滚动定位"**：右侧不渲染其它节点，也就没有可滚动的目标。
 5. **宽度自适应**：分栏比例由宿主决定，左栏有最小/最大宽度；**不写死像素**，取 `packages/ui` 设计 token。
 6. **不写说明文字**：界面 / 蓝图等大类不在左侧或右侧插入解释性段落（如"应用级系统界面…"）；界面只呈现设置项本身。
+7. **层级：盖住布局块与全部面板，且指针不穿透**（D141）。「全部设置」是**应用级系统界面**，打开时**不得**让指针或键盘焦点落到下层的面板与布局块上：
+   - **z 序必须高于 dockview 的全部浮动层**。dockview 浮动组 / 蓝图浮层容器的层级是 `calc(var(--dv-overlay-z-index) - 2)`，而 `--dv-overlay-z-index` = `OVERLAY_Z_BASE`（`overlayChrome.ts`，999）+ 叠放高度（`packages/config/src/blueprintValues.ts` 的 `OVERLAY_HEIGHT_MIN`–`OVERLAY_HEIGHT_MAX`，1–10）；八个缩放手柄用**原值**、`.dv-smart-guides` 再 `+100`，因此**实测最高交互层 = 999 + 10 + 100 = 1109**。设置浮层取 **1150**：高于 1109，且**低于**右键菜单 2000 与浮窗 3000（打开设置时用户仍要能看见并点击右键菜单），也高于菜单弹层 100。
+   - **z 序只是第一道**：宿主在浮层打开时给工作区加 **`inert`**（`AppUiApp.tsx` 的 `.app-workspace`），让命中测试与键盘焦点**根本到不了下层**。两者互为兜底——只靠 z-index，任何新增浮动层或主题改动 `--dv-overlay-z-index` 都可能再次翻转；只靠 `inert`，则视觉上仍可能被浮层压在下面。
+   - 浮层根节点声明 `role="dialog"` + **`aria-modal="true"`**（与 `.task-overlay` 的浮窗 / 确认框一致）。
+   - **判据进 `pnpm check:settings`**（第 9 节第 8.6 组）：断言的是**数量关系**（设置层 > dockview 最高交互层、设置层 < 右键菜单/浮窗），不是某个魔数——改 `OVERLAY_Z_BASE`、叠放高度域或设置层高，只要关系被破坏就红。
 
 ## 3. 大类
 
@@ -259,6 +264,9 @@
   6. 落库键前缀规则（宿主 `ui.*` / `layout.*` / `mcp.*`；插件强制 `plugin.<plugin_id>.`）。
   7. 搜索：`title_key` 在所有语言资源里都存在（三套语言键集一致）。
   8. **（2026-09 新增）** Rust 校验镜像 ↔ TS 权威声明**逐项一致**（宿主项 ↔ `SYSTEM_SETTING_DECLS`、面板项 ↔ `panelSettingDecls()`，比对落库键 / `kind` / `scope` / `options`），且**无多余声明**（反向断言）；以及写入路径四条规则与 D76 包装的落点断言。
+  9. **（2026-11 新增，D141）层级与指针隔离**（第 2 节规则 7）：从源码读出 dockview 侧的最高交互层（`OVERLAY_Z_BASE` + `OVERLAY_HEIGHT_MAX` + 100）与 `.settings-overlay` / `.context-menu` / `.task-overlay` 的 z-index，断言**设置层严格高于前者、严格低于后两者**；再断言 `.app-workspace` 绑定 `inert={settingsOpen}`、浮层根节点带 `aria-modal="true"`，以及源码注释里**不再残留「设置浮层 60」**的旧口径（口径必须与实现一致）。
+- **`node tools/settings-overlay-hittest-verify.mjs`**（**（2026-11 新增，D141）真机命中验证**）：上一项门禁只读**源码文本**、比较两个数字大小，证明不了"浏览器真的把点击判给了设置界面"（`calc()` 变量、主题根上的 `--dv-overlay-z-index`、`pointer-events` 的继承都可能让纸面推导在真实渲染里不成立——缺陷 0027 就是同类教训）。本验证器用无头 Edge 加载仓库**真实的** `styles.css` + dockview 的 `dockview.css`，拼与实现**同构**的 DOM，让 `document.elementFromPoint()`（**命中测试本身**）回答"这个点归谁"，跑三个夹具：`fixed`（z-index 1150 + 无 `inert`，中心点必须归 `.settings-overlay`）、`regress`（把设置层按回修复前的 60，中心点必须被浮动浮层抢走 = 本条缺陷的**回退即红对照**）、`inert`（层叠仍是旧的 60 但工作区带 `inert`，命中也**不得**进入 `.app-workspace`——证明两道防线各自独立有效）。实测 **6/6 通过**（2026-11-06）。
+
 - **`cargo test -p hp-core`**：设置声明的硬错误清单、`kind` 输入类白名单、插件键前缀强制、同名 id 冲突拒绝；**（2026-09 新增）** 校验镜像的落库键/`kind`/`scope`、值校验分级、`select` 必须有可选项、以及"仅 `repo` 项拼 `repoId`"（`crates/hp-core/src/setting_registry.rs` 的 4 个用例）。
 - **回归**：现有三项设置（`ui.theme` / `ui.language` / `layout.syncBlueprint`）必须能在新界面里找到并读写（**零行为变化**）。
 - **（2026-09 补记）显示格式类宿主设置的"行为"由 `pnpm check:panels` 的元数据面板段断言**：体积两制（1024 / 1000）且按体积自适应、日期三格式 ± 时间开关、时长/码率/帧率、ffprobe / EXIF 解析夹具，以及"面板真的消费它并按媒体类型自适应渲染"。分工：`check:settings` 管**声明合法与镜像不漂移**，该段管**显示正确**。

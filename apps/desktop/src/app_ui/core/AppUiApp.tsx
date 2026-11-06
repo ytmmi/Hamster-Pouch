@@ -352,7 +352,11 @@ export function AppUiApp(): JSX.Element {
           onLanguageChange={changeLanguage}
           onOpenSettings={() => setSettingsOpen(true)}
         />
-        <div className="app-workspace" ref={workspaceRef}>
+        {/* 「全部设置」打开时给工作区加 `inert`（D141）：
+            z 序（`.settings-overlay` 1150 > dockview 浮动层 ≤1109）负责"画在上面"，
+            `inert` 负责"命中测试与键盘焦点根本到不了下层"——两者互为兜底，
+            上层浮层打开时指针绝不会穿透去操作下面的面板与布局块。 */}
+        <div className="app-workspace" ref={workspaceRef} inert={settingsOpen}>
           {/* 垂直「界面页」标签条（D124 / D124-R2）：默认启用、默认左侧，启用与位置在设置里改。
               它是**界面导航**（点击切层），与 dockview 的面板标签不是一回事，也不属于任何面板组。
               收起态是工作区里一条 **12px 真实占位**的窄条（面板区整体让开 12px，不覆盖任何面板）；

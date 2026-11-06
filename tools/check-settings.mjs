@@ -598,6 +598,93 @@ check(
   labelWrapping.join(", ") || "4 处调用点均用 `<span>` 容器 + `label` 属性",
 );
 
+// ============================== 8.6 层级与指针隔离（D141） ==============================
+//
+// 防的是"全部设置悬浮层被下面的布局块穿透"：z-index 若低于 dockview 的浮动层，
+// 浮层（蓝图 overlay 面板 / 用户拖出的浮动组）会**画在设置界面之上并抢走指针**，
+// 于是点击/hover 落到下面的面板与布局块上。所以这里不锚定某一个数字，而是锚定
+// **数量关系**——把 dockview 侧的最高交互层算出来，要求设置浮层严格高于它，
+// 同时严格低于右键菜单与浮窗。以后谁改 `OVERLAY_Z_BASE` / 浮层高度域 / 设置层高，
+// 只要关系被破坏就红。
+const appUiAppSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/core/AppUiApp.tsx"),
+  "utf8",
+);
+const overlayChromeSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/overlayChrome.ts"),
+  "utf8",
+);
+const blueprintValuesSrc = readFileSync(
+  join(ROOT, "packages/config/src/blueprintValues.ts"),
+  "utf8",
+);
+const blueprintHelpSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/BlueprintHelpView.tsx"),
+  "utf8",
+);
+/** 取某个选择器规则块里的 `z-index: <n>`；找不到返回 null。 */
+const cssZIndexOf = (src, selector) => {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`${escaped}\\s*\\{[^}]*?z-index:\\s*(\\d+)`).exec(src);
+  return match ? Number(match[1]) : null;
+};
+const numberConstOf = (src, name) => {
+  const match = new RegExp(`export const ${name}\\s*=\\s*(\\d+)`).exec(src);
+  return match ? Number(match[1]) : null;
+};
+
+const overlayZ = cssZIndexOf(stylesSrc, ".settings-overlay");
+const contextMenuZ = cssZIndexOf(stylesSrc, ".context-menu");
+const taskOverlayZ = cssZIndexOf(stylesSrc, ".task-overlay");
+const overlayBase = numberConstOf(overlayChromeSrc, "OVERLAY_Z_BASE");
+const overlayHeightMax = numberConstOf(blueprintValuesSrc, "OVERLAY_HEIGHT_MAX");
+// dockview 侧的最高交互层：缩放手柄用原值 `--dv-overlay-z-index`（= base + 叠放高度），
+// 智能参考线再 +100。见 dockview.css 与 `overlayChrome.ts` 的契约注释。
+const dvTopInteractiveZ = overlayBase + overlayHeightMax + 100;
+
+check(
+  "设置浮层的 z-index **高于 dockview 全部浮动层**（否则浮层会盖住设置界面并抢走指针）",
+  overlayZ !== null && overlayZ > dvTopInteractiveZ,
+  `.settings-overlay = ${overlayZ}，dockview 最高交互层 = ${overlayBase} + ${overlayHeightMax} + 100 = ${dvTopInteractiveZ}`,
+);
+check(
+  "设置浮层的 z-index **低于右键菜单与浮窗**（打开设置时菜单仍须可见可点）",
+  overlayZ !== null &&
+    contextMenuZ !== null &&
+    taskOverlayZ !== null &&
+    overlayZ < contextMenuZ &&
+    overlayZ < taskOverlayZ,
+  `设置 ${overlayZ} < 右键菜单 ${contextMenuZ} / 浮窗 ${taskOverlayZ}`,
+);
+check(
+  "设置浮层的层级写在**一个地方**，注释里写清取值区间的依据（不是孤立魔数）",
+  /\.settings-overlay\s*\{[\s\S]{0,320}?D141[\s\S]{0,320}?z-index/.test(stylesSrc) ||
+    (/z-index:\s*1150;/.test(stylesSrc) && /D141/.test(stylesSrc)),
+  "styles.css 里 `.settings-overlay` 段落带 D141 的区间说明",
+);
+check(
+  "设置浮层打开时工作区 `inert`（命中测试与焦点根本到不了下层，与 z-index 互为兜底）",
+  /<div className="app-workspace"[^>]*\binert=\{settingsOpen\}/.test(appUiAppSrc),
+  ".app-workspace 绑定 inert={settingsOpen}",
+);
+check(
+  "设置浮层声明 `aria-modal`（与浮窗 / 确认框一致，屏幕阅读器不越界朗读下层内容）",
+  /className="settings-overlay"[^>]*aria-modal="true"/.test(settingsAppSwitchSrc),
+  '`role="dialog" aria-modal="true"`',
+);
+// 旧口径"设置浮层 60"必须全清：留一处就会与实现自相矛盾，而 doc 是权威。
+const staleZ60Refs = [
+  ["apps/desktop/src/app_ui/shared/styles.css", stylesSrc],
+  ["apps/desktop/src/app_ui/panels/BlueprintHelpView.tsx", blueprintHelpSrc],
+]
+  .filter(([, src]) => /设置浮层[^\n]{0,24}[（(]?\s*(?:60|`60`)/.test(src))
+  .map(([rel]) => rel);
+check(
+  "源码注释里不再残留「设置浮层 60」的旧层级口径",
+  staleZ60Refs.length === 0,
+  staleZ60Refs.join(", ") || "0 处",
+);
+
 // ============================== 汇总 ==============================
 
 const passed = results.filter((r) => r.ok).length;

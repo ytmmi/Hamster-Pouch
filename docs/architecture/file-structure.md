@@ -183,7 +183,9 @@ apps/desktop/src/app_ui/
                         #   （normalizeLayersForSave → blueprintValidate → blueprintSave →
                         #   notifyBlueprintChangedLocally）。两条路径只差"改哪一步"，落库必须同一份
   settings/           # **「全部设置」系统界面**（RFC 0010 决策 7；应用级系统界面，不受蓝图引擎管辖）
-    SettingsApp.tsx     # 左侧大类/二级 + 右侧分节设置 + 顶部搜索
+    SettingsApp.tsx     # 左侧大类/二级 + 右侧分节设置 + 顶部搜索；浮层根 `role="dialog"` +
+                        #   `aria-modal="true"`，层级 1150 与工作区 `inert` 见 D141——`styles.css` 的
+                        #   `.settings-overlay` 那段注释是层级依据的**唯一出处**（其它地方只引用，不复述数字）
     settingsRegistry.ts # 设置注册表（宿主项 + 面板项 + 插件项；`kind` 只取控件输入类）
     McpServiceStatus.tsx # 「MCP」大类底部的服务状态块（D119）：运行状态 / 端点 / 令牌 /
                         #   工具数，端点与令牌可一键复制；`mcp_status` 命令的唯一界面消费点
@@ -709,6 +711,11 @@ HamsterPouch/
                               #   **`check-status.mjs`**（`pnpm check:status`）：守护 `docs/architecture/
                               #   implementation-status.md` 的机械一致性（§1↔§2 计数与状态分布、状态取值、
                               #   `路径:行号` 引用可解析且在界内）；权威描述见该文档第 5 节。
+                              # **真机验证器**（无头 Edge + 仓库真实 CSS，手工跑，不是 `check:*`）：
+                              #   `reader-layout-verify.mjs` / `reader-typography-verify.mjs`（D116 纸张与
+                              #   排版档位）、`settings-overlay-hittest-verify.mjs`（D141 用
+                              #   `document.elementFromPoint()` 量「全部设置」浮层有没有被浮动层抢走指针；
+                              #   三个夹具含**回退即红**对照——把层级按回旧值必须复现缺陷）
                               # **版本号工具 `version.mjs`**（D140，纯 Node 无依赖，`pnpm version:next` /
                               #   `pnpm check:version`）：`--current` 显示当前版本、`--next` 预览 +1、`--write <v>`
                               #   指定版本、`--apply` 按 `HP_VERSION` 或 +1 落盘；`bumpPatch` 只对 x.y.z 的 z 段
