@@ -598,6 +598,9 @@ HamsterPouch/
                               #     且**没有可失败分配**，无上限时畸形自声明尺寸会让进程 abort）；
                               #     尺寸取 `width`/`height`/`viewBox`，全缺时按 CSS 默认 300×300
                               #   thumbnail.rs 图片缩略图（WebP 三级降级）+ 视频首帧（JPEG）；
+                              #     视频**跳过片头黑屏**（D143）：一条 `blackframe` + `metadata`
+                              #     过滤链在一次 ffmpeg 内完成，输入侧 `-t` 限窗 5 s；窗口内全黑
+                              #     则回退到原首帧命令（判据是临时文件是否存在，不是退出码）；
                               #     `generate_image_preview` 的 **SVG 分流必须在 ffmpeg 快路径之前**
                               #     （生产恒传 Some(ffmpeg)，顺序反了 = SVGZ 在查看器里一片空白）
                               #   waveform.rs 音频**波形图**（2026-10-17 / D115）：ffmpeg

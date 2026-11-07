@@ -33,7 +33,7 @@ pub use probe::{MediaProbe, probe};
 pub use process::hidden_command;
 pub use svg::{SVG_EXTS, is_svg, rasterize_svg};
 pub use thumbnail::{
-    IMAGE_THUMB_MAX_DIM, IMAGE_THUMB_WEBP_QUALITY, extract_thumbnail, generate_image_preview,
-    generate_image_thumbnail,
+    IMAGE_THUMB_MAX_DIM, IMAGE_THUMB_WEBP_QUALITY, VIDEO_BLACK_SKIP_WINDOW, extract_thumbnail,
+    generate_image_preview, generate_image_thumbnail,
 };
 pub use waveform::{WAVE_COLOR, WAVE_SIZE, generate_waveform};
