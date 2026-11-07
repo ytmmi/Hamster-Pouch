@@ -378,7 +378,9 @@ export const zhCN = {
   "player.clickToPause": "单击暂停",
   "player.clickToResume": "单击继续",
   "player.progress": "播放进度",
+  "player.volume": "音量",
   "player.settings.autoPauseOnTabSwitch": "切换标签时自动暂停",
+  "player.settings.volume": "音量",
 
   // 色彩参考
   "color.imageOnly": "色彩参考仅支持图片",

@@ -607,7 +607,32 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
       },
     ],
   },
-  { id: "player", titleKey: "panel.player", category: "media", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN, settings: [{ key: "autoPauseOnTabSwitch", kind: "switch", title_key: "player.settings.autoPauseOnTabSwitch", default: true }] },
+  {
+    id: "player",
+    titleKey: "panel.player",
+    category: "media",
+    hasClass: false,
+    blueprintNode: "control",
+    origin: SYSTEM_ORIGIN,
+    settings: [
+      {
+        key: "autoPauseOnTabSwitch",
+        kind: "switch",
+        title_key: "player.settings.autoPauseOnTabSwitch",
+        default: true,
+      },
+      {
+        // 音量按**百分比**存（0 = 静音，100 = 原声）：宿主 `slider` 的取值域恰是
+        // 0–100（浏览器 range 的默认 min/max），因此这一项不需要面板另立数值口径
+        // ——与 `bookreader.pageWidth` / `brightness` 同款（声明层没有 min/max，
+        // 越界值由面板夹紧，见 `docs/spec/panel-standard.md` 第 5.3 节）。
+        key: "volume",
+        kind: "slider",
+        title_key: "player.settings.volume",
+        default: 100,
+      },
+    ],
+  },
   { id: "tasks", titleKey: "panel.tasks", category: "system", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "plugins", titleKey: "panel.plugins", category: "system", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "blueprint", titleKey: "panel.blueprint", category: "system", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },

@@ -5075,6 +5075,79 @@ button.danger {
   display: block;
 }
 
+/*
+ * 音量（D142）：进度条**右侧**一枚图标，点开是一条**竖状**控制条。
+ *
+ * 浮层贴着自己这块容器的右缘向上长（`right: 0` + `bottom: 100%`）：`.panel` 是
+ * `overflow: auto`，往右伸会把面板顶出横向滚动条。
+ */
+.player-volume {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.player-volume-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.player-volume-btn:hover {
+  color: var(--fg);
+  border-color: var(--hover-border);
+}
+
+/* 展开中 = 选中态：`--active-bg` 实心底 + `--active-fg` 反色前景。
+   浅色主题下 `--accent` 是白色，拿它当高亮等于没有高亮（见文件头的主题约定）。 */
+.player-volume-btn.is-open {
+  background: var(--active-bg);
+  border-color: var(--active-bg);
+  color: var(--active-fg);
+}
+
+.player-volume-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 6px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  z-index: 20;
+}
+
+/*
+ * 原生 range 天生横着躺：整块转 -90° 才是竖条，转完 min 在下、max 在上。
+ * `margin` 的 ±38px 是配平旋转后的占位——96×20 的盒子转过来视觉上是 20×96，
+ * 于是左右各收回 38px、上下各撑出 38px，浮层不会被它撑宽。
+ */
+.player-volume-slider {
+  width: 96px;
+  height: 20px;
+  margin: 38px -38px;
+  transform: rotate(-90deg);
+}
+
+.player-volume-value {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
 /* ===== 图像查看器面板 ===== */
 
 .iv-panel {

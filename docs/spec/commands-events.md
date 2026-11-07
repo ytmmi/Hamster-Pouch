@@ -381,6 +381,14 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 进度来自 `<video>` 的 `timeupdate` / `loadedmetadata` 事件；面板**不能**用"自己发起过
 播放"来判断是否有会话，因为蓝图双击是宿主直接发起播放的。
 
+**播放器面板的音量（2026-11-07 用户要求，D142，仍有效）**：进度条行**最右端**一枚**音量图标**
+（静音 / 有声 / 过半三态，语义只走 `aria-label`），点击在图标上方弹出**竖状控制条**（0–100
+百分比；再点图标、点浮层之外、按 `Esc` 收起）。音量是**输出**控制，不属于上面被禁的
+播放/暂停/定位/停止四类传输控制，故与「面板不放按钮」不冲突。它**不经过**本文件的任何
+`media.*` 命令或事件：音量存成面板设置 `panel.player.volume`（默认 `100` = 原声），
+读走 `usePanelSettingValue`（含声明缺省与热更新），写走 `setting.set` + 本地
+`setting.changed` 广播，仅由面板把值应用为 `video.volume` / `video.muted`。
+
 **`media.*` 命令必须都是 `async fn`（2026-09 修复）**：`#[tauri::command]` 对普通 `fn`
 用 `ExecutionContext::Blocking`，命令体**在主线程执行**；而本组命令会做阻塞操作
 （`media.play` 等 mpv 建管道最长 5s、其余要抢同一把 `media` 锁）。若在主线程上阻塞，

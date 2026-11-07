@@ -205,6 +205,20 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &[],
         requires_capability: None,
     },
+    // 媒体播放器（`panel.player.*`）：音量（百分比 0–100）。
+    //
+    // 与 `bookreader.pageWidth` / `brightness` 同款：`slider` 的**取值域由控件给**
+    // （0–100），`validate_setting_value` 只校验"是数字"，越界值由面板自己夹紧
+    // （设置项声明没有 min/max，见 `docs/spec/panel-standard.md` 第 5.3 节）。
+    SettingDeclFact {
+        id: "volume",
+        owner_kind: "panel",
+        owner_id: Some("player"),
+        kind: "slider",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
     // 查看器（`panel.viewer.*`）：顶部基础信息栏是否显示。
     SettingDeclFact {
         id: "infoBarEnabled",

@@ -368,7 +368,9 @@ export const en: Record<keyof DictZhCN, string> = {
   "player.clickToPause": "Click to pause",
   "player.clickToResume": "Click to resume",
   "player.progress": "Playback progress",
+  "player.volume": "Volume",
   "player.settings.autoPauseOnTabSwitch": "Pause video when switching tabs",
+  "player.settings.volume": "Volume",
 
   "color.imageOnly": "Color reference supports images only",
   "color.empty": "No palette (right-click \"Re-analyze this file\", or rescan the source in full)",

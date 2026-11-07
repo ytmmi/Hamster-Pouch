@@ -365,7 +365,9 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "player.clickToPause": "單擊暫停",
   "player.clickToResume": "單擊繼續",
   "player.progress": "播放進度",
+  "player.volume": "音量",
   "player.settings.autoPauseOnTabSwitch": "切換標籤時自動暫停",
+  "player.settings.volume": "音量",
 
   "color.imageOnly": "色彩參考僅支援圖片",
   "color.empty": "無調色盤（右鍵「重新分析該檔案」或全量重掃來源即可擷取）",

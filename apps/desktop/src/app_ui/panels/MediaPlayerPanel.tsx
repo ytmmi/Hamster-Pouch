@@ -16,6 +16,19 @@
  * 4. 切标签默认自动暂停（可在「全部设置 → 面板 → 媒体播放器」关闭，默认开）；
  * 5. 播放完成回到首帧并暂停。
  *
+ * ## 音量（2026-11-07 / D142）
+ *
+ * 进度条**右侧**一枚**音量图标**，点它展开一条**竖状**音量条（再点 / 点别处 / Esc
+ * 收起）。图标本身就报告音量状态：静音时是喇叭加叉，音量过半才画出第二道声波。
+ *
+ * 这条控件不违反上面那条"不放按钮"的裁决：被点名禁掉的是播放 / 暂停 / 定位 / 停止
+ * 四类**传输控制**，而音量是**输出**控制——它不可能取代单击画面这个暂停入口，也不会
+ * 让进度条变成"控制区"。裁决原文与范围见 `docs/rfc/0005-media-capabilities.md`。
+ *
+ * 音量存成**百分比**面板设置（`panel.player.volume`，0 = 静音、100 = 原声，默认 100）：
+ * 宿主 `slider` 的取值域恰是 0–100，所以声明层不需要（也没有）min/max，越界值由
+ * `clampVolume` 夹紧——与 `bookreader.pageWidth` / `brightness` 同款。
+ *
  * 播放来源：蓝图双击视频（`payload.play`）→ `playerPlayStore.requestPlayerPlay(fileId)`
  * → 本面板解析路径、`convertFileSrc` 后加载并自动播放；单击画面且尚无源时播放
  * 当前选中的视频/音频文件。
@@ -37,6 +50,8 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { AudioWaveform } from "../shared/AudioWaveform";
+import { usePanelSettingValue } from "../shared/settingValue";
+import { publishSettingChanged } from "../core/settingChangeStore";
 import { useApp } from "../core/AppContext";
 import {
   getPlayerPlayRequest,
@@ -54,6 +69,25 @@ export interface MediaPlayerPanelProps {
  * `panel.<panel_id>.<key>`，见 `docs/spec/panel-standard.md` 第 5.3 节）。
  */
 const PLAYER_AUTO_PAUSE_SETTING_KEY = "panel.player.autoPauseOnTabSwitch";
+
+/** 「音量」面板设置键（百分比 0–100）。 */
+const PLAYER_VOLUME_SETTING_KEY = "panel.player.volume";
+
+/** 音量缺省值（= 原声），与设置声明里的 `default` 保持一致。 */
+const PLAYER_VOLUME_DEFAULT = 100;
+
+/**
+ * 音量夹紧到 0–100 的整数。
+ *
+ * 设置声明里**没有** min/max（见 `docs/spec/panel-standard.md` 第 5.3 节），范围由
+ * 面板自己保证：落库值可能来自旧版本、手改的 `app_settings` 或宿主控件的边界。
+ */
+function clampVolume(value: number): number {
+  if (!Number.isFinite(value)) {
+    return PLAYER_VOLUME_DEFAULT;
+  }
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
 
 export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.Element {
   const app = useApp();
@@ -78,6 +112,21 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   /** 最新 app 上下文（供只订阅一次的 effect 读取，避免闭包过期）。 */
   const appRef = useRef(app);
   appRef.current = app;
+
+  /**
+   * 音量（百分比 0–100）。走面板设置的**标准读取路径**：`usePanelSettingValue`
+   * 负责四条热更新触发源与声明里的 `default`，面板不再自己读一遍 `app_settings`。
+   */
+  const storedVolume = usePanelSettingValue("player", "volume", panelApi);
+  /** 拖动音量条中：以本地值为准（松手才落库），与进度条同款时序。 */
+  const [draftVolume, setDraftVolume] = useState<number | null>(null);
+  /** 竖状音量条是否展开。 */
+  const [volumeOpen, setVolumeOpen] = useState(false);
+  /** 音量控件的整块容器（按钮 + 浮层）：判断"点别处"用，见收起 effect。 */
+  const volumeBoxRef = useRef<HTMLDivElement>(null);
+  const volume =
+    draftVolume ??
+    (typeof storedVolume === "number" ? clampVolume(storedVolume) : PLAYER_VOLUME_DEFAULT);
 
   /** 读取「切换标签时自动暂停」设置（未设置 = 默认开）。 */
   const reloadAutoPauseSetting = useCallback(async () => {
@@ -218,6 +267,63 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     };
   }, [panelApi, reloadAutoPauseSetting]);
 
+  // 音量落到元素上：`<video>` 是 `videoUrl` 就绪后才挂载的，所以两个依赖都要看
+  // （换源 = 新元素，必须重新应用；音量变化 = 当前元素即时生效）。
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+    video.volume = volume / 100;
+    // 0 直接静音：比"音量 0 仍在解码出声"的边界更符合直觉，图标也才与听感一致。
+    video.muted = volume === 0;
+  }, [volume, videoUrl]);
+
+  // 音量浮层收起：点别处、按 Esc。判据是**整块容器**（按钮 + 浮层）——只排除按钮会
+  // 让"按住滑块拖动"的第一次 mousedown 就把浮层收掉（媒体预览下拉踩过的同款坑）。
+  useEffect(() => {
+    if (!volumeOpen) {
+      return;
+    }
+    const onPointerDown = (event: MouseEvent) => {
+      const box = volumeBoxRef.current;
+      if (box && !box.contains(event.target as Node)) {
+        setVolumeOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setVolumeOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [volumeOpen]);
+
+  /**
+   * 音量写回（松手 / 键盘调整后）。与书阅读器 `useReaderSettings` 同款：
+   * 落库失败不影响本次播放（内存里的值仍然生效，下次读取会纠正）。
+   */
+  const commitVolume = useCallback((value: number) => {
+    const next = clampVolume(value);
+    setDraftVolume(null);
+    void api
+      .settingSet({ key: PLAYER_VOLUME_SETTING_KEY, value: next })
+      .then(() => publishSettingChanged(PLAYER_VOLUME_SETTING_KEY))
+      .catch(() => {
+        /* 见上：写入失败不该让播放中断。 */
+      });
+  }, []);
+
+  /** 音量条拖动中：只更新本地显示值（出声即时，落库等松手）。 */
+  const onVolumeInput = (value: number) => {
+    setDraftVolume(clampVolume(value));
+  };
+
   /** 视频元数据就绪 → 进度条总时长。 */
   const onLoadedMetadata = () => {
     const video = videoRef.current;
@@ -353,8 +459,85 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
           aria-label={app.t("player.progress")}
         />
         <span className="player-time mono">{formatMs(durationMs)}</span>
+
+        {/*
+          音量（D142）：进度条**右侧**一枚图标，点它展开一条**竖状**控制条。
+          图标按用户裁决不写悬停提示（与画面区同一条规矩），语义只走 `aria-label`。
+        */}
+        <div className="player-volume" ref={volumeBoxRef}>
+          <button
+            type="button"
+            className={`player-volume-btn${volumeOpen ? " is-open" : ""}`}
+            onClick={() => setVolumeOpen((open) => !open)}
+            aria-label={app.t("player.volume")}
+            aria-expanded={volumeOpen}
+          >
+            <VolumeIcon volume={volume} />
+          </button>
+          {volumeOpen && (
+            <div className="player-volume-pop">
+              <input
+                className="player-volume-slider"
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={volume}
+                onChange={(e) => onVolumeInput(Number(e.target.value))}
+                onMouseUp={(e) => commitVolume(Number((e.target as HTMLInputElement).value))}
+                onTouchEnd={(e) => commitVolume(Number((e.target as HTMLInputElement).value))}
+                onKeyUp={(e) => commitVolume(Number((e.target as HTMLInputElement).value))}
+                aria-label={app.t("player.volume")}
+              />
+              <span className="player-volume-value mono">{volume}</span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * 音量图标（内联 SVG，颜色随按钮的 `currentColor`）。
+ *
+ * 三态正是"图标本身就是状态显示"：静音（喇叭 + 叉）、有声（一道声波）、过半
+ * （两道声波）。图标不给悬停提示——与画面区同一条规矩（面板内不出提示文字）。
+ */
+function VolumeIcon({ volume }: { volume: number }): JSX.Element {
+  const muted = volume === 0;
+  const loud = volume >= 50;
+  return (
+    <svg viewBox="0 0 24 24" width={18} height={18} aria-hidden="true" focusable="false">
+      <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" />
+      {!muted && (
+        <path
+          d="M16 8.5a4.5 4.5 0 0 1 0 7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        />
+      )}
+      {!muted && loud && (
+        <path
+          d="M18.5 6.5a7.5 7.5 0 0 1 0 11"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        />
+      )}
+      {muted && (
+        <path
+          d="M16 9.5l5 5M21 9.5l-5 5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        />
+      )}
+    </svg>
   );
 }
 
