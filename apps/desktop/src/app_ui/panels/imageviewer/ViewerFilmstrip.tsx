@@ -1,17 +1,20 @@
 /**
- * 图像查看器：**胶片栏**（当前图像所属相册或源的全部图像，顺序与媒体预览的
+ * 图像查看器：**胶片栏**（当前图像所属相册或源的**整个来源**，顺序与媒体预览的
  * 有效排序一致——排序在 `useViewerSequence.ts` 完成，本组件只按给定序列渲染）。
  *
- * 三条实现约束：
+ * 三条实现约束（D146，缺陷 0018 余留项：序列无上限后的性能与质量平衡）：
  *
- * 1. **只渲染窗口**：序列可能上千项，全量挂 DOM 会拖慢面板。这里渲染 `[0, end)`，
- *    滚动接近末尾时按步长**追加**（只追加、不前插 → 不会出现滚动锚点跳动）；
- *    当前下标推进时窗口自动跟进（键盘/上一张下一张导航后仍能看到当前项）。
- * 2. **缩略图懒加载**：一个共享 `IntersectionObserver`（`root` = 滚动容器）收集
- *    "已进入视口附近"的 fileId，只有这些单元才请求 `thumb.get`。
- *    不是每个单元一个 observer —— 上千个 observer 本身就是性能问题。
- * 3. **滚动只在容器内**：定位当前项用容器 `scrollTop/scrollLeft` 手算，
- *    不用 `scrollIntoView`（后者会连带滚动祖先，可能把整个面板/页面顶走）。
+ * 1. **只渲染视口窗口，前后对称余量**：序列可达数万张，旧的"只追加不回收"
+ *    窗口会在导航到深处时挂出几万个 DOM 单元。现在窗口以滚动位置为中心
+ *    （纯几何 `viewerFilmstripLayout.ts`），滚出去即卸载、滚回来再挂载；
+ *    单元绝对定位在算好的偏移上，窗口滑动不引起滚动锚点跳动。
+ * 2. **缩略图按需取**：只有窗口内单元才请求 `thumb.get`（窗口本身就是
+ *    "视口 + 余量"，不再需要 IntersectionObserver 这道全量渲染时代的闸门——
+ *    缺陷 0025 的教训）；URL 走共享缓存（`shared/thumbUrl.ts`），来回滚动
+ *    不重复请求。宽高比解码后写进共享缓存，单元重挂载直接取真值。
+ * 3. **滚动只在容器内**：当前项居中按纯几何算偏移（不要求当前项已挂载——
+ *    窗口有界后深处当前项可能不在 DOM 里），不用 `scrollIntoView`
+ *    （后者会连带滚动祖先，可能把整个面板/页面顶走）。
  */
 
 import {
@@ -27,6 +30,21 @@ import {
 import { resolveThumbUrl } from "../../shared/thumbUrl";
 import type { FileItem } from "../../shared/types";
 import { filmstripEdgeClass, isFilmstripVertical, type FilmstripEdge, type FilmstripView } from "./viewerPlacement";
+import {
+  FILMSTRIP_BORDER,
+  FILMSTRIP_GAP,
+  FILMSTRIP_PADDING,
+  FilmstripDeltaIndex,
+  filmstripCellExtent,
+  filmstripCellRatio,
+  filmstripCenterScroll,
+  filmstripWindow,
+  getCachedFilmstripRatio,
+  setCachedFilmstripRatio,
+  subscribeFilmstripRatios,
+  touchCachedFilmstripRatio,
+  type FilmstripWindow,
+} from "./viewerFilmstripLayout";
 
 export interface ViewerFilmstripProps {
   edge: FilmstripEdge;
@@ -47,24 +65,10 @@ export interface ViewerFilmstripProps {
   ariaLabel: string;
 }
 
-/** 首屏渲染的单元数（其余随滚动追加）。 */
-const FILMSTRIP_WINDOW = 120;
-/** 每次追加的单元数。 */
-const FILMSTRIP_STEP = 80;
-/** 当前项前后至少保留的单元数（窗口跟随当前项时用）。 */
-const FILMSTRIP_MARGIN = 24;
-/** 距滚动末端多少 px 触发追加。 */
-const FILMSTRIP_PREFETCH_PX = 320;
-
-/** 缩略图 URL（懒加载：`enabled` 为假时不请求）。 */
-function useThumbUrl(
-  repoId: string,
-  fileId: string,
-  enabled: boolean,
-): string | null | undefined {
+/** 缩略图 URL（进窗口才解析；缓存命中时同步给出初值，重挂载不闪占位）。 */
+function useThumbUrl(repoId: string, fileId: string): string | null | undefined {
   const [url, setUrl] = useState<string | null | undefined>(undefined);
   useEffect(() => {
-    if (!enabled) return;
     let cancelled = false;
     void resolveThumbUrl(repoId, fileId).then((resolved) => {
       if (!cancelled) setUrl(resolved);
@@ -72,40 +76,45 @@ function useThumbUrl(
     return () => {
       cancelled = true;
     };
-  }, [repoId, fileId, enabled]);
+  }, [repoId, fileId]);
   return url;
 }
 
-/** 单个胶片单元（缩略图 + 文件名 tooltip）。 */
+/** 单个胶片单元（缩略图 + 文件名 tooltip；主轴尺寸/偏移由面板算好下发）。 */
 function FilmstripCell({
   file,
   repoId,
   active,
   position,
   view,
+  extent,
+  offset,
+  crossExtent,
+  vertical,
   onSelect,
-  loadThumb,
 }: {
   file: FileItem;
   repoId: string;
   active: boolean;
-  /** 在序列中的下标（`data-index` 供滚动定位）。 */
+  /** 在序列中的下标（`data-index` 供测试与无障碍定位）。 */
   position: number;
   view: FilmstripView;
+  /** 主轴外尺寸（px，纯几何算出；含单元盒开销）。 */
+  extent: number;
+  /** 主轴起点偏移（px，绝对定位）。 */
+  offset: number;
+  /** 交叉轴外尺寸（px）：撑满容器内容区，与几何模块同一公式。 */
+  crossExtent: number;
+  vertical: boolean;
   onSelect: (index: number) => void;
-  loadThumb: boolean;
 }): JSX.Element {
-  const thumbUrl = useThumbUrl(repoId, file.id, loadThumb);
-  /**
-   * 缩略图自身宽高比（解码后才有）。
-   *
-   * 单元的**主尺寸由宽高比决定**（交叉轴由 flex `stretch` 撑满胶片栏厚度）：
-   * - 自适应：用图像真实宽高比 → 整张图完整可见（不裁剪、不留黑边）；
-   * - 平铺：固定 `1`（方形）+ `object-fit: cover` → 排成整齐的一列/一行。
-   * 未解码前先用 `1` 占位，避免单元塌成 0 高。
-   */
-  const [aspect, setAspect] = useState<number | null>(null);
-  const ratio = view === "tile" ? 1 : (aspect ?? 1);
+  const thumbUrl = useThumbUrl(repoId, file.id);
+  // 单元不持有宽高比状态：几何以共享缓存为唯一事实（父级订阅缓存写入、
+  // 按帧重算后下发新 extent），单元只负责解码回填——两处各存一份就是漂移源。
+  // 挂载时 touch 一次 LRU 热度（读路径免写，见几何模块注释）。
+  useEffect(() => {
+    touchCachedFilmstripRatio(file.id);
+  }, [file.id]);
 
   return (
     <button
@@ -113,7 +122,11 @@ function FilmstripCell({
       className={`iv-film-cell iv-film-cell-${view}${active ? " iv-film-cell-active" : ""}`}
       data-file-id={file.id}
       data-index={position}
-      style={{ aspectRatio: `${ratio}` }}
+      style={
+        vertical
+          ? { top: `${offset}px`, height: `${extent}px`, width: `${crossExtent}px` }
+          : { left: `${offset}px`, width: `${extent}px`, height: `${crossExtent}px` }
+      }
       title={file.relative_path}
       aria-current={active ? "true" : undefined}
       onClick={() => onSelect(position)}
@@ -123,11 +136,13 @@ function FilmstripCell({
           className="iv-film-thumb"
           src={thumbUrl}
           alt=""
-          loading="lazy"
           draggable={false}
           onLoad={(event) => {
             const { naturalWidth, naturalHeight } = event.currentTarget;
-            if (naturalWidth > 0 && naturalHeight > 0) setAspect(naturalWidth / naturalHeight);
+            if (naturalWidth > 0 && naturalHeight > 0) {
+              // 回填共享缓存（唯一入口）→ 订阅方按帧合并后重算几何。
+              setCachedFilmstripRatio(file.id, naturalWidth / naturalHeight);
+            }
           }}
         />
       ) : (
@@ -150,111 +165,140 @@ export function ViewerFilmstrip({
 }: ViewerFilmstripProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const vertical = isFilmstripVertical(edge);
-  /** 已渲染的单元数（只增不减，避免滚动锚点跳动）。 */
-  const [end, setEnd] = useState(() =>
-    Math.min(files.length, Math.max(FILMSTRIP_WINDOW, index + 1 + FILMSTRIP_MARGIN)),
-  );
-  /** 已进入视口附近的 fileId（缩略图懒加载白名单）。 */
-  const [loaded, setLoaded] = useState<ReadonlySet<string>>(() => new Set());
-
-  // 序列整体更换（换相册/换源）→ 重置窗口与懒加载白名单。
-  useEffect(() => {
-    setEnd(Math.min(files.length, Math.max(FILMSTRIP_WINDOW, index + 1 + FILMSTRIP_MARGIN)));
-    setLoaded(new Set());
-    // `index` 有意不入依赖：换序列时只看新序列长度（当前项由下面那个 effect 跟进）。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files]);
-
-  // 当前项推进 → 窗口至少覆盖到它之后（只追加）。
-  useEffect(() => {
-    if (index < 0) return;
-    setEnd((prev) =>
-      Math.min(files.length, Math.max(prev, index + 1 + FILMSTRIP_MARGIN, FILMSTRIP_WINDOW)),
-    );
-  }, [index, files.length]);
-
-  // 缩略图懒加载：共享一个 observer，观察当前已渲染的单元。
-  useEffect(() => {
-    const root = containerRef.current;
-    if (!root || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const hit = entries
-          .filter((entry) => entry.isIntersecting)
-          .map((entry) => (entry.target as HTMLElement).dataset.fileId)
-          .filter((id): id is string => Boolean(id));
-        if (hit.length === 0) return;
-        setLoaded((prev) => {
-          const next = new Set(prev);
-          for (const id of hit) next.add(id);
-          return next;
-        });
-      },
-      { root, rootMargin: "320px" },
-    );
-    // `NodeListOf` 不可直接迭代（tsconfig 的 lib 不含 DOM.Iterable），用 forEach。
-    root.querySelectorAll<HTMLElement>("[data-file-id]").forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, [files, end, edge]);
-
-  /** 滚动接近末端 → 追加一屏（只追加，不回收）。 */
-  const onScroll = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const nearEnd = vertical
-      ? el.scrollTop + el.clientHeight >= el.scrollHeight - FILMSTRIP_PREFETCH_PX
-      : el.scrollLeft + el.clientWidth >= el.scrollWidth - FILMSTRIP_PREFETCH_PX;
-    if (nearEnd) setEnd((prev) => Math.min(files.length, prev + FILMSTRIP_STEP));
-  }, [files.length, vertical]);
-
-  // 当前项在胶片栏中始终居中（容器内手算滚动，不惊动祖先滚动容器）。
-  // 首次打开面板时容器可能还没完成布局（clientHeight=0），这里用 rAF 重试兜底：
-  // 最多等待 10 帧（~167ms，足够容器完成初始化布局）。
-  // 同时用 ResizeObserver 监听容器尺寸变化（切换胶片栏位置/调整面板大小后重新居中）。
-  const centerOnIndex = useCallback(() => {
-    const container = containerRef.current;
-    if (!container || index < 0 || index >= end) return;
-    const cell = container.querySelector<HTMLElement>(`[data-index="${index}"]`);
-    if (!cell) return;
-    let retries = 10;
-    const doCenter = () => {
-      const cDim = vertical ? container.clientHeight : container.clientWidth;
-      const cellOff = vertical ? cell.offsetTop : cell.offsetLeft;
-      const cellDim = vertical ? cell.offsetHeight : cell.offsetWidth;
-      // 容器或单元格还没有稳定尺寸 → 下一帧重试
-      if ((cDim <= 0 || cellDim <= 0) && retries > 0) {
-        retries--;
-        requestAnimationFrame(doCenter);
-        return;
-      }
-      if (cDim > 0) {
-        if (vertical) {
-          container.scrollTop = Math.max(0, cellOff + cellDim / 2 - cDim / 2);
-        } else {
-          container.scrollLeft = Math.max(0, cellOff + cellDim / 2 - cDim / 2);
-        }
-      }
-    };
-    requestAnimationFrame(doCenter);
-  }, [index, end, vertical]);
-
+  /** 主轴滚动偏移（rAF 合帧：滚动事件一帧几十个，窗口重算只做一次）。 */
+  const [scroll, setScroll] = useState(0);
+  const scrollFrameRef = useRef(0);
+  /** 容器主轴客户区尺寸 + 宽高比缓存版本（解码回填后重算窗口几何）。 */
+  const [viewport, setViewport] = useState(0);
+  const [ratioVersion, setRatioVersion] = useState(0);
+  const ratioFrameRef = useRef(0);
+  /**
+   * 已缓存修正的前缀索引（Fenwick）：窗口/居中公式 = 全部占位 + 前缀修正，
+   * 滚动帧不再逐项查 5 万次缓存。换序列/换视图/改厚度即重建（O(n) 一次），
+   * 缓存写入经订阅增量更新（O(log n)）。平铺视图恒方形 → 修正恒 0（空索引）。
+   */
+  const deltaRef = useRef(new FilmstripDeltaIndex());
   useLayoutEffect(() => {
-    centerOnIndex();
-  }, [centerOnIndex]);
+    deltaRef.current.bindSequence(
+      view === "adaptive" ? files.map((f) => f.id) : [],
+      size,
+    );
+    setRatioVersion((v) => v + 1);
+  }, [files, view, size]);
 
-  // 容器尺寸变化（面板初始化后第一次布局完成、面板大小改变、胶片栏切换位置等）
-  // 也重新居中当前项。
+  /** 逐单元占位比例：平铺恒 1；自适应取共享缓存，未解码 1:1。 */
+  const ratioAt = useCallback(
+    (i: number) => {
+      const file = files[i];
+      return filmstripCellRatio(view, file ? getCachedFilmstripRatio(file.id) : undefined);
+    },
+    // ratioVersion 让解码回填后的重渲染重读缓存（Map 本体不是 React 状态）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [files, view, ratioVersion],
+  );
+
+  /** 前缀修正读取（绑定到当前索引身份；ratioVersion 驱动重算）。 */
+  const deltaBefore = useCallback(
+    (i: number) => deltaRef.current.deltaBefore(i),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ratioVersion],
+  );
+
+  const window_ = useMemo<FilmstripWindow>(
+    () => filmstripWindow(files.length, scroll, viewport, size, ratioAt, deltaBefore),
+    [files.length, scroll, viewport, size, ratioAt, deltaBefore],
+  );
+
+  // 交叉轴外尺寸：撑满容器内容区（与 filmstripCellExtent 同一盒模型公式，
+  // 单元盒开销由单元自己的 border-box 承担）。
+  const crossExtent = Math.max(0, size - FILMSTRIP_PADDING * 2 - FILMSTRIP_BORDER * 2);
+
+  /** 窗口内单元 + 各自的绝对偏移（从窗口起点续算，不再从 0 全量扫描）。 */
+  const cells = useMemo(() => {
+    const out: { file: FileItem; position: number; extent: number; offset: number }[] = [];
+    let offset = window_.startOffset;
+    for (let i = window_.start; i < window_.end; i++) {
+      const file = files[i];
+      if (!file) break;
+      const extent = filmstripCellExtent(size, ratioAt(i));
+      out.push({ file, position: i, extent, offset });
+      offset += extent + FILMSTRIP_GAP;
+    }
+    return out;
+  }, [files, window_, size, ratioAt]);
+
+  // 序列整体更换（换相册/换源/排序重排）→ 滚动与窗口回到起点。
+  useEffect(() => {
+    setScroll(0);
+    const el = containerRef.current;
+    if (el) {
+      if (vertical) el.scrollTop = 0;
+      else el.scrollLeft = 0;
+    }
+  }, [files, vertical]);
+
+  // 容器尺寸监听（首帧布局完成 / 面板改尺寸 / 胶片栏换边）→ 重算窗口与居中。
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const ro = new ResizeObserver(() => {
-      centerOnIndex();
-    });
+    const read = () => {
+      const dim = vertical ? container.clientHeight : container.clientWidth;
+      setViewport((prev) => (prev === dim ? prev : dim));
+    };
+    read();
+    const ro = new ResizeObserver(read);
     ro.observe(container);
     return () => ro.disconnect();
-  }, [centerOnIndex]);
+  }, [vertical]);
 
-  const visible = useMemo(() => files.slice(0, end), [files, end]);
+  // 宽高比解码回填 → 增量更新前缀索引 + 重算几何。按帧合并：一次滚动解码
+  // 几十张，逐张重渲染就是几十次窗口重算（媒体预览 ratioCache 的同款教训）。
+  // 索引更新**不**合帧（O(log n) 廉价且必须与缓存一致），重渲染才合帧。
+  useEffect(() => {
+    const unsubscribe = subscribeFilmstripRatios((fileId) => {
+      deltaRef.current.update(fileId);
+      if (ratioFrameRef.current) return;
+      ratioFrameRef.current = requestAnimationFrame(() => {
+        ratioFrameRef.current = 0;
+        setRatioVersion((v) => v + 1);
+      });
+    });
+    return () => {
+      unsubscribe();
+      if (ratioFrameRef.current) cancelAnimationFrame(ratioFrameRef.current);
+      ratioFrameRef.current = 0;
+    };
+  }, []);
+
+  /** 滚动 → rAF 合帧后更新窗口（只改窗口，不改内容总长，滚动条不抖）。 */
+  const onScroll = useCallback(() => {
+    if (scrollFrameRef.current) return;
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = 0;
+      const el = containerRef.current;
+      if (!el) return;
+      const next = vertical ? el.scrollTop : el.scrollLeft;
+      setScroll((prev) => (prev === next ? prev : next));
+    });
+  }, [vertical]);
+
+  useEffect(
+    () => () => {
+      if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current);
+    },
+    [],
+  );
+
+  // 当前项始终居中：纯几何算偏移（不要求当前项在 DOM 里），容器内手算滚动。
+  // 依赖含 viewport / ratioAt：布局完成与宽高比收敛后重新居中一次。
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container || index < 0 || index >= files.length || viewport <= 0) return;
+    const target = filmstripCenterScroll(index, viewport, size, ratioAt, deltaBefore);
+    if (vertical) container.scrollTop = Math.max(0, target);
+    else container.scrollLeft = Math.max(0, target);
+    setScroll(Math.max(0, target));
+  }, [index, files.length, viewport, size, ratioAt, deltaBefore, vertical]);
 
   return (
     <div
@@ -267,18 +311,30 @@ export function ViewerFilmstrip({
       aria-label={ariaLabel}
       onScroll={onScroll}
     >
-      {visible.map((file, position) => (
-        <FilmstripCell
-          key={file.id}
-          file={file}
-          repoId={repoId}
-          active={position === index}
-          position={position}
-          view={view}
-          onSelect={onSelect}
-          loadThumb={loaded.has(file.id)}
-        />
-      ))}
+      <div
+        className="iv-film-track"
+        style={
+          vertical
+            ? { height: `${window_.totalExtent}px`, width: "100%" }
+            : { width: `${window_.totalExtent}px`, height: "100%" }
+        }
+      >
+        {cells.map(({ file, position, extent, offset }) => (
+          <FilmstripCell
+            key={file.id}
+            file={file}
+            repoId={repoId}
+            active={position === index}
+            position={position}
+            view={view}
+            extent={extent}
+            offset={offset}
+            crossExtent={crossExtent}
+            vertical={vertical}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
     </div>
   );
 }

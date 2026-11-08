@@ -556,6 +556,7 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
           index={sequence.index}
           total={sequence.files.length}
           totalBytes={totalBytes}
+          loading={sequence.loading}
           truncated={sequence.truncated}
           natural={natural}
           zoom={transform.zoom}

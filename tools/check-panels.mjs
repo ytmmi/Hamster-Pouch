@@ -2962,12 +2962,292 @@ check(
 
 check(
   "D144：排序变化只重排、不重取——取数 effect 依赖不含排序，排序在 useMemo 里消费",
-  /\}, \[repoId, albumId, sourceId, dirPath, refreshKey, status, t\]\);/.test(viewerSequenceSrc) &&
+  /\}, \[repoId, albumId, sourceId, dirPath, refreshKey\]\);/.test(viewerSequenceSrc) &&
     /\[rawFiles, sortKey, sortDir\],/.test(viewerSequenceSrc) &&
     // 反向：查看器不得另写比较器（同一个事实只有一份实现）。
     !/\.sort\(/.test(stripComments(viewerSequenceSrc)) &&
     !/localeCompare/.test(stripComments(viewerSequenceSrc)),
 );
+
+// ==================== 图像查看器：序列无上限 + 胶片栏窗口化（缺陷 0018 余留项 / D146） ====================
+//
+// 防的是"上限取消了，性能悬崖却搬了家"：取数侧靠 drainPages 的循环安全
+// （严格前进 + 页数上限），渲染侧靠有界对称窗口（旧的"只追加不回收"在
+// 导航到深处时会挂出几万个 DOM 单元）。行为断言直接跑真函数；接线与
+// 盒模型常量按源码/样式表锚点断言。
+
+const filmstripLayout = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerFilmstripLayout.ts")).href
+);
+const filmstripSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/ViewerFilmstrip.tsx"),
+  "utf8",
+);
+const filmstripLayoutSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerFilmstripLayout.ts"),
+  "utf8",
+);
+
+// ---- drainPages 的完成标志（complete）：不完整必须可判，数组行为不变 ----
+{
+  const done = pageStub([
+    { items: [fileAt(1)], nextCursor: "c1" },
+    { items: [fileAt(2)], nextCursor: null },
+  ]);
+  const drained = await mediaPaging.drainPages(done.fetchPage);
+  check(
+    "D146：drainPages 翻到末页 → complete=true，且数组展开/序列化行为与旧签名一致",
+    drained.complete === true &&
+      drained.length === 2 &&
+      [...drained].length === 2 &&
+      !JSON.stringify(drained).includes("complete"),
+    `complete=${drained.complete}`,
+  );
+}
+{
+  const looped = pageStub([
+    { items: [fileAt(1)], nextCursor: "same" },
+    { items: [fileAt(2)], nextCursor: "same" },
+    { items: [fileAt(3)], nextCursor: "same" },
+  ]);
+  const drained = await mediaPaging.drainPages(looped.fetchPage);
+  const pages = pageStub([
+    { items: [fileAt(1)], nextCursor: "c1" },
+    { items: [fileAt(2)], nextCursor: null },
+  ]);
+  let stop = false;
+  const cancelled = await mediaPaging.drainPages(pages.fetchPage, {
+    isCancelled: () => stop,
+    onPage: () => {
+      stop = true;
+    },
+  });
+  check(
+    "D146：防御性停手（游标不前进）与中途取消 → complete=false（序列不完整必须可判）",
+    drained.complete === false && cancelled.complete === false,
+    `looped=${drained.complete} cancelled=${cancelled.complete}`,
+  );
+}
+
+// ---- 取数侧接线：无条目上限、复用 drainPages、首屏只刷一次、世代号取消 ----
+check(
+  "D146：查看器序列取消条目上限（VIEWER_MAX_FILES 不复存在），翻页复用媒体预览同一个 drainPages",
+  !/VIEWER_MAX_FILES/.test(viewerSequenceSrc) &&
+    !/VIEWER_MAX_FILES/.test(filmstripSrc) &&
+    !/VIEWER_MAX_FILES/.test(imageViewerPanelSrc) &&
+    /import \{ drainPages, type MediaPreviewPageFetcher \} from "\.\.\/mediaPreviewPaging";/.test(
+      viewerSequenceSrc,
+    ) &&
+    /await drainPages<FileItem>\(fetchPage, \{/.test(viewerSequenceSrc) &&
+    // 反向：不得再自写第二套 do/while 翻页（循环安全只有 drainPages 一处）。
+    !/do \{/.test(stripComments(viewerSequenceSrc)),
+);
+check(
+  "D146：首屏第一页即出图、进度只刷那一次（逐页刷新 = 递增全量重排，0018 P1-A 教训）",
+  /let firstPageRendered = false;/.test(viewerSequenceSrc) &&
+    /if \(firstPageRendered\) return;/.test(viewerSequenceSrc) &&
+    /onFirstPage\?\.\(imagesOnly\(accumulated\)\)/.test(viewerSequenceSrc) &&
+    // 反向禁止"按页数取模"的节流写法（每 10 页刷一次仍有秒级累计阻塞）。
+    !/% \d+ === 0/.test(stripComments(viewerSequenceSrc)),
+);
+check(
+  "D146：后台翻页用世代号取消（卸载/换来源即停），truncated 只标注防御性停手",
+  /const generation = \+\+generationRef\.current;/.test(viewerSequenceSrc) &&
+    /const isCancelled = \(\) => generationRef\.current !== generation;/.test(viewerSequenceSrc) &&
+    /truncated: !drained\.complete && !\(isCancelled\?\.\(\) \?\? false\)/.test(viewerSequenceSrc),
+);
+
+// ---- 窗口几何：行为断言（直接跑真函数） ----
+{
+  const size = 76;
+  const ratioAt = () => 1;
+  const unit = filmstripLayout.filmstripCellExtent(size, 1) + filmstripLayout.FILMSTRIP_GAP;
+  const deep = filmstripLayout.filmstripWindow(50000, 20000 * unit, 600, size, ratioAt);
+  const head = filmstripLayout.filmstripWindow(50000, 0, 600, size, ratioAt);
+  check(
+    "D146：5 万项序列只渲染有界窗口（深处导航不再挂出前 N 万个单元），窗口覆盖视口",
+    deep.end - deep.start <= 40 &&
+      head.end - head.start <= 40 &&
+      deep.start > 19000 &&
+      deep.startOffset <= 20000 * unit + filmstripLayout.FILMSTRIP_PADDING &&
+      deep.startOffset + (deep.end - deep.start) * unit >= 20000 * unit + 600,
+    `deep=[${deep.start},${deep.end}) head=[${head.start},${head.end})`,
+  );
+  // 对称余量：视口前后各多渲染的单元数都 ≥ MARGIN−1 且相差 ≤ 2（缺陷 0025 的
+  // "向下预加载、向上不预加载"就是要防的方向性差异）。
+  const scroll = 20000 * unit;
+  const before = Math.floor((scroll - deep.startOffset) / unit);
+  const afterCells = deep.end - deep.start - before - Math.ceil(600 / unit);
+  check(
+    "D146：窗口余量前后对称（各 ≥ MARGIN−1，相差 ≤ 2）",
+    before >= filmstripLayout.FILMSTRIP_WINDOW_MARGIN - 1 &&
+      afterCells >= filmstripLayout.FILMSTRIP_WINDOW_MARGIN - 1 &&
+      Math.abs(before - afterCells) <= 2,
+    `before=${before} after=${afterCells}`,
+  );
+  // 总长与起点偏移必须与逐项求和一致（含混合宽高比，经前缀索引修正）。
+  const mixed = (i) => (i % 2 === 0 ? 2 : 0.5);
+  const ids1000 = Array.from({ length: 1000 }, (_, i) => `mix${i}`);
+  const idx1000 = new filmstripLayout.FilmstripDeltaIndex();
+  idx1000.bindSequence(ids1000, size);
+  for (let i = 0; i < 1000; i++) {
+    filmstripLayout.setCachedFilmstripRatio(`mix${i}`, mixed(i));
+    idx1000.update(`mix${i}`);
+  }
+  const delta1000 = (i) => idx1000.deltaBefore(i);
+  const w = filmstripLayout.filmstripWindow(1000, 5000, 600, size, mixed, delta1000);
+  let sum = filmstripLayout.FILMSTRIP_PADDING;
+  for (let i = 0; i < 1000; i++) {
+    sum += filmstripLayout.filmstripCellExtent(size, mixed(i)) + filmstripLayout.FILMSTRIP_GAP;
+  }
+  const expectTotal = sum - filmstripLayout.FILMSTRIP_GAP + filmstripLayout.FILMSTRIP_PADDING;
+  let expectStart = filmstripLayout.FILMSTRIP_PADDING;
+  for (let i = 0; i < w.start; i++) {
+    expectStart += filmstripLayout.filmstripCellExtent(size, mixed(i)) + filmstripLayout.FILMSTRIP_GAP;
+  }
+  const empty = filmstripLayout.filmstripWindow(0, 0, 600, size, ratioAt);
+  check(
+    "D146：前缀索引修正后的总长/起点偏移与逐项求和逐值一致；空序列给空窗口",
+    Math.abs(w.totalExtent - expectTotal) < 1e-6 &&
+      Math.abs(w.startOffset - expectStart) < 1e-6 &&
+      empty.start === 0 &&
+      empty.end === 0 &&
+      empty.totalExtent === 0,
+    `total=${w.totalExtent} expect=${expectTotal}`,
+  );
+  // 居中定位：纯几何、不要求当前项已挂载（深处当前项不在 DOM 里也要能定位）。
+  const center = filmstripLayout.filmstripCenterScroll(49999, 600, size, ratioAt);
+  const expectCenter =
+    filmstripLayout.FILMSTRIP_PADDING +
+    49999 * unit +
+    filmstripLayout.filmstripCellExtent(size, 1) / 2 -
+    300;
+  check(
+    "D146：当前项居中按纯几何计算（第 5 万项不要求已挂载），与占位公式逐值一致",
+    Math.abs(center - expectCenter) < 1e-9 && center > 0,
+    `center=${center}`,
+  );
+  // 前缀索引增量更新与重建等价（写入后再 bind 一次，两者逐项一致）。
+  idx1000.bindSequence(ids1000, size);
+  const rebuilt = filmstripLayout.filmstripWindow(1000, 5000, 600, size, mixed, (i) => idx1000.deltaBefore(i));
+  check(
+    "D146：前缀索引增量更新与全量重建等价（换序列重建不漂移）",
+    rebuilt.start === w.start &&
+      Math.abs(rebuilt.totalExtent - w.totalExtent) < 1e-9 &&
+      Math.abs(rebuilt.startOffset - w.startOffset) < 1e-9,
+    `start=${rebuilt.start}/${w.start}`,
+  );
+  filmstripLayout.clearFilmstripRatioCache();
+  // 比例兜底：非法值不塌成 0；平铺恒方形。
+  check(
+    "D146：占位比例兜底（0/负/NaN/Infinity → 1:1），平铺视图恒为方形",
+    filmstripLayout.filmstripCellRatio("adaptive", 0) === 1 &&
+    filmstripLayout.filmstripCellRatio("adaptive", -2) === 1 &&
+    filmstripLayout.filmstripCellRatio("adaptive", Number.NaN) === 1 &&
+    filmstripLayout.filmstripCellRatio("adaptive", Number.POSITIVE_INFINITY) === 1 &&
+    filmstripLayout.filmstripCellRatio("adaptive", undefined) === 1 &&
+    filmstripLayout.filmstripCellRatio("adaptive", 1.5) === 1.5 &&
+    filmstripLayout.filmstripCellRatio("tile", 1.5) === 1,
+  );
+}
+
+// ---- 宽高比共享缓存：写入通知 / 同值与非法不通知 / 退订不泄漏 ----
+{
+  filmstripLayout.clearFilmstripRatioCache();
+  let notified = 0;
+  const unsubscribe = filmstripLayout.subscribeFilmstripRatios(() => {
+    notified += 1;
+  });
+  filmstripLayout.setCachedFilmstripRatio("fa", 1.5);
+  filmstripLayout.setCachedFilmstripRatio("fa", 1.5); // 同值不通知
+  filmstripLayout.setCachedFilmstripRatio("fa", 0); // 非法不通知
+  filmstripLayout.setCachedFilmstripRatio("fb", 2);
+  check(
+    "D146：宽高比缓存写入即通知、同值/非法不通知、读回真值（单元卸载不丢）",
+    notified === 2 &&
+      filmstripLayout.getCachedFilmstripRatio("fa") === 1.5 &&
+      filmstripLayout.getCachedFilmstripRatio("fb") === 2 &&
+      filmstripLayout.getCachedFilmstripRatio("missing") === undefined,
+    `通知=${notified}`,
+  );
+  unsubscribe();
+  filmstripLayout.setCachedFilmstripRatio("fc", 3);
+  check("D146：退订后不再收到通知（订阅表不泄漏）", notified === 2, `通知=${notified}`);
+  filmstripLayout.clearFilmstripRatioCache();
+}
+
+// ---- 渲染侧接线与盒模型对账 ----
+check(
+  "D146：胶片栏消费有界窗口 + 绝对定位轨道，旧的只追加窗口与逐格观察器已删除",
+  /filmstripWindow\(files\.length, scroll, viewport, size, ratioAt, deltaBefore\)/.test(filmstripSrc) &&
+    /className="iv-film-track"/.test(filmstripSrc) &&
+    /window_\.totalExtent/.test(filmstripSrc) &&
+    /window_\.startOffset/.test(filmstripSrc) &&
+    // 反向：不得复活"只追加不回收"（setEnd）与 IntersectionObserver 闸门。
+    !/setEnd\(/.test(stripComments(filmstripSrc)) &&
+    !/IntersectionObserver/.test(stripComments(filmstripSrc)) &&
+    !/scrollIntoView/.test(stripComments(filmstripSrc)),
+);
+check(
+  "D146：滚动与宽高比通知都按帧合并（rAF），居行走纯几何且不惊动祖先",
+  /requestAnimationFrame/.test(filmstripSrc) &&
+    /subscribeFilmstripRatios\(/.test(filmstripSrc) &&
+    // 增量更新必须真的在跑（注释掉 = 索引与缓存漂移，断言剥注释后仍须命中）。
+    /deltaRef\.current\.update\(fileId\)/.test(stripComments(filmstripSrc)) &&
+    /filmstripCenterScroll\(index, viewport, size, ratioAt, deltaBefore\)/.test(filmstripSrc) &&
+    /container\.scrollTop = Math\.max\(0, target\)/.test(filmstripSrc) &&
+    /container\.scrollLeft = Math.max\(0, target\)/.test(filmstripSrc),
+);
+check(
+  "D146：几何模块是无框架依赖的纯逻辑（无 React / Tauri / DOM 读取）",
+  !/from "react"/.test(filmstripLayoutSrc) &&
+    !/@tauri-apps/.test(filmstripLayoutSrc) &&
+    !/document\./.test(stripComments(filmstripLayoutSrc)) &&
+    !/querySelector/.test(stripComments(filmstripLayoutSrc)),
+);
+{
+  // 盒模型常量 ↔ 样式表逐项对账（改 CSS 不改常量 = 单元错位/重叠，0018 P1-A
+  // 第 6 轮瀑布流盒模型踩过的同款坑）。
+  const filmBlock = /\.iv-film \{([\s\S]*?)\}/.exec(stylesSource)?.[1] ?? "";
+  const cellBlock = /\.iv-film-cell \{([\s\S]*?)\}/.exec(stylesSource)?.[1] ?? "";
+  const px = (block, prop) => {
+    const m = new RegExp(`${prop}:\\s*(\\d+)px`).exec(block);
+    return m ? Number(m[1]) : null;
+  };
+  const padding = px(filmBlock, "padding");
+  const border = px(filmBlock, "border");
+  const cellPadding = px(cellBlock, "padding");
+  const cellBorder = px(cellBlock, "border");
+  check(
+    "D146：胶片栏盒模型常量与样式表一致（容器 padding/border、单元盒开销），轨道/单元定位齐全",
+    padding === filmstripLayout.FILMSTRIP_PADDING &&
+      border === filmstripLayout.FILMSTRIP_BORDER &&
+      cellPadding !== null &&
+      cellBorder !== null &&
+      cellPadding * 2 + cellBorder * 2 === filmstripLayout.FILMSTRIP_CELL_CHROME &&
+      /\.iv-film-track \{\s*position: relative;/.test(stylesSource) &&
+      /position: absolute;/.test(cellBlock) &&
+      /box-sizing: border-box;/.test(cellBlock),
+    `padding=${padding} border=${border} chrome=${cellPadding}*2+${cellBorder}*2`,
+  );
+}
+{
+  // 信息栏如实提示：loading（后台翻页中）与 truncated（防御性停手）两个状态都接线，三语齐备。
+  const zhCN = readFileSync(join(ROOT, "apps/desktop/src/app_ui/i18n/zh-CN.ts"), "utf8");
+  const zhTW = readFileSync(join(ROOT, "apps/desktop/src/app_ui/i18n/zh-TW.ts"), "utf8");
+  const en = readFileSync(join(ROOT, "apps/desktop/src/app_ui/i18n/en.ts"), "utf8");
+  check(
+    "D146：信息栏的 loading/truncated 提示三语齐备且面板真的接线（不假装是全部）",
+    [zhCN, zhTW, en].every(
+      (dict) =>
+        dict.includes('"imageviewer.info.loading"') && dict.includes('"imageviewer.info.truncated"'),
+    ) &&
+    /loading=\{sequence\.loading\}/.test(imageViewerPanelSrc) &&
+    /truncated=\{sequence\.truncated\}/.test(imageViewerPanelSrc) &&
+    /\{loading && ` \$\{t\("imageviewer\.info\.loading"\)\}`\}/.test(viewerInfoBarSrc) &&
+    /\{truncated && ` \$\{t\("imageviewer\.info\.truncated"\)\}`\}/.test(viewerInfoBarSrc),
+  );
+}
 
 // ==================== 图像查看器：相邻图像预加载 ====================
 //

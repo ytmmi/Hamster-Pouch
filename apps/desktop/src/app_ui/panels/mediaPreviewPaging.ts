@@ -72,26 +72,41 @@ export interface DrainPagesOptions<T extends MediaPreviewPageItem> {
   isCancelled?: () => boolean;
 }
 
+/** `drainPages` 的返回体：数组本体 + 完成标志（`complete` 不可枚举，见下）。 */
+export type DrainedItems<T extends MediaPreviewPageItem> = T[] & {
+  /**
+   * `true` = 按游标翻到 `nextCursor === null`（整个来源取完）。
+   * `false` = 中途停下：取消 / 游标不前进 / 页数触顶。消费方据此**如实标注**
+   * "序列还不完整"（缺陷 0018 的口径：不假装是全部），而不是靠猜。
+   */
+  readonly complete: boolean;
+};
+
 /**
  * 把一个来源**按游标翻到末页**，返回全部条目（已按 `id` 去重）。
  *
  * 行为约定（`pnpm check:panels` 按此断言）：
  * - 第一页的 `cursor` 是 `null`，之后一律用上一页的 `nextCursor` 续页；
- * - `nextCursor === null` 即末页，停止；
+ * - `nextCursor === null` 即末页，停止，且 `result.complete` 置真
+ *   （取消 / 游标不前进 / 页数触顶都为假——序列不完整必须可判）；
  * - **游标必须严格前进**：同一个游标再次出现（后端写坏）即停，不无限翻；
  * - 页数触顶 [`MEDIA_PREVIEW_MAX_PAGES`] 即停（返回已取到的部分，不抛错）；
  * - `isCancelled()` 在**每页前后**各判一次：翻页途中取消不会再多发一次请求，
  *   也不会把已取消的一页交给界面。
+ *
+ * 返回**数组本体**（媒体预览按数组消费）；完成标志挂在数组的不可枚举属性上
+ * （`result.complete`）——数组的展开 / 序列化 / 逐项行为与旧签名完全一致。
  */
 export async function drainPages<T extends MediaPreviewPageItem>(
   fetchPage: MediaPreviewPageFetcher<T>,
   options: DrainPagesOptions<T> = {},
-): Promise<T[]> {
+): Promise<DrainedItems<T>> {
   const { onPage, isCancelled } = options;
   const accumulated: T[] = [];
   const seenIds = new Set<string>();
   const seenCursors = new Set<string>();
   let cursor: string | null = null;
+  let complete = false;
 
   for (let pageIndex = 0; pageIndex < MEDIA_PREVIEW_MAX_PAGES; pageIndex++) {
     if (isCancelled?.()) break;
@@ -111,12 +126,16 @@ export async function drainPages<T extends MediaPreviewPageItem>(
     if (isCancelled?.()) break;
 
     const next = page.nextCursor;
-    if (!next) break;
+    if (!next) {
+      complete = true;
+      break;
+    }
     // 游标必须严格前进：重复游标 = 后端异常，立即停手（否则是死循环）。
     if (seenCursors.has(next)) break;
     seenCursors.add(next);
     cursor = next;
   }
 
-  return accumulated;
+  Object.defineProperty(accumulated, "complete", { value: complete });
+  return accumulated as DrainedItems<T>;
 }

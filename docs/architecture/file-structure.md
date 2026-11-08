@@ -266,10 +266,14 @@ apps/desktop/src/app_ui/
                       #   来的那几项画成灰黑色；「不可取消」那套口径已整体作废
     imageviewer/      # 图像查看器（多文件功能域：主面板 / 舞台 / 导航器 / 胶片栏 / 信息栏
                       #   + 纯逻辑模块 viewerZoom·viewerPlacement·viewerFormat·viewerKeymap·viewerPreload
+                      #   + viewerFilmstripLayout（胶片栏窗口/定位纯几何 + 宽高比共享缓存 +
+                      #   Fenwick 前缀索引 FilmstripDeltaIndex；5 万项窗口重算 0.012 ms/帧，D146）
                       #   + DOM 工具 viewerDecode（换图前离屏解码：解码完成才原子替换 url+尺寸，缺陷 0028）
                       #   + 面板设置 useViewerSettings 与浏览序列 useViewerSequence
                       #   （序列按媒体预览的**有效排序**排列：同一批设置键 + core/mediaSortStore
-                      #   会话覆盖 + 同一个 sortFiles 纯函数；改排序只重排不重取，D144 / 缺陷 0039）
+                      #   会话覆盖 + 同一个 sortFiles 纯函数；改排序只重排不重取，D144 / 缺陷 0039；
+                      #   **无条目上限**：复用媒体预览 drainPages 后台翻完整个来源，首屏即出图、
+                      #   进度只落地一次、世代号取消；truncated 只标防御性停手，D146 / 缺陷 0018 P1-B）
                       #   + 相邻图像预加载 useViewerPreload）
                       #   设置热加载走四条独立触发源：本地广播 / setting.changed / 窗口焦点 / 面板激活
                       #   键盘：按键映射与「取焦点判据」都在 viewerKeymap（左=上一张、右=下一张，

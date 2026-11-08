@@ -5354,8 +5354,9 @@ button.danger {
 /* ---- 胶片栏 ---- */
 
 .iv-film {
-  display: flex;
-  gap: 4px;
+  /* 轨道承载绝对定位的单元（D146 窗口化）；padding/border 的数值由
+     viewerFilmstripLayout.ts 的同名常量镜像（门禁逐项对账），单元间距
+     由几何公式的偏移承担（FILMSTRIP_GAP），不再用 flex gap。 */
   padding: 4px;
   overflow: auto;
   background: var(--bg-2, var(--bg));
@@ -5364,10 +5365,14 @@ button.danger {
   scrollbar-width: thin;
 }
 
+/* 内容轨道：主轴长度 = 面板按占位几何算出的总长（估计值，随解码收敛）。 */
+.iv-film-track {
+  position: relative;
+}
+
 /* 左右边：纵向滚动，固定宽度。 */
 .iv-film-left,
 .iv-film-right {
-  flex-direction: column;
   width: 76px;
   flex: 0 0 auto;
 }
@@ -5383,7 +5388,6 @@ button.danger {
 
 /* 上下边：横向滚动，固定高度。 */
 .iv-film-horizontal {
-  flex-direction: row;
   height: 76px;
   flex: 0 0 auto;
 }
@@ -5398,15 +5402,18 @@ button.danger {
 }
 
 /**
- * 胶片单元：**主尺寸由 `aspect-ratio` 决定、交叉轴交给 flex stretch**。
+ * 胶片单元：**绝对定位在轨道上，两轴尺寸与偏移都由面板纯几何下发**（D146）。
  *
- * - 主尺寸不再写死像素：自适应模式由单元内联的 `aspect-ratio`（图像真实宽高比）决定，
- *   平铺模式固定 `1`（方形）。两个方向都写死会让"宽高两用"的厚度设置失效；
- * - 交叉轴（左右栏是宽、上下栏是高）由 flex 的 `align-items: stretch` 撑满，
- *   因此胶片栏厚度设置直接决定缩略图的另一条边。
+ * - 主轴外尺寸（纵向栏是高、横向栏是宽）与偏移由内联样式给出：
+ *   `viewerFilmstripLayout.ts` 按"厚度 − 容器盒开销 → 内容边长 × 宽高比 + 单元盒开销"
+ *   算出；交叉轴撑满容器内容区。未解码按 1:1 占位，解码后从共享缓存取真值
+ *   （经订阅通知父级重算后下发新尺寸，单元自身不存第二份宽高比）。
+ * - 内边距 2 + 边框 1 = 单元盒开销 6px，与 `FILMSTRIP_CELL_CHROME` 同值
+ *   （门禁对样式表逐项对账；改这里必须改常量）。
  */
 .iv-film-cell {
-  flex: 0 0 auto;
+  position: absolute;
+  box-sizing: border-box;
   padding: 2px;
   border: 1px solid var(--border);
   border-radius: 4px;

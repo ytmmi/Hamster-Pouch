@@ -33,7 +33,9 @@ export interface ViewerInfoBarProps {
   total: number;
   /** 序列总体积（字节）。 */
   totalBytes: number;
-  /** 序列命中加载上限（信息栏如实标注，不假装是全部）。 */
+  /** 仍在后台翻页：计数/排序只代表已取到的部分，如实提示（D146）。 */
+  loading: boolean;
+  /** 防御性停手（游标不前进/页数触顶）：序列不完整，如实标注，不假装是全部。 */
   truncated: boolean;
   /** 原图尺寸；`null` = 尚未解码。 */
   natural: Size | null;
@@ -53,6 +55,7 @@ export function ViewerInfoBar({
   index,
   total,
   totalBytes,
+  loading,
   truncated,
   natural,
   zoom,
@@ -70,6 +73,7 @@ export function ViewerInfoBar({
           total,
           size: formatByteSize(totalBytes, sizeUnit),
         })}
+        {loading && ` ${t("imageviewer.info.loading")}`}
         {truncated && ` ${t("imageviewer.info.truncated")}`}
       </span>
       {file && (
