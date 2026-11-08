@@ -160,10 +160,11 @@ pub(crate) fn supervised_call(
 pub(crate) fn resolve_plugin_query(
     state: &AppState,
     owner: &PanelOwner,
+    repo_id: &str,
 ) -> HpResult<ExternalProcessQuery> {
     let guard = lock_global(state)?;
     let db = global(&guard)?;
-    hp_plugin_host::query_for_owner(db, owner)
+    hp_plugin_host::query_for_owner(db, owner, repo_id)
 }
 
 /// 取（或查询并缓存）面板 schema。
@@ -171,6 +172,7 @@ fn fetch_panel_schema(
     state: &AppState,
     owner: &PanelOwner,
     panel_id: &str,
+    repo_id: &str,
 ) -> HpResult<PanelSchemaItem> {
     let key = PanelSchemaKey::new(&owner.plugin_id, panel_id, &owner.plugin_version);
     {
@@ -204,7 +206,7 @@ fn fetch_panel_schema(
 
     // 三种运行形态共用同一请求名；本轮落地 `external-process` 与 `python`
     // （`python` 形态的入口是 `.py` 源码，由 Python 核心 system 插件拉起）。
-    let mut query = resolve_plugin_query(state, owner)?;
+    let mut query = resolve_plugin_query(state, owner, repo_id)?;
 
     // 查询期间**不持任何锁**：这里可能阻塞到超时（D61 默认 2s）。
     let plugin_id_for_run = owner.plugin_id.clone();
@@ -245,7 +247,7 @@ pub(crate) fn plugin_panel_schema(
     let outcome = (|| -> HpResult<PanelSchemaItem> {
         ensure_global(&state, &app)?;
         let owner = panel_owner_enabled(&state, &repo_id, &panel_id)?;
-        let result = fetch_panel_schema(&state, &owner, &panel_id);
+        let result = fetch_panel_schema(&state, &owner, &panel_id, &repo_id);
         if let Err(e) = &result {
             emit_plugin_error(&app, &repo_id, &owner.plugin_id, &e.to_string());
         }

@@ -244,26 +244,26 @@ fn real_tag_extension_is_catalogued_last_without_enable_state() {
         .expect("注册 tag 扩展包失败");
 
     let catalog = PluginHost
-        .panel_catalog(&db, "repo-1")
+        .plugin_catalog(&db, "repo-1")
         .expect("取扩展目录失败");
     assert_eq!(
         catalog.len(),
         2,
-        "带面板的 1 行 + 数据扩展 1 行: {catalog:#?}"
+        "带面板的 1 个插件 + 数据扩展 1 个插件（每插件一行）: {catalog:#?}"
     );
 
-    // 带面板的在前。
+    // 有启用语义的在前（control-demo 带面板）。
     assert_eq!(
         catalog[0].plugin_id,
         "dev.hamsterpouch.example.control_demo"
     );
-    assert!(catalog[0].panel.is_some(), "control-demo 应带面板");
+    assert!(!catalog[0].panels.is_empty(), "control-demo 应带面板");
     assert!(!catalog[0].stateless, "有代码的插件有启用语义");
 
     // 真实数据扩展在最后，且**没有启用语义**。
     assert_eq!(catalog[1].plugin_id, ext.id.as_str());
     assert!(
-        catalog[1].panel.is_none(),
+        catalog[1].panels.is_empty(),
         "纯数据扩展不贡献面板: {:#?}",
         catalog[1]
     );

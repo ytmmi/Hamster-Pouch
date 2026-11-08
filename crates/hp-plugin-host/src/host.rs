@@ -320,31 +320,45 @@ impl PluginHost {
         Ok(out)
     }
 
-    /// **已安装**插件的「扩展」目录（含**未启用**的），供界面把"还要启用"这件事显示出来。
+    /// **已安装插件目录**：每个插件**一行**（含**未启用**的），供「扩展」菜单把
+    /// "装了什么 / 还要不要启用 / 有没有面板可打开"三件事分开显示。
     ///
     /// 与 [`PluginHost::repo_contributions`] 的区别只有一条：**不按启用状态过滤**，
     /// 而是把 `enabled` 原样报出来。注册表仍只登记已启用的（那是安全口径），
     /// 本方法只服务"展示 + 就地启用"。
     ///
-    /// 为什么需要它：装完插件后面板菜单里**什么都不出现**，界面又没有任何提示，
-    /// 用户只能得出"装了没反应"的结论——`hello` / `control-demo` 都踩过这条。
+    /// 为什么是「插件目录」而不是「面板目录」：早期实现每个面板贡献点发一行、
+    /// 无面板的插件用 `panel = None` 哨兵硬塞，于是「有没有面板」被当成了
+    /// 「有没有启用语义」。随包安装的 `python-core`（`external-process`、
+    /// `contributions: []`）撞出了这个错配：它**没有面板**却**有启用语义**，
+    /// 被误排进底部的"纯数据扩展"组、贴了「安装即启用」且不给开关。
+    /// 现在每个插件一行、面板作为内嵌列表：**面板可为空，但空面板 ≠ 无状态**。
     ///
-    /// **没有面板贡献点的插件也占一行**（`panel = None`）：纯数据扩展包
-    /// （`static-data`，RFC 0008 D36.1）按定义声明 `contributions: []`，若只按面板过滤，
-    /// 用户装了 128–162MB 的词典扩展后「扩展」菜单里**同样"什么都不出现"**——
-    /// 与上面那条是同一个缺陷。这类包**没有启用语义**（装完即生效），
-    /// 故 `stateless = true`，界面**不得**给它启用/禁用开关（RFC 0008 D36.9）。
+    /// **有无启用语义只有一个判据**：`stateless = (runtime_kind == static-data)`。
+    /// 纯数据扩展包（RFC 0008 D36.1 / D36.9）装完即生效，界面**不得**给它开关；
+    /// 其余所有插件（含无面板的系统插件）都给开关。
     ///
-    /// **排序**：带面板的在前（按 plugin_id / panel id），**无面板的整组排在最后**
-    /// ——界面据此把"数据扩展"放在菜单底部，不必自己再排。
-    pub fn panel_catalog(&self, db: &GlobalDb, repo_id: &str) -> HpResult<Vec<PanelCatalogEntry>> {
-        let mut with_panel = Vec::new();
-        let mut without_panel = Vec::new();
+    /// **排序**：有启用语义的在前（按 plugin_id），`stateless` 的整组排在最后
+    /// ——界面据此把纯数据扩展放在菜单底部，不必自己再排。
+    pub fn plugin_catalog(
+        &self,
+        db: &GlobalDb,
+        repo_id: &str,
+    ) -> HpResult<Vec<PluginCatalogEntry>> {
+        let mut stateful = Vec::new();
+        let mut stateless_rows = Vec::new();
         for row in db.list_plugins()? {
-            let enabled = db
-                .get_plugin_repo_state(row.id.as_str(), repo_id)?
-                .map(|s| s.enabled)
-                .unwrap_or(false);
+            // Python 核心是宿主内部 provider：随包播种不写 plugin_repo_state 行，
+            // 无状态行按「默认启用」处理（python_core_enabled），否则扩展菜单的开关
+            // 会显示成「关」而运行时其实可用（0039）。其它插件维持安全口径：
+            // 无状态行 = 未启用。
+            let enabled = if row.id.as_str() == crate::python_core::PYTHON_CORE_PLUGIN_ID {
+                crate::python_core::python_core_enabled(db, repo_id)?
+            } else {
+                db.get_plugin_repo_state(row.id.as_str(), repo_id)?
+                    .map(|s| s.enabled)
+                    .unwrap_or(false)
+            };
             let Ok(manifest) = parse_manifest(&row.manifest_json) else {
                 continue;
             };
@@ -353,85 +367,80 @@ impl PluginHost {
                 continue;
             }
             let runtime_kind = row.runtime_kind.as_str().to_string();
-            // 纯数据包不执行代码、不声明能力与贡献点 → 没有可"启用"的东西
-            // （`plugin.installLocal` 里"装完即重装配"的注释也是这个口径）。
+            // 唯一归组判据：纯数据包不执行代码、装完即生效 → 无启用语义。
+            // 其它运行时形态一律**有启用语义**，哪怕 contributions 为空（如 python-core）。
             let stateless = row.runtime_kind == RuntimeKind::StaticData;
-            let panels: Vec<PanelDecl> = manifest
+            // 面板只是"能不能打开"，与"能不能启用"彻底解耦：空列表是合法的。
+            let panels: Vec<PluginCatalogPanel> = manifest
                 .contributions
                 .iter()
                 .filter(|c| c.kind == ContributionKind::Panel)
-                .map(|c| c.panel_decl(Some(manifest.id.as_str())))
+                .map(|c| {
+                    let decl = c.panel_decl(Some(manifest.id.as_str()));
+                    PluginCatalogPanel {
+                        id: decl.id,
+                        title_key: decl.title_key.unwrap_or_default(),
+                    }
+                })
                 .collect();
-            if panels.is_empty() {
-                without_panel.push(PanelCatalogEntry {
-                    plugin_id: manifest.id.as_str().to_string(),
-                    plugin_name: manifest.name.clone(),
-                    trust_level: row.trust_level.as_str().to_string(),
-                    runtime_kind,
-                    panel: None,
-                    enabled,
-                    stateless,
-                });
-                continue;
-            }
-            for panel in panels {
-                with_panel.push(PanelCatalogEntry {
-                    plugin_id: manifest.id.as_str().to_string(),
-                    plugin_name: manifest.name.clone(),
-                    trust_level: row.trust_level.as_str().to_string(),
-                    runtime_kind: runtime_kind.clone(),
-                    panel: Some(PanelCatalogPanel {
-                        id: panel.id.clone(),
-                        title_key: panel.title_key.clone().unwrap_or_default(),
-                    }),
-                    enabled,
-                    stateless,
-                });
+            // 启用开关按插件**声明的能力**发起（host.rs:81 要求 requested ⊆ 声明能力）：
+            // python-core 只声明 native.code，硬编码 repo.read 会被拒。
+            let capabilities = manifest
+                .capabilities
+                .iter()
+                .map(|c| c.as_str().to_string())
+                .collect();
+            let entry = PluginCatalogEntry {
+                plugin_id: manifest.id.as_str().to_string(),
+                plugin_name: manifest.name.clone(),
+                trust_level: row.trust_level.as_str().to_string(),
+                runtime_kind,
+                enabled,
+                stateless,
+                capabilities,
+                panels,
+            };
+            if stateless {
+                stateless_rows.push(entry);
+            } else {
+                stateful.push(entry);
             }
         }
-        with_panel.sort_by(|a, b| {
-            (
-                a.plugin_id.as_str(),
-                a.panel.as_ref().map(|p| p.id.as_str()),
-            )
-                .cmp(&(
-                    b.plugin_id.as_str(),
-                    b.panel.as_ref().map(|p| p.id.as_str()),
-                ))
-        });
-        without_panel.sort_by(|a, b| a.plugin_id.as_str().cmp(b.plugin_id.as_str()));
-        // 带面板的在前，**无面板的数据扩展整组在最后**。
-        with_panel.extend(without_panel);
-        Ok(with_panel)
+        stateful.sort_by(|a, b| a.plugin_id.as_str().cmp(b.plugin_id.as_str()));
+        stateless_rows.sort_by(|a, b| a.plugin_id.as_str().cmp(b.plugin_id.as_str()));
+        // 有启用语义的插件在前，**无启用语义的纯数据扩展整组在最后**。
+        stateful.extend(stateless_rows);
+        Ok(stateful)
     }
 }
 
-/// 「扩展」目录项（[`PluginHost::panel_catalog`] 的元素）。
+/// 已安装插件目录项（[`PluginHost::plugin_catalog`] 的元素）：**一个插件一行**。
 ///
-/// 一个插件可能产出**多行**：每个 `panel` 贡献点一行。**没有面板贡献点的插件也占一行**
-/// （`panel = None`）——纯数据扩展包（RFC 0008 D36.1）就是这样，
-/// 它在「扩展」菜单里必须可见，否则用户只能得出"装了没反应"。
+/// 面板是内嵌列表而非"一行一个面板"；`panels` 为空只表示"没有可打开的面板"，
+/// **不表示无启用语义**——`stateless` 才是唯一判据。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PanelCatalogEntry {
+pub struct PluginCatalogEntry {
     pub plugin_id: String,
-    /// 插件显示名（`manifest.name`），用于"这个面板来自哪个插件"。
+    /// 插件显示名（`manifest.name`）。
     pub plugin_name: String,
     /// 信任等级（诊断与界面提示用）。
     pub trust_level: String,
     /// 运行时形态（`static-data` / `external-process` / …），界面用作类型标记。
     pub runtime_kind: String,
-    /// 面板声明；**`None` = 该插件不贡献面板**（数据扩展），界面不提供"打开"。
-    pub panel: Option<PanelCatalogPanel>,
     /// **该仓库**是否已启用（未启用 → 界面灰显 + 提供启用开关）。
     pub enabled: bool,
     /// **无启用语义**：纯数据包（`static-data`）装完即生效，宿主不据启用状态做任何事，
     /// 界面因此**不得**给它启用/禁用开关（RFC 0008 D36.9）。
     pub stateless: bool,
+    /// manifest 声明的能力；界面据此发起启用（禁止硬编码 `repo.read`）。
+    pub capabilities: Vec<String>,
+    /// 该插件贡献的面板（可为空）；界面据此给"打开"按钮，与启用开关无关。
+    pub panels: Vec<PluginCatalogPanel>,
 }
 
-/// 「扩展」目录项里的面板声明（[`PanelCatalogEntry::panel`]）。
+/// 已安装插件目录项里的面板声明（[`PluginCatalogEntry::panels`] 的元素）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PanelCatalogPanel {
+pub struct PluginCatalogPanel {
     pub id: String,
     /// 面板标题的 i18n 键（插件语言资源通道未落地时界面会原样显示键名）。
     pub title_key: String,

@@ -102,7 +102,7 @@ pub(crate) fn plugin_control_event(
                 owner.plugin_id
             )));
         }
-        let mut query = resolve_plugin_query(&state, &owner)?;
+        let mut query = resolve_plugin_query(&state, &owner, &repo_id)?;
 
         // 交付期间**不持任何锁**：这里可能阻塞到超时（D61 默认 2s）。
         let pid_sup = owner.plugin_id.clone();

@@ -17,13 +17,15 @@ pub use channel::{
     control_event_method, hidden_command,
 };
 pub use host::{
-    LoadOutcome, PanelCatalogEntry, PanelCatalogPanel, PanelOwner, PluginHost, RepoContribution,
+    LoadOutcome, PanelOwner, PluginCatalogEntry, PluginCatalogPanel, PluginHost, RepoContribution,
     SettingsSectionDecl,
 };
 pub use install::{InstallSource, InstalledPackage, PluginInstaller};
 pub use manifest::{MANIFEST_FILE, PluginPackage, discover_packages, parse_manifest, read_package};
 pub use python_core::{
-    PYTHON_CORE_PLUGIN_ID, PYTHON_RUN_FLAG, find_python_core_launcher, query_for_owner,
+    PYTHON_CORE_PLUGIN_ID, PYTHON_RUN_FLAG, PYTHON_SELFTEST_FLAG, PythonCoreStatus,
+    SELFTEST_TIMEOUT_SECS, find_python_core_launcher, python_core_enabled, python_core_selftest,
+    python_core_status, query_for_owner,
 };
 pub use supervision::{
     MAX_CONSECUTIVE_FAILURES, ProcessSupervisor, SupervisionRegistry, SupervisionStatus,

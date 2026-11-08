@@ -83,6 +83,7 @@ fn fetch_panel_data(
     panel_id: &str,
     selected_file_id: Option<&str>,
     binds: &[PanelDataBind],
+    repo_id: &str,
 ) -> HpResult<PanelDataItem> {
     for b in binds {
         if b.kind != "panel" && b.kind != "selection" {
@@ -123,7 +124,7 @@ fn fetch_panel_data(
 
     // 三种运行形态共用同一请求名；本轮落地 `external-process` 与 `python`
     // （与 schema 通道同口径）。
-    let mut query = resolve_plugin_query(state, owner)?;
+    let mut query = resolve_plugin_query(state, owner, repo_id)?;
 
     let specs: Vec<PanelQuerySpec> = binds
         .iter()
@@ -179,6 +180,7 @@ pub(crate) fn plugin_panel_data(
             &panel_id,
             selected_file_id.as_deref(),
             &binds,
+            &repo_id,
         );
         if let Err(e) = &result {
             emit_plugin_error(&app, &repo_id, &owner.plugin_id, &e.to_string());
@@ -192,6 +194,8 @@ pub(crate) fn plugin_panel_data(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    const REPO: &str = "repo-test";
 
     /// 造一个只用于**宿主侧校验**的 owner（不起进程：入口刻意指向不存在的路径）。
     fn owner_with_queries(queries: &[&str]) -> PanelOwner {
@@ -243,15 +247,22 @@ mod tests {
     }
 
     /// 测试用的空 AppState（监督为空不干预，插件未注册监督器时跳过检查）。
+    ///
+    /// 持一个真实的内存全局库：`fetch_panel_data` → `resolve_plugin_query` 会先
+    /// `global()` 取库，若留 `None` 就只会得到「全局库未初始化」，永远走不到
+    /// 入口存在性校验（见 `undeclared_bind_name_is_a_hard_error` 的第二段断言）。
     fn test_state() -> AppState {
         use crate::tasks::TaskRegistry;
         use hp_ai::AiTaggingService;
         use hp_media::ThumbnailCache;
         use hp_plugin_host::SupervisionRegistry;
         use hp_scanner::Scanner;
+        use hp_store::GlobalDb;
         use std::sync::{Arc, Mutex};
         AppState {
-            global_db: Arc::new(Mutex::new(None)),
+            global_db: Arc::new(Mutex::new(Some(
+                GlobalDb::open(":memory:").expect("测试用内存全局库"),
+            ))),
             open_repo: Arc::new(Mutex::new(None)),
             current_repo_id: Arc::new(Mutex::new(None)),
             current_repo_path: Arc::new(Mutex::new(None)),
@@ -280,7 +291,7 @@ mod tests {
     fn undeclared_bind_name_is_a_hard_error() {
         let owner = owner_with_queries(&["colors"]);
         let s = test_state();
-        let err = fetch_panel_data(&s, &owner, "p.panel", None, &[bind("panel", "ghost")])
+        let err = fetch_panel_data(&s, &owner, "p.panel", None, &[bind("panel", "ghost")], REPO)
             .expect_err("未声明的查询名应失败");
         assert!(
             matches!(err, HpError::InvalidArgument(_)),
@@ -289,8 +300,15 @@ mod tests {
         assert!(err.to_string().contains("ghost"), "应指出是哪个名字: {err}");
 
         // 声明过的名字通过校验，随后才因**入口不存在**失败（证明失败点在校验之后）。
-        let err = fetch_panel_data(&s, &owner, "p.panel", None, &[bind("panel", "colors")])
-            .expect_err("入口不存在应失败");
+        let err = fetch_panel_data(
+            &s,
+            &owner,
+            "p.panel",
+            None,
+            &[bind("panel", "colors")],
+            REPO,
+        )
+        .expect_err("入口不存在应失败");
         assert!(
             err.to_string().contains("入口不存在"),
             "应是入口问题: {err}"
@@ -302,7 +320,7 @@ mod tests {
     fn bind_kind_is_a_closed_set() {
         let owner = owner_with_queries(&["colors"]);
         let s = test_state();
-        let err = fetch_panel_data(&s, &owner, "p.panel", None, &[bind("repo", "colors")])
+        let err = fetch_panel_data(&s, &owner, "p.panel", None, &[bind("repo", "colors")], REPO)
             .expect_err("repo 类第一版不应开放");
         assert!(matches!(err, HpError::InvalidArgument(_)));
         assert!(
@@ -316,7 +334,7 @@ mod tests {
     fn empty_binds_never_spawn_a_process() {
         let owner = owner_with_queries(&["colors"]);
         let s = test_state();
-        let item = fetch_panel_data(&s, &owner, "p.panel", None, &[])
+        let item = fetch_panel_data(&s, &owner, "p.panel", None, &[], REPO)
             .expect("无 bind 不该因为入口缺失而失败——它根本不该起进程");
         assert!(item.results.is_empty());
         assert!(item.missing.is_empty());

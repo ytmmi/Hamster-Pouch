@@ -709,7 +709,9 @@ mod tests {
         let found =
             find_upwards_dir("plugins/system").expect("应从祖先目录找到仓库内的 plugins/system");
         assert!(found.is_dir());
-        assert!(found.join("palette").join("plugin.manifest").is_file());
+        // f7457a2 起随包系统插件换代为 python-core；palette 已删除，
+        // 断言改为当前唯一随包系统插件的清单（git ls-files 可查，新克隆也在）。
+        assert!(found.join("python-core").join("plugin.manifest").is_file());
         let normalized = found.to_string_lossy().replace('\\', "/");
         assert!(
             normalized.ends_with("plugins/system"),

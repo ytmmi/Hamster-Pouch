@@ -210,6 +210,20 @@ pub(crate) fn list() -> Vec<ToolSpec> {
             schema: object(json!({}), &[]),
         },
         ToolSpec {
+            name: "python_runtime_status",
+            title: "Python 运行时状态",
+            description: "查询随包 Python 核心 system 插件的安装、该仓库有效启用状态与启动器路径（纯读，不拉起进程）。",
+            write: false,
+            schema: object(json!({}), &[]),
+        },
+        ToolSpec {
+            name: "python_runtime_selftest",
+            title: "Python 运行时自检",
+            description: "真正拉起 python-core.exe --selftest，回报解释器版本；运行时停用时拒绝拉起（用于验证开关确实生效）。",
+            write: false,
+            schema: object(json!({}), &[]),
+        },
+        ToolSpec {
             name: "file_rename",
             title: "重命名文件",
             description: "把文件在其所在目录内改名，并同步更新索引。会真的改磁盘上的文件名。",
@@ -338,6 +352,20 @@ pub(crate) fn list() -> Vec<ToolSpec> {
                 }),
                 &["albumId", "fileIds"],
             ),
+        },
+        ToolSpec {
+            name: "python_runtime_enable",
+            title: "启用 Python 运行时",
+            description: "启用随包 Python 核心 system 插件（写 plugin_repo_state），之后 python 形态插件与自检才能拉起解释器。",
+            write: true,
+            schema: object(json!({}), &[]),
+        },
+        ToolSpec {
+            name: "python_runtime_disable",
+            title: "停用 Python 运行时",
+            description: "停用随包 Python 核心 system 插件（写 plugin_repo_state），之后所有 python 形态插件与自检都会被闸门拒绝。",
+            write: true,
+            schema: object(json!({}), &[]),
         },
     ]
 }
@@ -622,6 +650,40 @@ pub(crate) fn call(
             state,
         ))
         .and_then(to_json),
+        "python_runtime_status" => flatten(
+            crate::commands::python_runtime::plugin_python_runtime_status(
+                repo_id,
+                app.state::<AppState>(),
+                app.clone(),
+            ),
+        )
+        .and_then(to_json),
+        "python_runtime_selftest" => flatten(
+            crate::commands::python_runtime::plugin_python_runtime_selftest(
+                repo_id,
+                app.state::<AppState>(),
+                app.clone(),
+            ),
+        )
+        .and_then(to_json),
+        // 启停复用既有的 plugin.enable / plugin.disable：与「扩展」菜单写同一张
+        // plugin_repo_state 表。grants 传空——python-core 只声明 native.code，
+        // 空请求不会触发能力子集 / 信任校验（host.rs:81-94）。
+        "python_runtime_enable" => flatten(crate::commands::plugin_lifecycle::plugin_enable(
+            repo_id,
+            hp_plugin_host::PYTHON_CORE_PLUGIN_ID.to_string(),
+            vec![],
+            app.state::<AppState>(),
+            app.clone(),
+        ))
+        .and_then(to_json),
+        "python_runtime_disable" => flatten(crate::commands::plugin_lifecycle::plugin_disable(
+            repo_id,
+            hp_plugin_host::PYTHON_CORE_PLUGIN_ID.to_string(),
+            app.state::<AppState>(),
+            app.clone(),
+        ))
+        .and_then(to_json),
         other => {
             return Err(RpcError::new(
                 INTERNAL_ERROR,
@@ -785,6 +847,8 @@ mod tests {
             "rating_set",
             "album_add_members",
             "album_remove_members",
+            "python_runtime_enable",
+            "python_runtime_disable",
         ] {
             assert!(
                 write_names.contains(&expected),
@@ -799,6 +863,23 @@ mod tests {
                 spec.name
             );
         }
+    }
+
+    /// Python 运行时的四个工具（issues/0040）：状态 / 自检只读，启用 / 停用是写操作。
+    /// 这条断言钉住 MCP 工具表确实暴露了 py 运行时，且写边界没标错。
+    #[test]
+    fn python_runtime_tools_are_registered_with_correct_write_flags() {
+        let specs = list();
+        let find = |name: &str| {
+            specs
+                .iter()
+                .find(|spec| spec.name == name)
+                .unwrap_or_else(|| panic!("MCP 工具表缺少 {name}"))
+        };
+        assert!(!find("python_runtime_status").write);
+        assert!(!find("python_runtime_selftest").write);
+        assert!(find("python_runtime_enable").write);
+        assert!(find("python_runtime_disable").write);
     }
 
     /// `repo_current` 必须是无参工具（模型第一步就要调它，不该先问参数）。

@@ -119,51 +119,92 @@ export function pluginContributions(repoId: string): Promise<PluginContributions
   return invoke<ApiResponse<PluginContributions>>("plugin_contributions", { repoId }).then(unwrapApi);
 }
 
-/** 「扩展」菜单一行的面板声明（`panel` 字段）。 */
-export interface PluginPanelCatalogPanel {
+/** 「扩展」菜单里插件贡献的一个面板声明。 */
+export interface PluginCatalogPanel {
   id: string;
   /** 面板标题的 i18n 键（插件语言资源未落地时界面会原样显示键名）。 */
   titleKey: string;
 }
 
 /**
- * 「扩展」菜单的一行：**已安装**插件贡献的面板**或**纯数据扩展（均含未启用）。
+ * 「扩展」菜单的一行：**一个已安装插件**（含未启用）。
  *
- * 两种行由 `panel` 区分：
- * - `panel !== null` —— 面板行，界面可"打开"并给启用开关；
- * - `panel === null` —— 该插件**不贡献面板**（纯数据扩展包，RFC 0008 D36.1），
- *   界面只列出来、**不提供打开**；且 `stateless === true`，**也不得有启用开关**
- *   （数据扩展无状态、装完即生效，D36.9）。
+ * 这是「插件目录」而不是「面板目录」：一个插件只一行，面板作为 `panels` 内嵌列表。
+ * **面板可为空，但空面板 ≠ 无启用语义**——随包系统插件 `python-core` 不贡献任何面板，
+ * 仍属有启用语义的插件。归组只看 `stateless`：
+ * - `stateless === false` → 界面给启用开关（按 `capabilities` 发起，禁止硬编码）；
+ *   `panels` 里每一项另给"打开"按钮；
+ * - `stateless === true` → 纯数据扩展包（RFC 0008 D36.1，装完即生效，D36.9），
+ *   界面**只列出来、不给开关**。
  */
-export interface PluginPanelCatalogItem {
+export interface PluginCatalogItem {
   pluginId: string;
   /** 插件显示名（`manifest.name`）。 */
   pluginName: string;
   trustLevel: string;
   /** 运行时形态（`static-data` / `external-process` / …），界面用作类型标记。 */
   runtimeKind: string;
-  /** 面板声明；`null` = 该插件不贡献面板（纯数据扩展）。 */
-  panel: PluginPanelCatalogPanel | null;
   /** **该仓库**是否已启用；`stateless` 的行上该字段无意义。 */
   enabled: boolean;
   /** 无启用语义（纯数据包装完即生效）→ 界面**不得**画启用/禁用开关。 */
   stateless: boolean;
+  /** manifest 声明的能力；启用时按此发起（宿主要求 ⊆ 声明能力）。 */
+  capabilities: string[];
+  /** 该插件贡献的面板（可为空）；界面据此给"打开"按钮，与启用开关无关。 */
+  panels: PluginCatalogPanel[];
 }
 
 /**
- * 「扩展」菜单的目录（**含未启用**的插件面板与纯数据扩展）。
+ * 「扩展」菜单的**已安装插件目录**（含未启用的）。
  *
  * 与 [`pluginContributions`] 是**两条不同口径**，不要合并：那个只报已启用的（注册表用，
  * 启用即授权能力，属安全口径）；本命令报全部已安装的并附带 `enabled`，
  * 让"装了但没启用"在界面上可见——此前装完插件后面板菜单里毫无迹象。
  *
- * **后端已排好序**：带面板的在前，无面板的数据扩展整组在最后。界面直接按序渲染即可
- * （把数据扩展放在菜单底部是用户要求）。
+ * **后端已排好序**：有启用语义的插件在前，纯数据扩展整组在最后。界面直接按序渲染即可
+ * （把数据扩展放在菜单底部是用户要求）。`repoId` 为空时仍可调用（后端按空仓库处理，
+ * 目录照常返回，只是所有 `enabled` 均为 false）。
  */
-export function pluginPanelCatalog(repoId: string): Promise<PluginPanelCatalogItem[]> {
-  return invoke<ApiResponse<PluginPanelCatalogItem[]>>("plugin_panel_catalog", { repoId }).then(
+export function pluginCatalog(repoId: string): Promise<PluginCatalogItem[]> {
+  return invoke<ApiResponse<PluginCatalogItem[]>>("plugin_catalog", { repoId }).then(unwrapApi);
+}
+
+/**
+ * `plugin.pythonRuntimeStatus`（issues/0040）：随包 Python 核心 system 插件的
+ * 安装 / 有效启用 / 启动器状态（纯读，不拉起解释器）。
+ */
+export interface PythonRuntimeStatusItem {
+  pluginId: string;
+  installed: boolean;
+  version: string;
+  trustLevel: string;
+  runtimeKind: string;
+  /** 该仓库有效启用：无状态行按默认启用算，仅显式停用为 false。 */
+  enabled: boolean;
+  launcher: string;
+  launcherExists: boolean;
+}
+
+export function pluginPythonRuntimeStatus(repoId: string): Promise<PythonRuntimeStatusItem> {
+  return invoke<ApiResponse<PythonRuntimeStatusItem>>("plugin_python_runtime_status", { repoId }).then(
     unwrapApi,
   );
+}
+
+/**
+ * `plugin.pythonRuntimeSelftest`（issues/0040）：真正拉起 `python-core.exe --selftest`。
+ * 运行时停用时后端以 `permission` 拒绝（不拉起解释器）。
+ */
+export interface PythonRuntimeSelftestItem {
+  enabled: boolean;
+  output: string;
+}
+
+export function pluginPythonRuntimeSelftest(repoId: string): Promise<PythonRuntimeSelftestItem> {
+  return invoke<ApiResponse<PythonRuntimeSelftestItem>>(
+    "plugin_python_runtime_selftest",
+    { repoId },
+  ).then(unwrapApi);
 }
 
 /** `plugin.panelSchema` 的返回项（D76 已包装）。 */

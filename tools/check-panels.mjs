@@ -4046,11 +4046,15 @@ check(
   /x\s*-\s*width/.test(contextMenuSrc) && /y\s*-\s*contentHeight/.test(contextMenuSrc),
 );
 
-// ==================== 「扩展」菜单：装了但没启用必须可见（2026-09 缺陷修复的守护）====================
+// ==================== 「扩展」菜单：已安装插件目录（装了但没启用必须可见）====================
 //
 // 防的是：装完插件后「扩展」菜单里**什么都不出现**、界面也无任何提示，
 // 用户只能得出"装了没反应"的结论（`hello` / `control-demo` 都踩过）。
-// 根因是 `plugin.panelCatalog` 这条"含未启用"的口径此前根本不存在——菜单是个占位。
+// 更深的缺陷（issues/0038）：早期目录是「面板目录」——一行一个面板贡献点，
+// 无面板的插件用 `panel = null` 哨兵硬塞，「有没有面板」被当成了「有没有启用语义」。
+// 随包的 `python-core`（`external-process` + `contributions: []`）因此被归进底部
+// 「纯数据扩展」、贴「安装即启用」、不给开关。现重构为**插件目录**：每插件一行、
+// 面板内嵌，只按 `stateless` 归组。
 
 const menuBarSrc = readFileSync(join(ROOT, "apps/desktop/src/app_ui/menu/MenuBar.tsx"), "utf8");
 const apiPluginSrc = readFileSync(
@@ -4067,35 +4071,40 @@ const catalogBridgeSrc = readFileSync(
 );
 
 check(
-  "「扩展」菜单不再是占位：渲染面板目录并带启用开关（胶囊）",
-  /pluginPanelCatalog\(/.test(menuBarSrc) &&
-    /panelCatalog\.map\(/.test(menuBarSrc) &&
+  "「扩展」菜单不再是占位：渲染插件目录并带启用开关（胶囊）",
+  /pluginCatalog\(/.test(menuBarSrc) &&
+    /statefulRows\.map\(/.test(menuBarSrc) &&
     /togglePluginEnabled/.test(menuBarSrc) &&
     // 启用开关是宿主统一的胶囊按钮（`shared/SwitchToggle.tsx`），不再是原生复选框。
     /<SwitchToggle/.test(menuBarSrc) &&
     !/type="checkbox"/.test(menuBarSrc),
 );
 check(
-  "未启用 → 灰显且不可点击（按钮 disabled），由右侧开关负责启用",
+  "面板按钮未启用 → 灰显且不可点击（disabled），由上方开关负责启用",
   /disabled=\{!item\.enabled\}/.test(menuBarSrc) && /\$\{item\.enabled \? "" : " dim"\}/.test(menuBarSrc),
 );
 check(
-  "面板目录**含未启用**（host 侧不按 enabled 过滤，只如实报出该字段）",
-  /fn panel_catalog/.test(catalogSrc) &&
-    // 关键：panel_catalog 里**没有** `if !enabled { continue }` 这种过滤
-    !/fn panel_catalog[\s\S]{0,2000}?if !enabled\s*\{/.test(catalogSrc) &&
+  "插件目录**含未启用**（host 侧不按 enabled 过滤，只如实报出该字段）",
+  /fn plugin_catalog/.test(catalogSrc) &&
+    // 关键：plugin_catalog 里**没有** `if !enabled { continue }` 这种过滤
+    !/fn plugin_catalog[\s\S]{0,2000}?if !enabled\s*\{/.test(catalogSrc) &&
     /pub enabled: bool/.test(catalogSrc),
 );
 check(
-  "启用走既有授权口径（只传 repo.read，ui.panel 由宿主按 manifest 自动授予）",
-  /pluginEnable\(repoId, item\.pluginId, \["repo\.read"\]\)/.test(menuBarSrc) &&
-    /pluginDisable\(repoId, item\.pluginId\)/.test(menuBarSrc),
+  "启用按插件**声明的能力**发起（不得硬编码 repo.read，否则 python-core 报『未声明能力』）",
+  /pluginEnable\(repoId, item\.pluginId, item\.capabilities\)/.test(menuBarSrc) &&
+    /pluginDisable\(repoId, item\.pluginId\)/.test(menuBarSrc) &&
+    // 反向守护：旧的硬编码写法不能回来。
+    !/pluginEnable\([^)]*\["repo\.read"\]\)/.test(menuBarSrc),
 );
 check(
-  "面板目录是独立命令（不污染只含已启用的 plugin.contributions 注册表口径）",
-  /export function pluginPanelCatalog/.test(apiPluginSrc) &&
-    /"plugin_panel_catalog"/.test(apiPluginSrc) &&
-    /pub\(crate\) fn plugin_panel_catalog/.test(catalogBridgeSrc),
+  "插件目录是独立命令（不污染只含已启用的 plugin.contributions 注册表口径）",
+  /export function pluginCatalog/.test(apiPluginSrc) &&
+    /"plugin_catalog"/.test(apiPluginSrc) &&
+    /pub\(crate\) fn plugin_catalog/.test(catalogBridgeSrc) &&
+    // 命令名改了，旧的 panel 目录名不该残留。
+    !/plugin_panel_catalog/.test(apiPluginSrc) &&
+    !/fn plugin_panel_catalog/.test(catalogBridgeSrc),
 );
 // 目录命令 2026-09 从 `commands/plugin.rs` 拆到 `commands/plugin_catalog.rs`
 // （前者越过 1200 行上限），因此上面读的是新文件；这里再守一道"不能又搬回去
@@ -4110,26 +4119,34 @@ check(
 //
 // 防的是 D36.9 那个缺陷：数据包按 D36.1 声明 `contributions: []`，而目录只发
 // `kind = panel` 的贡献点 → 装了 128–162MB 的词典扩展后「扩展」菜单里照样
-// **什么都不出现**（与 `hello` / `control-demo` 是同一个缺陷）。同时防"再给它画一个
-// 点了没用的启用开关"——词库装配只看安装目录、不读启用状态。
+// **什么都不出现**。同时防"再给它画一个点了没用的启用开关"。
+// 关键新约束（0038）：**空面板 ≠ 无状态**——只有 `stateless` 才沉底、才不给开关。
 const pluginPanelSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/PluginPanel.tsx"),
   "utf8",
 );
 
 check(
-  "宿主把**无面板的插件也发一行**，并标出「无启用语义」（D36.9）",
-  /panel: Option<PanelCatalogPanel>/.test(catalogSrc) &&
+  "宿主发**插件目录**：每插件一行、面板内嵌，只按 stateless 归组（D36.9 + 0038）",
+  /pub struct PluginCatalogEntry/.test(catalogSrc) &&
+    /pub panels: Vec<PluginCatalogPanel>/.test(catalogSrc) &&
+    /pub capabilities: Vec<String>/.test(catalogSrc) &&
     /pub stateless: bool/.test(catalogSrc) &&
-    // 带面板的在前、无面板的整组在最后（界面据此放到菜单最底下）。
-    /with_panel\.extend\(without_panel\)/.test(catalogSrc) &&
-    // 判据是运行时形态，不是"名字像扩展包"。
-    /row\.runtime_kind == RuntimeKind::StaticData/.test(catalogSrc),
+    // 有启用语义的在前、无启用语义的纯数据扩展整组在最后。
+    /stateful\.extend\(stateless_rows\)/.test(catalogSrc) &&
+    // 判据是运行时形态，不是"名字像扩展包"，也不是"有没有面板"。
+    /row\.runtime_kind == RuntimeKind::StaticData/.test(catalogSrc) &&
+    // 反向守护：旧的 `panel === null`/`panels.is_empty()` 归组不能回来。
+    !/if panels\.is_empty\(\)/.test(catalogSrc) &&
+    !/panel: Option<PanelCatalogPanel>/.test(catalogSrc),
 );
 check(
-  "「扩展」菜单把数据扩展**列在最底下**，且**不给启用按钮**",
-  /const dataPackRows = panelCatalog\.filter\(\(i\) => i\.panel === null\)/.test(menuBarSrc) &&
+  "「扩展」菜单按 stateless 归组：数据扩展**列最底下、不给开关**，其余全带开关",
+  /const statefulRows = catalog\.filter\(\(i\) => !i\.stateless\)/.test(menuBarSrc) &&
+    /const dataPackRows = catalog\.filter\(\(i\) => i\.stateless\)/.test(menuBarSrc) &&
     /dataPackRows\.map\(/.test(menuBarSrc) &&
+    // 反向守护：不能再用「有没有面板」当归组判据。
+    !/i\.panel === null/.test(menuBarSrc) &&
     // 数据扩展那一组的渲染里不得出现开关（否则就是一个点了没用的控件）。
     !/dataPackRows[\s\S]{0,600}?<SwitchToggle/.test(menuBarSrc),
 );
@@ -4137,6 +4154,14 @@ check(
   "插件面板对数据包**不再画启用/禁用按钮**（那是空操作），只显示状态",
   /const stateless = p\.runtime_kind === "static-data"/.test(pluginPanelSrc) &&
     /plugin\.statelessState/.test(pluginPanelSrc),
+);
+check(
+  "无面板的系统插件（python-core）落在**有启用语义组**且带开关（0038 回归）",
+  // 上组用 statefulRows 渲染且组内就有 SwitchToggle；python-core 无面板但 stateful。
+  /statefulRows\.map\(/.test(menuBarSrc) &&
+    /statefulRows[\s\S]{0,1600}?<SwitchToggle/.test(menuBarSrc) &&
+    // 面板是内嵌列表子行，而非"一行一个面板"的顶层循环。
+    /item\.panels\.map\(/.test(menuBarSrc),
 );
 
 // ==================== 仓库面板：当前仓库显示**仓库名**（不是内部 repoId）====================

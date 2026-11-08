@@ -20,12 +20,15 @@ use std::path::{Path, PathBuf};
 
 use hp_core::RuntimeKind;
 use hp_plugin_host::{
-    InstallSource, MANIFEST_FILE, PanelSchemaParams, PluginHost, PluginInstaller, SCHEMA_MAX_BYTES,
-    SCHEMA_QUERY_TIMEOUT, query_for_owner,
+    InstallSource, MANIFEST_FILE, PYTHON_CORE_PLUGIN_ID, PanelSchemaParams, PluginHost,
+    PluginInstaller, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT, python_core_enabled,
+    python_core_status, query_for_owner,
 };
 use hp_store::GlobalDb;
 
 const INSTALLED_AT: &str = "2026-01-01T00:00:00Z";
+/// 查询通道的仓库上下文（0039：Python 核心开关按仓库生效）。
+const REPO: &str = "repo-1";
 /// 测试插件 id。面板 id 必须带 `plugin.<plugin_id>.` 前缀（贡献点命名空间化）。
 const PLUGIN_ID: &str = "dev.hamsterpouch.test.pyhello";
 const PANEL_ID: &str = "plugin.dev.hamsterpouch.test.pyhello.py.panel";
@@ -180,7 +183,7 @@ fn python_plugin_is_launched_through_the_bundled_python_core() {
         entry.display()
     );
 
-    let mut query = query_for_owner(&db, &owner).expect("构造 python 形态查询通道失败");
+    let mut query = query_for_owner(&db, &owner, REPO).expect("构造 python 形态查询通道失败");
     let schema = query
         .query(
             &PanelSchemaParams::new(PANEL_ID, 1),
@@ -234,7 +237,7 @@ fn python_plugin_without_its_script_fails_closed() {
         .expect("反查面板归属失败")
         .expect("应能反查到面板归属");
     // `ExternalProcessQuery` 没实现 `Debug`（它持有 `Command`），所以不用 `expect_err`。
-    let err = match query_for_owner(&db, &owner) {
+    let err = match query_for_owner(&db, &owner, REPO) {
         Ok(_) => panic!("脚本缺失必须失败，不得静默略过"),
         Err(e) => e,
     };
@@ -243,4 +246,67 @@ fn python_plugin_without_its_script_fails_closed() {
         text.contains("插件入口不存在"),
         "错误应指出入口缺失，实际: {text}"
     );
+}
+
+/// 0039：Python 核心的开关必须**真的**挡住 python 形态的插件，而不是显示层的假开关。
+///
+/// 覆盖三种状态：随包播种（无 `plugin_repo_state` 行）默认可用 → 显式禁用后
+/// `query_for_owner` 拒绝 → 重新启用后恢复。状态快照与 catalog 也走同一谓词。
+#[test]
+fn python_core_toggle_really_gates_the_runtime() {
+    if !python_core_available() {
+        eprintln!("跳过：随包 python-core 尚未构建");
+        return;
+    }
+
+    let root = temp_root("py-toggle");
+    let (_installer, mut db) = install_pair(&root);
+    let owner = PluginHost
+        .find_panel_owner(&db, PANEL_ID)
+        .expect("反查面板归属失败")
+        .expect("应能反查到面板归属");
+
+    // 1) 默认态：播种只写注册表、不写状态行 → 运行时视为启用。
+    assert!(
+        python_core_enabled(&db, REPO).expect("查默认启用失败"),
+        "随包 Python 核心默认必须可用，否则 python 插件全部拉不起来"
+    );
+    let status = python_core_status(&db, REPO).expect("查状态失败");
+    assert!(status.installed, "python-core 应已安装");
+    assert!(status.enabled, "默认状态快照应为启用");
+    assert!(status.launcher_exists, "启动器应存在: {}", status.launcher);
+    assert_eq!(status.plugin_id, PYTHON_CORE_PLUGIN_ID);
+    query_for_owner(&db, &owner, REPO).expect("默认态应能构造查询通道");
+    let catalog = PluginHost.plugin_catalog(&db, REPO).expect("查目录失败");
+    let core = catalog
+        .iter()
+        .find(|e| e.plugin_id == PYTHON_CORE_PLUGIN_ID)
+        .expect("目录里应列出 python-core");
+    assert!(core.enabled, "目录里的开关应与运行时同一谓词");
+
+    // 2) 显式禁用 → python 形态查询通道被拒；external-process 不受影响（本夹具没有）。
+    PluginHost
+        .disable_for_repo(&mut db, PYTHON_CORE_PLUGIN_ID, REPO)
+        .expect("禁用失败");
+    assert!(!python_core_enabled(&db, REPO).expect("查禁用失败"));
+    let err = match query_for_owner(&db, &owner, REPO) {
+        Ok(_) => panic!("停用后不得再拉起 python 插件"),
+        Err(e) => e,
+    };
+    let text = err.to_string();
+    assert!(
+        text.contains("Python 运行时已停用"),
+        "应给出明确的停用提示，实际: {text}"
+    );
+    assert!(
+        !python_core_status(&db, REPO).expect("查状态失败").enabled,
+        "状态快照应反映停用"
+    );
+
+    // 3) 重新启用（空 grants：python-core 只声明 native.code，无需也不应请求它）→ 恢复。
+    PluginHost
+        .enable_for_repo(&mut db, PYTHON_CORE_PLUGIN_ID, REPO, &[])
+        .expect("重新启用失败");
+    assert!(python_core_enabled(&db, REPO).expect("查重新启用失败"));
+    query_for_owner(&db, &owner, REPO).expect("重新启用后应恢复查询通道");
 }

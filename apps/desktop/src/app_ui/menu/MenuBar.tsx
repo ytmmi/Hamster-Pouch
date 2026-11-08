@@ -59,21 +59,19 @@ export function MenuBar({
   const [open, setOpen] = useState<string | null>(null);
   const [submenu, setSubmenu] = useState<string | null>(null);
   const [layouts, setLayouts] = useState<string[]>([]);
-  /** 「扩展」菜单的面板目录（**含未启用**的插件面板）。 */
-  const [panelCatalog, setPanelCatalog] = useState<api.PluginPanelCatalogItem[]>([]);
+  /** 「扩展」菜单的**已安装插件目录**（含未启用的，每个插件一行）。 */
+  const [catalog, setCatalog] = useState<api.PluginCatalogItem[]>([]);
   const [extBusy, setExtBusy] = useState(false);
 
-  /** 拉取面板目录。打开菜单时按需拉取 → 启用/禁用后天然不会陈旧。 */
+  /** 拉取插件目录。打开菜单时按需拉取 → 启用/禁用后天然不会陈旧。
+   *  即使未打开仓库也照常拉取（后端按空仓库处理，enabled 全为 false），
+   *  保证「所有安装的插件」始终可见；只是没仓库时开关不可点。 */
   const loadCatalog = useCallback(async () => {
-    if (!repoId) {
-      setPanelCatalog([]);
-      return;
-    }
     try {
-      setPanelCatalog(await api.pluginPanelCatalog(repoId));
+      setCatalog(await api.pluginCatalog(repoId));
     } catch (e) {
       app.status(errorTextOf(app.t, e), "error");
-      setPanelCatalog([]);
+      setCatalog([]);
     }
   }, [repoId, app]);
 
@@ -84,12 +82,13 @@ export function MenuBar({
   /**
    * 就地启用/禁用某个插件（「扩展」菜单右侧的开关）。
    *
-   * 授权口径与插件面板一致：只传 `repo.read`，`ui.panel` 由宿主按 manifest 声明
-   * **自动授予**（`hp-plugin-host` 的 `enable`：声明了 `ui.panel` 就一并授）。
-   * 启用后宿主广播 `plugin.changed`，面板注册表随之重建，该面板即可打开。
+   * 授权按插件**声明的能力**发起（host.rs:81 要求请求 ⊆ 声明能力）：
+   * 早期实现硬编码 `repo.read`，会让只声明 `native.code` 的随包系统插件
+   * （python-core）报「插件未声明能力: repo.read」。
+   * 启用后宿主广播 `plugin.changed`，面板注册表随之重建，该插件的面板即可打开。
    */
   const togglePluginEnabled = useCallback(
-    async (item: api.PluginPanelCatalogItem) => {
+    async (item: api.PluginCatalogItem) => {
       if (!repoId) {
         app.status(app.t("common.selectRepo"), "error");
         return;
@@ -99,7 +98,7 @@ export function MenuBar({
         if (item.enabled) {
           await api.pluginDisable(repoId, item.pluginId);
         } else {
-          await api.pluginEnable(repoId, item.pluginId, ["repo.read"]);
+          await api.pluginEnable(repoId, item.pluginId, item.capabilities);
         }
         await loadCatalog();
       } catch (e) {
@@ -112,13 +111,16 @@ export function MenuBar({
   );
 
   /**
-   * 「扩展」菜单里**无状态**的纯数据扩展（`panel === null`，RFC 0008 D36.9）。
+   * 「扩展」菜单按**有无启用语义**分组：只看 `stateless`，与「有没有面板」无关。
    *
-   * 这类包（`tagdict-*` / `tagrel-*`）按 D36.1 声明 `contributions: []`，不贡献面板；
-   * 词库数据是**安装即生效**的（宿主装配只看安装目录，不看启用状态），因此这里
-   * **只列出来、不给启用按钮**——给它开关等于骗用户。后端已把它们排在最后。
+   * - `statefulRows`：有启用语义 → 每个插件一行 + 右侧开关；其面板另作可打开的
+   *   子行。随包系统插件 `python-core`（`panels` 为空但 `stateless=false`）也在这组，
+   *   不再被当成词库。
+   * - `dataPackRows`：`stateless` 的纯数据扩展（tagdict-* / tagrel-*，装完即生效），
+   *   **只列出来、不给开关**——给它开关等于骗用户。后端已把它们整组排在最后。
    */
-  const dataPackRows = panelCatalog.filter((i) => i.panel === null);
+  const statefulRows = catalog.filter((i) => !i.stateless);
+  const dataPackRows = catalog.filter((i) => i.stateless);
   const [savingLayout, setSavingLayout] = useState(false);
   const [layoutName, setLayoutName] = useState("");
   const [layoutMenu, setLayoutMenu] = useState<{ x: number; y: number; name: string } | null>(
@@ -582,28 +584,22 @@ export function MenuBar({
         </button>
         {open === "ext" && (
           <div className="menu-pop">
-            {panelCatalog.length === 0 && (
+            {catalog.length === 0 && (
               <span className="menu-item dim">{t("menubar.extensionsHint")}</span>
             )}
-            {panelCatalog.map((item) => {
-              const panel = item.panel;
-              // 无面板 = 纯数据扩展，由下面的分组渲染（排在最后、无开关）。
-              if (!panel) return null;
-              const inLayout = Boolean(apiRef.current?.getPanel(panel.id));
-              return (
-                <div key={panel.id} className="menu-item-row">
-                  <button
-                    className={`menu-item grow${item.enabled ? "" : " dim"}`}
-                    // 未启用 → 打不开（面板还没登记进注册表），按钮置灰、由右侧开关负责启用。
-                    disabled={!item.enabled}
-                    title={item.enabled ? panel.id : t("menubar.extensionsNeedsEnable")}
-                    onClick={() => togglePanel(panel.id)}
+            {/* 有启用语义的插件：**一个插件一行**，右侧就地开关；其面板另作可打开的
+                子行。无面板的系统插件（python-core）也在这里、照样带开关——它不再被
+                误当成纯数据扩展。开关按 `capabilities` 启用（禁止硬编码 repo.read）。 */}
+            {statefulRows.map((item) => (
+              <div key={item.pluginId}>
+                <div className="menu-item-row">
+                  <span
+                    className={`menu-item grow static${item.enabled ? "" : " dim"}`}
+                    title={item.pluginId}
                   >
-                    {inLayout ? "✓ " : "　"}
                     {item.pluginName}
-                    {/* 插件语言资源通道未落地 → 这里直接显示标题键，不做 i18n 查询 */}
-                    <span className="dim"> · {panel.titleKey}</span>
-                  </button>
+                    <span className="dim"> · {item.runtimeKind}</span>
+                  </span>
                   {/* 容器用 `<span>` 而不是 `<label>`：`<label>` 不得包住其它可交互元素，
                       胶囊开关本身就是按钮（无障碍名由 `label` 属性给）。 */}
                   <span
@@ -624,8 +620,27 @@ export function MenuBar({
                     />
                   </span>
                 </div>
-              );
-            })}
+                {item.panels.map((panel) => {
+                  const inLayout = Boolean(apiRef.current?.getPanel(panel.id));
+                  return (
+                    <div key={panel.id} className="menu-item-row">
+                      <button
+                        className={`menu-item grow${item.enabled ? "" : " dim"}`}
+                        // 未启用 → 打不开（面板还没登记进注册表），按钮置灰、由上方开关负责启用。
+                        disabled={!item.enabled}
+                        title={item.enabled ? panel.id : t("menubar.extensionsNeedsEnable")}
+                        onClick={() => togglePanel(panel.id)}
+                      >
+                        {inLayout ? "✓ " : "　"}
+                        {item.pluginName}
+                        {/* 插件语言资源通道未落地 → 这里直接显示标题键，不做 i18n 查询 */}
+                        <span className="dim"> · {panel.titleKey}</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
             {/* 纯数据扩展（tagdict-* / tagrel-*）：**列在最后、无启用按钮**
                 ——词库数据装完即生效，没有可"启用"的状态（RFC 0008 D36.9）。 */}
             {dataPackRows.length > 0 && <div className="menu-sep" />}

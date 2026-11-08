@@ -34,6 +34,9 @@ pub(crate) mod plugin_control_channel;
 pub(crate) mod plugin_control_event;
 pub(crate) mod plugin_lifecycle;
 pub(crate) mod plugin_panel_data;
+// Python 运行时（随包 system 插件）的状态 / 自检命令面（issues/0040）：
+// 与 plugin_catalog 拆开；启停复用 plugin_lifecycle，不另设命令。
+pub(crate) mod python_runtime;
 pub(crate) mod rating;
 // 阅读批注（书签 / 笔记 / 高亮）：`reader.*` 与 `book.*` 分开命名——前者是
 // "读者留下的东西"（会写库、按仓库隔离），后者是"从文件里读出的内容属性"。

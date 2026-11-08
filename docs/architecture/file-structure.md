@@ -91,7 +91,7 @@ crates/hp-store/src/
     plugin_contributions.rs # 三张注册表的插件注册视图（plugin.contributions）
     plugin_control_channel.rs # 控件通道地基（归属校验 / 受监督调用 / plugin.error）+ panelSchema / validateControl
     plugin_control_event.rs   # 控件事件回传链（plugin.controlEvent，控件标准第 6 节 / D63）
-    plugin_catalog.rs   # 「扩展」菜单的目录通道（plugin.panelCatalog：面板 + 无面板的数据扩展）
+    plugin_catalog.rs   # 「扩展」菜单的已安装插件目录（plugin.catalog：每插件一行、面板内嵌，按 stateless 归组）
     plugin_panel_data.rs # 面板 bind 的受控取数通道（plugin.panelData）
     blueprint.rs        # 蓝图命令桥接（含 blueprint.changed 广播）
     interface_pages.rs  # 界面页分组结构桥接（2026-10-26，D124）：只有 interfacePages.get / .set
