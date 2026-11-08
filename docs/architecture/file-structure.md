@@ -267,7 +267,11 @@ apps/desktop/src/app_ui/
     imageviewer/      # 图像查看器（多文件功能域：主面板 / 舞台 / 导航器 / 胶片栏 / 信息栏
                       #   + 纯逻辑模块 viewerZoom·viewerPlacement·viewerFormat·viewerKeymap·viewerPreload
                       #   + viewerFilmstripLayout（胶片栏窗口/定位纯几何 + 宽高比共享缓存 +
-                      #   Fenwick 前缀索引 FilmstripDeltaIndex；5 万项窗口重算 0.012 ms/帧，D146）
+                      #   Fenwick 前缀索引 FilmstripDeltaIndex；5 万项窗口重算 0.012 ms/帧，D146；
+                      #   D147 / 缺陷 0041 起几何对齐 76e073a 原视图：外框比例横栏 ×r / 竖栏 ÷r，
+                      #   交叉轴 = 容器实测客户区 − padding×2（滚动条/贴边边框天然算进去），
+                      #   filmstripCrossSizeFallback 只作未测量占位；ViewerFilmstrip 两轴经
+                      #   ResizeObserver + onScroll 双通道重读，CSS overflow 按主轴收窄）
                       #   + DOM 工具 viewerDecode（换图前离屏解码：解码完成才原子替换 url+尺寸，缺陷 0028）
                       #   + 面板设置 useViewerSettings 与浏览序列 useViewerSequence
                       #   （序列按媒体预览的**有效排序**排列：同一批设置键 + core/mediaSortStore
@@ -734,7 +738,11 @@ HamsterPouch/
                               #   `reader-layout-verify.mjs` / `reader-typography-verify.mjs`（D116 纸张与
                               #   排版档位）、`settings-overlay-hittest-verify.mjs`（D141 用
                               #   `document.elementFromPoint()` 量「全部设置」浮层有没有被浮动层抢走指针；
-                              #   三个夹具含**回退即红**对照——把层级按回旧值必须复现缺陷）
+                              #   三个夹具含**回退即红**对照——把层级按回旧值必须复现缺陷）、
+                              #   `filmstrip-layout-verify.mjs`（D147 / 缺陷 0041 量胶片栏自适应视图：
+                              #   单元不溢出客户区 / 无第二条滚动条 / 外框比例对齐 76e073a 原视图，
+                              #   26 项；`HP_FILM_CROSS_MODE` / `HP_FILM_EXTENT_MODE` 两个回退旋钮
+                              #   各自复现修复前的红）
                               # **版本号工具 `version.mjs`**（D140，纯 Node 无依赖，`pnpm version:next` /
                               #   `pnpm check:version`）：`--current` 显示当前版本、`--next` 预览 +1、`--write <v>`
                               #   指定版本、`--apply` 按 `HP_VERSION` 或 +1 落盘；`bumpPatch` 只对 x.y.z 的 z 段

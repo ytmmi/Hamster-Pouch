@@ -5356,9 +5356,13 @@ button.danger {
 .iv-film {
   /* 轨道承载绝对定位的单元（D146 窗口化）；padding/border 的数值由
      viewerFilmstripLayout.ts 的同名常量镜像（门禁逐项对账），单元间距
-     由几何公式的偏移承担（FILMSTRIP_GAP），不再用 flex gap。 */
+     由几何公式的偏移承担（FILMSTRIP_GAP），不再用 flex gap。
+     overflow 刻意按主轴收窄（见下方四边规则）：全局滚动条是经典占位
+     滚动条（6px），`overflow: auto` 会在单元哪怕溢出 1px 时凭空多出一条
+     交叉轴滚动条、再把客户区扣窄——缺陷 0041 的连锁形态。单元两轴尺寸
+     由面板从实测客户区推出（D147），交叉轴按构造不可能溢出，收窄只是
+     把这条不变量在 CSS 层也钉死（亚像素/异常输入时不出第二条滚动条）。 */
   padding: 4px;
-  overflow: auto;
   background: var(--bg-2, var(--bg));
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -5375,6 +5379,8 @@ button.danger {
 .iv-film-right {
   width: 76px;
   flex: 0 0 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .iv-film-left {
@@ -5390,6 +5396,8 @@ button.danger {
 .iv-film-horizontal {
   height: 76px;
   flex: 0 0 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .iv-film-top {
@@ -5405,8 +5413,10 @@ button.danger {
  * 胶片单元：**绝对定位在轨道上，两轴尺寸与偏移都由面板纯几何下发**（D146）。
  *
  * - 主轴外尺寸（纵向栏是高、横向栏是宽）与偏移由内联样式给出：
- *   `viewerFilmstripLayout.ts` 按"厚度 − 容器盒开销 → 内容边长 × 宽高比 + 单元盒开销"
- *   算出；交叉轴撑满容器内容区。未解码按 1:1 占位，解码后从共享缓存取真值
+ *   `viewerFilmstripLayout.ts` 按"实测交叉轴外框 × 主轴比例（横栏 ×r、竖栏 ÷r）"
+ *   算出（D147，观感基准 = 76e073a 原视图的 border-box aspect-ratio；
+ *   客户区实测把滚动条/贴边边框都算进去）；交叉轴撑满容器内容区。
+ *   未解码按 1:1 占位，解码后从共享缓存取真值
  *   （经订阅通知父级重算后下发新尺寸，单元自身不存第二份宽高比）。
  * - 内边距 2 + 边框 1 = 单元盒开销 6px，与 `FILMSTRIP_CELL_CHROME` 同值
  *   （门禁对样式表逐项对账；改这里必须改常量）。

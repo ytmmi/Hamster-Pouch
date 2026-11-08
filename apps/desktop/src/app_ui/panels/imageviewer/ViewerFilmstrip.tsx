@@ -15,6 +15,11 @@
  * 3. **滚动只在容器内**：当前项居中按纯几何算偏移（不要求当前项已挂载——
  *    窗口有界后深处当前项可能不在 DOM 里），不用 `scrollIntoView`
  *    （后者会连带滚动祖先，可能把整个面板/页面顶走）。
+ * 4. **两轴尺寸都从容器实测客户区推**（缺陷 0041 / D147）：全局滚动条是
+ *    经典占位滚动条（6px），出现时从客户区扣掉一条；按厚度设置 `size` 推算
+ *    的"理想盒"不知道这件事，单元交叉轴会溢出轨道被裁、还多出一条交叉轴
+ *    滚动条。主轴（viewport）与交叉轴（crossClient）都实测，滚动条出没
+ *    经 ResizeObserver + onScroll 双通道重读；`size` 只作未测量时的占位。
  */
 
 import {
@@ -31,13 +36,13 @@ import { resolveThumbUrl } from "../../shared/thumbUrl";
 import type { FileItem } from "../../shared/types";
 import { filmstripEdgeClass, isFilmstripVertical, type FilmstripEdge, type FilmstripView } from "./viewerPlacement";
 import {
-  FILMSTRIP_BORDER,
   FILMSTRIP_GAP,
   FILMSTRIP_PADDING,
   FilmstripDeltaIndex,
   filmstripCellExtent,
   filmstripCellRatio,
   filmstripCenterScroll,
+  filmstripCrossSizeFallback,
   filmstripWindow,
   getCachedFilmstripRatio,
   setCachedFilmstripRatio,
@@ -170,21 +175,34 @@ export function ViewerFilmstrip({
   const scrollFrameRef = useRef(0);
   /** 容器主轴客户区尺寸 + 宽高比缓存版本（解码回填后重算窗口几何）。 */
   const [viewport, setViewport] = useState(0);
+  /**
+   * 容器**交叉轴客户区**尺寸（实测，缺陷 0041 / D147）：0 = 尚未测量。
+   * 单元两轴与窗口/居中几何都从它推——经典占位滚动条出现时客户区会变窄，
+   * `size`（厚度设置）推算的"理想盒"不知道这件事，按它下发单元就溢出轨道。
+   */
+  const [crossClient, setCrossClient] = useState(0);
   const [ratioVersion, setRatioVersion] = useState(0);
   const ratioFrameRef = useRef(0);
+  /** 交叉轴内容区 = 实测客户区 − 两侧内边距；未测量时按厚度推算占位。 */
+  const crossExtent =
+    crossClient > 0
+      ? Math.max(0, crossClient - FILMSTRIP_PADDING * 2)
+      : filmstripCrossSizeFallback(size);
   /**
    * 已缓存修正的前缀索引（Fenwick）：窗口/居中公式 = 全部占位 + 前缀修正，
-   * 滚动帧不再逐项查 5 万次缓存。换序列/换视图/改厚度即重建（O(n) 一次），
-   * 缓存写入经订阅增量更新（O(log n)）。平铺视图恒方形 → 修正恒 0（空索引）。
+   * 滚动帧不再逐项查 5 万次缓存。换序列/换视图/改厚度/交叉轴实测变化即重建
+   * （O(n) 一次），缓存写入经订阅增量更新（O(log n)）。平铺视图恒方形 →
+   * 修正恒 0（空索引）。
    */
   const deltaRef = useRef(new FilmstripDeltaIndex());
   useLayoutEffect(() => {
     deltaRef.current.bindSequence(
       view === "adaptive" ? files.map((f) => f.id) : [],
-      size,
+      crossExtent,
+      vertical,
     );
     setRatioVersion((v) => v + 1);
-  }, [files, view, size]);
+  }, [files, view, crossExtent, vertical]);
 
   /** 逐单元占位比例：平铺恒 1；自适应取共享缓存，未解码 1:1。 */
   const ratioAt = useCallback(
@@ -205,13 +223,9 @@ export function ViewerFilmstrip({
   );
 
   const window_ = useMemo<FilmstripWindow>(
-    () => filmstripWindow(files.length, scroll, viewport, size, ratioAt, deltaBefore),
-    [files.length, scroll, viewport, size, ratioAt, deltaBefore],
+    () => filmstripWindow(files.length, scroll, viewport, crossExtent, vertical, ratioAt, deltaBefore),
+    [files.length, scroll, viewport, crossExtent, vertical, ratioAt, deltaBefore],
   );
-
-  // 交叉轴外尺寸：撑满容器内容区（与 filmstripCellExtent 同一盒模型公式，
-  // 单元盒开销由单元自己的 border-box 承担）。
-  const crossExtent = Math.max(0, size - FILMSTRIP_PADDING * 2 - FILMSTRIP_BORDER * 2);
 
   /** 窗口内单元 + 各自的绝对偏移（从窗口起点续算，不再从 0 全量扫描）。 */
   const cells = useMemo(() => {
@@ -220,12 +234,12 @@ export function ViewerFilmstrip({
     for (let i = window_.start; i < window_.end; i++) {
       const file = files[i];
       if (!file) break;
-      const extent = filmstripCellExtent(size, ratioAt(i));
+      const extent = filmstripCellExtent(crossExtent, ratioAt(i), vertical);
       out.push({ file, position: i, extent, offset });
       offset += extent + FILMSTRIP_GAP;
     }
     return out;
-  }, [files, window_, size, ratioAt]);
+  }, [files, window_, crossExtent, vertical, ratioAt]);
 
   // 序列整体更换（换相册/换源/排序重排）→ 滚动与窗口回到起点。
   useEffect(() => {
@@ -238,18 +252,25 @@ export function ViewerFilmstrip({
   }, [files, vertical]);
 
   // 容器尺寸监听（首帧布局完成 / 面板改尺寸 / 胶片栏换边）→ 重算窗口与居中。
+  // **两轴都实测**（缺陷 0041 / D147）：交叉轴客户区在滚动条出现/消失时会变
+  // （经典占位滚动条从客户区扣 6px），只测主轴就会拿旧交叉轴继续算单元尺寸。
+  // `read` 同时喂给 ResizeObserver 与 onScroll（滚动条出没不保证触发 RO）。
+  const readContainer = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const main = vertical ? el.clientHeight : el.clientWidth;
+    const cross = vertical ? el.clientWidth : el.clientHeight;
+    setViewport((prev) => (prev === main ? prev : main));
+    setCrossClient((prev) => (prev === cross ? prev : cross));
+  }, [vertical]);
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const read = () => {
-      const dim = vertical ? container.clientHeight : container.clientWidth;
-      setViewport((prev) => (prev === dim ? prev : dim));
-    };
-    read();
-    const ro = new ResizeObserver(read);
+    readContainer();
+    const ro = new ResizeObserver(readContainer);
     ro.observe(container);
     return () => ro.disconnect();
-  }, [vertical]);
+  }, [readContainer]);
 
   // 宽高比解码回填 → 增量更新前缀索引 + 重算几何。按帧合并：一次滚动解码
   // 几十张，逐张重渲染就是几十次窗口重算（媒体预览 ratioCache 的同款教训）。
@@ -279,8 +300,10 @@ export function ViewerFilmstrip({
       if (!el) return;
       const next = vertical ? el.scrollTop : el.scrollLeft;
       setScroll((prev) => (prev === next ? prev : next));
+      // 滚动可能让滚动条出现/消失 → 交叉轴客户区同步重读（0041）。
+      readContainer();
     });
-  }, [vertical]);
+  }, [vertical, readContainer]);
 
   useEffect(
     () => () => {
@@ -294,11 +317,11 @@ export function ViewerFilmstrip({
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container || index < 0 || index >= files.length || viewport <= 0) return;
-    const target = filmstripCenterScroll(index, viewport, size, ratioAt, deltaBefore);
+    const target = filmstripCenterScroll(index, viewport, crossExtent, vertical, ratioAt, deltaBefore);
     if (vertical) container.scrollTop = Math.max(0, target);
     else container.scrollLeft = Math.max(0, target);
     setScroll(Math.max(0, target));
-  }, [index, files.length, viewport, size, ratioAt, deltaBefore, vertical]);
+  }, [index, files.length, viewport, crossExtent, ratioAt, deltaBefore, vertical]);
 
   return (
     <div

@@ -3061,9 +3061,9 @@ check(
 {
   const size = 76;
   const ratioAt = () => 1;
-  const unit = filmstripLayout.filmstripCellExtent(size, 1) + filmstripLayout.FILMSTRIP_GAP;
-  const deep = filmstripLayout.filmstripWindow(50000, 20000 * unit, 600, size, ratioAt);
-  const head = filmstripLayout.filmstripWindow(50000, 0, 600, size, ratioAt);
+  const unit = filmstripLayout.filmstripCellExtent(size, 1, false) + filmstripLayout.FILMSTRIP_GAP;
+  const deep = filmstripLayout.filmstripWindow(50000, 20000 * unit, 600, size, false, ratioAt);
+  const head = filmstripLayout.filmstripWindow(50000, 0, 600, size, false, ratioAt);
   check(
     "D146：5 万项序列只渲染有界窗口（深处导航不再挂出前 N 万个单元），窗口覆盖视口",
     deep.end - deep.start <= 40 &&
@@ -3089,23 +3089,23 @@ check(
   const mixed = (i) => (i % 2 === 0 ? 2 : 0.5);
   const ids1000 = Array.from({ length: 1000 }, (_, i) => `mix${i}`);
   const idx1000 = new filmstripLayout.FilmstripDeltaIndex();
-  idx1000.bindSequence(ids1000, size);
+  idx1000.bindSequence(ids1000, size, false);
   for (let i = 0; i < 1000; i++) {
     filmstripLayout.setCachedFilmstripRatio(`mix${i}`, mixed(i));
     idx1000.update(`mix${i}`);
   }
   const delta1000 = (i) => idx1000.deltaBefore(i);
-  const w = filmstripLayout.filmstripWindow(1000, 5000, 600, size, mixed, delta1000);
+  const w = filmstripLayout.filmstripWindow(1000, 5000, 600, size, false, mixed, delta1000);
   let sum = filmstripLayout.FILMSTRIP_PADDING;
   for (let i = 0; i < 1000; i++) {
-    sum += filmstripLayout.filmstripCellExtent(size, mixed(i)) + filmstripLayout.FILMSTRIP_GAP;
+    sum += filmstripLayout.filmstripCellExtent(size, mixed(i), false) + filmstripLayout.FILMSTRIP_GAP;
   }
   const expectTotal = sum - filmstripLayout.FILMSTRIP_GAP + filmstripLayout.FILMSTRIP_PADDING;
   let expectStart = filmstripLayout.FILMSTRIP_PADDING;
   for (let i = 0; i < w.start; i++) {
-    expectStart += filmstripLayout.filmstripCellExtent(size, mixed(i)) + filmstripLayout.FILMSTRIP_GAP;
+    expectStart += filmstripLayout.filmstripCellExtent(size, mixed(i), false) + filmstripLayout.FILMSTRIP_GAP;
   }
-  const empty = filmstripLayout.filmstripWindow(0, 0, 600, size, ratioAt);
+  const empty = filmstripLayout.filmstripWindow(0, 0, 600, size, false, ratioAt);
   check(
     "D146：前缀索引修正后的总长/起点偏移与逐项求和逐值一致；空序列给空窗口",
     Math.abs(w.totalExtent - expectTotal) < 1e-6 &&
@@ -3116,11 +3116,11 @@ check(
     `total=${w.totalExtent} expect=${expectTotal}`,
   );
   // 居中定位：纯几何、不要求当前项已挂载（深处当前项不在 DOM 里也要能定位）。
-  const center = filmstripLayout.filmstripCenterScroll(49999, 600, size, ratioAt);
+  const center = filmstripLayout.filmstripCenterScroll(49999, 600, size, false, ratioAt);
   const expectCenter =
     filmstripLayout.FILMSTRIP_PADDING +
     49999 * unit +
-    filmstripLayout.filmstripCellExtent(size, 1) / 2 -
+    filmstripLayout.filmstripCellExtent(size, 1, false) / 2 -
     300;
   check(
     "D146：当前项居中按纯几何计算（第 5 万项不要求已挂载），与占位公式逐值一致",
@@ -3128,8 +3128,8 @@ check(
     `center=${center}`,
   );
   // 前缀索引增量更新与重建等价（写入后再 bind 一次，两者逐项一致）。
-  idx1000.bindSequence(ids1000, size);
-  const rebuilt = filmstripLayout.filmstripWindow(1000, 5000, 600, size, mixed, (i) => idx1000.deltaBefore(i));
+  idx1000.bindSequence(ids1000, size, false);
+  const rebuilt = filmstripLayout.filmstripWindow(1000, 5000, 600, size, false, mixed, (i) => idx1000.deltaBefore(i));
   check(
     "D146：前缀索引增量更新与全量重建等价（换序列重建不漂移）",
     rebuilt.start === w.start &&
@@ -3179,7 +3179,7 @@ check(
 // ---- 渲染侧接线与盒模型对账 ----
 check(
   "D146：胶片栏消费有界窗口 + 绝对定位轨道，旧的只追加窗口与逐格观察器已删除",
-  /filmstripWindow\(files\.length, scroll, viewport, size, ratioAt, deltaBefore\)/.test(filmstripSrc) &&
+  /filmstripWindow\(files\.length, scroll, viewport, crossExtent, vertical, ratioAt, deltaBefore\)/.test(filmstripSrc) &&
     /className="iv-film-track"/.test(filmstripSrc) &&
     /window_\.totalExtent/.test(filmstripSrc) &&
     /window_\.startOffset/.test(filmstripSrc) &&
@@ -3194,7 +3194,7 @@ check(
     /subscribeFilmstripRatios\(/.test(filmstripSrc) &&
     // 增量更新必须真的在跑（注释掉 = 索引与缓存漂移，断言剥注释后仍须命中）。
     /deltaRef\.current\.update\(fileId\)/.test(stripComments(filmstripSrc)) &&
-    /filmstripCenterScroll\(index, viewport, size, ratioAt, deltaBefore\)/.test(filmstripSrc) &&
+    /filmstripCenterScroll\(index, viewport, crossExtent, vertical, ratioAt, deltaBefore\)/.test(filmstripSrc) &&
     /container\.scrollTop = Math\.max\(0, target\)/.test(filmstripSrc) &&
     /container\.scrollLeft = Math.max\(0, target\)/.test(filmstripSrc),
 );
@@ -3246,6 +3246,118 @@ check(
     /truncated=\{sequence\.truncated\}/.test(imageViewerPanelSrc) &&
     /\{loading && ` \$\{t\("imageviewer\.info\.loading"\)\}`\}/.test(viewerInfoBarSrc) &&
     /\{truncated && ` \$\{t\("imageviewer\.info\.truncated"\)\}`\}/.test(viewerInfoBarSrc),
+  );
+}
+
+// ==================== 图像查看器：胶片栏自适应视图对齐原视图（缺陷 0041 / D147） ====================
+//
+// 防的是"公式对、浏览器不对"与"观感漂移"：D146 窗口化后几何从厚度设置推算
+// "理想盒"，不知道经典占位滚动条会扣客户区、贴边规则会去掉一侧边框；且竖栏
+// 主轴是高，恒乘宽高比把横竖图用反。观感基准 = 76e073a 原视图（flex stretch +
+// border-box aspect-ratio）。真机量由 tools/filmstrip-layout-verify.mjs 承担
+// （26 项，回退即红两个旋钮各自复现）；这里钉行为与接线。
+
+// ---- 几何行为：外框比例 = 原视图的 aspect-ratio 语义 ----
+{
+  const cross = 100;
+  const extent = filmstripLayout.filmstripCellExtent;
+  check(
+    "D147：横栏主轴 = 交叉轴外框 × r、竖栏 = ÷ r（76e073a 原视图 border-box aspect-ratio 语义）",
+    extent(cross, 2, false) === 200 &&
+      extent(cross, 0.5, false) === 50 &&
+      extent(cross, 2, true) === 50 &&
+      extent(cross, 0.5, true) === 200 &&
+      extent(cross, 1, true) === extent(cross, 1, false),
+    `横×2=${extent(cross, 2, false)} 竖×2=${extent(cross, 2, true)}`,
+  );
+  check(
+    "D147：外框不塌（外框 < 单元盒开销时夹紧），非法比例/交叉轴回落不产生 NaN",
+    extent(2, 1, false) === filmstripLayout.FILMSTRIP_CELL_CHROME &&
+      extent(0, 1, false) === filmstripLayout.FILMSTRIP_CELL_CHROME &&
+      extent(2, 5, false) === 10 &&
+      extent(cross, 0, false) === cross &&
+      extent(cross, Number.NaN, true) === cross &&
+      extent(cross, Number.POSITIVE_INFINITY, false) === cross &&
+      extent(Number.NaN, 2, false) === filmstripLayout.FILMSTRIP_CELL_CHROME,
+  );
+  // 竖栏混合比例的前缀索引：修正量按 ÷r 算（恒乘 r 即回 D146 缺陷形态）。
+  const ids = ["v0", "v1", "v2"];
+  filmstripLayout.clearFilmstripRatioCache();
+  filmstripLayout.setCachedFilmstripRatio("v0", 2);
+  filmstripLayout.setCachedFilmstripRatio("v1", 0.5);
+  const vIdx = new filmstripLayout.FilmstripDeltaIndex();
+  vIdx.bindSequence(ids, cross, true);
+  const expectDelta2 =
+    extent(cross, 2, true) - extent(cross, 1, true) + (extent(cross, 0.5, true) - extent(cross, 1, true));
+  check(
+    "D147：竖栏前缀修正按 ÷r 累计（换边重建不沿用横栏口径）",
+    Math.abs(vIdx.deltaBefore(2) - expectDelta2) < 1e-9 && vIdx.deltaBefore(0) === 0,
+    `deltaBefore(2)=${vIdx.deltaBefore(2)} expect=${expectDelta2}`,
+  );
+  filmstripLayout.clearFilmstripRatioCache();
+  // 未测量占位：理想盒推算收敛在唯一函数，且与实测口径可区分。
+  check(
+    "D147：未测量占位 = 厚度 − padding×2 − border×2（filmstripCrossSizeFallback 唯一实现）",
+    filmstripLayout.filmstripCrossSizeFallback(76) ===
+      76 - filmstripLayout.FILMSTRIP_PADDING * 2 - filmstripLayout.FILMSTRIP_BORDER * 2 &&
+      filmstripLayout.filmstripCrossSizeFallback(10) === 0,
+  );
+}
+
+// ---- 组件接线：两轴实测、滚动双通道重读、几何消费实测值 ----
+check(
+  "D147：交叉轴从容器实测客户区推（滚动条/贴边边框天然算进去），size 只作未测量占位",
+  /const \[crossClient, setCrossClient\] = useState\(0\)/.test(filmstripSrc) &&
+    /crossClient - FILMSTRIP_PADDING \* 2/.test(stripComments(filmstripSrc)) &&
+    /filmstripCrossSizeFallback\(size\)/.test(filmstripSrc) &&
+    // 反向：不得再按厚度直接推交叉轴外尺寸（缺陷 0041 的形态）。
+    !/size - FILMSTRIP_PADDING \* 2 - FILMSTRIP_BORDER \* 2/.test(stripComments(filmstripSrc)),
+);
+check(
+  "D147：ResizeObserver 与 onScroll 双通道重读两轴（滚动条出没不保证触发 RO）",
+  /const cross = vertical \? el\.clientWidth : el\.clientHeight/.test(filmstripSrc) &&
+    /new ResizeObserver\(readContainer\)/.test(filmstripSrc) &&
+    /setCrossClient\(\(prev\) => \(prev === cross \? prev : cross\)\)/.test(filmstripSrc) &&
+    // onScroll 的 rAF 回调里必须真的重读（只断言符号名会被 effect 里的调用满足；
+    // 剥注释后从 onScroll 定义起到依赖数组止的片段里找调用）。
+    (() => {
+      const stripped = stripComments(filmstripSrc);
+      const start = stripped.indexOf("const onScroll = useCallback");
+      const end = stripped.indexOf("[vertical, readContainer]", start);
+      return start >= 0 && end > start && stripped.slice(start, end).includes("readContainer();");
+    })(),
+);
+check(
+  "D147：窗口/居中/单元尺寸全部消费实测 crossExtent 与 vertical（不再喂 size）",
+  /filmstripWindow\(files\.length, scroll, viewport, crossExtent, vertical, ratioAt, deltaBefore\)/.test(filmstripSrc) &&
+    /filmstripCenterScroll\(index, viewport, crossExtent, vertical, ratioAt, deltaBefore\)/.test(filmstripSrc) &&
+    /filmstripCellExtent\(crossExtent, ratioAt\(i\), vertical\)/.test(filmstripSrc) &&
+    /bindSequence\(/.test(filmstripSrc) &&
+    // bindSequence 的第三参必须是 vertical（换边重建）。
+    /crossExtent,\s*vertical,\s*\)/.test(filmstripSrc),
+);
+// ---- CSS：overflow 按主轴收窄（交叉轴按构造不溢出，双保险钉死不变量） ----
+{
+  const verticalBlock = /\.iv-film-left,\s*\.iv-film-right \{([\s\S]*?)\}/.exec(stylesSource)?.[1] ?? "";
+  const horizontalBlock = /\.iv-film-horizontal \{([\s\S]*?)\}/.exec(stylesSource)?.[1] ?? "";
+  check(
+    "D147：胶片栏 overflow 按主轴收窄（竖栏 x-hidden/y-auto、横栏 x-auto/y-hidden），不出第二条滚动条",
+    /overflow-x: hidden;/.test(verticalBlock) &&
+      /overflow-y: auto;/.test(verticalBlock) &&
+      /overflow-x: auto;/.test(horizontalBlock) &&
+      /overflow-y: hidden;/.test(horizontalBlock),
+  );
+}
+{
+  // 真机验证脚本必须存在且量的是真实样式表（登记进工具清单，防"写了没接"）。
+  const verifyPath = join(ROOT, "tools/filmstrip-layout-verify.mjs");
+  const verifySrc = existsSync(verifyPath) ? readFileSync(verifyPath, "utf8") : "";
+  check(
+    "D147：真机布局验证脚本在位（真实 styles.css + 同构夹具 + 回退即红旋钮）",
+    verifySrc.includes("apps/desktop/src/app_ui/shared/styles.css") &&
+      verifySrc.includes("iv-film-track") &&
+      verifySrc.includes("HP_FILM_CROSS_MODE") &&
+      verifySrc.includes("HP_FILM_EXTENT_MODE"),
   );
 }
 

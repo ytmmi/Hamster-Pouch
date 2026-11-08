@@ -12,9 +12,10 @@
  *
  * ## 为什么定位可以纯计算
  *
- * 单元主轴尺寸 = 内容边长 × 宽高比 + 单元盒开销（见 `filmstripCellExtent`），
- * 未解码的单元按 1:1 占位——与旧实现"未解码先按方形"同一占位口径，
- * 解码后从共享宽高比缓存取真值。于是"当前项居中"不再需要查询 DOM
+ * 单元主轴尺寸 = 交叉轴外框 × 主轴比例（横栏 ×r、竖栏 ÷r，见
+ * `filmstripCellExtent`；观感基准 = 76e073a 原视图的 border-box
+ * `aspect-ratio`），未解码的单元按 1:1 占位——与旧实现"未解码先按方形"
+ * 同一占位口径，解码后从共享宽高比缓存取真值。于是"当前项居中"不再需要查询 DOM
  * （旧实现要求当前项已挂载才能 `querySelector`，窗口有界后深处当前项
  * 根本不在 DOM 里），直接按几何算出滚动目标。
  */
@@ -73,16 +74,45 @@ export function filmstripCellRatio(
 }
 
 /**
- * 单元在**主轴**上的外尺寸（px，含单元盒开销，不含间距）。
+ * 单元在**主轴**上的外尺寸（px，border-box，不含间距）。
  *
- * 单元交叉轴撑满容器内容区（内联样式下发）：内容边长 = 厚度 − 容器内边距×2 −
- * 边框×2 − 单元盒开销；主轴 = 内容边长 × 占位比例 + 单元盒开销。
- * `size` 已被面板夹紧（`clampFilmstripSize` ≥ 40），这里仍对异常小值兜底为非负。
+ * **观感基准 = 76e073a 的原视图**（用户口径，缺陷 0041 / D147）：原实现是
+ * flex stretch 撑满交叉轴 + 内联 `aspect-ratio: r`（作用于 **border-box**），
+ * 主轴由外框比例推出。本函数复刻同一几何：
+ * - 横栏（主轴 = 宽）：`crossSize × r`；
+ * - 竖栏（主轴 = 高）：`crossSize / r`（主轴是高，宽高比要取倒数——
+ *   D146 的窗口化实现恒乘 r，把竖栏的横图变高格、竖图变扁格）。
+ * **不加/减单元盒开销**：原视图的 `aspect-ratio` 就作用于外框，内容盒
+ * 因 padding/border 产生的轻微 contain 留边是原观感的一部分，不是缺陷。
+ * 极小值夹紧到单元盒开销（外框不能塌得比 padding+border 还小）。
+ *
+ * **`crossSize` 必须是容器实测客户区减两侧内边距**（`clientWidth`/`clientHeight`
+ * − `FILMSTRIP_PADDING × 2`），**不是**厚度设置 `size` 推算（缺陷 0041）：
+ * 全局滚动条是经典占位滚动条（`::-webkit-scrollbar` 6px），出现时从客户区
+ * 扣掉一条；边框又被"贴面板边"规则去掉一侧。原视图靠 flex stretch **自动**
+ * 跟随客户区收窄，窗口化后改由本函数的实测入参承接同一行为——按 `size`
+ * 推算会让单元交叉轴溢出轨道被裁、还凭空多出一条交叉轴滚动条。
  */
-export function filmstripCellExtent(size: number, ratio: number): number {
-  const content = size - FILMSTRIP_PADDING * 2 - FILMSTRIP_BORDER * 2 - FILMSTRIP_CELL_CHROME;
+export function filmstripCellExtent(
+  crossSize: number,
+  ratio: number,
+  vertical: boolean,
+): number {
   const safeRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
-  return Math.max(0, content) * safeRatio + FILMSTRIP_CELL_CHROME;
+  const mainRatio = vertical ? 1 / safeRatio : safeRatio;
+  const safeCross = Number.isFinite(crossSize) ? Math.max(0, crossSize) : 0;
+  return Math.max(FILMSTRIP_CELL_CHROME, safeCross * mainRatio);
+}
+
+/**
+ * 从容器**厚度设置**推算交叉轴内容区尺寸（px）——**仅供首帧/未测量时占位**。
+ * 布局完成后必须换成实测口径（`clientWidth`/`clientHeight` − padding×2），
+ * 否则滚动条一出现就回到缺陷 0041 的形态。此函数把"理想盒"的推算收敛在
+ * 一处：厚度 − 两侧内边距 − 两侧边框（实际边框可能被贴边规则去掉一侧、
+ * 滚动条可能再扣 6px，理想值只是占位，不是事实）。
+ */
+export function filmstripCrossSizeFallback(size: number): number {
+  return Math.max(0, size - FILMSTRIP_PADDING * 2 - FILMSTRIP_BORDER * 2);
 }
 
 /**
@@ -97,24 +127,26 @@ export function filmstripCellExtent(size: number, ratio: number): number {
 export class FilmstripDeltaIndex {
   private tree: number[] = [0];
   private n = 0;
-  private size = 0;
+  private crossSize = 0;
+  private vertical = false;
   private idToIndex = new Map<string, number>();
   private applied: number[] = [];
 
-  /** 绑定序列（换来源/排序重排即调）：按缓存现值重建前缀修正。 */
-  bindSequence(ids: readonly string[], size: number): void {
-    this.size = size;
+  /** 绑定序列（换来源/排序重排/实测交叉轴变化/换边即调）：按缓存现值重建前缀修正。 */
+  bindSequence(ids: readonly string[], crossSize: number, vertical: boolean): void {
+    this.crossSize = crossSize;
+    this.vertical = vertical;
     this.n = ids.length;
     this.tree = new Array(this.n + 1).fill(0);
     this.applied = new Array(this.n).fill(0);
     this.idToIndex = new Map();
-    const placeholder = filmstripCellExtent(size, 1);
+    const placeholder = filmstripCellExtent(crossSize, 1, vertical);
     for (let i = 0; i < this.n; i++) {
       const id = ids[i] as string;
       this.idToIndex.set(id, i);
       const ratio = getCachedFilmstripRatio(id);
       if (ratio === undefined) continue;
-      const delta = filmstripCellExtent(size, ratio) - placeholder;
+      const delta = filmstripCellExtent(crossSize, ratio, vertical) - placeholder;
       this.applied[i] = delta;
       this.add(i + 1, delta);
     }
@@ -126,7 +158,9 @@ export class FilmstripDeltaIndex {
     if (i === undefined) return;
     const ratio = getCachedFilmstripRatio(fileId);
     if (ratio === undefined) return;
-    const delta = filmstripCellExtent(this.size, ratio) - filmstripCellExtent(this.size, 1);
+    const delta =
+      filmstripCellExtent(this.crossSize, ratio, this.vertical) -
+      filmstripCellExtent(this.crossSize, 1, this.vertical);
     const prev = this.applied[i] as number;
     if (delta === prev) return;
     this.applied[i] = delta;
@@ -148,7 +182,9 @@ export class FilmstripDeltaIndex {
 /**
  * 以视口为中心的对称渲染窗口 + 内容总长。
  *
- * `scroll` 是主轴滚动偏移，`viewport` 是容器主轴客户区尺寸。窗口覆盖
+ * `scroll` 是主轴滚动偏移，`viewport` 是容器主轴客户区尺寸，`crossSize` 是
+ * **交叉轴内容区实测尺寸**（见 `filmstripCellExtent`；未测量时可用
+ * `filmstripCrossSizeFallback` 占位）。窗口覆盖
  * `[center − margin, center + margin]`，margin = 半视口 + N 个占位单元
  * （**两侧同一个数**，对称是硬要求）。`viewport <= 0`（首帧尚未布局）时
  * 退化为"从头渲染一个有界窗口"，等布局完成后由 ResizeObserver 重算。
@@ -167,7 +203,8 @@ export function filmstripWindow(
   total: number,
   scroll: number,
   viewport: number,
-  size: number,
+  crossSize: number,
+  vertical: boolean,
   ratioAt: (index: number) => number,
   cachedDeltaBefore: (index: number) => number = () => 0,
 ): FilmstripWindow {
@@ -175,7 +212,7 @@ export function filmstripWindow(
   const vp = Math.max(0, viewport);
   const center = Math.max(0, scroll) + vp / 2;
   // 占位单元的外尺寸（1:1）：余量按它估，保证上下对称。
-  const placeholder = filmstripCellExtent(size, 1) + FILMSTRIP_GAP;
+  const placeholder = filmstripCellExtent(crossSize, 1, vertical) + FILMSTRIP_GAP;
   const margin = vp / 2 + FILMSTRIP_WINDOW_MARGIN * placeholder;
   const from = center - margin;
   const until = center + margin;
@@ -192,14 +229,18 @@ export function filmstripWindow(
   // 不减且非负时估计只会偏小，本循环常态零次；留作修正口径变化的兜底。
   while (
     start > 0 &&
-    offsetOf(start - 1) + filmstripCellExtent(size, ratioAt(start - 1)) + FILMSTRIP_GAP > from
+    offsetOf(start - 1) +
+      filmstripCellExtent(crossSize, ratioAt(start - 1), vertical) +
+      FILMSTRIP_GAP >
+      from
   ) {
     start--;
   }
   // 估计偏小 → 前推到第一个"底边越过上沿"的单元。
   while (
     start < total - 1 &&
-    offsetOf(start) + filmstripCellExtent(size, ratioAt(start)) + FILMSTRIP_GAP <= from
+    offsetOf(start) + filmstripCellExtent(crossSize, ratioAt(start), vertical) + FILMSTRIP_GAP <=
+    from
   ) {
     start++;
   }
@@ -211,7 +252,7 @@ export function filmstripWindow(
   for (let i = start; i < total && i - start < FILMSTRIP_WINDOW_MAX; i++) {
     if (offset > until) break;
     end = i + 1;
-    offset += filmstripCellExtent(size, ratioAt(i)) + FILMSTRIP_GAP;
+    offset += filmstripCellExtent(crossSize, ratioAt(i), vertical) + FILMSTRIP_GAP;
   }
   if (end <= start) end = Math.min(start + 1, total);
   // 总长 = 全部按占位 + 已缓存单元的累计修正（一次 O(1) 读取）。
@@ -231,13 +272,14 @@ export function filmstripWindow(
 export function filmstripCenterScroll(
   index: number,
   viewport: number,
-  size: number,
+  crossSize: number,
+  vertical: boolean,
   ratioAt: (index: number) => number,
   cachedDeltaBefore: (index: number) => number = () => 0,
 ): number {
-  const placeholder = filmstripCellExtent(size, 1) + FILMSTRIP_GAP;
+  const placeholder = filmstripCellExtent(crossSize, 1, vertical) + FILMSTRIP_GAP;
   const offset = FILMSTRIP_PADDING + index * placeholder + cachedDeltaBefore(index);
-  const extent = filmstripCellExtent(size, ratioAt(index));
+  const extent = filmstripCellExtent(crossSize, ratioAt(index), vertical);
   return offset + extent / 2 - viewport / 2;
 }
 
