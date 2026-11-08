@@ -423,8 +423,9 @@ apps/desktop/src/app_ui/
                       #   BookCoverMenu.tsx 右键菜单里的「标记」多选区（按可注册清单渲染）
                       #     + 「更换封面」（预设色板 + 取色器 + 选图 + 恢复默认），两者经共享菜单的
                       #     **同一个** `extraItems` 插槽挂进来（不是第二份菜单、也不是第三个插槽）
-    MetadataPanel.tsx # 元数据面板（索引字段 + EXIF/ffprobe 摘要；消费宿主设置 ui.sizeUnit/dateFormat/dateShowTime）
-    metadataInfo.ts   # 元数据面板的**纯解析**（ffprobe 原始 JSON、EXIF 摘要 → 尺寸/时长/编码/码率/帧率）
+    MetadataPanel.tsx # 元数据面板（顶部摘要含拍摄参数自动行 + EXIF/媒体信息结构化明细 + 折叠原始 JSON，D145/D145-R1；消费宿主设置 ui.sizeUnit/dateFormat/dateShowTime）
+    metadataInfo.ts   # 元数据面板的**纯解析**（ffprobe 原始 JSON → 容器/逐流事实、EXIF 摘要十键含拍摄参数 → 事实；不解析来源没有的键）
+    metadataFormat.ts # 元数据面板的**纯格式化与行构造**（EXIF 日期重排/方向翻译键/容器别名/逐流明细行/拍摄参数自动行，D145/D145-R1）
     MediaPreviewPanel.tsx   # 媒体预览主面板（列表行渲染 + 三种视图容器 + 图片尺寸 CSS 变量）
     mediaPreviewData.ts     # 面板取数（全库游标翻页 + 排序后的条目流）
     mediaPreviewPaging.ts   # 游标翻页的纯逻辑（drainPages：严格前进 + 页数上限两道循环安全闸门）

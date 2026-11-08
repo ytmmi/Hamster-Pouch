@@ -1080,6 +1080,52 @@ button.danger {
   word-break: break-all;
 }
 
+/* ===== 元数据面板（2026-11-08 / D145）=====
+ * 只作用于 `.metadata-panel` 作用域：共享的 `.kv` / `.json-block` 被别的面板共用，
+ * 不动它们的缺省值。标签列 max-content 自适应（长标签不再截断）、上限 160px 防挤占值列。 */
+
+.metadata-panel .meta-kv {
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+  column-gap: 12px;
+}
+
+/* 标签与值都允许折行：长标签（繁中/英文）与 64 位哈希都不把面板顶出横向滚动。 */
+.metadata-panel .meta-kv > span:nth-child(odd) {
+  max-width: 160px;
+  overflow-wrap: anywhere;
+}
+
+.metadata-panel .meta-kv > span:nth-child(even) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.meta-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meta-empty {
+  padding: 0;
+}
+
+/* 原始 JSON：默认折叠的底账。summary 行与 .collapse-toggle 同款手感。 */
+.meta-raw > summary {
+  cursor: pointer;
+  color: var(--fg-dim);
+  font-size: 12px;
+  user-select: none;
+}
+
+.meta-raw > summary:hover {
+  color: var(--fg);
+}
+
+.meta-raw[open] > summary {
+  margin-bottom: 6px;
+}
+
 .progress-wrap {
   display: flex;
   gap: 8px;

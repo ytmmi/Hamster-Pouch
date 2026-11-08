@@ -8,7 +8,7 @@
  * | --- | --- |
  * | `ui.sizeUnit` | 体积：二进制 `KiB/MiB/GiB`（缺省）或十进制 `KB/MB/GB`；**永远按体积自适应**换单位 |
  * | `ui.dateFormat` | 日期：`YYYY-MM-DD`（缺省）/ `MM/DD/YYYY` / `DD/MM/YYYY` |
- * | `ui.dateShowTime` | 日期后是否再显示 ` HH:MM:SS`（缺省关） |
+ * | `ui.dateShowTime` | 日期后是否再显示 ` HH:MM:SS`（缺省关）；EXIF 拍摄时间同受此开关约束 |
  *
  * **按类型自适应显示**（每项各占一行；**取不到值就显示 `—`，不静默消失**——否则"索引里没数据"
  * 与"面板坏了"看起来一模一样）：
@@ -17,13 +17,14 @@
  * | --- | --- | --- |
  * | 图像 | 尺寸 | 前端解码取真实像素（EXIF 的 `PixelXDimension` 对 PNG 等为 null，仅作兜底） |
  * | 视频 | 尺寸 / 时长 / 编码 / 码率 / 帧率 | 优先 `media_info_json`（ffprobe 原始 JSON）；索引里没有缓存时用前端 `<video>` 探测**兜底尺寸与时长**（编码 / 码率 / 帧率 DOM 拿不到，如实显示 `—`） |
- * | 音频 | 时长 | 索引里**没有**音频元数据（D11 占位行），只能前端 `preload="metadata"` 读一次 |
+ * | 音频 | 时长 / 编码 / 采样率 | 优先索引里的 ffprobe 缓存（D115）；旧库未升级时前端 `preload="metadata"` 兜底时长 |
  *
  * 「类型」下面是**文件后缀**（`.png`，小写带点；取索引里既有的 `relative_path`，**不改后端**）：
  * 两者一起回答"这是什么文件"。无后缀（目录名里的点不算、隐藏文件不算）显示 `—`，与其它行同款。
  *
- * 两坨原始 JSON（EXIF / 媒体信息）照旧原样展示：派生行是"看得懂的摘要"，原始 JSON 是
- * 不丢信息的底账。
+ * **三段式布局（2026-11-08 / D145）**：顶部摘要是"看得懂的速览"；EXIF / 媒体信息各自先是
+ * **结构化明细表**（字段翻译成人话、逐流分组、缺值显示 `—`），原始 JSON 收进**默认折叠**的
+ * 「原始 JSON」——底账不丢信息，但不再用两堵 220px 的 JSON 墙把面板撑满。
  */
 
 import { Fragment, useEffect, useMemo, useState, type JSX } from "react";
@@ -40,6 +41,7 @@ import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import type { PanelRenderCtx } from "../core/panelRegistry";
+import type { Translate } from "../i18n";
 import {
   formatBitRate,
   formatByteSize,
@@ -51,6 +53,12 @@ import {
 } from "../shared/format";
 import { useHostSettingValue } from "../shared/settingValue";
 import type { FileMetadataResult } from "../shared/types";
+import {
+  buildExifRows,
+  buildMediaRows,
+  buildShootingRows,
+  type MetaRow,
+} from "./metadataFormat";
 import { fileSuffix, parseExifSummary, parseMediaInfo } from "./metadataInfo";
 
 function pretty(json: string | null): string {
@@ -62,24 +70,63 @@ function pretty(json: string | null): string {
   }
 }
 
-/** 表格里的一行（标签 + 值）。 */
-interface MetaRow {
-  label: string;
-  value: string;
-  /** 等宽（哈希这类定长十六进制串）。 */
-  mono?: boolean;
-}
-
 /** 前端探测到的补充事实（索引里没有的那些）。 */
 interface ProbedFacts {
   /** 图像解码 / 视频容器的真实像素（EXIF 常缺、视频可能没有 ffprobe 缓存）。 */
   width: number | null;
   height: number | null;
-  /** 视频 / 音频时长（音频是 D11 占位行，索引里没有；视频可能没探过）。 */
+  /** 视频 / 音频时长（旧库音频可能没有 ffprobe 缓存；视频可能没探过）。 */
   durationMs: number | null;
 }
 
 const NO_FACTS: ProbedFacts = { width: null, height: null, durationMs: null };
+
+/** 键值行列表（摘要与明细表共用；标签列样式由外层 `.meta-kv` 作用域限定）。 */
+function MetaRows({ rows }: { rows: MetaRow[] }): JSX.Element {
+  return (
+    <div className="kv meta-kv">
+      {rows.map((row, index) => (
+        <Fragment key={`${index}-${row.label}`}>
+          <span>{row.label}</span>
+          <span className={row.mono ? "mono" : undefined}>{row.value}</span>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 一个明细区：结构化表在前，原始 JSON 折叠在后。
+ *
+ * 结构化表**总是渲染**（解析失败/无缓存时显示空态文案）；原始 JSON 是 `<details>`，
+ * 默认收起——它是"不丢信息的底账"，不是主视图。切文件时由调用方用 `key` 重置折叠态。
+ */
+function MetaDetailSection({
+  title,
+  rows,
+  rawJson,
+  t,
+}: {
+  title: string;
+  rows: MetaRow[];
+  rawJson: string | null;
+  t: Translate;
+}): JSX.Element {
+  return (
+    <section className="meta-section">
+      <div className="section-title">{title}</div>
+      {rows.length > 0 ? (
+        <MetaRows rows={rows} />
+      ) : (
+        <span className="placeholder meta-empty">{t("metadata.noData")}</span>
+      )}
+      <details className="meta-raw">
+        <summary>{t("metadata.rawJson")}</summary>
+        <pre className="json-block">{pretty(rawJson)}</pre>
+      </details>
+    </section>
+  );
+}
 
 export interface MetadataPanelProps {
   /** dockview 面板 API（可选）：面板回到前台时补读一次设置（四条触发源的第 4 条）。 */
@@ -229,6 +276,11 @@ export function MetadataPanel({ api: panelApi }: MetadataPanelProps = {}): JSX.E
           : formatPixelSize(mediaFacts?.width ?? probed.width, mediaFacts?.height ?? probed.height),
       });
     }
+    // 图像拍摄参数（焦距/光圈/快门/ISO）放第一段，**自动模式：有就显示、无就不显示**
+    // （2026-11-08 / D145）。数据来自后端 extract_exif 实时提取，缺哪项哪项不占行。
+    if (isImage) {
+      out.push(...buildShootingRows(app.t, exifFacts));
+    }
     if (isVideo || isAudio) {
       out.push({
         label: app.t("metadata.duration"),
@@ -264,23 +316,41 @@ export function MetadataPanel({ api: panelApi }: MetadataPanelProps = {}): JSX.E
     return out;
   }, [meta, app, sizeUnit, dateFormat, dateShowTime, probed, mediaFacts, exifFacts]);
 
+  const exifRows = useMemo(
+    () => buildExifRows(app.t, exifFacts, dateFormat, dateShowTime),
+    [app, exifFacts, dateFormat, dateShowTime],
+  );
+  const mediaRows = useMemo(() => buildMediaRows(app.t, mediaFacts), [app, mediaFacts]);
+
+  const isImage = meta?.media_type === "image";
+  const hasMediaInfo = meta?.media_type === "video" || meta?.media_type === "audio";
+  // 切文件时重置两个 <details> 的折叠态（上一个文件展开的底账不该跟到下一个文件）。
+  const fileKey = meta ? `${meta.source_id}:${meta.id}` : "none";
+
   return (
-    <div className="panel">
+    <div className="panel metadata-panel">
       {!meta && <span className="placeholder">{app.t("common.noSelection")}</span>}
       {meta && (
         <>
-          <div className="kv">
-            {rows.map((row) => (
-              <Fragment key={row.label}>
-                <span>{row.label}</span>
-                <span className={row.mono ? "mono" : undefined}>{row.value}</span>
-              </Fragment>
-            ))}
-          </div>
-          <div className="section-title">{app.t("metadata.exif")}</div>
-          <pre className="json-block">{pretty(meta.exif_json)}</pre>
-          <div className="section-title">{app.t("metadata.mediaInfo")}</div>
-          <pre className="json-block">{pretty(meta.media_info_json)}</pre>
+          <MetaRows rows={rows} />
+          {isImage && (
+            <MetaDetailSection
+              key={`exif:${fileKey}`}
+              title={app.t("metadata.exif")}
+              rows={exifRows}
+              rawJson={meta.exif_json}
+              t={app.t}
+            />
+          )}
+          {hasMediaInfo && (
+            <MetaDetailSection
+              key={`media:${fileKey}`}
+              title={app.t("metadata.mediaInfo")}
+              rows={mediaRows}
+              rawJson={meta.media_info_json}
+              t={app.t}
+            />
+          )}
         </>
       )}
     </div>
