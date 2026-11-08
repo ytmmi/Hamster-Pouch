@@ -30,6 +30,15 @@ const SKIP_DIRS = new Set([
   "node_modules", "target", "dist", ".git", ".pnpm-store", "backups",
   ".codegraph", ".omo", "gen",
 ]);
+/** 按**相对路径**跳过的整棵子树（目录名太通用，不能进 SKIP_DIRS）。
+ *
+ * 目前只有一项：随包第三方运行时 `plugins/system/python-core/runtime/`
+ * ——它是 vendored 的 CPython 可嵌入发行版，来源与摘要由
+ * `tools/python-runtime.lock.json` 固定，`tools/fetch-python-runtime.mjs` 落地，
+ * 整个目录被 `.gitignore` 排除。它的 `LICENSE.txt` 行尾由**上游**决定
+ * （混用 CRLF/LF，约 30 个换行是 LF），不是本仓库的编辑事故；
+ * 改写 vendored 文件的字节会让签名与摘要对不上，故这里按路径整体跳过。 */
+const SKIP_PATH_PREFIXES = ["plugins/system/python-core/runtime"];
 /** 确定性：按路径排序后再遍历，输出顺序稳定。 */
 const files = [];
 
@@ -43,6 +52,14 @@ function walk(dir) {
   for (const entry of entries) {
     if (SKIP_DIRS.has(entry)) continue;
     const p = join(dir, entry);
+    const rel = p.split("\\").join("/");
+    if (
+      SKIP_PATH_PREFIXES.some(
+        (prefix) => rel === prefix || rel.startsWith(`${prefix}/`),
+      )
+    ) {
+      continue;
+    }
     let st;
     try {
       st = statSync(p);

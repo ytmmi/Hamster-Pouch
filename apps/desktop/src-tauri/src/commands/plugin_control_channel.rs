@@ -17,7 +17,9 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::shared::{ApiResponse, EmitHp, api_from_hp, ensure_global};
+use crate::commands::shared::{
+    ApiResponse, EmitHp, api_from_hp, ensure_global, global, lock_global,
+};
 
 /// 广播 `plugin.error`：某个面板的 schema 查询失败。
 ///
@@ -144,6 +146,26 @@ pub(crate) fn supervised_call(
     result
 }
 
+/// 解析本次调用要执行的**宿主命令**（只在解析阶段短暂持锁）。
+///
+/// - `external-process`：执行插件自己的入口（`owner.entry_path`）。
+/// - `python`：执行 **Python 核心**的启动器 `python-core.exe --run <脚本>`。宿主刻意
+///   **不**直连 `runtime/python.exe`——解释器由 Python 核心自行解析，否则它只是个空壳；
+///   拉起的职责归 Python 核心（RFC 0004「Python 核心」）。
+///
+/// 其余运行形态（`dynamic-library` / `wasm`）仍返回「尚未接入」错。
+///
+/// 为什么单独成一步：查询本身可能阻塞到超时（D61 默认 2s），跨进程等待一律不持锁，
+/// 所以这里只解析路径、返回命令，执行交给 [`supervised_call`] 的闭包。
+pub(crate) fn resolve_plugin_query(
+    state: &AppState,
+    owner: &PanelOwner,
+) -> HpResult<ExternalProcessQuery> {
+    let guard = lock_global(state)?;
+    let db = global(&guard)?;
+    hp_plugin_host::query_for_owner(db, owner)
+}
+
 /// 取（或查询并缓存）面板 schema。
 fn fetch_panel_schema(
     state: &AppState,
@@ -180,29 +202,15 @@ fn fetch_panel_schema(
         });
     }
 
-    // 三种运行形态共用同一请求名；本轮先落地 `external-process`（示例与系统插件的形态）。
-    if owner.runtime_kind != RuntimeKind::ExternalProcess {
-        return Err(HpError::Plugin(format!(
-            "运行形态 {} 的 schema 通道尚未接入（当前只支持 external-process）",
-            owner.runtime_kind.as_str()
-        )));
-    }
-    let entry = owner.entry_path.clone().ok_or_else(|| {
-        HpError::Plugin("注册表缺少插件安装目录（source_ref），无法定位入口".into())
-    })?;
-    if !entry.is_file() {
-        return Err(HpError::Plugin(format!(
-            "插件入口不存在: {}",
-            entry.display()
-        )));
-    }
+    // 三种运行形态共用同一请求名；本轮落地 `external-process` 与 `python`
+    // （`python` 形态的入口是 `.py` 源码，由 Python 核心 system 插件拉起）。
+    let mut query = resolve_plugin_query(state, owner)?;
 
     // 查询期间**不持任何锁**：这里可能阻塞到超时（D61 默认 2s）。
     let plugin_id_for_run = owner.plugin_id.clone();
-    let entry_clone = entry.clone();
     let panel_id_clone = panel_id.to_string();
     let schema_json = supervised_call(state, plugin_id_for_run, move || {
-        ExternalProcessQuery::for_entry(entry_clone).query(
+        query.query(
             &PanelSchemaParams::new(&panel_id_clone, CONTROL_API_VERSION),
             SCHEMA_QUERY_TIMEOUT,
             SCHEMA_MAX_BYTES,

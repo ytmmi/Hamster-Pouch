@@ -9,15 +9,15 @@
 
 use hp_core::{CONTROL_API_VERSION, HpError, HpResult, RuntimeKind};
 use hp_plugin_host::{
-    ExternalProcessQuery, PanelOwner, PanelQueryParams, PanelQuerySpec, PanelSelectionContext,
-    QUERY_MAX_BYTES, QUERY_TIMEOUT,
+    PanelOwner, PanelQueryParams, PanelQuerySpec, PanelSelectionContext, QUERY_MAX_BYTES,
+    QUERY_TIMEOUT,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::AppState;
 use crate::commands::plugin_control_channel::{
-    emit_plugin_error, panel_owner_enabled, supervised_call,
+    emit_plugin_error, panel_owner_enabled, resolve_plugin_query, supervised_call,
 };
 use crate::commands::shared::{ApiResponse, api_from_hp, ensure_global};
 
@@ -121,22 +121,9 @@ fn fetch_panel_data(
         });
     }
 
-    // 三种运行形态共用同一请求名；本轮先落地 `external-process`（与 schema 通道同口径）。
-    if owner.runtime_kind != RuntimeKind::ExternalProcess {
-        return Err(HpError::Plugin(format!(
-            "运行形态 {} 的取数通道尚未接入（当前只支持 external-process）",
-            owner.runtime_kind.as_str()
-        )));
-    }
-    let entry = owner.entry_path.clone().ok_or_else(|| {
-        HpError::Plugin("注册表缺少插件安装目录（source_ref），无法定位入口".into())
-    })?;
-    if !entry.is_file() {
-        return Err(HpError::Plugin(format!(
-            "插件入口不存在: {}",
-            entry.display()
-        )));
-    }
+    // 三种运行形态共用同一请求名；本轮落地 `external-process` 与 `python`
+    // （与 schema 通道同口径）。
+    let mut query = resolve_plugin_query(state, owner)?;
 
     let specs: Vec<PanelQuerySpec> = binds
         .iter()
@@ -151,14 +138,9 @@ fn fetch_panel_data(
 
     // 查询期间**不持任何锁**：这里可能阻塞到超时（与 schema 通道同口径 2s）。
     let plugin_id = owner.plugin_id.clone();
-    let entry_clone = entry.clone();
     let request_clone = request.clone();
     let text = supervised_call(state, plugin_id, move || {
-        ExternalProcessQuery::for_entry(entry_clone).query_panel_data(
-            &request_clone,
-            QUERY_TIMEOUT,
-            QUERY_MAX_BYTES,
-        )
+        query.query_panel_data(&request_clone, QUERY_TIMEOUT, QUERY_MAX_BYTES)
     })?;
     let results = parse_panel_data_results(&text)?;
     let missing = specs

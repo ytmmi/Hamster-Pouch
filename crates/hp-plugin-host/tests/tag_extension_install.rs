@@ -219,17 +219,17 @@ fn real_tag_extension_is_catalogued_last_without_enable_state() {
     let installer = PluginInstaller::new(tmp.path().join("plugins"));
 
     // 带面板的插件（小体积）作为"面板在前"的对照。
-    let hello_src = repo_root().join("plugins/examples/hello");
+    let demo_src = repo_root().join("plugins/examples/control-demo");
     assert!(
-        hello_src.is_dir(),
+        demo_src.is_dir(),
         "夹具路径存在性（repo_root 解析错时不许静默通过）"
     );
-    let hello = installer
-        .install_registry_row(&InstallSource::LocalPath(hello_src), "2026-01-01T00:00:00Z")
-        .expect("安装 hello 示例失败");
+    let demo = installer
+        .install_registry_row(&InstallSource::LocalPath(demo_src), "2026-01-01T00:00:00Z")
+        .expect("安装 control-demo 示例失败");
     PluginHost
-        .register(&mut db, &hello)
-        .expect("注册 hello 失败");
+        .register(&mut db, &demo)
+        .expect("注册 control-demo 失败");
 
     // 只装**一个**真实包即可证明"真实数据包会被目录列出"：每个包要复制 128–162MB，
     // 多包排序由 `m9_panel_catalog.rs` 的合成夹具覆盖，不必在这里重复付磁盘代价。
@@ -253,8 +253,11 @@ fn real_tag_extension_is_catalogued_last_without_enable_state() {
     );
 
     // 带面板的在前。
-    assert_eq!(catalog[0].plugin_id, "dev.hamsterpouch.example.hello");
-    assert!(catalog[0].panel.is_some(), "hello 应带面板");
+    assert_eq!(
+        catalog[0].plugin_id,
+        "dev.hamsterpouch.example.control_demo"
+    );
+    assert!(catalog[0].panel.is_some(), "control-demo 应带面板");
     assert!(!catalog[0].stateless, "有代码的插件有启用语义");
 
     // 真实数据扩展在最后，且**没有启用语义**。

@@ -38,11 +38,11 @@ fn every_bundled_manifest_is_accepted_by_the_host() {
     manifests(&plugins_dir, &mut found);
     found.sort();
 
-    // 至少要有 system/palette 与两个 example —— 数量为 0 说明路径解析错了
-    // （那样本用例会"静默通过"，比红还糟）。
+    // 至少要能发现随仓库分发的两个插件（示例 control-demo + 系统 python-core）——
+    // 数量为 0 说明路径解析错了（那样本用例会"静默通过"，比红还糟）。
     assert!(
-        found.len() >= 3,
-        "只找到 {} 份 manifest（期望 >= 3）：{:?}",
+        found.len() >= 2,
+        "只找到 {} 份 manifest（期望 >= 2）：{:?}",
         found.len(),
         found
     );

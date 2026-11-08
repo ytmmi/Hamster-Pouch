@@ -59,7 +59,7 @@ fn self_claimed_system_package(root: &Path) -> PathBuf {
 
 #[test]
 fn example_plugin_is_valid_and_read_only() {
-    let dir = repo_root().join("plugins/examples/hello");
+    let dir = repo_root().join("plugins/examples/control-demo");
     let pkg = read_package(&dir).expect("读取示例插件失败");
     pkg.manifest.validate().expect("示例插件应通过宿主校验");
 
@@ -80,7 +80,7 @@ fn example_plugin_is_valid_and_read_only() {
 
 #[test]
 fn system_plugin_is_valid_and_effective_trust_is_system() {
-    let dir = repo_root().join("plugins/system/palette");
+    let dir = repo_root().join("plugins/system/python-core");
     let pkg = read_package(&dir).expect("读取系统插件失败");
     pkg.manifest.validate().expect("系统插件应通过宿主校验");
     assert!(!pkg.manifest.capabilities.contains(&Capability::FsWrite));
@@ -143,13 +143,13 @@ fn local_path_install_cannot_self_declare_system_trust() {
 #[test]
 fn bundled_system_plugin_gets_system_trust_from_host_decision() {
     // 随包分发的内置插件（`plugins/system/*`）由**宿主**判定为 system——
-    // 与 manifest 是否自称无关（palette 清单根本没写 source）。
-    // D40+：palette 已有 Ed25519 签名，信任等级为 System。
+    // 与 manifest 是否自称无关（python-core 清单根本没写 source）。
+    // D40+：python-core 已有 Ed25519 签名，信任等级为 System。
     let root = temp_root("bundled");
     let installer = PluginInstaller::new(root.join("store"));
     let row = installer
         .install_registry_row(
-            &InstallSource::Bundled(repo_root().join("plugins/system/palette")),
+            &InstallSource::Bundled(repo_root().join("plugins/system/python-core")),
             INSTALLED_AT,
         )
         .expect("随包安装失败");

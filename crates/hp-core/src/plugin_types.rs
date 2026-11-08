@@ -115,6 +115,11 @@ impl fmt::Display for SourceKind {
 pub enum RuntimeKind {
     /// 外部进程：默认隔离形态，AI 打标默认使用。
     ExternalProcess,
+    /// Python 源码：`entry` 指向 `.py`，由「Python 核心」system 插件拉起解释器（RFC 0009）。
+    ///
+    /// 与 [`RuntimeKind::ExternalProcess`] 的唯一区别是**谁提供入口**：脚本本身不可执行，
+    /// 宿主必须经 Python 核心插件（`dev.hamsterpouch.system.python_core`）拉起。
+    Python,
     /// 动态库：仅 `system`/`trusted` 可用，需声明 `native.code`。
     DynamicLibrary,
     /// WASM：首期支持，资源限额 + 纯数据输出。
@@ -127,6 +132,7 @@ impl RuntimeKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             RuntimeKind::ExternalProcess => "external-process",
+            RuntimeKind::Python => "python",
             RuntimeKind::DynamicLibrary => "dynamic-library",
             RuntimeKind::Wasm => "wasm",
             RuntimeKind::StaticData => "static-data",
@@ -136,6 +142,7 @@ impl RuntimeKind {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "external-process" => Some(RuntimeKind::ExternalProcess),
+            "python" => Some(RuntimeKind::Python),
             "dynamic-library" => Some(RuntimeKind::DynamicLibrary),
             "wasm" => Some(RuntimeKind::Wasm),
             "static-data" => Some(RuntimeKind::StaticData),

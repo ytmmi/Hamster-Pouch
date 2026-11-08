@@ -97,8 +97,25 @@ tools/tagdict/output/*
 # 插件入口是**本地构建**的可执行文件（源码是测试夹具 crates/hp-plugin-host/src/bin/，
 # 一份代码同时当测试对端与示例）；与 mpv 同理不入库——二进制不该进版本库，
 # 而且构建机与目标机的 ABI 未必一致。构建办法见 plugins/examples/control-demo/README.md。
-# 只忽略 bin/ 下的 .exe：同目录的 README.md 等说明文档仍入库（见 plugins/examples/hello/bin/）。
+# 只忽略 bin/ 下的 .exe：同目录的 README.md 等说明文档仍入库（见 plugins/system/python-core/bin/README.md）。
 plugins/**/bin/*.exe
+
+# === 随包 Python 运行时：获取产物，不入库 ===
+# 由 tools/fetch-python-runtime.mjs 按 tools/python-runtime.lock.json（URL + SHA256，
+# 摘要不符即拒绝解压）下载并解压到 plugins/system/python-core/runtime/。约 25MB，
+# 与平台绑定，且与 mpv / 插件入口同理——二进制不该进版本库。
+# 打包自检（tools/package-build.mjs 的 verifyBundledRuntime）对它的存在性 fail-closed。
+plugins/system/python-core/runtime/
+
+# === python-core 的签名：覆盖的是构建产物，故同样不入库 ===
+# SHA256SUMS 逐文件摘要 + SHA256SUMS.sig（Ed25519）。它们覆盖**包内全部参与加载的文件**，
+# 其中 `bin/python-core.exe`（本机构建）与 `runtime/`（获取产物）都不入库——把签名入库
+# 只会留下一份与任何一次真实构建都对不上的陈旧记录（换台机器重建启动器即失效）。
+# 每次构建启动器后都要重新签：`node tools/sign-plugin.mjs plugins/system/python-core`。
+# 打包自检（verifyBundledRuntime）对签名 fail-closed：D40 规定 system 等级必须签名，
+# 缺签名的随包插件会在安装时被静默降级为 community。
+plugins/system/python-core/SHA256SUMS
+plugins/system/python-core/SHA256SUMS.sig
 
 # 插件签名私钥（只提交公钥，私钥保持本机）
 tools/signing/signing-key.pem

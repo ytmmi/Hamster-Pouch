@@ -23,7 +23,7 @@ Rust 核心层
 - `hp-hash`：内容哈希与感知哈希；只输出哈希值与算法元数据。
 - `hp-album`：固定相册、跟随源同步规则、成员维护、相册查询。
 - `hp-fsops`：媒体源间真实文件操作；所有硬盘变更必须可记录，撤销范围属于实现期开放点。
-- `hp-plugin-host`：插件包发现、git/本地路径安装、锁定版本、按仓库启用与能力授权、信任等级校验、宿主 API。**运行形态执行体（`external-process` 常驻生命周期 / `dynamic-library` / `wasm`）尚未实现**——当前 `host.rs` 的 `load` 只做校验与 `LoadOutcome`；唯一有执行路径的是**一次一问一答**的控件 schema 查询（`crates/hp-plugin-host/src/channel.rs`）。**不要把三形态"生命周期"读成已具备**（同文第 99、100 行并列了这两条待办）。
+- `hp-plugin-host`：插件包发现、git/本地路径安装、锁定版本、按仓库启用与能力授权、信任等级校验、宿主 API。**运行形态执行体（`external-process` 常驻生命周期 / `dynamic-library` / `wasm`）尚未实现**——当前 `host.rs` 的 `load` 只做校验与 `LoadOutcome`；有执行路径的是**一次一问一答**的控件 schema / 取数 / 事件通道（`crates/hp-plugin-host/src/channel.rs`），以及 **`python` 形态**（`crates/hp-plugin-host/src/python_core.rs`：宿主执行随包 **Python 核心** system 插件的 `bin/python-core.exe --run <版本目录>/<entry>`，解释器随包、不依赖用户系统 Python；Python 插件自身默认仍 `community`）。**不要把三形态"生命周期"读成已具备**（同文第 99、100 行并列了这两条待办）。
 - `hp-ai`：AI 打标提供方抽象、任务排队、结果回写；不内置具体厂商 SDK；第一期仅处理图片（D17）。
 - `hp-media`：媒体子进程管理（libmpv，单实例常驻、崩溃重启）、播放控制、ffprobe 元数据探测、ffmpeg 抽帧宿主、**音频波形图生成**（`waveform.rs`，ffmpeg `showwavespic` → 透明背景 PNG，按内容哈希缓存；2026-10-17 / D115）；外部进程调用带超时与错误降级。
 

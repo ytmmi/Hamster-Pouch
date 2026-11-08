@@ -117,28 +117,31 @@ fn installed_but_disabled_panel_shows_up_only_in_the_catalog() {
     assert!(!other[0].enabled, "启用是按仓库隔离的");
 }
 
-/// 随仓库分发的 `hello` 示例（声明了面板、带 `bin/hello.exe` 缺席）也要出现在目录里——
-/// 这正是用户第一次踩到的那条路径：装了 hello，菜单里却什么都没有。
+/// 随仓库分发的 `control-demo` 示例（声明了面板；入口 `bin/control-demo.exe` 是本地构建产物，
+/// 可能缺席）也要出现在目录里——这正是用户第一次踩到的那条路径：装了示例，菜单里却什么都没有。
 #[test]
 fn bundled_example_panels_are_listed_even_without_an_entry_binary() {
     let root = temp_root("catalog-example");
     let installer = PluginInstaller::new(root.join("store"));
     let row = installer
         .install_registry_row(
-            &InstallSource::LocalPath(repo_root().join("plugins/examples/hello")),
+            &InstallSource::LocalPath(repo_root().join("plugins/examples/control-demo")),
             INSTALLED_AT,
         )
-        .expect("安装 hello 示例失败");
+        .expect("安装 control-demo 示例失败");
     let mut db = GlobalDb::open(root.join("global.sqlite3")).expect("打开全局库失败");
     PluginHost.register(&mut db, &row).expect("注册失败");
 
     let catalog = PluginHost.panel_catalog(&db, REPO).expect("取面板目录失败");
-    assert_eq!(catalog.len(), 1, "hello 声明了一个面板: {catalog:?}");
-    assert_eq!(catalog[0].plugin_id, "dev.hamsterpouch.example.hello");
+    assert_eq!(catalog.len(), 1, "control-demo 声明了一个面板: {catalog:?}");
+    assert_eq!(
+        catalog[0].plugin_id,
+        "dev.hamsterpouch.example.control_demo"
+    );
     assert!(catalog[0].panel.is_some());
     assert!(!catalog[0].enabled);
     assert!(
-        repo_root().join("plugins/examples/hello").exists(),
+        repo_root().join("plugins/examples/control-demo").exists(),
         "夹具路径存在性（防止 repo_root 解析错导致用例静默通过）"
     );
 }
@@ -173,7 +176,7 @@ fn write_static_data_package(root: &std::path::Path, dir: &str, id: &str, name: 
 /// 回归背景（用户实际反馈）：装了 `tagdict-*` / `tagrel-*` 之后「扩展」菜单里
 /// **什么都不出现**——因为目录只发 `kind = panel` 的贡献点，而数据包按 D36.1
 /// 声明 `contributions: []`，结构上不可能命中。用户只能得出"装了没反应"，
-/// 与当年 `hello` / `control-demo` 踩的是同一个缺陷。
+/// 与示例插件当年踩的是同一个缺陷。
 ///
 /// 用户裁定（2026-09-30）：数据扩展**无状态、安装即启用**，因此只列在菜单最底下、
 /// **不给启用按钮**——目录里的 `stateless` 就是这个判据，界面据此不画开关。
@@ -186,15 +189,15 @@ fn data_extensions_are_listed_last_and_have_no_enable_state() {
     let mut db = GlobalDb::open(root.join("global.sqlite3")).expect("打开全局库失败");
 
     // ① 一个**带面板**的插件作为对照。
-    let hello = installer
+    let demo = installer
         .install_registry_row(
-            &InstallSource::LocalPath(repo_root().join("plugins/examples/hello")),
+            &InstallSource::LocalPath(repo_root().join("plugins/examples/control-demo")),
             INSTALLED_AT,
         )
-        .expect("安装 hello 示例失败");
-    PluginHost.register(&mut db, &hello).expect("注册失败");
+        .expect("安装 control-demo 示例失败");
+    PluginHost.register(&mut db, &demo).expect("注册失败");
 
-    // ② 两个纯数据扩展包。id 刻意**排在 hello 之前**（`aaa` < `example`），
+    // ② 两个纯数据扩展包。id 刻意**排在 control-demo 之前**（`aaa` < `example`），
     //    用来证明"数据扩展在最后"靠的是"无面板"这个判据，而不是 id 字典序的巧合。
     for (dir, id, name) in [
         (
@@ -219,8 +222,14 @@ fn data_extensions_are_listed_last_and_have_no_enable_state() {
     assert_eq!(catalog.len(), 3, "1 个面板 + 2 个数据扩展: {catalog:#?}");
 
     // ③ 带面板的在最前，即便它的插件 id 字典序更大。
-    assert_eq!(catalog[0].plugin_id, "dev.hamsterpouch.example.hello");
-    assert!(catalog[0].panel.is_some(), "hello 应带面板: {catalog:#?}");
+    assert_eq!(
+        catalog[0].plugin_id,
+        "dev.hamsterpouch.example.control_demo"
+    );
+    assert!(
+        catalog[0].panel.is_some(),
+        "control-demo 应带面板: {catalog:#?}"
+    );
     assert!(!catalog[0].stateless, "有代码的插件有启用语义");
 
     // ④ 数据扩展整组在最后，且**无启用语义**（界面据此不画启用按钮）。

@@ -6,6 +6,7 @@ mod channel;
 mod host;
 mod install;
 mod manifest;
+mod python_core;
 mod supervision;
 mod trust;
 
@@ -13,7 +14,7 @@ pub use channel::{
     CONTROL_EVENT_METHOD_PREFIX, ExternalProcessQuery, PANEL_QUERY_REQUEST, PANEL_SCHEMA_REQUEST,
     PanelQueryParams, PanelQuerySpec, PanelSchemaCache, PanelSchemaKey, PanelSchemaParams,
     PanelSelectionContext, QUERY_MAX_BYTES, QUERY_TIMEOUT, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT,
-    control_event_method,
+    control_event_method, hidden_command,
 };
 pub use host::{
     LoadOutcome, PanelCatalogEntry, PanelCatalogPanel, PanelOwner, PluginHost, RepoContribution,
@@ -21,6 +22,9 @@ pub use host::{
 };
 pub use install::{InstallSource, InstalledPackage, PluginInstaller};
 pub use manifest::{MANIFEST_FILE, PluginPackage, discover_packages, parse_manifest, read_package};
+pub use python_core::{
+    PYTHON_CORE_PLUGIN_ID, PYTHON_RUN_FLAG, find_python_core_launcher, query_for_owner,
+};
 pub use supervision::{
     MAX_CONSECUTIVE_FAILURES, ProcessSupervisor, SupervisionRegistry, SupervisionStatus,
 };

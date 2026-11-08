@@ -279,46 +279,98 @@ pub(crate) fn plugin_install_bundled(
 ) -> ApiResponse<BundledInstallReport> {
     let outcome = (|| -> HpResult<BundledInstallReport> {
         ensure_global(&state, &app)?;
-        let root = bundled_plugins_dir().ok_or_else(|| {
-            HpError::NotFound(
-                "未找到随包插件目录 plugins/system（可用 HP_BUNDLED_PLUGINS_DIR 指定；\
-                 打包运行需补 tauri.conf.json 的 bundle.resources）"
-                    .into(),
-            )
-        })?;
-        let installer = PluginInstaller::new(state.plugin_root.as_ref().clone());
-        let candidates = bundled_candidates(&root)?;
-
-        // 阶段一：磁盘安装。**不持库锁**——复制是慢操作，不该挡住其它命令。
-        let now = now_iso();
-        let mut items = Vec::new();
-        let mut pending: Vec<(usize, PluginRegistryRow)> = Vec::new();
-        for candidate in &candidates {
-            let (item, row) = install_bundled_candidate(&installer, candidate, &now);
-            if let Some(row) = row {
-                pending.push((items.len(), row));
-            }
-            items.push(item);
-        }
-
-        // 阶段二：登记注册表（短暂持锁）。单项失败只标该项，不掀翻整批。
-        if !pending.is_empty() {
-            let mut guard = lock_global(&state)?;
-            let g = global_mut(&mut guard)?;
-            for (idx, row) in &pending {
-                if let Err(e) = PluginHost.register(g, row) {
-                    items[*idx].status = "failed".into();
-                    items[*idx].message = Some(format!("登记注册表失败: {e}"));
-                }
-            }
-        }
-
-        Ok(BundledInstallReport {
-            root: root.to_string_lossy().to_string(),
-            items,
-        })
+        install_all_bundled(&state)
     })();
     api_from_hp(outcome)
+}
+
+/// 把随包目录（`plugins/system/*`）里的全部插件包装进插件根并登记注册表。
+///
+/// `plugin.installBundled` 与**启动期播种**共用这一份实现。两阶段：先在**不持库锁**的
+/// 情况下复制（或复用同版本目录），再短暂持锁登记注册表。单项失败只标该项，绝不掀翻整批。
+pub(crate) fn install_all_bundled(state: &AppState) -> HpResult<BundledInstallReport> {
+    let root = bundled_plugins_dir().ok_or_else(|| {
+        HpError::NotFound(
+            "未找到随包插件目录 plugins/system（可用 HP_BUNDLED_PLUGINS_DIR 指定；\
+             打包运行需补 tauri.conf.json 的 bundle.resources）"
+                .into(),
+        )
+    })?;
+    let installer = PluginInstaller::new(state.plugin_root.as_ref().clone());
+    let candidates = bundled_candidates(&root)?;
+
+    // 阶段一：磁盘安装。**不持库锁**——复制是慢操作，不该挡住其它命令。
+    let now = now_iso();
+    let mut items = Vec::new();
+    let mut pending: Vec<(usize, PluginRegistryRow)> = Vec::new();
+    for candidate in &candidates {
+        let (item, row) = install_bundled_candidate(&installer, candidate, &now);
+        if let Some(row) = row {
+            pending.push((items.len(), row));
+        }
+        items.push(item);
+    }
+
+    // 阶段二：登记注册表（短暂持锁）。单项失败只标该项，不掀翻整批。
+    //
+    // 这里同时是发布包 `source_ref` 的**自愈点**：`tools/package-build.mjs` 只把发布库里
+    // 系统插件行的 `source_ref` 前缀替换成包内相对路径，编译机绝对路径可能残留，因此
+    // 每次进程启动都重新登记一次，把它改写成**本机**包内版本目录。
+    if !pending.is_empty() {
+        let mut guard = lock_global(state)?;
+        let g = global_mut(&mut guard)?;
+        for (idx, row) in &pending {
+            if let Err(e) = PluginHost.register(g, row) {
+                items[*idx].status = "failed".into();
+                items[*idx].message = Some(format!("登记注册表失败: {e}"));
+            }
+        }
+    }
+
+    Ok(BundledInstallReport {
+        root: root.to_string_lossy().to_string(),
+        items,
+    })
+}
+
+/// 随包 system 插件的**默认安装**：每个进程只跑一次，失败只记日志、绝不阻断启动。
+///
+/// 由 `ensure_global` 在全局库打开之后调用（见 `commands/shared.rs`）。
+///
+/// **为什么每次启动都跑**，而不是只在"新建全局库"之时：发布包里系统插件行的
+/// `source_ref` 可能残留**编译机**的绝对路径（`tools/package-build.mjs` 只把包内前缀
+/// 替换成相对路径），重新登记一次才能把它改写成本机包内版本目录——即**自愈**。
+/// `install_or_reuse_registry_row` 复用同版本目录，故这一步幂等、不覆盖已有安装。
+///
+/// **失败为什么只记日志**：系统插件缺席（开发机上还没构建启动器 / 还没拉取运行时）不该
+/// 让整个应用起不来——面板、蓝图、设置各自按"插件未接通"降级，符合 RFC 0010 决策 6。
+pub(crate) fn seed_bundled_plugins_once(state: &AppState) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static SEEDED: AtomicBool = AtomicBool::new(false);
+    if SEEDED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    match install_all_bundled(state) {
+        Ok(report) => {
+            let changed: Vec<String> = report
+                .items
+                .iter()
+                .filter(|i| i.status != "alreadyInstalled")
+                .map(|i| format!("{}={}", i.name, i.status))
+                .collect();
+            if !changed.is_empty() {
+                eprintln!(
+                    "随包系统插件播种：{}（根目录 {}）",
+                    changed.join(", "),
+                    report.root
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("随包系统插件播种失败（不影响启动）: {e}");
+        }
+    }
 }
 
 /// plugin.versions：列出某插件已安装版本。
@@ -353,8 +405,8 @@ mod tests {
 
     /// 随包样例清单：请求 `system`，但**来源**由宿主判定（RFC 0009）。
     ///
-    /// 它故意不写 `source` 字段，也不创建 `entry` 指向的 `bin/sample.exe`——这正是
-    /// `plugins/system/palette` 的现状（只随包分发清单）。安装阶段不校验入口存在，
+    /// 它故意不写 `source` 字段，也不创建 `entry` 指向的 `bin/sample.exe`——这正是随包
+    /// 系统插件的常见形态（只分发清单与资源，入口在构建期补齐）。安装阶段不校验入口存在，
     /// "入口缺失"是**面板查询时**才降级的事（`plugin.panelSchema` → `plugin.error`）。
     const SAMPLE_MANIFEST: &str = r#"{
         "id": "dev.hamsterpouch.bundled.sample",

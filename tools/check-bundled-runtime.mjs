@@ -155,8 +155,20 @@ check(
 
 // ───────── D. 随包插件来源根存在且可被 find_upwards_dir 命中 ─────────
 check(
-  "plugins/system 存在且含 palette/plugin.manifest（installBundled 的来源）",
-  existsSync(join(BUNDLED_PLUGINS, "palette", "plugin.manifest")),
+  "plugins/system 存在且含 python-core/plugin.manifest（installBundled 的来源）",
+  existsSync(join(BUNDLED_PLUGINS, "python-core", "plugin.manifest")),
+);
+// python-core 的启动器与随包解释器**都不入库**（`.gitignore`），因此"进包"这件事只能由
+// 打包自检兜住：漏了就会静默产出一个"装了 Python 插件却跑不起来"的包。
+// 签名同样列入必需项：D40 规定 `system` 等级必须签名，缺签名时安装会**静默降级为
+// community**（`install.rs` 的 `registry_row_of`）——那是等级失真，不是少个文件。
+check(
+  "打包自检把 python-core 的清单/启动器/解释器/签名都列为必需项（fail-closed）",
+  pkgText.includes('"plugins/system/python-core/plugin.manifest"') &&
+    pkgText.includes('"plugins/system/python-core/bin/python-core.exe"') &&
+    pkgText.includes('"plugins/system/python-core/runtime/python.exe"') &&
+    pkgText.includes('"plugins/system/python-core/SHA256SUMS"') &&
+    pkgText.includes('"plugins/system/python-core/SHA256SUMS.sig"'),
 );
 
 // ───────── E. mpv 是可选资产：存在则入包、缺失则跳过（不得改成硬失败）─────────

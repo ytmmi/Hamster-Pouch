@@ -280,7 +280,7 @@
 4. ✅ 「面板」大类接入面板注册表（按 `category` 分组、按面板分节；**无 `settings` 的面板不显示**，第 4.1 节）。
 5. 🟡 「插件」大类接入插件注册表 ✅，但**能力授权展示未接线**（`requires_capability` 目前一律按"未授权"置灰 —— 失败关闭是对的，但真正的授权查询未接进来，见第 12 节开放点）。
 6. ✅ 搜索（`title_key` 的**当前语言文案** + `keywords`；前端函数 `settingsRegistry.ts` 的 `searchSettings`，非命令）。
-7. ✅ 贡献点 `settingsSection`（`plugin_contribution.rs` + `plugin_validate.rs` 的大类/前缀/同名校验；可用夹具 `plugins/system/palette`）。
+7. ✅ 贡献点 `settingsSection`（`plugin_contribution.rs` + `plugin_validate.rs` 的大类/前缀/同名校验；夹具见 `crates/hp-plugin-host/src/manifest.rs` 内的合成清单——原系统插件夹具 `plugins/system/palette` 已随系统插件换代移除）。
 
 ## 11. 明确不做（第一版）
 

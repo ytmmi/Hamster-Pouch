@@ -252,10 +252,19 @@ impl ExternalProcessQuery {
         }
     }
 
+    /// 用一条**宿主构造**的命令行启动插件进程（python 形态经 Python 核心拉起）。
+    ///
+    /// 与 [`ExternalProcessQuery::for_entry`] 同一条不变式：命令行由**宿主**决定，
+    /// 插件无法指定；区别只是"宿主决定的那条命令"不一定是插件入口本身
+    /// （python 形态下是 Python 核心插件 + `--run <脚本>`）。
+    pub fn for_host_command(command: Command) -> Self {
+        Self { command }
+    }
+
     /// 用一条自定义命令构造（**测试夹具用**：模拟插件的应答/超时/超限行为）。
     ///
-    /// 生产路径只走 [`ExternalProcessQuery::for_entry`]：入口必须来自宿主解析的
-    /// 版本目录，插件无法指定命令行。
+    /// 生产路径只走 [`ExternalProcessQuery::for_entry`] / [`ExternalProcessQuery::for_host_command`]：
+    /// 入口必须来自宿主解析的版本目录，插件无法指定命令行。
     pub fn for_test_command(command: Command) -> Self {
         Self { command }
     }
@@ -393,6 +402,18 @@ impl ExternalProcessQuery {
         drop(reader);
         outcome
     }
+}
+
+/// 构造一条**隐藏控制台窗口**的命令。
+///
+/// 插件子进程、Python 核心拉起的解释器都经这里构造。门禁 `pnpm check:hidden-console`
+/// 只允许裸 `Command::new(` 出现在本文件（helper 的定义处）：新增任何外部进程都必须走
+/// `hidden_command`，否则 Windows 上会闪出黑色 cmd 窗口（应用是 GUI 子系统，唯一的
+/// 保证就是启动时带上 `CREATE_NO_WINDOW`）。
+pub fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut command = Command::new(program);
+    hide_console_window(&mut command);
+    command
 }
 
 /// Windows 上以 `CREATE_NO_WINDOW` 启动插件子进程，避免 GUI 程序闪出控制台窗口。

@@ -202,6 +202,7 @@
 - manifest **只声明面板与贡献点**（`contributions` 里的 `panel`/`viewer`，见 `docs/spec/plugin-standard.md`），控件树由宿主在**需要渲染时**向插件查询。
 - 通道按运行形态统一为一次"取面板 schema"的调用，插件侧不得区分：
   - `external-process`：宿主经插件子进程的 JSON-RPC 请求（请求名 `ui.panel.schema`，参数 `{ panel_id, api_version }`）；
+  - `python`：**同一条协议、同一次一问一答**，区别只在拉起方式——宿主执行**随包 Python 核心**插件的 `bin/python-core.exe --run <版本目录>/<entry>`，解释器解析（`runtime/python.exe`）、隔离与进程收尾都归 Python 核心，宿主不直连解释器（RFC 0009 决策 2；`crates/hp-plugin-host/src/python_core.rs`）。因此 Python 插件可以源码分发；
   - `wasm`：宿主经受控导入函数取回（同一请求名，参数以线性内存中的 JSON 传递）；
   - `dynamic-library`：宿主经版本化结构体 ABI 调用。
 - 宿主侧约束：单次查询**超时**（默认 2s）、**输出字节上限**（默认 256 KiB）、失败即该面板渲染为**错误态控件**（`empty` 的 `reason` 变体）并广播 `plugin.error`，不得阻塞其它面板。
@@ -236,8 +237,11 @@
 >    失效靠键本身（含 `plugin_version`）+ `PanelSchemaCache::invalidate_plugin`。
 >
 > `wasm` 与 `dynamic-library` 两条通道仍**未接入**（各自依赖 `wasmi` 与版本化结构体 ABI）。
-> 示例插件包的 `entry`（`bin/hello.exe`）是占位路径（产物不入库），因此装示例包会如实走到
-> 「插件入口不存在」的错误态；联调方式见 `plugins/examples/hello/bin/README.md`。
+> `python` 形态走同一条通道：宿主执行 **Python 核心**的 `python-core.exe --run <版本目录>/<entry>`，
+> 解释器由 Python 核心解析并随包分发；宿主只与启动器做一次一问一答。
+> 示例插件 `plugins/examples/control-demo` 的 `entry`（`bin/control-demo.exe`）是占位路径
+> （产物不入库），因此装示例包会如实走到「插件入口不存在」的错误态；联调方式见
+> `plugins/examples/control-demo/README.md`。
 
 ### 3. schema 的 JSON 形态
 

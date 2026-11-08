@@ -7,12 +7,22 @@
  *                                   + external-cli\ + plugins\system\。
  *                                   每次编译新建一个；命名按时间排序，一眼可辨先后。
  *   release\                     发布包：hamster-pouch-desktop.exe + data\system\（**系统数据库**，
- *                                   全局配置库随发布）+ data\plugins\（**系统插件** trust_level=system，
- *                                   含其自带数据库，随应用发布）+ external-cli\ + plugins\system\；
+ *                                   全局配置库随发布）+ data\plugins\<id>\<version>\（**系统插件**，
+ *                                   按**已安装布局**落盘，见下）+ external-cli\ + plugins\system\；
  *                                   **不含用户数据**——user\repos\ 仓库库、
  *                                   非系统插件、thumbnails\ 缓存、debug.log 一律不带，
- *                                   发布全局库的仓库注册表/按仓库授权清空、非系统插件注册删除
- *                                   （系统插件 source_ref 改写为包内路径）。
+ *                                   发布全局库的仓库注册表/按仓库授权清空。
+ *
+ * **系统插件"随包即已安装"（默认安装）**：发布包按 `<id>\<version>\` 落盘而不是按目录名平铺，
+ * 并**同步写入 `plugin_registry` 行**（`DELETE` 全表后 `INSERT OR REPLACE`，来源根是仓库
+ * `plugins\system\<目录>\`——与 `plugin.installBundled` 同源，**不**反查活动数据注册表，
+ * 否则"仓库里已删掉的插件"会被 `data\plugins\<id>` 缓存带回发布包）。
+ * 关键点是**目录名不保证等于插件 id**：`plugins/system/python-core/` 的 id 是
+ * `dev.hamsterpouch.system.python_core`，而宿主只认 `version_dir(id, version)`；
+ * 此前按目录名平铺复制出来的 `data\plugins\python-core\` 宿主永远不读——是死副本，
+ * 还和"没有注册行的孤儿目录"长得一样。
+ * 注册行里的 `source_ref` 是**编译机绝对路径**（与 dev 包同口径），目标机首次运行播种时
+ * 由 `install_or_reuse_registry_row` 复用同版本目录并改写为**本机**包内路径（自愈）。
  *
  * **随包分发的运行时资产（D14 / 契约 §3.11）**：`external-cli\`（ffmpeg 运行时子集 +
  * 可选 mpv）与 `plugins\system\`（`plugin.installBundled` 的来源）都放在 **exe 同级**，
@@ -70,7 +80,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { cp, link, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { cp, link, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -149,6 +159,31 @@ async function copyBaseDict(targetDataRoot) {
     }
   } catch { /* 文件不存在时不复制 */ }
   return false;
+}
+
+/**
+ * 读系统插件清单，取**安装布局**需要的字段（`id` / `version` / `runtime.kind`）。
+ *
+ * 清单是这些字段的**唯一事实来源**：`plugins/system/<目录>/` 的目录名只是仓库内的组织方式，
+ * 安装目录必须按 `<id>/<version>/`（`crates/hp-plugin-host/src/install.rs` 的
+ * `version_dir(id, version) = <插件根>/<id>/<version>`），两者**不保证同名**。
+ *
+ * 返回 `{ text, json }`：`text` 原样进注册表 `manifest_json`（宿主 `parse_manifest` 读它），
+ * `json` 供本脚本取字段，不再二次序列化以免丢掉原始格式。
+ */
+async function readPluginManifest(dir) {
+  const text = await readFile(join(dir, "plugin.manifest"), "utf8");
+  const json = JSON.parse(text);
+  if (typeof json.id !== "string" || typeof json.version !== "string") {
+    throw new Error("清单缺少 id / version");
+  }
+  return { text, json };
+}
+
+/** SQL 字符串字面量（单引号转义；路径里的反斜杠无需转义，SQLite 不解释它）。 */
+function sqlStr(value) {
+  if (value === null || value === undefined) return "NULL";
+  return `'${String(value).replace(/'/g, "''")}'`;
 }
 
 /**
@@ -271,13 +306,36 @@ function verifyBundledRuntime(targetRoot, { allowLink, mpvExpected }) {
     ["external-cli/ffmpeg/bin/avutil-60.dll", "file"],
     ["external-cli/ffmpeg/bin/swresample-6.dll", "file"],
     ["external-cli/ffmpeg/bin/swscale-9.dll", "file"],
-    ["plugins/system/palette/plugin.manifest", "file"],
+    ["plugins/system/python-core/plugin.manifest", "file"],
+    // python-core 是**随包分发的 Python 运行时**：只有清单没有解释器/启动器，就等于
+    // 装了个跑不起来的插件（用户装了 Python 插件却得不到任何反馈）。两份产物都不入库
+    // （`.gitignore`：`plugins/**/bin/*.exe`、`plugins/system/python-core/runtime/`），
+    // 所以必须在这里 fail-closed，并把修复命令写进错误信息。
+    ["plugins/system/python-core/bin/python-core.exe", "file"],
+    ["plugins/system/python-core/runtime/python.exe", "file"],
+    // 签名同样算**必需项**：D40 规定 `system` 等级必须签名，缺签名时 `install.rs` 的
+    // `registry_row_of` 会把随包 system 插件**静默降级为 community**——那不是"少个文件"，
+    // 而是把系统插件当社区插件发出去，必须在打包时断掉。签名覆盖构建产物（启动器 + 运行时），
+    // 所以每次重建启动器后都要重签（见 `.gitignore` 同名条目）。
+    ["plugins/system/python-core/SHA256SUMS", "file"],
+    ["plugins/system/python-core/SHA256SUMS.sig", "file"],
   ];
+  const missingHints = {
+    "plugins/system/python-core/bin/python-core.exe":
+      "先构建启动器: cargo build -p hp-plugin-host --bin python_core --release，" +
+      "再把 target/release/python_core.exe 复制到 plugins/system/python-core/bin/python-core.exe",
+    "plugins/system/python-core/runtime/python.exe":
+      "先获取解释器: node tools/fetch-python-runtime.mjs（URL 与 SHA256 见 tools/python-runtime.lock.json）",
+    "plugins/system/python-core/SHA256SUMS":
+      "先签名: node tools/sign-plugin.mjs plugins/system/python-core（D40：system 等级必须签名）",
+    "plugins/system/python-core/SHA256SUMS.sig":
+      "先签名: node tools/sign-plugin.mjs plugins/system/python-core（D40：system 等级必须签名）",
+  };
   for (const [rel, kind] of mustExist) {
     const p = join(targetRoot, ...rel.split("/"));
     const st = statSync(p, { throwIfNoEntry: false });
     const ok = kind === "file" ? Boolean(st?.isFile()) : Boolean(st?.isDirectory());
-    if (!ok) problems.push(`缺 ${rel}`);
+    if (!ok) problems.push(`缺 ${rel}${missingHints[rel] ? `（${missingHints[rel]}）` : ""}`);
   }
   // mpv 是可选项：**源在就必须进包**（防"复制逻辑静默漏掉"），源不在则不要求包里有。
   // 不写成"包里必须有 mpv"：新克隆没有该目录，那样会让 app:build 在新克隆上断掉。
@@ -403,15 +461,12 @@ if (await copyBaseDict(join(devDir, "data"))) {
 // 它可能来自旧的 DATA 暂存缓存；留着会被误当成有效词库（旧 schema）。
 await rm(join(devDir, "data", "system", "tag_dict_base.sqlite3"), { force: true });
 
-// 同步系统插件签名文件（编译缓存可能不是最新）
-const paletteSigSrc = join(ROOT, "plugins", "system", "palette", "SHA256SUMS");
-const paletteSigSigSrc = join(ROOT, "plugins", "system", "palette", "SHA256SUMS.sig");
-const paletteSigDst = join(DATA, "plugins", "palette");
-if (await stat(paletteSigSrc).catch(() => null)) {
-  await mkdir(paletteSigDst, { recursive: true });
-  await cp(paletteSigSrc, join(paletteSigDst, "SHA256SUMS"));
-  await cp(paletteSigSigSrc, join(paletteSigDst, "SHA256SUMS.sig"));
-}
+// 系统插件的签名**随插件目录一起走**：`plugins/system/<目录>/SHA256SUMS(.sig)` 由
+// `placeBundledRuntime` 整目录带进包（exe 同级，`plugin.installBundled` 的来源根），
+// 发布分支再从**仓库根**复制系统插件目录进 `data\plugins\`。
+// 这里曾有一段把 `system/palette` 的签名单独同步到 `data\plugins\palette` 的代码：
+// 目标目录既不是插件 id 也不是版本目录（安装布局是 `<root>\<id>\<version>\`），
+// 是一处陈旧残留，已随 palette 插件删除。
 // 随包运行时资产：external-cli\（ffmpeg 运行时子集 + 可选 mpv）+ plugins\system\（随包插件来源）。
 // 放在 exe 同级 —— 与仓库内布局同构，find_upwards 从 exe 目录第一跳即命中。
 // dev 包走硬链接（零额外占用），见 placeFile。
@@ -430,9 +485,8 @@ await mkdir(relDir, { recursive: true });
 await cp(EXE, join(relDir, "hamster-pouch-desktop.exe"));
 
 // 发布包只保留「系统内容」：复制暂存 data\ 后清掉用户库/缓存/日志与**非系统插件**，
-// 再补回系统插件目录（trust_level=system，含其自带数据库），
-// 发布全局库同时清空仓库注册表与按仓库授权、去掉非系统插件注册。
-const stagingGdb = join(DATA, "system", "hamster-pouch-global.sqlite3");
+// 再按**已安装布局**补回系统插件目录，发布全局库同时清空仓库注册表与按仓库授权、
+// 并只保留本次落盘的系统插件注册。
 let systemPlugins = [];
 if (dataStat?.isDirectory()) {
   await cp(DATA, join(relDir, "data"), { recursive: true });
@@ -441,56 +495,73 @@ if (dataStat?.isDirectory()) {
   }
   await rm(join(relDir, "data", "debug.log"), { force: true });
 
-  // 只保留系统插件：先整体清掉 plugins\，再按注册表复制 trust_level='system' 的插件目录。
-  const relPlugins = join(relDir, "data", "plugins");
-  await rm(relPlugins, { recursive: true, force: true });
-  systemPlugins = (await stat(stagingGdb).catch(() => null))
-    ? execFileSync("sqlite3", [stagingGdb, "SELECT id FROM plugin_registry WHERE trust_level='system';"], {
-        encoding: "utf8",
-      })
-        .split(/\r?\n/)
-        .map((s) => s.trim())
-        .filter(Boolean)
-    : [];
-  // 如果全局库无注册记录（全新编译），改用文件系统扫描 plugins/system/*/
-  if (systemPlugins.length === 0) {
-    const sysPluginRoot = join(ROOT, "plugins", "system");
-    try {
-      for (const entry of await readdir(sysPluginRoot, { withFileTypes: true })) {
-        if (entry.isDirectory()) {
-          systemPlugins.push(entry.name);
-        }
-      }
-    } catch { /* 目录不存在则跳过 */ }
-  }
-  if (systemPlugins.length > 0) {
-    for (const pid of systemPlugins) {
-      // 从仓库根 plugins/system/<pid>/ 复制（比 DATA 更可靠——编译缓存可能缺失）
-      let sysSrcExists = false;
-      try { sysSrcExists = (await stat(join(ROOT, "plugins", "system", pid))).isDirectory(); } catch {}
-      if (sysSrcExists) {
-        await cp(join(ROOT, "plugins", "system", pid), join(relPlugins, pid), { recursive: true });
-      } else {
-        // 兜底：从编译缓存 DATA/plugins/<pid>/ 复制
-        let dataSrcExists = false;
-        try { dataSrcExists = (await stat(join(DATA, "plugins", pid))).isDirectory(); } catch {}
-        if (dataSrcExists) {
-          await cp(join(DATA, "plugins", pid), join(relPlugins, pid), { recursive: true });
-        }
+  // 系统插件的**来源是仓库根** `plugins/system/*/`——它就是 `plugin.installBundled` 的来源根，
+  // 也是 `placeBundledRuntime` 整目录带进包的那一批。**不再**按活动数据的注册表反查：
+  // 注册表可能留着"仓库里已删掉"的系统插件行（palette 就是这么把已删插件带回发布包的）。
+  const sysPluginRoot = join(ROOT, "plugins", "system");
+  const sysPluginDirs = [];
+  try {
+    for (const entry of await readdir(sysPluginRoot, { withFileTypes: true })) {
+      if (entry.isDirectory() && existsSync(join(sysPluginRoot, entry.name, "plugin.manifest"))) {
+        sysPluginDirs.push(entry.name);
       }
     }
+  } catch { /* 目录不存在则跳过 */ }
+
+  // 落盘必须按**已安装布局** `data\plugins\<id>\<version>\`：加载路径是 `install.rs` 的
+  // `version_dir(id, version)`，而**目录名不保证等于插件 id**（`plugins/system/python-core/`
+  // 的 id 是 `dev.hamsterpouch.system.python_core`）。此前按目录名平铺复制
+  // （`data\plugins\python-core\`）——既不是任何插件 id、也没有版本层，宿主永远不会读它：
+  // 那是**死副本**，且与"没有注册行的孤儿目录"长得一模一样。
+  const relPlugins = join(relDir, "data", "plugins");
+  await rm(relPlugins, { recursive: true, force: true });
+  const installedSystem = [];
+  for (const name of sysPluginDirs) {
+    let manifest;
+    try {
+      manifest = await readPluginManifest(join(sysPluginRoot, name));
+    } catch (e) {
+      console.log(`[package-build]   警告: 系统插件 ${name} 的清单不可用，跳过（${e.message}）`);
+      continue;
+    }
+    const dest = join(relPlugins, manifest.json.id, manifest.json.version);
+    await cp(join(sysPluginRoot, name), dest, { recursive: true });
+    installedSystem.push({ manifest, versionDir: dest });
+    systemPlugins.push(manifest.json.id);
   }
 
-  // 发布全局库：清仓库注册/按仓库授权；系统插件 source_ref 改写为包内路径；
-  // 非系统插件注册删除（其插件目录未随发布）。
+  // 发布全局库：清仓库注册/按仓库授权；**系统插件注册按刚落盘的安装目录重写**，
+  // 做到"随包即已安装"（首次运行播种走 `alreadyInstalled` 复用，并把 `source_ref`
+  // 修正为**本机**包内路径——`install_or_reuse_registry_row`）。非系统插件注册一律删除。
   const relGdb = join(relDir, "data", "system", "hamster-pouch-global.sqlite3");
   if (await stat(relGdb).catch(() => null)) {
-    const relData = join(relDir, "data");
+    const installedAt = new Date().toISOString();
+    const rows = installedSystem
+      .map(({ manifest, versionDir }) => {
+        const m = manifest.json;
+        const cols = [
+          m.id,
+          m.name,
+          m.version,
+          "system",
+          "system",
+          versionDir,
+          m.runtime?.kind ?? "external-process",
+          installedAt,
+          manifest.text,
+        ].map(sqlStr);
+        return (
+          "INSERT OR REPLACE INTO plugin_registry " +
+          "(id, name, version, trust_level, source_kind, source_ref, runtime_kind, installed_at, manifest_json) " +
+          `VALUES (${cols.join(", ")});`
+        );
+      })
+      .join(" ");
     const sql =
       "DELETE FROM repos; " +
       "DELETE FROM plugin_repo_state; " +
-      `UPDATE plugin_registry SET source_ref = replace(source_ref, '${DATA}', '${relData}') WHERE trust_level='system'; ` +
-      "DELETE FROM plugin_registry WHERE trust_level <> 'system';";
+      "DELETE FROM plugin_registry; " +
+      rows;
     execFileSync("sqlite3", [relGdb, sql], { stdio: "ignore" });
   }
 }

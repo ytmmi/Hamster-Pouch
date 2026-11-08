@@ -50,7 +50,7 @@ plugin-package/
 | `name` | string | 非空 | 展示名（允许中文）；不参与 i18n 键规则 |
 | `version` | string | 语义化版本 `MAJOR.MINOR.PATCH` | 与版本目录名一致 |
 | `min_host_version` | int ≥ 1 | ≤ 当前 `HOST_API_VERSION` | 高于当前宿主即拒绝安装（更新前预检，RFC 0009） |
-| `runtime.kind` | string | `external-process` / `wasm` / `dynamic-library` | 自声明、宿主强校验（RFC 0004 决策 3） |
+| `runtime.kind` | string | `external-process` / `python` / `wasm` / `dynamic-library` / `static-data` | 自声明、宿主强校验（RFC 0004 决策 3）；`python` 由 Python 核心 system 插件拉起（RFC 0009 决策 2） |
 | `entry` | string | 相对路径，非空 | 进程入口 / 动态库 / wasm / Python 脚本 |
 | `capabilities` | string[] | 第 5 节白名单 | 能力制（RFC 0004 决策 4） |
 | `api_version` | int ≥ 1 | 当前 `HOST_API_VERSION` | 插件实现的宿主 API 版本；与 `min_host_version` 一起构成兼容区间 |
@@ -201,7 +201,7 @@ LocalPath   -> local-dev（永不提升）
 1. `id` / `name` / `version` / `entry` 非空；`id` 合法且未与既有插件冲突。
 2. `min_host_version` ≤ 当前 `HOST_API_VERSION`，否则拒绝安装（预检，不装完才失败）。
 3. `runtime.kind = dynamic-library` → 必须声明 `native.code`；且信任等级必须是 `system` / `trusted`，否则拒绝加载（D4）。
-4. `community` / `local-dev` 只能使用 `external-process` 或 `wasm`。
+4. `community` / `local-dev` 只能使用 `external-process` / `python` / `wasm`。`python` 的可执行性由随包的 Python 核心 system 插件提供，但这**不放宽** Python 插件自身的信任校验：它默认仍是 `community`，按仓库启用与能力授权照旧（RFC 0009 决策 2 / D39）。
 5. 请求高危能力但信任等级不足或该仓库未授权 → 拒绝加载或要求用户显式升级授权；越权调用 API → 拒绝并记录事件。
 6. `native_dependencies` 未随包或摘要不符 → 拒绝加载（D43）。
 7. manifest 自称 `source.kind` → **不解析、不参与** `effective_trust`（`PluginManifest` 无来源字段）。
@@ -246,14 +246,15 @@ LocalPath   -> local-dev（永不提升）
     注册表 `trust_level = local-dev`、`source_kind = local-path`，且 `enable_for_repo(native.code)` 被拒」。
     把修复回退（信任改回读 manifest 自称）该测试即**变红**（已验证）。
   - `bundled_system_plugin_gets_system_trust_from_host_decision` 断言随包分发的
-    `plugins/system/palette` 由 `InstallSource::Bundled` 得到 `system`——与 manifest 是否自称无关。
+    `plugins/system/python-core` 由 `InstallSource::Bundled` 得到 `system`——与 manifest 是否自称无关。
 - **`pnpm check:panels` / `check:blueprint-nodes` / `check:settings`**：三张注册表与各自规范文档、与本文贡献点形态的一致性（详见各规范第 8/10 节）。
-- 示例与系统插件包（`plugins/examples/hello`、`plugins/system/palette`）已升级为标准形态（类型化贡献点 + `data_queries` + `events` + `api_version`），作为 manifest 的接口夹具。
+- 示例与系统插件包（`plugins/examples/control-demo`、`plugins/system/python-core`）为标准形态：示例包演示面板与控件通道（类型化贡献点 + `data_queries` + `events` + `api_version`），系统包演示 `system` 信任与 Ed25519 签名（无贡献点、装好即用）。
+- 运行形态新增 **`python`**：`entry` 指向 `.py` 源码，由 **Python 核心** system 插件（`dev.hamsterpouch.system.python_core`）拉起——宿主不直连 `runtime/python.exe`，解释器解析与进程收尾都归 Python 核心。因此 Python 插件可以**源码分发**（RFC 0009 决策 2），Python 插件自身默认仍是 `community`。
 
 ## 10. 待实现缺口（与 RFC 0009 一致）
 
-- ~~`trust.rs` 仍读 manifest 自称的 `source.kind` → 必须改为宿主判定，并加"本地路径自称 system 不得获得 system"回归测试。~~ → **已修（2026-09，缺陷 0008）**：manifest 不再解析 `source`，信任只接受宿主判定的 `HostSourceKind`，调用方级回归测试已落地且可失败（详见第 6 节与第 9 节）。**余留**：随包安装入口（`InstallSource::Bundled`）暂无桥接命令，`system` 等级目前只能经宿主侧 API 得到；`system` 的 `plugin.sig` 验签仍未实现（D40）。
-- `plugin.load` 仍为生命周期骨架：三种运行形态都无执行体；WASM `wasmi` 未接入；`external-process` 无监督（重启退避 / 不健康标记 / `plugin.error`）。
+- ~~`trust.rs` 仍读 manifest 自称的 `source.kind` → 必须改为宿主判定，并加"本地路径自称 system 不得获得 system"回归测试。~~ → **已修（2026-09，缺陷 0008）**：manifest 不再解析 `source`，信任只接受宿主判定的 `HostSourceKind`，调用方级回归测试已落地且可失败（详见第 6 节与第 9 节）。~~**余留**：随包安装入口（`InstallSource::Bundled`）暂无桥接命令，`system` 等级目前只能经宿主侧 API 得到；`system` 的 `plugin.sig` 验签仍未实现（D40）。~~ → **两条均已落地（2026-11）**：随包安装有桥接命令 `plugin.installBundled`（**不带参数**，来源固定 `InstallSource::Bundled`，见 `commands-events.md` 3.11），并在**首次打开全局库时自动播种**（`apps/desktop/src-tauri/src/commands/shared.rs` 的 `ensure_global` → `commands/plugin.rs` 的 `seed_bundled_plugins_once`：幂等、失败只记日志不阻断启动，同时是发布包 `source_ref` 的自愈点）；`system` 的 Ed25519 验签在安装/登记路径执行（`crates/hp-plugin-host/src/install.rs` 的 `verify_signature`，签名无效即 `permission` 拒装），随包系统插件 `plugins/system/python-core` 已带 `SHA256SUMS` + `SHA256SUMS.sig`（`tools/sign-plugin.mjs` 生成、自验证通过、签发人 `ytmmi`）。
+- `plugin.load` 仍为生命周期骨架（只做校验并产出 `LoadOutcome`，**不代表进程已拉起**）：`external-process` 与 `python` 两条**查询/事件**通道已落地（`crates/hp-plugin-host/src/channel.rs`、`crates/hp-plugin-host/src/python_core.rs`），但两者的常驻生命周期仍无执行体；`dynamic-library` / `wasm` 无执行体（WASM `wasmi` 未接入）；`external-process` 无监督（重启退避 / 不健康标记 / `plugin.error`）。
 - 注册表无 `active_version`，回滚不切换活跃版本；无 `.zip` 通道与签名校验；`InstallSource::Git` 无 git 拉取逻辑与桥接命令。
 - ~~控件 schema 运行时通道（控件标准第 2 节）尚未接线~~ → **`external-process` 通道已于 2026-09 落地**（`crates/hp-plugin-host/src/channel.rs`、命令 `plugin.panelSchema` / `plugin.validateControl`；`wasm` 与 `dynamic-library` 两条通道仍待各自运行形态）。本文的 `contributions` / `data_queries` / `events` 形态为**契约先行**——manifest 侧已全部解析校验，但 `data_queries` 的**取数通道**与 `events` 的**回传命令**仍未实现。
 - **RFC 0010 缺口（2026-09 更新：原列的 4 条已全部落地）**：

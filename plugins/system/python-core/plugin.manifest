@@ -1,0 +1,25 @@
+{
+  "id": "dev.hamsterpouch.system.python_core",
+  "name": "Python 核心",
+  "version": "0.1.0",
+  "min_host_version": 1,
+  "api_version": 1,
+  "runtime": {
+    "kind": "external-process"
+  },
+  "entry": "bin/python-core.exe",
+  "capabilities": [
+    "native.code"
+  ],
+  "contributions": [],
+  "data_queries": [],
+  "events": [],
+  "native_dependencies": [
+    "runtime/python.exe",
+    "runtime/python314.dll",
+    "runtime/python314.zip"
+  ],
+  "trust": {
+    "requested": "system"
+  }
+}

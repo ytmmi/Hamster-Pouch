@@ -65,6 +65,17 @@ impl PluginManifest {
                 ));
             }
         }
+        // Python 形态：`entry` 是**交给解释器的源码文件**，不是可执行程序（RFC 0009 决策 2）。
+        // 要求 `.py` 后缀是**把这条语义钉死在校验层**：`.exe`/`.dll`/空壳路径都会被拦下，
+        // 否则"Python 插件"会被写成"伪装成 python 形态的外部进程"（拉起方式完全不同）。
+        if self.runtime_kind == RuntimeKind::Python
+            && !self.entry.trim().to_ascii_lowercase().ends_with(".py")
+        {
+            return Err(HpError::InvalidArgument(format!(
+                "python 形态的插件入口必须是 .py 源码文件: {}",
+                self.entry
+            )));
+        }
         if !HostApiVersion::current().is_compatible(self.min_host_version) {
             return Err(HpError::InvalidArgument(format!(
                 "插件要求宿主 API 版本 >= {}，当前为 {}",

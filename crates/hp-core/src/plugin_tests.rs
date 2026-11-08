@@ -94,6 +94,7 @@ fn source_kind_roundtrip() {
 fn runtime_kind_roundtrip() {
     for v in [
         RuntimeKind::ExternalProcess,
+        RuntimeKind::Python,
         RuntimeKind::DynamicLibrary,
         RuntimeKind::Wasm,
         RuntimeKind::StaticData,
@@ -165,6 +166,19 @@ fn manifest_validate_rejects_dynamic_library_untrusted() {
     m.capabilities.push(Capability::NativeCode);
     m.trust_requested = TrustLevel::Community;
     assert!(m.validate().is_err());
+}
+
+#[test]
+fn manifest_validate_rejects_python_entry_that_is_not_source() {
+    // python 形态的入口是**交给解释器的源码**：`.exe`/`.dll` 这类"伪装成 python 形态的
+    // 外部进程"必须被拦下（两者的拉起方式与隔离级别完全不同）。
+    let mut m = manifest();
+    m.runtime_kind = RuntimeKind::Python;
+    m.entry = "bin/plugin.exe".into();
+    assert!(m.validate().is_err());
+
+    m.entry = "main.py".into();
+    assert!(m.validate().is_ok());
 }
 
 #[test]

@@ -5,14 +5,14 @@
 //! 归属校验与受监督调用复用 `plugin_control_channel.rs` 的地基。
 
 use hp_core::{ControlEvent, HpError, HpResult};
-use hp_plugin_host::{
-    ExternalProcessQuery, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT, control_event_method,
-};
+use hp_plugin_host::{SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT, control_event_method};
 use serde::Serialize;
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::plugin_control_channel::{panel_owner_enabled, supervised_call};
+use crate::commands::plugin_control_channel::{
+    panel_owner_enabled, resolve_plugin_query, supervised_call,
+};
 use crate::commands::shared::{ApiResponse, api_from_hp, ensure_global};
 
 /// `plugin.controlEvent` 的确认载荷（诊断用）。
@@ -102,20 +102,11 @@ pub(crate) fn plugin_control_event(
                 owner.plugin_id
             )));
         }
-        let entry = owner.entry_path.clone().ok_or_else(|| {
-            HpError::Plugin("注册表缺少插件安装目录（source_ref），无法定位入口".into())
-        })?;
-        if !entry.is_file() {
-            return Err(HpError::Plugin(format!(
-                "插件入口不存在: {}",
-                entry.display()
-            )));
-        }
+        let mut query = resolve_plugin_query(&state, &owner)?;
 
         // 交付期间**不持任何锁**：这里可能阻塞到超时（D61 默认 2s）。
         let pid_sup = owner.plugin_id.clone();
         let pid_for_closure = owner.plugin_id.clone();
-        let entry_clone = entry.clone();
         let panel_id_clone = panel_id.clone();
         let control_id_clone = control_id.clone();
         let event_str = parsed.as_str().to_string();
@@ -130,7 +121,7 @@ pub(crate) fn plugin_control_event(
                 value: value_clone.as_ref(),
                 target: target_clone.as_deref(),
             };
-            ExternalProcessQuery::for_entry(entry_clone)
+            query
                 .call(
                     &control_event_method(&pid_for_closure, &event_id_clone),
                     &params,

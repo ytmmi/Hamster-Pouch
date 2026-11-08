@@ -503,14 +503,17 @@ pub(crate) fn external_bin(name: &str) -> Option<PathBuf> {
 
 /// 懒加载全局配置库。
 pub(crate) fn ensure_global(state: &AppState, _app: &tauri::AppHandle) -> HpResult<()> {
-    let mut guard = state
-        .global_db
-        .lock()
-        .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
-    if guard.is_none() {
-        let path = global_db_path().map_err(HpError::Io)?;
-        *guard = Some(GlobalDb::open(&path)?);
+    {
+        let mut guard = state
+            .global_db
+            .lock()
+            .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+        if guard.is_none() {
+            let path = global_db_path().map_err(HpError::Io)?;
+            *guard = Some(GlobalDb::open(&path)?);
+        }
     }
+    crate::commands::plugin::seed_bundled_plugins_once(state);
     Ok(())
 }
 

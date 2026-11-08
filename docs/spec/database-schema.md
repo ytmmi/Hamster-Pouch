@@ -75,7 +75,7 @@ CREATE TABLE plugin_registry (
   trust_level   TEXT NOT NULL,             -- system|trusted|community|local-dev
   source_kind   TEXT NOT NULL,             -- system|git|local-path
   source_ref    TEXT,                      -- git URL + 锁定 commit/tag 或本地路径
-  runtime_kind  TEXT NOT NULL,             -- external-process|dynamic-library|wasm
+  runtime_kind  TEXT NOT NULL,             -- external-process|python|dynamic-library|wasm|static-data
   installed_at  TEXT NOT NULL,
   manifest_json TEXT NOT NULL
 );

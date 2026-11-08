@@ -688,7 +688,8 @@ HamsterPouch/
       index.ts                # 包入口：`export *` 汇总上面各模块（消费方只认包入口）
   plugins/
     system/                   # 系统插件源码与打包输入（随应用发布；运行时插件目录在 app_data/plugins）
-      python-core/            # 待办：Python 核心 system 插件（提供 Python 环境，使 Python 插件可源码分发）
+      python-core/            # Python 核心 system 插件：宿主基础设施，提供随包 Python 解释器并拉起 Python 插件
+                              #   （`runtime/` 与 `bin/*.exe` 是构建产物、不入库；打包自检 fail-closed）
     examples/                 # 插件示例与接口夹具，不放核心逻辑
     # 插件分发与打包产物不入库：Rust 插件走 .zip 二进制包（RFC 0009）
   external-cli/               # 外部 CLI 程序（ffmpeg 等编解码工具），随应用捆绑发布（D14）。

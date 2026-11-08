@@ -155,6 +155,23 @@ fn main() {
                     }
                 }
             }
+            // 随包系统插件的**默认安装**（D40 / RFC 0009）：不依赖前端先发哪条命令。
+            // `ensure_global` 既有的调用点（ai / blueprint / layout / interface_pages / mcp）
+            // 都是懒加载：用户可能一直没触发其中任何一条，于是出现"系统插件随包配套了、
+            // 却没被安装"的观感。这里在启动时就把全局库打开并播种一次
+            // （`seed_bundled_plugins_once` 幂等，见 `commands/plugin.rs`），
+            // 同时把发布包里编译机残留的 `source_ref` 自愈成本机包内路径。
+            // 放后台线程：磁盘/杀软第一次打开库可能慢，不该拖住首屏；
+            // 失败只记日志——插件装不上是功能缺失，不该让应用起不来。
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let state = handle.state::<AppState>();
+                    if let Err(e) = commands::shared::ensure_global(&state, &handle) {
+                        eprintln!("[plugin] 启动播种随包系统插件失败（不影响启动）: {e}");
+                    }
+                });
+            }
             // 按设置项应用内置 MCP 服务（D119）：缺省关闭，因此这里通常是空操作；
             // 用户在设置里打开过则随应用启动直接可用（端口被占用只记日志，不阻断启动）。
             mcp::reload(app.handle());
