@@ -153,6 +153,11 @@ apps/desktop/src/app_ui/
                         #   RFC 0010 决策 4 要接入插件面板的动态注册路径）
     settingChangeStore.ts # 设置变更的**同窗口**广播（「全部设置」写完即通知面板；
                         #   跨窗口仍走后端 `setting.changed` 事件）
+    mediaSortStore.ts   # 媒体预览**排序会话覆盖**的跨面板 store（D144 / 缺陷 0039）：
+                        #   只存覆盖不存缺省（缺省由各面板经 usePanelSettingValue 读同一批键），
+                        #   媒体预览与图像查看器胶片栏消费同一份；模块加载即订阅
+                        #   settingChangeStore——「全部设置」显式改排序即放弃覆盖，
+                        #   不依赖哪个面板恰好挂载着
     InterfacePageBar.tsx  # 垂直「界面页」标签条（D124 / D124-R2 / D124-R3 / D124-R4 / D124-R5）：界面（= 蓝图层）
                         #   导航 + 页面组。收起是工作区里 12px 的**真实占位列**（与面板同层、不覆盖内容），
                         #   指针移入才把 200px 面板**绝对定位**滑出到面板之上（展开态才脱离布局）。
@@ -263,6 +268,8 @@ apps/desktop/src/app_ui/
                       #   + 纯逻辑模块 viewerZoom·viewerPlacement·viewerFormat·viewerKeymap·viewerPreload
                       #   + DOM 工具 viewerDecode（换图前离屏解码：解码完成才原子替换 url+尺寸，缺陷 0028）
                       #   + 面板设置 useViewerSettings 与浏览序列 useViewerSequence
+                      #   （序列按媒体预览的**有效排序**排列：同一批设置键 + core/mediaSortStore
+                      #   会话覆盖 + 同一个 sortFiles 纯函数；改排序只重排不重取，D144 / 缺陷 0039）
                       #   + 相邻图像预加载 useViewerPreload）
                       #   设置热加载走四条独立触发源：本地广播 / setting.changed / 窗口焦点 / 面板激活
                       #   键盘：按键映射与「取焦点判据」都在 viewerKeymap（左=上一张、右=下一张，

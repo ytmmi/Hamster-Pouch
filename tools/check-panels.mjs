@@ -1785,18 +1785,20 @@ check(
 );
 check(
   "面板内的改动只做**本会话**覆盖，且「全部设置」显式改动时放弃覆盖（否则＝改了设置没反应）",
+  // 视图 / 图片尺寸的覆盖仍是本面板的模块变量；排序两项的覆盖自缺陷 0039 / D144 起
+  // 在共享 store（`core/mediaSortStore.ts`，图像查看器同步消费）——断言跟着代码走。
   /let sessionView: MediaViewMode \| null = null;/.test(mediaFamilySrc) &&
     /let sessionImageSize: number \| null = null;/.test(mediaFamilySrc) &&
     /sessionView = next;/.test(mediaFamilySrc) &&
     /sessionImageSize = clamped;/.test(mediaFamilySrc) &&
-    /sessionSortKey = next;/.test(mediaFamilySrc) &&
-    /sessionSortDir = next;/.test(mediaFamilySrc) &&
     /subscribeSettingChanged\(\(key\) => \{/.test(mediaFamilySrc) &&
     /key === VIEW_STORAGE_KEY/.test(mediaFamilySrc) &&
     /key === IMAGE_SIZE_STORAGE_KEY/.test(mediaFamilySrc) &&
-    /key === SORT_KEY_STORAGE_KEY/.test(mediaFamilySrc) &&
-    /key === SORT_DIR_STORAGE_KEY/.test(mediaFamilySrc) &&
-    (mediaFamilySrc.match(/= null;\n\s+set\w+Override\(null\);/g) ?? []).length === 4,
+    (mediaFamilySrc.match(/= null;\n\s+set\w+Override\(null\);/g) ?? []).length === 2 &&
+    // 排序覆盖的写入与放弃都只经 store（面板不得再私藏第二份排序覆盖）。
+    /chooseMediaSort\(next\);/.test(mediaFamilySrc) &&
+    !/let sessionSortKey/.test(mediaFamilySrc) &&
+    !/let sessionSortDir/.test(mediaFamilySrc),
 );
 check(
   "排序下拉 =「名称 / 时间 / 大小 / 类型」+ **一条横线** +「正序 / 倒序」（两组都由取值域派生）",
@@ -2478,6 +2480,149 @@ check(
       "utf8",
     ),
   ),
+);
+
+// ==================== 图像查看器：胶片栏排序与媒体预览一致（缺陷 0039 / D144） ====================
+//
+// 防的是"媒体预览设为名称·倒序，胶片栏还是查询顺序的正序"：排序此前是媒体预览
+// 私有模块变量 + 面板内 useMemo，第二个消费方（图像查看器）读不到也不消费。
+// 修法的三件事各有断言：① 会话覆盖收敛进共享 store（行为驱动）；② 查看器读
+// **同一批设置键 + 同一个 store + 同一个纯函数**（源码锚点）；③ 排序变化只重排、
+// 不重发游标请求（取数依赖不含排序）。
+
+const mediaSortStore = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/core/mediaSortStore.ts")).href
+);
+const settingChangeStore = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/core/settingChangeStore.ts")).href
+);
+const mediaSortStoreSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/core/mediaSortStore.ts"),
+  "utf8",
+);
+const mediaSessionSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewSession.ts"),
+  "utf8",
+);
+const viewerSequenceSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/useViewerSequence.ts"),
+  "utf8",
+);
+
+{
+  // 行为断言：写入通知、同值不通知、快照引用只在变化时更换（useSyncExternalStore 前提）。
+  let notified = 0;
+  const unsubscribe = mediaSortStore.subscribeMediaSort(() => {
+    notified += 1;
+  });
+  const before = mediaSortStore.getMediaSortSession();
+  mediaSortStore.chooseMediaSort("time");
+  const afterKey = mediaSortStore.getMediaSortSession();
+  mediaSortStore.chooseMediaSort("time"); // 同值：不得再通知
+  mediaSortStore.chooseMediaSort("desc");
+  const afterDir = mediaSortStore.getMediaSortSession();
+  mediaSortStore.chooseMediaSort("bogus"); // 非法取值：忽略且不通知
+  check(
+    "D144：排序覆盖 store——写入即通知、同值/非法不通知、快照稳定引用且键与方向互不覆盖",
+    notified === 2 &&
+      before !== afterKey &&
+      afterKey !== afterDir &&
+      afterKey.key === "time" &&
+      afterKey.dir === null &&
+      afterDir.key === "time" &&
+      afterDir.dir === "desc" &&
+      mediaSortStore.getMediaSortSession() === afterDir,
+    `通知=${notified} key=${afterDir.key} dir=${afterDir.dir}`,
+  );
+  // 「全部设置」显式写入对应落库键 → 放弃该项覆盖（另一项不受牵连）。
+  settingChangeStore.publishSettingChanged(mediaSortStore.MEDIA_SORT_DIR_STORAGE_KEY);
+  const afterDirReset = mediaSortStore.getMediaSortSession();
+  settingChangeStore.publishSettingChanged(mediaSortStore.MEDIA_SORT_KEY_STORAGE_KEY);
+  settingChangeStore.publishSettingChanged("panel.media.view"); // 无关键：不通知
+  const afterAllReset = mediaSortStore.getMediaSortSession();
+  check(
+    "D144：设置显式改动放弃对应覆盖（方向键只清方向、键只清键；无关键不动）",
+    afterDirReset.key === "time" &&
+      afterDirReset.dir === null &&
+      afterAllReset.key === null &&
+      afterAllReset.dir === null &&
+      notified === 4 &&
+      mediaSortStore.MEDIA_SORT_KEY_STORAGE_KEY === "panel.media.sortKey" &&
+      mediaSortStore.MEDIA_SORT_DIR_STORAGE_KEY === "panel.media.sortDir",
+    `通知=${notified}`,
+  );
+  unsubscribe();
+  mediaSortStore.chooseMediaSort("name");
+  check(
+    "D144：退订后不再收到通知（订阅表不泄漏）",
+    notified === 4,
+    `通知=${notified}`,
+  );
+  // 清理会话状态，避免污染后续断言（store 是模块级的）。
+  settingChangeStore.publishSettingChanged(mediaSortStore.MEDIA_SORT_KEY_STORAGE_KEY);
+}
+
+check(
+  "D144：排序覆盖 store 是纯逻辑模块（无 React / Tauri 依赖），且模块加载即订阅设置变更（放弃覆盖不依赖面板挂载）",
+  !/from "react"/.test(mediaSortStoreSrc) &&
+    !/@tauri-apps/.test(mediaSortStoreSrc) &&
+    /subscribeSettingChanged\(onSettingChanged\);/.test(mediaSortStoreSrc),
+);
+
+check(
+  "D144：媒体预览从共享 store 取排序覆盖（快照经 useSyncExternalStore），缺省仍读面板设置",
+  /useSyncExternalStore\(subscribeMediaSort, getMediaSortSession, getMediaSortSession\)/.test(
+    mediaSessionSrc,
+  ) &&
+    /sortSession\.key \?\? \(isMediaSortKey\(defaultSortKey\) \? defaultSortKey : "name"\)/.test(
+      mediaSessionSrc,
+    ) &&
+    /sortSession\.dir \?\? \(isSortDirection\(defaultSortDir\) \? defaultSortDir : "asc"\)/.test(
+      mediaSessionSrc,
+    ) &&
+    /usePanelSettingValue\(MEDIA_PANEL_ID, "sortKey", panelApi\)/.test(mediaSessionSrc) &&
+    /usePanelSettingValue\(MEDIA_PANEL_ID, "sortDir", panelApi\)/.test(mediaSessionSrc),
+);
+
+// 行为对照：胶片栏用的排序函数与媒体预览**是同一个导出**（不是同形复制）。
+{
+  const rows = [
+    { relative_path: "a\\img2.jpg", size: 100, mtime: "1700000000000000000", media_type: "image" },
+    { relative_path: "b\\img10.jpg", size: 300, mtime: "1600000000000000000", media_type: "image" },
+    { relative_path: "c\\img1.jpg", size: 200, mtime: "1500000000000000000", media_type: "image" },
+  ];
+  const asc = mediaView.sortFiles(rows, "name", "asc").map((f) => f.relative_path);
+  const desc = mediaView.sortFiles(rows, "name", "desc").map((f) => f.relative_path);
+  check(
+    "D144：胶片栏消费与媒体预览同一个 `sortFiles` 导出（名称·倒序 = 正序的完全反转，数字感知）",
+    asc.join(",") === "c\\img1.jpg,a\\img2.jpg,b\\img10.jpg" &&
+      desc.join(",") === "b\\img10.jpg,a\\img2.jpg,c\\img1.jpg" &&
+      /import \{[\s\S]*?sortFiles,[\s\S]*?\} from "\.\.\/mediaPreviewView";/.test(viewerSequenceSrc) &&
+      /sortFiles\(rawFiles, sortKey, sortDir\)/.test(viewerSequenceSrc),
+    `asc=${asc.join(",")}`,
+  );
+}
+
+check(
+  "D144：查看器序列读同一批排序设置键 + 同一个会话覆盖 store（缺省读取带面板 API，热加载四触发源）",
+  /usePanelSettingValue\(MEDIA_PANEL_ID, "sortKey", panelApi\)/.test(viewerSequenceSrc) &&
+    /usePanelSettingValue\(MEDIA_PANEL_ID, "sortDir", panelApi\)/.test(viewerSequenceSrc) &&
+    /useSyncExternalStore\(subscribeMediaSort, getMediaSortSession, getMediaSortSession\)/.test(
+      viewerSequenceSrc,
+    ) &&
+    /sortSession\.key \?\?/.test(viewerSequenceSrc) &&
+    /sortSession\.dir \?\?/.test(viewerSequenceSrc) &&
+    // 面板把 dockview API 传进序列钩子（否则第 4 条触发源不可达）。
+    /useViewerSequence\(app, panelApi\)/.test(imageViewerPanelSrc),
+);
+
+check(
+  "D144：排序变化只重排、不重取——取数 effect 依赖不含排序，排序在 useMemo 里消费",
+  /\}, \[repoId, albumId, sourceId, dirPath, refreshKey, status, t\]\);/.test(viewerSequenceSrc) &&
+    /\[rawFiles, sortKey, sortDir\],/.test(viewerSequenceSrc) &&
+    // 反向：查看器不得另写比较器（同一个事实只有一份实现）。
+    !/\.sort\(/.test(stripComments(viewerSequenceSrc)) &&
+    !/localeCompare/.test(stripComments(viewerSequenceSrc)),
 );
 
 // ==================== 图像查看器：相邻图像预加载 ====================

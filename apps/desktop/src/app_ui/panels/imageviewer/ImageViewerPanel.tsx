@@ -14,7 +14,8 @@
  *
  * 交互（与媒体播放器面板同一取向：不摆按钮、不写提示文字）：
  * - 滚轮 = 以设置的中心点缩放；超出舞台时按住左键拖动 = 平移；
- * - 方向键 / PageUp / PageDown = 上一张 / 下一张（顺序即胶片栏序列）；
+ * - 方向键 / PageUp / PageDown = 上一张 / 下一张（顺序即胶片栏序列，而胶片栏顺序
+ *   与媒体预览的有效排序一致——设置缺省 + 会话覆盖，缺陷 0039 / D144）；
  * - `Home` = 适应窗口，`1` = 100%（1:1）。
  *
  * **换图（2026-10-07）**：视图变换与它所属的图像绑定（`OwnedTransform` + `viewerZoom.ts`
@@ -133,7 +134,9 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
     useHostSettingValue(SETTING_KEYS.dateShowTime, panelApi),
   );
   const settings = useViewerSettings(panelApi);
-  const sequence = useViewerSequence(app);
+  // 浏览序列按媒体预览的有效排序排列（缺陷 0039 / D144）；panelApi 供排序设置
+  // 热加载第 4 条触发源（后台标签期间在媒体预览/设置里改排序，切回来即生效）。
+  const sequence = useViewerSequence(app, panelApi);
   /**
    * 面板是否**正在显示**（判据只看 `isVisible`，理由见 `shared/panelForeground.ts`）。
    * 预加载只在显示时进行：dockview 会把后台标签留在 DOM 里，隐藏时预加载纯属浪费

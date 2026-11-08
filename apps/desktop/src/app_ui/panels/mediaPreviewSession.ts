@@ -11,14 +11,25 @@
  * dockview 卸载重建后仍保持）。用户在「全部设置」里改动该项时**放弃**本次会话的覆盖
  * ——否则就是 `docs/spec/panel-standard.md` 点名的那类缺陷："改了设置没反应"。
  *
+ * **排序的会话覆盖在 `core/mediaSortStore.ts`**（缺陷 0039 / D144）：图像查看器的
+ * 胶片栏必须按同一份有效排序排列，因此排序覆盖有第二个消费方，不能再是本模块的
+ * 私有变量；视图 / 图片尺寸只有本面板消费，仍留在这里。store 只存覆盖不存缺省——
+ * 设置缺省由两个面板各自经 `usePanelSettingValue` 读同一批键（四条热加载触发源），
+ * 有效值 = 覆盖 ?? 缺省，不引入第二份真相。
+ *
  * 取值域（三种视图 / 四个排序键 / 两个方向 / 尺寸范围）在 `mediaPreviewView.ts`。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 import { panelSettingStorageKey } from "@hamster-pouch/config";
 
 import { subscribeSettingChanged } from "../core/settingChangeStore";
+import {
+  chooseMediaSort,
+  getMediaSortSession,
+  subscribeMediaSort,
+} from "../core/mediaSortStore";
 import type { PanelRenderCtx } from "../core/panelRegistry";
 import { usePanelSettingValue, usePanelSwitch } from "../shared/settingValue";
 import {
@@ -35,18 +46,15 @@ import {
 /** 面板设置的落库键（`panel.media.<key>`；声明见 `packages/config/src/panels.ts`）。 */
 const VIEW_STORAGE_KEY = panelSettingStorageKey(MEDIA_PANEL_ID, "view");
 const IMAGE_SIZE_STORAGE_KEY = panelSettingStorageKey(MEDIA_PANEL_ID, "imageSize");
-const SORT_KEY_STORAGE_KEY = panelSettingStorageKey(MEDIA_PANEL_ID, "sortKey");
-const SORT_DIR_STORAGE_KEY = panelSettingStorageKey(MEDIA_PANEL_ID, "sortDir");
 
 /**
  * 跨挂载保存面板内选择：面板被 dockview 卸载重建时也能恢复浏览进度与排布方式。
  *
  * `session*` 为 `null` = 跟随面板设置（注册表缺省或用户在「全部设置」里的选择）。
+ * 排序的会话覆盖不在这里——它在 `core/mediaSortStore.ts`（图像查看器也消费）。
  */
 let sessionView: MediaViewMode | null = null;
 let sessionImageSize: number | null = null;
-let sessionSortKey: MediaSortKey | null = null;
-let sessionSortDir: SortDirection | null = null;
 
 /** 面板实际使用的视图 / 图片尺寸 / 排序 / 文件名开关，以及面板内的三项本会话覆盖回调。 */
 export interface MediaViewState {
@@ -110,26 +118,23 @@ export function useMediaViewState(panelApi?: PanelRenderCtx["api"]): MediaViewSt
   const [imageSizeOverride, setImageSizeOverride] = useState<number | null>(
     () => sessionImageSize,
   );
-  const [sortKeyOverride, setSortKeyOverride] = useState<MediaSortKey | null>(
-    () => sessionSortKey,
-  );
-  const [sortDirOverride, setSortDirOverride] = useState<SortDirection | null>(
-    () => sessionSortDir,
-  );
+  // 排序覆盖在共享 store（图像查看器同步消费；快照稳定引用，供 useSyncExternalStore）。
+  const sortSession = useSyncExternalStore(subscribeMediaSort, getMediaSortSession, getMediaSortSession);
 
   const view: MediaViewMode =
     viewOverride ?? (isMediaViewMode(defaultView) ? defaultView : "adaptive");
   const imageSize = clampImageSize(imageSizeOverride ?? defaultImageSize);
   const sortKey: MediaSortKey =
-    sortKeyOverride ?? (isMediaSortKey(defaultSortKey) ? defaultSortKey : "name");
+    sortSession.key ?? (isMediaSortKey(defaultSortKey) ? defaultSortKey : "name");
   const sortDir: SortDirection =
-    sortDirOverride ?? (isSortDirection(defaultSortDir) ? defaultSortDir : "asc");
+    sortSession.dir ?? (isSortDirection(defaultSortDir) ? defaultSortDir : "asc");
 
   /**
    * 用户在「全部设置」里显式改动了本面板的设置 → **放弃**本会话的手动覆盖。
    *
    * 只认「本窗口的显式写入」这一条通路（本地广播携带落库键），不做"缺省值变了就清覆盖"
    * 的推断：后者会在面板重建时（设置异步读回、首帧还是声明缺省）把用户刚选的视图抹掉。
+   * 排序两项的放弃在 store 内部（模块级订阅，不依赖本面板挂载着）。
    */
   useEffect(
     () =>
@@ -140,12 +145,6 @@ export function useMediaViewState(panelApi?: PanelRenderCtx["api"]): MediaViewSt
         } else if (key === IMAGE_SIZE_STORAGE_KEY) {
           sessionImageSize = null;
           setImageSizeOverride(null);
-        } else if (key === SORT_KEY_STORAGE_KEY) {
-          sessionSortKey = null;
-          setSortKeyOverride(null);
-        } else if (key === SORT_DIR_STORAGE_KEY) {
-          sessionSortDir = null;
-          setSortDirOverride(null);
         }
       }),
     [],
@@ -165,15 +164,9 @@ export function useMediaViewState(panelApi?: PanelRenderCtx["api"]): MediaViewSt
     setImageSizeOverride(clamped);
   }, []);
 
-  /** 面板内选排序：排序键与方向共用一个下拉（`value` 决定改哪一项）。 */
+  /** 面板内选排序：转发给共享 store（键与方向共用一个下拉，`value` 决定改哪一项）。 */
   const chooseSort = useCallback((next: string) => {
-    if (isMediaSortKey(next)) {
-      sessionSortKey = next;
-      setSortKeyOverride(next);
-    } else if (isSortDirection(next)) {
-      sessionSortDir = next;
-      setSortDirOverride(next);
-    }
+    chooseMediaSort(next);
   }, []);
 
   return {
