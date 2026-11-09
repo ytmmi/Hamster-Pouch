@@ -88,7 +88,7 @@ pub(crate) fn list() -> Vec<ToolSpec> {
         ToolSpec {
             name: "file_query",
             title: "查询文件",
-            description: "按媒体类型 / 媒体源 / 目录前缀筛选当前仓库的已索引文件，游标分页。返回 items 与 next_cursor（把 next_cursor 原样回传即可续页，null 表示末页）。",
+            description: "按媒体类型 / 媒体源 / 目录前缀筛选当前仓库的已索引文件，游标分页。返回 items 与 nextCursor（把 nextCursor 原样回传即可续页，null 表示末页）。",
             write: false,
             schema: object(
                 json!({
@@ -99,7 +99,7 @@ pub(crate) fn list() -> Vec<ToolSpec> {
                     },
                     "sourceId": string("只查某个媒体源（source_list 里的 id）。"),
                     "dirPrefix": string("只查某个目录前缀，例如 \"2024/旅行\"。"),
-                    "cursor": string("上一页返回的 next_cursor，原样回传。"),
+                    "cursor": string("上一页返回的 nextCursor，原样回传。"),
                     "limit": integer("页大小，缺省 200，上限 1000。"),
                 }),
                 &[],
@@ -164,12 +164,12 @@ pub(crate) fn list() -> Vec<ToolSpec> {
         ToolSpec {
             name: "album_members",
             title: "相册成员",
-            description: "游标分页列出相册的可见成员文件（按相册的有效媒体属性过滤）。",
+            description: "游标分页列出相册的可见成员文件（按相册的有效媒体属性过滤）。返回 items 与 nextCursor。",
             write: false,
             schema: object(
                 json!({
                     "albumId": string("相册 ID。"),
-                    "cursor": string("上一页返回的 next_cursor，原样回传。"),
+                    "cursor": string("上一页返回的 nextCursor，原样回传。"),
                     "limit": integer("页大小，缺省 200，上限 1000。"),
                 }),
                 &["albumId"],

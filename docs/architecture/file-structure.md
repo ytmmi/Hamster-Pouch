@@ -619,6 +619,13 @@ HamsterPouch/
                               #     则回退到原首帧命令（判据是临时文件是否存在，不是退出码）；
                               #     `generate_image_preview` 的 **SVG 分流必须在 ffmpeg 快路径之前**
                               #     （生产恒传 Some(ffmpeg)，顺序反了 = SVGZ 在查看器里一片空白）
+                              #   lowres.rs 大 JPEG 缩略图的 **ffmpeg `-lowres` 快路径**（D148 /
+                              #     缺陷 0018 §4.2 ②）：六道闸门按像素分流（jpg 扩展名 / 有 ffmpeg /
+                              #     有界请求 / 短边 ≥ 2×max_dim / ≥24 MP / **SOF 分量=3**——CMYK 实测
+                              #     两路径反相不一致会偏色，灰度语料未覆盖，一并排除）；档位 = 最小 L
+                              #     使两轴 ceil(dim/2^L) ≥ max_dim；9000² 约 2.8×、1536² 反而慢 6 倍
+                              #     故小图保持进程内；失败即回退既有路径，接入点唯一在
+                              #     `thumbnail::decode_thumbnail_src` 顶部（扫描期与按需同一个函数）
                               #   waveform.rs 音频**波形图**（2026-10-17 / D115）：ffmpeg
                               #     `showwavespic` 出一张 **PNG**（实测**透明背景** alpha=0 ⇒
                               #     三套主题共用一张图，不生成第二套）；实测**逐字节确定性**
@@ -742,7 +749,13 @@ HamsterPouch/
                               #   `filmstrip-layout-verify.mjs`（D147 / 缺陷 0041 量胶片栏自适应视图：
                               #   单元不溢出客户区 / 无第二条滚动条 / 外框比例对齐 76e073a 原视图，
                               #   26 项；`HP_FILM_CROSS_MODE` / `HP_FILM_EXTENT_MODE` 两个回退旋钮
-                              #   各自复现修复前的红）
+                              #   各自复现修复前的红）、
+                              #   `real-interaction-verify.mjs`（D148 扩展真机验证：真实 app +
+                              #   WebView2 CDP，六交互面 16 项——媒体预览翻页计数收敛 / 右键定位与
+                              #   关闭 / 相册建删 / 真实 DataTransfer 拖拽入相册 / 查看器键盘翻页与
+                              #   序列后台翻完 / 胶片栏有界窗口 + 深处跳图；语料 = real-source-prep
+                              #   写入的 4700 张真实照片。**缺陷 0042（分页游标键名蛇形 → 真机翻页
+                              #   从未生效）就是这条链首跑抓到的**——夹具桩测不到真实序列化）
                               # **版本号工具 `version.mjs`**（D140，纯 Node 无依赖，`pnpm version:next` /
                               #   `pnpm check:version`）：`--current` 显示当前版本、`--next` 预览 +1、`--write <v>`
                               #   指定版本、`--apply` 按 `HP_VERSION` 或 +1 落盘；`bumpPatch` 只对 x.y.z 的 z 段

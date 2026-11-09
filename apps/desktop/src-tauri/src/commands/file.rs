@@ -154,9 +154,20 @@ pub(crate) struct FileQueryFilterArgs {
 }
 
 /// `file.query` 的返回体：本页 + 下一页游标（`null` = 已到末页）。
+///
+/// **`next_cursor` 必须序列化成驼峰 `nextCursor`**（缺陷 0042，2026-11-09）：
+/// 契约（`docs/spec/commands-events.md` 的 `file.query` 行）、前端类型
+/// （`shared/types/file.ts`）与 `drainPages`（`mediaPreviewPaging.ts`）读的都是
+/// `nextCursor`；此前这里**没有** `rename_all`/`rename`，serde 按字段名出蛇形，
+/// `page.nextCursor` 恒为 `undefined` → **真机上永远认为第一页就是末页**，
+/// 后台翻页停在 500 张——正是缺陷 0018 的"只能看到 300 张"同一族观感。
+/// （夹具测不到：Vite alias 的桩直接返回驼峰字面量。）
+/// `book.content` 一族刻意保留蛇形 `next_cursor`（前端类型同为蛇形，契约文档已写明），
+/// 与本字段**不同口径**，改动只限 file.query / album.members 这两个分页体。
 #[derive(Serialize)]
 pub(crate) struct FileQueryPage {
     items: Vec<AlbumFileItem>,
+    #[serde(rename(serialize = "nextCursor"))]
     next_cursor: Option<String>,
 }
 
@@ -692,4 +703,33 @@ pub(crate) fn file_reverify(
         Ok(updated.verify_status.as_str().to_string())
     })();
     api_from_hp(outcome)
+}
+
+#[cfg(test)]
+mod wire_shape_tests {
+    //! 缺陷 0042 的回归钉子：**分页游标在 JSON 上必须是 `nextCursor`**。
+    //!
+    //! 真机验证（2026-11-09）发现 `FileQueryPage` 没有 `rename_all`/`rename` 时
+    //! serde 出蛇形 `next_cursor`，而契约（`docs/spec/commands-events.md` 的
+    //! `file.query` 行）、前端类型（`shared/types/file.ts`）与 `drainPages`
+    //! 读的都是 `nextCursor` —— 真机上第一页永远被当成末页，后台翻页停在 500 张。
+    //! 夹具（Vite alias 桩）直接返回驼峰字面量，所以这条断裂**只有真机能看见**；
+    //! 这里把"序列化出来的键名"钉成断言，让它不再依赖人工。
+
+    use super::*;
+
+    #[test]
+    fn file_query_page_serializes_cursor_as_camel_case() {
+        let page = FileQueryPage {
+            items: vec![],
+            next_cursor: Some("cursor-value".into()),
+        };
+        let json = serde_json::to_value(&page).expect("序列化应成功");
+        let obj = json.as_object().expect("返回体应是对象");
+        assert!(
+            obj.contains_key("nextCursor"),
+            "键名必须是 nextCursor，实际 {obj:?}"
+        );
+        assert!(!obj.contains_key("next_cursor"), "不得再出蛇形键");
+    }
 }

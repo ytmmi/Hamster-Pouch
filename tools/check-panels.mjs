@@ -3360,6 +3360,31 @@ check(
       verifySrc.includes("HP_FILM_EXTENT_MODE"),
   );
 }
+{
+  // D148：扩展真机验证（交互面）在位——覆盖 0018 真机验证此前没碰过的六个面：
+  // 媒体预览翻页计数收敛 / 右键 / 相册 / 拖拽 / 查看器翻页 / 胶片栏窗口。
+  // 它抓到的 0042（游标键名蛇形）证明了只有穿过**真实序列化**的检查才测得到这一环。
+  const verifyPath = join(ROOT, "tools/real-interaction-verify.mjs");
+  const verifySrc = existsSync(verifyPath) ? readFileSync(verifyPath, "utf8") : "";
+  const covers = [
+    "media.paging.drain",
+    "contextmenu.open",
+    "album.create",
+    "drag.files-to-album",
+    "viewer.keyboard-paging",
+    "filmstrip.bounded-window",
+  ];
+  check(
+    "D148：扩展真机验证脚本在位（翻页/右键/相册/拖拽/查看器/胶片栏 六面全覆盖）",
+    verifySrc.length > 0 && covers.every((name) => verifySrc.includes(`"${name}"`)),
+  );
+  check(
+    "D148：真机验证走真实 app + WebView2 CDP（零新增依赖，与 0018 第 6 轮同设施）",
+    verifySrc.includes("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") &&
+      verifySrc.includes("remote-debugging-port") &&
+      verifySrc.includes("hamster-pouch-desktop.exe"),
+  );
+}
 
 // ==================== 图像查看器：相邻图像预加载 ====================
 //

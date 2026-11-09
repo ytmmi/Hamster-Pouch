@@ -409,10 +409,12 @@ pub(crate) fn album_list(repo_id: String, state: State<AppState>) -> ApiResponse
 /// `album.members` 的返回体：本页 + 下一页游标（`null` = 已到末页）。
 ///
 /// 与 `file.query` 的 `FileQueryPage` **同形**（D78 先例）：界面按同一套"回传 nextCursor"
-/// 的写法消费两种分页，不必记两套规则。
+/// 的写法消费两种分页，不必记两套规则。同缺陷 0042：游标字段**必须**序列化成驼峰
+/// `nextCursor`——否则界面读不到、真机上翻页永远停在第一页（详见 `file.rs` 的说明）。
 #[derive(Serialize)]
 pub(crate) struct AlbumMembersPage {
     items: Vec<AlbumFileItem>,
+    #[serde(rename(serialize = "nextCursor"))]
     next_cursor: Option<String>,
 }
 
@@ -587,4 +589,28 @@ pub(crate) fn album_delete(
         db.delete_album(&album_id)
     })();
     api_from_hp(outcome)
+}
+
+#[cfg(test)]
+mod wire_shape_tests {
+    //! 与 `file.rs` 的 `file_query_page_serializes_cursor_as_camel_case` 同族
+    //! （缺陷 0042）：`album.members` 与 `file.query` 是**同形**分页（D78），
+    //! 游标必须同为驼峰 `nextCursor`。
+
+    use super::*;
+
+    #[test]
+    fn album_members_page_serializes_cursor_as_camel_case() {
+        let page = AlbumMembersPage {
+            items: vec![],
+            next_cursor: Some("cursor-value".into()),
+        };
+        let json = serde_json::to_value(&page).expect("序列化应成功");
+        let obj = json.as_object().expect("返回体应是对象");
+        assert!(
+            obj.contains_key("nextCursor"),
+            "键名必须是 nextCursor，实际 {obj:?}"
+        );
+        assert!(!obj.contains_key("next_cursor"), "不得再出蛇形键");
+    }
 }

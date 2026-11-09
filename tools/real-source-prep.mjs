@@ -55,7 +55,21 @@ const REPO_DB = args.get("db") ?? defaultRepoDb();
 const SOURCE_ROOT = args.get("source") ?? "F:\\billfish资源库\\图片";
 /** 标记：本脚本写入的行都挂在这个 source_id 下，便于精确清理。 */
 const SOURCE_ID = "perf-real-source-0001";
-const REPO_ID = "c07f28d2-57dc-4d73-a9e5-3d943fa9e4f2";
+/**
+ * 目标仓库 id：**从库自身读**（sources.repo_id 既有行就是本库的 id）。
+ * 写死历史 id 会在换库后把源挂到不存在的仓库下，面板永远看不到。
+ * 库里还没有任何 source 时用显式 --repo=<id> 传入。
+ */
+const REPO_ID = (() => {
+  const explicit = args.get("repo");
+  if (explicit) return explicit;
+  const probe = new DatabaseSync(REPO_DB);
+  const row = probe.prepare("SELECT repo_id FROM sources LIMIT 1").get();
+  probe.close();
+  if (row?.repo_id) return row.repo_id;
+  console.error("库里没有既有 source，无法推断 repo_id；用 --repo=<id> 显式指定。");
+  process.exit(2);
+})();
 
 /**
  * 可解码的图片扩展名（与 `media_type.rs` 的判定一致，但排除 avif/heic/heif——

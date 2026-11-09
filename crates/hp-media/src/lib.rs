@@ -12,6 +12,7 @@
 mod cache;
 mod decode;
 mod exif;
+mod lowres;
 mod palette;
 mod player;
 mod probe;
@@ -37,3 +38,7 @@ pub use thumbnail::{
     generate_image_preview, generate_image_thumbnail,
 };
 pub use waveform::{WAVE_COLOR, WAVE_SIZE, generate_waveform};
+
+/// 大 JPEG `-lowres` 快路径的分流判据（D148 / 0018 §4.2 ②）。
+/// 生产判定在 `thumbnail` 内部完成；这里导出供集成测试与基准探针钉口径。
+pub use lowres::should_use_lowres;

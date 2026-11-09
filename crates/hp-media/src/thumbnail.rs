@@ -1,6 +1,10 @@
 //! 缩略图生成：ffmpeg 首帧抽帧（D16，视频）+ 图片进程内缩放（进程内**无解码器**的格式
 //! 与 AVIF/HEIC 家族回退 ffmpeg 有界解码，2026-10-11 起；见 `docs/issues/0018` §7 P1-D）。
 //!
+//! 图片解码的第一步是**大 JPEG 的 `-lowres` 快路径分流**（D148，0018 §4.2 ② / P1-E，
+//! 2026-11-09）：阈值之上（≥24 MP 的 YCbCr jpg）用 ffmpeg 的 DCT 缩放解码，阈值之下
+//! 与其余格式**逐位口径不变**——判据与实测见 `crate::lowres` 模块文档。
+//!
 //! **落盘格式按媒体类型分流**（用户 2026-10-08 口径：「同像素和质量的情况下，选择
 //! 体积更小的格式」）：
 //!
@@ -417,6 +421,16 @@ fn decode_thumbnail_src(
     // 首次进入即注册 libheif hooks（幂等）：heic/heif/avif 可进程内解码，
     // 失败才落 ffmpeg 兜底（见 `decode` 模块文档）。
     crate::decode::ensure_libheif_hooks();
+
+    // **大 JPEG 的 -lowres 快路径**（D148 / 0018 §4.2 ②）：按像素分流，
+    // 小图仍走进程内（外部进程固定开销反而更慢）。ffmpeg 已应用 EXIF 旋转，
+    // 成功即直接返回；失败落回下面的既有进程内路径（行为与旧实现一致）。
+    if let Some(bin) = ffmpeg_bin
+        && crate::lowres::should_use_lowres(src, max_dim)
+        && let Ok(img) = crate::lowres::decode_lowres_thumbnail(src, bin, max_dim, timeout)
+    {
+        return Ok(img);
+    }
 
     // SVG / SVGZ（D112）：进程内 `resvg` 栅格化。**不碰 ffmpeg**——ffmpeg 对 SVG
     // 只有解复用器、没有解码器（`docs/rfc/0005` §4），试它必然失败。

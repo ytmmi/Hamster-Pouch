@@ -302,6 +302,50 @@ check(
     ),
 );
 
+// ==================== 游标分页的**线上键名**（缺陷 0042） ====================
+//
+// 真机验证（2026-11-09）抓到的断裂：`file.query` / `album.members` 的返回体字段
+// `next_cursor` 没有 serde rename，JSON 上是蛇形；而契约、前端类型与 `drainPages`
+// 读的都是驼峰 `nextCursor` → 真机上第一页永远被当成末页，后台翻页停在 500 张。
+// 夹具（Vite alias 桩）返回驼峰字面量，所以 check:panels 的 drainPages 行为断言
+// **全绿却测不到这条链**——键名对账必须钉在桥接层与前端类型之间。
+const albumBridgeSrc = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/album.rs"),
+  "utf8",
+);
+const pagingWire = [
+  {
+    label: "FileQueryPage",
+    structSrc: fileBridgeSrc,
+    typeSrc: readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/types/file.ts"), "utf8"),
+  },
+  {
+    label: "AlbumMembersPage",
+    structSrc: albumBridgeSrc,
+    typeSrc: readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/types/album.ts"), "utf8"),
+  },
+];
+for (const { label, structSrc, typeSrc } of pagingWire) {
+  const structBody = structSrc.slice(
+    structSrc.search(new RegExp(`struct\\s+${label}\\b`)),
+    structSrc.search(new RegExp(`struct\\s+${label}\\b`)) + 400,
+  );
+  check(
+    `0042：${label} 的游标序列化成驼峰 nextCursor（桥接层 rename 在位）`,
+    /rename\(serialize = "nextCursor"\)/.test(structBody),
+  );
+  check(
+    `0042：${label} 的前端类型读驼峰 nextCursor（两侧对账）`,
+    /nextCursor:/.test(typeSrc) && !/next_cursor:/.test(typeSrc),
+  );
+}
+check(
+  "0042：drainPages 消费的就是驼峰 nextCursor（翻页循环判据不被字段名漂移打断）",
+  /nextCursor === null|page\.nextCursor/.test(
+    readFileSync(join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewPaging.ts"), "utf8"),
+  ),
+);
+
 const passed = results.filter((r) => r.ok).length;
 console.log(`\n${passed}/${results.length} 通过`);
 process.exit(passed === results.length ? 0 : 1);
