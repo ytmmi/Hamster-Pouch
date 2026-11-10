@@ -25,7 +25,7 @@ import {
   rmSync,
   statSync,
   mkdirSync,
-  renameSync,
+  cpSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
@@ -153,7 +153,9 @@ async function main() {
     // ③ 整目录替换：清单里列了 README / 清单文件，逐个文件替换会留下两边不一致的余地
     if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
     mkdirSync(dirname(dest), { recursive: true });
-    renameSync(staged, dest);
+    // 不用 rename：临时目录与工作区可能不在一张盘上（GitHub runner 上 C: → D:），
+    // rename 会抛 EXDEV。整目录复制虽然慢一点（12 MB），但路径无关、哪儿都能跑。
+    cpSync(staged, dest, { recursive: true });
     const files = verifyPluginDir(dest);
     if (files.length > 0) throw new Error(`落地后复核失败：\n  - ${files.join("\n  - ")}`);
     console.log(`[bundled-plugin] 已落地：${dest}`);
