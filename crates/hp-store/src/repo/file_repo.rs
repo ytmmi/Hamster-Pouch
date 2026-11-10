@@ -7,6 +7,7 @@ use hp_core::{
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::repo::repo_db::RepoDb;
+use crate::repo::source_exclusion_repo::EXCLUDED_PATH_PREDICATE;
 use crate::util::{now_iso, require_nonempty, store_err};
 
 /// 单页最大条数（防调用方一次拉全库；契约里 `limit` 只是页大小）。
@@ -273,6 +274,10 @@ impl RepoDb {
     /// `dir_prefix` 非空时仅返回 `relative_path` 以 `<dir_prefix>/` 开头的文件（含更深子目录）。
     /// `media_types` **空 = 不筛**（D95：集合语义见 [`FileQueryFilter`]）。
     ///
+    /// 落在**被排除子目录**（`source_exclusion`，D149）下的行一律不返回：排除是视图级
+    /// 软隐藏，索引行本身仍在库里，所以过滤必须做在查询里而不是"查完再删"。
+    /// 判定口径由 [`EXCLUDED_PATH_PREDICATE`] 单点定义，与相册成员查询、目录树同源。
+    ///
     /// **排序键（游标的依据，契约要求写明）**：`(relative_path, source_id, id)` **升序**。
     /// - `relative_path` 单独**不是**全序：同一仓库下两个源可以有同名相对路径，
     ///   所以必须带上 `source_id`；`id` 是主键，保证同一 `(源, 路径)`（唯一索引）下也不含糊。
@@ -323,9 +328,11 @@ impl RepoDb {
                AND (?7 IS NULL OR f.source_id = ?7)
                AND (?8 IS NULL OR f.relative_path LIKE ?8 ESCAPE '\\')
                AND (?9 = 0 OR {after})
+               AND {excluded}
              ORDER BY f.relative_path, f.source_id, f.id
              LIMIT ?13",
-            after = after.unwrap_or("1 = 1")
+            after = after.unwrap_or("1 = 1"),
+            excluded = EXCLUDED_PATH_PREDICATE
         );
         let mut stmt = self
             .conn()

@@ -118,9 +118,15 @@ interface HpError {
 | `source.rename` | 重命名别名（**仅添加后**） | `{ repoId, sourceId, alias }` | `{ ok, data: { ok: true } }` | **已包装** | 线上 `data` 是 `()`（序列化为 `null`） |
 | `source.scan` | 扫描/索引媒体源 | `{ repoId, sourceId, full? }` | `{ ok, data: { taskId } }` | **已包装** | 异步命令用 `ApiAsync`；线上 `data` 是裸 `taskId` 串；已有任务在跑 → `conflict` |
 | `source.list` | 列出媒体源 | `{ repoId }` | `{ ok, data: { items } }` | **已包装** | 线上 `data` 是裸 `SourceItem[]` |
-| `source.tree` | 列出媒体源目录树 | `{ repoId }` | `{ ok, data: { nodes } }` | **已包装** | 线上 `data` 是裸 `SourceTreeNode[]` |
+| `source.tree` | 列出媒体源目录树 | `{ repoId }` | `{ ok, data: { nodes } }` | **已包装** | 线上 `data` 是裸 `SourceTreeNode[]`；**被排除的子目录（D149）不出现** |
+| `source.exclusions` | 列出被排除的子目录 | `{ repoId, sourceId? }` | `{ ok, data: { items } }` | **已包装** | 省略 `sourceId` = 整个仓库（面板据此决定「取消排除」是否出现） |
+| `source.exclude` | **排除**一个子目录（含全部后代，软排除） | `{ repoId, sourceId, relativePath }` | `{ ok, data: { items } }` | **已包装** | `items` = 该源排除后的最新清单。源不存在 → `not_found`；空路径 / 含 `.` `..` 段 → `validation`；重复排除幂等（不刷新 `excluded_at`） |
+| `source.unexclude` | 取消排除（逐个勾选恢复） | `{ repoId, sourceId, relativePaths }` | `{ ok, data: { removed, items } }` | **已包装** | `removed` = 实际删掉的排除行数；`items` = 该源剩余清单；空数组 → `removed: 0`（不是错误） |
 
 > **本批的 D76 落地细节**：`source.*` 七条 + `task.*` 四条（见 3.7）一并包装；
+> `source.exclusions` / `source.exclude` / `source.unexclude` 是 2026-11 追加的三条（D149），
+> 同样是同步命令、同样返回 `ApiResponse`，**不发事件、不占长任务闸门**——排除只是往一张小表里
+> 写一行，没有需要进度上报的工作量。
 > 两个长任务命令（`source.scan` / `source.unmount`）是**异步命令**，用 `ApiAsync`
 > （Tauri 对含引用的 async 命令强制要求 `Result`，包装仍落在成功值里）。
 > 错误码口径：空路径 / 空 ID → `validation`；未打开仓库 → `not_found`；
@@ -166,6 +172,30 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 - 跟随源相册的根源离线时同步为空操作（否则 `mirror` 会误清空相册）。
 - `source.mount` 遇到同仓库内路径相同且**当前离线**的行会复用它（翻回在线、保留原别名），
   避免重建源 ID 导致旧索引与解释数据变成取不回的孤儿。
+
+**子目录排除语义（D149，2026-11，用户已确认的口径）**：右键一个**子文件夹**选「排除」，
+它连同全部后代从目录树与媒体库视图里消失；右键**源根**选「取消排除」弹出被排除清单，
+逐个勾选恢复（附「全部恢复」）。与「卸载」的对照是本功能的全部要点：
+
+| | 卸载（`source.unmount`） | 排除（`source.exclude`） |
+| --- | --- | --- |
+| 范围 | 整个源 | 源内某个子目录（含后代） |
+| 数据 | 删索引 / 标签 / 评分 / 色彩 / 相册成员 | **一行不删**，只写 `source_exclusion` |
+| 可逆 | 不可恢复（磁盘文件除外） | 取消排除即刻原样还原（含标签与评分） |
+| 树上呈现 | 源消失 | 该子树消失（用户口径：完全不显示，不做灰显） |
+| 命令形态 | 后台长任务 + 进度浮窗 + 3 条事件 | 同步命令，无事件 |
+| `source.list` / 图标 | 源不再出现 | 源照常在列，只是 `file_count` 变小 |
+
+- 语义是**路径前缀**：排除 `a/b` 会连带藏着 `a/b/c`，但 **`a/bc` 不受影响**。
+- **扫描器不过滤被排除的目录**（`hp-scanner` 不改）：照常索引它们。若扫描跳过，增量扫描会把
+  既有行判成 `missing` 并清掉——那等于删除数据，与"软排除"自相矛盾。
+- 过滤点共四处，缺一处就会出现"这里没了、那里还在"：`file.query`（`RepoDb::query_files`）、
+  相册成员分页（`RepoDb::query_album_members_page`）、相册全量可见成员
+  （`hp-album` 的 `visible_members`）、以及 `source.tree` 建树**之前**的相对路径过滤。
+  判定口径单点定义在 `EXCLUDED_PATH_PREDICATE`（`crates/hp-store/src/repo/source_exclusion_repo.rs`）。
+- `count_files` / `count_album_members` 这类**原始计数**刻意不带过滤（它们回答"库里有多少行"）；
+  界面数字请用过滤版本（如 `RepoDb::count_visible_album_members`）。
+- 排除整个源不在本功能范围内：那正是卸载。
 
 添加媒体源由**原生文件夹对话框选取目录**触发，UI **不传 `alias`**：源名称默认取所选文件夹名（`source_tree` 在 `alias` 为空时回退到路径末级段）。别名的创建入口只在「已添加的媒体源」条目上（`source.rename`），添加时不可填别名。`alias` 参数保留在命令契约中以兼容桥接层与嵌套源场景。
 

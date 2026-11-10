@@ -26,6 +26,8 @@ const REPO_MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/repo/0012_album_sync_mirror.sql"),
     // 相册同级排序位：D132。
     include_str!("../../migrations/repo/0013_album_sort_order.sql"),
+    // 媒体源子目录排除（软排除，可恢复）：D149。
+    include_str!("../../migrations/repo/0014_source_exclusion.sql"),
 ];
 
 /// 仓库库句柄。

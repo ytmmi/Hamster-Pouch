@@ -398,7 +398,7 @@ pub(crate) fn album_list(repo_id: String, state: State<AppState>) -> ApiResponse
         let albums = db.list_albums(&repo_id)?;
         let mut items = Vec::with_capacity(albums.len());
         for a in albums {
-            let count = db.count_album_members(a.id.as_str())?;
+            let count = db.count_visible_album_members(a.id.as_str())?;
             items.push(album_to_item(a, count));
         }
         Ok(items)

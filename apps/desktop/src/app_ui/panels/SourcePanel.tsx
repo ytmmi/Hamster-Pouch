@@ -12,9 +12,10 @@ import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { getTask, setTask, useTask } from "../core/taskStore";
 import { ContextMenu } from "../menu/ContextMenu";
+import { SwitchToggle } from "../shared/SwitchToggle";
 import { MarkMenuTree, usePanelMarks } from "./markMenu";
 import { marksOf } from "../shared/panelMarks";
-import type { SourceTreeNode } from "../shared/types";
+import type { SourceExclusionItem, SourceTreeNode } from "../shared/types";
 
 /** 取路径最后一段文件夹名。 */
 function baseName(path: string): string {
@@ -133,16 +134,30 @@ export function SourcePanel(): JSX.Element {
   const renameRef = useRef<HTMLInputElement>(null);
   // 右键菜单内「添加标记」子菜单开关（D134）
   const [openMarkSub, setOpenMarkSub] = useState(false);
+  // 被排除的子目录清单（D149）：源根右键「取消排除」是否显示由它决定
+  const [exclusions, setExclusions] = useState<SourceExclusionItem[]>([]);
+  // 「取消排除」清单弹窗的目标源；null = 不显示
+  const [unexcludeFor, setUnexcludeFor] = useState<string | null>(null);
+  // 清单弹窗里勾选的相对目录（默认全选：这是"还原"操作，一步到位更顺手）
+  const [unexcludeChecked, setUnexcludeChecked] = useState<Set<string>>(new Set());
   // 本面板内的打标状态：与相册面板**各存一份**，自定义标记互不可见（用户口径）
   const { marks, persist: persistMarks } = usePanelMarks(app.repoId);
 
   const load = useCallback(async () => {
     if (!app.repoId) {
       setNodes([]);
+      setExclusions([]);
       return;
     }
     try {
-      setNodes(await api.sourceTree({ repoId: app.repoId }));
+      // 排除清单与目录树一起取：右键菜单要按它决定「取消排除」是否出现，
+      // 分两次请求会出现"树里没了、菜单里还没认"的中间态。
+      const [tree, excluded] = await Promise.all([
+        api.sourceTree({ repoId: app.repoId }),
+        api.sourceExclusions({ repoId: app.repoId }),
+      ]);
+      setNodes(tree);
+      setExclusions(excluded.items);
     } catch (e) {
       app.status(app.t("source.treeFailed", { err: errorTextOf(app.t, e) }), "error");
     }
@@ -351,6 +366,86 @@ export function SourcePanel(): JSX.Element {
     } catch (e) {
       setTask(null);
       app.status(t("source.unmountFailed", { err: errorTextOf(app.t, e) }), "error");
+    }
+  };
+
+  /** 该源当前是否有被排除的子文件夹（源根右键「取消排除」的显示条件）。 */
+  const hasExclusions = (sourceId: string): boolean =>
+    exclusions.some((e) => e.source_id === sourceId);
+
+  /**
+   * 排除子文件夹（D149，**软排除**）：把它连同全部后代从目录树与媒体库视图里藏起来，
+   * 一行数据都不删。
+   *
+   * 为什么不直接复刻卸载：卸载会 `purge_source_data` 把索引/标签/评分/相册成员一起
+   * 抹掉，是不可恢复的；排除只写一张 `source_exclusion` 表，标签评分原地不动，
+   * 「取消排除」即刻原样回来——两者的确认文案也必须如实区分，别让用户以为能反悔。
+   */
+  const excludeDir = async (sourceId: string, relativePath: string, name: string) => {
+    if (!app.repoId) return;
+    const confirmed = await app.askConfirm({
+      title: t("source.excludeConfirmTitle", { name }),
+      message: t("source.excludeConfirmBody"),
+      warning: t("source.excludeConfirmWarn"),
+      confirmLabel: t("source.exclude"),
+      cancelLabel: t("common.cancel"),
+      // 不标 danger：这是可逆的软排除（数据一行不删），红色危险按钮会和
+      // 上面"不会删除任何数据"的提示自相矛盾。真正危险的「卸载」才用红色。
+    });
+    if (!confirmed) return;
+    try {
+      const res = await api.sourceExclude({ repoId: app.repoId, sourceId, relativePath });
+      setExclusions(res.items);
+      // 当前选中的目录（或它的上级）刚被排除时清掉选中：媒体库视图里已经没有这些行了
+      if (
+        app.sourceId === sourceId &&
+        app.dirPath !== null &&
+        (app.dirPath === relativePath || app.dirPath.startsWith(`${relativePath}/`))
+      ) {
+        app.setDirPath(null);
+      }
+      app.status(t("source.excluded", { name }), "info");
+      // 目录树要重新取：被排除的子树立即消失（含祖先节点的文件数变化）
+      await load();
+    } catch (e) {
+      app.status(t("source.excludeFailed", { err: errorTextOf(app.t, e) }), "error");
+    }
+  };
+
+  /** 打开「取消排除」清单弹窗（逐个勾选恢复，默认全选）。 */
+  const openUnexcludeDialog = (sourceId: string) => {
+    const items = exclusions.filter((e) => e.source_id === sourceId);
+    if (items.length === 0) return;
+    setUnexcludeChecked(new Set(items.map((e) => e.relative_path)));
+    setUnexcludeFor(sourceId);
+  };
+
+  /**
+   * 取消排除：`all` = 全部恢复（忽略勾选），否则只恢复勾中的那些。
+   * 恢复后台会重新出现在目录树里——数据从未离开，所以这里不存在"重建"开销。
+   */
+  const restoreExclusions = async (all: boolean) => {
+    if (!app.repoId || !unexcludeFor) return;
+    const sourceId = unexcludeFor;
+    const items = exclusions.filter((e) => e.source_id === sourceId);
+    const picked = (all ? items : items.filter((e) => unexcludeChecked.has(e.relative_path))).map(
+      (e) => e.relative_path,
+    );
+    if (picked.length === 0) {
+      app.status(t("source.unexcludeNothing"), "info");
+      return;
+    }
+    try {
+      const res = await api.sourceUnexclude({
+        repoId: app.repoId,
+        sourceId,
+        relativePaths: picked,
+      });
+      setUnexcludeFor(null);
+      app.status(t("source.unexcluded", { count: res.removed }), "info");
+      await load();
+    } catch (e) {
+      app.status(t("source.unexcludeFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -692,7 +787,7 @@ export function SourcePanel(): JSX.Element {
                   />
                 </div>
               )}
-              {menu.relativePath === null && (
+              {menu.relativePath === null ? (
                 <>
                   <div className="menu-sep" />
                   {/* 别名只能在添加之后修改 */}
@@ -709,6 +804,21 @@ export function SourcePanel(): JSX.Element {
                   >
                     {t("common.rename")}
                   </button>
+                  {/* 只有该源确有被排除的子文件夹时才出现（用户口径：没有就不显示） */}
+                  {hasExclusions(menu.sourceId) && (
+                    <>
+                      <div className="menu-sep" />
+                      <button
+                        className="menu-item"
+                        onClick={() => {
+                          openUnexcludeDialog(menu.sourceId);
+                          setMenu(null);
+                        }}
+                      >
+                        {t("source.unexclude")}
+                      </button>
+                    </>
+                  )}
                   <div className="menu-sep" />
                   <button
                     className="menu-item danger"
@@ -720,8 +830,79 @@ export function SourcePanel(): JSX.Element {
                     {t("common.unmount")}
                   </button>
                 </>
+              ) : (
+                <>
+                  <div className="menu-sep" />
+                  {/* 子文件夹的「排除」＝软化版的卸载：隐藏而不删数据，随时可还原（D149） */}
+                  <button
+                    className="menu-item"
+                    onClick={() => {
+                      const relativePath = menu.relativePath;
+                      // 菜单只在子文件夹上渲染这一项；TS 在回调里丢掉了收窄，这里补一次判定
+                      if (relativePath === null) {
+                        setMenu(null);
+                        return;
+                      }
+                      const name = menu.name;
+                      setMenu(null);
+                      void excludeDir(menu.sourceId, relativePath, name);
+                    }}
+                  >
+                    {t("source.exclude")}
+                  </button>
+                </>
               )}
             </ContextMenu>
+          )}
+
+          {/* 「取消排除」清单弹窗：逐个勾选恢复（复用任务浮窗的遮罩/卡片样式） */}
+          {unexcludeFor && (
+            <div className="task-overlay" onClick={() => setUnexcludeFor(null)}>
+              <div className="task-card exclude-card" onClick={(e) => e.stopPropagation()}>
+                <div className="task-title">{t("source.unexcludeTitle")}</div>
+                <div className="exclude-hint">{t("source.unexcludeHint")}</div>
+                <div className="exclude-list">
+                  {exclusions
+                    .filter((e) => e.source_id === unexcludeFor)
+                    .map((e) => (
+                      // 容器必须是 `<span>`：`<label>` 不得包住可交互元素，
+                      // 勾选框走宿主统一的胶囊开关（原生复选框在 app_ui 内被 check:settings 禁止）
+                      <span key={e.relative_path} className="exclude-row">
+                        <SwitchToggle
+                          checked={unexcludeChecked.has(e.relative_path)}
+                          theme={app.theme}
+                          label={e.relative_path}
+                          onChange={(next) => {
+                            setUnexcludeChecked((prev) => {
+                              const picked = new Set(prev);
+                              if (next) {
+                                picked.add(e.relative_path);
+                              } else {
+                                picked.delete(e.relative_path);
+                              }
+                              return picked;
+                            });
+                          }}
+                        />
+                        <span className="exclude-path" title={e.relative_path}>
+                          {e.relative_path}
+                        </span>
+                      </span>
+                    ))}
+                </div>
+                <div className="task-actions">
+                  <button className="menu-item" onClick={() => void restoreExclusions(false)}>
+                    {t("source.unexcludeSelected")}
+                  </button>
+                  <button className="menu-item" onClick={() => void restoreExclusions(true)}>
+                    {t("source.unexcludeAll")}
+                  </button>
+                  <button className="menu-item" onClick={() => setUnexcludeFor(null)}>
+                    {t("common.cancel")}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </>
       )}

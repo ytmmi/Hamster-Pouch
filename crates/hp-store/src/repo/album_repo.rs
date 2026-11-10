@@ -11,6 +11,7 @@ use rusqlite::{OptionalExtension, Row, params};
 
 use crate::repo::file_repo::{FILE_COLUMN_COUNT, FILE_COLUMNS_F, row_to_file};
 use crate::repo::repo_db::RepoDb;
+use crate::repo::source_exclusion_repo::EXCLUDED_PATH_PREDICATE;
 use crate::util::{now_iso, require_nonempty, store_err};
 
 /// `album.members` 单页上限（与 `file.query` 的 `FILE_QUERY_MAX_LIMIT` 同量级）。
@@ -548,8 +549,10 @@ impl RepoDb {
                AND (?6 = 0
                     OR m.added_at > ?7
                     OR (m.added_at = ?7 AND m.file_id > ?8))
+               AND {excluded}
              ORDER BY m.added_at, m.file_id
-             LIMIT ?9"
+             LIMIT ?9",
+            excluded = EXCLUDED_PATH_PREDICATE
         );
 
         let mut stmt = self
@@ -631,7 +634,11 @@ impl RepoDb {
         Ok(())
     }
 
-    /// 统计相册成员数。
+    /// 统计相册成员数（**原始成员行数**，不做任何视图过滤）。
+    ///
+    /// 供存储层自检与测试使用；界面要显示"这个相册有几个可见对象"请用
+    /// [`Self::count_visible_album_members`]——否则被排除子目录下的成员会被算进去，
+    /// 列表数字与翻页出来的条数对不上。
     pub fn count_album_members(&self, album_id: &str) -> HpResult<i64> {
         self.conn()
             .query_row(
@@ -640,6 +647,24 @@ impl RepoDb {
                 |row| row.get(0),
             )
             .map_err(|e| store_err("统计相册成员数", e))
+    }
+
+    /// 统计相册中**可见**的成员数：与 [`Self::query_album_members_page`] 同一过滤口径
+    /// （离线源排除 + 被排除子目录排除，D149）。
+    pub fn count_visible_album_members(&self, album_id: &str) -> HpResult<i64> {
+        let sql = format!(
+            "SELECT COUNT(*)
+             FROM album_member m
+             JOIN files f ON f.id = m.file_id
+             JOIN sources s ON s.id = f.source_id
+             WHERE m.album_id = ?1
+               AND s.mounted = 1
+               AND {excluded}",
+            excluded = EXCLUDED_PATH_PREDICATE
+        );
+        self.conn()
+            .query_row(&sql, params![album_id], |row| row.get(0))
+            .map_err(|e| store_err("统计相册可见成员数", e))
     }
 
     /// 列出包含某文件的全部相册 ID（源间复制继承成员关系用，RFC 0001）。

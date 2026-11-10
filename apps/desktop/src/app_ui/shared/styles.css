@@ -770,6 +770,42 @@ button.danger {
   white-space: nowrap;
 }
 
+/* 「取消排除」清单弹窗（D149）：被排除的子目录逐条勾选恢复。
+   与 .confirm-card 同宽——相对路径往往很长，窄卡片会把它们全截掉。 */
+.exclude-card {
+  max-width: min(560px, 82vw);
+}
+
+.exclude-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--fg-dim);
+}
+
+.exclude-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.exclude-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.exclude-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 扫描进行中：右键菜单里的扫描项置灰 */
 .menu-item:disabled {
   opacity: 0.45;

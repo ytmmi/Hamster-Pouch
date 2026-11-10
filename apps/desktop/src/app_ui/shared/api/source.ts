@@ -10,12 +10,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import type {
+  SourceExcludeArgs,
+  SourceExclusionList,
+  SourceExclusionsArgs,
   SourceItem,
   SourceListArgs,
   SourceMountArgs,
   SourceRenameArgs,
   SourceScanArgs,
   SourceTreeNode,
+  SourceUnexcludeArgs,
+  SourceUnexcludeResult,
   SourceUnmountArgs,
   SourceUnmountPreview,
 } from "../types";
@@ -103,6 +108,37 @@ export function sourceScan(args: SourceScanArgs): Promise<string> {
     repoId: args.repoId,
     sourceId: args.sourceId,
     full: args.full,
+  }).then(unwrapApi);
+}
+
+/**
+ * 列出被排除的子目录（D149）。不给 `sourceId` = 整个仓库。
+ *
+ * 排除是**软排除**：一行数据都不删，只是这些目录（含全部后代）不再出现在
+ * 目录树与媒体库视图里；[`sourceUnexclude`] 后原样回来。
+ */
+export function sourceExclusions(args: SourceExclusionsArgs): Promise<SourceExclusionList> {
+  return invoke<ApiResponse<SourceExclusionList>>("source_exclusions", {
+    repoId: args.repoId,
+    sourceId: args.sourceId,
+  }).then(unwrapApi);
+}
+
+/** 排除某源下的一个子目录（含其后代）；返回该源最新的排除清单。 */
+export function sourceExclude(args: SourceExcludeArgs): Promise<SourceExclusionList> {
+  return invoke<ApiResponse<SourceExclusionList>>("source_exclude", {
+    repoId: args.repoId,
+    sourceId: args.sourceId,
+    relativePath: args.relativePath,
+  }).then(unwrapApi);
+}
+
+/** 取消排除若干子目录（逐个勾选恢复）；返回实际恢复条数与该源剩余清单。 */
+export function sourceUnexclude(args: SourceUnexcludeArgs): Promise<SourceUnexcludeResult> {
+  return invoke<ApiResponse<SourceUnexcludeResult>>("source_unexclude", {
+    repoId: args.repoId,
+    sourceId: args.sourceId,
+    relativePaths: args.relativePaths,
   }).then(unwrapApi);
 }
 

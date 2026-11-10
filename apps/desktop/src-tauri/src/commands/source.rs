@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use hp_core::{HpError, HpResult, Source};
 use hp_scanner::{ScanOptions, ScanOutcome, ScanPhase, ScanProgress};
-use hp_store::{RepoDb, build_source_tree};
+use hp_store::{RepoDb, build_source_tree, retain_visible_paths};
 use serde::Serialize;
 use tauri::State;
 
@@ -449,6 +449,9 @@ pub(crate) fn source_list(repo_id: String, state: State<AppState>) -> ApiRespons
 ///
 /// 只含**在线**源：卸载（`mounted = 0`）后必须立即从「已添加的媒体源」消失，
 /// 文件索引仍在库中，重新挂载同一路径即恢复（RFC 0003）。
+///
+/// 被排除的子目录（`source_exclusion`，D149）也**不出现**：排除是视图级软隐藏，
+/// 数据一行不删，「取消排除」后原样回来。
 #[tauri::command]
 pub(crate) fn source_tree(
     repo_id: String,
@@ -460,7 +463,12 @@ pub(crate) fn source_tree(
         let sources = db.list_mounted_sources(&repo_id)?;
         let mut out = Vec::with_capacity(sources.len());
         for source in sources {
+            // 排除在**建树之前**生效：先把被排除子树下的路径滤掉，再建树。
+            // 这样"被排除目录不出现"与"其文件不计入任何父目录的 file_count"由同一份
+            // 输入决定；若建完树再回头删节点/改计数，每层都要重算，迟早漏一层。
+            let prefixes = db.source_exclusion_prefixes(source.id.as_str())?;
             let paths = db.list_relative_paths_by_source(source.id.as_str())?;
+            let paths = retain_visible_paths(paths, &prefixes);
             let tree = build_source_tree(&paths);
             let source_id = source.id.as_str().to_string();
             let name = source
@@ -481,6 +489,118 @@ pub(crate) fn source_tree(
         Ok(out)
     })();
     api_from_hp(outcome)
+}
+
+/// 一条媒体源子目录排除记录（D149）。
+#[derive(Serialize)]
+pub(crate) struct SourceExclusionItem {
+    source_id: String,
+    relative_path: String,
+    excluded_at: String,
+}
+
+/// `source.exclusions` / `source.exclude` 的返回体：该范围内的最新排除清单。
+#[derive(Serialize)]
+pub(crate) struct SourceExclusionList {
+    items: Vec<SourceExclusionItem>,
+}
+
+/// `source.unexclude` 的返回体：实际取消的条数 + 该源剩余清单。
+#[derive(Serialize)]
+pub(crate) struct SourceUnexcludeResult {
+    removed: u64,
+    items: Vec<SourceExclusionItem>,
+}
+
+/// source.exclusions：列出被排除的子目录（不给 `source_id` = 整个仓库）。
+///
+/// 面板右键要用它决定「取消排除」显不显示（有排除才显示），因此支持只取一个源的清单，
+/// 也支持一次取全仓库（避免逐源发 N 条命令）。
+#[tauri::command]
+pub(crate) fn source_exclusions(
+    repo_id: String,
+    source_id: Option<String>,
+    state: State<AppState>,
+) -> ApiResponse<SourceExclusionList> {
+    let outcome = (|| -> HpResult<SourceExclusionList> {
+        let guard = lock_repo(&state)?;
+        let db = open_repo(&guard)?;
+        let rows = match source_id.as_deref() {
+            Some(id) => db.list_source_exclusions(id)?,
+            None => db.list_repo_exclusions(&repo_id)?,
+        };
+        Ok(SourceExclusionList {
+            items: rows.into_iter().map(exclusion_to_item).collect(),
+        })
+    })();
+    api_from_hp(outcome)
+}
+
+/// source.exclude：把某媒体源下的一个子目录（含其全部后代）排除出仓库视野。
+///
+/// **软排除**（D149）：一行数据都不删——文件索引、标签、评分、色彩参考、相册成员
+/// 全部原样保留，只是不再出现在目录树与媒体库视图里；「取消排除」后即刻完整还原。
+/// 与 `source.unmount` 的区别正在这里：卸载是整个源离线且要重新挂载，
+/// 排除是源内某个目录、随时可逆。
+#[tauri::command]
+pub(crate) fn source_exclude(
+    repo_id: String,
+    source_id: String,
+    relative_path: String,
+    state: State<AppState>,
+) -> ApiResponse<SourceExclusionList> {
+    // `repo_id` 不参与查询：`open_repo` 已经绑定当前仓库库，
+    // 别的仓库的 source_id 在这里根本查不到（与 `source.scan` 等同口径）。
+    let _ = repo_id;
+    let outcome = (|| -> HpResult<SourceExclusionList> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        db.exclude_source_dir(&source_id, &relative_path)?;
+        Ok(SourceExclusionList {
+            items: db
+                .list_source_exclusions(&source_id)?
+                .into_iter()
+                .map(exclusion_to_item)
+                .collect(),
+        })
+    })();
+    api_from_hp(outcome)
+}
+
+/// source.unexclude：取消排除指定的若干子目录（逐个勾选恢复）。
+///
+/// 只删**被勾选的那几行**，不做任何前缀展开：被排除目录的后代本来就没有单独的行，
+/// 它们本来就是"跟着目录一起藏、也跟着目录一起回来"。
+#[tauri::command]
+pub(crate) fn source_unexclude(
+    repo_id: String,
+    source_id: String,
+    relative_paths: Vec<String>,
+    state: State<AppState>,
+) -> ApiResponse<SourceUnexcludeResult> {
+    let _ = repo_id;
+    let outcome = (|| -> HpResult<SourceUnexcludeResult> {
+        let mut guard = lock_repo(&state)?;
+        let db = open_repo_mut(&mut guard)?;
+        let removed = db.unexclude_source_dirs(&source_id, &relative_paths)?;
+        Ok(SourceUnexcludeResult {
+            removed,
+            items: db
+                .list_source_exclusions(&source_id)?
+                .into_iter()
+                .map(exclusion_to_item)
+                .collect(),
+        })
+    })();
+    api_from_hp(outcome)
+}
+
+fn exclusion_to_item(row: hp_store::SourceExclusion) -> SourceExclusionItem {
+    SourceExclusionItem {
+        source_id: row.source_id,
+        relative_path: row.relative_path,
+        excluded_at: row.excluded_at,
+    }
 }
 
 /// 将 hp-store 目录树节点转换为可序列化的 `SourceTreeNode`。

@@ -154,6 +154,39 @@ CREATE TABLE sources (
 CREATE INDEX idx_sources_repo ON sources(repo_id);
 ```
 
+### 4.2.1 子目录排除 `source_exclusion`（迁移 repo/0014，D149）
+
+```sql
+-- 仓库库迁移 repo/0014（D149，库版本 13 → 14）：媒体源子目录排除。
+-- 语义 = **路径前缀**：记录 `a/b` 即排除 `a/b` 自身与它的全部后代。
+-- 只写这张表，**一行索引/标签/评分都不动**——这正是排除与卸载的分界：
+-- 卸载走 `purge_source_data` 不可恢复，排除随时可以取消并原样还原。
+CREATE TABLE source_exclusion (
+  source_id     TEXT NOT NULL,
+  relative_path TEXT NOT NULL,   -- 源内相对目录，归一化为 `/` 分隔、无首尾斜杠
+  excluded_at   TEXT NOT NULL,
+  PRIMARY KEY (source_id, relative_path),
+  FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
+);
+-- 主键 (source_id, relative_path) 天然去重（重复排除不刷新 excluded_at），
+-- 前缀列也已覆盖"按源取排除集"的读法，不再额外建索引。
+-- 级联只在**彻底卸载**（purge 删 `sources` 行）时生效；普通卸载只翻 `mounted = 0`，本表不动。
+```
+
+**读取侧口径**（不是"扫描器不索引"，而是"视图不返回"）：
+
+- `files` 的多行查询（`RepoDb::query_files`、`RepoDb::query_album_members_page`）统一拼一段
+  `EXCLUDED_PATH_PREDICATE`（`crates/hp-store/src/repo/source_exclusion_repo.rs`）：用
+  `substr(f.relative_path, 1, length(e.relative_path) + 1) = e.relative_path || '/'` 判前缀，
+  **不用 `LIKE`**——相对路径里 `%` / `_` 是合法字符，走 `LIKE` 要额外处理通配符与 `ESCAPE`。
+- 逐行过滤的那条路（`hp-album` 的 `visible_members`：先按源查前缀集合，再用纯函数
+  `is_excluded_path` 判）必须自己再筛一次，否则会出现"源面板里没有了、相册里却还在"。
+- **扫描器不过滤**（`hp-scanner` 不改）：被排除的目录照常索引。若扫描跳过它们，增量扫描会把
+  既有行判成 `missing` 并清掉——那等于删除数据，与"软排除"直接矛盾。
+- 目录树在**建树之前**就按前缀过滤相对路径（`retain_visible_paths`，与谓词同一个模块；
+  之后才交给 `crates/hp-store/src/repo/source_tree.rs` 的 `build_source_tree`），
+  所以祖先节点的 `file_count` 与"整棵树看不到它们"自然一致。
+
 ### 4.3 文件索引 `files`
 
 ```sql
@@ -638,11 +671,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blueprints_default
 
 ## 5. 迁移策略
 
-- 三库**共用同一个版本追踪机制**：`PRAGMA user_version`。读：`crates/hp-store/src/migrate.rs:12`；版本号以"迁移数组下标 + 1"推导（`migrate.rs:16`）；每次未执行版本单开事务执行后写回（`migrate.rs:23`）。三库分别在 `crates/hp-store/src/repo/repo_db.rs:71`、`crates/hp-store/src/global/global_db.rs:65`、`crates/hp-store/src/dict/dict_db.rs:41` 调用同一个 `migrate::apply`。
-  - **当前仓库库版本 = 13**（`0013` 为 `albums.sort_order` 同级排序位 + `idx_albums_repo_order`（拖拽排序，D132）；`0012` 为相册同步镜像身份列 + `album_sync_exclusion`（同步相册镜像树、只增不删、位置与源一致，D129）；`0011` 为 `reader_annotations` 阅读批注表（书签 / 笔记 / 高亮，D113）；`0010` 为 `file_marks` 一对多标记表 + 存量搬迁；`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列（**已废弃**）；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
+- 三库**共用同一个版本追踪机制**：`PRAGMA user_version`。读：`crates/hp-store/src/migrate.rs:12`；版本号以"迁移数组下标 + 1"推导（`migrate.rs:16`）；每次未执行版本单开事务执行后写回（`migrate.rs:23`）。三库分别在 `crates/hp-store/src/repo/repo_db.rs:82`、`crates/hp-store/src/global/global_db.rs:65`、`crates/hp-store/src/dict/dict_db.rs:41` 调用同一个 `migrate::apply`。
+  - **当前仓库库版本 = 14**（`0014` 为 `source_exclusion` 媒体源子目录排除表（软排除，与卸载同形但可还原，D149）；`0013` 为 `albums.sort_order` 同级排序位 + `idx_albums_repo_order`（拖拽排序，D132）；`0012` 为相册同步镜像身份列 + `album_sync_exclusion`（同步相册镜像树、只增不删、位置与源一致，D129）；`0011` 为 `reader_annotations` 阅读批注表（书签 / 笔记 / 高亮，D113）；`0010` 为 `file_marks` 一对多标记表 + 存量搬迁；`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列（**已废弃**）；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
   - **当前全局配置库版本 = 4**（`global/0001_init` … `global/0004_layout_layers`，见 `crates/hp-store/src/global/global_db.rs:15`-`18` 的四个 `include_str!`）；全局库内**没有**镜像表（7 张表里没有 `global_meta`）。
   - **当前词库版本 = 1**（`dict_db.rs:19`）；`dict_meta`（`dict/0001:6-9`）是数据元信息 K/V，**不是** schema 版本。
-- **`repo_meta.schema_version` 是**镜像键**，每次打开仓库库都按权威值回写**（2026-09 修复缺陷 0006）：`repo_db.rs:86`-`89`（`sync_schema_version_meta`）在 `repo_db.rs:78`-`79`（`open_inner` 汇总点，`migrate::apply` 与蓝图文档迁移之后）执行，**新建与打开两条路径共用这一处**，因此升级过的库不再与 `user_version` 分叉。回写**不能**下沉到 `migrate::apply`（`migrate.rs:10`）：那个执行器由仓库库/全局库/词库共用，且全局库与词库**没有** `repo_meta`。**版本判断一律以 `PRAGMA user_version` 为准**，不要读镜像键（该键仍无读取方）。
+- **`repo_meta.schema_version` 是**镜像键**，每次打开仓库库都按权威值回写**（2026-09 修复缺陷 0006）：`repo_db.rs:97`-`100`（`sync_schema_version_meta`）在 `repo_db.rs:89`-`90`（`open_inner` 汇总点，`migrate::apply` 与蓝图文档迁移之后）执行，**新建与打开两条路径共用这一处**，因此升级过的库不再与 `user_version` 分叉。回写**不能**下沉到 `migrate::apply`（`migrate.rs:10`）：那个执行器由仓库库/全局库/词库共用，且全局库与词库**没有** `repo_meta`。**版本判断一律以 `PRAGMA user_version` 为准**，不要读镜像键（该键仍无读取方）。
 - 每个仓库库打开时都会 `busy_timeout = 5s`：**扫描与完全卸载各用一条独立连接**（不占用主连接锁，避免长任务把界面命令堵住），双连接在 WAL 下并存需要这个等待窗口。
 - 每次启动比对并顺序应用未执行的迁移；迁移脚本存放在 `crates/hp-store/migrations/`（当前分 `repo/`、`global/`、`dict/`、**`dict_lib/`** 四个目录），按 `0001_xxx.sql` 编号。
   - `dict/` 是 RFC 0006 旧词库（保留作对照与回退，forward-only）。

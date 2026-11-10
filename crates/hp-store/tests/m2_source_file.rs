@@ -103,8 +103,8 @@ fn file_upsert_get_and_media_info_migration() {
         Some(r#"{"format":{"duration":"1.5"}}"#)
     );
 
-    // 迁移 0013 已生效：schema_version 应为 13（0001..0013）
-    assert_eq!(db.schema_version().expect("读版本失败"), 13);
+    // 迁移 0013、0014 已生效：schema_version 应为 14（0001..0014）
+    assert_eq!(db.schema_version().expect("读版本失败"), 14);
 
     db.close().expect("关闭失败");
 }

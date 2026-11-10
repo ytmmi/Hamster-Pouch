@@ -67,7 +67,7 @@ crates/hp-store/src/
     tag_lib_set.rs    # 四库**聚合查询层**：用户库 > 扩展包 > 内置基底的统一视图（TagLibSet）
     tag_lib_merge.rs  # 多扩展包之间的**重复概念归并**（MergeIndex，D36.3）
   migrations/         # 迁移 SQL（forward-only，发布后禁止修改；权威文本在这些文件里）
-    repo/             # 仓库库：0001_init … 0013_album_sort_order.sql（当前版本 = 13）
+    repo/             # 仓库库：0001_init … 0014_source_exclusion.sql（当前版本 = 14）
     global/           # 全局配置库：0001_init … 0004_layout_layers.sql（当前版本 = 4）
     dict/             # tag 词库：0001_init.sql
                       # 注意：**没有** `dict_lib/` 目录——实际只有 repo/ global/ dict/ 三个。

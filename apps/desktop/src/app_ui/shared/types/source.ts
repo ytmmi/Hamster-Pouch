@@ -73,3 +73,42 @@ export interface SourceScanArgs {
   sourceId: string;
   full?: boolean;
 }
+
+/** 一条子目录排除记录（source_exclusions / source_exclude 返回元素） */
+export interface SourceExclusionItem {
+  source_id: string;
+  /** 源内相对目录，已归一化为 `/` 分隔、无首尾斜杠；命中它自身与全部后代。 */
+  relative_path: string;
+  excluded_at: string;
+}
+
+/** source_exclusions / source_exclude 返回：该范围内的最新排除清单 */
+export interface SourceExclusionList {
+  items: SourceExclusionItem[];
+}
+
+/** source_unexclude 返回：实际取消的条数 + 该源剩余清单 */
+export interface SourceUnexcludeResult {
+  removed: number;
+  items: SourceExclusionItem[];
+}
+
+/** 列出排除清单：`sourceId` 省略 = 整个仓库（面板据此决定菜单项是否显示） */
+export interface SourceExclusionsArgs {
+  repoId: string;
+  sourceId?: string;
+}
+
+export interface SourceExcludeArgs {
+  repoId: string;
+  sourceId: string;
+  /** 子文件夹相对路径（源根不参与排除，排除整个源请用卸载）。 */
+  relativePath: string;
+}
+
+export interface SourceUnexcludeArgs {
+  repoId: string;
+  sourceId: string;
+  /** 要恢复的相对目录清单（逐个勾选）。 */
+  relativePaths: string[];
+}

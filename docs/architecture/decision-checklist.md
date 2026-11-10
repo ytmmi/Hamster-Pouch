@@ -794,3 +794,34 @@
 > `check:status` 全绿。这些只证明"分流判据与产物正确、翻页链在真实序列化下成立"；
 > **真实大图库的缩略图首屏观感（万张级 lowres 命中率）与 CMYK/灰度大图的
 > 进程内路径性能仍需人工执行**，不得据此认为已人工验收。
+
+## 第 33 轮 · 媒体源子目录「排除 / 取消排除」（D149，2026-11-10）
+
+> **开发数据**：本轮**新增 1 个仓库库迁移**（`crates/hp-store/migrations/repo/0014_source_exclusion.sql`，
+> 仓库库版本 13 → **14**）：新表 `source_exclusion(source_id, relative_path, excluded_at)`，
+> 主键 `(source_id, relative_path)`，外键 `sources(id) ON DELETE CASCADE`。
+> **不新增设置键、不新增事件、不新增长任务**——三条新命令（`source.exclusions` /
+> `source.exclude` / `source.unexclude`）都是同步 `ApiResponse`，不占 `TaskRegistry` 闸门。
+> 语义由用户 2026-11-10 拍板：**软排除**——只从目录树与媒体库视图隐藏，
+> 文件索引 / 标签 / 评分 / 色彩参考 / 相册成员**一行不删**，「取消排除」即刻完整还原；
+> 树上对被排除的子文件夹**完全不显示**；「取消排除」入口只在**该源确有排除**时出现，
+> 且弹清单**逐个勾选**恢复。
+> 实现分布：新仓储 `crates/hp-store/src/repo/source_exclusion_repo.rs`（单点 SQL 谓词
+> `EXCLUDED_PATH_PREDICATE` + 三个纯函数），读取侧**四处**过滤（`file.query` /
+> 相册成员分页 / `hp-album` 的 `visible_members` / 目录树建树前 `retain_visible_paths`），
+> 并新增 `count_visible_album_members` 供相册列表显示（与成员分页同口径；
+> `count_album_members` 保持"原始行数"，仍供卸载预览使用）。
+> **扫描器有意不改**：若扫描跳过被排除目录，增量扫描会把它们的行判 `missing` 清掉，
+> 软排除就变成了真删除。
+>
+> **验证方式与边界**：`cargo test -p hp-store --test m2_source_exclusion` **7/7**
+> （幂等与校验 / `file.query` 隐藏 / 建树前过滤 / 相册视图隐藏 / 取消排除幂等 /
+> 仓库清单只覆盖在线源 / purge 级联）；`cargo test -p hp-album --test m3_source_exclusion_album`
+> **1/1**（专测 SQL 谓词覆盖不到的 `visible_members` 逐行过滤，并钉住原始计数不随排除变）；
+> 仓储内联单测 **6/6**（归一化 / 前缀边界（`a/bc` 不算 `a/b` 的后代）/ 通配符按字面量 /
+> 保留函数）。门禁：`check:fmt` 2/2、`check:clippy` 2/2、`check:commands` **16/16**、
+> `check:panels` **428/428**、`check:settings` **55/55**、`check:status`（**189** 条 / **16** 分节 /
+> 960 处路径引用）、`check:line-count`、`check:encoding`、`check:doc-status` 全绿；
+> `tsc --noEmit` exit 0。这些只证明"库层过滤与命令契约自洽、面板入口按用户口径接线"；
+> **端到端 GUI（真实源右键排除 → 树与媒体库同步消失 → 取消排除逐个还原 → 标签/评分完好）
+> 仍需人工执行**，不得据此认为已人工验收。
