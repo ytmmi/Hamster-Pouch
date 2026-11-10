@@ -12,7 +12,8 @@
 # 本仓的发布形态是**便携文件夹**（exe + 同级 `data\` / `external-cli\` / `plugins\`），
 # 不是安装器：`pnpm app:build` = `tauri build --no-bundle` + `node tools/package-build.mjs`。
 # 因此这里把 `apps/desktop/src-tauri/target/release/release/` 重命名成
-# `hamster-pouch-<version>/` 再打成**一个 zip**（解压即得可运行文件夹，整夹可搬走）。
+# `Hamster-Pouch-v<version>-Windows-x64-Portable/` 再打成**一个同名 zip**
+# （解压即得可运行文件夹，整夹可搬走）。名字一律由 `tools/artifact-name.mjs` 给出。
 #
 # ## 与 ci.yml 的关系（取舍，不是遗漏）
 #
@@ -221,14 +222,23 @@ jobs:
           EOF
           cat "$REL/BUILD-INFO.txt"
 
+      # 产物名由 `tools/artifact-name.mjs` 统一提供（**唯一命名源**）：
+      #   Hamster-Pouch-v0.1.13-Alpha-Windows-x64-Portable.zip
+      # 软件名-v版本-平台-架构-安装方式（用户口径 2026-11-10 / D153）。
+      # 这里不手拼字符串：zip 名、artifact 名、Release 资产路径三处必须逐字相同。
       - name: 重命名并打 zip
         id: zip
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          node tools/artifact-name.mjs --self-test
+          NAME="$(node tools/artifact-name.mjs --version "$VERSION")"
+          ZIP_NAME="$(node tools/artifact-name.mjs --version "$VERSION" --zip)"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "zip=apps/desktop/src-tauri/target/release/dist/$ZIP_NAME" >> "$GITHUB_OUTPUT"
           cd apps/desktop/src-tauri/target/release
-          NAME="hamster-pouch-$VERSION"
           rm -rf "$NAME"
           mv release "$NAME"
           mkdir -p dist
@@ -236,11 +246,10 @@ jobs:
           # 因此直接给绝对路径兜底）；比 Compress-Archive 快得多，且不受
           # PowerShell 那条 2GB/路径长度的小脾气影响。
           SEVENZ="$(command -v 7z || echo '/c/Program Files/7-Zip/7z.exe')"
-          ZIP="dist/$NAME-win-x64.zip"
+          ZIP="dist/$ZIP_NAME"
           rm -f "$ZIP"
           "$SEVENZ" a -tzip -mx=3 "$ZIP" "$NAME" > /dev/null
           ls -lh "$ZIP"
-          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
           # 解压后的顶层目录就是 $NAME/，解压即得可运行文件夹。
           # 注意：7-Zip 在 Windows 上列出的路径分隔符是 "\"，所以这里不用
           # 带分隔符的字面串断言，而是分别匹配顶层目录名与 exe 文件名。
@@ -248,12 +257,12 @@ jobs:
             echo "::error::zip 里找不到 $NAME 下的 hamster-pouch-desktop.exe"
             exit 1
           fi
-          echo "zip 内容自检通过"
+          echo "zip 内容自检通过：$ZIP_NAME"
 
       - name: 上传主包 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hamster-pouch-${{ steps.version.outputs.version }}-win-x64
+          name: ${{ steps.zip.outputs.name }}
           path: apps/desktop/src-tauri/target/release/dist/*.zip
           if-no-files-found: error
 
@@ -278,7 +287,7 @@ jobs:
         run: |
           set -euo pipefail
           TAG="v$VERSION"
-          ZIP="apps/desktop/src-tauri/target/release/dist/hamster-pouch-$VERSION-win-x64.zip"
+          ZIP="apps/desktop/src-tauri/target/release/dist/$(node tools/artifact-name.mjs --version "$VERSION" --zip)"
           shopt -s nullglob
           FILES=("$ZIP" plugins-dist/*.zip)
           NOTES="$EXTRA_NOTES"

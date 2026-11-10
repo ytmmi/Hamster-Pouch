@@ -727,7 +727,7 @@ HamsterPouch/
                               #   门禁：`pnpm check:bundled-runtime`
   docs/
     architecture/             # 文件架构、总体架构、决策清单
-    rfc/                      # 决策记录（0001–0011；0011 = 布局预设与仓库绑定）
+    rfc/                      # 决策记录（0001–0012；0011 = 布局预设与仓库绑定，0012 = 程序自更新）
     spec/                     # 模块技术规范（control-standard / panel-standard / settings-standard /
                               #   blueprint-node-standard / plugin-standard / commands-events / module-boundaries …）
     roadmap/                  # 实施路线图
@@ -763,6 +763,11 @@ HamsterPouch/
                               #   三处版本文件（`tauri.conf.json` / 桥接 `Cargo.toml` / `apps/desktop/package.json`）
                               #   同源写入，用**定点替换而非 `JSON.stringify`**（后者会把 `"scope": ["**"]`
                               #   展开成多行，产生与版本无关的 diff 噪声）。
+                              # **发布产物命名 `artifact-name.mjs`**（D153，纯 Node 无依赖，`pnpm check:artifact-name`）：
+                              #   `--version <v> [--zip]` 打印 `Hamster-Pouch-v0.1.13-Alpha-Windows-x64-Portable.zip`
+                              #   形式的产物名（五段：软件名-版本-平台-架构-安装方式），`--self-test` 做纯函数自检。
+                              #   是**唯一命名源**——`release.yml` 的 zip 名、artifact 名、Release 资产路径都向它取；
+                              #   逐段字符集校验，版本先过 `version.mjs` 的 `normalizeVersion` 再摘 `+` 构建元数据。
                               # 修数据工具（默认 dry-run，需 `--apply` 才写库，写前自动备份到 `backups/`）：
                               #   `fix-layer-layout.mjs`（给缺布局的层补该层专属布局）、
                               #   `fix-blueprint-home.mjs`（把某层标为主界面并清掉"上次所在层"）。

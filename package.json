@@ -45,6 +45,7 @@
     "check:event-names": "node tools/check-event-names.mjs",
     "check:doc-status": "node tools/check-doc-status.mjs",
     "check:version": "node tools/version.mjs --self-test",
+    "check:artifact-name": "node tools/artifact-name.mjs --self-test",
     "check:status": "node tools/check-status.mjs"
   }
 }
