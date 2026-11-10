@@ -249,6 +249,7 @@ fn main() {
             commands::file::file_rename,
             commands::file::file_trash,
             commands::file::file_reanalyze,
+            commands::file::file_backfill,
             commands::file::file_reverify,
             // 文件标记（D102）：可多值、与类目正交的用户标记；蓝图按它分派行为。
             commands::file::file_set_marks,

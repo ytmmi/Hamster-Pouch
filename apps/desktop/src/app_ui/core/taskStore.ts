@@ -18,6 +18,8 @@ import { listenHp } from "../shared/events";
 
 import type { Translate, TranslationKey } from "../i18n";
 import type {
+  FileBackfillCompletedPayload,
+  FileBackfillProgressPayload,
   ScanCompletedPayload,
   ScanErrorPayload,
   ScanProgressPayload,
@@ -128,6 +130,50 @@ export function startTaskEvents(): () => void {
       const a = actions;
       if (!a) return;
       a.status(a.t("source.scanError", { err: e.payload.error }), "error");
+    }),
+
+    // ── 图片尺寸回填（0043 阶段 2）──
+    // 后台补偿任务：没有待补的行时后端根本不发事件（`total === 0` 直接收尾），
+    // 所以"打开仓库就闪一下进度浮窗"不会发生。
+    listenHp<FileBackfillProgressPayload>("file.backfill.progress", (e) => {
+      const p = e.payload;
+      setTask({
+        titleKey: "backfill.title",
+        taskId: p.taskId,
+        sourceId: null,
+        subtitle: null,
+        messageKey: "backfill.progress",
+        messageParams: { processed: p.processed, total: p.total },
+        processed: p.processed,
+        total: p.total,
+        current: null,
+        cancellable: true,
+        // 回填没有暂停点（每张图是一次读头，粒度已经足够细）。
+        pausable: false,
+        updatedAt: now(),
+      });
+    }),
+    listenHp<FileBackfillCompletedPayload>("file.backfill.completed", (e) => {
+      const p = e.payload;
+      setTask(null);
+      const a = actions;
+      if (!a) return;
+      if (p.error) {
+        a.status(a.t("backfill.error", { err: p.error }), "error");
+        return;
+      }
+      if (p.cancelled) {
+        a.status(a.t("backfill.cancelled", { filled: p.filled }), "info");
+        return;
+      }
+      // 一轮什么都没做（本来就没有待补的行）→ 不打扰。
+      if (p.filled === 0 && p.failed === 0) return;
+      a.status(
+        a.t("backfill.completed", { filled: p.filled, failed: p.failed }),
+        p.failed > 0 ? "info" : "ok",
+      );
+      // 宽度变了 = 布局可以按真实比例排，媒体预览与胶片栏要重排一次。
+      a.refresh();
     }),
 
     // ── 卸载（完全卸载）──

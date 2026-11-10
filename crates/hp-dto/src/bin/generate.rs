@@ -78,6 +78,8 @@ fn export_all(out: &Path) {
         hp_dto::BlueprintChangedPayload,
         hp_dto::FileMissingPayload,
         hp_dto::FileRestoredPayload,
+        hp_dto::FileBackfillCompletedPayload,
+        hp_dto::FileBackfillProgressPayload,
         hp_dto::FileCreatedPayload,
         hp_dto::FileChangedPayload,
     );
@@ -132,6 +134,8 @@ fn write_index(out: &Path) {
         "BlueprintChangedPayload",
         "FileMissingPayload",
         "FileRestoredPayload",
+        "FileBackfillCompletedPayload",
+        "FileBackfillProgressPayload",
         "FileCreatedPayload",
         "FileChangedPayload",
     ];

@@ -288,6 +288,12 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "book.mark.setFailed": "設定標記失敗：{err}",
 
   // 掃描進度浮窗
+  // 圖片尺寸回填（0043 階段 2）：背景任務，可取消、不打擾——沒有待補的列時不彈浮窗。
+  "backfill.title": "正在補齊圖片尺寸",
+  "backfill.progress": "已處理 {processed}/{total} 張圖片",
+  "backfill.completed": "圖片尺寸已補齊：{filled} 張（失敗 {failed}）",
+  "backfill.cancelled": "已取消補齊圖片尺寸（本次寫入 {filled} 張）",
+  "backfill.error": "補齊圖片尺寸中止：{err}",
   "scan.title": "正在掃描源",
   "scan.walking": "正在走訪資料夾…（已發現 {count} 個檔案）",
   "scan.indexing": "正在索引 {processed}/{total}",

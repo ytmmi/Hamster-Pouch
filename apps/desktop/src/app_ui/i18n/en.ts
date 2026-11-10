@@ -290,6 +290,13 @@ export const en: Record<keyof DictZhCN, string> = {
   "book.mark.setFailed": "Failed to set marks: {err}",
 
   // Scan progress overlay
+  // Image dimension backfill (0043 phase 2): background task, cancellable and quiet —
+  // the overlay only appears when there is something to fill.
+  "backfill.title": "Filling in image sizes",
+  "backfill.progress": "Processed {processed}/{total} images",
+  "backfill.completed": "Image sizes filled: {filled} (failed {failed})",
+  "backfill.cancelled": "Image size backfill cancelled ({filled} written)",
+  "backfill.error": "Image size backfill stopped: {err}",
   "scan.title": "Scanning source",
   "scan.walking": "Walking folders… ({count} files found)",
   "scan.indexing": "Indexing {processed}/{total}",

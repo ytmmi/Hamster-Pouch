@@ -115,6 +115,16 @@ pub(crate) const FILE_COLUMNS_F: &str = "f.id, f.source_id, f.relative_path, f.m
 /// 用它算出追加列的下标，避免把数字写死在两处。
 pub(crate) const FILE_COLUMN_COUNT: usize = 20;
 
+/// 待回填显示尺寸的一行（缺陷 0043 阶段 2）：只带定位与读取所需的最小字段。
+///
+/// `local_path` 来自 `sources`——回填要读文件头，而索引行只存源内相对路径。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingDimensionRow {
+    pub file_id: String,
+    pub relative_path: String,
+    pub local_path: String,
+}
+
 impl RepoDb {
     /// 插入或更新文件索引行（按 `source_id + relative_path` 唯一索引冲突时更新，保留原 id）。
     ///
@@ -508,6 +518,75 @@ impl RepoDb {
             )
             .map_err(|e| store_err("更新缺失标记", e))?;
         Ok(())
+    }
+
+    /// 统计待回填显示尺寸的图片行数（`width IS NULL`，缺陷 0043 阶段 2）。
+    ///
+    /// 回填任务的**总量口径**：`NULL` 就是"还没索引到尺寸"，与 `0` 无关。
+    pub fn count_pending_dimensions(&self) -> HpResult<i64> {
+        self.conn()
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE media_type = 'image' AND width IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| store_err("统计待回填尺寸", e))
+    }
+
+    /// 取一批待回填显示尺寸的图片（按 `id` 升序，**键集分页**）。
+    ///
+    /// 为什么要 `after_id` 而不是"反复查 `width IS NULL` 的前 N 条"：读头失败的行
+    /// **仍然是 `NULL`**，只按前 N 条查会在同一批坏文件上打转（一个坏文件就能把回填
+    /// 卡死在这一页）。键集前进让每行在本轮**至多被尝试一次**，失败留到下次打开仓库。
+    pub fn next_pending_dimensions(
+        &self,
+        after_id: Option<&str>,
+        limit: i64,
+    ) -> HpResult<Vec<PendingDimensionRow>> {
+        let mut stmt = self
+            .conn()
+            .prepare(
+                "SELECT f.id, f.relative_path, s.local_path \
+                 FROM files f JOIN sources s ON s.id = f.source_id \
+                 WHERE f.media_type = 'image' AND f.width IS NULL \
+                   AND (?1 IS NULL OR f.id > ?1) \
+                 ORDER BY f.id LIMIT ?2",
+            )
+            .map_err(|e| store_err("查询待回填尺寸", e))?;
+        let rows = stmt
+            .query_map(params![after_id, limit], |r| {
+                Ok(PendingDimensionRow {
+                    file_id: r.get(0)?,
+                    relative_path: r.get(1)?,
+                    local_path: r.get(2)?,
+                })
+            })
+            .map_err(|e| store_err("查询待回填尺寸", e))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|e| store_err("读取待回填尺寸", e))?);
+        }
+        Ok(out)
+    }
+
+    /// 回填写入显示尺寸；**只在仍为 `NULL` 时写**，返回是否真的写入了。
+    ///
+    /// 条件更新是"回填与扫描互不覆盖"的另一半：扫描可能刚刚写入了同一行，
+    /// 回填读到的是旧目录、稍后到达，此时不得用同一份（或更旧的）结果覆盖它。
+    pub fn backfill_dimensions(
+        &mut self,
+        file_id: &str,
+        width: u32,
+        height: u32,
+    ) -> HpResult<bool> {
+        let changed = self
+            .conn()
+            .execute(
+                "UPDATE files SET width = ?2, height = ?3 WHERE id = ?1 AND width IS NULL",
+                params![file_id, i64::from(width), i64::from(height)],
+            )
+            .map_err(|e| store_err("回填显示尺寸", e))?;
+        Ok(changed > 0)
     }
 
     /// 更新文件校验状态与缺失标记（扫描校验/失效标记用）。

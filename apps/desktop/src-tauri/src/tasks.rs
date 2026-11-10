@@ -1,4 +1,4 @@
-//! 长任务控制块注册表（扫描 / 卸载）—— 缺陷 `docs/issues/0003` 的修复点。
+//! 长任务控制块注册表（扫描 / 卸载 / 回填）—— 缺陷 `docs/issues/0003` 的修复点。
 //!
 //! **旧实现的问题**：取消请求用 `AppState` 上**一个全局** `AtomicBool` 表达
 //! （连同 `Scanner` 自身的标志），于是 `task.cancel` / `task.pause` / `task.resume`
@@ -25,6 +25,10 @@ pub(crate) enum TaskKind {
     /// 但**没有暂停点**（一个文件的哈希/抽帧/调色板是一口气做完的）。
     Analyze,
     Unmount,
+    /// 图片尺寸回填（`docs/issues/0043` 阶段 2）：打开仓库后低优先级补齐 `files.width`
+    /// 为 `NULL` 的图片行。只有取消、**没有**暂停点——每张图是一次读头，粒度已经足够细，
+    /// 再加暂停等于让"停在两个文件之间"这种状态进契约。
+    Backfill,
 }
 
 impl TaskKind {
@@ -34,6 +38,7 @@ impl TaskKind {
             TaskKind::Scan => "scan",
             TaskKind::Analyze => "analyze",
             TaskKind::Unmount => "unmount",
+            TaskKind::Backfill => "backfill",
         }
     }
 

@@ -123,3 +123,16 @@ export function fileReanalyze(args: FileReanalyzeArgs): Promise<string> {
     fileId: args.fileId,
   }).then(unwrapApi);
 }
+
+/**
+ * 手动触发一轮图片尺寸回填（0043 阶段 2）。
+ *
+ * 平时用不着调用：打开仓库时后端会**自动**低优先级跑一轮（补齐 `files.width` 为
+ * `NULL` 的图片行）。这个命令留给"扫描刚写进大量新图、又不想等下次开仓"的场景。
+ *
+ * 进度与收尾由 `file.backfill.progress` / `file.backfill.completed` 事件驱动
+ * （与扫描同款：调用方不要自己弹状态）。已有任务在跑时返回 `conflict`。
+ */
+export function fileBackfill(): Promise<string> {
+  return invoke<ApiResponse<string>>("file_backfill", {}).then(unwrapApi);
+}

@@ -212,6 +212,7 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 | 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
 | --- | --- | --- | --- | --- | --- |
 | `file.query` | **游标分页**查询文件 | `{ repoId, filter?, cursor?, limit? }` | `{ ok, data: { items, nextCursor } }` | **已包装** | 代码 `commands/file.rs` 的 `file_query`；**D76 批次 `file` 已迁移 + D78 游标分页已落地（2026-09）**。`filter` = `{ mediaTypes?, sourceId?, dirPrefix? }`（`mediaTypes` 为**集合**、缺省/空 = 不筛；2026-10-08 由单值 `mediaType` 改为集合，见 D95）；`limit` **只是页大小**；把 `nextCursor` 原样回传即可续页，`null` = 末页。**排序键 = `(relative_path, source_id, id)` 升序**（`relative_path` 单独不是全序：同名不同源会并列）。游标是**不透明字符串**（当前编码 `{路径字节长度}`+US+路径+US+sourceId+US+id，先读长度再按字节切，因此路径里出现分隔符也不歧义）；非法游标 → `validation`，**不静默从头开始**。键集游标在翻页途中库内容变动时**不漏项/不重复**（原 `offset` 分页会），用例 `crates/hp-store/tests/m2_source_file.rs` 的 `cursor_pagination_is_stable_under_inserts` |
+| `file.backfill` | 手动触发一轮图片尺寸回填（`files.width` 为 `NULL` 的图片行） | `{}` | `{ ok, data: { taskId } }` | **已包装** | **后台任务**（2026-11-11 第 37 轮裁决 2，缺陷 0043 阶段 2）：登记 `TaskKind::Backfill` → 独立仓库库连接上按 `id` **键集分页**读 `width IS NULL` 的图片行，逐行读头写显示尺寸（EXIF 方向已应用）。**平时不用调**——`repo.open` 之后后端自动跑一轮（已有任务在跑则直接跳过，不排队）。进度/收尾用独立事件 `file.backfill.progress` / `file.backfill.completed`（不复用 `scan.progress`：两者的"总量"口径不同）；**没有暂停点**。前端 `api/file.ts` 的 `fileBackfill()` |
 | `file.reverify` | 重新校验单个文件 | `{ repoId, fileId }` | `{ ok, data: { verifyStatus } }` | **已包装** | 代码 `commands/file.rs` 的 `file_reverify`；线上 `data` 是**裸状态串**（文档写 `{ verifyStatus }`，差异随 D78/D76 收尾一并处理） |
 | `file.metadata` | 读取文件元数据 | `{ repoId, fileId }` | `{ ok, data: { size, mtime, hash, mediaType, ... } }` | **已包装** | `data` 是 `FileMetadataResult` 对象，字段为蛇形：`content_hash`（文档 `hash`）、`source_id`、`relative_path`、`media_type`、`subtype`、`verify_status`、`media_info_json`、`exif_json` |
 | `file.path` | 取文件绝对路径（供前端 `convertFileSrc` 预览） | `{ repoId, fileId }` | `{ ok, data: { path } }` | **已包装** | 线上 `data` 是裸路径串；前端 `api/file.ts` |
@@ -352,7 +353,7 @@ tag 实体按仓库独立（D23）；人工 tag 与自动 tag 的关联使用独
 | `task.cancel` | 取消**指定**长任务 | `{ taskId }` | `{ ok, data: { cancelled } }` | **已包装** | **2026-09 已修（缺陷 `docs/issues/0003`）**：`commands/source.rs` 的 `task_cancel(task_id, …)`；`cancelled` = 请求是否命中当前任务（`false` = 任务已结束，**不是错误**）；空 `taskId` → `validation`；前端 `api/source.ts` 的 `taskCancel(taskId)` |
 | `task.pause` | 暂停**指定**扫描任务 | `{ taskId }` | `{ ok, data: { accepted, paused } }` | **已包装** | **2026-09 已修（缺陷 0003）**：只有扫描可暂停，其余一律 `accepted: false`；`paused` = 调用后的挂起状态（受理后为 `true`）；**前端已封装**（`taskPause(taskId)`），浮窗按任务给出暂停按钮 |
 | `task.resume` | 恢复**指定**已暂停的扫描任务 | `{ taskId }` | `{ ok, data: { accepted, paused } }` | **已包装** | **2026-09 已修（缺陷 0003）**：受理后 `paused` 恒为 `false`——单看 `paused` 无法区分"已恢复"与"任务已结束"，故并列回报 `accepted`；前端 `taskResume(taskId)` |
-| `task.status` | 长任务快照（前端进度浮窗的对账依据） | `{}` | `{ ok, data: { busy, taskId, kind, paused } }` | **已包装** | 线上另有 `taskId` / `kind`（`scan` \| `analyze` \| `unmount`；**2026-09 追加 `analyze`** = `file.reanalyze` 的单文件分析任务）/ `paused`（仅扫描任务有值，无任务为 `null`）：浮窗重建后要先问清"当前是哪条任务"才能按 `taskId` 操作（缺陷 0003）；浮窗若因界面线程繁忙丢掉终止事件，可据 `busy` 收起「永远转圈」的浮窗；前端 `api/source.ts` 的 `taskStatus()` |
+| `task.status` | 长任务快照（前端进度浮窗的对账依据） | `{}` | `{ ok, data: { busy, taskId, kind, paused } }` | **已包装** | 线上另有 `taskId` / `kind`（`scan` \| `analyze` \| `unmount` \| `backfill`；**2026-09 追加 `analyze`** = `file.reanalyze` 的单文件分析任务；**2026-11-11 追加 `backfill`** = 图片尺寸回填，缺陷 0043 阶段 2）/ `paused`（仅扫描任务有值，无任务为 `null`）：浮窗重建后要先问清"当前是哪条任务"才能按 `taskId` 操作（缺陷 0003）；浮窗若因界面线程繁忙丢掉终止事件，可据 `busy` 收起「永远转圈」的浮窗；前端 `api/source.ts` 的 `taskStatus()` |
 
 ### 3.8 `ai.*`
 
@@ -635,6 +636,8 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 | `source.unmount.error` | `{ taskId, sourceId, error }`（**完全卸载的终止失败事件**；发射点 `apps/desktop/src-tauri/src/commands/source.rs:291`（清理失败）与 `:307`（工作线程 panic 终止，`error` 固定为「卸载线程异常终止」），DTO `source.rs:111`；前端监听 `apps/desktop/src/app_ui/core/taskStore.ts:179`） |
 | `file.changed` | `{ repoId, fileId, change: modified|renamed|moved }`（**2026-11-10 已接线**（缺陷 0045）：`apps/desktop/src-tauri/src/source_watch.rs` 为每个**已挂载**源起一个 `hp_scanner::SourceWatcher` 线程，静默 900 ms 后把攒下的路径对库核一次再发；`change` 当前**只发 `modified`**（`renamed`/`moved` 没有可靠判定源：`notify` 的 rename 事件既可能是改名也可能是移动，且契约未定义"新旧路径如何配对"）。**语义边界**：只对**索引里已有**的文件发（新增文件走独立的 `file.created`，见下一行）；`file.changed` 本身**不触发重扫**。 |
 | `file.created` | `{ repoId, sourceId, relativePath }`（**2026-11-11 新增**（第 37 轮裁决 4）：磁盘上有、索引里没有 → 监听报出这条，并在这一批静默后请求**一次自动增量扫描**把文件真正接进索引。**没有 `fileId`**：此刻索引行还不存在；也不并进 `file.changed.change`（那个枚举描述已索引文件的变化）。auto-scan 三条限流：`CREATE_QUIET` 1.5 s、`SCAN_MIN_INTERVAL` 30 s、`MAX_DEFER` 30 s；走与「扫描」按钮同一道闸门（手动任务在跑时**不插队、不排队**，等下一个窗口）。发射点 `apps/desktop/src-tauri/src/source_watch.rs`，汇总口径见 `docs/issues/0045` 的 2026-11-11 追记 |
+| `file.backfill.progress` | `{ taskId, processed, total }`（**2026-11-11 新增**（0043 阶段 2）：`total` 是本轮开始时待回填的行数、**整轮不变**；`processed` 含失败行。250 ms 节流 + 首帧与收尾帧一律放行。`total === 0` 时后端**一帧都不发**——没有待补的行就不该闪浮窗。发射点 `apps/desktop/src-tauri/src/commands/file.rs`，前端监听 `core/taskStore.ts`） |
+| `file.backfill.completed` | `{ taskId, filled, failed, cancelled, error }`（**2026-11-11 新增**：`filled` 是**真的写进库**的行数（扫描抢先写入的不计），`failed` 是读头失败的行数——这些行保持 `NULL`，下次开仓再试；`error` 只在整轮中止（库打不开 / 线程 panic）时非空，**「失败若干行」不算错误**） |
 | `file.missing` | `{ repoId, fileId }`（**2026-11-10 已接线**：磁盘上文件消失且索引里 `missing_status = 0` 时发，并发完即把 `missing_status` 置 1；已标记过的不重复发） |
 | `file.restored` | `{ repoId, fileId }`（**2026-11-10 已接线**：索引里 `missing_status != 0`、磁盘上文件又出现时发，并把标记清回 0） |
 | `album.sync.progress` | `{ taskId, albumId, added, removed, pinned }` |
@@ -658,6 +661,8 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 >
 > **10 条缺口的逐条裁决（2026-09，用户拍板）**：**撤下 5 条**——`task.progress` / `task.cancelled`（与既有进度/取消口径重叠）、`media.ready` / `media.ended` / `media.crashed`（随 `media.*` 退役休眠）；**补 1 条发射点**——`plugin.loaded`（`plugin.load` 已存在）；**暂不补 1 条**——`ai.tagging.completed`（占位提供方返回空候选，现在发射等于报假事件，待真实推理提供方）；**保留 3 条并标注"待 watcher 接线"**——`file.changed` / `file.missing` / `file.restored`（`SourceWatcher` 无生产调用方）。
 > **2026-11-10 追记**：上面这 3 条**已经接线**（缺陷 0045，发射点 `apps/desktop/src-tauri/src/source_watch.rs`），缺口清单只剩 `ai.tagging.completed` 一条；同时新登记三条**本轮刻意不做**的边界（新增文件语义、监听不触发重扫、前端暂不消费），见 `docs/issues/0045`。
+> **2026-11-11 追记（0043 阶段 2）**：`file.backfill.progress` / `file.backfill.completed` 两条新增，事件表条目数 25 → **27**。它们**不是**被撤下的 `task.progress` 换皮：`task.progress` 是"任何长任务都发一条通用百分比"，而这两条只服务一个任务、带这个任务特有的 `filled`/`failed` 口径（读头失败的行保持 `NULL` 是常态而非错误）。
+>
 > **2026-11-11 追记（第 37 轮裁决 4）**：上面那条边界**「新增文件不发」已被推翻**——新增改为**独立事件 `file.created`**（载荷是 `repoId`/`sourceId`/`relativePath`，因为此时没有 `fileId`），并在静默后**自动排队一次增量扫描**（限流见该行）。因此本表条目数 24 → **25**，「前端暂不消费」仍成立。原「不触发重扫」的理由（自激）没有消失，只是被限流收敛为「**只在有新增时、最多每 30 s 一次**」——普通修改/删除**仍然不触发**扫描。
 >
 > **撤下的条目一律划掉而不删行**，以便追溯"曾经声明过、为何撤下"。

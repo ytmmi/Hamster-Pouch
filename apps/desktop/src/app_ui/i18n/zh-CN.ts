@@ -296,6 +296,12 @@ export const zhCN = {
   "book.mark.setFailed": "设置标记失败：{err}",
 
   // 扫描进度浮窗
+  // 图片尺寸回填（0043 阶段 2）：后台任务，可取消、不打扰——没有待补的行时不弹浮窗。
+  "backfill.title": "正在补齐图片尺寸",
+  "backfill.progress": "已处理 {processed}/{total} 张图片",
+  "backfill.completed": "图片尺寸已补齐：{filled} 张（失败 {failed}）",
+  "backfill.cancelled": "已取消补齐图片尺寸（本次写入 {filled} 张）",
+  "backfill.error": "补齐图片尺寸中止：{err}",
   "scan.title": "正在扫描源",
   "scan.walking": "正在遍历文件夹…（已发现 {count} 个文件）",
   "scan.indexing": "正在索引 {processed}/{total}",

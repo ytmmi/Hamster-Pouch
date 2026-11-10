@@ -736,6 +736,7 @@ pub struct FileChangedPayload {
 ///
 /// 之所以不并进 `file.changed.change`：那个字段的枚举是 `modified|renamed|moved`，
 /// 描述的是**已索引**文件的变化；新增带不来 `fileId`，字段集合本来就不一样。
+
 #[derive(Serialize, TS, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FileCreatedPayload {
@@ -743,4 +744,34 @@ pub struct FileCreatedPayload {
     pub source_id: String,
     /// 源内相对路径（`/` 分隔，与 `files.relative_path` 同口径）。
     pub relative_path: String,
+}
+
+/// 图片尺寸回填的进度（缺陷 0043 阶段 2）。
+///
+/// 为什么不复用 `scan.progress`：扫描的 `processed/total` 是"本次扫描走了多少文件"，
+/// 回填的是"全库还剩多少张图没尺寸"，两者的总量与节流口径都不同；而契约里
+/// `task.progress` 已在 2026-09 撤下（语义与具体任务的事件重叠）。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FileBackfillProgressPayload {
+    pub task_id: String,
+    /// 已处理（成功 + 失败）的行数。
+    pub processed: u64,
+    /// 本轮开始时待回填的总行数（`width IS NULL` 的图片数，**整轮不变**）。
+    pub total: u64,
+}
+
+/// 图片尺寸回填的收尾（缺陷 0043 阶段 2）。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FileBackfillCompletedPayload {
+    pub task_id: String,
+    /// 真的写进了库的行数（读头失败、或扫描刚好抢先写入的行不计）。
+    pub filled: u64,
+    /// 读头失败的行数（文件缺失/损坏/格式不支持）——这些行保持 `NULL`，下次打开仓库会再试。
+    pub failed: u64,
+    pub cancelled: bool,
+    /// 整轮中止的原因（库打不开、线程 panic）。正常结束与用户取消都是 `null`：
+    /// 「读头失败若干行」不算错误，它是常态的一部分。
+    pub error: Option<String>,
 }

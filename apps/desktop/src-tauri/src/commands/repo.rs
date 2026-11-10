@@ -13,6 +13,7 @@ use tauri::State;
 
 use crate::AppState;
 use crate::commands::shared::EmitHp;
+use crate::commands::shared::diag_log;
 use crate::commands::shared::{
     ApiResponse, api_from_hp, default_repo_dir, ensure_global, global, global_mut, lock_global,
     lock_repo,
@@ -340,6 +341,15 @@ pub(crate) fn repo_open(
 
         // 实时监听（D9）：仓库一打开就把"已挂载源 → 文件变更事件"的线接上。
         crate::source_watch::service().sync(&app, Path::new(&row.repo_db_path), &repo_id);
+
+        // 图片尺寸回填（0043 阶段 2）：打开仓库后低优先级补齐 `files.width` 为 NULL
+        // 的行。**失败不阻塞开仓**——回填是后台补偿，不是开仓的前置条件；已有任务在跑时
+        // 直接跳过（不排队），下次开仓或扫描写库时会自然再补上。
+        if let Err(e) =
+            crate::commands::file::start_backfill(&app, &state, PathBuf::from(&row.repo_db_path))
+        {
+            diag_log(&format!("[backfill] 自动回填未启动：{e}"));
+        }
 
         Ok(RepoSummary {
             id: repo_id,

@@ -14,12 +14,14 @@ use tauri::State;
 
 use crate::AppState;
 use crate::commands::shared::EmitHp;
+use crate::commands::shared::diag_log;
 use crate::commands::shared::{
     AlbumFileItem, ApiAsync, ApiResponse, api_async, api_from_hp, file_to_item, lock_repo,
     open_repo, open_repo_mut, resolve_file_path,
 };
 use crate::commands::source::{ScanCompletedEvent, ScanErrorEvent, ScanProgressEvent};
 use crate::tasks::{TaskControl, TaskKind};
+use hp_dto::{FileBackfillCompletedPayload, FileBackfillProgressPayload};
 
 /// 后台线程按需生成缩略图（缓存未命中时才调用；不阻塞 IPC 线程）。
 ///
@@ -737,4 +739,195 @@ mod wire_shape_tests {
         );
         assert!(!obj.contains_key("next_cursor"), "不得再出蛇形键");
     }
+}
+
+// ───────────────────────── 图片尺寸回填（缺陷 0043 阶段 2）─────────────────────────
+
+/// 每批回填的行数。64 行足够摊薄一次 `RepoDb::open` 之外的开销，又不会让"取消"
+/// 在长批次后面等太久（每行只是一次读头，远小于一次解码）。
+const BACKFILL_BATCH: i64 = 64;
+/// 进度事件的节流间隔。回填是后台任务，不需要 80 ms 那种实时性；
+/// 一秒钟几帧已经够浮窗的进度条动了，再多只是白耗 IPC。
+const BACKFILL_EMIT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// 回填一轮的结果（也用于给前端发收尾事件）。
+struct BackfillOutcome {
+    filled: u64,
+    failed: u64,
+    cancelled: bool,
+}
+
+/// 启动一轮图片尺寸回填；返回任务 ID。
+///
+/// 供两处调用：命令 `file.backfill`（用户在设置里手动触发）与 `repo.open` 之后
+/// 的自动触发。**闸门与扫描共用**（`TaskRegistry` 单任务）：已有任务在跑时直接返回
+/// `AlreadyExists`，调用方（自动触发那条路径）按"本轮跳过"处理，不排队——
+/// 排队会让"打开仓库后不久又开扫描"变成一条看不见的队列。
+pub(crate) fn start_backfill(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    repo_path: std::path::PathBuf,
+) -> HpResult<String> {
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let control = state
+        .tasks
+        .start(&task_id, TaskKind::Backfill)
+        .ok_or_else(|| {
+            HpError::AlreadyExists("已有任务正在进行中，请等待其结束或先取消。".into())
+        })?;
+
+    let st = state.clone();
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let emit_task_id = control.task_id().to_string();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_backfill(&app_handle, &control, &repo_path)
+        }));
+        match result {
+            Ok(Ok(outcome)) => app_handle.emit_hp(
+                "file.backfill.completed",
+                FileBackfillCompletedPayload {
+                    task_id: emit_task_id.clone(),
+                    filled: outcome.filled,
+                    failed: outcome.failed,
+                    cancelled: outcome.cancelled,
+                    error: None,
+                },
+            ),
+            Ok(Err(e)) => {
+                diag_log(&format!("[backfill] 中止：{e}"));
+                app_handle.emit_hp(
+                    "file.backfill.completed",
+                    FileBackfillCompletedPayload {
+                        task_id: emit_task_id.clone(),
+                        filled: 0,
+                        failed: 0,
+                        cancelled: false,
+                        error: Some(e.to_string()),
+                    },
+                );
+            }
+            Err(_) => {
+                diag_log("[backfill] 线程 panic");
+                app_handle.emit_hp(
+                    "file.backfill.completed",
+                    FileBackfillCompletedPayload {
+                        task_id: emit_task_id.clone(),
+                        filled: 0,
+                        failed: 0,
+                        cancelled: false,
+                        error: Some("回填线程异常终止".into()),
+                    },
+                );
+            }
+        }
+        st.tasks.finish(&emit_task_id);
+    });
+
+    Ok(task_id)
+}
+
+/// 回填主体：**键集分页**遍历 `width IS NULL` 的图片行，逐行读头写显示尺寸。
+///
+/// 两条刻意的取舍：
+/// - **读头失败只记数，不写 NULL 之外的东西**：文件可能只是暂时不可达（移动硬盘没插），
+///   把它标成"失败"会让下次不再尝试；保持 `NULL` 就是"还没成功过"。
+/// - **每行之间让一下**：回填是后台任务，扫描/浏览正在同时跑，`sleep(1ms)` 让 OS
+///   把 CPU 让给前台；节流进度也只按时间，不按行数。
+fn run_backfill(
+    app: &tauri::AppHandle,
+    control: &TaskControl,
+    repo_path: &std::path::Path,
+) -> HpResult<BackfillOutcome> {
+    let mut db = RepoDb::open(repo_path)?;
+    let total = db.count_pending_dimensions()?.max(0) as u64;
+    let task_id = control.task_id().to_string();
+    let mut processed: u64 = 0;
+    let mut filled: u64 = 0;
+    let mut failed: u64 = 0;
+    let mut cancelled = false;
+    let mut cursor: Option<String> = None;
+    let mut last_emit = std::time::Instant::now();
+
+    let mut emit = |processed: u64, force: bool| {
+        if !force && last_emit.elapsed() < BACKFILL_EMIT_INTERVAL {
+            return;
+        }
+        last_emit = std::time::Instant::now();
+        app.emit_hp(
+            "file.backfill.progress",
+            FileBackfillProgressPayload {
+                task_id: task_id.clone(),
+                processed,
+                total,
+            },
+        );
+    };
+
+    if total == 0 {
+        return Ok(BackfillOutcome {
+            filled: 0,
+            failed: 0,
+            cancelled: false,
+        });
+    }
+    emit(0, true);
+
+    loop {
+        if control.is_cancelled() {
+            cancelled = true;
+            break;
+        }
+        let batch = db.next_pending_dimensions(cursor.as_deref(), BACKFILL_BATCH)?;
+        if batch.is_empty() {
+            break;
+        }
+        for row in &batch {
+            if control.is_cancelled() {
+                cancelled = true;
+                break;
+            }
+            cursor = Some(row.file_id.clone());
+            let abs = std::path::Path::new(&row.local_path).join(
+                row.relative_path
+                    .replace('/', std::path::MAIN_SEPARATOR_STR),
+            );
+            match hp_media::display_dimensions(&abs) {
+                Some((w, h)) => {
+                    if db.backfill_dimensions(&row.file_id, w, h)? {
+                        filled += 1;
+                    }
+                }
+                None => failed += 1,
+            }
+            processed += 1;
+            emit(processed, false);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        if cancelled {
+            break;
+        }
+    }
+    emit(processed, true);
+    Ok(BackfillOutcome {
+        filled,
+        failed,
+        cancelled,
+    })
+}
+
+/// file.backfill：手动触发一轮图片尺寸回填（设置页/诊断用）。
+#[tauri::command]
+pub(crate) fn file_backfill(state: State<AppState>, app: tauri::AppHandle) -> ApiResponse<String> {
+    let outcome = (|| -> HpResult<String> {
+        let repo_path = match state.current_repo_path.lock() {
+            Ok(guard) => match guard.clone() {
+                Some(p) => p,
+                None => return Err(HpError::NotFound("未打开仓库".into())),
+            },
+            Err(_) => return Err(HpError::Store("仓库锁中毒".into())),
+        };
+        start_backfill(&app, &state, repo_path)
+    })();
+    api_from_hp(outcome)
 }

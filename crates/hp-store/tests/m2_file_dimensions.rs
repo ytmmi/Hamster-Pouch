@@ -131,3 +131,53 @@ fn schema_version_bumped_to_15() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 回填的取数口径（0043 阶段 2）：只取图片、只取 `width IS NULL`、**键集前进**。
+///
+/// 键集那条是这一层最容易写错的地方：读头失败的行仍然是 `NULL`，若按"前 N 条"反复查，
+/// 一个坏文件就能让回填永远停在第一页。
+#[test]
+fn pending_dimensions_scan_advances_past_failures() {
+    let (dir, mut db) = temp_db("pending");
+    let s = db
+        .mount_source("repo-1", "D:/lib", None, None)
+        .expect("挂载失败");
+    db.upsert_file(&row("p1", &s.id, "e/有尺寸.jpg", Some((640, 480))))
+        .expect("写入失败");
+    db.upsert_file(&row("p2", &s.id, "e/待补.jpg", None))
+        .expect("写入失败");
+    db.upsert_file(&row("p3", &s.id, "e/再待补.jpg", None))
+        .expect("写入失败");
+    let mut video = row("p4", &s.id, "e/视频.mp4", None);
+    video.media_type = MediaType::Video;
+    db.upsert_file(&video).expect("写入失败");
+
+    assert_eq!(
+        db.count_pending_dimensions().expect("统计失败"),
+        2,
+        "只有图片参与回填（视频宽高在 media_info_json 里）"
+    );
+
+    let first = db.next_pending_dimensions(None, 1).expect("取批失败");
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].file_id, "p2");
+    assert_eq!(first[0].relative_path, "e/待补.jpg");
+    assert_eq!(
+        first[0].local_path, "D:/lib",
+        "回填要读盘，必须带源的本地路径"
+    );
+
+    // p2 读头失败、保持 NULL：靠 after_id 前进到 p3，而不是再次取到 p2。
+    let second = db
+        .next_pending_dimensions(Some(&first[0].file_id), 1)
+        .expect("取批失败");
+    assert_eq!(second[0].file_id, "p3");
+
+    // 回填写入后不再命中；条件更新对已有值的行**不覆盖**。
+    assert!(db.backfill_dimensions("p3", 1024, 768).expect("回填失败"));
+    assert!(!db.backfill_dimensions("p3", 1, 1).expect("回填失败"));
+    let got = db.get_file("p3").expect("查询失败").expect("应当存在");
+    assert_eq!((got.width, got.height), (Some(1024), Some(768)));
+    assert_eq!(db.count_pending_dimensions().expect("统计失败"), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
