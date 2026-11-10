@@ -66,9 +66,9 @@ import type { Translate } from "../i18n";
 import type { FileItem } from "../shared/types";
 import {
   AUDIO_CARD_RATIO,
-  DEFAULT_CELL_RATIO,
   fileName,
   imageRatio,
+  resolveRatio,
 } from "./mediaPreviewView";
 import { masonryCellHeight } from "./mediaPreviewVirtual";
 
@@ -88,7 +88,7 @@ export const ratioCache = new Map<string, number>();
  * （`<img>` 解码后）。按列/按行虚拟化必须先知道"每项多高"才能算窗口，因此面板要把
  * 这个版本号放进 `useMemo` 依赖——量到新宽高比就重算布局。
  *
- * 没有它的话：首次渲染全部按 `DEFAULT_CELL_RATIO` 估高，之后解码完虽然单元自己
+ * 没有它的话：首次渲染全部按 `DEFAULT_CELL_RATIO`（或索引宽高比）估高，之后解码完虽然单元自己
  * `setRatio` 重渲了，但**列偏移/行偏移**仍停在旧值 → 单元与占位层错位。
  *
  * 用**计数器**而不是"订阅回调"：订阅要管注册/退订与内存泄漏，而面板本来就要重渲
@@ -194,7 +194,7 @@ export const ThumbCell = memo(function ThumbCell({
   const [ratio, setRatio] = useState<number>(() =>
     file.media_type === "audio"
       ? AUDIO_CARD_RATIO
-      : (ratioCache.get(file.id) ?? DEFAULT_CELL_RATIO),
+      : resolveRatio(file, ratioCache.get(file.id)),
   );
 
   /**

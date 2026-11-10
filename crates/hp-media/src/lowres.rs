@@ -148,17 +148,35 @@ fn jpeg_sof_is_ycbcr(src: &Path) -> bool {
 /// 是否应走 `-lowres` 快路径（判据见模块文档；读不到尺寸按"不适用"处理）。
 /// `pub`：经 `lib.rs` 导出供集成测试与基准探针钉口径（生产判定在 `thumbnail` 内部）。
 pub fn should_use_lowres(src: &Path, max_dim: u32) -> bool {
+    should_use_lowres_known(src, max_dim, None)
+}
+
+/// 同上，但尺寸**可以由调用方给出**（缺陷 0043 阶段 3）。
+///
+/// 索引里已经有 `files.width`/`height`（显示尺寸，EXIF 已应用），`thumb.get` 拿得到——
+/// 那就别再自己读一遍文件头：一次缩略图请求只该有一次"问尺寸"，问完一路带下去。
+///
+/// `known` 是**显示尺寸**（可能出现长短边互换），而闸门只看短边与总像素，
+/// 这两个量在互换下都不变，所以不需要把它换回存储朝向。
+pub fn should_use_lowres_known(src: &Path, max_dim: u32, known: Option<(u32, u32)>) -> bool {
     if !is_jpeg_path(src) || max_dim == u32::MAX || max_dim == 0 {
         return false;
     }
-    let Ok((w, h)) = image::image_dimensions(src) else {
+    let dims = match known {
+        Some((w, h)) if w > 0 && h > 0 => Some((u64::from(w), u64::from(h))),
+        // 传了但不可用（0 / 负数）当作"没传"：宁可多读一次头，也不要按坏值放行。
+        _ => image::image_dimensions(src)
+            .ok()
+            .map(|(w, h)| (u64::from(w), u64::from(h))),
+    };
+    let Some((w, h)) = dims else {
         return false;
     };
     // 短边闸门：连 L=1 都保不住 max_dim 的图不许走（缩略图只缩小不放大）。
-    if w.min(h) < max_dim.saturating_mul(2) {
+    if w.min(h) < u64::from(max_dim).saturating_mul(2) {
         return false;
     }
-    if u64::from(w) * u64::from(h) < LOWRES_MIN_MP * 1_000_000 {
+    if w * h < LOWRES_MIN_MP * 1_000_000 {
         return false;
     }
     jpeg_sof_is_ycbcr(src)
@@ -168,14 +186,19 @@ pub fn should_use_lowres(src: &Path, max_dim: u32) -> bool {
 ///
 /// 失败返回 `HpError::Io`，调用方回退进程内路径（见模块文档"失败即回退"）。
 /// EXIF 旋转由 ffmpeg 的 displaymatrix 自动应用，调用方**不得**再旋转。
-pub(crate) fn decode_lowres_thumbnail(
+/// 尺寸可由调用方给出（缺陷 0043 阶段 3：索引里有就不再读头；`None` = 自己读）。
+pub(crate) fn decode_lowres_thumbnail_known(
     src: &Path,
     ffmpeg_bin: &Path,
     max_dim: u32,
     timeout: Duration,
+    known: Option<(u32, u32)>,
 ) -> HpResult<image::DynamicImage> {
-    let (w, h) =
-        image::image_dimensions(src).map_err(|e| HpError::Io(format!("读取图片尺寸失败: {e}")))?;
+    let (w, h) = match known {
+        Some((w, h)) if w > 0 && h > 0 => (w, h),
+        _ => image::image_dimensions(src)
+            .map_err(|e| HpError::Io(format!("读取图片尺寸失败: {e}")))?,
+    };
     let level = lowres_level(w, h, max_dim);
     // 保持纵横比：w/h 用 -1（按另一轴推、四舍五入），双轴 min 夹住上限。
     // **不能**两轴都写 min(D,i·)——那是各自独立夹紧，非方图会被拉成 D×D

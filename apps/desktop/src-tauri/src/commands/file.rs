@@ -38,17 +38,21 @@ fn generate_thumbnail(
     src_path: std::path::PathBuf,
     media_type: MediaType,
     ffmpeg: Option<std::path::PathBuf>,
+    dims: Option<(u32, u32)>,
 ) -> bool {
     if cache.ensure_dir_for(&hash).is_err() {
         return false;
     }
     match media_type {
-        MediaType::Image => hp_media::generate_image_thumbnail(
+        // `dims` = 索引里的显示尺寸（缺陷 0043 阶段 3）：有了它，大 JPEG 走
+        // `-lowres` 时不必再读一遍文件头问尺寸。
+        MediaType::Image => hp_media::generate_image_thumbnail_known(
             &src_path,
             &out,
             hp_media::IMAGE_THUMB_MAX_DIM,
             ffmpeg.as_deref(),
             std::time::Duration::from_secs(30),
+            dims,
         )
         .is_ok(),
         MediaType::Video => match ffmpeg {
@@ -264,7 +268,7 @@ pub(crate) async fn thumb_get(
 
     let outcome = async {
         // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard。
-        let (src_path, content_hash, media_type, cache, ffmpeg) = {
+        let (src_path, content_hash, media_type, cache, ffmpeg, dims) = {
             let guard = lock_repo(&state)?;
             let db = open_repo(&guard)?;
             let file = db
@@ -277,6 +281,7 @@ pub(crate) async fn thumb_get(
                 file.media_type,
                 (*state.thumb_cache).clone(),
                 (*state.ffmpeg_bin).clone(),
+                file.width.zip(file.height),
             )
         };
 
@@ -296,7 +301,7 @@ pub(crate) async fn thumb_get(
         // 缓存未命中：后台线程按需生成，避免阻塞 IPC 线程。
         let gen_out = thumb_path.clone();
         let generated = tauri::async_runtime::spawn_blocking(move || {
-            generate_thumbnail(cache, hash, gen_out, src_path, media_type, ffmpeg)
+            generate_thumbnail(cache, hash, gen_out, src_path, media_type, ffmpeg, dims)
         })
         .await
         .unwrap_or(false);

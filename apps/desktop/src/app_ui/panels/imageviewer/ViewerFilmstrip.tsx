@@ -34,6 +34,7 @@ import {
 
 import { resolveThumbUrl } from "../../shared/thumbUrl";
 import type { FileItem } from "../../shared/types";
+import { indexedRatio } from "../mediaPreviewView";
 import { filmstripEdgeClass, isFilmstripVertical, type FilmstripEdge, type FilmstripView } from "./viewerPlacement";
 import {
   FILMSTRIP_GAP,
@@ -45,6 +46,7 @@ import {
   filmstripCrossSizeFallback,
   filmstripWindow,
   getCachedFilmstripRatio,
+  seedFilmstripRatios,
   setCachedFilmstripRatio,
   subscribeFilmstripRatios,
   touchCachedFilmstripRatio,
@@ -196,6 +198,16 @@ export function ViewerFilmstrip({
    */
   const deltaRef = useRef(new FilmstripDeltaIndex());
   useLayoutEffect(() => {
+    // 先把索引里已知的宽高比播种进共享缓存（缺陷 0043 阶段 3）：胶片栏的总长与
+    // 窗口位置因此**首帧即终值**，不必先按 1:1 占位、等 `<img>` 解码后再跳一次。
+    if (view === "adaptive") {
+      seedFilmstripRatios(
+        files.flatMap((f) => {
+          const ratio = indexedRatio(f);
+          return ratio === null ? [] : [[f.id, ratio] as const];
+        }),
+      );
+    }
     deltaRef.current.bindSequence(
       view === "adaptive" ? files.map((f) => f.id) : [],
       crossExtent,

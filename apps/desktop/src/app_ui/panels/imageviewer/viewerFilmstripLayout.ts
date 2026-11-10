@@ -328,6 +328,32 @@ export function setCachedFilmstripRatio(fileId: string, ratio: number): void {
   for (const listener of ratioListeners) listener(fileId);
 }
 
+/**
+ * 批量播种（**静默**，不通知订阅者）：把索引里已知的宽高比一次性写进缓存。
+ *
+ * 用于缺陷 0043 阶段 3：`files.width`/`files.height` 在首帧就有，胶片栏不必先按
+ * 1:1 占位再等 `<img>` 解码——滚动条总长与窗口位置首帧即终值。
+ *
+ * 三条纪律：①**已有值不覆盖**（解码后量到的是这一张的真值，索引只是近似）；
+ * ②不通知（一次 2 万条会打出 2 万条通知，调用方自己 `setState` 触发一次重算）：
+ * ③仍走同一个 LRU 上限，避免批量写入把缓存撑爆。
+ */
+export function seedFilmstripRatios(entries: Iterable<readonly [string, number]>): number {
+  let seeded = 0;
+  for (const [fileId, ratio] of entries) {
+    if (!Number.isFinite(ratio) || ratio <= 0) continue;
+    if (ratioCache.has(fileId)) continue;
+    ratioCache.set(fileId, ratio);
+    seeded += 1;
+  }
+  while (ratioCache.size > FILMSTRIP_RATIO_CACHE_MAX) {
+    const oldest = ratioCache.keys().next().value;
+    if (oldest === undefined) break;
+    ratioCache.delete(oldest);
+  }
+  return seeded;
+}
+
 /** 清空缓存（仓库切换后旧 fileId 恒失效；与 thumbUrl 缓存同一口径）。 */
 export function clearFilmstripRatioCache(): void {
   ratioCache.clear();

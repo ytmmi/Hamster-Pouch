@@ -830,6 +830,12 @@ const mediaDropdownSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewDropdown.tsx"),
   "utf8",
 );
+// 视图几何的**纯函数**（宽高比辅助、列分配）：缺陷 0043 阶段 3 起这里多两条
+// ——`indexedRatio`（索引尺寸 → 比例）与 `resolveRatio`（缓存优先、索引兜底）。
+const mediaViewSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewView.ts"),
+  "utf8",
+);
 // 媒体预览面板家族（2026-09 第四轮按 1200 行规则再拆）：主面板 / 取值域 / 会话状态 /
 // 工具条 / 文件动作 / 右键菜单 / 选区 / 单元 / 下拉。**断言跟着代码走**：
 // 凡「面板真的消费 / 真的渲染」这类断言读**整个家族**；反向断言同样读整个家族——
@@ -1285,7 +1291,11 @@ check(
     /adaptiveCellIntrinsicHeight\(imageSize, showName\)/.test(mediaPanelSrc) &&
     /masonryCellHeight\(imageSize, ratio, showName\)/.test(mediaPanelSrc) &&
     /const showName = showFileNameFor\(file\.media_type\);/.test(mediaPanelSrc) &&
-    /ratioCache\.get\(file\.id\) \?\? DEFAULT_CELL_RATIO/.test(mediaPanelSrc),
+    // 宽高比取自 `resolveRatio`：解码后量到的优先，其次索引里的 `files.width/height`
+    //（缺陷 0043 阶段 3——首帧即按真实比例估高，不再从 1:1 跳一次）。
+    /resolveRatio\(file, ratioCache\.get\(file\.id\)\)/.test(mediaPanelSrc) &&
+    /export function indexedRatio\(/.test(mediaViewSrc) &&
+    /export function resolveRatio\(/.test(mediaViewSrc),
 );
 
 check(

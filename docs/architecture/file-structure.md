@@ -613,6 +613,11 @@ HamsterPouch/
                               #     画布有**像素上限 100 MP**（`Pixmap::new` 是 `vec![0; w*h*4]`
                               #     且**没有可失败分配**，无上限时畸形自声明尺寸会让进程 abort）；
                               #     尺寸取 `width`/`height`/`viewBox`，全缺时按 CSS 默认 300×300
+                              #   thumb_decode.rs **解码与编码小工具**（2026-11-11 从 thumbnail.rs 拆出：
+                              #     该文件已顶到 1200 行门禁）：按扩展名判 WebP / JPEG 原子落盘 /
+                              #     解码源文件 / 解码失败兜底——只关心"文件 → 像素或字节"，
+                              #     不含"走 lowres 还是全解码"的策略（策略在 thumbnail / lowres）
+                              #     与落盘原子性仍复用 `thumbnail::{temp_sibling, commit}`
                               #   thumbnail.rs 图片缩略图（WebP 三级降级）+ 视频首帧（JPEG）；
                               #     视频**跳过片头黑屏**（D143）：一条 `blackframe` + `metadata`
                               #     过滤链在一次 ffmpeg 内完成，输入侧 `-t` 限窗 5 s；窗口内全黑
@@ -626,6 +631,10 @@ HamsterPouch/
                               #     使两轴 ceil(dim/2^L) ≥ max_dim；9000² 约 2.8×、1536² 反而慢 6 倍
                               #     故小图保持进程内；失败即回退既有路径，接入点唯一在
                               #     `thumbnail::decode_thumbnail_src` 顶部（扫描期与按需同一个函数）
+                              #     **2026-11-11 / 缺陷 0043 阶段 3**：判据 4/5 可直接吃索引里的
+                              #     `files.width`/`files.height`（`should_use_lowres_known`），
+                              #     命中即**完全不读文件头**（此前每张缩略图都要读一次头）；
+                              #     未传或不可用才回退读头——宁可多读一次，也不按坏值放行
                               #   waveform.rs 音频**波形图**（2026-10-17 / D115）：ffmpeg
                               #     `showwavespic` 出一张 **PNG**（实测**透明背景** alpha=0 ⇒
                               #     三套主题共用一张图，不生成第二套）；实测**逐字节确定性**

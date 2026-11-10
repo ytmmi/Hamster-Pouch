@@ -19,6 +19,7 @@ mod player;
 mod probe;
 mod process;
 mod svg;
+mod thumb_decode;
 mod thumbnail;
 mod waveform;
 mod webp;
@@ -37,10 +38,10 @@ pub use process::hidden_command;
 pub use svg::{SVG_EXTS, is_svg, rasterize_svg};
 pub use thumbnail::{
     IMAGE_THUMB_MAX_DIM, IMAGE_THUMB_WEBP_QUALITY, VIDEO_BLACK_SKIP_WINDOW, extract_thumbnail,
-    generate_image_preview, generate_image_thumbnail,
+    generate_image_preview, generate_image_thumbnail, generate_image_thumbnail_known,
 };
 pub use waveform::{WAVE_COLOR, WAVE_SIZE, generate_waveform};
 
 /// 大 JPEG `-lowres` 快路径的分流判据（D148 / 0018 §4.2 ②）。
 /// 生产判定在 `thumbnail` 内部完成；这里导出供集成测试与基准探针钉口径。
-pub use lowres::should_use_lowres;
+pub use lowres::{should_use_lowres, should_use_lowres_known};

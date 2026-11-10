@@ -165,8 +165,43 @@ export function imageRatio(
   return width / height;
 }
 
-/** 解码前的占位宽高比（1:1）——解码后按真实值重排一次。 */
+/** 解码前的占位宽高比（1:1）——解码后、或索引里有尺寸时按真实值重排一次。 */
 export const DEFAULT_CELL_RATIO = 1;
+
+/**
+ * 索引里记录的宽高比（宽 / 高），不可用时返回 `null`（缺陷 0043 阶段 3）。
+ *
+ * 2026-11-11 起 `files.width`/`files.height` 有值（显示尺寸，EXIF 方向已应用），
+ * 所以**首帧**就能按真实比例排版——不必等 `<img>` 解码量 `naturalWidth`，
+ * 滚动条与行高也不会先从 1:1 跳一下。
+ */
+export function indexedRatio(file: {
+  width?: number | null;
+  height?: number | null;
+}): number | null {
+  const { width, height } = file;
+  if (typeof width !== "number" || typeof height !== "number") return null;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return width / height;
+}
+
+/**
+ * 取一个文件该用的宽高比：**解码后量到的**（`cached`）优先，其次索引里的，
+ * 最后才回落 `fallback`。
+ *
+ * 为什么缓存优先：索引尺寸是显示尺寸的近似（EXIF 已应用但只到"长短边"级别），
+ * 而解码后量到的是这一张图在这个缩放下真实的像素比——后者才是排版真值。
+ */
+export function resolveRatio(
+  file: { width?: number | null; height?: number | null },
+  cached: number | undefined,
+  fallback: number = DEFAULT_CELL_RATIO,
+): number {
+  if (cached !== undefined) return cached;
+  return indexedRatio(file) ?? fallback;
+}
 
 /**
  * 音频的卡片宽高比：音频**没有**宽高比可用（缩略图是波形图，尺寸自定），
