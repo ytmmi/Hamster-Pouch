@@ -9,6 +9,7 @@
 import { useCallback, useEffect } from "react";
 
 import { refreshPluginRegistrations, unregisterAll } from "./pluginRegistryHost";
+import type { PluginChangedPayload } from "../shared/types";
 
 /**
  * 按当前仓库重建插件注册表。
@@ -50,7 +51,7 @@ export function usePluginRegistrations(repoId: string | null, onChanged: () => v
     void (async () => {
       try {
         const { listenHp } = await import("../shared/events");
-        dispose = await listenHp<{ repoId?: string }>("plugin.changed", (event) => {
+        dispose = await listenHp<PluginChangedPayload>("plugin.changed", (event) => {
           const target = event.payload?.repoId ?? repoId;
           if (target) void reloadPlugins(target);
         });

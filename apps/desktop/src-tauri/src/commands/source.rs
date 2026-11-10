@@ -52,90 +52,6 @@ pub(crate) struct SourceTreeNode {
     children: Vec<SourceTreeNode>,
 }
 
-/// `scan.progress` 的载荷。
-///
-/// 扫描与**单文件重新分析**共用这一条事件（"分析时和源全量同款浮窗"就是靠复用同一族事件
-/// 达成的：前端 `taskStore` 只认事件、不认命令）。两者的差别只有两处，因此必须写在载荷里
-/// 而不是靠前端猜：`total`（扫描是文件总数，单文件分析是 0 = 总数未知 → 不定进度条）
-/// 与 `pausable`（分析没有暂停点 → 浮窗**不显示**暂停按钮，免得留一个按不动的键）。
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ScanProgressEvent {
-    pub(crate) task_id: String,
-    pub(crate) source_id: String,
-    pub(crate) processed: u64,
-    pub(crate) total: u64,
-    pub(crate) phase: String,
-    /// 正在处理的条目（相对路径或目录）；遍历阶段为当前目录。
-    pub(crate) current: Option<String>,
-    /// 该任务是否支持暂停/恢复（只有整源扫描支持；单文件分析为 `false`）。
-    pub(crate) pausable: bool,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ScanCompletedEvent {
-    pub(crate) task_id: String,
-    pub(crate) source_id: String,
-    pub(crate) indexed: u64,
-    pub(crate) changed: u64,
-    pub(crate) missing: u64,
-    pub(crate) skipped: u64,
-    /// 是否被用户取消（取消不是错误，统计为已完成部分）。
-    pub(crate) cancelled: bool,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ScanErrorEvent {
-    pub(crate) task_id: String,
-    pub(crate) source_id: String,
-    pub(crate) error: String,
-}
-
-/// 卸载进度：`phase` 见 `hp_store::PurgePhase`；`total == 0` = 总数未知（界面按不定进度显示）。
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct UnmountProgressEvent {
-    task_id: String,
-    source_id: String,
-    /// `counting` / `syncRules` / `children` / `derived` / `files` / `source`
-    phase: String,
-    processed: u64,
-    total: u64,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct UnmountCompletedEvent {
-    task_id: String,
-    source_id: String,
-    /// 是否被用户取消（取消时整个事务回滚，什么都没删）。
-    cancelled: bool,
-    /// 删除的相册成员关系条数。
-    members: u64,
-    /// 删除的文件索引行数。
-    files: u64,
-    /// 删除的 tag 关联数。
-    tags: u64,
-    /// 删除的评分数。
-    ratings: u64,
-    /// 删除的色彩参考数。
-    colors: u64,
-    /// 降级为普通相册的跟随相册数。
-    sync_albums: u64,
-    /// 摘挂为顶层源的子源数。
-    child_sources: u64,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct UnmountErrorEvent {
-    task_id: String,
-    source_id: String,
-    error: String,
-}
-
 fn source_to_item(s: Source) -> SourceItem {
     SourceItem {
         id: s.id.as_str().to_string(),
@@ -900,3 +816,13 @@ pub(crate) fn task_resume(task_id: String, state: State<AppState>) -> ApiRespons
     })();
     api_from_hp(outcome)
 }
+
+// 事件载荷的权威定义在 `hp-dto`（同一份 Rust 定义生成前端 TS，
+// 见 `docs/spec/shared-types.md` 与 `docs/issues/README.md` 第 37 轮）。
+// 这里保留旧名字作为别名：命令层与 `file.rs` 的构造点不必跟着改名。
+pub(crate) use hp_dto::ScanCompletedPayload as ScanCompletedEvent;
+pub(crate) use hp_dto::ScanErrorPayload as ScanErrorEvent;
+pub(crate) use hp_dto::ScanProgressPayload as ScanProgressEvent;
+use hp_dto::SourceUnmountCompletedPayload as UnmountCompletedEvent;
+use hp_dto::SourceUnmountErrorPayload as UnmountErrorEvent;
+use hp_dto::SourceUnmountProgressPayload as UnmountProgressEvent;

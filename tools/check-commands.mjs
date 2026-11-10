@@ -174,25 +174,39 @@ check(
 // 单文件分析复用 `source.rs` 的 `scan.progress|completed|error` 三个 DTO —— "同款浮窗"就是
 // 靠复用同一条事件实现的）。只要该结构体在桥接层里定义且带 camelCase 属性即通过。
 const bridgeAllSrc = bridgeFiles.map((f) => f.src).join("\n");
-const snakeEventFields = [];
+// **2026-11-11**：事件载荷的权威定义搬进了 `hp-dto`（第 37 轮裁决 5），桥接层只剩
+// `use hp_dto::XPayload as XEvent` 别名。因此这里两处都要看：先在桥接层找同名结构体，
+// 找不到就顺着别名跳到 `hp-dto` 的定义再断言 camelCase。判据本身不变，只是多认一种写法。
+const hpDtoLibSrc = readFileSync(join(ROOT, "crates/hp-dto/src/lib.rs"), "utf8");
 const missingEventAttr = [];
 for (const { file, src } of bridgeFiles) {
-  const emitRe = /\.emit_hp\(\s*"([a-z][a-z0-9.]*)",\s*([A-Z][A-Za-z0-9_]*)\s*\{/g;
+  const emitRe = /\.emit_hp\(\s*"([a-z][a-z0-9.]*)",\s*(?:hp_dto::)?([A-Z][A-Za-z0-9_]*)\s*\{/g;
   let m;
   while ((m = emitRe.exec(src)) !== null) {
     const [, eventName, dto] = m;
-    // 该 DTO 的结构体定义必须带 camelCase 属性（属性在 struct 行上方）。
-    const structIdx = bridgeAllSrc.search(new RegExp(`struct\\s+${dto}\\b`));
+    // 该 DTO 的定义必须带 camelCase 属性（属性在 struct 行上方）。
+    let haystack = bridgeAllSrc;
+    let structName = dto;
+    let structIdx = bridgeAllSrc.search(new RegExp(`struct\\s+${dto}\\b`));
+    if (structIdx < 0) {
+      const alias = bridgeAllSrc.match(
+        new RegExp(`use\\s+hp_dto::(\\w+)\\s+as\\s+${dto}\\b`),
+      );
+      structName = alias ? alias[1] : dto;
+      haystack = hpDtoLibSrc;
+      structIdx = hpDtoLibSrc.search(new RegExp(`struct\\s+${structName}\\b`));
+    }
     if (structIdx < 0) {
       missingEventAttr.push(`${eventName} → 找不到 ${dto}`);
       continue;
     }
-    const head = bridgeAllSrc.slice(Math.max(0, structIdx - 200), structIdx);
+    const head = haystack.slice(Math.max(0, structIdx - 240), structIdx);
     if (!/rename_all\s*=\s*"camelCase"/.test(head)) {
-      missingEventAttr.push(`${eventName}（${dto} @ ${file}）`);
+      missingEventAttr.push(`${eventName}（${structName} @ ${file}）`);
     }
   }
 }
+
 check(
   "D77：全部事件 DTO 带 rename_all = camelCase",
   missingEventAttr.length === 0,
@@ -273,10 +287,11 @@ check(
 );
 check(
   "暂停能力由**事件载荷**决定，不是前端写死（`pausable` 必须在 DTO 与 store 两侧对上）",
-  /pausable: bool,/.test(
-    readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/source.rs"), "utf8"),
-  ) &&
-    /pausable: boolean;/.test(eventsTs) &&
+  /pausable: bool,/.test(readFileSync(join(ROOT, "crates/hp-dto/src/lib.rs"), "utf8")) &&
+    // 前端声明在生成文件里（events.ts 已改为再导出，2026-11-11）。
+    /pausable: boolean/.test(
+      readFileSync(join(ROOT, "packages/shared-types/src/ScanProgressPayload.ts"), "utf8"),
+    ) &&
     /pausable: p\.pausable,/.test(taskStoreSrc) &&
     // 浮窗只在可暂停时渲染暂停/恢复按钮。
     /task\.cancellable && task\.pausable/.test(

@@ -56,14 +56,9 @@ fn parse_grants(raw: &[String]) -> HpResult<Vec<Capability>> {
 /// 注册项**不落库**，因此事件只带"哪个仓库的启用状态变了"；启用/禁用插件后，
 /// 蓝图里由该插件注册的面板与节点类型立即变为「未接通」或自动恢复。
 fn emit_plugin_changed(app: &tauri::AppHandle, repo_id: &str) {
-    #[derive(Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct PluginChanged {
-        repo_id: String,
-    }
     app.emit_hp(
         "plugin.changed",
-        PluginChanged {
+        hp_dto::PluginChangedPayload {
             repo_id: repo_id.to_string(),
         },
     );
@@ -74,15 +69,9 @@ fn emit_plugin_changed(app: &tauri::AppHandle, repo_id: &str) {
 /// 语义：校验通过、`LoadOutcome` 已产出即算加载完成（**生命周期骨架**，
 /// 不代表常驻进程已拉起——那属 `external-process` 监督，仍未实现）。
 fn emit_plugin_loaded(app: &tauri::AppHandle, repo_id: &str, plugin_id: &str) {
-    #[derive(Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct PluginLoaded {
-        plugin_id: String,
-        repo_id: String,
-    }
     app.emit_hp(
         "plugin.loaded",
-        PluginLoaded {
+        hp_dto::PluginLoadedPayload {
             plugin_id: plugin_id.to_string(),
             repo_id: repo_id.to_string(),
         },

@@ -653,6 +653,10 @@ mod tests {
             "setting.changed",
             "blueprint.changed",
             "color.extracted",
+            // 缺陷 0045：实时监听接线时新增的三条（此前一直漏在这张清单外）。
+            "file.changed",
+            "file.missing",
+            "file.restored",
             "media.surface.click",
             "repo.changed",
             "panel.restore",

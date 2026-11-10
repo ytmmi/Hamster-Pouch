@@ -5,7 +5,6 @@
 
 use hp_core::{HpError, HpResult, MediaType};
 use hp_media::{encode_palette_json, extract_palette};
-use serde::Serialize;
 use tauri::State;
 
 use crate::AppState;
@@ -14,14 +13,6 @@ use crate::commands::shared::{
     ApiAsync, ApiResponse, api_async, api_from_hp, lock_repo, open_repo, open_repo_mut,
     resolve_file_path,
 };
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct ColorExtractedEvent {
-    task_id: String,
-    file_id: String,
-    palette: Vec<String>,
-}
 
 /// color.get：读取文件色彩参考。
 #[tauri::command]
@@ -126,3 +117,6 @@ fn run_color_extract(state: &AppState, file_id: &str) -> HpResult<hp_media::Pale
     db.upsert_color_ref(file_id, &encode_palette_json(&palette.colors))?;
     Ok(palette)
 }
+
+// 事件载荷的权威定义在 `hp-dto`（见 `docs/spec/shared-types.md`）。
+use hp_dto::ColorExtractedPayload as ColorExtractedEvent;

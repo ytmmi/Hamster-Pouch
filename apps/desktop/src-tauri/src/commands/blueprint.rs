@@ -17,7 +17,6 @@
 
 use hp_core::{BlueprintGraph, BlueprintRow, HpError, HpResult};
 use hp_dto::{BlueprintItem, BlueprintTemplateItem, BlueprintValidateResult};
-use serde::Serialize;
 use tauri::State;
 
 use crate::AppState;
@@ -26,14 +25,6 @@ use crate::commands::shared::{
     ApiResponse, api_from_hp, ensure_global, global, lock_global, lock_repo, open_repo,
     open_repo_mut,
 };
-
-/// 蓝图变更事件载荷（RFC 0007 命令与事件；字段口径见 `docs/spec/commands-events.md`）。
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BlueprintChanged {
-    repo_id: String,
-    blueprint_id: Option<String>,
-}
 
 /// 广播蓝图变更：前端重载当前生效蓝图并重新对账布局（失败不影响命令结果）。
 fn emit_changed(app: &tauri::AppHandle, repo_id: &str, blueprint_id: Option<&str>) {
@@ -427,3 +418,6 @@ pub(crate) fn blueprint_template_install(
     })();
     api_from_hp(outcome)
 }
+
+// 事件载荷的权威定义在 `hp-dto`（见 `docs/spec/shared-types.md`）。
+use hp_dto::BlueprintChangedPayload as BlueprintChanged;

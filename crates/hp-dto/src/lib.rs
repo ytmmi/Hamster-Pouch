@@ -504,3 +504,217 @@ pub struct ReaderAnnotationItem {
     /// 创建时间（ISO 8601）。
     pub created_at: String,
 }
+
+// ─────────────────────────── 事件载荷（契约 §4） ───────────────────────────
+//
+// **D77（2026-09）**：事件载荷一律 `#[serde(rename_all = "camelCase")]`，前端按驼峰消费。
+// 这些类型是本 crate 里唯一带 `rename_all` 的一族：命令返回值历史上是蛇形，
+// 改动会波及全部前端调用点，故只把**事件**这一族统一到驼峰（与 D77 一致）。
+//
+// 之所以把它们搬进 `hp-dto`（2026-11-11，裁决见 `docs/issues/README.md` 第 37 轮）：
+// 事件载荷过去是各命令模块里的私有结构体 + 前端 `events.ts` 手写同名接口，
+// 两边靠人工对齐；现在是同一份 Rust 定义 + 生成 TS，漂移由 `pnpm check:types` 守住。
+
+/// `scan.progress` 载荷。
+///
+/// 扫描与**单文件重新分析**共用这一条事件（"分析时和源全量同款浮窗"就是靠复用同一族事件
+/// 达成的：前端只认事件、不认命令）。两者差别只有两处，因此写在载荷里而不是靠前端猜：
+/// `total`（扫描是文件总数，单文件分析是 0 = 总数未知 → 不定进度条）与
+/// `pausable`（分析没有暂停点 → 浮窗不显示暂停按钮，免得留一个按不动的键）。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanProgressPayload {
+    pub task_id: String,
+    pub source_id: String,
+    #[ts(type = "number")]
+    pub processed: u64,
+    /// 遍历阶段为 0（总数未知）。
+    #[ts(type = "number")]
+    pub total: u64,
+    /// `walking`（遍历目录）| `indexing`（逐文件索引）。
+    pub phase: String,
+    /// 正在处理的条目（相对路径或目录）；代表该文件正在被哈希/抽帧。
+    pub current: Option<String>,
+    /// 该任务是否支持暂停/恢复（整源扫描为 `true`，单文件分析为 `false`）。
+    pub pausable: bool,
+}
+
+/// `scan.completed` 载荷。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanCompletedPayload {
+    pub task_id: String,
+    pub source_id: String,
+    #[ts(type = "number")]
+    pub indexed: u64,
+    #[ts(type = "number")]
+    pub changed: u64,
+    #[ts(type = "number")]
+    pub missing: u64,
+    #[ts(type = "number")]
+    pub skipped: u64,
+    /// 是否被用户取消（取消不是错误，统计为已完成部分）。
+    pub cancelled: bool,
+}
+
+/// `scan.error` 载荷。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanErrorPayload {
+    pub task_id: String,
+    pub source_id: String,
+    pub error: String,
+}
+
+/// `source.unmount.progress` 载荷（完全卸载的分阶段进度）。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceUnmountProgressPayload {
+    pub task_id: String,
+    pub source_id: String,
+    /// `counting` / `syncRules` / `children` / `derived` / `files` / `source`。
+    pub phase: String,
+    #[ts(type = "number")]
+    pub processed: u64,
+    /// 0 = 该阶段总数未知（界面按不定进度显示）。
+    #[ts(type = "number")]
+    pub total: u64,
+}
+
+/// `source.unmount.completed` 载荷（完全卸载结果）。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceUnmountCompletedPayload {
+    pub task_id: String,
+    pub source_id: String,
+    /// 是否被用户取消（取消时整个事务回滚，什么都没删）。
+    pub cancelled: bool,
+    /// 删除的相册成员关系条数。
+    #[ts(type = "number")]
+    pub members: u64,
+    /// 删除的文件索引行数。
+    #[ts(type = "number")]
+    pub files: u64,
+    /// 删除的 tag 关联数。
+    #[ts(type = "number")]
+    pub tags: u64,
+    /// 删除的评分数。
+    #[ts(type = "number")]
+    pub ratings: u64,
+    /// 删除的色彩参考数。
+    #[ts(type = "number")]
+    pub colors: u64,
+    /// 降级为普通相册的跟随相册数。
+    #[ts(type = "number")]
+    pub sync_albums: u64,
+    /// 摘挂为顶层源的子源数。
+    #[ts(type = "number")]
+    pub child_sources: u64,
+}
+
+/// `source.unmount.error` 载荷。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceUnmountErrorPayload {
+    pub task_id: String,
+    pub source_id: String,
+    pub error: String,
+}
+
+/// `album.sync.progress` 载荷。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumSyncProgressPayload {
+    pub task_id: String,
+    pub album_id: String,
+    #[ts(type = "number")]
+    pub added: u64,
+    #[ts(type = "number")]
+    pub removed: u64,
+    #[ts(type = "number")]
+    pub pinned: u64,
+}
+
+/// `album.sync.conflict` 载荷（**逐文件**，缺陷 0004）：一个冲突成员一条事件。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumSyncConflictPayload {
+    pub task_id: String,
+    pub album_id: String,
+    /// 冲突成员的 file ID——**不再是空串**。
+    pub file_id: String,
+    /// 稳定原因码（`pinned_kept`：成员已被用户固定，`mirror` 本应移除却保留）。
+    pub reason: String,
+}
+
+/// `album.sync.failed` 载荷（**整体失败**，缺陷 0004）：与逐文件冲突分开。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumSyncFailedPayload {
+    pub task_id: String,
+    pub album_id: String,
+    /// 诊断串（结构化错误码仍以命令层 `code` 为准）。
+    pub error: String,
+}
+
+/// `color.extracted` 载荷。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ColorExtractedPayload {
+    pub task_id: String,
+    pub file_id: String,
+    pub palette: Vec<String>,
+}
+
+/// `plugin.loaded` 载荷（契约 §4）。
+///
+/// 语义：校验通过、`LoadOutcome` 已产出即算"加载完成"（**生命周期骨架**）——
+/// **不代表**常驻进程已拉起，那属 `external-process` 监督（仍未实现）。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginLoadedPayload {
+    pub plugin_id: String,
+    pub repo_id: String,
+}
+
+/// `plugin.changed` 载荷：注册表**不落库**，事件只带"哪个仓库的启用状态变了"。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginChangedPayload {
+    pub repo_id: String,
+}
+
+/// `blueprint.changed` 载荷（RFC 0007）：前端据此重载生效蓝图并重新对账布局。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BlueprintChangedPayload {
+    pub repo_id: String,
+    /// 变更后的生效蓝图；`None` = 该仓库没有生效蓝图。
+    pub blueprint_id: Option<String>,
+}
+
+/// `file.missing` 载荷（缺陷 0045）：监听发现**已索引**的文件从磁盘消失。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FileMissingPayload {
+    pub repo_id: String,
+    pub file_id: String,
+}
+
+/// `file.restored` 载荷（缺陷 0045）：此前标记为缺失的文件又回到磁盘。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FileRestoredPayload {
+    pub repo_id: String,
+    pub file_id: String,
+}
+
+/// `file.changed` 载荷（缺陷 0045）：目录里已有文件的内容变了。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FileChangedPayload {
+    pub repo_id: String,
+    pub file_id: String,
+    /// 契约枚举里的值：本模块只会发 `modified`（`renamed` / `moved` 无可靠判定源）。
+    pub change: String,
+}

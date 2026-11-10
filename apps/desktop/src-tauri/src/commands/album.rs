@@ -70,38 +70,6 @@ pub(crate) struct AlbumRemoveResult {
     removed: u64,
 }
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct AlbumSyncProgressEvent {
-    task_id: String,
-    album_id: String,
-    added: u64,
-    removed: u64,
-    pinned: u64,
-}
-
-/// 单文件同步冲突（缺陷 0004）：**一个成员一条事件**，`fileId` 是真实值。
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct AlbumSyncConflictEvent {
-    task_id: String,
-    album_id: String,
-    /// 冲突成员的 file ID——**不再是空串**。
-    file_id: String,
-    /// 稳定原因码（`pinned_kept`：成员已被用户固定，`mirror` 本应移除却保留）。
-    reason: String,
-}
-
-/// 同步**整体失败**（缺陷 0004）：与"单文件冲突"分开，避免两种语义挤在一个事件名里。
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct AlbumSyncFailedEvent {
-    task_id: String,
-    album_id: String,
-    /// 诊断串（结构化错误码仍以命令层/`code` 为准）。
-    error: String,
-}
-
 /// 解析相册媒体属性字符串；缺省或空串表示继承父相册。
 fn parse_album_media_type(value: Option<&str>) -> HpResult<Option<AlbumMediaType>> {
     match value {
@@ -590,6 +558,11 @@ pub(crate) fn album_delete(
     })();
     api_from_hp(outcome)
 }
+
+// 事件载荷的权威定义在 `hp-dto`（见 `docs/spec/shared-types.md`）。
+use hp_dto::AlbumSyncConflictPayload as AlbumSyncConflictEvent;
+use hp_dto::AlbumSyncFailedPayload as AlbumSyncFailedEvent;
+use hp_dto::AlbumSyncProgressPayload as AlbumSyncProgressEvent;
 
 #[cfg(test)]
 mod wire_shape_tests {
