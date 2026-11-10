@@ -1,6 +1,6 @@
 //! M1：仓库与设置命令桥接。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use hp_core::{
     Capability, HpError, HpResult, RepoId, SettingScope, registry_decl_for_storage_key,
@@ -338,6 +338,9 @@ pub(crate) fn repo_open(
             *path = Some(PathBuf::from(&row.repo_db_path));
         }
 
+        // 实时监听（D9）：仓库一打开就把"已挂载源 → 文件变更事件"的线接上。
+        crate::source_watch::service().sync(&app, Path::new(&row.repo_db_path), &repo_id);
+
         Ok(RepoSummary {
             id: repo_id,
             name: row.name,
@@ -351,6 +354,8 @@ pub(crate) fn repo_open(
 #[tauri::command]
 pub(crate) fn repo_close(state: State<AppState>) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
+        // 先停监听线程：它们各自持有仓库库连接，得在关库之前收手。
+        crate::source_watch::service().stop_all();
         let mut guard = lock_repo(&state)?;
         if let Some(repo) = guard.take() {
             repo.close()?;

@@ -49,6 +49,89 @@ impl SourceWatcher {
     }
 }
 
+/// 该事件值不值得处理：**访问类**（打开/读/关闭）一律丢弃。
+///
+/// 缩略图与查看器会不断读源里的文件，`Access` 事件因此非常密集；不丢弃的话监听线程
+/// 会被"自己读自己的文件"持续吵醒，去抖窗口永远等不到静默。
+pub fn is_relevant_event(event: &Event) -> bool {
+    !matches!(event.kind, notify::EventKind::Access(_))
+}
+
+/// 库内已有文件在监听判定中要用到的字段（取自 `files` 行）。
+///
+/// 只带判定必需的四项：`file_id` 用于发事件，`size` / `mtime` 用于判"内容变了"，
+/// `missing` 是库里已登记的缺失标记（决定往 `file.missing` 还是 `file.restored` 走）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnownFile {
+    pub file_id: String,
+    pub size: i64,
+    pub mtime: String,
+    pub missing: bool,
+}
+
+/// 一条监听事件最终落到哪个契约事件。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WatchDecision {
+    /// 库里有、磁盘上没了 → `file.missing`
+    Missing { file_id: String },
+    /// 库里登记为缺失、磁盘上又出现了 → `file.restored`
+    Restored { file_id: String },
+    /// 库里有、磁盘上还在、size 或 mtime 变了 → `file.changed(modified)`
+    Modified { file_id: String },
+}
+
+/// 由"库里怎么记的"与"磁盘上现在什么样"决定发不发事件。
+///
+/// **语义边界**（对齐 `docs/spec/commands-events.md` 的三条契约）：
+///
+/// - `known == None`（磁盘上有、索引里没有 = **新增文件**）→ `None`。契约里
+///   `file.changed.change` 只有 `modified|renamed|moved`，新增语义**未裁决**，
+///   因此本轮不发明事件；新增仍由扫描发现。
+/// - `disk == None` 且库里**尚未**标记缺失 → `Missing`；已标记过 → `None`（不重复轰炸）。
+/// - `disk == Some` 且库里标记缺失 → `Restored`。
+/// - `disk == Some`、未标记缺失、`size` 或 `mtime` 变化 → `Modified`；都没变 → `None`
+///   （重复 `Modify` 抖动、属性事件都落在这里，天然静默）。
+///
+/// 判定是**纯函数**：不做 IO、不碰数据库，因此可以在单测里逐条钉死。
+pub fn decide(known: Option<&KnownFile>, disk: Option<(i64, String)>) -> Option<WatchDecision> {
+    let known = known?;
+    match (disk, known.missing) {
+        (None, false) => Some(WatchDecision::Missing {
+            file_id: known.file_id.clone(),
+        }),
+        (None, true) => None,
+        (Some(_), true) => Some(WatchDecision::Restored {
+            file_id: known.file_id.clone(),
+        }),
+        (Some((size, mtime)), false) => {
+            (size != known.size || mtime != known.mtime).then(|| WatchDecision::Modified {
+                file_id: known.file_id.clone(),
+            })
+        }
+    }
+}
+
+/// 把绝对路径换成"相对媒体源根"的库内键（`files.relative_path` 口径：`/` 分隔）。
+///
+/// 不在根之下就返回 `None`（事件来自别的目录）。`notify` 在 Windows 上偶尔给出
+/// `\\?\E:\...` 长路径前缀、或大小写与源记录不同，因此先按路径组件剥，失败再按
+/// 字符串（忽略 ASCII 大小写）剥一次。
+pub fn relative_key(root: &Path, path: &Path) -> Option<String> {
+    if let Ok(rel) = path.strip_prefix(root) {
+        return Some(rel.to_string_lossy().replace('\\', "/"));
+    }
+    let root_s = root.to_string_lossy().replace('\\', "/");
+    let root_s = root_s.strip_prefix("//?/").unwrap_or(&root_s);
+    let root_s = root_s.trim_end_matches('/');
+    let path_s = path.to_string_lossy().replace('\\', "/");
+    let path_s = path_s.strip_prefix("//?/").unwrap_or(&path_s);
+    let (rb, pb) = (root_s.as_bytes(), path_s.as_bytes());
+    if pb.len() > rb.len() && pb[..rb.len()].eq_ignore_ascii_case(rb) && pb[rb.len()] == b'/' {
+        return Some(path_s[rb.len() + 1..].to_string());
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,5 +160,71 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         assert!(got_event, "应在创建文件后收到监听事件");
+    }
+
+    /// 判定表的四条主线 + 新增文件不发事件。
+    #[test]
+    fn decide_maps_disk_state_and_index_state_to_contract_events() {
+        let known = |missing: bool| KnownFile {
+            file_id: "f1".into(),
+            size: 100,
+            mtime: "111".into(),
+            missing,
+        };
+        let same = Some((100, "111".to_string()));
+
+        // 库里没有 = 新增文件：契约没有 created 语义，本轮不发。
+        assert_eq!(decide(None, same.clone()), None);
+        // 库里有、磁盘没了、库里未标记 → 缺失。
+        assert_eq!(
+            decide(Some(&known(false)), None),
+            Some(WatchDecision::Missing {
+                file_id: "f1".into()
+            })
+        );
+        // 已登记缺失、磁盘仍然没有 → 不重复发。
+        assert_eq!(decide(Some(&known(true)), None), None);
+        // 已登记缺失、磁盘又出现 → 恢复（即便 size/mtime 也变了，先报恢复）。
+        assert_eq!(
+            decide(Some(&known(true)), same.clone()),
+            Some(WatchDecision::Restored {
+                file_id: "f1".into()
+            })
+        );
+        // 未标记缺失、size 变了 → 内容变更。
+        assert_eq!(
+            decide(Some(&known(false)), Some((101, "111".into()))),
+            Some(WatchDecision::Modified {
+                file_id: "f1".into()
+            })
+        );
+        // 未标记缺失、只有 mtime 变了 → 同样是内容变更。
+        assert_eq!(
+            decide(Some(&known(false)), Some((100, "222".into()))),
+            Some(WatchDecision::Modified {
+                file_id: "f1".into()
+            })
+        );
+        // 一模一样（Access/重复 Modify 抖动）→ 静默。
+        assert_eq!(decide(Some(&known(false)), same), None);
+    }
+
+    /// 相对键：`/` 归一、根外返回 `None`、长路径前缀与大小写也能剥。
+    #[test]
+    fn relative_key_normalizes_and_rejects_outside_paths() {
+        let root = Path::new("E:/Hamster Pouch/夹具");
+        assert_eq!(
+            relative_key(root, Path::new("E:/Hamster Pouch/夹具/子/图.png")).as_deref(),
+            Some("子/图.png")
+        );
+        assert_eq!(
+            relative_key(root, Path::new("E:/Hamster Pouch/别的/图.png")),
+            None
+        );
+        // Windows 长路径前缀 + 大小写差异。
+        assert_eq!(
+            relative_key(root, Path::new("\\\\?\\e:\\hamster pouch\\夹具\\a.png")).as_deref(),
+            Some("a.png")
+        );
     }
 }

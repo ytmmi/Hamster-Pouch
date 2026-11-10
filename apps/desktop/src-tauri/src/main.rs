@@ -25,6 +25,8 @@ mod commands;
 mod embed_window;
 // 内置 MCP（模型上下文协议）服务（D119）：随应用启动的本机 HTTP 服务。
 mod mcp;
+// 媒体源实时监听接线（D9）：挂载的源 → `file.changed|missing|restored` 事件。
+mod source_watch;
 mod tasks;
 
 /// 应用级共享状态（Arc 包装以支持后台扫描线程）。

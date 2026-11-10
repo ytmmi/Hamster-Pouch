@@ -462,6 +462,44 @@ impl RepoDb {
         Ok(changed)
     }
 
+    /// 按 `(源, 相对路径)` 查一行索引（实时监听用：把磁盘路径换算成库内文件）。
+    ///
+    /// 同一源内 `relative_path` 唯一（`0018`/D11 的全量索引口径），因此最多一行。
+    pub fn find_file_by_source_path(
+        &self,
+        source_id: &str,
+        relative_path: &str,
+    ) -> HpResult<Option<FileIndexRow>> {
+        let mut stmt = self
+            .conn()
+            .prepare(&format!(
+                "SELECT {FILE_COLUMNS} FROM files WHERE source_id = ?1 AND relative_path = ?2"
+            ))
+            .map_err(|e| store_err("按路径查询文件", e))?;
+        let mut rows = stmt
+            .query_map(params![source_id, relative_path], row_to_file)
+            .map_err(|e| store_err("按路径查询文件", e))?;
+        match rows.next() {
+            Some(Ok(mut row)) => {
+                load_marks_for(self.conn(), std::slice::from_mut(&mut row))?;
+                Ok(Some(row))
+            }
+            Some(Err(e)) => Err(store_err("读取文件行", e)),
+            None => Ok(None),
+        }
+    }
+
+    /// 只更新缺失标记（实时监听用；不动 `verify_status`——监听不是校验）。
+    pub fn set_file_missing(&mut self, file_id: &str, missing_status: i64) -> HpResult<()> {
+        self.conn()
+            .execute(
+                "UPDATE files SET missing_status = ?2 WHERE id = ?1",
+                params![file_id, missing_status],
+            )
+            .map_err(|e| store_err("更新缺失标记", e))?;
+        Ok(())
+    }
+
     /// 更新文件校验状态与缺失标记（扫描校验/失效标记用）。
     pub fn update_file_status(
         &mut self,

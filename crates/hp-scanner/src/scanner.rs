@@ -695,7 +695,10 @@ fn default_marks_for(prep: &Prepared) -> Vec<FileMark> {
 }
 
 /// 读取文件 size 与 mtime（mtime 存 epoch 纳秒十进制字符串，便于精确比较）。
-fn file_stat(path: &Path) -> Option<(i64, String)> {
+///
+/// **对外可见**（`hp_scanner::file_stat`）：实时监听（`watcher::decide`）要用**同一套**
+/// 口径比较"磁盘现状 vs 索引里记的值"，两处各算一份必然漂移。
+pub fn file_stat(path: &Path) -> Option<(i64, String)> {
     let meta = std::fs::metadata(path).ok()?;
     let size = meta.len() as i64;
     let mtime = meta.modified().ok()?;

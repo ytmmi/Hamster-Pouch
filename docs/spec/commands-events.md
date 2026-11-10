@@ -633,9 +633,9 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 | `source.unmount.progress` | `{ taskId, sourceId, phase, processed, total }`（**2026-09 补入**：正文 §3.2 与代码早就有它，本节此前**漏列**；`phase` ∈ `counting`/`syncRules`/`children`/`derived`/`files`/`source`，`total == 0` 表示该阶段总数未知（界面按不定进度显示）。发射点 `apps/desktop/src-tauri/src/commands/source.rs:347`，DTO `source.rs:90`；前端监听 `apps/desktop/src/app_ui/core/taskStore.ts`） |
 | `source.unmount.completed` | `{ taskId, sourceId, cancelled, members, files, tags, ratings, colors, syncAlbums, childSources }`（**2026-09 补入**，同上：本节此前漏列。`cancelled` 为真时整个事务回滚、什么都没删；发射点 `apps/desktop/src-tauri/src/commands/source.rs:284`，DTO `source.rs:101`） |
 | `source.unmount.error` | `{ taskId, sourceId, error }`（**完全卸载的终止失败事件**；发射点 `apps/desktop/src-tauri/src/commands/source.rs:291`（清理失败）与 `:307`（工作线程 panic 终止，`error` 固定为「卸载线程异常终止」），DTO `source.rs:111`；前端监听 `apps/desktop/src/app_ui/core/taskStore.ts:179`） |
-| `file.changed` | `{ repoId, fileId, change: modified|renamed|moved }`（**保留在契约，标注"待 watcher 接线"**：2026-09 取证发现 `crates/hp-scanner/src/watcher.rs` 的 `SourceWatcher` **没有任何生产调用方**（只有自己的单测），桥接层从不启动监听——所以这三条一直没实现**不是缺 emit，是缺接线**。D9/M2 本来就要求"实时监听 + 定期全量校验兜底"，因此**不从契约撤下**） |
-| `file.missing` | `{ repoId, fileId }`（同上，待 watcher 接线） |
-| `file.restored` | `{ repoId, fileId }`（同上，待 watcher 接线） |
+| `file.changed` | `{ repoId, fileId, change: modified|renamed|moved }`（**2026-11-10 已接线**（缺陷 0045）：`apps/desktop/src-tauri/src/source_watch.rs` 为每个**已挂载**源起一个 `hp_scanner::SourceWatcher` 线程，静默 900 ms 后把攒下的路径对库核一次再发；`change` 当前**只发 `modified`**（`renamed`/`moved` 没有可靠判定源：`notify` 的 rename 事件既可能是改名也可能是移动，且契约未定义"新旧路径如何配对"）。**语义边界**：只对**索引里已有**的文件发；「磁盘上新增的文件」不发（契约枚举里没有 `created`，新增语义待裁决，新增仍由扫描发现）；监听**不触发重扫**（避免"扫描写库 → 监听看到 → 再扫描"自激） |
+| `file.missing` | `{ repoId, fileId }`（**2026-11-10 已接线**：磁盘上文件消失且索引里 `missing_status = 0` 时发，并发完即把 `missing_status` 置 1；已标记过的不重复发） |
+| `file.restored` | `{ repoId, fileId }`（**2026-11-10 已接线**：索引里 `missing_status != 0`、磁盘上文件又出现时发，并把标记清回 0） |
 | `album.sync.progress` | `{ taskId, albumId, added, removed, pinned }` |
 | `album.sync.conflict` | `{ taskId, albumId, fileId, reason }`（**逐文件冲突**，2026-09 按缺陷 0004 归位：**一个冲突成员一条事件**，`fileId` 是**真实**成员 ID、不再有空串；`reason` 是稳定原因码——当前只有 `pinned_kept`（成员已被用户固定，`mirror` 本应移除却保留）。语义依据 RFC 0002「`mirror` 可能移除用户以为还存在的成员，需要 UI 明确提示」；同步**本身成功**，只是某些成员没被移除。发射点 `apps/desktop/src-tauri/src/commands/album.rs:331`-`341`，逐文件明细由 `crates/hp-album/src/sync.rs:104`-`107` 产出（`SyncConflict`）；前端监听 `panels/TaskPanel.tsx`、`test_ui/panels/AlbumPanel.tsx`） |
 | `album.sync.failed` | `{ taskId, albumId, error }`（**整体失败**，2026-09 按缺陷 0004 **新增**：相册不存在 / 无同步规则 / 固定型相册 / 库错误等，与"单文件冲突"分开，避免两种语义挤在同一个事件名里。发射点 `apps/desktop/src-tauri/src/commands/album.rs:346`-`353`（DTO `AlbumSyncFailedEvent`）；前端监听 `panels/TaskPanel.tsx`（i18n 键 `task.albumSyncFailed`）） |
@@ -656,6 +656,7 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 > **目录完整性订正（2026-09）**：本表此前**漏列两条已实现事件**——`source.unmount.progress` 与 `source.unmount.completed`（正文 §3.2 有、代码也发射，只有本表没列）。已补入，并另补 `media.surface.click`（Rust 发射、属休眠路径）。因此**本表条目数由 22 变为 24**（+2 已实现）+ 1 条休眠事件；`docs/architecture/implementation-status.md` §2.7 #13 的基数随之订正。
 >
 > **10 条缺口的逐条裁决（2026-09，用户拍板）**：**撤下 5 条**——`task.progress` / `task.cancelled`（与既有进度/取消口径重叠）、`media.ready` / `media.ended` / `media.crashed`（随 `media.*` 退役休眠）；**补 1 条发射点**——`plugin.loaded`（`plugin.load` 已存在）；**暂不补 1 条**——`ai.tagging.completed`（占位提供方返回空候选，现在发射等于报假事件，待真实推理提供方）；**保留 3 条并标注"待 watcher 接线"**——`file.changed` / `file.missing` / `file.restored`（`SourceWatcher` 无生产调用方）。
+> **2026-11-10 追记**：上面这 3 条**已经接线**（缺陷 0045，发射点 `apps/desktop/src-tauri/src/source_watch.rs`），缺口清单只剩 `ai.tagging.completed` 一条；同时新登记三条**本轮刻意不做**的边界（新增文件语义、监听不触发重扫、前端暂不消费），见 `docs/issues/0045`。
 >
 > **撤下的条目一律划掉而不删行**，以便追溯"曾经声明过、为何撤下"。
 

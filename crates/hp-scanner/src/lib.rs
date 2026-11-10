@@ -10,5 +10,7 @@ mod watcher;
 pub use media_type::{default_file_marks, detect_media_type};
 pub use scan_compute::{ImageDerivations, analyze_image, image_pixel_cost};
 pub use scan_pool::{PIXEL_BUDGET_MP, map_bounded, pixel_cost, worker_count};
-pub use scanner::{ScanOptions, ScanOutcome, ScanPhase, ScanProgress, Scanner};
-pub use watcher::SourceWatcher;
+pub use scanner::{ScanOptions, ScanOutcome, ScanPhase, ScanProgress, Scanner, file_stat};
+pub use watcher::{
+    KnownFile, SourceWatcher, WatchDecision, decide, is_relevant_event, relative_key,
+};

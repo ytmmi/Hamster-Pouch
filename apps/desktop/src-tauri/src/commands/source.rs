@@ -156,7 +156,9 @@ pub(crate) fn source_mount(
     alias: Option<String>,
     parent_source_id: Option<String>,
     state: State<AppState>,
+    app: tauri::AppHandle,
 ) -> ApiResponse<SourceItem> {
+    let mut started: Option<(String, String)> = None;
     let outcome = (|| -> HpResult<SourceItem> {
         if local_path.trim().is_empty() {
             return Err(HpError::InvalidArgument("媒体源路径不能为空".into()));
@@ -169,8 +171,16 @@ pub(crate) fn source_mount(
             alias.as_deref(),
             parent_source_id.as_deref(),
         )?;
+        started = Some((source.id.as_str().to_string(), source.local_path.clone()));
         Ok(source_to_item(source))
     })();
+    // 挂载成功即开始实时监听（失败则什么都不做——没挂上的源不该有线程）。
+    if outcome.is_ok()
+        && let Some((source_id, path)) = started
+        && let Ok(Some(repo_path)) = state.current_repo_path.lock().map(|g| g.clone())
+    {
+        crate::source_watch::service().start(&app, &repo_path, &repo_id, &source_id, &path);
+    }
     api_from_hp(outcome)
 }
 
@@ -331,6 +341,8 @@ pub(crate) async fn source_unmount(
                 }
             }
             st.tasks.finish(&emit_task_id);
+            // 源已经卸载：监听线程跟着收手（进程内的停止开关只在这里与 repo.close 置位）。
+            crate::source_watch::service().stop(&emit_source_id);
         });
 
         Ok(task_id)
