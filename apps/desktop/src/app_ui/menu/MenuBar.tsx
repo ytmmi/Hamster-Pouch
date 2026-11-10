@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type JSX } from "react";
 import type { DockviewApi } from "dockview-react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
@@ -54,8 +55,8 @@ export function MenuBar({
   const { t } = app;
   // 面板注册表（内置 14 个 + 插件注册项）：重置布局与组件菜单都用这一份清单。
   const panelDefs = useAllPanelDefs();
-  // 布局按仓库隔离（D1）：未打开仓库时用空串表示全局默认。
-  const repoId = app.repoId ?? "";
+  // RFC 0011：布局预设是应用级的；仓库只在有绑定时覆盖（`repoId` 可空）。
+  const repoId = app.repoId;
   const [open, setOpen] = useState<string | null>(null);
   const [submenu, setSubmenu] = useState<string | null>(null);
   const [layouts, setLayouts] = useState<string[]>([]);
@@ -68,7 +69,7 @@ export function MenuBar({
    *  保证「所有安装的插件」始终可见；只是没仓库时开关不可点。 */
   const loadCatalog = useCallback(async () => {
     try {
-      setCatalog(await api.pluginCatalog(repoId));
+      setCatalog(await api.pluginCatalog(repoId ?? ""));
     } catch (e) {
       app.status(errorTextOf(app.t, e), "error");
       setCatalog([]);
@@ -128,6 +129,10 @@ export function MenuBar({
   );
   const [renamingLayout, setRenamingLayout] = useState<string | null>(null);
   const [renameLayoutValue, setRenameLayoutValue] = useState("");
+  /** 应用级默认预设名（菜单里打「默认」标记）。 */
+  const [defaultLayout, setDefaultLayoutName] = useState<string | null>(null);
+  /** 当前仓库的覆盖预设名（无覆盖为 null）。 */
+  const [repoBinding, setRepoBinding] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -141,20 +146,17 @@ export function MenuBar({
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  // 读取当前仓库的已保存布局名（首行为最近保存）。
-  // D53：列表返回的是**层行**（同一布局名在每个层各一行），这里按名字去重展示预设。
+  // 读取应用级预设名（最新在前）+ 默认指针 + 当前仓库覆盖（RFC 0011）。
   const loadLayoutNames = useCallback(async () => {
     try {
-      const items = await api.layoutList({ repoId });
-      const seen = new Set<string>();
-      const names: string[] = [];
-      for (const item of items) {
-        if (!seen.has(item.name)) {
-          seen.add(item.name);
-          names.push(item.name);
-        }
-      }
-      setLayouts(names);
+      const [items, def, bound] = await Promise.all([
+        api.layoutList(),
+        api.layoutGetDefault().catch(() => null),
+        repoId ? api.layoutGetDefault({ repoId }).catch(() => null) : Promise.resolve(null),
+      ]);
+      setLayouts(items.map((item) => item.name));
+      setDefaultLayoutName(def);
+      setRepoBinding(bound);
     } catch {
       setLayouts([]);
     }
@@ -236,7 +238,6 @@ export function MenuBar({
       const boundId = repoId ? await syncBlueprintFromLayout(repoId, dv) : null;
       const json = JSON.stringify(dv.toJSON());
       await api.layoutSave({
-        repoId,
         name,
         layoutJson: json,
         // D53：写**当前层**那一份布局；当前层按仓库持久化（D54）。
@@ -256,11 +257,11 @@ export function MenuBar({
     const dv = apiRef.current;
     if (!dv) return;
     try {
-      // D53：套用**当前层**那一份布局；该层没有专属行时按层无关行兜底（旧预设）。
+      // D53：套用**当前层**那一份布局；该层没有专属行时按 `""` 兜底（同一预设内）。
       const layerKey = currentLayerKey() ?? undefined;
       const raw =
-        (await api.layoutGet({ repoId, name, layerKey })) ??
-        (await api.layoutGet({ repoId, name }));
+        (await api.layoutGet({ name, layerKey })) ??
+        (await api.layoutGet({ name }));
       if (!raw) {
         app.status(t("layout.notFound", { name }), "error");
         return;
@@ -272,14 +273,10 @@ export function MenuBar({
       // 布局绑定蓝图：应用布局时激活其绑定的第一个蓝图（1 个布局可绑定多个蓝图），
       // 随后立即把蓝图语义对账到新布局（默认可见标签 + 组收起/展开）。
       let boundId: string | null = null;
-      if (repoId) {
-        const bound = await api
-          .layoutBlueprints({ repoId, name })
-          .catch(() => [] as string[]);
-        if (bound[0]) {
-          const loaded = await loadActiveBlueprint(repoId, bound[0]);
-          boundId = loaded.loaded ? bound[0] : null;
-        }
+      const bound = await api.layoutBlueprints({ name }).catch(() => [] as string[]);
+      if (repoId && bound[0]) {
+        const loaded = await loadActiveBlueprint(repoId, bound[0]);
+        boundId = loaded.loaded ? bound[0] : null;
       }
       if (!boundId) {
         setActiveBlueprintId(null);
@@ -300,7 +297,7 @@ export function MenuBar({
       return;
     }
     try {
-      await api.layoutRename({ repoId, name, newName: trimmed });
+      await api.layoutRename({ name, newName: trimmed });
       await loadLayoutNames();
       app.status(t("layout.renamed", { name: trimmed }), "ok");
     } catch (e) {
@@ -314,7 +311,7 @@ export function MenuBar({
       return;
     }
     try {
-      await api.layoutDelete({ repoId, name });
+      await api.layoutDelete({ name });
       await loadLayoutNames();
       app.status(t("layout.deleted", { name }), "ok");
     } catch (e) {
@@ -334,7 +331,6 @@ export function MenuBar({
       const boundId = repoId ? await syncBlueprintFromLayout(repoId, dv) : null;
       const json = JSON.stringify(dv.toJSON());
       await api.layoutSave({
-        repoId,
         name,
         layoutJson: json,
         // D53：覆盖的是**当前层**那一份布局。
@@ -352,10 +348,81 @@ export function MenuBar({
   const setDefaultLayout = async (name: string) => {
     setLayoutMenu(null);
     try {
-      await api.layoutSetDefault({ repoId, name });
+      await api.layoutSetDefault({ name });
       app.status(t("layout.defaultSet", { name }), "ok");
     } catch (e) {
       app.status(t("layout.defaultFailed", { err: errorTextOf(app.t, e) }), "error");
+    }
+  };
+
+  /** 把预设设为**当前仓库**的覆盖（RFC 0011：只写绑定，不动应用级默认）。 */
+  const bindRepoLayout = async (name: string) => {
+    setLayoutMenu(null);
+    if (!repoId) {
+      app.status(t("layout.bindingNeedsRepo"), "info");
+      return;
+    }
+    try {
+      await api.layoutBindRepo({ repoId, name });
+      await loadLayoutNames();
+      app.status(t("layout.bound", { name }), "ok");
+    } catch (e) {
+      app.status(t("layout.bindFailed", { err: errorTextOf(app.t, e) }), "error");
+    }
+  };
+
+  /** 清除当前仓库覆盖，回到应用级默认。 */
+  const clearRepoBinding = async () => {
+    setLayoutMenu(null);
+    if (!repoId) {
+      return;
+    }
+    try {
+      await api.layoutBindRepo({ repoId });
+      await loadLayoutNames();
+      app.status(t("layout.unbound"), "ok");
+    } catch (e) {
+      app.status(t("layout.bindFailed", { err: errorTextOf(app.t, e) }), "error");
+    }
+  };
+
+  /** 导出预设为 `.json`（系统保存对话框取路径，Rust 侧落盘）。 */
+  const exportLayout = async (name: string) => {
+    setLayoutMenu(null);
+    try {
+      const safe = name.replace(/[\\/:*?"<>|]/g, "_");
+      const path = await saveDialog({
+        defaultPath: `${safe}.json`,
+        filters: [{ name: "Hamster Pouch Layout", extensions: ["json"] }],
+      });
+      if (!path) {
+        return;
+      }
+      await api.layoutExport({ name, path });
+      app.status(t("layout.exported", { name }), "ok");
+    } catch (e) {
+      app.status(t("layout.exportFailed", { err: errorTextOf(app.t, e) }), "error");
+    }
+  };
+
+  /** 导入预设（重名自动加后缀，不覆盖、不改绑定）。 */
+  const importLayout = async () => {
+    closeMenus();
+    try {
+      const picked = await openDialog({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Hamster Pouch Layout", extensions: ["json"] }],
+      });
+      const path = Array.isArray(picked) ? picked[0] : picked;
+      if (!path) {
+        return;
+      }
+      const item = await api.layoutImport({ path });
+      await loadLayoutNames();
+      app.status(t("layout.imported", { name: item.name }), "ok");
+    } catch (e) {
+      app.status(t("layout.importFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -524,12 +591,23 @@ export function MenuBar({
                       }}
                     >
                       {name}
+                      {defaultLayout === name && (
+                        <span className="dim"> · {t("menubar.layout.defaultTag")}</span>
+                      )}
+                      {repoBinding === name && (
+                        <span className="dim"> · {t("menubar.layout.bindingTag")}</span>
+                      )}
                     </button>
                   ),
                 )}
                 {layouts.length === 0 && (
                   <span className="menu-item dim">{t("menubar.layout.empty")}</span>
                 )}
+                {/* 导出 / 导入（RFC 0011 决策 6）：导出走预设右键菜单 */}
+                <div className="menu-sep" />
+                <button className="menu-item" onClick={() => void importLayout()}>
+                  {t("menubar.layout.import")}
+                </button>
                 {/* 重置布局：置于布局子菜单最底部 */}
                 <div className="menu-sep" />
                 <button className="menu-item" onClick={resetLayout}>
@@ -686,6 +764,25 @@ export function MenuBar({
             onClick={() => void setDefaultLayout(layoutMenu.name)}
           >
             {t("menubar.layout.setDefault")}
+          </button>
+          <button
+            className="menu-item"
+            onClick={() => void bindRepoLayout(layoutMenu.name)}
+          >
+            {t("menubar.layout.bindRepo")}
+          </button>
+          <button
+            className="menu-item"
+            onClick={() => void clearRepoBinding()}
+          >
+            {t("menubar.layout.clearBinding")}
+          </button>
+          <div className="menu-sep" />
+          <button
+            className="menu-item"
+            onClick={() => void exportLayout(layoutMenu.name)}
+          >
+            {t("menubar.layout.export")}
           </button>
         </ContextMenu>
       )}

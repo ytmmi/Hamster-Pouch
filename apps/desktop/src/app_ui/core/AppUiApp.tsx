@@ -114,7 +114,7 @@ export function AppUiApp(): JSX.Element {
   const panelDefs = useAllPanelDefs();
   const dockComponents = useDockComponents();
 
-  // 「全部设置」系统界面（RFC 0010 决策 7）：应用级、独立于仓库蓝图与 panel_layouts。
+  // 「全部设置」系统界面（RFC 0010 决策 7）：应用级、独立于仓库蓝图与布局预设。
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // 垂直「界面页」标签条（D124）：启用开关与左右位置都是宿主设置，改动即时生效。
@@ -313,7 +313,7 @@ export function AppUiApp(): JSX.Element {
       addDefaultPanels(dv, t);
 
       // 启动：若设置了默认仓库，自动打开并应用其默认布局（D25 相邻能力，失败忽略）。
-      void bootstrapDefaultRepo(dv, setRepoId);
+      void bootstrapDefaultRepo(dv, setRepoId, t);
 
       // 拖出工作区 → 独立窗口（左键按住标签页拖拽，指针离开工作区即脱离）
       bindPanelDragOut({ dv, getWorkspace, detach: detachPanel });
@@ -407,7 +407,7 @@ export function AppUiApp(): JSX.Element {
         {/* 长任务进度浮窗 + 危险操作确认弹窗：界面居中，盖在布局/面板之上 */}
         <TaskOverlay />
         <ConfirmDialog />
-        {/* 「全部设置」系统界面（RFC 0010 决策 7）：不进蓝图、不参与 panel_layouts */}
+        {/* 「全部设置」系统界面（RFC 0010 决策 7）：不进蓝图、不参与布局预设 */}
         {settingsOpen && (
           <SettingsApp
             onClose={() => setSettingsOpen(false)}

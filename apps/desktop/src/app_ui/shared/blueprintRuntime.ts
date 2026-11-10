@@ -374,10 +374,10 @@ export async function loadCurrentLayer(repoId: string): Promise<string | null> {
 }
 
 /**
- * 套用某一层的布局（D53：每层一份布局）：读取默认布局在该层的快照并套用，
- * 然后按蓝图语义对账一次（D54：切层时目标层按自身结构对账一次）。
+ * 套用某一层的布局（D53：每层一份布局；RFC 0011 解析链）：按「仓库覆盖 → 应用级默认」
+ * 依次读取该层快照（每份预设内先当前层、再 `""`），套用首个命中者，然后按蓝图语义对账一次。
  *
- * 该层没有专属布局行时返回 `false`（保持当前布局不动）；布局损坏时同样返回 `false`。
+ * 链上都没有布局时返回 `false`（保持当前布局不动）；布局损坏时同样返回 `false`。
  */
 export async function applyLayerLayout(
   repoId: string,
@@ -388,17 +388,26 @@ export async function applyLayerLayout(
     return false;
   }
   try {
-    const name = await api.layoutGetDefault({ repoId });
-    if (!name) {
-      return false;
+    const names: string[] = [];
+    const bound = await api.layoutGetDefault({ repoId });
+    if (bound) {
+      names.push(bound);
     }
-    const raw = await api.layoutGet({ repoId, name, layerKey });
-    if (!raw) {
-      return false;
+    const appDefault = await api.layoutGetDefault();
+    if (appDefault && !names.includes(appDefault)) {
+      names.push(appDefault);
     }
-    dv.fromJSON(normalizeLayoutJson(JSON.parse(raw)));
-    reconcileAfterLayoutApplied(dv);
-    return true;
+    for (const name of names) {
+      const raw =
+        (await api.layoutGet({ name, layerKey })) ?? (await api.layoutGet({ name }));
+      if (!raw) {
+        continue;
+      }
+      dv.fromJSON(normalizeLayoutJson(JSON.parse(raw)));
+      reconcileAfterLayoutApplied(dv);
+      return true;
+    }
+    return false;
   } catch (e) {
     trace(`[layer] 套用层布局失败 repo=${repoId} layer=${layerKey}: ${String(e)}`);
     return false;
