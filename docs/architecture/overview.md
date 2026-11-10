@@ -135,6 +135,7 @@ Rust 核心层
 - tag 库（总库 / 关系映射 / 分类映射 / 别名与多语言）：`docs/rfc/0008-tag-libraries.md`
 - 蓝图（节点式显隐与组布局控制）：`docs/rfc/0007-blueprint.md`
 - **面板与蓝图节点注册（术语改名 + 插件可注册 + 全部设置）**：`docs/rfc/0010-panel-and-node-registration.md`
+- **布局预设与仓库绑定（应用级默认 + 仓库可选覆盖；预设实体化）**：`docs/rfc/0011-layout-presets-and-repo-binding.md`
 - 控件标准（面板**内部**的 26 种宿主内置 UI 单元 / schema / 白名单 / 校验 / 渲染骨架）：`docs/spec/control-standard.md`
 - **面板标准（面板注册表 + 声明参数列表；宿主内置 + 插件可注册）**：`docs/spec/panel-standard.md`
 - **设置标准（「全部设置」系统界面 + 设置注册表 + 插件扩展）**：`docs/spec/settings-standard.md`

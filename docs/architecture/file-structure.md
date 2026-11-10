@@ -727,7 +727,7 @@ HamsterPouch/
                               #   门禁：`pnpm check:bundled-runtime`
   docs/
     architecture/             # 文件架构、总体架构、决策清单
-    rfc/                      # 决策记录（0001–0010；0010 = 面板与蓝图节点注册）
+    rfc/                      # 决策记录（0001–0011；0011 = 布局预设与仓库绑定）
     spec/                     # 模块技术规范（control-standard / panel-standard / settings-standard /
                               #   blueprint-node-standard / plugin-standard / commands-events / module-boundaries …）
     roadmap/                  # 实施路线图
