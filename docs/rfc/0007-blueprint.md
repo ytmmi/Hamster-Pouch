@@ -398,9 +398,12 @@ CREATE TABLE blueprint_templates (
 ```
 
 > ⚠️ **上例是"结构示意（12 节点 / 13 边）"，不是真实内置默认图。**
-> 真实内置默认蓝图是 **27 节点 / 26 边**（`default_version` 当前 = 7，单层「主界面」），权威来源只有一个：
-> **`packages/config/src/blueprint.ts` 的 `DEFAULT_BLUEPRINT` 常量**，其 JSON 由 `pnpm generate:blueprint-fixture`
-> 导出为 `crates/hp-store/tests/default_blueprint.json`（Rust 侧 `include_str!` 引用，测试断言 27/26）。
+> 真实内置默认蓝图是 **51 节点 / 48 边**（`default_version` 当前 = 8，**2 层**「主界面」+「界面 2」），权威来源只有一个：
+> **`packages/config/src/blueprintDefault.ts` 的 `DEFAULT_BLUEPRINT` 常量**，其 JSON 由 `pnpm generate:blueprint-fixture`
+> 导出为 `crates/hp-store/tests/default_blueprint.json`（Rust 侧 `include_str!` 引用，测试断言 51/48）。
+>
+> **2026-11-10 / D155**：`default_version` 由 7 升至 8 —— 内置默认图改为与随包「演示布局」**同一份编辑**
+> （布局多出「界面 2」后蓝图必须同步，否则全新安装会出现"布局有标签页、画布没有该层"）。
 > 本节示例仅用于说明**字段与边形状**（含 `overlay` 目标类型等目标态字段），**不得据此落库**；
 > 真实结构以「实现注记（零回归）」与上述常量为准。
 
@@ -408,7 +411,9 @@ CREATE TABLE blueprint_templates (
 
 > 上例为**单层**结构示意（`layers` 仅一项「主界面」，全部节点归属 `l_main`；示例为省篇幅只在首部节点上标出 `layer`，落库时**每个节点都带该字段**）。
 
-> **实现注记（零回归）**：内置默认蓝图（`packages/config` 的 `DEFAULT_BLUEPRINT`，`default_version` 当前=7）**如实表达当前默认「媒体-测试」布局**：**单层**（`layers = [{key:"l_main", name:"主界面"}]`，每个节点都带 `layer: "l_main"`）内顶层为界面节点 `ui`；左栏（区域）＝仓库/媒体源/相册三个独立面板，布局块直接连三个面板；中栏（区域）＝一个标签组 `g_media`（成员：媒体预览/查看器/媒体播放器），媒体预览内部再分 图像/视频/音频 类目→对象；右栏（区域）＝**只有一个标签组** `g_inspector`（成员：色彩参考 / 标签·评分 / 元数据，三者同属一个 dockview 标签组）——即右栏**没有**"单面板直连布局块"的成员；**标签组优先**：布局块只连**标签组**（成员由标签组 `contains`）与**单面板**；一栏内同时存在"单面板 + 标签组"时，两者都直接挂在布局块下。界面节点只连布局块（`ui → blk_left/blk_center/blk_right`）；界面显示名取自**层名**（界面节点不再另存 `name`）。规则三元组（对象→操作→状态，全部连线）：双击 图像·双击对象 → 显示 查看器；双击 视频 → 播放器并播放；双击 音频 → 元数据。节点 `position` 按栏分列排布、互不重叠（Rust 测试 `default_blueprint_nodes_do_not_overlap` 守住该不变量）；夹具由 `pnpm generate:blueprint-fixture` 从 TS 常量生成，不在两侧手工维护。旧版内置默认由引擎按 `default_version` 自动升级（v5 → v6 引入界面节点、v6 → v7 引入分层）；用户一旦在编辑器保存即移除该标记（`forUserSave`），此后不再被自动升级覆盖。不保留旧模式兼容。
+> **实现注记（零回归）**：内置默认蓝图（`packages/config` 的 `DEFAULT_BLUEPRINT`，`default_version` 当前=8——D155 起升版；
+> 本节下述"单层 / 27 节点 / 右栏只有一个标签组"描述的是 v7 形态，v8 的事实以常量与 `crates/hp-store/tests/m6_blueprint.rs`
+> 的断言为准：2 层、`ui`+`ui_2` 两个界面节点、右栏另有直接挂载的「色彩参考」「元数据」两个单面板、面板集合与演示布局逐层相等）**如实表达当前默认「媒体-测试」布局**：**单层**（`layers = [{key:"l_main", name:"主界面"}]`，每个节点都带 `layer: "l_main"`）内顶层为界面节点 `ui`；左栏（区域）＝仓库/媒体源/相册三个独立面板，布局块直接连三个面板；中栏（区域）＝一个标签组 `g_media`（成员：媒体预览/查看器/媒体播放器），媒体预览内部再分 图像/视频/音频 类目→对象；右栏（区域）＝**只有一个标签组** `g_inspector`（成员：色彩参考 / 标签·评分 / 元数据，三者同属一个 dockview 标签组）——即右栏**没有**"单面板直连布局块"的成员；**标签组优先**：布局块只连**标签组**（成员由标签组 `contains`）与**单面板**；一栏内同时存在"单面板 + 标签组"时，两者都直接挂在布局块下。界面节点只连布局块（`ui → blk_left/blk_center/blk_right`）；界面显示名取自**层名**（界面节点不再另存 `name`）。规则三元组（对象→操作→状态，全部连线）：双击 图像·双击对象 → 显示 查看器；双击 视频 → 播放器并播放；双击 音频 → 元数据。节点 `position` 按栏分列排布、互不重叠（Rust 测试 `default_blueprint_nodes_do_not_overlap` 守住该不变量）；夹具由 `pnpm generate:blueprint-fixture` 从 TS 常量生成，不在两侧手工维护。旧版内置默认由引擎按 `default_version` 自动升级（v5 → v6 引入界面节点、v6 → v7 引入分层）；用户一旦在编辑器保存即移除该标记（`forUserSave`），此后不再被自动升级覆盖。不保留旧模式兼容。
 
 ### 6. 校验：服务端 `blueprint.validate`（硬错误 + 软告警）
 

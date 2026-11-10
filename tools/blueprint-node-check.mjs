@@ -203,7 +203,9 @@ const hasEdge = (doc, from, to, kind) =>
   const { doc, node } = factory.appendNode(doc0, "class", { x: 0, y: 0 }, hint);
   check(
     "选中 c_media 后新增类目：key 按选中上级命名（c_media_image），但 control **留空**（未接通灰显）",
-    node.control === undefined && node.key === "c_media_image",
+    // key 按选中上级命名；内置默认图里可能已有同名节点（D155 的 v8 里就有 `c_media_image`），
+    // 去重后缀（`_2`）是既定行为，故只断言前缀。
+    node.control === undefined && node.key.startsWith("c_media_image"),
     `key=${node.key} control=${node.control ?? "(留空)"}`,
   );
   // 缺省字段仍按**选中的面板**取（图书预览下默认 text，而不是 image）
@@ -289,11 +291,13 @@ const hasEdge = (doc, from, to, kind) =>
     pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintDelete.ts")).href
   );
   let doc = defaults();
+  // 基线层数**不写死**：内置默认图随演示布局增层（D155 起两层），断言只关心"多了一层"。
+  const baseLayers = doc.layers.length;
   const added = layersMod.addLayer(doc);
   doc = added.doc;
   check(
     "新增层：自动带出该层界面根节点（每层至多一个界面，D51）",
-    doc.layers.length === 2 &&
+    doc.layers.length === baseLayers + 1 &&
       doc.nodes.filter(
         (n) => n.type === "interface" && n.layer === added.layer.key,
       ).length === 1,
@@ -311,14 +315,19 @@ const hasEdge = (doc, from, to, kind) =>
   check(
     "删除层：层与层内节点一并删除（D55，非软删除）",
     removed.rejected === null &&
-      removed.doc.layers.length === 1 &&
+      removed.doc.layers.length === baseLayers &&
       !removed.doc.nodes.some((n) => n.layer === added.layer.key),
     `layers=${removed.doc.layers.length} nodes=${removed.doc.nodes.length}`,
   );
-  const rejected = deleteMod.removeLayer(removed.doc, removed.doc.layers[0].key);
+  // 基线层数不写死（D155 起内置默认两层）：先逐层删到只剩一层，再断言拒绝。
+  let lastDoc = removed.doc;
+  while (lastDoc.layers.length > 1 && lastDoc.layers[1]) {
+    lastDoc = deleteMod.removeLayer(lastDoc, lastDoc.layers[1].key).doc;
+  }
+  const rejected = deleteMod.removeLayer(lastDoc, lastDoc.layers[0].key);
   check(
     "删除层：禁止删除最后一层（D55）",
-    rejected.rejected === "last-layer" && rejected.doc === removed.doc,
+    rejected.rejected === "last-layer" && rejected.doc === lastDoc,
     `rejected=${rejected.rejected}`,
   );
 }
@@ -1253,12 +1262,18 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
   // 两侧同口径：这四类在后端同样是"缺少必要引用"软告警（逐 key 对上）
   const rust = rustWarnings(doc);
   const mine = new Set(added.map((n) => n.key));
+  // 基线（内置默认图本身）可能已有软告警——例如 v8 里那个孤立的浮层 `ov_1`。
+  // 这里只要求**本次新增的**告警都指向这四类之一，否则断言会被基线噪声淹没。
+  const baseWarnings = new Set(rustWarnings(defaults()) ?? []);
+  const fresh = (rust ?? []).filter((w) => !baseWarnings.has(w));
   check(
-    "四类未接通在后端同口径：每条软告警都指向这四个 key 之一，且四个 key 都被报到",
+    "四类未接通在后端同口径：每条（新增）软告警都指向这四个 key 之一，且四个 key 都被报到",
     rust !== null &&
       added.every((n) => rust.some((w) => w.includes(n.key))) &&
-      rust.every((w) => [...mine].some((key) => w.includes(key))),
-    rust === null ? "Rust 输出解析失败" : `后端 ${rust.length} 条：${rust.map((w) => w.slice(0, 24)).join(" / ")}`,
+      fresh.every((w) => [...mine].some((key) => w.includes(key))),
+    rust === null
+      ? "Rust 输出解析失败"
+      : `后端 ${rust.length} 条（基线 ${baseWarnings.size} 条）：${fresh.map((w) => w.slice(0, 24)).join(" / ")}`,
   );
 }
 

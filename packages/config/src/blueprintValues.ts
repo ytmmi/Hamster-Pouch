@@ -20,7 +20,7 @@ import { OVERLAY_ANCHORS, TOKEN_LEVELS } from "./blueprintOverlay";
 export const BLUEPRINT_SCHEMA_VERSION = 3;
 
 /** 当前内置默认蓝图版本（引擎据此自动升级旧库存默认）。 */
-export const DEFAULT_BLUEPRINT_VERSION = 7;
+export const DEFAULT_BLUEPRINT_VERSION = 8;
 
 /**
  * **宿主内置**节点类型取值域（RFC 0007 决策 1 / D46/D47/D50）——封闭清单，**12 种**。

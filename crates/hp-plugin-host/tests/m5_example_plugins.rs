@@ -147,11 +147,24 @@ fn bundled_system_plugin_gets_system_trust_from_host_decision() {
     // D40+：python-core 已有 Ed25519 签名，信任等级为 System。
     let root = temp_root("bundled");
     let installer = PluginInstaller::new(root.join("store"));
+    let bundled = repo_root().join("plugins/system/python-core");
+
+    // `SHA256SUMS` / `SHA256SUMS.sig` 覆盖的是**构建产物**（启动器 + `runtime/`），
+    // 两者都按 `.gitignore` 不入库（签名入库只会留下一份与任何一次真实构建都对不上的
+    // 陈旧记录）。于是**全新 checkout（CI）里没有签名**，宿主会把随包插件降级为
+    // community —— 那条降级口径已由 `install.rs` 的单测
+    // `install_or_reuse_registry_row_keeps_bundled_as_system` 覆盖。
+    // 本用例断言的是**签名有效 → System** 这条正向路径，故缺签名时按仓库既有惯例跳过
+    // （同 `crates/hp-plugin-signing/tests/verify_dist_packages.rs` 的 `跳过：…`）。
+    if !bundled.join("SHA256SUMS.sig").is_file() {
+        eprintln!(
+            "跳过：plugins/system/python-core 未签名（先 node tools/sign-plugin.mjs plugins/system/python-core）"
+        );
+        return;
+    }
+
     let row = installer
-        .install_registry_row(
-            &InstallSource::Bundled(repo_root().join("plugins/system/python-core")),
-            INSTALLED_AT,
-        )
+        .install_registry_row(&InstallSource::Bundled(bundled), INSTALLED_AT)
         .expect("随包安装失败");
 
     assert_eq!(row.trust_level, TrustLevel::System);

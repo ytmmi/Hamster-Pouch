@@ -19,133 +19,137 @@ import {
 // ============================== 内置默认蓝图 ==============================
 
 /**
- * 内置默认蓝图 v7：如实表达当前默认「媒体-测试」布局（RFC 0007 决策 5 / D32 / D47 / D51）。
+ * 内置默认蓝图 v8：**与随包分发的「演示布局」同一份编辑**（RFC 0007 决策 5 / D32 / D47 / D51 / D155）。
  *
- * 结构（**单层**「主界面」：层 ⊃ 界面 ⊃ 布局块 ⊃ 标签组 ⊃ 面板；面板 ⊃ 类目 ⊃ 对象）
- * —— 与仓库默认布局逐栏对应：
- * - 分层（D51）：`layers = [{ key: "l_main", name: "主界面" }]`，**每个节点都带 `layer`**；
- *   一个层 = 一张画布 = 一个界面（页面）；多页面由用户新增层与界面节点，
- *   并用 `navigate`（界面跳转，D48）连接；
- * - 层内的根是**界面节点** `ui`（界面显示名取自层名，D51：不再另存 `name`）；
- * - 左栏（blk_left）：**三个独立面板**，故直接含 仓库、媒体源、相册 三个面板
- *   （该栏没有 dockview 标签组）；
- * - 中栏（blk_center）：**只有一个标签组** `g_media`，其成员为 媒体预览 / 查看器 /
- *   媒体播放器（布局里就是同一个 leaf 的三个标签页）；媒体预览内部再分
- *   图像/视频/音频 类目 → 各一个「双击」对象；
- * - 右栏（blk_right）：**只有一个标签组** `g_inspector`，成员为 色彩参考 /
- *   标签·评分 / 元数据（布局里同样是同一个 leaf 的三个标签页）。
+ * 这份图取自演示布局所绑定的那份蓝图（2026-11-10 保存「媒体-测试」布局时，
+ * `layout.syncBlueprint` 在同一次保存里既写布局、也写蓝图）：**2 层 / 60 节点 / 53 边**。
+ * 布局与蓝图必须同源——只更新一半，全新安装就会看到「界面 2」有标签页、蓝图里却没有该层画布。
+ * `tools/package-build.mjs` 打包时逐层比对，缺层即失败退出。
  *
- * 术语（D71 / RFC 0010 决策 1）：节点类型 `control` 在文档与 UI 中显示为**面板**，
- * 与 `docs/spec/control-standard.md` 的「控件」（宿主标准 UI 单元，26 种）区分；
- * 节点类型 `class` 显示为**类目**（D46 的「面板控件」叫法已由 D71 撤销）；
- * 浮层（`overlay`，D50）是**容器**，直接包含面板/标签组（2026-09 取消「浮动控件」绑定），
- * 默认蓝图不含浮层。
+ * 结构：层 ⊃ 界面 ⊃ 布局块 ⊃ 标签组 ⊃ 面板；面板 ⊃ 类目 ⊃ 子类 ⊃ 对象；对象 ⊃ 操作 → 状态。
+ * - 分层（D51）：`l_main`（主界面，`is_home`）与 `l_2`（界面 2），**每个节点都带 `layer`**；
+ *   一个层 = 一张画布 = 一个界面（页面），多页面之间用 `navigate`（D48）连接；
+ * - 标签组（`group`）用 `contains` 收纳成员面板；布局块（`layout_block`）只连标签组或
+ *   独立面板（**标签组优先**）；浮层（`overlay`，D50）是容器，v8 起随演示布局一起携带；
+ * - 节点 `position` 为画布世界坐标，打开编辑器即可读清结构；拖拽后位置随文档落库（D30）。
  *
- * 规则（对象 → 操作 → 状态，全部连线）：
- * - 双击 图像·双击对象 → 显示 查看器；
- * - 双击 视频·双击对象 → 显示 播放器并播放（`payload.play`）；
- * - 双击 音频·双击对象 → 显示 元数据。
+ * 术语见 D71 / RFC 0010 决策 1：节点类型 `control` 显示为**面板**，`class` 显示为**类目**。
  *
- * 说明：
- * - **标签组优先**：某栏在布局里是一个 dockview 标签组时，布局块只连标签组，
- *   成员面板由标签组 `contains`；只有该栏由多个独立面板组成（如左栏）时，
- *   布局块才直接连面板。
- * - **界面节点只连布局块**（`ui → blk_left/blk_center/blk_right`），不直接连标签组/面板。
- * - 「媒体-测试」默认布局中 `tagtable`（tag表）与 `tasks`（任务）未挂载，故默认蓝图
- *   不含它们；用户需要时在编辑器中加 `control` 节点并放进标签组即可。
- * - `default_visible` 留空（不指定默认可见成员）：对账时保留布局自身的激活标签；
- *   `media` 与查看器/播放器同属 `g_media`，双击动作由「激活已存在面板」完成，
- *   不会因切换标签而把面板销毁。
- * - 节点 `position` 为画布世界坐标（界面一行、布局块一行、各栏一列），**互不重叠**，
- *   打开编辑器即可读清结构；拖拽后位置随文档落库（D30）。
- * - 旧版内置默认由引擎按 `default_version` 自动升级（v6 → v7 即引入分层那次升级）；
- *   不保留旧模式兼容。
+ * 版本：v7 → v8 补齐了随包演示布局的第二层（`l_2`）及随之新增的面板/类目/浮层节点；
+ * 旧库里的内置默认由引擎按 `default_version` 静默升级，用户改过的图（`forUserSave` 已去掉该标记）
+ * 不会被覆盖。
  */
 export const DEFAULT_BLUEPRINT: BlueprintGraph = {
   schema_version: BLUEPRINT_SCHEMA_VERSION,
   default_version: DEFAULT_BLUEPRINT_VERSION,
-  layers: [{ key: "l_main", name: "主界面" }],
+  layers: [
+    { key: "l_main", name: "主界面", is_home: true },
+    { key: "l_2", name: "界面 2", is_home: false },
+  ],
   nodes: [
-    // 界面（顶层容器 / 页面）：一行，居中于三栏之上
-    { key: "ui", type: "interface", layer: "l_main", position: { x: 460, y: 40 } },
-
-    // 布局块（各栏一列，位于界面之下）
-    { key: "blk_left", type: "layout_block", layer: "l_main", name: "左栏", position: { x: 40, y: 170 } },
-    { key: "blk_center", type: "layout_block", layer: "l_main", name: "中栏", position: { x: 460, y: 170 } },
-    { key: "blk_right", type: "layout_block", layer: "l_main", name: "右栏", position: { x: 880, y: 170 } },
-
-    // 左栏面板（仓库 / 媒体源 / 相册）
-    { key: "c_repo", type: "control", layer: "l_main", panel_id: "repo", title_key: "panel.repo", position: { x: 40, y: 300 } },
-    { key: "c_sources", type: "control", layer: "l_main", panel_id: "sources", title_key: "panel.sources", position: { x: 40, y: 430 } },
-    { key: "c_albums", type: "control", layer: "l_main", panel_id: "albums", title_key: "panel.albums", position: { x: 40, y: 560 } },
-
-    // 中栏：**只有标签组** g_media（媒体预览 / 查看器 / 媒体播放器同属一个 dockview
-    // 标签组，对应布局里的一个 leaf），媒体预览内部再分 图像/视频/音频 类目 → 对象。
-    { key: "g_media", type: "group", layer: "l_main", mode: "exclusive", name: "媒体·查看器·播放", position: { x: 460, y: 300 } },
-    { key: "c_media", type: "control", layer: "l_main", panel_id: "media", title_key: "panel.media", position: { x: 760, y: 300 } },
-    { key: "c_viewer", type: "control", layer: "l_main", panel_id: "viewer", title_key: "panel.viewer", position: { x: 760, y: 430 } },
-    { key: "c_player", type: "control", layer: "l_main", panel_id: "player", title_key: "panel.player", position: { x: 760, y: 560 } },
-    { key: "k_image", type: "class", layer: "l_main", control: "c_media", media_type: "image", position: { x: 1060, y: 300 } },
-    { key: "k_video", type: "class", layer: "l_main", control: "c_media", media_type: "video", position: { x: 1060, y: 430 } },
-    { key: "k_audio", type: "class", layer: "l_main", control: "c_media", media_type: "audio", position: { x: 1060, y: 560 } },
-    { key: "o_img", type: "object", layer: "l_main", class: "k_image", scope: "double_clicked", position: { x: 1360, y: 300 } },
-    { key: "o_vid", type: "object", layer: "l_main", class: "k_video", scope: "double_clicked", position: { x: 1360, y: 430 } },
-    { key: "o_aud", type: "object", layer: "l_main", class: "k_audio", scope: "double_clicked", position: { x: 1360, y: 560 } },
-
-    // 右栏：**只有标签组** g_inspector（色彩参考 / 标签·评分 / 元数据同属一个 dockview 标签组）
-    { key: "g_inspector", type: "group", layer: "l_main", mode: "exclusive", name: "色彩·标签·元数据", position: { x: 460, y: 720 } },
-    { key: "c_color", type: "control", layer: "l_main", panel_id: "color", title_key: "panel.color", position: { x: 760, y: 720 } },
-    { key: "c_tags", type: "control", layer: "l_main", panel_id: "tags", title_key: "panel.tags", position: { x: 760, y: 850 } },
-    { key: "c_metadata", type: "control", layer: "l_main", panel_id: "metadata", title_key: "panel.metadata", position: { x: 760, y: 980 } },
-
-    // 规则三元组：操作（由对象 on 边驱动）→ 状态
-    { key: "e_dbl_img", type: "event", layer: "l_main", trigger: "double_click", position: { x: 1660, y: 300 } },
-    { key: "e_dbl_vid", type: "event", layer: "l_main", trigger: "double_click", position: { x: 1660, y: 430 } },
-    { key: "e_dbl_aud", type: "event", layer: "l_main", trigger: "double_click", position: { x: 1660, y: 560 } },
-    { key: "a_show_viewer", type: "action", layer: "l_main", op: "show", target: "c_viewer", position: { x: 1960, y: 300 } },
-    { key: "a_show_player", type: "action", layer: "l_main", op: "show", target: "c_player", payload: { play: true }, position: { x: 1960, y: 430 } },
-    { key: "a_show_meta", type: "action", layer: "l_main", op: "show", target: "c_metadata", position: { x: 1960, y: 560 } },
+    // 层 l_main（主界面）：48 节点
+    { key: "blk_left", type: "layout_block", layer: "l_main", name: "左栏", position: { x: 337, y: 40 } },
+    { key: "blk_center", type: "layout_block", layer: "l_main", name: "中栏", position: { x: 337, y: 210 } },
+    { key: "blk_right", type: "layout_block", layer: "l_main", name: "右栏", position: { x: 337, y: 380 } },
+    { key: "c_repo", type: "control", layer: "l_main", panel_id: "repo", title_key: "panel.repo", position: { x: 637, y: 40 } },
+    { key: "c_sources", type: "control", layer: "l_main", panel_id: "sources", title_key: "panel.sources", position: { x: 637, y: 210 } },
+    { key: "c_albums", type: "control", layer: "l_main", panel_id: "albums", title_key: "panel.albums", position: { x: 637, y: 380 } },
+    { key: "g_media", type: "group", layer: "l_main", name: "媒体·查看器·播放", mode: "exclusive", position: { x: 637, y: 550 } },
+    { key: "c_media", type: "control", layer: "l_main", panel_id: "media", title_key: "panel.media", position: { x: 937, y: 210 } },
+    { key: "c_player", type: "control", layer: "l_main", panel_id: "player", title_key: "panel.player", position: { x: 937, y: 380 } },
+    { key: "k_image", type: "class", layer: "l_main", control: "c_media", media_type: "image", position: { x: 1237, y: 210 } },
+    { key: "k_video", type: "class", layer: "l_main", control: "c_media", media_type: "video", position: { x: 1237, y: 380 } },
+    { key: "k_audio", type: "class", layer: "l_main", control: "c_media", media_type: "audio", position: { x: 1237, y: 550 } },
+    { key: "o_img", type: "object", layer: "l_main", class: "k_image", scope: "double_clicked", position: { x: 1537, y: 380 } },
+    { key: "o_vid", type: "object", layer: "l_main", class: "k_video", scope: "double_clicked", position: { x: 1537, y: 550 } },
+    { key: "o_aud", type: "object", layer: "l_main", class: "k_audio", scope: "double_clicked", position: { x: 1537, y: 720 } },
+    { key: "g_inspector", type: "group", layer: "l_main", name: "色彩·标签·元数据", mode: "exclusive", position: { x: 637, y: 720 } },
+    { key: "c_color", type: "control", layer: "l_main", panel_id: "color", title_key: "panel.color", position: { x: 637, y: 890 } },
+    { key: "c_tags", type: "control", layer: "l_main", panel_id: "tags", title_key: "panel.tags", position: { x: 937, y: 1060 } },
+    { key: "c_metadata", type: "control", layer: "l_main", panel_id: "metadata", title_key: "panel.metadata", position: { x: 637, y: 1060 } },
+    { key: "e_dbl_img", type: "event", layer: "l_main", position: { x: 1837, y: 380 }, trigger: "double_click", target: "o_img" },
+    { key: "e_dbl_vid", type: "event", layer: "l_main", position: { x: 1837, y: 550 }, trigger: "double_click" },
+    { key: "e_dbl_aud", type: "event", layer: "l_main", position: { x: 1837, y: 720 }, trigger: "double_click" },
+    { key: "a_show_viewer", type: "action", layer: "l_main", position: { x: 2137, y: 380 }, target: "c_1_3", op: "show" },
+    { key: "a_show_player", type: "action", layer: "l_main", position: { x: 2137, y: 550 }, target: "c_player", op: "show", payload: { play: true } },
+    { key: "a_show_meta", type: "action", layer: "l_main", position: { x: 2137, y: 720 }, target: "c_player", op: "show" },
+    { key: "ui", type: "interface", layer: "l_main", position: { x: 37, y: 40 } },
+    { key: "ov_1", type: "overlay", layer: "l_main", position: { x: 2737, y: 42 }, visible: true, height: 2, size: { width: 200, height: 600 }, shadow: "sm", radius: "lg", hide_label: true },
+    { key: "c_1", type: "control", layer: "l_main", panel_id: "tasks", position: { x: 2737, y: 212 } },
+    { key: "c_1_3", type: "control", layer: "l_main", name: "图像查看器", panel_id: "imageviewer", title_key: "panel.imageviewer", position: { x: 937, y: 550 } },
+    { key: "c_1_4", type: "control", layer: "l_main", panel_id: "viewer", title_key: "panel.viewer", position: { x: 937, y: 1230 } },
+    { key: "c_1_5", type: "control", layer: "l_main", panel_id: "bookpreview", title_key: "panel.bookpreview", position: { x: 937, y: 720 } },
+    { key: "c_media_image", type: "class", layer: "l_main", control: "c_1_5", media_type: "text", position: { x: 1237, y: 720 } },
+    { key: "k_1", type: "subclass", layer: "l_main", format: "epub", subclass: "c_media_image", position: { x: 1537, y: 890 } },
+    { key: "k_1_dbl", type: "object", layer: "l_main", subclass: "k_1", scope: "double_clicked", position: { x: 1837, y: 890 } },
+    { key: "k_1_dbl_event", type: "event", layer: "l_main", position: { x: 2137, y: 890 }, trigger: "double_click" },
+    { key: "k_1_dbl_event_show", type: "action", layer: "l_main", position: { x: 2437, y: 40 }, target: "c_1_6", op: "show" },
+    { key: "c_media_image_dbl", type: "object", layer: "l_main", class: "c_media_image", scope: "double_clicked", position: { x: 1537, y: 1060 } },
+    { key: "c_media_image_dbl_event", type: "event", layer: "l_main", position: { x: 1837, y: 1060 }, trigger: "double_click" },
+    { key: "c_media_image_dbl_event_show", type: "action", layer: "l_main", position: { x: 2137, y: 1060 }, target: "c_1_6", op: "show" },
+    { key: "c_1_6", type: "control", layer: "l_main", panel_id: "bookreader", title_key: "panel.bookreader", position: { x: 937, y: 890 } },
+    { key: "c_albums_album", type: "class", layer: "l_main", control: "c_albums", media_type: "album", position: { x: 937, y: 40 } },
+    { key: "c_albums_album_media", type: "mark", layer: "l_main", mark: "media", object: "o_1", position: { x: 1537, y: 40 } },
+    { key: "c_albums_album_media_dbl_event", type: "event", layer: "l_main", position: { x: 1837, y: 40 }, trigger: "click", target: "c_albums_album_media" },
+    { key: "c_albums_album_media_dbl_event_show", type: "action", layer: "l_main", position: { x: 2137, y: 40 }, target: "c_media", op: "show" },
+    { key: "o_1", type: "object", layer: "l_main", class: "c_albums_album", scope: "clicked", position: { x: 1237, y: 40 } },
+    { key: "o_1_media", type: "mark", layer: "l_main", mark: "document", position: { x: 1537, y: 210 }, object: "o_1" },
+    { key: "o_1_event", type: "event", layer: "l_main", trigger: "click", position: { x: 1837, y: 210 }, target: "o_1_media" },
+    { key: "o_1_event_show", type: "action", layer: "l_main", op: "show", position: { x: 2137, y: 210 }, target: "c_1_5" },
+    // 层 l_2（界面 2）：3 节点
+    { key: "ui_2", type: "interface", layer: "l_2", position: { x: 153.33969130004868, y: 1450 } },
+    { key: "c_1_2", type: "control", layer: "l_2", panel_id: "sources", position: { x: 753.3396913000487, y: 1450 } },
+    { key: "blk_1", type: "layout_block", layer: "l_2", position: { x: 453.3396913000487, y: 1450 } },
   ],
   edges: [
-    // 界面 → 布局块（顶层容器收纳区域）
-    { from: "ui", to: "blk_left", kind: "contains", order: 1 },
-    { from: "ui", to: "blk_center", kind: "contains", order: 2 },
-    { from: "ui", to: "blk_right", kind: "contains", order: 3 },
-
-    // 布局块 → 内容（**标签组优先**：某栏在布局里就是一个 dockview 标签组时，
-    // 布局块只连该组，成员面板由标签组 contains；只有该栏由多个独立面板组成时，
-    // 布局块才直接连面板，如左栏）
-    { from: "blk_left", to: "c_repo", kind: "contains", order: 4 },
-    { from: "blk_left", to: "c_sources", kind: "contains", order: 5 },
-    { from: "blk_left", to: "c_albums", kind: "contains", order: 6 },
-    { from: "blk_center", to: "g_media", kind: "contains", order: 7 },
-    { from: "blk_right", to: "g_inspector", kind: "contains", order: 8 },
-
-    // 标签组 → 面板（标签组包含面板；中栏的媒体预览/查看器/播放同属一个标签组）
-    { from: "g_media", to: "c_media", kind: "contains", order: 9 },
-    { from: "g_media", to: "c_viewer", kind: "contains", order: 10 },
-    { from: "g_media", to: "c_player", kind: "contains", order: 11 },
-    { from: "g_inspector", to: "c_color", kind: "contains", order: 12 },
-    { from: "g_inspector", to: "c_tags", kind: "contains", order: 13 },
-    { from: "g_inspector", to: "c_metadata", kind: "contains", order: 14 },
-
-    // 面板 → 类目（媒体预览内的类目）
-    { from: "c_media", to: "k_image", kind: "contains", order: 15 },
-    { from: "c_media", to: "k_video", kind: "contains", order: 16 },
-    { from: "c_media", to: "k_audio", kind: "contains", order: 17 },
-
-    // 类目 → 对象（类目内的对象）
-    { from: "k_image", to: "o_img", kind: "contains", order: 18 },
-    { from: "k_video", to: "o_vid", kind: "contains", order: 19 },
-    { from: "k_audio", to: "o_aud", kind: "contains", order: 20 },
-
-    // 规则：对象 → 操作（on）→ 状态（fires）
-    { from: "o_img", to: "e_dbl_img", kind: "on", order: 21 },
-    { from: "o_vid", to: "e_dbl_vid", kind: "on", order: 22 },
-    { from: "o_aud", to: "e_dbl_aud", kind: "on", order: 23 },
-    { from: "e_dbl_img", to: "a_show_viewer", kind: "fires", order: 24 },
-    { from: "e_dbl_vid", to: "a_show_player", kind: "fires", order: 25 },
-    { from: "e_dbl_aud", to: "a_show_meta", kind: "fires", order: 26 },
+    { from: "blk_left", to: "c_repo", kind: "contains", order: 1 },
+    { from: "blk_left", to: "c_sources", kind: "contains", order: 2 },
+    { from: "blk_left", to: "c_albums", kind: "contains", order: 3 },
+    { from: "blk_center", to: "g_media", kind: "contains", order: 4 },
+    { from: "blk_right", to: "g_inspector", kind: "contains", order: 5 },
+    { from: "g_media", to: "c_media", kind: "contains", order: 6 },
+    { from: "g_media", to: "c_player", kind: "contains", order: 8 },
+    { from: "g_inspector", to: "c_tags", kind: "contains", order: 10 },
+    { from: "c_media", to: "k_image", kind: "contains", order: 12 },
+    { from: "c_media", to: "k_video", kind: "contains", order: 13 },
+    { from: "c_media", to: "k_audio", kind: "contains", order: 14 },
+    { from: "k_image", to: "o_img", kind: "contains", order: 15 },
+    { from: "k_video", to: "o_vid", kind: "contains", order: 16 },
+    { from: "k_audio", to: "o_aud", kind: "contains", order: 17 },
+    { from: "o_vid", to: "e_dbl_vid", kind: "on", order: 19 },
+    { from: "o_aud", to: "e_dbl_aud", kind: "on", order: 20 },
+    { from: "e_dbl_img", to: "a_show_viewer", kind: "fires", order: 21 },
+    { from: "e_dbl_vid", to: "a_show_player", kind: "fires", order: 22 },
+    { from: "e_dbl_aud", to: "a_show_meta", kind: "fires", order: 23 },
+    { from: "ui", to: "blk_left", kind: "contains", order: 24 },
+    { from: "ui", to: "blk_center", kind: "contains", order: 25 },
+    { from: "ui", to: "blk_right", kind: "contains", order: 26 },
+    { from: "ov_1", to: "c_1", kind: "contains", order: 28 },
+    { from: "ui_2", to: "blk_1", kind: "contains", order: 29 },
+    { from: "blk_1", to: "c_1_2", kind: "contains", order: 30 },
+    { from: "o_img", to: "e_dbl_img", kind: "on", order: 31 },
+    { from: "g_media", to: "c_1_3", kind: "contains", order: 32 },
+    { from: "blk_right", to: "c_color", kind: "contains", order: 33 },
+    { from: "blk_right", to: "c_metadata", kind: "contains", order: 34 },
+    { from: "g_inspector", to: "c_1_4", kind: "contains", order: 35 },
+    { from: "g_media", to: "c_1_5", kind: "contains", order: 36 },
+    { from: "k_1_dbl", to: "k_1_dbl_event", kind: "on", order: 36 },
+    { from: "k_1_dbl_event", to: "k_1_dbl_event_show", kind: "fires", order: 37 },
+    { from: "c_1_5", to: "c_media_image", kind: "contains", order: 38 },
+    { from: "c_media_image", to: "k_1", kind: "contains", order: 39 },
+    { from: "k_1", to: "k_1_dbl", kind: "contains", order: 40 },
+    { from: "c_media_image_dbl", to: "c_media_image_dbl_event", kind: "on", order: 41 },
+    { from: "c_media_image_dbl_event", to: "c_media_image_dbl_event_show", kind: "fires", order: 42 },
+    { from: "c_media_image", to: "c_media_image_dbl", kind: "contains", order: 43 },
+    { from: "g_media", to: "c_1_6", kind: "contains", order: 44 },
+    { from: "c_albums", to: "c_albums_album", kind: "contains", order: 45 },
+    { from: "c_albums_album_media_dbl_event", to: "c_albums_album_media_dbl_event_show", kind: "fires", order: 49 },
+    { from: "c_albums_album", to: "o_1", kind: "contains", order: 50 },
+    { from: "o_1", to: "c_albums_album_media", kind: "contains", order: 51 },
+    { from: "c_albums_album_media", to: "c_albums_album_media_dbl_event", kind: "on", order: 52 },
+    { from: "o_1", to: "o_1_media", kind: "contains", order: 53 },
+    { from: "o_1_media", to: "o_1_event", kind: "on", order: 54 },
+    { from: "o_1_event", to: "o_1_event_show", kind: "fires", order: 55 },
   ],
 };
 

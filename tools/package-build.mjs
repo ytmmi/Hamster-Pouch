@@ -85,6 +85,8 @@ import { cp, link, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { compareBlueprintWithLayout } from "./blueprint-pair.mjs";
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BASE = join(ROOT, "apps", "desktop", "src-tauri", "target", "release");
 const EXE = join(BASE, "hamster-pouch-desktop.exe");
@@ -569,6 +571,12 @@ if (dataStat?.isDirectory()) {
       "(SELECT value FROM app_settings WHERE key = 'layout.default'); " +
       "UPDATE layout_presets SET name = '演示布局', origin = 'user' " +
       "WHERE id = (SELECT value FROM app_settings WHERE key = 'layout.default'); " +
+      // 演示布局原来绑定的蓝图是**仓库级**数据（`data\\user\\repos\\` 整个不进包），
+      // 留着就是一串指向不存在记录的悬空 id。清空后由内置默认蓝图
+      // （`packages/config/src/blueprintDefault.ts`，D155）在用户建仓库时播种——
+      // 布局与蓝图因此始终同源，不会再出现「界面上有标签页、画布上没有该层」。
+      "UPDATE layout_presets SET blueprint_ids_json = '[]' " +
+      "WHERE id = (SELECT value FROM app_settings WHERE key = 'layout.default'); " +
       "DELETE FROM plugin_repo_state; " +
       "DELETE FROM plugin_registry; " +
       // 按仓库的设置键一并清掉：`repo.default` 指向已删仓库会让首屏误判「有默认仓库」
@@ -578,7 +586,49 @@ if (dataStat?.isDirectory()) {
       " OR key LIKE 'panelMarks.%'; " +
       rows;
     execFileSync("sqlite3", [relGdb, sql], { stdio: "ignore" });
+    await verifyDemoLayoutMatchesDefaultBlueprint(relGdb);
   }
+}
+
+/**
+ * 一体校验（D155）：随包「演示布局」与内置默认蓝图必须**同源**。
+ *
+ * 两者分处两侧（布局在全局库 `layout_presets.layers_json`，蓝图在代码
+ * `packages/config/src/blueprintDefault.ts` → 夹具 `crates/hp-store/tests/default_blueprint.json`），
+ * 任何一侧单独改动都会让全新安装出现「布局有面板、画布无节点」或反之。
+ * 这里逐层比对：层集合必须相等；每层布局挂载的面板集合必须与蓝图该层的面板控件集合相等。
+ *
+ * 只在**有编译机活动数据**（`data\\system\\` 全局库存在）时执行——全新克隆的包里没有全局库，
+ * 全局库由目标机首次运行自建；此时由 `check:blueprint-fixture` 守住"代码 ↔ 夹具"一侧。
+ */
+async function verifyDemoLayoutMatchesDefaultBlueprint(gdbPath) {
+  const rows = execFileSync(
+    "sqlite3",
+    [
+      gdbPath,
+      "SELECT layers_json FROM layout_presets " +
+        "WHERE id = (SELECT value FROM app_settings WHERE key = 'layout.default');",
+    ],
+    { encoding: "utf8" },
+  ).trim();
+  if (!rows) return;
+
+  const fixturePath = join(ROOT, "crates", "hp-store", "tests", "default_blueprint.json");
+  const graph = JSON.parse(await readFile(fixturePath, "utf8"));
+  const preset = JSON.parse(rows);
+  const problems = compareBlueprintWithLayout(graph, preset);
+  if (problems.length > 0) {
+    console.error("[package-build] 演示布局与内置默认蓝图不同源（D155）：");
+    for (const p of problems) console.error(`[package-build]   - ${p}`);
+    console.error(
+      "[package-build] 同步方式：改 packages/config/src/blueprintDefault.ts 后跑 " +
+        "`pnpm generate:blueprint-fixture`；布局改动则在同一份编辑里同步蓝图。",
+    );
+    process.exit(1);
+  }
+  console.log(
+    `[package-build]   一体校验通过: 演示布局 ${graph.layers.length} 层 / 蓝图 ${graph.nodes.length} 节点同源`,
+  );
 }
 
 // 发布包必须带内置基底库：它随应用分发（RFC 0008 / D36 第一层），与「编译机本地活动数据」

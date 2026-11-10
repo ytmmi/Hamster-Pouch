@@ -433,58 +433,97 @@ fn default_blueprint_fixture_validates() {
     let graph = BlueprintGraph::from_json(json).expect("解析默认蓝图失败");
     let errors = graph.validate();
     assert!(errors.is_empty(), "默认蓝图校验失败: {errors:?}");
-    assert_eq!(graph.nodes.len(), 27, "默认蓝图应有 27 个节点");
-    assert_eq!(graph.edges.len(), 26, "默认蓝图应有 26 条边");
+    // 数量随随包「演示布局」走：布局增删面板时这里与夹具一并更新（D155）。
+    assert_eq!(graph.nodes.len(), 51, "默认蓝图应有 51 个节点");
+    assert_eq!(graph.edges.len(), 48, "默认蓝图应有 48 条边");
     assert_eq!(
         graph.default_version,
-        Some(7),
-        "引入分层后内置默认升版（D51）"
+        Some(8),
+        "演示布局新增「界面 2」后内置默认升版（D51 / D155）"
     );
-
-    // 分层（D51）：内置默认是**单层「主界面」**，每个节点都带 layer 归属。
     assert_eq!(graph.schema_version, BLUEPRINT_SCHEMA_VERSION);
-    assert_eq!(graph.layers.len(), 1, "内置默认蓝图应是单层");
+
+    // 分层（D51 / D155）：内置默认与演示布局是**同一份编辑**——主界面 + 界面 2。
+    assert_eq!(graph.layers.len(), 2, "内置默认蓝图应与演示布局同为两层");
     assert_eq!(graph.layers[0].key, "l_main");
     assert_eq!(graph.layers[0].name, "主界面");
+    assert!(
+        graph.layers[0].is_home(),
+        "主界面是进入仓库的默认界面（D67）"
+    );
+    assert_eq!(graph.layers[1].key, "l_2");
+    assert_eq!(graph.layers[1].name, "界面 2");
+    assert!(!graph.layers[1].is_home());
+    let layer_of = |key: &str| {
+        graph
+            .nodes
+            .iter()
+            .find(|n| n.key == key)
+            .and_then(|n| n.layer.clone())
+    };
     assert!(
         graph
             .nodes
             .iter()
-            .all(|n| n.layer.as_deref() == Some("l_main")),
-        "默认蓝图每个节点都必须归属 l_main"
+            .all(|n| matches!(n.layer.as_deref(), Some("l_main") | Some("l_2"))),
+        "默认蓝图每个节点都必须归属已声明的层"
     );
 
-    // 顶层界面节点（页面，D47）：每层至多一个；界面显示名取自层名，不另存 name。
+    // 顶层界面节点（页面，D47）：**每层恰好一个**；显示名取自层名，不另存 name。
     let interfaces: Vec<&hp_core::BlueprintNode> = graph
         .nodes
         .iter()
         .filter(|n| n.node_type == NodeType::Interface)
         .collect();
-    assert_eq!(
-        interfaces.len(),
-        1,
-        "内置默认蓝图应有且仅有一个界面节点（ui）"
-    );
-    assert_eq!(interfaces[0].key, "ui");
-    assert!(interfaces[0].name.is_none(), "界面显示名取自层名（D51）");
-    for block in ["blk_left", "blk_center", "blk_right"] {
+    assert_eq!(interfaces.len(), 2, "两层应各有一个界面节点（ui / ui_2）");
+    for (key, layer) in [("ui", "l_main"), ("ui_2", "l_2")] {
+        let node = interfaces
+            .iter()
+            .find(|n| n.key == key)
+            .unwrap_or_else(|| panic!("默认蓝图缺少界面节点 {key}"));
+        assert_eq!(node.layer.as_deref(), Some(layer));
+        assert!(node.name.is_none(), "界面显示名取自层名（D51）");
+    }
+
+    // 界面节点只包含**本层**布局块（一体：画布层与布局层一一对应）。
+    for (iface, block) in [
+        ("ui", "blk_left"),
+        ("ui", "blk_center"),
+        ("ui", "blk_right"),
+        ("ui_2", "blk_1"),
+    ] {
         assert!(
-            graph.edges.iter().any(|e| e.from == "ui"
+            graph.edges.iter().any(|e| e.from == iface
                 && e.to == block
                 && e.edge_kind == hp_core::EdgeKind::Contains),
-            "界面节点应包含 {block}"
+            "界面节点 {iface} 应包含布局块 {block}"
+        );
+        assert_eq!(
+            layer_of(iface),
+            layer_of(block),
+            "界面节点 {iface} 只应包含本层布局块"
         );
     }
-    assert!(
-        !graph
-            .edges
+    for edge in graph
+        .edges
+        .iter()
+        .filter(|e| e.from == "ui" || e.from == "ui_2")
+    {
+        let target = graph
+            .nodes
             .iter()
-            .any(|e| e.from == "ui" && !e.to.starts_with("blk_")),
-        "界面节点只应连布局块"
-    );
+            .find(|n| n.key == edge.to)
+            .expect("边端点必须存在");
+        assert_eq!(
+            target.node_type,
+            NodeType::LayoutBlock,
+            "界面节点只应连布局块，实际连到 {}",
+            edge.to
+        );
+    }
 
-    // 结构：布局块 ⊃ 标签组 ⊃ 控件（**标签组优先**）
-    // 中栏只有一个标签组 g_media，布局块不直接连成员控件。
+    // 结构：布局块 ⊃ 标签组 ⊃ 控件（**标签组优先**）。
+    // 中栏：一个标签组 g_media，布局块不直接连成员控件。
     assert!(graph.edges.iter().any(|e| e.from == "blk_center"
         && e.to == "g_media"
         && e.edge_kind == hp_core::EdgeKind::Contains));
@@ -494,7 +533,7 @@ fn default_blueprint_fixture_validates() {
             && e.to != "g_media"),
         "中栏（blk_center）应只包含标签组，不应直接连控件"
     );
-    for member in ["c_media", "c_viewer", "c_player"] {
+    for member in ["c_media", "c_player"] {
         assert!(
             graph.edges.iter().any(|e| e.from == "g_media"
                 && e.to == member
@@ -502,27 +541,35 @@ fn default_blueprint_fixture_validates() {
             "g_media 应包含 {member}"
         );
     }
-    // 右栏同理：只有一个标签组 g_inspector。
+    // 右栏：一个标签组 g_inspector + 直接挂载的独立面板（无标签组）。
     assert!(graph.edges.iter().any(|e| e.from == "blk_right"
         && e.to == "g_inspector"
         && e.edge_kind == hp_core::EdgeKind::Contains));
-    assert!(!graph.edges.iter().any(|e| e.from == "blk_right"
-        && e.edge_kind == hp_core::EdgeKind::Contains
-        && e.to != "g_inspector"));
-    for member in ["c_color", "c_tags", "c_metadata"] {
+    assert!(
+        graph.edges.iter().any(|e| e.from == "g_inspector"
+            && e.to == "c_tags"
+            && e.edge_kind == hp_core::EdgeKind::Contains),
+        "g_inspector 应包含 c_tags"
+    );
+    for member in ["c_color", "c_metadata"] {
         assert!(
-            graph.edges.iter().any(|e| e.from == "g_inspector"
+            graph.edges.iter().any(|e| e.from == "blk_right"
                 && e.to == member
                 && e.edge_kind == hp_core::EdgeKind::Contains),
-            "g_inspector 应包含 {member}"
+            "右栏应直接挂载 {member}"
         );
     }
     // 左栏是三个独立面板（无标签组）：布局块直接连控件。
-    assert!(graph.edges.iter().any(|e| e.from == "blk_left"
-        && e.to == "c_repo"
-        && e.edge_kind == hp_core::EdgeKind::Contains));
+    for member in ["c_repo", "c_sources", "c_albums"] {
+        assert!(
+            graph.edges.iter().any(|e| e.from == "blk_left"
+                && e.to == member
+                && e.edge_kind == hp_core::EdgeKind::Contains),
+            "左栏应直接挂载 {member}"
+        );
+    }
 
-    // 规则三元组：对象 → 操作 → 状态（on 边 + fires 边，全部连线）
+    // 规则三元组：对象 → 操作 → 状态（on 边 + fires 边）
     assert!(
         graph.edges.iter().any(|e| e.from == "o_img"
             && e.to == "e_dbl_img"
@@ -531,33 +578,37 @@ fn default_blueprint_fixture_validates() {
     assert!(graph.edges.iter().any(|e| e.from == "e_dbl_img"
         && e.to == "a_show_viewer"
         && e.edge_kind == hp_core::EdgeKind::Fires));
-    // 操作节点无 target 字段（靠 on 边驱动）
-    let ev = graph
-        .nodes
-        .iter()
-        .find(|n| n.key == "e_dbl_img")
-        .expect("应有操作节点");
-    assert!(ev.target.is_none());
 
-    // 如实表达当前默认「媒体-测试」布局：中栏 = 媒体预览 + 查看器/播放器；
-    // 右栏 = 色彩参考/标签·评分/元数据；左栏 = 仓库/媒体源/相册。
-    let panel_ids: Vec<&str> = graph
+    // 一体（D155）：面板集合必须与随包「演示布局」**完全一致**——不多不少。
+    // 多：画布上出现布局里不存在的节点（曾经混进 panel_id 0–4 的脏控件）；
+    // 少：布局有面板、蓝图无节点（「界面 2」曾有标签页而画布无该层）。
+    let mut panels: Vec<&str> = graph
         .nodes
         .iter()
         .filter(|n| n.node_type == NodeType::Control)
-        .filter_map(|n| n.panel_id.as_deref())
+        .map(|n| n.panel_id.as_deref().expect("面板控件必须有 panel_id"))
         .collect();
-    for expected in [
-        "repo", "sources", "albums", "media", "viewer", "player", "color", "tags", "metadata",
-    ] {
-        assert!(
-            panel_ids.contains(&expected),
-            "默认蓝图缺少面板控件: {expected}"
-        );
-    }
-    // 「媒体-测试」布局未挂载 tag表/任务，默认蓝图不表达它们。
-    assert!(!panel_ids.contains(&"tagtable"));
-    assert!(!panel_ids.contains(&"tasks"));
+    panels.sort_unstable();
+    panels.dedup();
+    assert_eq!(
+        panels,
+        [
+            "albums",
+            "bookpreview",
+            "bookreader",
+            "color",
+            "imageviewer",
+            "media",
+            "metadata",
+            "player",
+            "repo",
+            "sources",
+            "tags",
+            "tasks",
+            "viewer",
+        ],
+        "内置默认蓝图的面板集合必须与演示布局一致（含「界面 2」的 sources）"
+    );
 }
 
 #[test]
