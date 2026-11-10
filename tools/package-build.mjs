@@ -46,7 +46,8 @@
  * user\repos\ 仓库库 / plugins\ 插件 / thumbnails\ 缓存 / debug.log）。
  * 开发包 = exe + 该数据快照，并把包内全局库注册表（repos.repo_db_path、
  * plugin_registry.source_ref）改写为**包内**绝对路径——每个开发包自包含、
- * 可整夹带走；发布包只保留系统数据库。
+ * 可整夹带走；发布包只保留系统数据库，并只带一份由 `layout.default` 指定的
+ * 演示布局（重命名为「演示布局」），不携带开发机上的测试预设。
  *
  * ## 反向同步（运行某个开发包后，把包内新数据收回活动数据源）
  *
@@ -560,6 +561,14 @@ if (dataStat?.isDirectory()) {
     const sql =
       "DELETE FROM repos; " +
       "DELETE FROM layout_bindings; " +
+      // 发布包只带**一份**演示布局：随包分发的是产品默认形状，不携带开发机上的测试预设
+      // （如「媒体-测试-1」）。保留 `layout.default` 指向的那份并改名为「演示布局」，其余删除；
+      // 无默认指针时这条删除是空操作（保留首次运行自建/播种路径）。origin 固定为 user，
+      // 避免首启播种逻辑把它当成「未被改动的 seeded 预设」替换掉。
+      "DELETE FROM layout_presets WHERE id <> " +
+      "(SELECT value FROM app_settings WHERE key = 'layout.default'); " +
+      "UPDATE layout_presets SET name = '演示布局', origin = 'user' " +
+      "WHERE id = (SELECT value FROM app_settings WHERE key = 'layout.default'); " +
       "DELETE FROM plugin_repo_state; " +
       "DELETE FROM plugin_registry; " +
       // 按仓库的设置键一并清掉：`repo.default` 指向已删仓库会让首屏误判「有默认仓库」

@@ -927,12 +927,12 @@ C 布局独立于仓库），用户选 **C**；实施刚开始（新增全局库
 在应用 0005 后的库副本上 **13/13 通过**；`check:commands`（16/16，布局契约表 §3.1.1 已按新签名重写）、
 `check:settings` 55/55、`tsc --noEmit` exit 0。
 
-**验收期两处补丁**：(1) `tools/package-build.mjs` 发布包清库时额外 `DELETE FROM layout_bindings`，并清掉 `repo.default` / `blueprint.currentLayer.%` / `panelMarks.%` 这些指向已删仓库的 per-repo 键——残留 `repo.default` 会让首屏误判「有默认仓库」，`repoOpen` 失败后应用级布局套不上（0044 的复发路径）；(2) `core/workspaceBootstrap.ts` 拆成三段独立 try（播种 / 默认仓库与层 / 套用布局），悬空 `repo.default` 只影响第二段，`applyEffectiveLayout` 始终执行，失败才退回代码内建形状。
+**验收期两处补丁**：(1) `tools/package-build.mjs` 发布包清库时额外 `DELETE FROM layout_bindings`，并清掉 `repo.default` / `blueprint.currentLayer.%` / `panelMarks.%` 这些指向已删仓库的 per-repo 键——残留 `repo.default` 会让首屏误判「有默认仓库」，`repoOpen` 失败后应用级布局套不上（0044 的复发路径）；(2) `core/workspaceBootstrap.ts` 拆成三段独立 try（播种 / 默认仓库与层 / 套用布局），悬空 `repo.default` 只影响第二段，`applyEffectiveLayout` 始终执行，失败才退回代码内建形状；(3) 发布包只带**一份**演示布局——清库时保留 `layout.default` 指向的预设并改名为「演示布局」、`origin` 固定 `user`（避免首启播种逻辑把它当未改动的 seeded 预设替换掉），其余预设一并删除（开发机上的测试预设「媒体-测试-1」不再随包）；无默认指针时这几条是空操作，保留「首次运行自建/播种」路径。
 
 **兼容与回滚**：迁移后旧 exe 读不了新库（表结构已变）⇒ 沿用 **D139 先例：整包替换、不新旧混跑**；
 回滚只能从 `backups/appdata/` 的迁移前快照恢复。数据侧纪律不变：动库前退出应用、先 `node tools/sync-user-data.mjs` 留快照。
 
 **边界（如实登记）**：(a) 端到端真机验收（发布包不建仓库首屏即「媒体-测试」`l_main` 形状 → 「窗口 → 布局」列预设、
-可切换、可设为默认 → 导出/导入往返）**2026-11-10 已在发布包上端到端验证通过**（发布库 `repos=0`、`layout_bindings=0`、预设 2 条、`layout.default` 指向 `媒体-测试`；首屏 DOM 分组与 `l_main` 逐项吻合——左列 `[仓库,任务]` + `[源,相册]`（媒体源与相册同组）、中列 `[媒体预览,媒体播放器]`、右列 `[色彩参考]` / `[查看器,标签/评分]` / `[元数据]`；「窗口 → 布局」列出「媒体-测试 · 默认 / 媒体-测试-1 / 导入布局… / 重置布局」；`layout.export` → `layout.import` 生成 `媒体-测试-2` 且 `l_main` 逐字节相同、删除成功）；缺陷 0044 已改「已修复」；
+可切换、可设为默认 → 导出/导入往返）**2026-11-10 已在发布包上端到端验证通过**（发布库 `repos=0`、`layout_bindings=0`、预设 1 条「演示布局」、`layout.default` 指向它；首屏 DOM 分组与 `l_main` 逐项吻合——左列 `[仓库,任务]` + `[源,相册]`（媒体源与相册同组）、中列 `[媒体预览,媒体播放器]`、右列 `[色彩参考]` / `[查看器,标签/评分]` / `[元数据]`；「窗口 → 布局」只列出「演示布局 · 默认 / 导入布局… / 重置布局」；`layout.export` → `layout.import` 生成重名后缀预设且 `l_main` 逐字节相同、删除成功）；缺陷 0044 已改「已修复」；
 (b) 不做版本化历史 / 云同步 / 插件注册布局；(c) **不恢复**「布局独立于仓库」的替换式方案（工作名 D150，已撤销）；
 (d) 不改蓝图节点 / 控件 / 面板注册（RFC 0007 / 0010 口径不动）。
