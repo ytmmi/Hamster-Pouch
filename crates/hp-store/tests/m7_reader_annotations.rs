@@ -31,6 +31,8 @@ fn file_row(id: &str, source_id: hp_core::SourceId, relative_path: &str) -> File
         perceptual_hash_algo_version: None,
         size: 100,
         mtime: "2026-10-16T00:00:00Z".to_string(),
+        width: None,
+        height: None,
         scan_time: "2026-10-16T00:00:00Z".to_string(),
         verify_status: VerifyStatus::Ok,
         thumb_status: ThumbStatus::NotGenerated,

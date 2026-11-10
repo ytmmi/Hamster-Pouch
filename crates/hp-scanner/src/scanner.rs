@@ -559,6 +559,10 @@ impl Scanner {
             verify_status,
             comp.thumb_status.unwrap_or(ThumbStatus::NotGenerated),
             comp.media_info,
+            match (comp.width, comp.height) {
+                (Some(w), Some(h)) => Some((w, h)),
+                _ => None,
+            },
         );
 
         if is_new {
@@ -610,6 +614,8 @@ impl Scanner {
             VerifyStatus::Unreadable,
             ThumbStatus::Failed,
             None,
+            // 读不到内容就谈不上宽高；列留 NULL，回填任务日后自行补（0043）。
+            None,
         );
         db.upsert_file(&row)?;
         // 标记单独落库（同 `write_one`：它在 `file_marks` 表，不在 `files` 行里）。
@@ -658,6 +664,7 @@ impl Scanner {
         verify_status: VerifyStatus,
         thumb_status: ThumbStatus,
         media_info_json: Option<String>,
+        dims: Option<(u32, u32)>,
     ) -> FileIndexRow {
         FileIndexRow {
             id,
@@ -673,6 +680,8 @@ impl Scanner {
             perceptual_hash_algo_version: perceptual.as_ref().map(|p| p.algo_version),
             size,
             mtime: mtime.to_string(),
+            width: dims.map(|(w, _)| w),
+            height: dims.map(|(_, h)| h),
             scan_time: now_iso(),
             verify_status,
             thumb_status,

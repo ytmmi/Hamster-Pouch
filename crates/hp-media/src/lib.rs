@@ -11,6 +11,7 @@
 
 mod cache;
 mod decode;
+mod dimensions;
 mod exif;
 mod lowres;
 mod palette;
@@ -24,7 +25,8 @@ mod webp;
 
 pub use cache::{ThumbFormat, ThumbnailCache};
 pub use decode::{decode_image_fallback, ensure_libheif_hooks};
-pub use exif::{ImageExif, extract_exif};
+pub use dimensions::{apply_orientation, display_dimensions, header_dimensions};
+pub use exif::{ImageExif, extract_exif, orientation_of};
 pub use palette::{
     DEFAULT_PALETTE_SIZE, PALETTE_FORMAT_VERSION, Palette, encode_palette_json, extract_palette,
     extract_palette_from_image, palette_is_locked,

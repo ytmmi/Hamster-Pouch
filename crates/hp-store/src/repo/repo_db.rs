@@ -28,6 +28,8 @@ const REPO_MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/repo/0013_album_sort_order.sql"),
     // 媒体源子目录排除（软排除，可恢复）：D149。
     include_str!("../../migrations/repo/0014_source_exclusion.sql"),
+    // 图片宽高进索引（显示尺寸，可空、可回填）：0043，2026-11-11 第 37 轮裁决。
+    include_str!("../../migrations/repo/0015_image_dimensions.sql"),
 ];
 
 /// 仓库库句柄。

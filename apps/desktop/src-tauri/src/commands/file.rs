@@ -96,6 +96,9 @@ pub(crate) struct FileMetadataResult {
     verify_status: String,
     media_info_json: Option<String>,
     exif_json: Option<String>,
+    /// 图片的**显示宽高**（EXIF 方向已应用，0043）；`None` = 非图片或未回填。
+    width: Option<u32>,
+    height: Option<u32>,
 }
 
 /// file.metadata：读取文件元数据（图片附 EXIF，视频附 ffprobe 缓存）。
@@ -134,6 +137,8 @@ pub(crate) fn file_metadata(
             verify_status: file.verify_status.as_str().to_string(),
             media_info_json: file.media_info_json,
             exif_json,
+            width: file.width,
+            height: file.height,
         })
     })();
     api_from_hp(outcome)

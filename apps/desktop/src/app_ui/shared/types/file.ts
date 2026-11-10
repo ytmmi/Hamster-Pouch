@@ -21,6 +21,14 @@ export interface FileItem {
   marks: string[];
   size: number;
   mtime: string;
+  /**
+   * 图片的**显示宽高**（EXIF 方向已应用，缺陷 0043）；非图片或回填未覆盖时为 `null`。
+   *
+   * 布局消费方（媒体预览虚拟化、胶片栏）据此直接算宽高比，缺值才回退到
+   * 旧的"占位估计 + 异步量测"路径——**不要**把 `null` 当成 1:1。
+   */
+  width: number | null;
+  height: number | null;
 }
 
 export interface FileMetadataArgs {

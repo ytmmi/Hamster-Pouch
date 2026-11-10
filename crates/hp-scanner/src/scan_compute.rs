@@ -46,6 +46,36 @@ pub fn image_pixel_cost(path: &Path) -> u64 {
     }
 }
 
+/// 索引期一次读头的全部产物：并发配额 + **显示尺寸**（缺陷 0043）。
+///
+/// 为什么合成一次读头：配额（`image_pixel_cost`）与宽高都只需要头信息，
+/// 分两处读会把同一份头读两遍——0043 想消灭的正是这类重复劳动。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ImageProbe {
+    /// 像素配额（与 [`image_pixel_cost`] 同一口径，已按像素加权）。
+    pub pixel_cost: u64,
+    /// 显示尺寸（EXIF 方向已应用）；`None` = 头读不到，索引里该留 NULL。
+    pub display: Option<(u32, u32)>,
+}
+
+/// 读一次头，得到像素配额与显示尺寸。读不到时配额退化为 1、尺寸为 `None`。
+pub fn probe_image(path: &Path) -> ImageProbe {
+    let Some((width, height)) = hp_media::header_dimensions(path) else {
+        return ImageProbe {
+            pixel_cost: 1,
+            display: None,
+        };
+    };
+    ImageProbe {
+        pixel_cost: crate::scan_pool::pixel_cost(width, height),
+        display: Some(hp_media::apply_orientation(
+            width,
+            height,
+            hp_media::orientation_of(path),
+        )),
+    }
+}
+
 /// 扫描期 AVIF/HEIC 家族 ffmpeg 兜底解码的有界尺寸：dHash（9×8）与调色板（64×64）
 /// 都不需要全分辨率像素；有界解码把大图成本从"全解码 + Triangle 重采样"压到
 /// 与 256px 相当的规模。对 AVIF/HEIC 没有既存缓存可比对，按文件确定性地采用该

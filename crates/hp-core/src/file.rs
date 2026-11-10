@@ -184,6 +184,14 @@ pub struct FileIndexRow {
     pub perceptual_hash_algo_version: Option<i64>,
     pub size: i64,
     pub mtime: String,
+    /// 图片的**显示宽度**（EXIF 方向已应用）；`None` = 未索引或回填未覆盖到。
+    ///
+    /// 只有 `media_type == Image` 才有值：视频/音频/文本/PDF 的"尺寸"没有
+    /// 布局语义（视频宽高在 `media_info_json` 里，是另一件事）。
+    /// 消费方必须把 `None` 当"还没补"降级，不得当成 0（缺陷 0043）。
+    pub width: Option<u32>,
+    /// 图片的**显示高度**（与 [`FileIndexRow::width`] 同一口径）。
+    pub height: Option<u32>,
     pub scan_time: String,
     pub verify_status: VerifyStatus,
     pub thumb_status: ThumbStatus,

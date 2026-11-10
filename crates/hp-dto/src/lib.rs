@@ -55,6 +55,11 @@ pub struct AlbumFileItem {
     #[ts(type = "number")]
     pub size: i64,
     pub mtime: String,
+    /// 图片**显示宽高**（EXIF 方向已应用，缺陷 0043）。非图片或回填未覆盖时为 `null`。
+    ///
+    /// 是"宽度/高度"而不是宽高比：消费方自己算比例，避免再存一份必然漂移的派生值。
+    pub width: Option<u32>,
+    pub height: Option<u32>,
 }
 
 /// file.metadata 返回。
@@ -73,6 +78,9 @@ pub struct FileMetadataResult {
     pub verify_status: String,
     pub media_info_json: Option<String>,
     pub exif_json: Option<String>,
+    /// 图片**显示宽高**（与 [`AlbumFileItem::width`] 同一口径）。
+    pub width: Option<u32>,
+    pub height: Option<u32>,
 }
 
 /// plugin.list 返回元素。

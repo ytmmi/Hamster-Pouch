@@ -99,7 +99,8 @@ impl FileQueryCursor {
 const FILE_COLUMNS: &str = "id, source_id, relative_path, media_type, subtype, \
      content_hash, content_hash_algo, content_hash_algo_version, \
      perceptual_hash, perceptual_hash_algo, perceptual_hash_algo_version, \
-     size, mtime, scan_time, verify_status, thumb_status, missing_status, media_info_json";
+     size, mtime, scan_time, verify_status, thumb_status, missing_status, media_info_json, \
+     width, height";
 
 /// 带 `f.` 前缀的列清单（JOIN 查询用）。
 ///
@@ -107,11 +108,12 @@ const FILE_COLUMNS: &str = "id, source_id, relative_path, media_type, subtype, \
 pub(crate) const FILE_COLUMNS_F: &str = "f.id, f.source_id, f.relative_path, f.media_type, f.subtype, \
      f.content_hash, f.content_hash_algo, f.content_hash_algo_version, \
      f.perceptual_hash, f.perceptual_hash_algo, f.perceptual_hash_algo_version, \
-     f.size, f.mtime, f.scan_time, f.verify_status, f.thumb_status, f.missing_status, f.media_info_json";
+     f.size, f.mtime, f.scan_time, f.verify_status, f.thumb_status, f.missing_status, f.media_info_json, \
+     f.width, f.height";
 
 /// [`FILE_COLUMNS_F`] 的列数。JOIN 查询若要在末尾追加列（如相册的 `added_at`），
 /// 用它算出追加列的下标，避免把数字写死在两处。
-pub(crate) const FILE_COLUMN_COUNT: usize = 18;
+pub(crate) const FILE_COLUMN_COUNT: usize = 20;
 
 impl RepoDb {
     /// 插入或更新文件索引行（按 `source_id + relative_path` 唯一索引冲突时更新，保留原 id）。
@@ -125,8 +127,10 @@ impl RepoDb {
                 "INSERT INTO files (id, source_id, relative_path, media_type, subtype,
                      content_hash, content_hash_algo, content_hash_algo_version,
                      perceptual_hash, perceptual_hash_algo, perceptual_hash_algo_version,
-                     size, mtime, scan_time, verify_status, thumb_status, missing_status, media_info_json)
-                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                     size, mtime, scan_time, verify_status, thumb_status, missing_status, media_info_json,
+                     width, height)
+                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                         ?18, ?19)
                  ON CONFLICT(source_id, relative_path) DO UPDATE SET
                      media_type = excluded.media_type,
                      content_hash = excluded.content_hash,
@@ -141,7 +145,11 @@ impl RepoDb {
                      verify_status = excluded.verify_status,
                      thumb_status = excluded.thumb_status,
                      missing_status = excluded.missing_status,
-                     media_info_json = excluded.media_info_json",
+                     media_info_json = excluded.media_info_json,
+                     -- 宽高只有扫描/回填能提供；读不到时（excluded 为 NULL）保留既有值，
+                     -- 免得一次读头失败的重扫把回填成果抹掉（0043）。
+                     width = COALESCE(excluded.width, files.width),
+                     height = COALESCE(excluded.height, files.height)",
                 params![
                     row.id.as_str(),
                     row.source_id.as_str(),
@@ -160,6 +168,8 @@ impl RepoDb {
                     row.thumb_status.as_i64(),
                     row.missing_status,
                     row.media_info_json,
+                    row.width,
+                    row.height,
                 ],
             )
             .map_err(|e| store_err("写入文件索引", e))?;
@@ -612,6 +622,9 @@ pub(crate) fn row_to_file(row: &Row) -> rusqlite::Result<FileIndexRow> {
     let thumb_status: i64 = row.get(15)?;
     let missing_status: i64 = row.get(16)?;
     let media_info_json: Option<String> = row.get(17)?;
+    // 18/19：图片显示宽高（0043，可空）。非图片行恒为 NULL。
+    let width: Option<i64> = row.get(18)?;
+    let height: Option<i64> = row.get(19)?;
 
     Ok(FileIndexRow {
         id: FileId::from_raw(id),
@@ -632,6 +645,8 @@ pub(crate) fn row_to_file(row: &Row) -> rusqlite::Result<FileIndexRow> {
         thumb_status: ThumbStatus::from_i64(thumb_status).unwrap_or(ThumbStatus::NotGenerated),
         missing_status,
         media_info_json,
+        width: width.and_then(|v| u32::try_from(v).ok()),
+        height: height.and_then(|v| u32::try_from(v).ok()),
     })
 }
 

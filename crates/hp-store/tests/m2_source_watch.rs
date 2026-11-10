@@ -28,6 +28,8 @@ fn make_row(source_id: &hp_core::SourceId, rel: &str, size: i64, mtime: &str) ->
         perceptual_hash_algo_version: None,
         size,
         mtime: mtime.to_string(),
+        width: None,
+        height: None,
         scan_time: "t".to_string(),
         verify_status: VerifyStatus::Ok,
         thumb_status: ThumbStatus::NotGenerated,

@@ -30,6 +30,8 @@ fn sample_file(id: &FileId, source_id: &hp_core::SourceId) -> FileIndexRow {
         perceptual_hash_algo_version: None,
         size: 5,
         mtime: "2026-01-01T00:00:00Z".into(),
+        width: None,
+        height: None,
         scan_time: "2026-01-01T00:00:00Z".into(),
         verify_status: VerifyStatus::Ok,
         thumb_status: ThumbStatus::Generated,

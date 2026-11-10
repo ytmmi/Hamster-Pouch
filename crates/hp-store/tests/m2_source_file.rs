@@ -83,6 +83,8 @@ fn file_upsert_get_and_media_info_migration() {
         perceptual_hash_algo_version: Some(1),
         size: 100,
         mtime: "1".to_string(),
+        width: None,
+        height: None,
         scan_time: "t".to_string(),
         verify_status: VerifyStatus::Ok,
         thumb_status: ThumbStatus::NotGenerated,
@@ -104,7 +106,7 @@ fn file_upsert_get_and_media_info_migration() {
     );
 
     // 迁移 0013、0014 已生效：schema_version 应为 14（0001..0014）
-    assert_eq!(db.schema_version().expect("读版本失败"), 14);
+    assert_eq!(db.schema_version().expect("读版本失败"), 15);
 
     db.close().expect("关闭失败");
 }
@@ -135,6 +137,8 @@ fn query_files_media_type_set_filter() {
         perceptual_hash_algo_version: None,
         size: 1,
         mtime: "1".to_string(),
+        width: None,
+        height: None,
         scan_time: "t".to_string(),
         verify_status: VerifyStatus::Ok,
         thumb_status: ThumbStatus::NotGenerated,
@@ -208,6 +212,8 @@ fn query_files_dir_prefix_filter() {
         perceptual_hash_algo_version: None,
         size: 1,
         mtime: "1".to_string(),
+        width: None,
+        height: None,
         scan_time: "t".to_string(),
         verify_status: VerifyStatus::Ok,
         thumb_status: ThumbStatus::NotGenerated,
@@ -276,6 +282,8 @@ fn cursor_pagination_is_stable_under_inserts() {
         perceptual_hash_algo_version: None,
         size: 1,
         mtime: "1".to_string(),
+        width: None,
+        height: None,
         scan_time: "t".to_string(),
         verify_status: VerifyStatus::Ok,
         thumb_status: ThumbStatus::NotGenerated,

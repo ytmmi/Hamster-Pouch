@@ -600,6 +600,12 @@ pub(crate) struct AlbumFileItem {
     pub(crate) marks: Vec<String>,
     pub(crate) size: i64,
     pub(crate) mtime: String,
+    /// 图片的**显示宽高**（EXIF 方向已应用，0043）；非图片或未回填为 `None`。
+    ///
+    /// 消费方（媒体预览虚拟化、胶片栏）必须把 `None` 当"还没补"降级成估计值，
+    /// 不得当成 0 或 1:1——那会把"未知"渲染成错得确定的布局。
+    pub(crate) width: Option<u32>,
+    pub(crate) height: Option<u32>,
 }
 
 /// 文件索引行 → 返回项。
@@ -612,6 +618,8 @@ pub(crate) fn file_to_item(f: FileIndexRow) -> AlbumFileItem {
         marks: f.marks.iter().map(|m| m.as_str().to_string()).collect(),
         size: f.size,
         mtime: f.mtime,
+        width: f.width,
+        height: f.height,
     }
 }
 

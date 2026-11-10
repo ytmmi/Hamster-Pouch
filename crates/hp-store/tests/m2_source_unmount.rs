@@ -33,6 +33,8 @@ fn file_row(source_id: &SourceId, relative_path: &str) -> FileIndexRow {
         perceptual_hash_algo_version: None,
         size: 10,
         mtime: "1".into(),
+        width: None,
+        height: None,
         scan_time: "2026-01-01T00:00:00Z".into(),
         verify_status: VerifyStatus::Ok,
         thumb_status: ThumbStatus::NotGenerated,

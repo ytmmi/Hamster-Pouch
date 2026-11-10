@@ -7,4 +7,8 @@ export type FileMetadataResult = { id: string, source_id: string, relative_path:
 /**
  * 文件的**标记集合**（见 [`AlbumFileItem::marks`]）。
  */
-marks: Array<string>, content_hash: string | null, size: number, mtime: string, verify_status: string, media_info_json: string | null, exif_json: string | null, };
+marks: Array<string>, content_hash: string | null, size: number, mtime: string, verify_status: string, media_info_json: string | null, exif_json: string | null, 
+/**
+ * 图片**显示宽高**（与 [`AlbumFileItem::width`] 同一口径）。
+ */
+width: number | null, height: number | null, };

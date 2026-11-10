@@ -30,7 +30,7 @@ fn create_two_repos_files_are_separate() {
     assert_ne!(a, b, "两个仓库库文件必须是不同路径");
     assert!(a.exists() && b.exists(), "两个仓库库文件都应存在");
 
-    assert_eq!(da.schema_version().expect("读版本失败"), 14);
+    assert_eq!(da.schema_version().expect("读版本失败"), 15);
     assert_eq!(db.meta("name").expect("读名失败").as_deref(), Some("仓库B"));
     da.close().expect("关闭A失败");
     db.close().expect("关闭B失败");
@@ -94,23 +94,23 @@ fn registry_survives_reopen() {
 fn repo_meta_roundtrip_and_version() {
     let path = temp_repo_path("meta");
     let db = RepoDb::create(&path, "元信息仓库").expect("创建失败");
-    assert_eq!(db.schema_version().expect("读版本失败"), 14);
+    assert_eq!(db.schema_version().expect("读版本失败"), 15);
     assert_eq!(
         db.meta("name").expect("读名失败").as_deref(),
         Some("元信息仓库")
     );
     assert_eq!(
         db.meta("schema_version").expect("读版本失败").as_deref(),
-        Some("14"),
+        Some("15"),
         "镜像键必须等于权威版本（缺陷 0006）"
     );
     db.close().expect("关闭失败");
 
     let db = RepoDb::open(&path).expect("重开失败");
-    assert_eq!(db.schema_version().expect("读版本失败"), 14);
+    assert_eq!(db.schema_version().expect("读版本失败"), 15);
     assert_eq!(
         db.meta("schema_version").expect("读版本失败").as_deref(),
-        Some("14")
+        Some("15")
     );
     db.close().expect("关闭失败");
 }
@@ -121,13 +121,13 @@ fn repo_meta_roundtrip_and_version() {
 /// 构造方式：先把库退化成 v6 形态（删掉 `repo/0007` 建的索引、`repo/0008` 加的列
 /// 与 `repo/0009`、`repo/0010`、`repo/0011`、`repo/0014` 建的表、`repo/0012` 加的两列与表、
 /// `repo/0013` 加的列与索引，版本一起退回 6），
-/// 再让 `RepoDb::open` 应用 0007 + 0008 + 0009 + 0010 + 0011 + 0012 + 0013 + 0014。
-/// 修复前镜像键会停留在 6（本测试即红），修复后两边都是 14。
+/// 再让 `RepoDb::open` 应用 0007 + 0008 + 0009 + 0010 + 0011 + 0012 + 0013 + 0014 + 0015。
+/// 修复前镜像键会停留在 6（本测试即红），修复后两边都是当前版本（0015 起是 15）。
 ///
 /// **这些 `DROP` 不是摆设**：`RepoDb::create` 已经建到最新版本，把 `user_version`
 /// 调回 6 会让 7/8/9/10/11/12/13/14 八条迁移**重跑**。0007 与 0013 的索引是
 /// `CREATE INDEX IF NOT EXISTS`（天然幂等），
-/// 而 0008、0012 与 0013 是 `ALTER TABLE ... ADD COLUMN`、0009/0010/0011/0012/0014 是 `CREATE TABLE`——
+/// 而 0008、0012、0013、0015 是 `ALTER TABLE ... ADD COLUMN`、0009/0010/0011/0012/0014 是 `CREATE TABLE`——
 /// 产物还在就会分别报 `duplicate column name` / `table ... already exists`。
 /// 所以退化必须真的把 v7..v14 的产物删掉，否则测的是"迁移能否重复执行"，那是另一件事。
 ///
@@ -160,6 +160,8 @@ fn upgraded_repo_schema_version_mirror_does_not_diverge() {
              ALTER TABLE albums DROP COLUMN sort_order;
              DROP TABLE IF EXISTS source_exclusion;
              ALTER TABLE files DROP COLUMN subtype;
+             ALTER TABLE files DROP COLUMN width;
+             ALTER TABLE files DROP COLUMN height;
              PRAGMA user_version = 6;
              INSERT INTO repo_meta (key, value) VALUES ('schema_version', '6')
                ON CONFLICT(key) DO UPDATE SET value = '6';",
@@ -170,12 +172,12 @@ fn upgraded_repo_schema_version_mirror_does_not_diverge() {
     let db = RepoDb::open(&path).expect("重开并升级失败");
     assert_eq!(
         db.schema_version().expect("读版本失败"),
-        14,
-        "迁移应把权威版本升到 14"
+        15,
+        "迁移应把权威版本升到 15"
     );
     assert_eq!(
         db.meta("schema_version").expect("读镜像键失败").as_deref(),
-        Some("14"),
+        Some("15"),
         "升级后镜像键必须跟随权威版本，不得停留在建库时的 6（缺陷 0006）"
     );
     db.close().expect("关闭失败");

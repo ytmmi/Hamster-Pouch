@@ -89,6 +89,19 @@ pub fn extract_exif(path: &Path) -> HpResult<ImageExif> {
     })
 }
 
+/// **只取方向**（`Tag::Orientation`）的轻量读取。
+///
+/// 与 [`extract_exif`] 的区别：不构造 `raw_json`、不读任何其它 tag。索引期每张图片
+/// 都要问一次方向（缺陷 0043 的显示尺寸口径），完整摘要那套序列化在这里是纯浪费。
+/// 无 EXIF、打不开、或没有该 tag 一律返回 `None`（方向未知 = 不交换宽高）。
+pub fn orientation_of(path: &Path) -> Option<u32> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = std::io::BufReader::new(file);
+    let exif = Reader::new().read_from_container(&mut reader).ok()?;
+    exif.get_field(Tag::Orientation, In::PRIMARY)
+        .and_then(|f| f.value.get_uint(0))
+}
+
 /// 无 EXIF 时的空摘要（仍产出有效 JSON，便于前端统一处理）。
 fn empty_summary() -> ImageExif {
     ImageExif {

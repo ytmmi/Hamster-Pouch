@@ -36,6 +36,8 @@ fn seed_file(db: &mut RepoDb, source_id: &SourceId, rel: &str) -> FileId {
         perceptual_hash_algo_version: None,
         size: 1,
         mtime: "1".to_string(),
+        width: None,
+        height: None,
         scan_time: "t".to_string(),
         verify_status: VerifyStatus::Ok,
         thumb_status: ThumbStatus::NotGenerated,

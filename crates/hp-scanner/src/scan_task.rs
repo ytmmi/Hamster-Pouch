@@ -49,6 +49,9 @@ pub struct Computed {
     pub palette: Option<Vec<String>>,
     pub thumb_status: Option<ThumbStatus>,
     pub media_info: Option<String>,
+    /// 图片的**显示尺寸**（EXIF 方向已应用，0043）；`None` = 非图片或头读不到。
+    pub width: Option<u32>,
+    pub height: Option<u32>,
     /// 读取失败 → 索引写"不可读"占位（RFC 0001），与旧实现同口径。
     pub unreadable: bool,
 }
@@ -97,12 +100,18 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
             // 解码 / 编码只依赖文件本身，正是并行阶段该干的活。反过来（留到界面要
             // 显示时才逐张补）会让大库第一次滚动就是几百次同步解码。
             let thumb_status = process_image_thumb(&prepared.path, &content, options);
+            // 宽高单独读头（0043）：解码结果的尺寸在 AVIF/HEIC 家族里是**有界中间尺寸**
+            // （`SCAN_DECODE_BOUND = 256`），且 JPEG 解码不应用 EXIF 方向，两者都不能当
+            // 显示尺寸用。读头失败的图片按"未知"入库，消费方降级（不回填 0）。
+            let probe = crate::scan_compute::probe_image(&prepared.path);
             Computed {
                 content: Some(content),
                 perceptual,
                 palette,
                 thumb_status: Some(thumb_status),
                 media_info: None,
+                width: probe.display.map(|(w, _)| w),
+                height: probe.display.map(|(_, h)| h),
                 unreadable: false,
             }
         }
@@ -121,6 +130,8 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
                 palette: None,
                 thumb_status: Some(thumb_status),
                 media_info,
+                width: None,
+                height: None,
                 unreadable: false,
             }
         }
@@ -146,6 +157,8 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
                 palette: None,
                 thumb_status: Some(ThumbStatus::NotGenerated),
                 media_info,
+                width: None,
+                height: None,
                 unreadable: false,
             }
         }

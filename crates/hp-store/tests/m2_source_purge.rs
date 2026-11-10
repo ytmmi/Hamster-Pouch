@@ -32,6 +32,8 @@ fn file_row(source_id: &SourceId, rel: &str) -> FileIndexRow {
         perceptual_hash_algo_version: None,
         size: 1,
         mtime: "1".into(),
+        width: None,
+        height: None,
         scan_time: "t".into(),
         verify_status: VerifyStatus::Ok,
         thumb_status: ThumbStatus::NotGenerated,

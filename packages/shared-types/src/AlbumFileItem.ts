@@ -10,4 +10,10 @@ export type AlbumFileItem = { id: string, source_id: string, relative_path: stri
  * 恒为数组（可能为空）；不再是单值"子类型"——用户口径是"标记可以交叉"，
  * 一个文件可以同时带多个标记。
  */
-marks: Array<string>, size: number, mtime: string, };
+marks: Array<string>, size: number, mtime: string, 
+/**
+ * 图片**显示宽高**（EXIF 方向已应用，缺陷 0043）。非图片或回填未覆盖时为 `null`。
+ *
+ * 是"宽度/高度"而不是宽高比：消费方自己算比例，避免再存一份必然漂移的派生值。
+ */
+width: number | null, height: number | null, };

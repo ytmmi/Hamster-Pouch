@@ -55,6 +55,9 @@ pub(crate) fn copy_one(
         perceptual_hash_algo_version: file.perceptual_hash_algo_version,
         size: file.size,
         mtime: file.mtime.clone(),
+        // 宽高随内容走：复制/移动不改变像素尺寸，丢掉就等于制造一行待回填（0043）。
+        width: file.width,
+        height: file.height,
         scan_time: file.scan_time.clone(),
         verify_status: VerifyStatus::Ok,
         thumb_status: ThumbStatus::NotGenerated,

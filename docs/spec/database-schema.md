@@ -192,6 +192,25 @@ CREATE TABLE source_exclusion (
   之后才交给 `crates/hp-store/src/repo/source_tree.rs` 的 `build_source_tree`），
   所以祖先节点的 `file_count` 与"整棵树看不到它们"自然一致。
 
+### 4.2.2 图片宽高 `files.width` / `files.height`（迁移 repo/0015，缺陷 0043）
+
+```sql
+-- 仓库库迁移 repo/0015（0043，库版本 14 → 15）：图片宽高进索引。
+ALTER TABLE files ADD COLUMN width  INTEGER;
+ALTER TABLE files ADD COLUMN height INTEGER;
+```
+
+口径（2026-11-11 / 第 37 轮裁决）：
+
+- **只存显示尺寸**：按 EXIF `Orientation`（5–8 交换长短边）换算成肉眼所见的宽高，
+  不另存存储尺寸。查看器、缩略图、`-lowres` 分流都按显示尺寸处理，再存一份存储
+  尺寸只会制造第二个口径（0042 已付过这笔学费）。
+- **可空**：`NULL` = "未索引或回填未覆盖"，消费方必须降级到旧路径（估计值 / 读头），
+  **不得**当成 0 或 1:1——那会把"未知"渲染成错得确定的布局。
+- **回填不覆盖扫描**，但扫描也**不覆盖回填**：`upsert_file` 对这两列写
+  `COALESCE(excluded.width, files.width)`，读不到尺寸的重扫不会把回填成果清零。
+- 只对 `media_type = 'image'` 有值；视频宽高在 `media_info_json` 里，是另一件事。
+
 ### 4.3 文件索引 `files`
 
 ```sql
@@ -237,6 +256,8 @@ CREATE TABLE files (
   thumb_status              INTEGER NOT NULL DEFAULT 0, -- 0=未生成 1=已生成 -1=失败
   missing_status            INTEGER NOT NULL DEFAULT 0, -- 软删除/缺失标记
   media_info_json           TEXT,              -- 视频全量媒体信息（ffprobe 探测后缓存；迁移 repo/0002 以 ALTER TABLE 追加，故位于列尾）
+  width                     INTEGER,           -- 图片**显示宽度**（EXIF 方向已应用；迁移 repo/0015 追加，可空 = 未索引/未回填，缺陷 0043）
+  height                    INTEGER,           -- 图片**显示高度**（与 width 同口径）
   FOREIGN KEY (source_id) REFERENCES sources(id)
 );
 CREATE INDEX idx_files_source ON files(source_id);
@@ -677,7 +698,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blueprints_default
 ## 5. 迁移策略
 
 - 三库**共用同一个版本追踪机制**：`PRAGMA user_version`。读：`crates/hp-store/src/migrate.rs:12`；版本号以"迁移数组下标 + 1"推导（`migrate.rs:16`）；每次未执行版本单开事务执行后写回（`migrate.rs:23`）。三库分别在 `crates/hp-store/src/repo/repo_db.rs:82`、`crates/hp-store/src/global/global_db.rs:65`、`crates/hp-store/src/dict/dict_db.rs:41` 调用同一个 `migrate::apply`。
-  - **当前仓库库版本 = 14**（`0014` 为 `source_exclusion` 媒体源子目录排除表（软排除，与卸载同形但可还原，D149）；`0013` 为 `albums.sort_order` 同级排序位 + `idx_albums_repo_order`（拖拽排序，D132）；`0012` 为相册同步镜像身份列 + `album_sync_exclusion`（同步相册镜像树、只增不删、位置与源一致，D129）；`0011` 为 `reader_annotations` 阅读批注表（书签 / 笔记 / 高亮，D113）；`0010` 为 `file_marks` 一对多标记表 + 存量搬迁；`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列（**已废弃**）；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
+  - **当前仓库库版本 = 15**（`0015` 为 `files.width` / `files.height` 图片显示宽高（可空、可回填，缺陷 0043）；`0014` 为 `source_exclusion` 媒体源子目录排除表（软排除，与卸载同形但可还原，D149）；`0013` 为 `albums.sort_order` 同级排序位 + `idx_albums_repo_order`（拖拽排序，D132）；`0012` 为相册同步镜像身份列 + `album_sync_exclusion`（同步相册镜像树、只增不删、位置与源一致，D129）；`0011` 为 `reader_annotations` 阅读批注表（书签 / 笔记 / 高亮，D113）；`0010` 为 `file_marks` 一对多标记表 + 存量搬迁；`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列（**已废弃**）；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
   - **当前全局配置库版本 = 5**（`global/0001_init` … `global/0005_layout_presets`，见 `crates/hp-store/src/global/global_db.rs:16`-`21` 的五个 `include_str!`；0005 建 `layout_presets` / `layout_bindings` 并折算 `panel_layouts`）；全局库内**没有**镜像表（没有 `global_meta`）。
   - **当前词库版本 = 1**（`dict_db.rs:19`）；`dict_meta`（`dict/0001:6-9`）是数据元信息 K/V，**不是** schema 版本。
 - **`repo_meta.schema_version` 是**镜像键**，每次打开仓库库都按权威值回写**（2026-09 修复缺陷 0006）：`repo_db.rs:97`-`100`（`sync_schema_version_meta`）在 `repo_db.rs:89`-`90`（`open_inner` 汇总点，`migrate::apply` 与蓝图文档迁移之后）执行，**新建与打开两条路径共用这一处**，因此升级过的库不再与 `user_version` 分叉。回写**不能**下沉到 `migrate::apply`（`migrate.rs:10`）：那个执行器由仓库库/全局库/词库共用，且全局库与词库**没有** `repo_meta`。**版本判断一律以 `PRAGMA user_version` 为准**，不要读镜像键（该键仍无读取方）。
