@@ -850,3 +850,26 @@
 > 另有一条**伴随差异（非布局）**：`app_settings.panelMarks.<repoId>` v1 → **v2**（D139 形状），
 > 它是面板标记（源 / 相册面板右键「添加标记」）的存储，与布局无关，随本轮数据同步一并带入。
 > 新建开发包 `dev-20261110-142424`；`node tools/layout-check.mjs` **6/6 通过**。
+
+### 发布包布局的运行时生效（缺陷 0044，待办）与「布局独立于仓库」提案的撤销
+
+2026-11-10 用户在真机上验收发布包时提出：「发布包 `target\release\release` 布局未更改，修复」，
+并补充「发布包内实际上无布局」（「窗口 → 布局」子菜单显示**无已保存布局**）。取证结论是
+**数据在、运行时不可达**：包内 `panel_layouts` 4 行齐备（`媒体-测试`/`l_main` 2195 字节）、
+`app_settings` 的 `layout.default.<repoId>` 也仍是 `媒体-测试`，但发布包按既有口径**清空了 `repos`**，
+而布局预设与默认标记都是 per-repo 键（`apps/desktop/src-tauri/src/commands/layout.rs:220-221`
+`format!("layout.default.{repo_id}")`），启动链在"没有默认仓库"时**直接放弃套用**
+（`apps/desktop/src/app_ui/core/workspaceBootstrap.ts:21-59`）⇒ 首屏退回代码内建布局
+（`apps/desktop/src/app_ui/core/defaultWorkspaceLayout.ts`）。
+
+处理路径留痕：先给三条候选（A 代码内建布局对齐「媒体-测试」／B 无仓库时按已有行读／
+C 布局独立于仓库），用户选 **C**；实施刚开始（新增全局库迁移
+`crates/hp-store/migrations/global/0005_repo_independent_layouts.sql` + `hp-store` 存储层去 `repo_id`），
+用户即下达「**取消更改，回退**」——工作区已还原（`git checkout -- crates/hp-store/src/global/global_db.rs`、
+删除新迁移文件），`git status --porcelain` 干净；最终裁决为「**暂不修，保持现状，记录到文档，为待办事项**」。
+
+因此：C 以工作名 **D150** 指代过，但**未采纳、未进入决策表、不占用该编号**（本小节即其留痕，
+避免日后重复提案）；缺口按缺陷登记 `docs/issues/0044-published-package-layout-not-applied.md`
+（含三条候选的取舍、`''` 层无关行仍是旧形状这一数据事实，以及复查触发条件）。
+本轮「发布包数据更新内容 = 布局」在**数据层**成立且可对账，**运行时生效需先建立/打开仓库**——
+这条口径边界如实记在此处，不写成"已生效"。
