@@ -12,6 +12,7 @@
  */
 
 import type { DockviewApi } from "dockview-react";
+import { DEFAULT_LAYOUT_LAYERS, type LayoutLayerState } from "@hamster-pouch/config";
 
 import * as api from "../shared/api";
 import {
@@ -22,6 +23,10 @@ import {
 } from "../shared/blueprintRuntime";
 import { normalizeLayoutJson } from "../shared/panelLayout";
 import type { Translate } from "../i18n";
+import { panelTitle } from "./panelRegistry";
+
+/** 首次运行自动建出来的仓库名（D158）：发布包不预置任何数据，由这一条补上开箱体验。 */
+const DEMO_REPO_NAME = "演示仓库";
 
 /** 启动装配：出厂播种 → （可选）打开默认仓库 → 套用生效布局。 */
 export async function bootstrapDefaultRepo(
@@ -41,7 +46,7 @@ export async function bootstrapDefaultRepo(
   let repoId: string | null = null;
   let layer: string | null = null;
   try {
-    const defRepo = await api.repoGetDefault();
+    const defRepo = (await api.repoGetDefault()) ?? (await ensureDemoRepo());
     if (defRepo) {
       const opened = await api.repoOpen({ repoId: defRepo });
       repoId = opened.id;
@@ -61,10 +66,47 @@ export async function bootstrapDefaultRepo(
   }
 }
 
-/** 出厂播种（RFC 0011 决策 5）：库内无预设时把内建形状写为 `seeded` 预设并设为默认。 */
-export async function ensureSeededLayout(dv: DockviewApi, t: Translate): Promise<void> {
-  // 一份布局 = 一条记录：内建形状作为 `""` 层无关快照落库。
-  const layersJson = JSON.stringify({ "": dv.toJSON() });
+/**
+ * 首次运行且库里一个仓库都没有时，建出「演示仓库」并设为默认（D158）。
+ *
+ * 只在**完全没有仓库**时动手：用户删光仓库是主动选择，下次启动也不该又冒出来一个；
+ * 已有仓库但没有默认指针时保持原行为（套用应用级默认布局）。
+ */
+async function ensureDemoRepo(): Promise<string | null> {
+  const repos = await api.repoList();
+  if (repos.length > 0) {
+    return null;
+  }
+  const created = await api.repoCreate({ name: DEMO_REPO_NAME });
+  await api.repoSetDefault({ repoId: created.id });
+  return created.id;
+}
+
+/** 给出厂布局补上当前语言的面板标题（标题不进常量，文案随语言变化）。 */
+function withPanelTitles(
+  layers: Readonly<Record<string, LayoutLayerState>>,
+  t: Translate,
+): Record<string, LayoutLayerState> {
+  const out: Record<string, LayoutLayerState> = {};
+  for (const [key, layer] of Object.entries(layers)) {
+    const panels: Record<string, { title?: string }> = {};
+    for (const [id, panel] of Object.entries(layer.panels ?? {})) {
+      panels[id] = { ...panel, title: panelTitle(id, t) };
+    }
+    out[key] = { ...layer, panels: { ...(layer.panels ?? {}), ...panels } };
+  }
+  return out;
+}
+
+/**
+ * 出厂播种（RFC 0011 决策 5 / D158）：库内无预设时把**代码里的分层布局**写为 `seeded`
+ * 预设并设为默认。
+ *
+ * 播种的是 `packages/config` 的 `DEFAULT_LAYOUT_LAYERS`（与 `DEFAULT_BLUEPRINT` 逐层配对），
+ * 不是"启动时的窗口形状"——后者只是单层快照，两层蓝图会让「界面 2」显示主界面的面板。
+ */
+export async function ensureSeededLayout(_dv: DockviewApi, t: Translate): Promise<void> {
+  const layersJson = JSON.stringify(withPanelTitles(DEFAULT_LAYOUT_LAYERS, t));
   await api.layoutEnsureSeed({ name: t("menubar.layout.seededName"), layersJson });
 }
 

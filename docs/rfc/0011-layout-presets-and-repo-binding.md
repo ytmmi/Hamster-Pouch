@@ -78,7 +78,8 @@ CREATE TABLE layout_bindings (
 
 ### 决策 5：出厂默认与首次播种
 
-- 出厂默认仍**由代码提供**（`defaultWorkspaceLayout.ts` 的形状），但**首次运行会把它播种成一条 `origin = 'seeded'` 的应用级预设**，并设为应用级默认。
+- 出厂默认仍**由代码提供**，但**首次运行会把它播种成一条 `origin = 'seeded'` 的应用级预设**，并设为应用级默认。
+  （2026-11-10 / D158 修订：形状从 `defaultWorkspaceLayout.ts` 的「启动时窗口形状」改成 `packages/config/src/layoutDefault.ts` 的 `DEFAULT_LAYOUT_LAYERS`——分层、与 `DEFAULT_BLUEPRINT` 逐层配对；同时首次启动会建「演示仓库」。）
 - 播种条件：库里**没有任何预设**时执行一次；已有预设则不动作。
 - 版本升级替换规则：仅当该 `seeded` 预设仍未被用户改动（`origin = 'seeded'` 且 `updated_at` 等于播种时间）时才可被新版本替换；用户改过则永不覆盖。
 

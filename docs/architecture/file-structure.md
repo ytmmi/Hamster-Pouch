@@ -705,6 +705,7 @@ HamsterPouch/
       blueprintNodes.ts       # 蓝图**节点定义表**（节点标准第 2 节：字段/取值域/父子/事件；画布与解析共用）
       blueprintOverlay.ts     # 浮层外观档位与相对定位纯函数（RFC 0007：这类纯函数落在 config）
       blueprintDefault.ts     # 内置默认蓝图 DEFAULT_BLUEPRINT（Rust 夹具的唯一来源）
+      layoutDefault.ts        # 出厂默认布局 DEFAULT_LAYOUT_LAYERS（按蓝图层存放；与 DEFAULT_BLUEPRINT 逐层配对，D158）
       controlKinds.ts         # 控件取值域（26 种 kind / 事件谓词表 / 各类档位清单）
       controlRegistry.ts      # 控件**类型注册表**（每种 kind 的专属字段/事件/是否容器）
       control.ts              # 控件 schema 类型、解析层校验、业务级校验、事件载荷

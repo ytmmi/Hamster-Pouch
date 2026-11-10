@@ -11,6 +11,7 @@ export * from "./blueprintNodes";
 export * from "./blueprintConflicts";
 export * from "./blueprintOverlay";
 export * from "./blueprintDefault";
+export * from "./layoutDefault";
 export * from "./controlKinds";
 export * from "./controlRegistry";
 export * from "./control";
