@@ -137,6 +137,20 @@ jobs:
       - name: 安装前端依赖
         run: pnpm install --frozen-lockfile
 
+      # D156：随包插件（python-core）的启动器与 Python 运行时是**构建产物**，按 .gitignore
+      # 不入库；它们的签名只能由维护机上的私钥生成，而私钥既不进仓库也不进 CI。
+      # 所以签好的那份挂成固定 Release 资产，这里下载 → 比对仓库里钉住的 sha256 →
+      # 解包后用**内置公钥**验签 → 整目录替换。任一步失败就红：绝不产出一个
+      # 「随包插件没签名」的发布包（运行期会被 D40 降级成 community，等于功能退化）。
+      - name: 取随包插件资产并验签（D156）
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          node tools/fetch-bundled-plugin.mjs
+
       # 版本推导的**唯一入口**是 `node tools/version.mjs --apply`（app:build 的第一步）：
       #   - 这里给了版本号 ⇒ 导出 HP_VERSION，脚本原样采用；
       #   - 留空 ⇒ 什么也不设，脚本把当前 tauri.conf.json 的 patch 数字 +1（后缀保留）。

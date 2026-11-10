@@ -1,0 +1,11 @@
+{
+  "_comment": "随包插件资产（D156）：本机签名、挂在固定 Release 上，发布流水线下载后按 sha256 + 内置公钥双重校验再打包。换资产时三处一起改：Release 上的 zip、这里的 sha256、plugins/system/python-core 目录。",
+  "release": "plugin-assets",
+  "pythonCore": {
+    "asset": "python-core-0.1.0-Windows-x64.zip",
+    "sha256": "dd33350d66403be1685e6a86b1ec58bc77469be085d93d527b4b62a42c093c0e",
+    "pluginVersion": "0.1.0",
+    "dir": "plugins/system/python-core"
+  },
+  "baseUrl": "https://github.com/ytmmi/Hamster-Pouch/releases/download"
+}

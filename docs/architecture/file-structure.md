@@ -768,6 +768,14 @@ HamsterPouch/
                               #   形式的产物名（五段：软件名-版本-平台-架构-安装方式），`--self-test` 做纯函数自检。
                               #   是**唯一命名源**——`release.yml` 的 zip 名、artifact 名、Release 资产路径都向它取；
                               #   逐段字符集校验，版本先过 `version.mjs` 的 `normalizeVersion` 再摘 `+` 构建元数据。
+                              # **随包插件资产**（D156）：`bundled-assets.json` 是唯一事实源
+                              #   （`release: "plugin-assets"` + 资产的 `sha256`）；
+                              #   `fetch-bundled-plugin.mjs` 下载该资产 → 比对 sha256 → 解包到临时目录
+                              #   → 用内置公钥验签 → **整目录替换** `plugins/system/python-core`
+                              #   （`--from <zip>` 本地演练 / `--dest <dir>` 换落地目录）；
+                              #   `verify-plugin-signature.mjs <插件目录>` 是纯校验：签名、逐文件哈希、
+                              #   以及「清单外的多余文件」——公钥**从 `hp-plugin-signing/src/lib.rs`
+                              #   的 `BUILTIN_PUBKEY_HEX` 解析**，不读 pem（读 pem 等于允许信任锚漂移）。
                               # 修数据工具（默认 dry-run，需 `--apply` 才写库，写前自动备份到 `backups/`）：
                               #   `fix-layer-layout.mjs`（给缺布局的层补该层专属布局）、
                               #   `fix-blueprint-home.mjs`（把某层标为主界面并清掉"上次所在层"）。
