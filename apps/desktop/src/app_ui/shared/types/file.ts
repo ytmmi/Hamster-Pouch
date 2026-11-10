@@ -2,6 +2,8 @@
  * M4：文件索引与元数据类型。
  */
 
+export type { FileMetadataResult } from "@hamster-pouch/shared-types";
+
 /** album_members / file_query 返回元素 */
 export interface FileItem {
   id: string;
@@ -24,22 +26,6 @@ export interface FileItem {
 export interface FileMetadataArgs {
   repoId: string;
   fileId: string;
-}
-
-/** file_metadata 返回 */
-export interface FileMetadataResult {
-  id: string;
-  source_id: string;
-  relative_path: string;
-  media_type: string;
-  /** 见 {@link FileItem.marks}。 */
-  marks: string[];
-  content_hash: string | null;
-  size: number;
-  mtime: string;
-  verify_status: string;
-  media_info_json: string | null;
-  exif_json: string | null;
 }
 
 export interface FilePathArgs {
