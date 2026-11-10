@@ -559,8 +559,14 @@ if (dataStat?.isDirectory()) {
       .join(" ");
     const sql =
       "DELETE FROM repos; " +
+      "DELETE FROM layout_bindings; " +
       "DELETE FROM plugin_repo_state; " +
       "DELETE FROM plugin_registry; " +
+      // 按仓库的设置键一并清掉：`repo.default` 指向已删仓库会让首屏误判「有默认仓库」
+      // （repoOpen 失败），应用级布局因此套不上（缺陷 0044 的复发路径）。
+      "DELETE FROM app_settings WHERE key = 'repo.default'" +
+      " OR key LIKE 'blueprint.currentLayer.%'" +
+      " OR key LIKE 'panelMarks.%'; " +
       rows;
     execFileSync("sqlite3", [relGdb, sql], { stdio: "ignore" });
   }

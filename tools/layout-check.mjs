@@ -5,7 +5,10 @@
  * 编译期暴露，只会在运行时抛异常（真实案例：给某一层生成的布局把网格根写成单个
  * `leaf`，套用布局时报 `dockview: root must be of type branch`，直接卡住切层）。
  *
- * 断言（对每条 `panel_layouts` 行与 `app_settings` 里的 `layout.*` 预设）：
+ * RFC 0011：布局存放在 `layout_presets`（一份布局 = 一行，各层在 `layers_json` 内），
+ * 仓库覆盖在 `layout_bindings`；不再有 `panel_layouts` 与 `layout.<名>` 旧通道。
+ *
+ * 断言（对每份预设的每一层，外加默认指针 / 绑定 / 旧键关系）：
  * 1. `grid.root` 存在且 **type 必须是 `branch`**（dockview 硬约束，单面板也要包一层 branch）；
  * 2. `grid.root` 递归下去：每个 `branch` 的 `data` 是非空数组；
  * 3. 每个 `leaf` 的 `data.views` 非空、`data.id` 存在、`activeView` ∈ `views`；
@@ -32,21 +35,40 @@ const check = (label, ok, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
-/** 收集待检查的布局：panel_layouts 各行 + app_settings 的 layout.* 预设。 */
+/** 查询辅助：sqlite3 -json。 */
+function query(db, sql) {
+  const out = execFileSync("sqlite3", ["-json", db, sql], {
+    encoding: "utf8",
+    maxBuffer: 256e6,
+  }).trim();
+  // 空结果集时 sqlite3 -json 输出空字符串（不是 `[]`）。
+  return out ? JSON.parse(out) : [];
+}
+
+/**
+ * 收集待检查的布局：`layout_presets` 每条预设的每一层（RFC 0011 决策 2/3）。
+ * 一份布局 = 一行，各层装在 `layers_json` 内；层 key `""` = 层无关快照。
+ */
 function collectLayouts(db) {
   const out = [];
-  const json = (sql) => JSON.parse(execFileSync("sqlite3", ["-json", db, sql], { encoding: "utf8", maxBuffer: 256e6 }));
-  for (const row of json("select repo_id, workspace, layer_key, layout_json from panel_layouts;")) {
-    out.push({
-      label: `panel_layouts ${row.workspace}/${row.layer_key || "(层无关)"}`,
-      json: row.layout_json,
-    });
-  }
-  for (const row of json(
-    "select key, value from app_settings where key like 'layout.%' and key <> 'layout.names' and key <> 'layout.default.%';",
-  )) {
-    if (typeof row.value === "string" && row.value.trim().startsWith("{")) {
-      out.push({ label: `app_settings ${row.key}`, json: row.value });
+  for (const row of query(db, "select name, layers_json from layout_presets order by name;")) {
+    let layers = null;
+    try {
+      layers = JSON.parse(row.layers_json);
+    } catch (e) {
+      out.parseErrors = [...(out.parseErrors ?? []), `预设「${row.name}」layers_json 不是合法 JSON: ${e}`];
+      continue;
+    }
+    const keys = layers && typeof layers === "object" ? Object.keys(layers) : [];
+    if (keys.length === 0) {
+      out.parseErrors = [...(out.parseErrors ?? []), `预设「${row.name}」不含任何层`];
+      continue;
+    }
+    for (const key of keys) {
+      out.push({
+        label: `预设「${row.name}」/ 层 ${key || "(层无关)"}`,
+        json: JSON.stringify(layers[key]),
+      });
     }
   }
   return out;
@@ -140,8 +162,35 @@ if (!existsSync(dbPath)) {
   process.exit(1);
 }
 
+const presets = query(
+  dbPath,
+  "select id, name, layers_json, blueprint_ids_json, origin from layout_presets order by name;",
+);
+check("存在布局预设（layout_presets 非空）", presets.length > 0, `${presets.length} 条`);
+
+for (const row of presets) {
+  check(
+    `预设「${row.name}」origin 合法（user / seeded）`,
+    row.origin === "user" || row.origin === "seeded",
+    String(row.origin),
+  );
+  let bindings = null;
+  try {
+    bindings = JSON.parse(row.blueprint_ids_json);
+  } catch {
+    /* 下面按非数组处理 */
+  }
+  check(
+    `预设「${row.name}」blueprint_ids_json 是字符串数组`,
+    Array.isArray(bindings) && bindings.every((x) => typeof x === "string"),
+  );
+}
+
 const layouts = collectLayouts(dbPath);
-check("找到待检查的布局行", layouts.length > 0, `${layouts.length} 条`);
+for (const message of layouts.parseErrors ?? []) {
+  check(message, false);
+}
+check("找到待检查的布局层", layouts.length > 0, `${layouts.length} 层`);
 
 let bad = 0;
 for (const item of layouts) {
@@ -157,6 +206,32 @@ for (const item of layouts) {
   if (problems.length > 0) bad += 1;
   check(`${item.label} 结构合法`, problems.length === 0, problems.slice(0, 3).join("; "));
 }
+
+// 关系检查（RFC 0011 决策 4/9）：默认指针与绑定必须指向存在的预设，旧键不得残留。
+const presetIds = new Set(presets.map((row) => row.id));
+const defRow = query(dbPath, "select value from app_settings where key = 'layout.default';")[0];
+check(
+  "app_settings['layout.default'] 指向存在的预设",
+  !defRow || presetIds.has(defRow.value),
+  defRow ? defRow.value : "未设置（走内建形状）",
+);
+
+const bindings = query(dbPath, "select repo_id, preset_id from layout_bindings;");
+const dangling = bindings.filter((row) => !presetIds.has(row.preset_id));
+check(
+  "layout_bindings 全部指向存在的预设",
+  dangling.length === 0,
+  dangling.map((row) => `${row.repo_id}→${row.preset_id}`).join(", "),
+);
+
+const legacyKeys = query(dbPath, "select key from app_settings where key like 'layout.%';")
+  .map((row) => row.key)
+  .filter((key) => key !== "layout.default" && key !== "layout.syncBlueprint");
+check(
+  "无旧版布局键残留（layout.names / layout.<名> / layout.default.<repo>）",
+  legacyKeys.length === 0,
+  legacyKeys.join(", "),
+);
 
 const passed = results.filter((r) => r.ok).length;
 console.log(`\n${passed}/${results.length} 通过${bad > 0 ? `（${bad} 条布局有问题）` : ""}`);

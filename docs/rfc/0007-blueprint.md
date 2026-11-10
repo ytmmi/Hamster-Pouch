@@ -238,6 +238,11 @@ has_tag == <tag_name>                        # 当前对象含某人工 tag
 
 ### 2. 存储：仓库库 `blueprints` 表 + 全局库 `blueprint_templates` 表（对齐 D1 的 `panel_layouts` 先例）
 
+> **更正（2026-11-10，RFC 0011 / D151）**：布局存储已从 `panel_layouts` 改为**应用级预设 `layout_presets`**
+> + **仓库绑定 `layout_bindings`**（一份布局一行、各层在 `layers_json` 内）。本 RFC 后文凡涉
+> `panel_layouts` 的**存储/读取**描述均为历史口径；**蓝图存储本身不变**（仍按仓库、仍整文档 JSON），
+> 「每层一份布局」的语义由 `layers_json[layer_key]` 承接。
+
 - 仓库库新增迁移 `0006_blueprint.sql`；蓝图文档整存 `blueprint_json`（含图结构与 schema 版本），**save = 整文档替换**（与 `layout.save` 一致），不做节点/边的逐行 CRUD。
 - **版本权威（D58）**：以**文档内的 `schema_version` 为权威**，数据库 `schema_version` 列必须**同步写入**（`blueprint.create` / `blueprint.save` / `template.install` 都必须写当前版本，不得依赖列默认值）；写库前统一走 `hp_core::normalize_document`——它把低版本文档迁移到当前版本，并在**文档缺 `schema_version` 字段时补上**（否则列写 2、文档没有版本，"文档内版本为权威"就不成立）；`default_version`（内置默认图版本）与文档 schema 版本**解耦**，各自独立演进。
 - **每层一份布局（D53）**：`panel_layouts` 由 `(repo_id, workspace)` 扩展为**按层各存一份**（全局迁移 `0004_layout_layers.sql` 新增 `layer_key` 维度 + 唯一索引）；`layout.save` 写**当前层**那一份，`layout.apply` 套用当前层的布局。布局 → 蓝图绑定见全局迁移 `0003_layout_blueprints.sql`（`panel_layouts.blueprint_ids_json`）；**这两列的权威定义在 `docs/spec/database-schema.md`**，本节 SQL 块只覆盖蓝图自己的两张表。

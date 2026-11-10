@@ -851,7 +851,7 @@
 > 它是面板标记（源 / 相册面板右键「添加标记」）的存储，与布局无关，随本轮数据同步一并带入。
 > 新建开发包 `dev-20261110-142424`；`node tools/layout-check.mjs` **6/6 通过**。
 
-### 发布包布局的运行时生效（缺陷 0044，待办）与「布局独立于仓库」提案的撤销
+### 发布包布局的运行时生效（缺陷 0044，**已实现、待真机验收**）与「布局独立于仓库」提案的撤销
 
 2026-11-10 用户在真机上验收发布包时提出：「发布包 `target\release\release` 布局未更改，修复」，
 并补充「发布包内实际上无布局」（「窗口 → 布局」子菜单显示**无已保存布局**）。取证结论是
@@ -879,4 +879,60 @@ C 布局独立于仓库），用户选 **C**；实施刚开始（新增全局库
 结构改为**预设实体化**（`layout_presets` + `layout_bindings`，一份布局一条记录、各层装在同一 `layers_json` 内），
 四个优先场景（发布包 / 新机器开箱即见、每仓库各用各的、消除「一份布局三行」漂移、导出 / 导入）全部覆盖；
 **本轮只讨论，不写代码**——实现清单、迁移折算与验收标准见该 RFC，缺陷 `docs/issues/0044-published-package-layout-not-applied.md`
-的状态随之记为「设计已定，待实施」。
+的状态随之记为「设计已定，待实施」。**2026-11-10 本轮已按该 RFC 实现（D151，见下节）；缺陷 0044 的状态在真机验收通过后改为「已修复」。**
+
+## 第 34 轮 · 布局预设与仓库绑定（D151，2026-11-10）
+
+> **决策 D151（已实现，待真机验收）**：布局改为「**应用级预设 + 仓库可选覆盖**」两级模型——
+> `layout_presets`（无仓库维度，一份布局 = 一行，各层装在同一 `layers_json` 内）+ `layout_bindings`
+> （`repo_id` → `preset_id`，无行 = 走应用级默认）。解析链**命中即停**：
+> 仓库绑定 → `app_settings['layout.default']`（预设 id）→ 前端内建形状（`core/defaultWorkspaceLayout.ts`）。
+> 本轮同时闭合缺陷 0044：**发布包 / 新机器不建仓库也套用应用级默认布局**。
+> 权威设计：`docs/rfc/0011-layout-presets-and-repo-binding.md`（含决策 1–11 与 §3 影响面清单）。
+
+**数据层**：新增全局库迁移 `crates/hp-store/migrations/global/0005_layout_presets.sql`（全局库版本 4 → **5**）——
+建两张新表；按 RFC 决策 10 把 `panel_layouts` 折算成应用级预设（按 `workspace` 分组、每层取 `updated_at` 最新一格、
+`updated_at` 取组最大值、`blueprint_ids_json` 取 `''` 行）；原 `layout.default.{repoId}` 折算成绑定行，
+应用级默认取最后写入的一条并换算成预设 id；删除死键 `layout.names` / `layout.<名>` / `layout.default.{repoId}`，
+保留 `layout.syncBlueprint` 与新的 `layout.default`。**用户 2026-11-10 裁决**：`媒体-测试` 的 `''` 旧快照（1365 B）
+不再保留，迁移时对齐 `l_main`（RFC 决策 10 第 6 条已加修订注记）；`媒体-测试-1` 只有 `''`，原样保留。
+旧表 `panel_layouts` 保留为历史、不再读写。
+
+**存储层**（`crates/hp-store/src/global/global_db.rs`）：`LayoutPresetRow { id, name, layers, blueprint_ids, origin, updated_at }`
++ `layer_keys()`；方法 `save_layout_layer` / `get_layout_layer`（当前层缺失回退该预设的 `""`，**不跨预设借行**）/
+`list_layout_presets` / `get_layout_preset` / `set_layout_blueprints` / `import_layout_preset` /
+`ensure_seeded_layout`（决策 5：库内无预设才播种 `origin='seeded'`；仅**未被改动**的播种预设可被新版替换）/
+`rename_layout_preset` / `delete_layout_preset`（**命中默认或任一绑定即拒绝**）/ `set_default_layout` /
+`default_layout_id` / `default_layout_name` / `layout_binding_name` / `bind_layout_repo`。
+`delete_repo` 改为只清 `layout_bindings` 与 `plugin_repo_state`——预设与默认不随仓库删。
+
+**命令面**（`apps/desktop/src-tauri/src/commands/layout.rs`，全部 `ApiResponse`）：八条去 `repoId`——
+`layout.save(name, layoutJson, layerKey?, blueprintIds?)` / `layout.list()` / `layout.get(name, layerKey?)` /
+`layout.rename(name,newName)` / `layout.delete(name)` / `layout.setDefault(name)` / `layout.getDefault(repoId?)` /
+`layout.blueprints(name)`；新增 `layout.bindRepo(repoId, name?)`（`name` 省略 = 清除覆盖）、
+`layout.export(name, path?)`（`{format:"hamster-pouch.layout",version:1,name,layers,blueprintIds}`）、
+`layout.import(json?, path?)`（重名追加 `-2` / `-3`，不覆盖、不改绑定）、`layout.ensureSeed(name, layersJson, blueprintIds?)`
+（首次运行播种）。导入/导出都过与 `tools/layout-check.mjs` 同口径的结构校验；落盘走 Rust `std::fs`，
+导出对话框需要 `dialog:allow-save` 权限（已加到 `capabilities/default.json`）。
+
+**前端**：`shared/types/layout.ts` / `shared/api/layout.ts` 12 个封装；`core/workspaceBootstrap.ts` 重写为
+`ensureSeededLayout → repoGetDefault → applyEffectiveLayout`，**没有默认仓库时也套用应用级默认**（0044 的修复点）；
+`layoutChain(repoId)` 与 `shared/blueprintRuntime.ts:applyLayerLayout` 共用同一条解析链；`menu/MenuBar.tsx` 的布局子菜单
+在无仓库时仍列出预设、标出「默认 / 仓库覆盖」，新增「导入布局…」与右键「设为当前仓库布局 / 清除仓库覆盖 / 导出布局…」；
+三语新增 15 个键。
+
+**测试与门禁**：`crates/hp-store/tests/m4_panel_layout.rs` 按新语义重写（12 项，含播种只替换未改动、导入逐字节往返、
+删除拒绝、绑定优先），`m5_repo_layout_admin.rs` 改为布局重命名/删除与 `delete_repo` 只清绑定；`cargo test -p hp-store` 全绿。
+`tools/layout-check.mjs` 改为读 `layout_presets` / `layout_bindings`：逐层结构校验 + 默认指针/绑定可解析 + 旧键零残留，
+在应用 0005 后的库副本上 **13/13 通过**；`check:commands`（16/16，布局契约表 §3.1.1 已按新签名重写）、
+`check:settings` 55/55、`tsc --noEmit` exit 0。
+
+**验收期两处补丁**：(1) `tools/package-build.mjs` 发布包清库时额外 `DELETE FROM layout_bindings`，并清掉 `repo.default` / `blueprint.currentLayer.%` / `panelMarks.%` 这些指向已删仓库的 per-repo 键——残留 `repo.default` 会让首屏误判「有默认仓库」，`repoOpen` 失败后应用级布局套不上（0044 的复发路径）；(2) `core/workspaceBootstrap.ts` 拆成三段独立 try（播种 / 默认仓库与层 / 套用布局），悬空 `repo.default` 只影响第二段，`applyEffectiveLayout` 始终执行，失败才退回代码内建形状。
+
+**兼容与回滚**：迁移后旧 exe 读不了新库（表结构已变）⇒ 沿用 **D139 先例：整包替换、不新旧混跑**；
+回滚只能从 `backups/appdata/` 的迁移前快照恢复。数据侧纪律不变：动库前退出应用、先 `node tools/sync-user-data.mjs` 留快照。
+
+**边界（如实登记）**：(a) 端到端真机验收（发布包不建仓库首屏即「媒体-测试」`l_main` 形状 → 「窗口 → 布局」列预设、
+可切换、可设为默认 → 导出/导入往返）**2026-11-10 已在发布包上端到端验证通过**（发布库 `repos=0`、`layout_bindings=0`、预设 2 条、`layout.default` 指向 `媒体-测试`；首屏 DOM 分组与 `l_main` 逐项吻合——左列 `[仓库,任务]` + `[源,相册]`（媒体源与相册同组）、中列 `[媒体预览,媒体播放器]`、右列 `[色彩参考]` / `[查看器,标签/评分]` / `[元数据]`；「窗口 → 布局」列出「媒体-测试 · 默认 / 媒体-测试-1 / 导入布局… / 重置布局」；`layout.export` → `layout.import` 生成 `媒体-测试-2` 且 `l_main` 逐字节相同、删除成功）；缺陷 0044 已改「已修复」；
+(b) 不做版本化历史 / 云同步 / 插件注册布局；(c) **不恢复**「布局独立于仓库」的替换式方案（工作名 D150，已撤销）；
+(d) 不改蓝图节点 / 控件 / 面板注册（RFC 0007 / 0010 口径不动）。

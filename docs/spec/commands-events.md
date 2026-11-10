@@ -92,21 +92,29 @@ interface HpError {
 
 `repo.delete` 删除当前打开仓库时先关闭；不删除真实媒体源文件（D26）。
 
-### 3.1.1 `layout.*`（面板布局预设）
+### 3.1.1 `layout.*`（布局预设与仓库绑定）
+
+RFC 0011：布局是**应用级预设**（`layout_presets`，一份布局 = 一行，各层在 `layers_json` 内），
+仓库通过 `layout_bindings` 可选覆盖；解析链 = 仓库绑定 → `app_settings['layout.default']` → 前端内建形状。
 
 | 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| `layout.save` | 保存/覆盖命名布局（**该层一份**） | `{ repoId, name, layoutJson, layerKey?, blueprintIds? }` | `{ ok, data: { id, name, layer_key, blueprint_ids, updatedAt } }` | **已包装** | **D76 批次 `repo/layout`（最后一批，2026-09）已迁移**。线上 `data` 元素字段为蛇形 `updated_at` |
-| `layout.list` | 列出该仓库命名布局**层行**（最新在前） | `{ repoId }` | `{ ok, data: { items } }`（同一 `name` 每层一行） | **已包装** | 线上 `data` 是裸 `LayoutItem[]`，元素字段为蛇形 `updated_at` |
-| `layout.get` | 读取**该层**布局 JSON（该层无行时回退层无关行） | `{ repoId, name, layerKey? }` | `{ ok, data: { layoutJson \| null } }` | **已包装** | 线上 `data` 是裸 JSON 串 `\| null` |
-| `layout.rename` | 重命名布局预设（作用于该名字的全部层行） | `{ repoId, name, newName }` | `{ ok, data: { ok: true } }` | **已包装** | 线上 `data` 是 `()`；空新名 → `validation`；默认布局名同步更新 |
-| `layout.delete` | 删除布局预设（作用于该名字的全部层行） | `{ repoId, name }` | `{ ok, data: { ok: true } }` | **已包装** | 线上 `data` 是 `()`；删的是默认布局时清空默认标记 |
-| `layout.setDefault` | 设为该仓库默认布局 | `{ repoId, name }` | `{ ok, data: { ok: true } }` | **已包装** | 线上 `data` 是 `()` |
-| `layout.getDefault` | 读取默认布局名 | `{ repoId }` | `{ ok, data: { name \| null } }` | **已包装** | 线上 `data` 是裸 `string \| null` |
-| `layout.blueprints` | 读取布局绑定的蓝图 id（预设级） | `{ repoId, name }` | `{ ok, data: { blueprintIds } }` | **已包装** | 线上 `data` 是裸 `string[]`；布局不存在 → `not_found` |
+| `layout.save` | 保存预设内**当前层**那一格（无预设则新建） | `{ name, layoutJson, layerKey?, blueprintIds? }` | `{ ok, data: LayoutItem }` | **已包装** | `layerKey` 缺省 = `""`（层无关）；`blueprintIds` 省略则不动绑定。线上 `data` 字段为蛇形 `layer_keys` / `blueprint_ids` / `updated_at`；结构不合法 → `validation` |
+| `layout.list` | 列出全部应用级预设（最新在前） | `{}` | `{ ok, data: LayoutItem[] }` | **已包装** | 线上 `data` 是裸 `LayoutItem[]` |
+| `layout.get` | 读取预设某层布局 JSON | `{ name, layerKey? }` | `{ ok, data: string \| null }` | **已包装** | 当前层缺失回退该预设的 `""` 层；**不跨预设**借行；预设不存在 → `not_found` |
+| `layout.rename` | 重命名预设 | `{ name, newName }` | `{ ok, data: null }` | **已包装** | 默认指针与绑定按 id 引用，自动跟随；空新名 → `validation`；重名 → `conflict`；同名 no-op |
+| `layout.delete` | 删除预设 | `{ name }` | `{ ok, data: null }` | **已包装** | **命中应用级默认或任一仓库绑定 → 拒绝**（`validation`） |
+| `layout.setDefault` | 设为应用级默认 | `{ name }` | `{ ok, data: null }` | **已包装** | 预设不存在 → `not_found` |
+| `layout.getDefault` | 读取生效布局名 | `{ repoId? }` | `{ ok, data: string \| null }` | **已包装** | 给 `repoId`：绑定优先、否则应用级默认（即解析链前两层）；都没设 → `null` |
+| `layout.blueprints` | 读取预设绑定的蓝图 id | `{ name }` | `{ ok, data: string[] }` | **已包装** | 预设不存在 → `not_found` |
+| `layout.bindRepo` | 设置/清除仓库覆盖 | `{ repoId, name? }` | `{ ok, data: null }` | **已包装** | `name` 省略或空串 = 清除绑定（回到应用级默认）；预设不存在 → `not_found` |
+| `layout.export` | 导出预设为 JSON 文本 | `{ name, path? }` | `{ ok, data: string }` | **已包装** | 格式 `{ format: "hamster-pouch.layout", version: 1, name, layers, blueprintIds }`；给 `path` 则同时写文件（Rust 侧 `std::fs`，I/O 失败 → `io`） |
+| `layout.import` | 导入 JSON 文本/文件为新预设 | `{ json?, path? }` | `{ ok, data: LayoutItem }` | **已包装** | 校验 format/version/layers 与布局结构（非法 → `validation`）；重名自动追加 `-2` / `-3`…，**不覆盖、不改绑定** |
+| `layout.ensureSeed` | 首次运行播种出厂布局 | `{ name, layersJson, blueprintIds? }` | `{ ok, data: { seeded, replaced, name } }` | **已包装** | 仅当库里没有任何预设时插入（`origin='seeded'`）；已存在时只替换**未被用户改动**的播种预设 |
 
-布局按仓库隔离（D1）；**每层一份布局**（D53：`layer_key`），保存/套用都针对**当前层**；
-重命名/删除会同步维护默认布局标记（D26）；`layerKey` 缺省 = 层无关行（兼容旧预设）。
+布局不再按仓库隔离（D1 的"按仓库"口径由本表取代，见 RFC 0011 / decision-checklist）；
+**每层一份布局**（D53 延续：`layers_json[layer_key]`），保存/套用都针对**当前层**；
+重命名按 id 跟随、删除命中默认/绑定即拒绝。
 
 ### 3.2 `source.*`
 

@@ -40,29 +40,34 @@ CREATE TABLE app_settings (
 );
 ```
 
-### 3.3 面板布局 `panel_layouts`
+### 3.3 布局预设 `layout_presets` 与仓库绑定 `layout_bindings`
+
+RFC 0011：布局是**应用级预设**（无仓库维度，一份布局 = 一行），仓库通过 `layout_bindings` 可选覆盖。
+解析链（命中即停）：仓库绑定 → `app_settings['layout.default']`（应用级默认）→ 前端内建形状（`core/defaultWorkspaceLayout.ts`）。
 
 ```sql
--- 决策 D1：布局表放全局配置库，每行带 repo_id，按仓库读取/覆盖
--- 决策 D53（已落地，迁移 global/0004）：再加 layer_key —— 蓝图每层一份布局（层与布局 1:1）；
---   当前层按仓库持久化（D54，应用设置键 blueprint.currentLayer.{repo_id}），保存布局写当前层那一份。
--- 决策 D59：布局可绑定蓝图（blueprint_ids_json，迁移 global/0003 已落地）。
-CREATE TABLE panel_layouts (
+CREATE TABLE layout_presets (
   id                 TEXT PRIMARY KEY,
-  repo_id            TEXT NOT NULL,         -- 空串或特殊值表示全局默认布局
-  workspace          TEXT NOT NULL,         -- 工作区标识（= 布局预设名，同名每层一行）
-  layer_key          TEXT NOT NULL DEFAULT '', -- 蓝图层的 key（D53）；'' = 层无关行（迁移前旧预设，读取时兜底命中）
-  blueprint_ids_json TEXT NOT NULL DEFAULT '[]', -- 绑定的蓝图 id 列表（D59）；生效取第一个（预设级，作用于全部层行）
-  layout_json        TEXT NOT NULL,         -- 面板位置/大小/可见性
+  name               TEXT NOT NULL UNIQUE,       -- 预设名（原 panel_layouts.workspace）
+  layers_json        TEXT NOT NULL,              -- {layer_key: layout_json}；"" = 层无关快照
+  blueprint_ids_json TEXT NOT NULL DEFAULT '[]', -- 绑定的蓝图 id（生效取第一个）
+  origin             TEXT NOT NULL DEFAULT 'user', -- user | seeded（出厂播种，未被改动才可被新版替换）
   updated_at         TEXT NOT NULL
+);                                                -- 迁移 global/0005
+
+CREATE TABLE layout_bindings (
+  repo_id    TEXT PRIMARY KEY,                    -- 无行 = 该仓库走应用级默认
+  preset_id  TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
-CREATE INDEX idx_panel_layouts_repo ON panel_layouts(repo_id, workspace);
-CREATE UNIQUE INDEX idx_panel_layouts_layer ON panel_layouts(repo_id, workspace, layer_key); -- 迁移 global/0004
+CREATE INDEX idx_layout_bindings_preset ON layout_bindings(preset_id);
 ```
 
-> **默认布局标记**不在本表：实现走 `app_settings` 的键 `layout.default.{repo_id}`（与 `layout.setDefault/getDefault` 对应）。
->
-> **`app_settings` 键空间**（见 3.2）：`ui.theme`、`ui.language`、`ui.autoCheckUpdate`（D140：打开「关于」页时是否自动检查 GitHub 新版本，缺省 `true`）、`layout.default.{repo_id}`、`blueprint.currentLayer.{repo_id}`（D54：该仓库的当前层，层切换时写入、启动时读取）、`interfacePages.{repo_id}`（D124）、`panelMarks.{repo_id}`（D134）等；新增键必须登记，避免与列方案混淆。
+> **层语义**（D53 延续）：`layers_json` 的键是蓝图层 key；读取顺序「当前层 → `""` → 沿解析链下移」，**不跨预设借旧行**。`layout.save` 只写预设内当前层那一格；`layout.rename` 改预设名，默认指针与绑定都按 **id** 引用，自然跟随。
+> **默认与绑定**：`app_settings['layout.default']` 存**预设 id**；`layout.default.{repo_id}` 旧键由 `global/0005` 删除并折算成绑定行；删除仓库只清 `layout_bindings`（预设与默认不随仓库删）。
+> **旧表** `panel_layouts`（迁移 `0001`–`0004`）保留为历史数据、**不再读写**；折算规则见 RFC 0011 决策 10（含用户 2026-11-10 裁决：组内存在 `l_main` 时把 `""` 对齐到 `l_main`）。
+
+**`app_settings` 键空间**（见 3.2）：`ui.theme`、`ui.language`、`ui.autoCheckUpdate`（D140）、`layout.default`（预设 id）、`layout.syncBlueprint`、`blueprint.currentLayer.{repo_id}`（D54）、`interfacePages.{repo_id}`（D124）、`panelMarks.{repo_id}`（D134）等；旧布局键 `layout.names` / `layout.<名>` / `layout.default.{repo_id}` 已由 `global/0005` 删除。新增键必须登记，避免与列方案混淆。
 
 ### 3.4 插件注册表 `plugin_registry`
 
@@ -673,7 +678,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blueprints_default
 
 - 三库**共用同一个版本追踪机制**：`PRAGMA user_version`。读：`crates/hp-store/src/migrate.rs:12`；版本号以"迁移数组下标 + 1"推导（`migrate.rs:16`）；每次未执行版本单开事务执行后写回（`migrate.rs:23`）。三库分别在 `crates/hp-store/src/repo/repo_db.rs:82`、`crates/hp-store/src/global/global_db.rs:65`、`crates/hp-store/src/dict/dict_db.rs:41` 调用同一个 `migrate::apply`。
   - **当前仓库库版本 = 14**（`0014` 为 `source_exclusion` 媒体源子目录排除表（软排除，与卸载同形但可还原，D149）；`0013` 为 `albums.sort_order` 同级排序位 + `idx_albums_repo_order`（拖拽排序，D132）；`0012` 为相册同步镜像身份列 + `album_sync_exclusion`（同步相册镜像树、只增不删、位置与源一致，D129）；`0011` 为 `reader_annotations` 阅读批注表（书签 / 笔记 / 高亮，D113）；`0010` 为 `file_marks` 一对多标记表 + 存量搬迁；`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列（**已废弃**）；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
-  - **当前全局配置库版本 = 4**（`global/0001_init` … `global/0004_layout_layers`，见 `crates/hp-store/src/global/global_db.rs:15`-`18` 的四个 `include_str!`）；全局库内**没有**镜像表（7 张表里没有 `global_meta`）。
+  - **当前全局配置库版本 = 5**（`global/0001_init` … `global/0005_layout_presets`，见 `crates/hp-store/src/global/global_db.rs:16`-`21` 的五个 `include_str!`；0005 建 `layout_presets` / `layout_bindings` 并折算 `panel_layouts`）；全局库内**没有**镜像表（没有 `global_meta`）。
   - **当前词库版本 = 1**（`dict_db.rs:19`）；`dict_meta`（`dict/0001:6-9`）是数据元信息 K/V，**不是** schema 版本。
 - **`repo_meta.schema_version` 是**镜像键**，每次打开仓库库都按权威值回写**（2026-09 修复缺陷 0006）：`repo_db.rs:97`-`100`（`sync_schema_version_meta`）在 `repo_db.rs:89`-`90`（`open_inner` 汇总点，`migrate::apply` 与蓝图文档迁移之后）执行，**新建与打开两条路径共用这一处**，因此升级过的库不再与 `user_version` 分叉。回写**不能**下沉到 `migrate::apply`（`migrate.rs:10`）：那个执行器由仓库库/全局库/词库共用，且全局库与词库**没有** `repo_meta`。**版本判断一律以 `PRAGMA user_version` 为准**，不要读镜像键（该键仍无读取方）。
 - 每个仓库库打开时都会 `busy_timeout = 5s`：**扫描与完全卸载各用一条独立连接**（不占用主连接锁，避免长任务把界面命令堵住），双连接在 WAL 下并存需要这个等待窗口。

@@ -29,13 +29,13 @@
 
 1. **面板不是控件**：面板是 dockview 承载单元与功能边界；控件是面板内部的 UI 单元。插件可注册面板，**不可以**注册控件。
 2. **类目不是控件**：类目是蓝图节点，声明"该面板内部按媒体类型分哪几类条目"；控件是渲染单元。
-3. **面板不是布局**：面板是"有哪些功能单元"，布局（`panel_layouts`，D1/D53）是"它们摆在哪、多大、怎么分组"。面板注册表**不参与**布局持久化。
+3. **面板不是布局**：面板是"有哪些功能单元"，布局（`layout_presets` + `layout_bindings`，D151；旧 `panel_layouts` 为历史）是"它们摆在哪、多大、怎么分组"。面板注册表**不参与**布局持久化。
 
 ### 1.1 与既有 D46 / D68 的口径一致
 
 本次把「面板控件」改回「**面板**」、把「类」改为「**类目**」，与 D46 / D68 同样**只改文档与 UI 显示用语**：
 
-- 蓝图节点枚举 `control` / `class`、字段 `panel_id` / `media_type`、库表 `panel_layouts`、命令名、i18n 键名（`panel.*`）**一律不变**。
+- 蓝图节点枚举 `control` / `class`、字段 `panel_id` / `media_type`、布局库表（`layout_presets` / `layout_bindings`）、命令名、i18n 键名（`panel.*`）**一律不变**。
 - 历史决策条目（D28/D44/D46/D49/D50/D56）**保持原文**，措辞由 `docs/architecture/decision-checklist.md` 的修订说明统一承接。
 
 ## 2. 权威与落点
@@ -46,7 +46,7 @@
 | 面板 → 组件映射 | `apps/desktop/src/app_ui/core/panelRegistry.tsx`（`PANEL_DEFS` / `DOCK_COMPONENTS`） | 插件面板需要动态注册路径 |
 | 面板注册的 manifest 侧 | `crates/hp-core/src/plugin_contribution.rs`（`ContributionKind::Panel`） | 声明参数扩展见 `docs/spec/plugin-standard.md` 第 4 节 |
 | 面板校验 | `crates/hp-core/src/plugin_validate.rs`（`PluginManifest::validate`；清单结构在 `plugin.rs`） | 硬错误清单见本文第 7 节 |
-| 面板布局（**不是**本文对象） | `panel_layouts` 表 + `packages/config/src/layout.ts` | 只按当前仓库与层过滤 |
+| 面板布局（**不是**本文对象） | `layout_presets` / `layout_bindings`（RFC 0011，D151）+ `packages/config/src/layout.ts` | 预设内按层过滤；仓库通过绑定覆盖，缺省走应用级默认 |
 | 「全部设置 → 面板」界面 | `docs/spec/settings-standard.md` | 按面板 `category` 分组、按面板分节 |
 
 ## 3. 面板分类（`category`）
@@ -233,7 +233,7 @@
 
 - `mount` 只**收窄**宿主既有约束，不新增能力：面板永远不能借 `mount` 变成独立窗口或绕过布局。
 - `overlay_content = false` 的面板被浮层 `contains` 时：校验层报**硬错误**（与"浮层不得 contains 布局块"同级）。
-- `mount` **不影响**布局持久化：不参与 `panel_layouts` 的读写。
+- `mount` **不影响**布局持久化：不参与布局预设（`layout_presets`）的读写。
 
 ### 5.5 `capabilities`（能力）
 
@@ -435,7 +435,7 @@
 - `has_class = true` 的面板，其类目是否允许自由命名（当前类目由 `media_type` 固定三值）。
 - `settings` 是否支持分组/嵌套（**已收窄**：`divider_before` 提供**一级分隔线**，无分组标题、无嵌套、无折叠；标题/嵌套仍待定）。
 - 插件面板的**图标**是否允许自带资源（当前只接受宿主图标集名字，D44 边界）。
-- `default_size` 与 `panel_layouts` 既有尺寸记忆的优先级（当前：布局优先，`default_size` 只作用于首次创建）。
+- `default_size` 与布局预设既有尺寸记忆的优先级（当前：布局优先，`default_size` 只作用于首次创建）。
 - **媒体派生信息的数据来源（2026-09 实测后记录；音频部分 2026-10-17 / D115 已落地，见下第一项）**：
   - **音频（2026-10-17 / D115 起口径已变）**：`files` 表对音频**不再是 D11 占位行**——扫描期照算内容哈希、并用 ffprobe 缓存媒体信息（时长 / 编码 / 码率 / 采样率），因此**索引里就有**时长。元数据面板优先读 `media_info_json` 的 ffprobe 结果（并新增「采样率」一行，**解析只看 `codec_type === "audio"` 的流**——取"首流"会把纯视频文件的字段误读成采样率）；前端 `preload="metadata"` 退为**兜底**，只服务于尚未升级的旧库行。**存量占位行原位补齐**：扫描的准备阶段只要发现音频行**哈希缺失**就重算一次，与 size/mtime 是否变化无关（否则"未变即跳过"会把占位行永远留下）。
   - **视频**：尺寸 / 时长 / 编码 / 码率 / 帧率来自 `media_info_json`（**扫描时 ffprobe 可用才写入**，`crates/hp-scanner/src/scanner.rs` 的 `process_video`）。**早于该状态的索引行永远是空的**——实测索引库里存在这种行，表现为"设置没错、面板却没显示任何媒体行"。现由面板用前端 `<video>` 兜底**尺寸与时长**；*编码 / 码率 / 帧率 DOM 拿不到，如实显示 `—`*。是否补"重新分析"入口或按需后端探测来补齐这三个字段，待定。
