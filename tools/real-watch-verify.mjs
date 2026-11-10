@@ -5,6 +5,8 @@
  * 判据（来自 `docs/issues/0045-realtime-file-events-unwired.md`）：
  *   ① 索引里已有的文件被删 → `missing_status` 翻 1，并发出 `file.missing`；
  *   ② 同一个文件回到盘上 → `missing_status` 翻 0，并发出 `file.restored`；
+ *   ③ 盘上**新增**（不在索引里）→ 发 `file.created`，并自动排队一次增量扫描把它接进索引
+ *      （2026-11-11 第 37 轮裁决 4：原「新增不发」边界已推翻）；
  *   ③ 文件内容/大小变化 → 发出 `file.changed { change: "modified" }`；
  *   ④ 磁盘**新增**文件（不在索引里）→ **不发**事件、**不落库**（本轮刻意边界，防重扫自激）；
  *   ⑤ 只读文件（Access 事件）→ **不发** `file.changed`；
@@ -194,13 +196,14 @@ class Cdp {
 const LISTEN_EVAL = `(async () => {
   const internals = window.__TAURI_INTERNALS__;
   window.__W = [];
-  const names = ["file:changed", "file:missing", "file:restored"];
+  // scan:completed 一并订阅：用来证明"索引行是自动扫描建的"，而不是别的东西顺手写的。
+  const names = ["file:changed", "file:missing", "file:restored", "file:created", "scan:completed", "scan:progress", "scan:error"];
   const failed = [];
   for (const name of names) {
     try {
       const handler = internals.transformCallback((event) => {
         window.__W.push({ name, payload: event?.payload ?? event, at: Date.now() });
-      }, true);
+      }, false);
       await internals.invoke("plugin:event|listen", { event: name, target: { kind: "Any" }, handler });
     } catch (error) {
       failed.push(name + ": " + String(error));
@@ -303,10 +306,10 @@ async function main() {
   const invoke = async (cmd, payload) =>
     ev(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(payload)})`);
 
-  const listen = await step("000", "页面内订阅 file:changed / file:missing / file:restored（逻辑名点分 → 线上名冒号）", async () => {
+  const listen = await step("000", "页面内订阅 file:changed / missing / restored / created + scan:completed（逻辑名点分 → 线上名冒号）", async () => {
     const out = await ev(LISTEN_EVAL);
     return {
-      status: out?.listening?.length === 3 ? "PASS" : "FAIL",
+      status: out?.listening?.length === 7 ? "PASS" : "FAIL",
       evidence: out,
       notes: out?.failed?.length ? out.failed : [],
     };
@@ -395,18 +398,52 @@ async function main() {
     };
   });
 
-  // ④ 磁盘新增（不在索引里）→ 不发事件、不落库
-  await step("006", "磁盘新增未索引文件 → 不发事件、不落库（刻意边界）", async () => {
-    const eventsBefore = (await ev(READ_EVENTS_EVAL)).length;
+  // ④ 磁盘新增（不在索引里）→ file.created + 自动增量扫描把它接进索引
+  //    第 37 轮裁决 4 推翻了 0045 原来的"新增不发"边界。
+  await step("006", "磁盘新增未索引文件 → file.created + 自动增量扫描接进索引", async () => {
+    const before = (await ev(READ_EVENTS_EVAL)).length;
     writeFileSync(join(FIXTURE, "c-new.png"), PNG_1X1);
-    await sleep(4000);
-    const eventsAfter = await ev(READ_EVENTS_EVAL);
-    const row = readFileRow(repo.dbPath, sourceId, "c-new.png");
-    const newEvents = eventsAfter.slice(eventsBefore);
+    const created = await waitFor(
+      async () => {
+        const evs = (await ev(READ_EVENTS_EVAL)).slice(before);
+        return evs.find((e) => e.name === "file:created" && e.payload?.relativePath === "c-new.png") ?? null;
+      },
+      { timeout: 20000, interval: 250, label: "file:created" },
+    );
+    // 自动扫描走与手动扫描同一道闸门；建行 + 发 scan.completed 需要几百毫秒到几秒。
+    const indexed = await waitFor(() => !!readFileRow(repo.dbPath, sourceId, "c-new.png"), {
+      timeout: 90000,
+      interval: 500,
+      label: "自动扫描建行",
+    });
+    // 索引行先落库、scan.completed 后到（emit 在 run_scan 返回之后），所以再等这一帧。
+    const completed = await waitFor(
+      async () => {
+        const evs = (await ev(READ_EVENTS_EVAL)).slice(before);
+        return evs.find((e) => e.name === "scan:completed") ?? null;
+      },
+      { timeout: 15000, interval: 250, label: "scan:completed" },
+    );
+    const evs = (await ev(READ_EVENTS_EVAL)).slice(before);
+    const scanned = completed.ok;
     return {
-      status: newEvents.length === 0 && !row ? "PASS" : "FAIL",
-      evidence: { newEvents, row, total: countSourceFiles(repo.dbPath, sourceId) },
-      notes: ["契约枚举只有 modified|renamed|moved，新增语义未裁决；不重扫是为了防『扫描 ↔ 监听』自激"],
+      status: created.ok && indexed.ok && scanned ? "PASS" : "FAIL",
+      evidence: {
+        created: created.value ?? created.error,
+        createdCount: evs.filter((e) => e.name === "file:created").length,
+        names: evs.map((e) => e.name),
+        allEvents: (await ev(READ_EVENTS_EVAL)).map((e) => e.name + "@" + (e.at % 100000)),
+        totalEvents: (await ev(READ_EVENTS_EVAL)).length,
+        scanned,
+        indexed: indexed.ok,
+        payload: created.value?.payload ?? null,
+        row: readFileRow(repo.dbPath, sourceId, "c-new.png"),
+        taskStatus: await ev('window.__TAURI_INTERNALS__.invoke("task_status").then((r) => JSON.stringify(r).slice(0, 300))'),
+      },
+      notes: [
+        "载荷是 {repoId, sourceId, relativePath}——此刻还没有 fileId，索引行由自动扫描建立",
+        "限流：CREATE_QUIET 1.5s / SCAN_MIN_INTERVAL 30s / MAX_DEFER 30s",
+      ],
     };
   });
 

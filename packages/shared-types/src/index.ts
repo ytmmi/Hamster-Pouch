@@ -48,4 +48,5 @@ export type { PluginChangedPayload } from "./PluginChangedPayload";
 export type { BlueprintChangedPayload } from "./BlueprintChangedPayload";
 export type { FileMissingPayload } from "./FileMissingPayload";
 export type { FileRestoredPayload } from "./FileRestoredPayload";
+export type { FileCreatedPayload } from "./FileCreatedPayload";
 export type { FileChangedPayload } from "./FileChangedPayload";

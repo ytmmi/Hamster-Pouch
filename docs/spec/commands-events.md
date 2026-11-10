@@ -633,7 +633,8 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 | `source.unmount.progress` | `{ taskId, sourceId, phase, processed, total }`（**2026-09 补入**：正文 §3.2 与代码早就有它，本节此前**漏列**；`phase` ∈ `counting`/`syncRules`/`children`/`derived`/`files`/`source`，`total == 0` 表示该阶段总数未知（界面按不定进度显示）。发射点 `apps/desktop/src-tauri/src/commands/source.rs:347`，DTO `source.rs:90`；前端监听 `apps/desktop/src/app_ui/core/taskStore.ts`） |
 | `source.unmount.completed` | `{ taskId, sourceId, cancelled, members, files, tags, ratings, colors, syncAlbums, childSources }`（**2026-09 补入**，同上：本节此前漏列。`cancelled` 为真时整个事务回滚、什么都没删；发射点 `apps/desktop/src-tauri/src/commands/source.rs:284`，DTO `source.rs:101`） |
 | `source.unmount.error` | `{ taskId, sourceId, error }`（**完全卸载的终止失败事件**；发射点 `apps/desktop/src-tauri/src/commands/source.rs:291`（清理失败）与 `:307`（工作线程 panic 终止，`error` 固定为「卸载线程异常终止」），DTO `source.rs:111`；前端监听 `apps/desktop/src/app_ui/core/taskStore.ts:179`） |
-| `file.changed` | `{ repoId, fileId, change: modified|renamed|moved }`（**2026-11-10 已接线**（缺陷 0045）：`apps/desktop/src-tauri/src/source_watch.rs` 为每个**已挂载**源起一个 `hp_scanner::SourceWatcher` 线程，静默 900 ms 后把攒下的路径对库核一次再发；`change` 当前**只发 `modified`**（`renamed`/`moved` 没有可靠判定源：`notify` 的 rename 事件既可能是改名也可能是移动，且契约未定义"新旧路径如何配对"）。**语义边界**：只对**索引里已有**的文件发；「磁盘上新增的文件」不发（契约枚举里没有 `created`，新增语义待裁决，新增仍由扫描发现）；监听**不触发重扫**（避免"扫描写库 → 监听看到 → 再扫描"自激） |
+| `file.changed` | `{ repoId, fileId, change: modified|renamed|moved }`（**2026-11-10 已接线**（缺陷 0045）：`apps/desktop/src-tauri/src/source_watch.rs` 为每个**已挂载**源起一个 `hp_scanner::SourceWatcher` 线程，静默 900 ms 后把攒下的路径对库核一次再发；`change` 当前**只发 `modified`**（`renamed`/`moved` 没有可靠判定源：`notify` 的 rename 事件既可能是改名也可能是移动，且契约未定义"新旧路径如何配对"）。**语义边界**：只对**索引里已有**的文件发（新增文件走独立的 `file.created`，见下一行）；`file.changed` 本身**不触发重扫**。 |
+| `file.created` | `{ repoId, sourceId, relativePath }`（**2026-11-11 新增**（第 37 轮裁决 4）：磁盘上有、索引里没有 → 监听报出这条，并在这一批静默后请求**一次自动增量扫描**把文件真正接进索引。**没有 `fileId`**：此刻索引行还不存在；也不并进 `file.changed.change`（那个枚举描述已索引文件的变化）。auto-scan 三条限流：`CREATE_QUIET` 1.5 s、`SCAN_MIN_INTERVAL` 30 s、`MAX_DEFER` 30 s；走与「扫描」按钮同一道闸门（手动任务在跑时**不插队、不排队**，等下一个窗口）。发射点 `apps/desktop/src-tauri/src/source_watch.rs`，汇总口径见 `docs/issues/0045` 的 2026-11-11 追记 |
 | `file.missing` | `{ repoId, fileId }`（**2026-11-10 已接线**：磁盘上文件消失且索引里 `missing_status = 0` 时发，并发完即把 `missing_status` 置 1；已标记过的不重复发） |
 | `file.restored` | `{ repoId, fileId }`（**2026-11-10 已接线**：索引里 `missing_status != 0`、磁盘上文件又出现时发，并把标记清回 0） |
 | `album.sync.progress` | `{ taskId, albumId, added, removed, pinned }` |
@@ -657,6 +658,7 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 >
 > **10 条缺口的逐条裁决（2026-09，用户拍板）**：**撤下 5 条**——`task.progress` / `task.cancelled`（与既有进度/取消口径重叠）、`media.ready` / `media.ended` / `media.crashed`（随 `media.*` 退役休眠）；**补 1 条发射点**——`plugin.loaded`（`plugin.load` 已存在）；**暂不补 1 条**——`ai.tagging.completed`（占位提供方返回空候选，现在发射等于报假事件，待真实推理提供方）；**保留 3 条并标注"待 watcher 接线"**——`file.changed` / `file.missing` / `file.restored`（`SourceWatcher` 无生产调用方）。
 > **2026-11-10 追记**：上面这 3 条**已经接线**（缺陷 0045，发射点 `apps/desktop/src-tauri/src/source_watch.rs`），缺口清单只剩 `ai.tagging.completed` 一条；同时新登记三条**本轮刻意不做**的边界（新增文件语义、监听不触发重扫、前端暂不消费），见 `docs/issues/0045`。
+> **2026-11-11 追记（第 37 轮裁决 4）**：上面那条边界**「新增文件不发」已被推翻**——新增改为**独立事件 `file.created`**（载荷是 `repoId`/`sourceId`/`relativePath`，因为此时没有 `fileId`），并在静默后**自动排队一次增量扫描**（限流见该行）。因此本表条目数 24 → **25**，「前端暂不消费」仍成立。原「不触发重扫」的理由（自激）没有消失，只是被限流收敛为「**只在有新增时、最多每 30 s 一次**」——普通修改/删除**仍然不触发**扫描。
 >
 > **撤下的条目一律划掉而不删行**，以便追溯"曾经声明过、为何撤下"。
 

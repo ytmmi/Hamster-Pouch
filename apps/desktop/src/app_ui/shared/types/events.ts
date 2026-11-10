@@ -12,6 +12,9 @@
  *
  * 仍在这里手写的是**前端自己 emit** 的事件（不经 Rust DTO，故无生成类型）：
  * `repo.changed { repoId }`、`panel.restore { id }`、`media.surface.click`（空载荷）。
+ *
+ * **2026-11-11 追加 `file.created`**（第 37 轮裁决 4）：它带 `{ repoId, sourceId, relativePath }`，
+ * 没有 `fileId`——文件还没进索引，索引行由随后的自动增量扫描建立。
  */
 
 export type {
@@ -21,6 +24,7 @@ export type {
   BlueprintChangedPayload,
   ColorExtractedPayload,
   FileChangedPayload,
+  FileCreatedPayload,
   FileMissingPayload,
   FileRestoredPayload,
   PluginChangedPayload,

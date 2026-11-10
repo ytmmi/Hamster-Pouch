@@ -578,12 +578,28 @@ pub(crate) async fn source_scan(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> ApiAsync<String> {
-    let outcome = (|| -> HpResult<String> {
+    let _ = repo_id;
+    let outcome = start_source_scan(&state, &app, &source_id, full.unwrap_or(false));
+    api_async(api_from_hp(outcome))
+}
+
+/// 扫描的**非命令入口**：实时监听在收到 `file.created` 后用它触发一次增量扫描
+/// （2026-11-11 第 37 轮裁决 4）。
+///
+/// 与命令层共用同一套闸门：`state.tasks.start` 拿不到控制块就返回 `AlreadyExists`
+/// ——用户正在扫同一个仓库时，监听**不插队、不排队**，等下一个窗口再说（由监听侧限流）。
+pub(crate) fn start_source_scan(
+    state: &AppState,
+    app: &tauri::AppHandle,
+    source_id: &str,
+    full: bool,
+) -> HpResult<String> {
+    // 线程闭包要 `'static`：监听侧传进来的是 `&str`，这里先持有所有权。
+    let source_id = source_id.to_string();
+    (|| -> HpResult<String> {
         if source_id.trim().is_empty() {
             return Err(HpError::InvalidArgument("媒体源 ID 不能为空".into()));
         }
-        let full = full.unwrap_or(false);
-        let _ = repo_id;
 
         // 单任务闸门 + 按 `task_id` 登记控制块（登记在启动线程之前，缺陷 0003）
         let task_id = uuid::Uuid::new_v4().to_string();
@@ -606,7 +622,7 @@ pub(crate) async fn source_scan(
             }
         };
 
-        let st = state.inner().clone();
+        let st = state.clone();
         let app_handle = app.clone();
         let emit_source_id = source_id.clone();
 
@@ -656,8 +672,7 @@ pub(crate) async fn source_scan(
         });
 
         Ok(task_id)
-    })();
-    api_async(api_from_hp(outcome))
+    })()
 }
 
 /// 在后台线程执行扫描（独立连接，不占用主连接锁）。

@@ -718,3 +718,21 @@ pub struct FileChangedPayload {
     /// 契约枚举里的值：本模块只会发 `modified`（`renamed` / `moved` 无可靠判定源）。
     pub change: String,
 }
+
+/// `file.created` 载荷（缺陷 0045 的续档；2026-11-11 第 37 轮裁决）。
+///
+/// 语义：监听发现**磁盘上有、索引里还没有**的文件。此时它还没有 `fileId`（索引行尚未
+/// 生成），因此载荷带的是**定位用的三元组**：仓库 + 媒体源 + 源内相对路径。前端据此可以把
+/// "新到的文件"先摆到界面（占位/闪烁），真正的索引行由随后的增量扫描建立——扫描完成时
+/// `scan.completed` 会照常到达。
+///
+/// 之所以不并进 `file.changed.change`：那个字段的枚举是 `modified|renamed|moved`，
+/// 描述的是**已索引**文件的变化；新增带不来 `fileId`，字段集合本来就不一样。
+#[derive(Serialize, TS, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FileCreatedPayload {
+    pub repo_id: String,
+    pub source_id: String,
+    /// 源内相对路径（`/` 分隔，与 `files.relative_path` 同口径）。
+    pub relative_path: String,
+}

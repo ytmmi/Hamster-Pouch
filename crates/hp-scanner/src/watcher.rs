@@ -78,15 +78,17 @@ pub enum WatchDecision {
     Restored { file_id: String },
     /// 库里有、磁盘上还在、size 或 mtime 变了 → `file.changed(modified)`
     Modified { file_id: String },
+    /// 库里没有、磁盘上有 → `file.created`（2026-11-11 第 37 轮裁决：新增文件也要报）
+    Created,
 }
 
 /// 由"库里怎么记的"与"磁盘上现在什么样"决定发不发事件。
 ///
 /// **语义边界**（对齐 `docs/spec/commands-events.md` 的三条契约）：
 ///
-/// - `known == None`（磁盘上有、索引里没有 = **新增文件**）→ `None`。契约里
-///   `file.changed.change` 只有 `modified|renamed|moved`，新增语义**未裁决**，
-///   因此本轮不发明事件；新增仍由扫描发现。
+/// - `known == None` 且磁盘上有 = **新增文件** → `Created`（`file.created`；2026-11-11
+///   第 37 轮裁决：用户要求"拖进文件夹就进库"，故新增由监听报出并触发一次增量扫描）。
+///   磁盘上也没有（创建后又立刻删）→ `None`。
 /// - `disk == None` 且库里**尚未**标记缺失 → `Missing`；已标记过 → `None`（不重复轰炸）。
 /// - `disk == Some` 且库里标记缺失 → `Restored`。
 /// - `disk == Some`、未标记缺失、`size` 或 `mtime` 变化 → `Modified`；都没变 → `None`
@@ -94,7 +96,9 @@ pub enum WatchDecision {
 ///
 /// 判定是**纯函数**：不做 IO、不碰数据库，因此可以在单测里逐条钉死。
 pub fn decide(known: Option<&KnownFile>, disk: Option<(i64, String)>) -> Option<WatchDecision> {
-    let known = known?;
+    let Some(known) = known else {
+        return disk.map(|_| WatchDecision::Created);
+    };
     match (disk, known.missing) {
         (None, false) => Some(WatchDecision::Missing {
             file_id: known.file_id.clone(),
@@ -173,8 +177,10 @@ mod tests {
         };
         let same = Some((100, "111".to_string()));
 
-        // 库里没有 = 新增文件：契约没有 created 语义，本轮不发。
-        assert_eq!(decide(None, same.clone()), None);
+        // 库里没有、磁盘上有 = 新增文件（第 37 轮裁决：发 file.created，并触发增量扫描）。
+        assert_eq!(decide(None, same.clone()), Some(WatchDecision::Created));
+        // 库里没有、磁盘上也没有（创建后又立刻删）：不发。
+        assert_eq!(decide(None, None), None);
         // 库里有、磁盘没了、库里未标记 → 缺失。
         assert_eq!(
             decide(Some(&known(false)), None),

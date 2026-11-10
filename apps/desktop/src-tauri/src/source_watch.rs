@@ -7,16 +7,20 @@
 //! 本模块把那根线接上：仓库打开时为**每个已挂载的媒体源**起一个监听线程，
 //! 静默 `QUIET` 后把攒下的路径一次性对库核对，按 `hp_scanner::decide` 的判定发事件。
 //!
-//! **本轮语义边界**（三条都写进了 `docs/issues/0045`）：
+//! **新到文件**（2026-11-11 第 37 轮裁决 4）：磁盘上有、索引里没有 → 发
+//! `file.created`（带 `repoId`/`sourceId`/`relativePath`，此时还没有 `fileId`），
+//! 并在这一批静默结束后请求一次增量扫描，把文件真正接进索引。扫描走
+//! `commands::source::start_source_scan`，与用户点「扫描」是同一道闸门，不会抢任务。
 //!
-//! 1. 只对**索引里已有**的文件发事件；磁盘上新增的文件不发——契约的
-//!    `file.changed.change` 只有 `modified|renamed|moved`，"新增"该发什么未裁决。
-//! 2. **不触发重扫**：索引刷新仍由扫描/全量校验负责。否则"扫描写库 → 监听看到
-//!    新文件 → 再扫描"会自激，且大源上会出现无法抑制的 CPU 峰值。
-//! 3. 前端**暂不消费**这三条事件（该刷新什么、要不要提示用户属交互决策）——
-//!    事件先按契约发出来，消费侧另行接线。
+//! 三条限流，让「往文件夹里拖 500 张图」不会变成 500 次扫描：
 //!
-//! 监听线程只读 `files` 行、只写 `missing_status`，从不改动别的列。
+//! - `CREATE_QUIET`（1.5 s）：新增先攒着，等这一波停了才动扫描；
+//! - `SCAN_MIN_INTERVAL`（30 s）：两次**自动**扫描之间至少隔这么久；
+//! - `MAX_DEFER`（30 s）：即便一直被限流压着，最迟也要在首次发现新增后 30 s 内扫一次。
+//!
+//! 另两条边界仍然成立：**只看已挂载源**；**只改 `missing_status`**（`file.created`
+//! 不写库，索引行交给扫描建）。前端**暂不消费**这几条事件（该刷新什么、要不要提示
+//! 用户属交互决策）——事件先按契约发出来，消费侧另行接线。
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -24,11 +28,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use hp_dto::{FileChangedPayload, FileCreatedPayload, FileMissingPayload, FileRestoredPayload};
 use hp_scanner::{
     KnownFile, SourceWatcher, WatchDecision, decide, is_relevant_event, relative_key,
 };
 use hp_store::RepoDb;
-use serde::Serialize;
 
 use crate::commands::shared::{EmitHp, diag_log};
 
@@ -38,29 +42,12 @@ const QUIET: Duration = Duration::from_millis(900);
 const TICK: Duration = Duration::from_millis(150);
 /// 单批上限：一段时间里狂改上万文件时，宁可多分几批也不要一次查爆 SQLite。
 const MAX_BATCH: usize = 512;
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct FileMissingEvent {
-    repo_id: String,
-    file_id: String,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct FileRestoredEvent {
-    repo_id: String,
-    file_id: String,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct FileChangedEvent {
-    repo_id: String,
-    file_id: String,
-    /// 契约枚举里的值：本模块只会发 `modified`。
-    change: &'static str,
-}
+/// 新增文件后等这么久（且这一批里再没有新事件）才请求扫描：把「拖一批图」合并成一次。
+const CREATE_QUIET: Duration = Duration::from_millis(1500);
+/// 两次**自动**扫描的最小间隔：更新一个 4 G 视频不会把 CPU 打满。
+const SCAN_MIN_INTERVAL: Duration = Duration::from_secs(30);
+/// 自动扫描的最长推迟：持续有新建时也不能一直不扫。
+const MAX_DEFER: Duration = Duration::from_secs(30);
 
 /// 进程内单例：`source_id → 停止开关`。
 #[derive(Default)]
@@ -204,6 +191,9 @@ fn watch_loop(
     };
     let mut pending: HashSet<PathBuf> = HashSet::new();
     let mut last_event = Instant::now();
+    // 自动增量扫描的调度状态：等到过一次 `file.created` 后置位，扫过再清。
+    let mut created_at: Option<Instant> = None;
+    let mut last_scan: Option<Instant> = None;
     while !stop.load(Ordering::Relaxed) {
         let mut got = false;
         while let Some(item) = watcher.try_recv() {
@@ -222,8 +212,33 @@ fn watch_loop(
             last_event = Instant::now();
         }
         if !pending.is_empty() && last_event.elapsed() >= QUIET {
-            flush(&app, &repo_path, &repo_id, &source_id, &root, &mut pending);
+            let saw_created = flush(&app, &repo_path, &repo_id, &source_id, &root, &mut pending);
+            if saw_created && created_at.is_none() {
+                created_at = Some(Instant::now());
+            }
             last_event = Instant::now();
+        }
+        if let Some(first) = created_at {
+            // 这一批静默过了（没有新路径在攒）、且这一波新增也安静了，才轮到扫描。
+            let quiet_enough = pending.is_empty() && last_event.elapsed() >= CREATE_QUIET;
+            if quiet_enough {
+                let rate_ok = last_scan.is_none_or(|t| t.elapsed() >= SCAN_MIN_INTERVAL);
+                let too_long = first.elapsed() >= MAX_DEFER;
+                if rate_ok || too_long {
+                    match request_incremental_scan(&app, &source_id) {
+                        Ok(_) => {
+                            created_at = None;
+                            last_scan = Some(Instant::now());
+                        }
+                        Err(e) => {
+                            // 闸门被手动任务占着：不清 created_at，也不打日志刷屏——
+                            // 记一次时间戳，30 s 后再试（`MAX_DEFER` 兜底）。
+                            diag_log(&format!("[watch] 自动扫描未启动 {source_id}: {e}"));
+                            last_scan = Some(Instant::now());
+                        }
+                    }
+                }
+            }
         }
         std::thread::sleep(TICK);
     }
@@ -237,7 +252,8 @@ fn flush(
     source_id: &str,
     root: &Path,
     pending: &mut HashSet<PathBuf>,
-) {
+) -> bool {
+    let mut saw_created = false;
     let paths: Vec<PathBuf> = pending.iter().take(MAX_BATCH).cloned().collect();
     for p in &paths {
         pending.remove(p);
@@ -246,7 +262,7 @@ fn flush(
         Ok(db) => db,
         Err(e) => {
             diag_log(&format!("[watch] 打开仓库库失败，本批丢弃: {e}"));
-            return;
+            return false;
         }
     };
     for path in paths {
@@ -271,7 +287,7 @@ fn flush(
                 mark(&mut db, &file_id, 1);
                 app.emit_hp(
                     "file.missing",
-                    FileMissingEvent {
+                    FileMissingPayload {
                         repo_id: repo_id.to_string(),
                         file_id,
                     },
@@ -281,7 +297,7 @@ fn flush(
                 mark(&mut db, &file_id, 0);
                 app.emit_hp(
                     "file.restored",
-                    FileRestoredEvent {
+                    FileRestoredPayload {
                         repo_id: repo_id.to_string(),
                         file_id,
                     },
@@ -289,13 +305,49 @@ fn flush(
             }
             Some(WatchDecision::Modified { file_id }) => app.emit_hp(
                 "file.changed",
-                FileChangedEvent {
+                FileChangedPayload {
                     repo_id: repo_id.to_string(),
                     file_id,
-                    change: "modified",
+                    change: "modified".into(),
                 },
             ),
+            // 库里没有、磁盘上有：新到的文件。此刻还没有 fileId，先报"在哪里"，
+            // 索引行由随后的自动增量扫描建立（见 watch_loop 的 created_at 调度）。
+            Some(WatchDecision::Created) => {
+                saw_created = true;
+                app.emit_hp(
+                    "file.created",
+                    FileCreatedPayload {
+                        repo_id: repo_id.to_string(),
+                        source_id: source_id.to_string(),
+                        relative_path: rel,
+                    },
+                );
+            }
             None => {}
+        }
+    }
+    saw_created
+}
+
+/// 请求一次**自动**增量扫描（走与「扫描」按钮完全相同的闸门）。
+fn request_incremental_scan(app: &tauri::AppHandle, source_id: &str) -> Result<String, String> {
+    use tauri::Manager;
+    let Some(state) = app.try_state::<crate::AppState>() else {
+        return Err("应用状态不可用".into());
+    };
+    match crate::commands::source::start_source_scan(&state, app, source_id, false) {
+        Ok(task) => {
+            diag_log(&format!(
+                "[watch] 自动增量扫描已排队 {source_id} task={task}"
+            ));
+            Ok(task)
+        }
+        Err(e) => {
+            diag_log(&format!(
+                "[watch] 自动增量扫描被闸门拦下 {source_id}: {e:?}"
+            ));
+            Err(e.to_string())
         }
     }
 }
