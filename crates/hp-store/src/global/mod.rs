@@ -5,4 +5,4 @@ mod blueprint_template_repo;
 mod global_db;
 mod plugin_repo;
 
-pub use global_db::{GlobalDb, PanelLayoutRow, RepoRow};
+pub use global_db::{GlobalDb, LayoutPresetRow, RepoRow, SeedOutcome};

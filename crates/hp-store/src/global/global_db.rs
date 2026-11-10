@@ -2,10 +2,12 @@
 //!
 //! 全局库知道"有哪些仓库"；面板布局、插件注册表等表已建但 API 在后续里程碑提供。
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use hp_core::{HpError, HpResult};
 use rusqlite::{Connection, OptionalExtension, Row, params};
+use serde_json::Value;
 
 use crate::migrate;
 use crate::util::{now_iso, require_nonempty, store_err, uuid};
@@ -16,6 +18,7 @@ const GLOBAL_MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/global/0002_blueprint_templates.sql"),
     include_str!("../../migrations/global/0003_layout_blueprints.sql"),
     include_str!("../../migrations/global/0004_layout_layers.sql"),
+    include_str!("../../migrations/global/0005_layout_presets.sql"),
 ];
 
 /// 仓库注册表行。
@@ -28,19 +31,45 @@ pub struct RepoRow {
     pub last_opened_at: Option<String>,
 }
 
-/// 面板布局行（决策 D1：全局配置库，每行带 `repo_id`；D53：按层各存一份）。
+/// 布局预设行（RFC 0011：应用级，无仓库维度；一份布局 = 一行）。
+///
+/// `layers` 的键是蓝图层 key；空串 `""` 是该布局的层无关快照（只在预设内该层
+/// 缺失时兜底，**不跨预设**借行）。
 #[derive(Debug, Clone, PartialEq)]
-pub struct PanelLayoutRow {
+pub struct LayoutPresetRow {
     pub id: String,
-    pub repo_id: String,
-    /// 命名布局标识（承载“布局名”）。
-    pub workspace: String,
-    /// 所属层 key（D53）；空串 = 迁移前的层无关行（读取指定层时兜底命中）。
-    pub layer_key: String,
-    pub layout_json: String,
-    /// 布局绑定的蓝图 ID 列表（1 个布局可绑定多个蓝图）。
+    pub name: String,
+    /// 各层布局（层 key → 布局 JSON 对象）。
+    pub layers: BTreeMap<String, Value>,
+    /// 布局绑定的蓝图 ID 列表（预设级，1 个布局可绑定多个蓝图）。
     pub blueprint_ids: Vec<String>,
+    /// `'user'` | `'seeded'`（出厂播种；用户保存后转为 `user`）。
+    pub origin: String,
     pub updated_at: String,
+}
+
+impl LayoutPresetRow {
+    /// 该预设的层 key 列表（含 `""` 层无关快照），按字典序。
+    pub fn layer_keys(&self) -> Vec<String> {
+        self.layers.keys().cloned().collect()
+    }
+
+    /// 读取某层的布局 JSON 文本：当前层 → `""`（层无关快照）→ 无。
+    pub fn layer_json(&self, layer_key: &str) -> Option<String> {
+        let value = self.layers.get(layer_key).or_else(|| self.layers.get(""))?;
+        serde_json::to_string(value).ok()
+    }
+}
+
+/// 出厂播种结果（RFC 0011 决策 5）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeedOutcome {
+    /// 本次是否新建了播种预设（库内原先没有任何预设）。
+    pub seeded: bool,
+    /// 是否用新的出厂形状替换了仍未被用户改动的播种预设。
+    pub replaced: bool,
+    /// 播种/替换命中的预设名。
+    pub name: Option<String>,
 }
 
 /// 全局配置库句柄。
@@ -217,201 +246,402 @@ impl GlobalDb {
         Ok(exists)
     }
 
-    /// 保存（UPSERT）某仓库下、**某一层**的命名面板布局。
+    /// 保存（更新）某预设内**某一层**的布局；预设不存在则新建。
     ///
-    /// 决策 D1：布局存全局库、每行带 `repo_id`，按仓库隔离。
-    /// 决策 D53：每层一份布局 —— 行键为 `(repo_id, workspace, layer_key)`；
-    /// `layer_key` 为空串表示层无关行（迁移前的旧预设，读取指定层时兜底命中）。
-    /// `repo_id` 允许为空串（表示未打开仓库 / 全局默认布局）。
-    /// `workspace` 承载命名布局标识（布局名）。
-    /// 蓝图绑定初始为空；绑定/追加走 `set_layout_blueprints`。
-    pub fn save_panel_layout(
+    /// RFC 0011 决策 3：一份布局 = 一行，保存只改该预设内当前层那一格。
+    /// 用户保存会把播种预设的 `origin` 从 `seeded` 转为 `user`（决策 5 的
+    /// 「用户改过则永不覆盖」判定）。
+    pub fn save_layout_layer(
         &mut self,
-        repo_id: &str,
-        workspace: &str,
+        name: &str,
         layer_key: &str,
         layout_json: &str,
-    ) -> HpResult<PanelLayoutRow> {
-        require_nonempty(workspace, "布局名")?;
+    ) -> HpResult<LayoutPresetRow> {
+        require_nonempty(name, "布局名")?;
         require_nonempty(layout_json, "布局内容")?;
+        let value: Value = serde_json::from_str(layout_json)
+            .map_err(|e| HpError::InvalidArgument(format!("布局内容不是合法 JSON: {e}")))?;
+        if !value.is_object() {
+            return Err(HpError::InvalidArgument("布局内容必须是 JSON 对象".into()));
+        }
 
-        let existing: Option<(String, Option<String>)> = self
-            .conn
-            .query_row(
-                "SELECT id, blueprint_ids_json FROM panel_layouts
-                 WHERE repo_id = ?1 AND workspace = ?2 AND layer_key = ?3 LIMIT 1",
-                params![repo_id, workspace, layer_key],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-            .map_err(|e| store_err("查询面板布局", e))?;
-
-        let row = match existing {
-            Some((id, raw_bindings)) => {
-                let updated_at = now_iso();
-                self.conn
-                    .execute(
-                        "UPDATE panel_layouts SET layout_json = ?2, updated_at = ?3 WHERE id = ?1",
-                        params![id, layout_json, updated_at],
-                    )
-                    .map_err(|e| store_err("更新面板布局", e))?;
-                PanelLayoutRow {
-                    id,
-                    repo_id: repo_id.to_string(),
-                    workspace: workspace.to_string(),
-                    layer_key: layer_key.to_string(),
-                    layout_json: layout_json.to_string(),
-                    blueprint_ids: parse_blueprint_ids(raw_bindings),
-                    updated_at,
-                }
-            }
-            None => {
-                let row = PanelLayoutRow {
-                    id: uuid(),
-                    repo_id: repo_id.to_string(),
-                    workspace: workspace.to_string(),
-                    layer_key: layer_key.to_string(),
-                    layout_json: layout_json.to_string(),
-                    blueprint_ids: vec![],
-                    updated_at: now_iso(),
-                };
-                self.conn
-                    .execute(
-                        "INSERT INTO panel_layouts
-                             (id, repo_id, workspace, layer_key, layout_json, blueprint_ids_json, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                        params![
-                            row.id,
-                            row.repo_id,
-                            row.workspace,
-                            row.layer_key,
-                            row.layout_json,
-                            "[]",
-                            row.updated_at
-                        ],
-                    )
-                    .map_err(|e| store_err("写入面板布局", e))?;
-                row
-            }
+        let mut preset = match self.get_layout_preset(name)? {
+            Some(existing) => existing,
+            None => LayoutPresetRow {
+                id: uuid(),
+                name: name.to_string(),
+                layers: BTreeMap::new(),
+                blueprint_ids: Vec::new(),
+                origin: "user".to_string(),
+                updated_at: now_iso(),
+            },
         };
-        Ok(row)
+        preset.layers.insert(layer_key.to_string(), value);
+        preset.origin = "user".to_string();
+        preset.updated_at = now_iso();
+
+        let layers_json = serde_json::to_string(&preset.layers)
+            .map_err(|e| HpError::Store(format!("序列化布局层失败: {e}")))?;
+        let bindings_json = serde_json::to_string(&preset.blueprint_ids)
+            .map_err(|e| HpError::Store(format!("序列化蓝图绑定失败: {e}")))?;
+        self.conn
+            .execute(
+                "INSERT INTO layout_presets
+                     (id, name, layers_json, blueprint_ids_json, origin, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(id) DO UPDATE SET
+                     name = excluded.name,
+                     layers_json = excluded.layers_json,
+                     blueprint_ids_json = excluded.blueprint_ids_json,
+                     origin = excluded.origin,
+                     updated_at = excluded.updated_at",
+                params![
+                    preset.id,
+                    preset.name,
+                    layers_json,
+                    bindings_json,
+                    preset.origin,
+                    preset.updated_at
+                ],
+            )
+            .map_err(|e| store_err("写入布局预设", e))?;
+        Ok(preset)
     }
 
-    /// 设置（覆盖）某布局绑定的蓝图 ID 列表（1 个布局可绑定多个蓝图）。
-    ///
-    /// 绑定是**预设级**语义（不是层级）：同一布局名下的所有层行一起更新。
-    pub fn set_layout_blueprints(
+    /// 导入一份应用级预设（名字已由调用方解决唯一性）。
+    pub fn import_layout_preset(
         &mut self,
-        repo_id: &str,
-        workspace: &str,
+        name: &str,
+        layers: BTreeMap<String, Value>,
         blueprint_ids: &[String],
-    ) -> HpResult<()> {
-        require_nonempty(workspace, "布局名")?;
+    ) -> HpResult<LayoutPresetRow> {
+        require_nonempty(name, "布局名")?;
+        let preset = LayoutPresetRow {
+            id: uuid(),
+            name: name.to_string(),
+            layers,
+            blueprint_ids: blueprint_ids.to_vec(),
+            origin: "user".to_string(),
+            updated_at: now_iso(),
+        };
+        let layers_json = serde_json::to_string(&preset.layers)
+            .map_err(|e| HpError::Store(format!("序列化布局层失败: {e}")))?;
+        let bindings_json = serde_json::to_string(&preset.blueprint_ids)
+            .map_err(|e| HpError::Store(format!("序列化蓝图绑定失败: {e}")))?;
+        self.conn
+            .execute(
+                "INSERT INTO layout_presets
+                     (id, name, layers_json, blueprint_ids_json, origin, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    preset.id,
+                    preset.name,
+                    layers_json,
+                    bindings_json,
+                    preset.origin,
+                    preset.updated_at
+                ],
+            )
+            .map_err(|e| store_err("写入导入布局预设", e))?;
+        Ok(preset)
+    }
+
+    /// 设置（覆盖）某预设绑定的蓝图 ID 列表（预设级，作用于全部层）。
+    pub fn set_layout_blueprints(&mut self, name: &str, blueprint_ids: &[String]) -> HpResult<()> {
+        require_nonempty(name, "布局名")?;
         let json = serde_json::to_string(blueprint_ids)
             .map_err(|e| HpError::Store(format!("序列化蓝图绑定失败: {e}")))?;
         let n = self
             .conn
             .execute(
-                "UPDATE panel_layouts SET blueprint_ids_json = ?3, updated_at = ?4
-                 WHERE repo_id = ?1 AND workspace = ?2",
-                params![repo_id, workspace, json, now_iso()],
+                "UPDATE layout_presets SET blueprint_ids_json = ?2, updated_at = ?3
+                 WHERE name = ?1",
+                params![name, json, now_iso()],
             )
             .map_err(|e| store_err("写入布局蓝图绑定", e))?;
         if n == 0 {
-            return Err(HpError::NotFound(format!("布局不存在: {workspace}")));
+            return Err(HpError::NotFound(format!("布局不存在: {name}")));
         }
         Ok(())
     }
 
-    /// 列出某仓库下全部命名面板布局行（按 `updated_at` 倒序，最新在前）。
-    ///
-    /// 返回的是**层行**：同一布局名在每个层各一行（D53），调用方按 `workspace` 聚合。
-    pub fn list_panel_layouts(&self, repo_id: &str) -> HpResult<Vec<PanelLayoutRow>> {
+    /// 列出全部应用级预设（最新在前）。
+    pub fn list_layout_presets(&self) -> HpResult<Vec<LayoutPresetRow>> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, repo_id, workspace, layer_key, layout_json, blueprint_ids_json, updated_at
-                 FROM panel_layouts WHERE repo_id = ?1 ORDER BY updated_at DESC",
+                "SELECT id, name, layers_json, blueprint_ids_json, origin, updated_at
+                 FROM layout_presets ORDER BY updated_at DESC, name",
             )
-            .map_err(|e| store_err("查询面板布局列表", e))?;
+            .map_err(|e| store_err("查询布局预设列表", e))?;
         let rows = stmt
-            .query_map(params![repo_id], row_to_layout)
-            .map_err(|e| store_err("读取面板布局列表", e))?
+            .query_map([], row_to_layout_preset)
+            .map_err(|e| store_err("读取布局预设列表", e))?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| store_err("解析面板布局列表", e))?;
+            .map_err(|e| store_err("解析布局预设列表", e))?;
         Ok(rows)
     }
 
-    /// 读取某仓库下、某一层的命名面板布局；不存在返回 `None`。
-    ///
-    /// 兼容：该层没有专属行时回退到 `layer_key = ''` 的层无关行（迁移前的旧预设）。
-    pub fn get_panel_layout(
-        &self,
-        repo_id: &str,
-        workspace: &str,
-        layer_key: &str,
-    ) -> HpResult<Option<PanelLayoutRow>> {
-        let exact = self
-            .conn
-            .query_row(
-                "SELECT id, repo_id, workspace, layer_key, layout_json, blueprint_ids_json, updated_at
-                 FROM panel_layouts WHERE repo_id = ?1 AND workspace = ?2 AND layer_key = ?3 LIMIT 1",
-                params![repo_id, workspace, layer_key],
-                row_to_layout,
-            )
-            .optional()
-            .map_err(|e| store_err("查询面板布局", e))?;
-        if exact.is_some() || layer_key.is_empty() {
-            return Ok(exact);
-        }
+    /// 按名字读取一份预设；不存在返回 `None`。
+    pub fn get_layout_preset(&self, name: &str) -> HpResult<Option<LayoutPresetRow>> {
+        require_nonempty(name, "布局名")?;
         self.conn
             .query_row(
-                "SELECT id, repo_id, workspace, layer_key, layout_json, blueprint_ids_json, updated_at
-                 FROM panel_layouts WHERE repo_id = ?1 AND workspace = ?2 AND layer_key = '' LIMIT 1",
-                params![repo_id, workspace],
-                row_to_layout,
+                "SELECT id, name, layers_json, blueprint_ids_json, origin, updated_at
+                 FROM layout_presets WHERE name = ?1 LIMIT 1",
+                params![name],
+                row_to_layout_preset,
             )
             .optional()
-            .map_err(|e| store_err("查询层无关面板布局", e))
+            .map_err(|e| store_err("查询布局预设", e))
     }
 
-    /// 重命名某仓库下的命名布局（同一布局名的**所有层行**一起改名）。
-    pub fn rename_panel_layout(
-        &mut self,
-        repo_id: &str,
-        name: &str,
-        new_name: &str,
-    ) -> HpResult<()> {
+    /// 读取某预设内某一层的布局 JSON（当前层 → `""` → 无）；**不跨预设**兜底。
+    pub fn get_layout_layer(&self, name: &str, layer_key: &str) -> HpResult<Option<String>> {
+        Ok(self
+            .get_layout_preset(name)?
+            .and_then(|preset| preset.layer_json(layer_key)))
+    }
+
+    /// 重命名预设（默认指针与绑定引用都按 id 存，无需跟着改）。
+    pub fn rename_layout_preset(&mut self, name: &str, new_name: &str) -> HpResult<()> {
         require_nonempty(name, "布局名")?;
         require_nonempty(new_name, "新布局名")?;
+        if new_name != name && self.get_layout_preset(new_name)?.is_some() {
+            return Err(HpError::AlreadyExists(format!("布局已存在: {new_name}")));
+        }
         let n = self
             .conn
             .execute(
-                "UPDATE panel_layouts SET workspace = ?3, updated_at = ?4
-                 WHERE repo_id = ?1 AND workspace = ?2",
-                params![repo_id, name, new_name, now_iso()],
+                "UPDATE layout_presets SET name = ?2, updated_at = ?3 WHERE name = ?1",
+                params![name, new_name, now_iso()],
             )
-            .map_err(|e| store_err("重命名面板布局", e))?;
+            .map_err(|e| store_err("重命名布局预设", e))?;
         if n == 0 {
             return Err(HpError::NotFound(format!("布局不存在: {name}")));
         }
         Ok(())
     }
 
-    /// 删除某仓库下的命名布局（同一布局名的**所有层行**一起删除）。
-    pub fn delete_panel_layout(&mut self, repo_id: &str, name: &str) -> HpResult<()> {
+    /// 删除预设。命中应用级默认或任一仓库绑定时**拒绝删除**（RFC 0011 决策 11）。
+    pub fn delete_layout_preset(&mut self, name: &str) -> HpResult<()> {
         require_nonempty(name, "布局名")?;
-        let n = self
+        let preset = self
+            .get_layout_preset(name)?
+            .ok_or_else(|| HpError::NotFound(format!("布局不存在: {name}")))?;
+        if self.default_layout_id()?.as_deref() == Some(preset.id.as_str()) {
+            return Err(HpError::InvalidArgument(format!(
+                "布局「{name}」是应用级默认，先设为其他默认再删除"
+            )));
+        }
+        let bound: bool = self
             .conn
-            .execute(
-                "DELETE FROM panel_layouts WHERE repo_id = ?1 AND workspace = ?2",
-                params![repo_id, name],
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM layout_bindings WHERE preset_id = ?1)",
+                params![preset.id],
+                |row| row.get(0),
             )
-            .map_err(|e| store_err("删除面板布局", e))?;
-        if n == 0 {
-            return Err(HpError::NotFound(format!("布局不存在: {name}")));
+            .map_err(|e| store_err("查询布局绑定", e))?;
+        if bound {
+            return Err(HpError::InvalidArgument(format!(
+                "布局「{name}」被仓库覆盖引用，先解除绑定再删除"
+            )));
+        }
+        self.conn
+            .execute(
+                "DELETE FROM layout_presets WHERE id = ?1",
+                params![preset.id],
+            )
+            .map_err(|e| store_err("删除布局预设", e))?;
+        Ok(())
+    }
+
+    /// 设为应用级默认（`app_settings['layout.default']` 存预设 id）。
+    pub fn set_default_layout(&mut self, name: &str) -> HpResult<()> {
+        let preset = self
+            .get_layout_preset(name)?
+            .ok_or_else(|| HpError::NotFound(format!("布局不存在: {name}")))?;
+        self.conn
+            .execute(
+                "INSERT INTO app_settings (key, value) VALUES ('layout.default', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![preset.id],
+            )
+            .map_err(|e| store_err("写入应用级默认布局", e))?;
+        Ok(())
+    }
+
+    /// 应用级默认预设 id（`layout.default` 的原始值）。
+    pub fn default_layout_id(&self) -> HpResult<Option<String>> {
+        self.get_setting("layout.default")
+            .map(|value| value.filter(|v| !v.is_empty()))
+    }
+
+    /// 应用级默认预设名；未设置或指向已不存在的预设时返回 `None`。
+    pub fn default_layout_name(&self) -> HpResult<Option<String>> {
+        let Some(id) = self.default_layout_id()? else {
+            return Ok(None);
+        };
+        self.conn
+            .query_row(
+                "SELECT name FROM layout_presets WHERE id = ?1 LIMIT 1",
+                params![id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| store_err("查询默认布局名", e))
+    }
+
+    /// 某仓库的覆盖绑定（预设名）；无绑定返回 `None`。
+    pub fn layout_binding_name(&self, repo_id: &str) -> HpResult<Option<String>> {
+        require_nonempty(repo_id, "仓库 ID")?;
+        self.conn
+            .query_row(
+                "SELECT p.name FROM layout_bindings b
+                 JOIN layout_presets p ON p.id = b.preset_id
+                 WHERE b.repo_id = ?1 LIMIT 1",
+                params![repo_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| store_err("查询仓库布局绑定", e))
+    }
+
+    /// 设 / 清仓库覆盖（RFC 0011 决策 4）：`Some(name)` 写绑定行，`None` 删除绑定行。
+    pub fn bind_layout_repo(&mut self, repo_id: &str, name: Option<&str>) -> HpResult<()> {
+        require_nonempty(repo_id, "仓库 ID")?;
+        match name {
+            Some(name) => {
+                let preset = self
+                    .get_layout_preset(name)?
+                    .ok_or_else(|| HpError::NotFound(format!("布局不存在: {name}")))?;
+                self.conn
+                    .execute(
+                        "INSERT INTO layout_bindings (repo_id, preset_id, updated_at)
+                         VALUES (?1, ?2, ?3)
+                         ON CONFLICT(repo_id) DO UPDATE SET
+                             preset_id = excluded.preset_id,
+                             updated_at = excluded.updated_at",
+                        params![repo_id, preset.id, now_iso()],
+                    )
+                    .map_err(|e| store_err("写入仓库布局绑定", e))?;
+            }
+            None => {
+                self.conn
+                    .execute(
+                        "DELETE FROM layout_bindings WHERE repo_id = ?1",
+                        params![repo_id],
+                    )
+                    .map_err(|e| store_err("清除仓库布局绑定", e))?;
+            }
         }
         Ok(())
+    }
+
+    /// 出厂播种（RFC 0011 决策 5）：库内没有任何预设时把代码内建形状播种为
+    /// `origin = 'seeded'` 的应用级预设并设为默认；已有 seed 预设且仍未被用户
+    /// 改动时，用新形状替换（`save_layout_layer` 会把 `origin` 转成 `user`）。
+    pub fn ensure_seeded_layout(
+        &mut self,
+        name: &str,
+        layers_json: &str,
+        blueprint_ids: &[String],
+    ) -> HpResult<SeedOutcome> {
+        require_nonempty(name, "布局名")?;
+        let layers: BTreeMap<String, Value> = serde_json::from_str(layers_json)
+            .map_err(|e| HpError::InvalidArgument(format!("布局内容不是合法 JSON: {e}")))?;
+        if layers.is_empty() {
+            return Err(HpError::InvalidArgument("布局内容不能为空".into()));
+        }
+        let canonical = serde_json::to_string(&layers)
+            .map_err(|e| HpError::Store(format!("序列化布局层失败: {e}")))?;
+
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM layout_presets", [], |row| row.get(0))
+            .map_err(|e| store_err("统计布局预设", e))?;
+        if count == 0 {
+            let id = uuid();
+            let now = now_iso();
+            let bindings = serde_json::to_string(blueprint_ids)
+                .map_err(|e| HpError::Store(format!("序列化蓝图绑定失败: {e}")))?;
+            self.conn
+                .execute(
+                    "INSERT INTO layout_presets
+                         (id, name, layers_json, blueprint_ids_json, origin, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, 'seeded', ?5)",
+                    params![id, name, canonical, bindings, now],
+                )
+                .map_err(|e| store_err("播种出厂布局", e))?;
+            self.conn
+                .execute(
+                    "INSERT INTO app_settings (key, value) VALUES ('layout.default', ?1)
+                     ON CONFLICT(key) DO NOTHING",
+                    params![id],
+                )
+                .map_err(|e| store_err("写入播种默认布局", e))?;
+            return Ok(SeedOutcome {
+                seeded: true,
+                replaced: false,
+                name: Some(name.to_string()),
+            });
+        }
+
+        let seeded: Option<(String, String)> = self
+            .conn
+            .query_row(
+                "SELECT id, name FROM layout_presets WHERE origin = 'seeded' LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| store_err("查询播种布局", e))?;
+        let Some((id, seeded_name)) = seeded else {
+            return Ok(SeedOutcome {
+                seeded: false,
+                replaced: false,
+                name: None,
+            });
+        };
+
+        // 播种预设仍未被改动：内容与出厂形状不一致时按新版本替换。
+        let current: String = self
+            .conn
+            .query_row(
+                "SELECT layers_json FROM layout_presets WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(|e| store_err("读取播种布局", e))?;
+        let mut replaced = false;
+        if current != canonical {
+            let bindings = serde_json::to_string(blueprint_ids)
+                .map_err(|e| HpError::Store(format!("序列化蓝图绑定失败: {e}")))?;
+            self.conn
+                .execute(
+                    "UPDATE layout_presets
+                        SET layers_json = ?2, blueprint_ids_json = ?3, updated_at = ?4
+                      WHERE id = ?1",
+                    params![id, canonical, bindings, now_iso()],
+                )
+                .map_err(|e| store_err("替换播种布局", e))?;
+            replaced = true;
+        }
+        // 默认指针缺失（或指向已不存在的预设）时补指到播种预设。
+        if self.default_layout_name()?.is_none() {
+            self.conn
+                .execute(
+                    "INSERT INTO app_settings (key, value) VALUES ('layout.default', ?1)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![id],
+                )
+                .map_err(|e| store_err("修复播种默认布局", e))?;
+        }
+        Ok(SeedOutcome {
+            seeded: false,
+            replaced,
+            name: Some(seeded_name),
+        })
     }
 
     /// 重命名仓库注册行。
@@ -431,8 +661,9 @@ impl GlobalDb {
         Ok(())
     }
 
-    /// 删除仓库注册行及其关联数据（面板布局、插件仓库状态）。
+    /// 删除仓库注册行及其关联数据（仓库布局绑定、插件仓库状态）。
     ///
+    /// RFC 0011：布局预设是应用级的，不再随仓库删除；只删 `layout_bindings` 的覆盖行。
     /// 不删除仓库库文件本身（由边界层处理），也不删除真实媒体源文件。
     pub fn delete_repo(&mut self, id: &str) -> HpResult<()> {
         require_nonempty(id, "仓库 ID")?;
@@ -440,7 +671,7 @@ impl GlobalDb {
             .conn
             .unchecked_transaction()
             .map_err(|e| store_err("开启仓库删除事务", e))?;
-        for table in ["panel_layouts", "plugin_repo_state"] {
+        for table in ["layout_bindings", "plugin_repo_state"] {
             tx.execute(
                 &format!("DELETE FROM {table} WHERE repo_id = ?1"),
                 params![id],
@@ -470,21 +701,22 @@ fn _assert_send() {
     assert_send::<GlobalDb>();
 }
 
-/// `panel_layouts` 行解析（含层归属与蓝图绑定 JSON）。
-fn row_to_layout(row: &Row) -> rusqlite::Result<PanelLayoutRow> {
-    let raw: Option<String> = row.get(5)?;
-    Ok(PanelLayoutRow {
+/// `layout_presets` 行解析（层 JSON 与蓝图绑定 JSON）。
+fn row_to_layout_preset(row: &Row) -> rusqlite::Result<LayoutPresetRow> {
+    let raw_layers: String = row.get(2)?;
+    let raw_bindings: Option<String> = row.get(3)?;
+    let layers = serde_json::from_str::<BTreeMap<String, Value>>(&raw_layers).unwrap_or_default();
+    Ok(LayoutPresetRow {
         id: row.get(0)?,
-        repo_id: row.get(1)?,
-        workspace: row.get(2)?,
-        layer_key: row.get(3)?,
-        layout_json: row.get(4)?,
-        blueprint_ids: parse_blueprint_ids(raw),
-        updated_at: row.get(6)?,
+        name: row.get(1)?,
+        layers,
+        blueprint_ids: parse_blueprint_ids(raw_bindings),
+        origin: row.get(4)?,
+        updated_at: row.get(5)?,
     })
 }
 
-/// 解析布局行的蓝图绑定 JSON（损坏时按空列表处理）。
+/// 解析布局预设的蓝图绑定 JSON（损坏时按空列表处理）。
 fn parse_blueprint_ids(raw: Option<String>) -> Vec<String> {
     raw.and_then(|r| serde_json::from_str::<Vec<String>>(&r).ok())
         .unwrap_or_default()
