@@ -38,8 +38,9 @@ pub use process::hidden_command;
 pub use svg::{SVG_EXTS, is_svg, rasterize_svg};
 pub use thumbnail::{
     IMAGE_THUMB_DIM_LADDER, IMAGE_THUMB_MAX_DIM, IMAGE_THUMB_MAX_LADDER_DIM,
-    IMAGE_THUMB_WEBP_QUALITY, VIDEO_BLACK_SKIP_WINDOW, extract_thumbnail, generate_image_preview,
-    generate_image_thumbnail, generate_image_thumbnail_known, image_thumb_dim_for,
+    IMAGE_THUMB_WEBP_QUALITY, VIDEO_BLACK_SKIP_WINDOW, encode_image_thumbnail, extract_thumbnail,
+    generate_image_preview, generate_image_thumbnail, generate_image_thumbnail_known,
+    image_thumb_dim_for,
 };
 pub use waveform::{WAVE_COLOR, WAVE_SIZE, generate_waveform};
 

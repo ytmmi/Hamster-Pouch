@@ -398,7 +398,25 @@ pub fn generate_image_thumbnail_known(
     known: Option<(u32, u32)>,
 ) -> HpResult<()> {
     let img = decode_thumbnail_src(src, ffmpeg_bin, max_dim, timeout, known)?;
+    encode_image_thumbnail(img, output, max_dim, ffmpeg_bin, timeout)
+}
 
+/// **已解码**的图 → 缩略图落盘（缩放 + 编码）。
+///
+/// 与 [`generate_image_thumbnail_known`] 的后半段**是同一份实现**：那条路先解码再调它。
+/// 单独拆出来是为了让**扫描期**复用自己已经拿到的那张图（第 44 轮 / D161）：
+/// 扫描为了算 dHash 与调色板已经解码过一次，缩略图再解码一次就是第二次全量解码
+/// 外加第二次 ffmpeg 进程启动（实测 120 张 AVIF：冷缓存 20.3 s → 40.9 s）。
+///
+/// **缩放口径与非复用路径逐位相同**：仅当长边超过 `max_dim` 时 `thumbnail()`
+/// （那是 `image` crate 的整数快缩放，和 `resize()` 的滤波器不是一回事，不能换）。
+pub fn encode_image_thumbnail(
+    img: image::DynamicImage,
+    output: &Path,
+    max_dim: u32,
+    ffmpeg_bin: Option<&Path>,
+    timeout: Duration,
+) -> HpResult<()> {
     // 仅当长边超过上限时缩放，避免小图被放大。
     let thumb = if img.width() > max_dim || img.height() > max_dim {
         img.thumbnail(max_dim, max_dim)
