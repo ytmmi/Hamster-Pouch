@@ -410,6 +410,30 @@ device，在同一台机器上连跑 4 次；每档分别测：`adapter.info`、
 | S3 补齐 | 中间档（仅在 S2 通过且实测有跳变时）、胶片栏图集、PDF 页面按倍率重栅格 | 2–4 d | 每一项都要有「不回退就掉帧」的实测证据，不做则记为不做 |
 | S4 收尾 | 决策登记（`decision-checklist.md` 追加 D160，编号落地时按当时序号取）、`file-structure.md` 增 `render/`、性能基线写进 `apps/desktop/perf/README` | 0.5 d | 全部门禁绿 + 真机验收截图 |
 
+### 12.1 S2 实测与止损结论（2026-11-11）
+
+S2 按 §6 全量实现后（`surfaceWebGpu.ts` 约 640 行、`shaderQuad.wgsl`、1024² 分块 + 2 px 边框、LOD0 mip 链、LOD1 LRU 256 MiB + 每帧 32 MiB 预算、`device.lost` 重建 ≤2 次后降 canvas2d；后端另加 `preview.tile` 命令按块裁剪并缓存），在**打包 app 的同一个 WebView2**里跑缩放场景（triangular 波形 fit→peak→fit，逐帧一次 `setView`，120 帧，预热 12 帧，长帧阈值 > 50 ms）。
+
+机器：Windows 11 家庭版 10.0.26300 · i5-13500H · Iris Xe（`intel / gen-12lp`）· dpr 1.5 · WebView2 157。本机 WebGPU 只枚举到核显（§6.8 已记录），**独显路径未测**。
+
+| 场景 | 图 | 宿主 | peak | canvas2d p50 / p95 / 长帧 | webgpu p50 / p95 / 长帧 | dom p50 / p95 / 长帧 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 合成夹具 | 6000×4000 | 1280×800 | 4× | 6.1 / 6.8 / 1 | 6.0 / 7.2 / 1 | 6.1 / 7.0 / 1 |
+| 合成夹具 · 240 帧 | 6000×4000 | 1280×800 | 4× | 6.1 / 6.9 / 1 | 6.1 / 6.9 / 1 | 6.0 / 6.9 / 1 |
+| 真实图 24.0 MP（avif 6000×4000） | 同上 | 1280×800 | 4× | 6.1 / 7.3 / 1 | 6.1 / 7.0 / 1 | 6.1 / 6.8 / 1 |
+| 真实图 | 同上 | 1280×800 | 16× | 6.0 / 7.2 / 1 | 6.0 / 6.9 / 1 | 6.1 / 6.7 / 1 |
+| 真实图 | 同上 | 2560×1500 | 8× | **9.6 / 20.5 / 1** | **11.5 / 24.6 / 1** | **6.1 / 6.8 / 1** |
+
+三个结论：
+
+1. **长帧改善 0%**（所有组合的长帧计数都是 1，且那 1 帧来自预热残留）。1280×800 宿主上三档全部被 WebView2 的刷新率钉在 ~6.1 ms，测量本身已经没有分辨率。
+2. 唯一拉开差距的 2560×1500 宿主上，**WebGPU 比 canvas2d 慢约 20%**（p50 11.5 vs 9.6，p95 24.6 vs 20.5）。原因是收益前提不成立：Chromium 的 canvas2d 本来就由 Skia 走 GPU，`drawImage` 是 GPU 到 GPU；而 WebGPU 路径每帧要 CPU 算 NDC、按块 `writeBuffer`，分块还要 `createImageBitmap` 裁切。§13「收益被高估」那条风险命中了。
+3. **DOM 后端最快**（6.1 / 6.8）：CSS transform 由合成器直接做，不重栅格。这解释了为什么今天的 `<img>` 路径在缩放时并不慢——缩放的瓶颈在**换图解码**，不在绘制，而换图解码已由 S1 的 LOD0 解决。
+
+处置（按 §12 的止损条款）：**`surfaceWebGpu.ts` 整体删除即回滚**，同时删除 `shaderQuad.wgsl`、`tileSource.ts`、`preview.tile` 命令与 `hp_media::tile` 分块生成、契约文档里对应行。保留：S1 全部成果（dom / canvas2d 表面、LOD0、契约、设置两键、`check:render`）、`render/webgpu.ts` 的探测类型与 `capabilities.ts` 的探测路径（`auto` 阶梯里 `webgpu`/`webgpu-compat` 两档现在无处可构造，`constructBackend` 返回 `null` 让阶梯继续往下走，落到 canvas2d）。`ui.imageBackend` 的 `webgpu` / `webgpu-compat` 选项**仍在设置里**：它们是排障用的强制档，选到即落 canvas2d，行为可预期。
+
+`--scenario=viewer-zoom` 未加进 `apps/desktop/perf/run.mjs`：回滚之后没有可比的第二个后端，headless 也无 WebGPU；本节的实测来自 `render-zoom-probe.mjs`（临时探针，随 S2 一并删除），数字已记在此处。
+
 ## 13. 风险
 
 | 风险 | 触发条件 | 处置 |

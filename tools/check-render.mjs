@@ -14,7 +14,8 @@
  *    `createElement("canvas")` 只允许出现在 `app_ui/render/`（别处一律 FAIL）；
  * 9. **不引第三方渲染库**：`apps/desktop/package.json` 的依赖里不得出现 three/pixi/regl/babylon；
  * 10. **设备丢失有兜底**：`surfaceWebGpu.ts` 必须含 `device.lost` 与重试上限常量
- *     `MAX_DEVICE_REBUILDS`；文件尚未落地（S2 之前）时，改为断言没有任何文件 import 它；
+ *     `MAX_DEVICE_REBUILDS`；文件尚未落地（未实现，或已按 §12.1 止损回滚）时，
+ *     改为断言没有任何文件 import 它；
  * 11. **降级链收口**：`decideBackends` 的任何返回值都必须以 `"dom"` 结尾；
  * 12. **LOD0 阈值两侧**：`shouldPrefetchLowRes` 在 4096 为 `false`、4097 为 `true`，且
  *     9000×6000 与 6000×9000 同为 `true`（判据是长边，不是宽或高）。
@@ -324,15 +325,15 @@ if (existsSync(GPU_SURFACE)) {
     `lost=${hasLost}，limit=${hasLimit}`,
   );
 } else {
-  // S2 之前该文件本就不该存在；此时的断言是「没人提前 import 它」，
-  // 这也正是 S2 回滚只需删文件的依据。
+  // 该文件本就不该存在（S2 未开工，或已按 RFC §12.1 的止损删掉）；此时的断言是
+  // 「没人 import 它」——这正是「删一个文件即可回滚」这个性质的实际保障。
   const earlyImports = walkSources(SRC_DIR)
     .map((file) => relative(ROOT, file))
     .filter((rel) => /surfaceWebGpu/.test(readFileSync(join(ROOT, rel), "utf8")));
   check(
-    "⑩ surfaceWebGpu 未落地（S2 之前）且无任何引用",
+    "⑩ surfaceWebGpu 未落地（未实现或已回滚，见 RFC §12.1）且无任何引用",
     earlyImports.length === 0,
-    earlyImports.length === 0 ? "S2 尚未开始" : earlyImports.join("、"),
+    earlyImports.length === 0 ? "无该文件、无引用" : earlyImports.join("、"),
   );
 }
 

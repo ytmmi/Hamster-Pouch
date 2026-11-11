@@ -118,7 +118,9 @@ function depsOf(runtime: Runtime): SurfaceDeps {
 function constructBackend(backend: Backend, deps: SurfaceDeps, hooks: SurfaceHooks): ImageSurface | null {
   if (backend === "dom") return createDomSurface(deps, hooks);
   if (backend === "canvas2d") return createCanvas2dSurface(deps, hooks);
-  // webgpu / webgpu-compat 在 S2 才落实现；S1 阶段返回 null，让阶梯继续往下走。
+  // S2 的 WebGPU 表面已按 RFC §12 止损回滚（真机实测长帧改善 0%，见 RFC §12.1），
+  // 阶梯里这两档暂时无处可构造：返回 null 让阶梯继续往下走，**不记失败**。
+  if (backend === "webgpu" || backend === "webgpu-compat") return null;
   return null;
 }
 
