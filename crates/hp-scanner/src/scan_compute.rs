@@ -76,19 +76,51 @@ pub fn probe_image(path: &Path) -> ImageProbe {
     }
 }
 
-/// 扫描期 AVIF/HEIC 家族 ffmpeg 兜底解码的有界尺寸：dHash（9×8）与调色板（64×64）
-/// 都不需要全分辨率像素；有界解码把大图成本从"全解码 + Triangle 重采样"压到
-/// 与 256px 相当的规模。对 AVIF/HEIC 没有既存缓存可比对，按文件确定性地采用该
-/// 中间尺寸是安全的（`hp_media::decode` 的模块文档）。
-const SCAN_DECODE_BOUND: u32 = 256;
+/// 扫描期解码的有界尺寸：**与缩略图上限取同一个常量**（第 44 轮 / D161）。
+///
+/// 扫描期一张图只解码**一次**，这一张图要同时喂三个消费者：dHash（9×8）、
+/// 调色板（64×64）与缩略图（长边 ≤ `IMAGE_THUMB_MAX_DIM`）。因此上界必须
+/// 由**最挑剔的那个**决定——也就是缩略图；否则要么缩略图被放大，要么再解码一次。
+/// 用常量绑定而不是写死数字：缩略图上限一改，扫描解码口径跟着走，不会悄悄分叉。
+///
+/// 代价可忽略：实测 113 张真实 AVIF，有界 256 → 320 每张 153.7 → 156.4 ms（+1.8%）。
+pub const SCAN_DECODE_BOUND: u32 = hp_media::IMAGE_THUMB_MAX_DIM;
 
-/// 对一张图片解码一次，同时得出感知哈希与（按需的）调色板。
+/// 扫描期解码一张图片（有界，见 [`SCAN_DECODE_BOUND`]）。
+///
+/// 解码优先走进程内 `image::open`（jpg/png 等既有格式输出与旧实现**逐位相同**）；
+/// AVIF/HEIC 家族失败时回退捆绑 ffmpeg 有界解码（`ffmpeg_bin` 为 `None` 时无兜底）。
+pub fn decode_scan_image(
+    path: &Path,
+    ffmpeg_bin: Option<&Path>,
+    timeout: Duration,
+) -> HpResult<image::DynamicImage> {
+    hp_media::decode_image_fallback(path, ffmpeg_bin, SCAN_DECODE_BOUND, timeout)
+        .map_err(|e| HpError::Io(format!("解码图片失败 {}: {e}", path.display())))
+}
+
+/// 对**已解码**的图求感知哈希与（按需的）调色板。
 ///
 /// `want_palette = false` 时**跳过调色板计算**：调用方已从库里读到它被手动锁定，
 /// 重算出来也会被丢弃，不如省下这次重采样。
 ///
-/// 解码优先走进程内 `image::open`（jpg/png 等既有格式输出与旧实现**逐位相同**）；
-/// AVIF/HEIC 家族失败时回退捆绑 ffmpeg 有界解码（`ffmpeg_bin` 为 `None` 时无兜底）。
+/// 入参是 `&DynamicImage`：扫描期这张图还要交给缩略图编码（[`hp_media::encode_image_thumbnail`]），
+/// 因此这里只借用、不夺取所有权，省掉一次整图克隆（9000² 的 RGB 克隆是 243 MB）。
+pub fn analyze_image_derivations(
+    img: &image::DynamicImage,
+    want_palette: bool,
+) -> ImageDerivations {
+    let perceptual = Some(dhash_image(img));
+    let palette = want_palette.then(|| extract_palette_from_image(img, 0).colors);
+    ImageDerivations {
+        perceptual,
+        palette,
+    }
+}
+
+/// 解码一次，同时得出感知哈希与（按需的）调色板——[`decode_scan_image`] +
+/// [`analyze_image_derivations`] 的组合，供不需要复用那张图的调用方（测试、基准）使用。
+///
 /// 解码失败返回 `HpError::Io`；调用方按既有口径处理（感知哈希缺失、调色板不写），
 /// **不影响索引本身**——这与旧实现 `dhash_file(path).ok()` + `write_palette` 内部
 /// `extract_palette(..).ok()` 的容错语义完全一致。
@@ -98,14 +130,8 @@ pub fn analyze_image(
     ffmpeg_bin: Option<&Path>,
     timeout: Duration,
 ) -> HpResult<ImageDerivations> {
-    let img = hp_media::decode_image_fallback(path, ffmpeg_bin, SCAN_DECODE_BOUND, timeout)
-        .map_err(|e| HpError::Io(format!("解码图片失败 {}: {e}", path.display())))?;
-    let perceptual = Some(dhash_image(&img));
-    let palette = want_palette.then(|| extract_palette_from_image(&img, 0).colors);
-    Ok(ImageDerivations {
-        perceptual,
-        palette,
-    })
+    let img = decode_scan_image(path, ffmpeg_bin, timeout)?;
+    Ok(analyze_image_derivations(&img, want_palette))
 }
 
 #[cfg(test)]

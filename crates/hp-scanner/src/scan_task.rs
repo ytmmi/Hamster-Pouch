@@ -16,7 +16,7 @@ use hp_core::{FileMark, MediaType, ThumbStatus};
 use hp_hash::{ContentHash, PerceptualHash, hash_file};
 use hp_media::{IMAGE_THUMB_MAX_DIM, extract_thumbnail, generate_image_thumbnail};
 
-use crate::scan_compute::{ImageProbe, analyze_image};
+use crate::scan_compute::{ImageProbe, analyze_image_derivations, decode_scan_image};
 use crate::scanner::ScanOptions;
 
 /// 串行准备阶段的产物：只含**廉价**信息（媒体类型、stat、是否变化、调色板是否要重算）。
@@ -96,22 +96,32 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
                     ..Computed::default()
                 };
             };
-            // 解码一次，同时得出感知哈希与调色板（旧实现解码两次）。
+            // **一张图只解码一次**，这张图同时喂三个消费者：dHash、调色板、缩略图。
+            // （第 44 轮 / D161：缩略图此前会**再解码一次**——冷缓存全量扫描实测
+            // 120 张 AVIF 从 20.3 s 涨到 40.9 s，多出来的就是这第二次解码加第二次
+            // ffmpeg 进程启动，单次启动在 Windows 上约 53 ms。）
+            //
             // 解码失败**不影响索引**：与旧实现 `dhash_file(path).ok()` +
             // `extract_palette(..).ok()` 的容错口径一致。
-            let (perceptual, palette) = match analyze_image(
+            let (perceptual, palette, thumb_status) = match decode_scan_image(
                 &prepared.path,
-                prepared.want_palette,
                 options.ffmpeg_bin.as_deref(),
                 options.video_timeout,
             ) {
-                Ok(derived) => (derived.perceptual, derived.palette),
-                Err(_) => (None, None),
+                Ok(img) => {
+                    let derived = analyze_image_derivations(&img, prepared.want_palette);
+                    let thumb = process_image_thumb_from(img, &content, options);
+                    (derived.perceptual, derived.palette, thumb)
+                }
+                // 解不开：派生数据照旧缺失；缩略图**退回独立解码**那条路——两条路的
+                // 解码器集合并不完全相同（大 JPEG 的 `-lowres` 快路径、SVG 的 resvg），
+                // 让它还有一次成功的机会，比一起放弃好。
+                Err(_) => (
+                    None,
+                    None,
+                    process_image_thumb(&prepared.path, &content, options),
+                ),
             };
-            // 缩略图**扫描期同步生成**（D126）：与视频首帧（D16）同一条路——
-            // 解码 / 编码只依赖文件本身，正是并行阶段该干的活。反过来（留到界面要
-            // 显示时才逐张补）会让大库第一次滚动就是几百次同步解码。
-            let thumb_status = process_image_thumb(&prepared.path, &content, options);
             // 宽高来自**准备阶段那次读头**（0043 / 第 43 轮）：解码结果的尺寸在 AVIF/HEIC
             // 家族里是**有界中间尺寸**（`SCAN_DECODE_BOUND = 256`），且 JPEG 解码不应用 EXIF
             // 方向，两者都不能当显示尺寸用。读头失败的图片按"未知"入库，消费方降级
@@ -216,16 +226,10 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
 /// 没有 `thumbnail_cache`（单元测试 / 精简环境）时不出图：行照建、`thumb_status`
 /// 留 0，与视频无 `ffmpeg_bin` 时同款降级。
 fn process_image_thumb(path: &Path, content: &ContentHash, options: &ScanOptions) -> ThumbStatus {
-    let Some(cache) = &options.thumbnail_cache else {
-        return ThumbStatus::NotGenerated;
+    let thumb_path = match thumb_target(content, options) {
+        Ok(path) => path,
+        Err(status) => return status,
     };
-    let thumb_path = cache.path_for_image(&content.value);
-    if thumb_path.exists() {
-        return ThumbStatus::Generated;
-    }
-    if cache.ensure_dir_for(&content.value).is_err() {
-        return ThumbStatus::Failed;
-    }
     match generate_image_thumbnail(
         path,
         &thumb_path,
@@ -236,6 +240,54 @@ fn process_image_thumb(path: &Path, content: &ContentHash, options: &ScanOptions
         Ok(()) => ThumbStatus::Generated,
         // 坏图 / 无解码器：**不影响索引**，行照建，只是没有缩略图
         // （与感知哈希缺失、调色板缺失同一容错口径）。
+        Err(_) => ThumbStatus::Failed,
+    }
+}
+
+/// 缩略图的**落点**：命中缓存或环境不支持时，直接用状态短路，不必再解码。
+///
+/// 两条生成路径（独立解码 / 复用扫描期那张图）都从这里出发，因此"缓存命中即跳过
+/// 重编码""没有 `thumbnail_cache` 就不出图"这两条口径只有一处实现。
+fn thumb_target(
+    content: &ContentHash,
+    options: &ScanOptions,
+) -> Result<std::path::PathBuf, ThumbStatus> {
+    let Some(cache) = &options.thumbnail_cache else {
+        return Err(ThumbStatus::NotGenerated);
+    };
+    let thumb_path = cache.path_for_image(&content.value);
+    if thumb_path.exists() {
+        return Err(ThumbStatus::Generated);
+    }
+    if cache.ensure_dir_for(&content.value).is_err() {
+        return Err(ThumbStatus::Failed);
+    }
+    Ok(thumb_path)
+}
+
+/// 用**扫描期已经解码的那张图**生成缩略图（第 44 轮 / D161）。
+///
+/// 与 [`process_image_thumb`] 的唯一区别是"图从哪来"：这里不碰磁盘、不再起 ffmpeg，
+/// 只做缩放 + WebP 编码。缩放与编码走 [`hp_media::encode_image_thumbnail`]，
+/// 与按需路径（`thumb.get` → `generate_image_thumbnail`）**是同一份实现**，
+/// 所以同一张图两条路产出的是同一种字节，不会出现"扫描期一张、点开又是一张"。
+fn process_image_thumb_from(
+    img: image::DynamicImage,
+    content: &ContentHash,
+    options: &ScanOptions,
+) -> ThumbStatus {
+    let thumb_path = match thumb_target(content, options) {
+        Ok(path) => path,
+        Err(status) => return status,
+    };
+    match hp_media::encode_image_thumbnail(
+        img,
+        &thumb_path,
+        IMAGE_THUMB_MAX_DIM,
+        options.ffmpeg_bin.as_deref(),
+        options.video_timeout,
+    ) {
+        Ok(()) => ThumbStatus::Generated,
         Err(_) => ThumbStatus::Failed,
     }
 }

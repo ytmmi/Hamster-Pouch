@@ -631,6 +631,8 @@ const scannerComputeSrc = readFileSync(
   join(ROOT, "crates/hp-scanner/src/scan_compute.rs"),
   "utf8",
 );
+// 第 44 轮（D161）：一次解码的**复用**发生在 `scan_task.rs`（缩略图由那张图编码）。
+const scannerTaskSrc = readFileSync(join(ROOT, "crates/hp-scanner/src/scan_task.rs"), "utf8");
 const colorCommandSrc = readFileSync(
   join(ROOT, "apps/desktop/src-tauri/src/commands/color.rs"),
   "utf8",
@@ -723,7 +725,15 @@ check(
   // 断言内容不变，只改它读哪些文件——这正是 file-structure.md 第「门禁跟着代码走」条的办理方式。
   //
   // ① 并行阶段只解码**一次**，调色板与感知哈希共用同一张图（旧实现各解码一次）。
-  /extract_palette_from_image\(&img, 0\)/.test(scannerComputeSrc) &&
+  //    第 44 轮（D161）：这张图还要交给缩略图编码，因此派生这一层只**借用**
+  //    （`analyze_image_derivations(img: &DynamicImage, …)`），断言跟着改成不取地址。
+  /fn analyze_image_derivations\(\s*img: &image::DynamicImage,\s*want_palette: bool,?\s*\)/.test(
+    scannerComputeSrc,
+  ) &&
+    /extract_palette_from_image\(img, 0\)/.test(scannerComputeSrc) &&
+    // 缩略图由这张已解码的图编码，不再第二次打开文件（`encode_image_thumbnail`）。
+    /encode_image_thumbnail\(/.test(scannerTaskSrc) &&
+    /let \(perceptual, palette, thumb_status\) = match decode_scan_image\(/.test(scannerTaskSrc) &&
     // ② 落库唯一入口：写库阶段的 `write_one` 走唯一 JSON 实现。
     /encode_palette_json\(colors\)/.test(scannerPaletteSrc) &&
     // ③ 手动锁定的色值在**准备阶段**就被排除（`want_palette` 为假 → 并行阶段不算它）。
