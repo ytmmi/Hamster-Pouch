@@ -88,10 +88,12 @@ tools/tagdict/output/*
 !tools/tagdict/output/tag_lib_base.sqlite3
 
 # === 外部 CLI ===
-# mpv Windows 构建（mpv.exe + d3dcompiler_43.dll 等约 120MB）：发布包需要包含它，
-# 所以**入库**——其中 120MB 的 mpv.exe 用 Git LFS 存（GitHub 单文件上限 100MB），
-# 其余小文件走普通 git（见 .gitattributes）。本地克隆没装 git-lfs 时只会拿到指针文件，
-# 此时 `pnpm app:build` 会把它当"缺少 mpv"跳过；也可用 `HP_MPV_BIN` 指定 mpv.exe 路径。
+# mpv Windows 构建（mpv.exe + d3dcompiler_43.dll 等约 119MB）：libmpv 播放通道已于
+# 2026-09 退役（缺陷 0001/0010，播放走 DOM `<video>`），资产随之**移出仓库**
+# （2026-11-11 / D162，缺陷 0047）——发布包不再分发、不再走 Git LFS。
+# 本机若自备该目录，`pnpm app:build` 仍会「存在则入包」（`tools/package-build.mjs`）；
+# 也可用 `HP_MPV_BIN` 指定 mpv.exe 路径。
+external-cli/mpv/
 
 # === 插件可执行入口：构建产物，不入库 ===
 # 插件入口是**本地构建**的可执行文件（源码是测试夹具 crates/hp-plugin-host/src/bin/，

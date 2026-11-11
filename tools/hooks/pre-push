@@ -27,8 +27,9 @@ cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets
 
 echo "── pre-push：通过 ─────────────────────────────────"
 
-# ── Git LFS：external-cli/mpv/mpv.exe（120MB）走 LFS，推送时必须把对象传上去 ──
-# 没有这一步，远端只有 130 字节指针文件，新克隆与 CI 拿到的是空壳 mpv。
+# ── Git LFS：仓库已无 LFS 资产（2026-11-11 / D162，缺陷 0047：mpv.exe 移出） ──
+# 这段委托**保留**而不是删掉：将来若重新入库任何 LFS 资产，忘了这一步的后果是
+# 远端只有指针文件、新克隆与 CI 拿到空壳——而且是"事后才发现"的那种坏。空转成本为零。
 # 注意：**不要**跑 `git lfs install` —— 它会试图用 git-lfs 自己的 pre-push 覆盖
 # 上面那段测试钩子（实测报 "Hook already exists: pre-push" 并要求 --force）。
 # 这里等价地委托一次：钩子拿到的参数（远端名、URL）原样转交给 git-lfs。

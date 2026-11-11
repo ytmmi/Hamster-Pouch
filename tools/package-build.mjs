@@ -32,13 +32,14 @@
  *
  * **"不入 git 库"与"能否进构建包"是两件事**：本脚本从**本地磁盘**复制，不读 git。
  *   - `external-cli\ffmpeg\` **已入库**（224 个文件）⇒ 任何完整工作树都有 ⇒ 必需项。
- *   - `external-cli\mpv\` **不入库**（`.gitignore` 忽略，100 MB+ 二进制不进版本库）
- *     ⇒ 新克隆必然没有 ⇒ **可选项**，存在则入包、缺失则跳过（否则新克隆上打包直接断掉）。
+ *   - `external-cli\mpv\` **不入库**（`.gitignore` 忽略；2026-11-11 / D162 起资产已移出仓库
+ *     ⇒ 新克隆与 CI 必然没有）⇒ **可选项**，存在则入包、缺失则跳过（否则新克隆上打包直接断掉）。
  *
  * 体积与落盘策略：
  *   - `external-cli\ffmpeg\` 只带**运行时子集**（两个 exe + bin\ 下全部 DLL + LICENSE.txt，
  *     约 168 MB）；`ffplay.exe`（交互式播放器，产品从不调用）与 `doc\` / `include\` /
- *     `lib\` / `presets\`（开发期文档与链接库）不带。mpv 不做裁剪（见 placeBundledRuntime）。
+ *     `lib\` / `presets\`（开发期文档与链接库）不带。mpv 若在本机存在则整目录入包、不做裁剪
+ *     （见 placeBundledRuntime）。
  *   - **dev 包用硬链接**（NTFS，零额外占用、瞬时完成；同卷实测可用，跨卷自动回退复制），
  *     **release 包用真实复制**（可分发实体文件）。硬链接只是省盘，包内容完整可搬走。
  *
@@ -122,7 +123,7 @@ const BASE_DICT = join(ROOT, "tools", "tagdict", "output", "tag_lib_base.sqlite3
 const EXTERNAL_CLI = join(ROOT, "external-cli");
 /** 随包分发的系统插件目录（仓库内）与其在包内的相对位置。 */
 const BUNDLED_PLUGINS = join(ROOT, "plugins", "system");
-/** libmpv 播放器（可选资产，见 [`placeBundledRuntime`] 的 mpv 说明）。 */
+/** libmpv 播放器（可选资产：仓库已不含它，见 [`placeBundledRuntime`] 的 mpv 说明）。 */
 const MPV_DIR = join(EXTERNAL_CLI, "mpv");
 
 /**
@@ -252,14 +253,14 @@ async function placeDir(src, dest, exclude = new Set(), prefix = "", allowLink =
  * **ffmpeg 与 mpv 的"缺失"语义刻意不同**（两者是不同的事）：
  *   - **ffmpeg 是必需项**：它随仓库入库（`git ls-files external-cli/ffmpeg` 有 224 个文件），
  *     任何完整工作树里都必然存在。缺了就是工作树坏了 ⇒ 由调用方的前置检查**硬失败**。
- *   - **mpv 是可选项**：`external-cli/mpv/` **不入库**（`.gitignore` 忽略，100 MB+ 二进制
- *     不进版本库），因此**新克隆里必然没有它**。若做成硬失败，新克隆上 `pnpm app:build`
+ *   - **mpv 是可选项**：`external-cli/mpv/` **不入库**（2026-11-11 / D162 起资产已移出仓库，
+ *     缺陷 0047），因此**新克隆与 CI 里必然没有它**。若做成硬失败，那些机器上 `pnpm app:build`
  *     会直接断掉。故这里按"**存在则入包、缺失则跳过并说明**"处理。
  *
  * 注意：**"不入 git 库"与"能否进构建包"是两件事**。本脚本从**本地磁盘**复制，
- * 不读 git —— mpv 只要在本机存在，就能进包；入库与否只决定新克隆是否自带源文件。
+ * 不读 git —— 本机自备 mpv 时它照样能进包；仓库是否跟踪该目录只决定新克隆是否自带源文件。
  *
- * mpv 不做裁剪（整目录原样入包，119.05 MB）：`mpv.exe` 的 IPC 能启动**不证明**视频渲染
+ * mpv 若存在则不做裁剪（整目录原样入包）：`mpv.exe` 的 IPC 能启动**不证明**视频渲染
  * 不需要 `d3dcompiler_43.dll`（D3D11 输出编译 shader 用它），证据不足就不裁。
  */
 async function placeBundledRuntime(targetRoot, mode, allowLink) {
@@ -283,7 +284,7 @@ async function placeBundledRuntime(targetRoot, mode, allowLink) {
       `，plugins\\system\\ ${plugins.files} 文件 / ${fmtMB(plugins.bytes)}` +
       (mpv.present
         ? `，external-cli\\mpv\\ ${mpv.files} 文件 / ${fmtMB(mpv.bytes)}`
-        : "，external-cli\\mpv\\ 跳过（本机无 mpv.exe：该目录不入库，见 README「外部依赖」）"),
+        : "，external-cli\\mpv\\ 跳过（本机无 mpv.exe：该目录不入库，见根 README「第三方组件」表）"),
   );
   return { external, plugins, mpv };
 }
@@ -341,7 +342,8 @@ function verifyBundledRuntime(targetRoot, { allowLink, mpvExpected }) {
     if (!ok) problems.push(`缺 ${rel}${missingHints[rel] ? `（${missingHints[rel]}）` : ""}`);
   }
   // mpv 是可选项：**源在就必须进包**（防"复制逻辑静默漏掉"），源不在则不要求包里有。
-  // 不写成"包里必须有 mpv"：新克隆没有该目录，那样会让 app:build 在新克隆上断掉。
+  // 不写成"包里必须有 mpv"：新克隆/CI 没有该目录（D162 起资产已移出仓库），那样会让
+  // app:build 在那些机器上断掉。
   if (mpvExpected) {
     const st = statSync(join(targetRoot, "external-cli", "mpv", "mpv.exe"), { throwIfNoEntry: false });
     if (!st?.isFile()) problems.push("本机有 mpv 源，但包里没有 external-cli\\mpv\\mpv.exe");

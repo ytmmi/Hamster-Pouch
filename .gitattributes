@@ -38,8 +38,6 @@
 Cargo.lock text eol=lf
 pnpm-lock.yaml text eol=lf
 
-# mpv 的 120MB 主程序走 Git LFS（GitHub 单文件上限 100MB）；同目录的小文件
-# （d3dcompiler_43.dll 4.4MB、mpv.com 3.5KB、mpv/fonts.conf）仍走普通 git。
-# 发布包需要包含 mpv，因此它必须能被全新克隆（CI）拿到 —— 用 LFS 存内容、
-# 用 `actions/checkout` 的 `lfs: true` 拉取；本地未装 git-lfs 的克隆会得到指针文件。
-external-cli/mpv/mpv.exe filter=lfs diff=lfs merge=lfs -text
+# 本仓库**没有** Git LFS 资产（2026-11-11 / D162）：`external-cli/mpv/mpv.exe` 曾走 LFS
+# 随仓库分发，随 libmpv 通道退役一并移出（`.gitignore` 忽略整个 `external-cli/mpv/`）。
+# 远端历史里的 LFS 对象不改写（不重写历史、不强推）；新克隆不再拉取它们。

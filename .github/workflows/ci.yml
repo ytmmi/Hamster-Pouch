@@ -35,12 +35,10 @@
 # - **不构建发布包**（`pnpm app:build`）：那是分发环节（便携包 + Release 资产），
 #   成本高于 PR 上的收益；发布通道单独一条、**手动触发**：
 #   `.github/workflows/release.yml`（`workflow_dispatch`，只在要发版本时跑）。
-# - **不拉 Git LFS**（`lfs: true` 只出现在 release.yml）：`external-cli/mpv/mpv.exe`
-#   （120MB）用 LFS 存，但门禁只查源码/结构、不读 mpv 字节；而本流程 3 个作业各自
-#   checkout，全拉就是 360MB/次——GitHub 免费档 LFS 额度 1GB/月，几天就用光（发布
-#   作业一次 120MB，按月发版量算绰绰有余）。所以这里的 checkout 拿到的是指针文件，
-#   `check:bundled-runtime` 的断言只看"存在 + 打包脚本对它的语义"，不看内容。
-#   这是有意的取舍，不是漏配。
+# - **不拉 Git LFS**：仓库**已无** LFS 资产（2026-11-11 / D162，缺陷 0047：mpv 移出，
+#   曾为它的 120MB `mpv.exe` 开过 LFS）。`lfs: true` 在 release.yml 里也已删除；这里的
+#   checkout 因此不必付任何 LFS 带宽，`check:bundled-runtime` 只查源码/结构与打包脚本语义、
+#   不读 mpv 字节，三条作业口径一致。这是有意的取舍，不是漏配。
 # - **不跑 `check:doc-status` 之外什么都没有的"文档存在性"检查**：PASS 的判定
 #   属门禁自己，CI 不重复判断。
 # - **不跑"本地开发库体检"类门禁**（`check:layouts` / `check:blueprint-*`）：

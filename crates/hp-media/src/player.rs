@@ -3,15 +3,15 @@
 //! 独立子进程承载 libmpv（通过 mpv 可执行文件），单实例常驻、崩溃自动重启；
 //! 主进程通过命名管道 JSON IPC 控制播放；渲染目标通过 `--wid` 嵌入面板原生窗口。
 //!
-//! mpv 可执行文件路径由调用方提供（`external-cli/mpv/` 或环境变量），
+//! mpv 可执行文件路径由调用方提供（`external-cli/mpv/` 或环境变量 `HP_MPV_BIN`），
 //! 本模块不负责下载外部二进制。
 //!
 //! **休眠（2026-09）**：整条 libmpv 播放路径已退役——播放器面板改走 DOM `<video>`
-//! （缺陷 `docs/issues/0001`；点击语义见 `docs/issues/0010`）。桥接层 `media.*` 这组命令
-//! 在正式界面 `apps/desktop/src/app_ui` 里**无调用方**（唯一调用方是 dev harness
-//! `apps/desktop/src/test_ui`），`external-cli/mpv/` 也不入库（见根 `README.md`「外部依赖」）。
-//! 本模块**保留不删**，仅作将来复活时的参考；`crates/hp-media/tests/player_lifecycle.rs`
-//! 的用例已标 `#[ignore]`，需要本机 mpv 与 `HP_TEST_VIDEO` 才跑。
+//! （缺陷 `0001`；点击语义见 `0010`）。桥接层 `media.*` 在 `app_ui` 里**无调用方**
+//! （唯一调用方是 dev harness `src/test_ui`）。**资产已移出（2026-11-11 / D162，缺陷 0047）**：
+//! `external-cli/mpv/` 不再入库、不再随包分发（也不再走 Git LFS），新克隆与 CI 没有 mpv.exe；
+//! 本机自备该目录或用 `HP_MPV_BIN` 时，休眠通道仍能跑。本模块**保留不删**，仅作将来复活
+//! 时的参考；`crates/hp-media/tests/player_lifecycle.rs` 的用例已标 `#[ignore]`，需本机 mpv。
 
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
