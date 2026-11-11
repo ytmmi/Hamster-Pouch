@@ -99,8 +99,6 @@ pnpm app:build    # 编译并打出便携发布包
 | 环境变量 | 作用 |
 | --- | --- |
 | `VITE_HP_UI` | 前端 UI 变体：`app_ui`（默认）/ `test_ui` / `dev_ui` |
-| `HP_MPV_BIN` | mpv 可执行文件路径（仅休眠的 libmpv 通道用；mpv 资产已不随仓库分发） |
-| `HP_MPV_EMBED` | 设为 `1` 时启用主窗口级 mpv 渲染嵌入（仅诊断，休眠通道） |
 | `HP_TEST_VIDEO` | 媒体测试用视频路径 |
 
 ## 构建与发布
@@ -126,7 +124,7 @@ pnpm app:build    # 编译并打出便携发布包
 | 组件 | 版本 | 许可 | 说明 |
 | --- | --- | --- | --- |
 | [FFmpeg](https://ffmpeg.org/) | N-125157（2026-06-22） | GPL-3.0（`--enable-gpl --enable-version3`） | 元数据探测、缩略图、音频波形；`external-cli/ffmpeg/` 随包分发 |
-| [mpv](https://mpv.io/) | v0.41.0-1023-g69e63f425 | GPL-2.0-or-later | **不再随仓库与发布包分发**（2026-11 移出，缺陷 0047）；当前播放器面板使用 DOM `<video>`，libmpv 通道休眠 |
+| [mpv](https://mpv.io/) | v0.41.0-1023-g69e63f425 | GPL-2.0-or-later | **曾随仓库分发，已于 2026-11 移出**（D162 / 缺陷 0047）；其休眠代码随后整体删除（D163）。当前播放器面板使用 DOM `<video>`，**不依赖 mpv** |
 | [libheif](https://github.com/strukturag/libheif) | 1.23.x（vcpkg） | LGPL-3.0 | HEIC / HEIF / AVIF 进程内解码 |
 | [libwebp](https://chromium.googlesource.com/webm/libwebp) | 随 `libwebp-sys` vendored | BSD-3-Clause | 缩略图进程内 WebP 编码 |
 | [SQLite](https://sqlite.org/) | 3.x（rusqlite） | Public Domain | 仓库库 / 全局库 / 词库 |
