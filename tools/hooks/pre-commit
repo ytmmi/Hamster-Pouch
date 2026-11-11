@@ -62,7 +62,7 @@ else
   # 兜底：直接跑全部门禁（不依赖临时文件）
   for name in check:fmt check:clippy check:line-count check:encoding check:doc-status \
               check:status check:commands check:event-names check:bundled-runtime \
-              check:hidden-console check:dormant-media check:layouts check:settings \
+              check:hidden-console check:layouts check:settings \
               check:controls check:panels check:types check:blueprint-runtime \
               check:blueprint-delete check:blueprint-engine check:blueprint-nodes \
               check:blueprint-connect check:blueprint-geometry check:blueprint-slots \

@@ -22,7 +22,7 @@
 | 事件载荷 | `ScanProgress`、`AiTaggingCompleted` | `hp-dto` |
 | 领域视图模型 | `RepoSummary`、`RepoListItem`、`SourceItem`、`AlbumFileItem`、`FileMetadata` | `hp-dto` |
 
-> **2026-11-11 口径更新（第 37 轮裁决）**：**事件载荷已全部进 `hp-dto`**——16 个 `*Payload`（scan ×3、source.unmount ×3、album.sync ×3、color.extracted、plugin.loaded、plugin.changed、blueprint.changed、file.changed/missing/restored）带 `#[serde(rename_all = "camelCase")]` 与 `#[derive(Serialize, TS, Clone)]`，后端命令模块改为 `use hp_dto::… as …Event` 别名（构造点不必改名），前端 `shared/types/events.ts` 改为再导出生成类型。仍手写的是**前端自己 emit** 的三条（`repo.changed` / `panel.restore` / `media.surface.click`）以及命令参数 `*Args`。
+> **2026-11-11 口径更新（第 37 轮裁决）**：**事件载荷已全部进 `hp-dto`**——16 个 `*Payload`（scan ×3、source.unmount ×3、album.sync ×3、color.extracted、plugin.loaded、plugin.changed、blueprint.changed、file.changed/missing/restored）带 `#[serde(rename_all = "camelCase")]` 与 `#[derive(Serialize, TS, Clone)]`，后端命令模块改为 `use hp_dto::… as …Event` 别名（构造点不必改名），前端 `shared/types/events.ts` 改为再导出生成类型。仍手写的是**前端自己 emit** 的两条（`repo.changed` / `panel.restore`）以及命令参数 `*Args`。（`media.surface.click` 原本是第三条，已于 2026-11-11 随 D163 删除。）
 >
 > > **2026-10-28 实测口径**：`crates/hp-dto/src/lib.rs` 目前只导出上表这几个命令 DTO（`AlbumFileItem` 是 `album.members` / `file.query` 的元素）。**领域模型 `FileIndexRow`（`hp-core`/`hp-store`）、`Album`（`hp-core`）、`Tag`、`Rating`、`ColorRef` 并没有进 `hp-dto`**，也未生成到 `packages/shared-types`——它们的对应前端形状由各面板 `shared/types/*.ts` 手写声明（例如 `apps/desktop/src/app_ui/shared/types/album.ts` 的 `AlbumItem` 与后端 `commands/album.rs` 的 `AlbumItem` 逐字对齐）。本行早先的「领域视图模型 → `hp-dto`」是**目标态**，不是现状。
 | 插件 manifest/schema | `PluginManifest`、面板 schema 类型 | `hp-plugin-host` / `hp-dto` |
