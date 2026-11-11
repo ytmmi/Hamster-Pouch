@@ -13,6 +13,33 @@ use crate::util::{now_iso, require_nonempty, store_err};
 /// 单页最大条数（防调用方一次拉全库；契约里 `limit` 只是页大小）。
 pub const FILE_QUERY_MAX_LIMIT: i64 = 1000;
 
+/// 扫描准备阶段的**一次性快照行**：只取"要不要重算"所需的列（`docs/issues/0018` 第 43 轮）。
+///
+/// 为什么不复用 [`FileIndexRow`]：准备阶段只要 6 个字段，却要对**每个文件**做一次判定。
+/// 旧实现走 [`RepoDb::get_file_by_path`]（1 条 SELECT + 1 条 marks 查询），再对每张图额外
+/// `get_color_ref` 一次——5 万文件就是 10 万条串行 SQL。这里一条 `files LEFT JOIN color_refs`
+/// 取回全部，SQL 条数与文件数脱钩（标记仍单独装载，那是对多表）。
+#[derive(Debug, Clone)]
+pub struct ScanPrepareRow {
+    pub id: String,
+    pub relative_path: String,
+    pub size: i64,
+    pub mtime: String,
+    /// 已存内容哈希；`None` 表示这份内容**从没算过**（音频占位行就地升级的判据，D115）。
+    pub content_hash: Option<String>,
+    /// 已有标记（按 `mark` 升序）。扫描只在集合为空时补默认值，**不覆盖**用户的选择（D102）。
+    pub marks: Vec<FileMark>,
+    /// `color_refs.color_json`；`None` = 还没有调色板行。`locked: true` 时重扫不得覆盖（D82）。
+    pub color_json: Option<String>,
+}
+
+/// 缺失检测用的最小行：`(id, relative_path)`，不带标记、不带其余 18 列。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceFileLocation {
+    pub id: String,
+    pub relative_path: String,
+}
+
 /// `file.query` 的过滤条件。
 ///
 /// `media_types` 是**集合**而不是单个取值（2026-10-08 用户口径：「媒体预览不包含 text 类型，
@@ -271,6 +298,70 @@ impl RepoDb {
             .map_err(|e| store_err("读取源文件相对路径", e))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| store_err("解析源文件相对路径", e))?;
+        Ok(rows)
+    }
+
+    /// 列出某媒体源**扫描准备阶段**需要的全部既有行（一条 JOIN + 分批装载标记）。
+    ///
+    /// 取代"逐文件 `get_file_by_path` + 每图 `get_color_ref`"：`files LEFT JOIN color_refs`
+    /// 一次拿到哈希与调色板行，标记再按 [`MARK_LOOKUP_CHUNK`] 一批装载。
+    pub fn list_files_for_scan(&self, source_id: &str) -> HpResult<Vec<ScanPrepareRow>> {
+        let mut stmt = self
+            .conn()
+            .prepare(
+                "SELECT f.id, f.relative_path, f.size, f.mtime, f.content_hash, c.color_json
+                 FROM files f LEFT JOIN color_refs c ON c.file_id = f.id
+                 WHERE f.source_id = ?1",
+            )
+            .map_err(|e| store_err("查询扫描准备行", e))?;
+        let mut rows = stmt
+            .query_map(params![source_id], |row| {
+                Ok(ScanPrepareRow {
+                    id: row.get(0)?,
+                    relative_path: row.get(1)?,
+                    size: row.get(2)?,
+                    mtime: row.get(3)?,
+                    content_hash: row.get(4)?,
+                    marks: Vec::new(),
+                    color_json: row.get(5)?,
+                })
+            })
+            .map_err(|e| store_err("读取扫描准备行", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析扫描准备行", e))?;
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        let mut marks = load_marks_map(self.conn(), &ids)?;
+        for row in rows.iter_mut() {
+            if let Some(found) = marks.remove(row.id.as_str()) {
+                row.marks = found;
+            }
+        }
+        Ok(rows)
+    }
+
+    /// 列出某媒体源下全部文件的 `(id, relative_path)`（缺失检测用）。
+    ///
+    /// 与 [`Self::list_relative_paths_by_source`] 只差一列 `id`，但用途不同：目录树只要路径，
+    /// 缺失检测要按 id 回写状态。旧实现走 `list_files_by_source`（20 列 + marks），
+    /// 这里的成本只有它的零头。
+    pub fn list_file_locations_by_source(
+        &self,
+        source_id: &str,
+    ) -> HpResult<Vec<SourceFileLocation>> {
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT id, relative_path FROM files WHERE source_id = ?1")
+            .map_err(|e| store_err("查询源文件位置", e))?;
+        let rows = stmt
+            .query_map(params![source_id], |row| {
+                Ok(SourceFileLocation {
+                    id: row.get(0)?,
+                    relative_path: row.get(1)?,
+                })
+            })
+            .map_err(|e| store_err("读取源文件位置", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析源文件位置", e))?;
         Ok(rows)
     }
 
@@ -729,6 +820,14 @@ pub(crate) fn row_to_file(row: &Row) -> rusqlite::Result<FileIndexRow> {
     })
 }
 
+/// 批量装载标记时**单条查询的 id 上限**。
+///
+/// SQLite 的复合查询变量上限是 32766（更老的版本只有 999）。旧实现把所有行一次性拼成
+/// `?1..?N`，于是源文件数一旦超过上限，`list_files_by_source` 会直接抛
+/// `too many SQL variables`——扫描的最后一米（缺失检测）在大源上必然失败。
+/// 取 900 是一个两边都安全的块大小，且远小于上限、不影响查询计划。
+const MARK_LOOKUP_CHUNK: usize = 900;
+
 /// **批量**为文件行装载标记（一次查全部，避免逐行 SQL 的 N+1）。
 ///
 /// `file_marks` 是 `(file_id, mark)` 一对多表；返回的每个 `row.marks` 按 `mark` 升序，
@@ -737,37 +836,50 @@ pub(crate) fn load_marks_for(conn: &Connection, rows: &mut [FileIndexRow]) -> Hp
     if rows.is_empty() {
         return Ok(());
     }
-    // 逐行占位符 `?1..?N`：这里按行数拼（调用方的行数由分页大小决定，可控）。
-    let placeholders = (1..=rows.len())
-        .map(|i| format!("?{i}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!(
-        "SELECT file_id, mark FROM file_marks WHERE file_id IN ({placeholders}) ORDER BY file_id, mark"
-    );
     let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| store_err("查询文件标记", e))?;
-    let pairs = stmt
-        .query_map(rusqlite::params_from_iter(ids.iter()), |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|e| store_err("查询文件标记", e))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| store_err("查询文件标记", e))?;
-    let mut by_id: std::collections::HashMap<String, Vec<FileMark>> =
-        std::collections::HashMap::new();
-    for (file_id, mark) in pairs {
-        by_id
-            .entry(file_id)
-            .or_default()
-            .push(FileMark::from_raw(mark));
-    }
+    let mut by_id = load_marks_map(conn, &ids)?;
     for row in rows.iter_mut() {
         if let Some(marks) = by_id.remove(row.id.as_str()) {
             row.marks = marks;
         }
     }
     Ok(())
+}
+
+/// 按 id 批量装载标记，返回 `file_id -> marks`（每个 `Vec` 内按 `mark` 升序）。
+///
+/// 内部按 [`MARK_LOOKUP_CHUNK`] 分块查询：单条 SQL 的占位符数量与**行数**脱钩，
+/// 大源（>3 万文件）不再撞 SQLite 的变量上限。
+pub(crate) fn load_marks_map(
+    conn: &Connection,
+    ids: &[&str],
+) -> HpResult<std::collections::HashMap<String, Vec<FileMark>>> {
+    let mut by_id: std::collections::HashMap<String, Vec<FileMark>> =
+        std::collections::HashMap::new();
+    for chunk in ids.chunks(MARK_LOOKUP_CHUNK) {
+        let placeholders = (1..=chunk.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT file_id, mark FROM file_marks WHERE file_id IN ({placeholders}) ORDER BY file_id, mark"
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| store_err("查询文件标记", e))?;
+        let pairs = stmt
+            .query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| store_err("查询文件标记", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("查询文件标记", e))?;
+        for (file_id, mark) in pairs {
+            by_id
+                .entry(file_id)
+                .or_default()
+                .push(FileMark::from_raw(mark));
+        }
+    }
+    Ok(by_id)
 }

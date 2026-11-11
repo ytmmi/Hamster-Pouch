@@ -139,6 +139,38 @@ impl RepoDb {
         Ok(())
     }
 
+    /// 开始一个**写批次**（扫描期按块包事务，`docs/issues/0018` 第 43 轮）。
+    ///
+    /// 扫描的写库路径是"一行文件 → `files` upsert + 逐标记 insert + 可选 color_ref"，
+    /// 旧实现每条语句各自自动提交：WAL 下每次提交都要写 WAL 帧并推进头，5 万文件就是
+    /// 十几万次提交。包进一个事务后，提交次数从"每文件"降到"每块"。
+    ///
+    /// 用 `BEGIN IMMEDIATE` 而不是默认的 deferred：扫描线程持有**独立连接**
+    /// （见 [`RepoDb::open_inner`] 的注释），立刻拿写锁可以让"主连接正在写"的冲突
+    /// 在事务开始时由 `busy_timeout` 等待，而不是在事务中途升级锁时失败。
+    ///
+    /// 提交/回滚见 [`Self::commit_write_batch`] / [`Self::rollback_write_batch`]；
+    /// 三者的调用必须成对，本类型不做嵌套事务（SQLite 也不支持嵌套 `BEGIN`）。
+    pub fn begin_write_batch(&mut self) -> HpResult<()> {
+        self.conn
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| store_err("开始写批次", e))
+    }
+
+    /// 提交写批次。
+    pub fn commit_write_batch(&mut self) -> HpResult<()> {
+        self.conn
+            .execute_batch("COMMIT")
+            .map_err(|e| store_err("提交写批次", e))
+    }
+
+    /// 回滚写批次（出错路径用；与 `begin` 成对，没开会话时报错由调用方忽略）。
+    pub fn rollback_write_batch(&mut self) -> HpResult<()> {
+        self.conn
+            .execute_batch("ROLLBACK")
+            .map_err(|e| store_err("回滚写批次", e))
+    }
+
     /// 关闭仓库库：WAL 检查点后释放连接。
     pub fn close(self) -> HpResult<()> {
         self.conn
