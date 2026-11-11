@@ -80,12 +80,11 @@ crates/hp-store/src/
                       #   不用 `cmd` 的 `%DATE%`——随 locale 变形）与 `HP_BUILD_COMMIT`（`git rev-parse --short HEAD`），
                       #   两者取不到都写空串（`app_info.rs` 用 `option_env!` 读，界面显示「未知」）；
                       #   末行才是 `tauri_build::build()`。D140
-  embed_window.rs     # Win32 原生渲染子窗口宿主（D14）
   commands/           # Tauri 命令桥接（按领域拆分）
     shared.rs
     repo.rs  source.rs  album.rs
     tag.rs   rating.rs  color.rs  file.rs
-    media.rs layout.rs
+    layout.rs
     plugin.rs           # 插件包：列出 / 发现 / 安装（本地与随包）/ 版本与回滚
     plugin_lifecycle.rs # 插件按仓库启用 / 禁用 / 状态 / 加载（含 plugin.changed|loaded 发射点）
     plugin_contributions.rs # 三张注册表的插件注册视图（plugin.contributions）

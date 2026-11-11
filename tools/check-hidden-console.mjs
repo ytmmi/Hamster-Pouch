@@ -16,7 +16,8 @@
  * 2. `run_with_timeout` 委派给 `run_with_timeout_stdin`，且后者函数体内调用
  *    `hide_console_window`（兜底：漏用 helper 也不会弹窗）；
  * 3. 白名单以外**零裸 `Command::new(`**——外部进程一律经 helper 构造；
- * 4. hp-media 的四个接入口（probe / decode / thumbnail / player）都出现 `hidden_command(`；
+ * 4. hp-media 的三个接入口（probe / decode / thumbnail）都出现 `hidden_command(`；
+ *    （第四个 `player` 已于 2026-11-11 随 libmpv 休眠代码删除，D163。）
  * 5. 前提仍成立：`main.rs` 的发布构建仍是 GUI 子系统（有控制台就不会弹窗）。
  *
  * 用法：pnpm check:hidden-console
@@ -29,7 +30,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PROCESS_RS = join(ROOT, "crates/hp-media/src/process.rs");
 const MAIN_RS = join(ROOT, "apps/desktop/src-tauri/src/main.rs");
-const HP_MEDIA_ENTRY_POINTS = ["probe", "decode", "thumbnail", "player"].map((n) =>
+const HP_MEDIA_ENTRY_POINTS = ["probe", "decode", "thumbnail"].map((n) =>
   join(ROOT, `crates/hp-media/src/${n}.rs`),
 );
 
@@ -138,10 +139,10 @@ check(
   bare.length ? bare.join(", ") : `扫描 ${scanned.length} 个 Rust 源文件`,
 );
 
-// ───────── 4. hp-media 四个接入口都走 helper ─────────
+// ───────── 4. hp-media 三个接入口都走 helper ─────────
 const missing = HP_MEDIA_ENTRY_POINTS.filter((p) => !read(p).includes("hidden_command("));
 check(
-  "hp-media 接入口 probe / decode / thumbnail / player 均出现 hidden_command(",
+  "hp-media 接入口 probe / decode / thumbnail 均出现 hidden_command(",
   missing.length === 0,
   missing.length ? missing.map(rel).join(", ") : "",
 );

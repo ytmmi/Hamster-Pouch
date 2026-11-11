@@ -50,7 +50,7 @@ interface HpError {
 | 规则 | 内容 |
 | --- | --- |
 | 新增命令 | `setting.*` / `panel.*` 及 RFC 0010 相关命令**一律直接按新口径实现**（包装 + `HpError`），不留技术债 |
-| 旧命令迁移批次 | **file → album → source → tag → media → plugin → blueprint → ai → fsops → repo/layout**；每批同时改后端桥接层与前端 `api/*` 封装与类型 |
+| 旧命令迁移批次 | **file → album → source → tag → ~~media~~（2026-11-11 退役，D163）→ plugin → blueprint → ai → fsops → repo/layout**；每批同时改后端桥接层与前端 `api/*` 封装与类型 |
 | **文档标注义务** | 迁移完成前，第 3 节每条命令**必须**标注其当前是「已包装」「裸返回」还是「未实现（契约先行）」，**不得**让文档停在"说了包装、实际裸返回"的模糊态 |
 | 错误文案 | `HpError.message` **仅作诊断**；前端**不得**直接显示它，必须按 `code` 走 i18n 键渲染（D27：三套语言，主流错误串直显会导致错误提示无法切换语言） |
 
@@ -68,7 +68,7 @@ interface HpError {
   `panels/ColorPanel.tsx`、`shared/blueprintRuntime.ts`、`core/AppUiApp.tsx`、
   `settings/SettingsApp.tsx` 一并核对（`test_ui` 的三个面板同步）。
 - **不经 Rust DTO 的事件**：`repo.changed` / `panel.restore` 由**前端自己 emit**（一直是驼峰）；
-  `media.surface.click` 是空载荷。三者不受本规则影响。
+  不受本规则影响（`media.surface.click` 已于 2026-11-11 随 D163 删除）。
 - **防回归**：`pnpm check:commands` 断言「每个 `emit(..., Dto {` 的结构体定义都带该属性」
   且 `events.ts` 里没有蛇形字段。
 
@@ -368,51 +368,19 @@ tag 实体按仓库独立（D23）；人工 tag 与自动 tag 的关联使用独
 
 AI 输入/输出/回写遵循决策 D6 + D21：输入含文件 ID、图像访问句柄、模型/提供方配置、任务选项；输出含候选 tag、置信度、来源模型、生成时间；回写**只写自动组**（`file_auto_tags`）并标记来源/置信度/生成时间，**不得修改人工 tag**（`file_tags`），自动组内高置信更新必须生成撤销记录。
 
-### 3.9 `media.*`
+### 3.9 `media.*`（**已退役**，2026-11-11 / D163）
 
-| 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
-| --- | --- | --- | --- | --- | --- |
-| `media.play` | 在面板中打开并播放 | `{ repoId, fileId }` | `{ ok, data: { sessionId } }` | **已包装** | **D76 批次 `media` 已迁移**（2026-09）。线上 `data` 是 `{ session_id }`，且会话 ID 实际取 `file_id`。**渲染目标未就绪时**错误码为 `conflict`，诊断串以 `EMBED_NOT_READY` 开头（不静默开独立窗口，见 `docs/issues/0001`） |
-| `media.pause` | 暂停 | `{ paused? }` | `{ ok, data: { ok: true } }` | **已包装** | 线上 `data` 是 `()`；`sessionId` **可选且不参与定位**（后端按当前常驻子进程操作）。**异步命令**，用 `ApiAsync` |
-| `media.seek` | 定位 | `{ positionMs }` | `{ ok, data: { ok: true } }` | **已包装** | 线上 `data` 是 `()`；`sessionId` 同上可选 |
-| `media.stop` | 停止播放（**保留常驻子进程**；释放渲染目标走 `media.embed.release`） | `{}` | `{ ok, data: { ok: true } }` | **已包装** | 只停播放、**保留常驻子进程**；`sessionId` 同上可选 |
-| `media.togglePause` | **原子**切换暂停/继续（单击画面 = 暂停/继续 的处理入口） | `{}` | `{ ok, data: { has_session, paused } }` | **已包装** | 后端一次锁内「读 pause → 取反写入」；`has_session=false`（无子进程/已停止/已播完）时前端转 `media.play` |
-| `media.processStatus` | 查询媒体子进程状态 | `{}` | `{ ok, data: { alive, pipe } }` | **已包装** | 线上 `data` 是 `{alive,pipe}`，字段名与文档的 `{ alive, version }` 不同 |
-| `media.playbackState` | 读取播放进度快照（进度条实时同步） | `{}` | `{ ok, data: { alive, position_ms, duration_ms, paused, ended } }` | **已包装** | 数据来自 mpv `observe_property` 推送（后台读取线程），**用 `try_lock` 非阻塞**（前端 500ms 轮询，不能用 `lock` 与 `media.play` 抢锁）；前端 `api/media.ts` |
-| `media.embed.rect` | 创建或更新**面板级原生渲染子窗口**（物理像素） | `{ x, y, width, height }` | `{ ok, data: { ready } }` | **已包装** | 线上 `data` 是裸 `bool`；首次创建、其后仅更新几何；`true` = 嵌入就绪；无 `repoId`（渲染目标不属于仓库）；窗口失败 → `io` |
-| `media.embed.release` | 销毁面板级渲染子窗口（面板关闭时调用） | `{}` | `{ ok, data: { ok: true } }` | **已包装** | 只销毁原生子窗口，**不停常驻 mpv 进程**（那走 `media.stop`）；无 `repoId` |
-| `media.embed.visible` | 显示/隐藏面板级渲染子窗口（**面板切到后台标签时必须隐藏**） | `{ visible }` | `{ ok, data: { ready } }` | **已包装** | 线上 `data` 是裸 `bool`；窗口尚未创建时返回 `false`（隐藏是空操作，不算错误）；**原生子窗口不受 DOM/CSS 约束**，不显式隐藏就会盖住面板原区域（"视频没了但一块区域点不动"） |
-| `media.embed.clickThrough` | 设置渲染子窗口是否把鼠标事件**穿透**给下层 WebView（**旧路径，默认关闭**） | `{ enabled }` | `{ ok, data: { ready } }` | **已包装** | 默认**不穿透**（2026-09 真机修正：`HTTRANSPARENT` 只转发到同线程窗口，WebView2 输入窗口不保证同线程，穿透在真机上不可靠）；现在点击由渲染子窗口自收并广播 `media.surface.click`；窗口未创建返回 `false` |
+libmpv 播放路径 2026-09 起休眠（播放器面板改走 DOM `<video>`，缺陷 0001 / RFC 0005），
+2026-11-11 随休眠代码一起删除（缺陷 0047 / **D163**）：
 
-> **本批的 D76 落地细节（批次 `media`）**：11 条命令**全部是异步命令**（它们要拿
-> `state.media` 锁，而 `media.play` 会在持锁期间做最长 5s 的启动等待；普通 `fn` 命令
-> 在主线程执行会直接卡死界面），因此统一用 [`ApiAsync`]——包装仍落在**成功值**里。
-> 错误码口径：mpv 可执行文件缺失 / 子进程与管道失败 / 嵌入窗口 Win32 失败 → `io`；
-> 未打开仓库 / 文件不存在 → `not_found`；渲染目标未就绪 → `conflict`（诊断串保留
-> `EMBED_NOT_READY` 前缀）。**注意**：自 2026-09 播放器面板改用 DOM `<video>` 后，
-> 这批命令**已无前端调用方**（`api/media.ts` 保留但休眠）；本批只做形状迁移，不改行为。
+- 桥接层 `apps/desktop/src-tauri/src/commands/media.rs`（11 条命令）与 `embed_window.rs`（Win32 原生渲染子窗口）整文件删除；`main.rs` 的命令注册段与 `AppState` 的 `media` / `media_embed` 字段同步移除。
+- `crates/hp-media/src/player.rs`（`MediaProcess` / `DEFAULT_PIPE_PATH`）与其 `#[ignore]` 生命周期测试删除，crate 不再依赖 `windows` crate（唯一用途是 mpv 的 `PeekNamedPipe`）。
+- 前端 `app_ui/shared/api/media.ts`、`app_ui/shared/types/media.ts`、`test_ui/api/media.ts`、`test_ui/panels/MediaPlayerPanel.tsx` 删除——四者自 2026-09 起就是 0 引用的死代码。
+- mpv 二进制资产已于同日移出仓库（**D162**），发布包不再分发它。
 
-媒体子进程为单实例常驻（D14）；崩溃自动重启。渲染目标挂到面板容器，面板关闭时释放句柄。
-
-> **2026-09 决策更新：本组命令进入休眠（`media.*` 仍注册可用，播放器面板不再调用）**。
-> 播放器面板已改为与查看器同构的 **DOM `<video>`**（见 `docs/rfc/0005-media-capabilities.md`）：
-> libmpv 原生窗口嵌入在真机上反复失败（原生窗口漂浮在「全部设置」等 DOM 浮层上方、
-> 点击穿透不可靠），用户要求"参考查看器的视频部分"。蓝图双击视频改为
-> `playerPlayStore.requestPlayerPlay(fileId)` → 面板用 `filePath` + `convertFileSrc`
-> 加载 DOM `<video>` 并播放；单击画面 = 暂停/继续、切标签自动暂停、播完回首帧暂停、
-> 进度条全部由 `<video>` 元素事件驱动。下列「渲染子窗口」各条均为**已退役路径的记录**。
-
-**渲染子窗口的显隐必须由前端驱动**（2026-09 补充，已随 DOM `<video>` 方案退役）：它是
-Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`media.embed.rect` 只改几何、
-**不再**带 `SWP_SHOWWINDOW`（否则几何同步会把隐藏后的窗口又唤醒），显隐一律走
-`media.embed.visible`。**应用级浮层**（如「全部设置」）打开时也要隐藏渲染子窗口
-（Win32 窗口永远盖在 WebView 之上，否则视频漂浮在浮层上方）——曾以 `appOverlayStore`
-广播浮层开合、面板订阅后隐藏/恢复。
-
-**点击由渲染子窗口自收并广播事件**（2026-09 真机修正，已退役）：曾把默认穿透改为渲染
-子窗口自收点击（`WM_LBUTTONUP` 广播 `media.surface.click`），面板监听后调
-`media.togglePause` 做**原子**切换。DOM `<video>` 方案下点击由浏览器原生派发到面板，
-`media.surface.click` 事件与 `media.togglePause` 均不再被使用（命令保留）。
+**原命令表（11 条 `media.*` 的请求 / 响应 / 错误码口径）与 D76 批次迁移细节保留在 git 历史**
+（本文件 2026-11-11 之前的版本）与 `docs/architecture/command-event-drift.md`（2026-09 漂移清单）。
+将来若真要重启原生播放，必须按当时的契约重新裁决，**不得**从历史残页推断"这些命令还在"。
 
 **播放器面板的交互（2026-09 用户裁决，仍有效）**：面板**不放**播放/暂停/定位/停止按钮；
 **单击画面 = 暂停 / 继续**（DOM `<video>` 实时 `.paused`，无状态过期），画面下方一根
@@ -654,10 +622,9 @@ Win32 原生子窗口，不随 WebView 里面板的隐藏/卸载而消失；`med
 | ~~`media.ready`~~ | ~~`{ sessionId, durationMs, videoInfo }`~~ **2026-09 裁决：从契约撤下（休眠）**。理由：与 `media.ended` / `media.crashed` 同批——`media.*` 命令、`embed_window.rs` 与 `hp-media` 播放器路径随缺陷 0001 改用 DOM `<video>` 而**退役休眠**（`docs/issues/0010`），主界面 0 处调用。**保留在契约里会让人以为视频播放事件可用**；真要复活播放器时按新方案重新入册。休眠代码的整体处置见 `docs/architecture/implementation-status.md` §2.7 #13 |
 | ~~`media.ended`~~ | ~~`{ sessionId }`~~ **2026-09 裁决：从契约撤下（休眠）**，同上 |
 | ~~`media.crashed`~~ | ~~`{ sessionId? }`~~ **2026-09 裁决：从契约撤下（休眠）**，同上 |
-| `media.surface.click` | `{}`（空载荷）（**2026-09 补入并标注为休眠**：它由 **Rust** 发射——`apps/desktop/src-tauri/src/embed_window.rs:71`，属已退役的 libmpv 原生窗口路径（缺陷 0001 改为 DOM `<video>` 后退役，见 `docs/issues/0010`）。前端 `apps/desktop/src/app_ui/shared/types/events.ts:10` 有类型声明但**主界面 0 处监听**；`media.*` 的休眠处置见 `docs/architecture/implementation-status.md` §2.7 #13） |
 | `color.extracted` | `{ taskId, fileId, palette }` |
 
-> **目录完整性订正（2026-09）**：本表此前**漏列两条已实现事件**——`source.unmount.progress` 与 `source.unmount.completed`（正文 §3.2 有、代码也发射，只有本表没列）。已补入，并另补 `media.surface.click`（Rust 发射、属休眠路径）。因此**本表条目数由 22 变为 24**（+2 已实现）+ 1 条休眠事件；`docs/architecture/implementation-status.md` §2.7 #13 的基数随之订正。
+> **目录完整性订正（2026-09）**：本表此前**漏列两条已实现事件**——`source.unmount.progress` 与 `source.unmount.completed`（正文 §3.2 有、代码也发射，只有本表没列）。已补入，并另补 `media.surface.click`（Rust 发射、属休眠路径）。因此**本表条目数由 22 变为 24**（+2 已实现）+ 1 条休眠事件（`media.surface.click`，**已于 2026-11-11 随 D163 删除，本表回到 24 条**）；`docs/architecture/implementation-status.md` §2.7 #13 的基数随之订正。
 >
 > **10 条缺口的逐条裁决（2026-09，用户拍板）**：**撤下 5 条**——`task.progress` / `task.cancelled`（与既有进度/取消口径重叠）、`media.ready` / `media.ended` / `media.crashed`（随 `media.*` 退役休眠）；**补 1 条发射点**——`plugin.loaded`（`plugin.load` 已存在）；**暂不补 1 条**——`ai.tagging.completed`（占位提供方返回空候选，现在发射等于报假事件，待真实推理提供方）；**保留 3 条并标注"待 watcher 接线"**——`file.changed` / `file.missing` / `file.restored`（`SourceWatcher` 无生产调用方）。
 > **2026-11-10 追记**：上面这 3 条**已经接线**（缺陷 0045，发射点 `apps/desktop/src-tauri/src/source_watch.rs`），缺口清单只剩 `ai.tagging.completed` 一条；同时新登记三条**本轮刻意不做**的边界（新增文件语义、监听不触发重扫、前端暂不消费），见 `docs/issues/0045`。

@@ -13,7 +13,6 @@ import { SourcePanel } from "./panels/SourcePanel";
 import { SourceSelectPanel } from "./panels/SourceSelectPanel";
 import { GridPanel } from "./panels/GridPanel";
 import { ViewerPanel } from "./panels/ViewerPanel";
-import { MediaPlayerPanel } from "./panels/MediaPlayerPanel";
 import { MetadataPanel } from "./panels/MetadataPanel";
 import { AlbumPanel } from "./panels/AlbumPanel";
 import { TagRatingPanel } from "./panels/TagRatingPanel";
@@ -91,12 +90,6 @@ export function TestUiApp(): JSX.Element {
           refreshKey={refreshKey}
         />
         <ViewerPanel
-          selectedFile={selectedFile}
-          repoId={repoId}
-          onStatus={handleStatus}
-          refreshKey={refreshKey}
-        />
-        <MediaPlayerPanel
           selectedFile={selectedFile}
           repoId={repoId}
           onStatus={handleStatus}

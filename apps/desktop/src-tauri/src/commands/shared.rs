@@ -665,7 +665,6 @@ mod tests {
             "file.changed",
             "file.missing",
             "file.restored",
-            "media.surface.click",
             "repo.changed",
             "panel.restore",
         ] {
@@ -676,30 +675,6 @@ mod tests {
                 "{logical} → {wire} 必须是 Tauri 合法事件名"
             );
         }
-    }
-
-    /// 开发期的工作目录就是本 crate（`cargo test` 与 `tauri dev` 都是
-    /// `apps/desktop/src-tauri`）——正是旧实现只按 cwd 拼相对路径时解析失败的目录。
-    ///
-    /// **缺失即跳过**：`external-cli/mpv/` 因体积过大**不入库**（见根 `README.md`
-    /// 「外部依赖」），因此全新克隆上该文件必然不存在——此处不能硬断言。
-    /// 判据与 `crates/hp-media/tests/player_lifecycle.rs` 同口径（缺失时打印跳过）。
-    /// 查找逻辑本身的覆盖不依赖本用例：同模块的 `find_upwards_finds_ffmpeg` 用
-    /// **随仓库分发**的 ffmpeg 覆盖同一条代码路径。
-    #[test]
-    fn find_upwards_finds_repo_relative_mpv() {
-        let Some(found) = find_upwards("external-cli/mpv/mpv.exe") else {
-            eprintln!(
-                "跳过：未找到 external-cli/mpv/mpv.exe（该目录不入库，见根 README「外部依赖」）"
-            );
-            return;
-        };
-        assert!(found.is_file());
-        let normalized = found.to_string_lossy().replace('\\', "/");
-        assert!(
-            normalized.ends_with("external-cli/mpv/mpv.exe"),
-            "意外路径: {normalized}"
-        );
     }
 
     /// 同一套查找也要能命中 ffmpeg/ffprobe（旧实现同样只按 cwd 拼相对路径）。

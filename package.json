@@ -45,7 +45,6 @@
     "check:line-count": "node tools/check-line-count.mjs",
     "check:encoding": "node tools/check-encoding.mjs",
     "check:commands": "node tools/check-commands.mjs",
-    "check:dormant-media": "node tools/check-dormant-media.mjs",
     "check:hidden-console": "node tools/check-hidden-console.mjs",
     "check:bundled-runtime": "node tools/check-bundled-runtime.mjs",
     "check:event-names": "node tools/check-event-names.mjs",

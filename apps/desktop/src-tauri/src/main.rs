@@ -11,18 +11,16 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use hp_ai::AiTaggingService;
-use hp_media::{MediaProcess, ThumbnailCache};
+use hp_media::ThumbnailCache;
 use hp_plugin_host::SupervisionRegistry;
 use hp_scanner::Scanner;
 use hp_store::{GlobalDb, RepoDb, TagLibSet};
 use tauri::Manager;
 
 use commands::shared::external_bin;
-use embed_window::EmbedWindow;
 use tasks::TaskRegistry;
 
 mod commands;
-mod embed_window;
 // 内置 MCP（模型上下文协议）服务（D119）：随应用启动的本机 HTTP 服务。
 mod mcp;
 // 媒体源实时监听接线（D9）：挂载的源 → `file.changed|missing|restored` 事件。
@@ -56,13 +54,6 @@ pub(crate) struct AppState {
      * 这也顺带去掉了旧实现的一个隐患：缓存在持锁期间解码，同一本书的并发请求
      * 被串行化；现在每个请求各开自己的 `File`。
      */
-    /// 媒体子进程（libmpv，单实例常驻，D14）。
-    ///
-    /// **休眠（2026-09）**：libmpv 播放路径已退役（播放器改走 DOM `<video>`，缺陷
-    /// `docs/issues/0001`）。该字段与 `media_embed` 一起**保留不删**，仅作将来复活参考。
-    pub(crate) media: Arc<Mutex<Option<MediaProcess>>>,
-    /// 面板级嵌入的原生渲染子窗口（D14）。**同上休眠**，见 `media` 字段的说明。
-    pub(crate) media_embed: Arc<Mutex<Option<EmbedWindow>>>,
     /// 插件包存储根目录（RFC 0004）。
     pub(crate) plugin_root: Arc<PathBuf>,
     /// 面板控件 schema 缓存，键 `(plugin_id, panel_id, plugin_version)`（D61）。
@@ -108,8 +99,6 @@ fn make_state() -> AppState {
         ffmpeg_bin: Arc::new(external_bin("ffmpeg")),
         ffprobe_bin: Arc::new(external_bin("ffprobe")),
         thumb_cache: Arc::new(ThumbnailCache::new(thumb_root)),
-        media: Arc::new(Mutex::new(None)),
-        media_embed: Arc::new(Mutex::new(None)),
         plugin_root: Arc::new(plugin_root),
         panel_schema_cache: Arc::new(Mutex::new(hp_plugin_host::PanelSchemaCache::new())),
         supervision: Arc::new(Mutex::new(SupervisionRegistry::new())),
@@ -298,23 +287,6 @@ fn main() {
             commands::ai::ai_tagging_submit,
             commands::ai::ai_tagging_status,
             commands::ai::ai_tagging_run,
-            // ===== 休眠段：libmpv 播放路径（2026-09 起播放器走 DOM `<video>`，见 docs/issues/0001）=====
-            // 下面 11 条 `media.*` 命令**全部休眠**：正式界面 `app_ui` 里 0 处调用，
-            // 唯一调用方是 dev harness `test_ui`；`external-cli/mpv/` 也不入库。
-            // **保留注册**（而非删除）是为了不改动休眠代码的形状，将来复活时无需重接线。
-            // 改这里的任何一条前，先确认没有把「休眠」读成「可用」。
-            commands::media::media_play,
-            commands::media::media_pause,
-            commands::media::media_toggle_pause,
-            commands::media::media_seek,
-            commands::media::media_stop,
-            commands::media::media_process_status,
-            commands::media::media_embed_rect,
-            commands::media::media_embed_release,
-            commands::media::media_embed_visible,
-            commands::media::media_embed_click_through,
-            commands::media::media_playback_state,
-            // ===== 休眠段结束 =====
             commands::layout::layout_save,
             commands::layout::layout_list,
             commands::layout::layout_get,

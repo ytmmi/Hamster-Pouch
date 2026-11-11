@@ -1989,7 +1989,6 @@ dependencies = [
  "libwebp-sys",
  "resvg",
  "serde_json",
- "windows 0.61.3",
 ]
 
 [[package]]

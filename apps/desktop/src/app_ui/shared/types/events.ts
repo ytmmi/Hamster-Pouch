@@ -11,7 +11,8 @@
  * 生成物一起过来，语义说明不会丢。
  *
  * 仍在这里手写的是**前端自己 emit** 的事件（不经 Rust DTO，故无生成类型）：
- * `repo.changed { repoId }`、`panel.restore { id }`、`media.surface.click`（空载荷）。
+ * `repo.changed { repoId }`、`panel.restore { id }`。
+ * （`media.surface.click` 曾在此列，2026-11-11 随 libmpv 休眠代码退役，D163。）
  *
  * **2026-11-11 追加 `file.backfill.*`**（0043 阶段 2）：图片尺寸回填的进度与收尾。
  *

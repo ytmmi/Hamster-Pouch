@@ -49,7 +49,7 @@ const eqList = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
  *
  * 为什么需要：说明性注释里常常**引用**被禁的写法（例如"不用 `loading="lazy"`"），
  * 直接对全文匹配会把注释当代码——出现"注释一写就红"的假失败，或反过来让断言形同虚设。
- * 与 `tools/check-dormant-media.mjs` 的 `stripComments` 同一口径（各门禁自持一份，
+ * 与 `tools/check-encoding.mjs` 的 `stripComments` 同一口径（各门禁自持一份，
  * 避免为一个小工具引入共享模块）。
  */
 function stripComments(text) {

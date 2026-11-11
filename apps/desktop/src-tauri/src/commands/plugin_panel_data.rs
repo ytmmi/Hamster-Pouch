@@ -273,8 +273,6 @@ mod tests {
             thumb_cache: Arc::new(ThumbnailCache::new(std::path::PathBuf::from("Z:/none"))),
             // 注：2026-10-18 起 `AppState` 不再有 `book_text`（整本正文缓存）字段——
             // 纯文本改为按窗口渐进读取，没有"整本"可缓存（用户需求 2）。
-            media: Arc::new(Mutex::new(None)),
-            media_embed: Arc::new(Mutex::new(None)),
             plugin_root: Arc::new(std::path::PathBuf::from("Z:/none")),
             panel_schema_cache: Arc::new(Mutex::new(hp_plugin_host::PanelSchemaCache::new())),
             supervision: Arc::new(Mutex::new(SupervisionRegistry::new())),
