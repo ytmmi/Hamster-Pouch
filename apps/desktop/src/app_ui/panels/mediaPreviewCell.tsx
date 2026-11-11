@@ -62,6 +62,7 @@ import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent } from "re
 
 import { AudioWaveform } from "../shared/AudioWaveform";
 import { resolveThumbUrl } from "../shared/thumbUrl";
+import { thumbBucket } from "../shared/thumbSize";
 import type { Translate } from "../i18n";
 import type { FileItem } from "../shared/types";
 import {
@@ -157,6 +158,7 @@ export const ThumbCell = memo(function ThumbCell({
   onContextMenu,
   t,
   intrinsicHeight,
+  thumbRequestSize,
 }: {
   file: FileItem;
   repoId: string;
@@ -188,6 +190,15 @@ export const ThumbCell = memo(function ThumbCell({
    * 由面板按当前视图算一个**接近真实**的值下发，就可以把跳过渲染打开。
    */
   intrinsicHeight?: number;
+  /**
+   * 本单元这一档需要的**设备像素长边**（px，缺陷 0046：自适应分辨率）。
+   *
+   * 面板按"图片宽度 × 视图倍率 × 设备像素比"算好（见 `thumbPixelSize`），
+   * 后端再向上吸附到档梯（320 / 480 / 640 / 960 / 1280）生成或命中缓存。
+   * 值变化（拖图片宽度滑条、换到 DPR 不同的屏幕）会让本单元**按新档重新取图**；
+   * 旧图留在界面上直到新图解析完成，不会先闪成占位。
+   */
+  thumbRequestSize: number;
 }): JSX.Element {
   const cellRef = useRef<HTMLButtonElement>(null);
   /** 宽高比：缓存优先；音频没有宽高比，用固定卡片比例（否则是一张方块）。 */
@@ -216,19 +227,22 @@ export const ThumbCell = memo(function ThumbCell({
   // 上下同余量），窗口**就是**预加载带。在这里就把图取回来，滚到该单元时已经就位；
   // 不再等观察器回调、也不交给 `<img loading="lazy">` 的启发式（那会让取图时机不再对称）。
   //
-  // 请求走 `thumbUrl.ts` 的模块级缓存 + in-flight 去重，重复挂载不会重复发命令。
+  // 请求走 `thumbUrl.ts` 的模块级缓存 + in-flight 去重，重复挂载不会重复发命令；
+  // **请求带尺寸档**（缺陷 0046）：放大图片宽度后要按新档重新取图，否则一直是第一档的糊图。
   useEffect(() => {
     if (!needsThumb) return;
     let cancelled = false;
-    void resolveThumbUrl(repoId, file.id).then((resolved) => {
+    void resolveThumbUrl(repoId, file.id, thumbRequestSize).then((resolved) => {
       if (cancelled) return;
       setThumbUrl(resolved);
       // **显式预热**：`.mp-cell` 的 `content-visibility: auto` 会让被跳过渲染的单元
       // 不触发 `<img>` 取图，而 overscan 带恰恰最容易被跳过——只设 `src` 不够，
       // 取图时机仍会落回渲染启发式（正是"向上不预加载"的来源）。
       // 用 `new Image()` 主动取一次，把取图与"该单元是否被渲染"解耦。
-      if (resolved && !warmedThumbs.has(file.id)) {
-        warmedThumbs.add(file.id);
+      // 预热键**带档位**：同一张图换档后要再预热一次，否则新档的图没人去取。
+      const warmKey = `${file.id}@${thumbBucket(thumbRequestSize)}`;
+      if (resolved && !warmedThumbs.has(warmKey)) {
+        warmedThumbs.add(warmKey);
         const image = new Image();
         image.decoding = "async";
         image.src = resolved;
@@ -238,7 +252,7 @@ export const ThumbCell = memo(function ThumbCell({
     return () => {
       cancelled = true;
     };
-  }, [needsThumb, repoId, file.id]);
+  }, [needsThumb, repoId, file.id, thumbRequestSize]);
 
   return (
     <button

@@ -51,6 +51,7 @@ import { formatByteSize } from "../shared/format";
 import { usePanelForeground } from "../shared/panelForeground";
 import { useHostSettingValue } from "../shared/settingValue";
 import { useStableCallback } from "../shared/stableCallback";
+import { THUMB_DIM_BASE } from "../shared/thumbSize";
 import { useApp } from "../core/AppContext";
 import type { PanelRenderCtx } from "../core/panelRegistry";
 import type { FileItem } from "../shared/types";
@@ -76,6 +77,7 @@ import {
   MEDIA_LIST_ROW_GAP,
   MEDIA_NAME_LINE_HEIGHT,
   MEDIA_TILE_ROW_GAP,
+  thumbPixelSize,
   tileRowHeight,
 } from "./mediaPreviewVirtual";
 import {
@@ -96,6 +98,28 @@ import {
  */
 const thumbScroll = createScrollSlot();
 const nameScroll = createScrollSlot();
+
+/**
+ * 设备像素比（DPR），并**跟随倍率变化**更新（缺陷 0046）。
+ *
+ * 为什么不能只读一次：把窗口拖到外接屏（DPR 1 → 2）或改系统缩放后，同样的 CSS 宽度
+ * 需要**双倍**的设备像素；不跟着变，缩略图就还是按旧倍率选的档，表现为"换了屏就糊"。
+ * `matchMedia('(resolution: Xdppx)')` 是唯一能收到"倍率变化"事件的接口
+ * （`resize` 在只改系统缩放时不一定触发）；每次变化后重建监听以对准新倍率。
+ *
+ * 返回值**不封顶**：封顶在 `thumbPixelSize`（`THUMB_DPR_MAX`）里做，
+ * 那是唯一需要这个上限的地方（排版不需要知道缓存策略）。
+ */
+function useDevicePixelRatio(): number {
+  const [dpr, setDpr] = useState(() => window.devicePixelRatio || 1);
+  useEffect(() => {
+    const media = window.matchMedia(`(resolution: ${dpr}dppx)`);
+    const onChange = () => setDpr(window.devicePixelRatio || 1);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [dpr]);
+  return dpr;
+}
 
 export interface MediaPreviewPanelProps {
   /**
@@ -476,6 +500,27 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
   );
 
   /**
+   * 每格缩略图这一档需要的**设备像素长边**（缺陷 0046：放大后不再糊）。
+   *
+   * 只有**图片**随"图片宽度 / 视图 / DPR"变化；视频首帧（后端固定 512 宽）与音频
+   * 波形图都是单尺寸缓存，一律传首档——给它们传变化的值，只会让同一张图在
+   * `thumbUrl` 的缓存里裂成多份、多发几次 IPC 却拿回同一个路径。
+   *
+   * `ratioVersion` 在依赖里：宽高比是 `<img>` 解码后才量到的，量到之前按 1:1 估算；
+   * 量到后必须**按真实比例重新选档**——竖图的长边是高度、横图是宽度，差得远。
+   */
+  const dpr = useDevicePixelRatio();
+  const thumbRequestSize = useCallback(
+    (file: FileItem): number => {
+      void ratioVersion;
+      if (file.media_type !== "image") return THUMB_DIM_BASE;
+      const ratio = resolveRatio(file, ratioCache.get(file.id));
+      return thumbPixelSize(view, imageSize, ratio, dpr);
+    },
+    [view, imageSize, dpr, ratioVersion],
+  );
+
+  /**
    * 右键菜单：未选中项先单选，已选中则保持多选；
    * 在光标位置打开自定义上下文菜单。
    */
@@ -536,6 +581,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
         selected={app.selectedIds.has(file.id)}
         showName={showFileNameFor(file.media_type)}
         intrinsicHeight={cellIntrinsicHeight(file)}
+        thumbRequestSize={thumbRequestSize(file)}
         onSelect={cellSelect}
         onDoubleClick={cellDoubleClick}
         onDragStart={cellDragStart}
@@ -549,6 +595,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
       app.t,
       showFileNameFor,
       cellIntrinsicHeight,
+      thumbRequestSize,
       cellSelect,
       cellDoubleClick,
       cellDragStart,

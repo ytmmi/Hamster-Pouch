@@ -89,6 +89,13 @@ export interface FileQueryPage {
 export interface ThumbGetArgs {
   repoId: string;
   fileId: string;
+  /**
+   * 该单元需要的**设备像素长边**（px）；后端向上吸附到档梯
+   * （320 / 480 / 640 / 960 / 1280）后分档缓存（缺陷 0046）。
+   *
+   * 省略 = 按首档 320 处理（与升级前一致）；视频首帧与音频波形图忽略此参数。
+   */
+  size?: number;
 }
 
 /** preview_get 命令参数（有界预览，供 Chromium 无法解码的 HEIC/HEIF 查看，缺陷 0019） */

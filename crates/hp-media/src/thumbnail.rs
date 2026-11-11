@@ -238,6 +238,40 @@ pub const IMAGE_THUMB_MAX_DIM: u32 = 320;
 /// `-quality 90` 的 SSIM 0.9908 已明显高于旧 JPEG，体积也反超（1.05×），不再是"同质量"比较。
 pub const IMAGE_THUMB_WEBP_QUALITY: u8 = 70;
 
+/// 图片缩略图**长边档梯**（像素）：`thumb.get` 的请求尺寸**向上吸附**到最近一档。
+///
+/// **为什么是档梯而不是按请求像素逐尺寸落盘**（缺陷 0046）：媒体预览的"图片宽度"是
+/// 连续滑条（80–400，步长 8），再乘设备像素比就是上百种请求尺寸；每个尺寸各存一份，
+/// 同一个文件会裂出几十份缓存，每份首次都要解一遍原图。档梯把分辨率离散成 5 档，
+/// 相邻档最多 1.5× 像素差（640→960），肉眼不可辨，缓存条目上界却只有 5。
+///
+/// 首档沿用 [`IMAGE_THUMB_MAX_DIM`]（320，旧口径）：默认设置（160 CSS px、DPR 1–2）
+/// 仍命中旧缓存文件，升级后不会整库重算（缓存文件名见
+/// `ThumbnailCache::path_for_image_at`）。
+pub const IMAGE_THUMB_DIM_LADDER: &[u32] = &[IMAGE_THUMB_MAX_DIM, 480, 640, 960, 1280];
+
+/// 档梯上限（长边像素）。超过它的请求一律按这一档生成。
+///
+/// **为什么封顶在 1280 而不是跟着请求长**：网格单元再大也受
+/// `--mp-row-max-factor: 2` 约束（自适应视图行高 = 图片宽度的 2 倍），
+/// 1280 已覆盖"400 宽 × DPR 2 × 2 倍行高"的极端组合。再往上缩略图就没有意义了——
+/// 那一档**回退到原图**（见 `thumb.get` 的 `should_serve_original`），
+/// 而不是为一张 8K 图解码出 8K 的 WebP 塞进内存。
+pub const IMAGE_THUMB_MAX_LADDER_DIM: u32 = 1280;
+
+/// 把前端请求的长边像素**向上吸附**到 [`IMAGE_THUMB_DIM_LADDER`] 的某一档。
+///
+/// `requested == 0`（未指定 / 旧调用方）与一切 ≤ 320 的请求归首档；
+/// 超过上限的归 [`IMAGE_THUMB_MAX_LADDER_DIM`]（不报错——请求"更大"是正常诉求，
+/// 只是缩略图到此为止，再清晰由原图回退负责）。
+pub fn image_thumb_dim_for(requested: u32) -> u32 {
+    IMAGE_THUMB_DIM_LADDER
+        .iter()
+        .copied()
+        .find(|&dim| requested <= dim)
+        .unwrap_or(IMAGE_THUMB_MAX_LADDER_DIM)
+}
+
 /// 生成**全分辨率** JPEG 预览（`preview.get` 命令，供 Chromium 无法原生解码的
 /// HEIC/HEIF 查看器使用，缺陷 0019）。
 ///
@@ -406,6 +440,41 @@ mod tests {
         let thumb = image::open(&out).expect("读取缩略图失败");
         assert_eq!(thumb.width(), 320);
         assert_eq!(thumb.height(), 160);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 档梯吸附（缺陷 0046）：向上取最近一档，两端夹紧。
+    #[test]
+    fn thumb_dim_snaps_up_to_ladder() {
+        assert_eq!(image_thumb_dim_for(0), IMAGE_THUMB_MAX_DIM);
+        assert_eq!(image_thumb_dim_for(1), IMAGE_THUMB_MAX_DIM);
+        assert_eq!(image_thumb_dim_for(320), 320);
+        assert_eq!(image_thumb_dim_for(321), 480);
+        assert_eq!(image_thumb_dim_for(480), 480);
+        assert_eq!(image_thumb_dim_for(800), 960);
+        assert_eq!(image_thumb_dim_for(1280), IMAGE_THUMB_MAX_LADDER_DIM);
+        // 超出上限不报错、不放大：夹到 1280 档（再清晰由原图回退负责）。
+        assert_eq!(image_thumb_dim_for(5000), IMAGE_THUMB_MAX_LADDER_DIM);
+    }
+
+    /// 同一张图在不同档位落盘时，长边恰好等于该档。
+    #[test]
+    fn ladder_dim_downscales_to_exactly_that_dim() {
+        let dir = std::env::temp_dir().join(format!("hp-thumb-ladder-{}", nanos()));
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        let src = dir.join("big.png");
+        let img = image::RgbImage::from_pixel(1200, 600, image::Rgb([40, 50, 60]));
+        img.save(&src).expect("写入测试图片失败");
+
+        for dim in [480u32, 960] {
+            let out = dir.join(format!("big@{dim}.jpg"));
+            generate_image_thumbnail(&src, &out, dim, None, Duration::from_secs(30))
+                .expect("生成缩略图失败");
+            let thumb = image::open(&out).expect("读取缩略图失败");
+            assert_eq!(thumb.width(), dim);
+            assert_eq!(thumb.height(), dim / 2);
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }

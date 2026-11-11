@@ -1069,6 +1069,108 @@ check(
     JSON.stringify(virtual.chunkRows([1, 2], -5)) === JSON.stringify([[1], [2]]),
 );
 
+// ---- 缺陷 0046：**缩略图自适应分辨率**（放大不糊 / 按档缓存 / 大图回退原图）----
+//
+// 三条会**静默**失败的路：
+//   ① 前端把"这一格排版需要多大"算错 → 请求偏小，图被浏览器放大（就是 0046 的现象）；
+//   ② 前端与后端的档梯不一致 → 同一张图按两档各生成一次，缓存条目白翻一倍；
+//   ③ 请求没带尺寸、或缓存键不带档 → 改了「图片宽度」仍显示第一档的糊图。
+// 因此这里跑**真函数**做行为断言（`thumbPixelSize` / `thumbBucket`），
+// 并把两端的档梯与可解码白名单**逐项对齐**（各写一套就是 ② 的来源）。
+const thumbSize = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/thumbSize.ts")).href
+);
+
+check(
+  "档梯吸附：向上取档（宁可多一档也不放大糊图）、上限 1280、非法值归首档",
+  thumbSize.THUMB_DIM_LADDER.join(",") === "320,480,640,960,1280" &&
+    thumbSize.THUMB_DIM_BASE === 320 &&
+    thumbSize.thumbBucket(0) === 320 &&
+    thumbSize.thumbBucket(Number.NaN) === 320 &&
+    thumbSize.thumbBucket(320) === 320 &&
+    thumbSize.thumbBucket(321) === 480 &&
+    thumbSize.thumbBucket(480) === 480 &&
+    thumbSize.thumbBucket(800) === 960 &&
+    thumbSize.thumbBucket(960) === 960 &&
+    thumbSize.thumbBucket(961) === 1280 &&
+    thumbSize.thumbBucket(50_000) === 1280,
+  `ladder=${thumbSize.THUMB_DIM_LADDER.join(",")} 800→${thumbSize.thumbBucket(800)}`,
+);
+
+check(
+  "缓存键分档：同一 fileId 的不同档必须是不同条目（否则换档后永远显示第一档）",
+  thumbSize.thumbCacheKey("f1", 320) !== thumbSize.thumbCacheKey("f1", 960) &&
+    thumbSize.thumbCacheKey("f1", 320) === "f1@320",
+);
+
+check(
+  "每视图的长边需求：平铺按 cover 取宽高较大者、自适应按行高 2× 封顶、瀑布流按列宽×比例、DPR 封顶 2",
+  (() => {
+    const t = virtual.thumbPixelSize;
+    return (
+      // 平铺是正方形 + `object-fit: cover`：横图 2:1 要按宽度那一侧取，竖图同理。
+      t("tile", 160, 2, 1) === 320 &&
+      t("tile", 160, 0.5, 1) === 320 &&
+      t("tile", 160, 1, 1) === 160 &&
+      // 自适应是 contain + 行高上限 2×：3:1 的横图只需 2×（不是 3×）。
+      t("adaptive", 160, 3, 1) === 320 &&
+      t("adaptive", 160, 0.5, 1) === 160 &&
+      // 瀑布流：列宽固定，竖图的高度才是长边。
+      t("masonry", 160, 0.5, 1) === 320 &&
+      t("masonry", 160, 3, 1) === 160 &&
+      // DPR 乘上去并向上取整；封顶 2（再高对肉眼无收益，缓存却是 4× 面积）。
+      t("masonry", 160, 0.5, 2) === 640 &&
+      t("masonry", 160, 0.5, 3) === 640 &&
+      t("masonry", 160, 0.5, 0) === 320 &&
+      t("masonry", 161, 0.5, 1) === 322
+    );
+  })(),
+  `tile2=${virtual.thumbPixelSize("tile", 160, 2, 1)} adaptive3=${virtual.thumbPixelSize("adaptive", 160, 3, 1)} dpr3=${virtual.thumbPixelSize("masonry", 160, 0.5, 3)}`,
+);
+
+check(
+  "档梯两端同源：Rust `IMAGE_THUMB_DIM_LADDER` ↔ 前端 `THUMB_DIM_LADDER`；320 档沿用旧缓存名 `<hash>.webp`",
+  (() => {
+    const thumbRs = readFileSync(join(ROOT, "crates/hp-media/src/thumbnail.rs"), "utf8");
+    const cacheRs = readFileSync(join(ROOT, "crates/hp-media/src/cache.rs"), "utf8");
+    const base = /pub const IMAGE_THUMB_MAX_DIM: u32 = (\d+);/.exec(thumbRs);
+    const ladder = /pub const IMAGE_THUMB_DIM_LADDER: &\[u32\] = &\[([^\]]+)\];/.exec(thumbRs);
+    if (!base || !ladder) return false;
+    // 首项写的是 `IMAGE_THUMB_MAX_DIM` 常量（不是字面量），先展开再逐项比。
+    const dims = ladder[1]
+      .replace(/IMAGE_THUMB_MAX_DIM/g, base[1])
+      .match(/\d+/g)
+      ?.map(Number);
+    return (
+      base[1] === "320" &&
+      dims?.join(",") === thumbSize.THUMB_DIM_LADDER.join(",") &&
+      /pub const IMAGE_THUMB_MAX_LADDER_DIM: u32 = 1280;/.test(thumbRs) &&
+      // 首档 == 旧名、其余带 `@<dim>`：升级不该让既有缓存整体作废。
+      /if dim <= IMAGE_THUMB_MAX_DIM \{/.test(cacheRs) &&
+      /format!\("\{content_hash\}@\{dim\}\.webp"\)/.test(cacheRs)
+    );
+  })(),
+);
+
+check(
+  "可解码白名单两端同源：后端 `NATIVE_RENDER_EXTS` ↔ 前端 `previewUrl.ts`（回退原图的前提）",
+  (() => {
+    const listOf = (text, head) => {
+      const m = new RegExp(`${head}[^\\[]*\\[([^\\]]*)\\]`).exec(text);
+      return m ? [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]).sort() : null;
+    };
+    const rust = listOf(
+      readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"), "utf8"),
+      "NATIVE_RENDER_EXTS: &\\[&str\\] = &",
+    );
+    const ts = listOf(
+      readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/previewUrl.ts"), "utf8"),
+      "NATIVE_RENDER_EXTS = ",
+    );
+    return rust !== null && ts !== null && rust.join(",") === ts.join(",");
+  })(),
+);
+
 // ---- 缺陷 0018 P1-A 回归：**滚动位置恢复 vs 后台翻页**（`mediaPreviewScroll.ts`）----
 //
 // P1-A 把取数从"一次取回有界一页"改成"后台翻页翻完全库"之后，恢复滚动的**时机**
@@ -1406,7 +1508,13 @@ check(
     return (
       /const warmedThumbs = new Set<string>\(\);/.test(code) &&
       /new Image\(\)/.test(code) &&
-      /warmedThumbs\.add\(file\.id\)/.test(code) &&
+      // **预热键必须带分辨率档**（缺陷 0046）：只按 `file.id` 记的话，换档后
+      // 新档的图没人预热（`content-visibility` 的单元不会自己去取），
+      // 表现为"放大图片宽度后滚回去还是糊的"。
+      /const warmKey = .*thumbBucket\(thumbRequestSize\)/.test(code) &&
+      /warmedThumbs\.add\(warmKey\)/.test(code) &&
+      // 请求必须把**该档尺寸**传下去，否则后端恒按首档出图（放大就糊，0046 原样复发）。
+      /void resolveThumbUrl\(repoId, file\.id, thumbRequestSize\)/.test(code) &&
       // **正向锚点**：缩略图 effect 的守卫必须**只有** `needsThumb` 一个条件——
       // 后面紧跟 `resolveThumbUrl`，因此再挂任何"等可见"的条件（`!visible` /
       // `!audioVisible` / 别的状态）都会让这条不成立。

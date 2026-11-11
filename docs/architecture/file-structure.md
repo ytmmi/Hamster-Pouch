@@ -215,7 +215,10 @@ apps/desktop/src/app_ui/
                       #   stableCallback（恒定引用回调：让条目单元的 memo 真正生效；
                       #     媒体预览与图书预览共用一份）、
                       #   format（显示格式纯函数：体积自适应 KiB/KB、日期三格式、时长/码率/帧率）、
-                      #   styles、api/（按域）、types/（按域）、thumbUrl
+                      #   styles、api/（按域）、types/（按域）、thumbUrl（取图结果缓存 + in-flight 去重）、
+                     #   thumbSize（**缩略图档梯**：`THUMB_DIM_LADDER` = 320/480/640/960/1280、
+                     #     `thumbBucket` 向上吸附、`thumbCacheKey` = `fileId@bucket`；D159，
+                     #     与 `crates/hp-media/src/thumbnail.rs` 的 `IMAGE_THUMB_DIM_LADDER` 同源，门禁对账）
     interfacePages.ts     # 垂直「界面页」的**纯逻辑**（D124 / D124-R3 / D124-R4 / D124-R5）：页面组模型 + 容错解析（任何
                           #   脏数据都落回可用状态，不抛异常）+ 序列化 + 增删改（删组无损，界面回到
                           #   未分组）；另有**导航顺序** `order`（orderedPages 收敛：order 认识的排前面、
@@ -451,9 +454,11 @@ apps/desktop/src/app_ui/
                             #   把取图与 `content-visibility` 的跳过渲染解耦，D89）
                             #   **音频走同一条路**（D115）：波形图由后端出，前端只显示，
                             #   因此那条例外连同它的 `IntersectionObserver` 一并删除
+                            #   取图按 `thumbRequestSize` 分档：缓存与预热键都是 `fileId@bucket`（D159）
     mediaPreviewDropdown.tsx # 工具条下拉
     mediaPreviewView.ts     # 取值域与纯函数
     mediaPreviewVirtual.ts  # 虚拟化的行/列模型（纯函数：切行、行高、列偏移、窗口区间、自适应断行）
+                            #   + `thumbPixelSize`（D159：按视图几何 × 图片宽度 × DPR 算缩略图长边需求）
     mediaPreviewVirtualRows.tsx # 行虚拟化的共享钩子（定高 / 测量 / 变量行高 + 滚动窗口）
     mediaPreviewScroll.ts   # 滚动位置恢复的纯逻辑（与后台翻页的时序冲突，缺陷 0018 第 6 轮）
     MediaPlayerPanel.tsx    # 媒体播放器面板（DOM `<video>` 播放控制；音频多一条**波形图**

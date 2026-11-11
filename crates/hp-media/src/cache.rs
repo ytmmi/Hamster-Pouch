@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 use hp_core::{HpError, HpResult, MediaType};
 
+use crate::thumbnail::IMAGE_THUMB_MAX_DIM;
+
 /// 缩略图落盘格式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThumbFormat {
@@ -98,7 +100,26 @@ impl ThumbnailCache {
 
     /// 图片缩略图路径（WebP）。
     pub fn path_for_image(&self, content_hash: &str) -> PathBuf {
-        self.path_for_format(content_hash, ThumbFormat::Webp)
+        self.path_for_image_at(content_hash, IMAGE_THUMB_MAX_DIM)
+    }
+
+    /// 图片缩略图在**指定长边档**下的缓存路径（缺陷 0046：自适应分辨率）。
+    ///
+    /// 首档（[`IMAGE_THUMB_MAX_DIM`] = 320）沿用旧文件名 `<hash>.webp`——升级后既有
+    /// 缓存文件直接命中，不会因为"新增了尺寸维度"就把整个缓存判废重算。
+    /// 其它档写 `<hash>@<dim>.webp`，仍落在同一分片目录：`@` 在 Windows / macOS / Linux
+    /// 文件名里都合法，且 `<hash>@480.webp` 与 `<hash>.preview.jpg`、`<hash>.bookmeta.json`
+    /// 这类同前缀文件按 `@` / `.` 分隔得开，不会互相覆盖。
+    ///
+    /// 档位值来自 [`crate::image_thumb_dim_for`]（请求像素已吸附到档梯），
+    /// 这里不做吸附——传入什么档就存什么档，文件名与内容一致。
+    pub fn path_for_image_at(&self, content_hash: &str, dim: u32) -> PathBuf {
+        let shard = self.shard_dir(content_hash);
+        if dim <= IMAGE_THUMB_MAX_DIM {
+            shard.join(format!("{content_hash}.webp"))
+        } else {
+            shard.join(format!("{content_hash}@{dim}.webp"))
+        }
     }
 
     /// 视频首帧缩略图路径（JPEG）。
@@ -205,6 +226,25 @@ mod tests {
         let cache = ThumbnailCache::new("C:/tmp/thumbs");
         let p = cache.path_for_video("abcdef0123456789");
         assert_eq!(p, PathBuf::from("C:/tmp/thumbs/ab/abcdef0123456789.jpg"));
+    }
+
+    /// 档梯命名（缺陷 0046）：首档沿用旧名（兼容既有缓存），其它档带 `@dim`。
+    #[test]
+    fn image_thumbnail_path_carries_dim_above_base() {
+        let cache = ThumbnailCache::new("C:/tmp/thumbs");
+        assert_eq!(
+            cache.path_for_image_at("abcdef0123456789", 320),
+            PathBuf::from("C:/tmp/thumbs/ab/abcdef0123456789.webp")
+        );
+        assert_eq!(
+            cache.path_for_image_at("abcdef0123456789", 960),
+            PathBuf::from("C:/tmp/thumbs/ab/abcdef0123456789@960.webp")
+        );
+        // 旧入口与新入口在首档必须给出**同一个路径**，否则升级后缓存全废。
+        assert_eq!(
+            cache.path_for_image("abcdef0123456789"),
+            cache.path_for_image_at("abcdef0123456789", 320)
+        );
     }
 
     #[test]

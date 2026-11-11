@@ -17,6 +17,11 @@
  * 不需要测量，也就不会出现"测量结果回流导致滚动条抖动"。
  */
 
+// 只借视图的**类型**：`thumbPixelSize` 要把"哪种视图怎么撑满格子"算成像素，
+// 而视图取值域的唯一来源在 `mediaPreviewView`（type-only import 运行时被擦除，
+// 本模块仍然不依赖那份实现）。
+import type { MediaViewMode } from "./mediaPreviewView";
+
 /**
  * 把条目按 `perRow` 个一行切开（最后一行可能不满）。
  *
@@ -388,5 +393,60 @@ export function adaptiveCellIntrinsicHeight(
 ): number {
   const base = Math.max(1, imageSize);
   return Math.round(base + (showName ? 4 + nameLineHeight : 0));
+}
+
+/**
+ * 媒体预览缩略图**封顶的设备像素比**（缺陷 0046）。
+ *
+ * 缩略图档梯顶到 1280，而 1280 只覆盖到 `400 × 2 × 2`：DPR 3 的窄屏笔记本把
+ * 图片宽度拉到 400 时理论上要 2400px，但那种组合下的差距（1.9× 放大）
+ * 远小于"为此多存 2 倍像素"的代价，且超过 1280 本来就走后端回退原图。
+ */
+export const THUMB_DPR_MAX = 2;
+
+/**
+ * 一个缩略图单元这一档需要的**设备像素长边**（缺陷 0046 的核心算式）。
+ *
+ * 输入是同一套排版参数（视图 / 图片宽度 / 宽高比 / DPR），输出直接喂给
+ * `resolveThumbUrl(repoId, fileId, size)`，由后端吸附到档梯后生成/命中缓存。
+ * 三种视图的"哪条边被撑满"不同，因此倍率也不同：
+ *
+ * - **平铺**（`tile`）：正方形 + `object-fit: cover`——短边也被填满，
+ *   一张 3:1 的横图会被放大到 `3 × 边长`，所以长边 = `图片宽度 × max(ratio, 1/ratio)`；
+ * - **自适应**（`adaptive`）：`object-fit: contain` + 行高等宽，格子宽度 =
+ *   `图片宽度 × ratio`（被 `--mp-row-max-factor: 2` 封顶），长边 =
+ *   `图片宽度 × min(max(ratio, 1), 2)`；
+ * - **瀑布流**（`masonry`）：列宽固定 = 图片宽度，高度按比例——竖图的高度才是长边，
+ *   长边 = `图片宽度 × max(1, 1/ratio)`。
+ *
+ * 最后乘 DPR 并**向上取整**：浏览器按设备像素解码，差 1px 也会重采样。
+ * 返回值不做档梯吸附（那是 `thumbBucket` / 后端的事），这样面板可以把
+ * "排版需要多大"与"缓存按哪一档存"两件事分开断言。
+ */
+export function thumbPixelSize(
+  view: MediaViewMode,
+  imageSize: number,
+  ratio: number,
+  dpr: number,
+  rowMaxFactor: number = MEDIA_ADAPTIVE_ROW_MAX_FACTOR,
+): number {
+  const size = Number.isFinite(imageSize) && imageSize > 0 ? imageSize : 1;
+  const safeRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+  const safeDpr = Number.isFinite(dpr) && dpr > 0 ? Math.min(dpr, THUMB_DPR_MAX) : 1;
+  const cap = Math.max(1, rowMaxFactor);
+  // 缺省按"方块"算（列表等非常规调用方）；三种预览视图各自覆盖。
+  let longEdge = size;
+  switch (view) {
+    case "tile":
+      longEdge = size * Math.max(safeRatio, 1 / safeRatio);
+      break;
+    case "adaptive":
+      longEdge = size * Math.min(Math.max(safeRatio, 1), cap);
+      break;
+    case "masonry":
+      longEdge = size * Math.max(1, 1 / safeRatio);
+      break;
+  }
+  return Math.ceil(longEdge * safeDpr);
 }
 

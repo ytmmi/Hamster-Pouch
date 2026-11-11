@@ -61,6 +61,9 @@ export function thumbGet(args: ThumbGetArgs): Promise<string | null> {
   return invoke<ApiResponse<string | null>>("thumb_get", {
     repoId: args.repoId,
     fileId: args.fileId,
+    // 缺省传 null：后端 `size: Option<u32>` 收下即按首档（320）处理，
+    // 与旧调用方逐位一致（缺陷 0046）。
+    size: args.size ?? null,
   }).then(unwrapApi);
 }
 
