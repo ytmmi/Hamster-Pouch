@@ -16,7 +16,7 @@ use hp_core::{FileMark, MediaType, ThumbStatus};
 use hp_hash::{ContentHash, PerceptualHash, hash_file};
 use hp_media::{IMAGE_THUMB_MAX_DIM, extract_thumbnail, generate_image_thumbnail};
 
-use crate::scan_compute::analyze_image;
+use crate::scan_compute::{ImageProbe, analyze_image};
 use crate::scanner::ScanOptions;
 
 /// 串行准备阶段的产物：只含**廉价**信息（媒体类型、stat、是否变化、调色板是否要重算）。
@@ -37,6 +37,12 @@ pub struct Prepared {
     pub existing_marks: Vec<FileMark>,
     /// 调色板是否需要重算（仅图片有意义；已手动锁定时为 `false`，见 `write_palette`）。
     pub want_palette: bool,
+    /// 图片头的一次读头产物（**配额 + 显示尺寸**，0043 / 第 43 轮）。
+    ///
+    /// 准备阶段读**一次**：配额交给并行段限流，显示尺寸直接进索引——旧实现在
+    /// 限流时读一次头、`compute` 里又读一次同一份头。只有"要重算的图片"有值，
+    /// 未变化的图一个字节都不碰。
+    pub image_probe: Option<ImageProbe>,
 }
 
 /// 并行计算阶段的产物：纯数据，不含数据库句柄。
@@ -60,11 +66,17 @@ pub struct Computed {
 ///
 /// 只有图片需要按尺寸加权：一张 9000² 图解码后约 231 MB（RGB8），
 /// 16 个核同时持图就是 3.7 GB。视频走外部进程，内存占用与像素无关。
+///
+/// 配额来自准备阶段那次读头（[`Prepared::image_probe`]，第 43 轮）；调用方没带
+/// （自建 `Prepared` 的测试/工具）时现场读一次头，与旧行为完全一致。
 pub fn pixel_cost(prepared: &Prepared) -> u64 {
     if prepared.unchanged || prepared.media_type != MediaType::Image {
         return 1;
     }
-    crate::scan_compute::image_pixel_cost(&prepared.path)
+    match prepared.image_probe {
+        Some(probe) => probe.pixel_cost.max(1),
+        None => crate::scan_compute::image_pixel_cost(&prepared.path),
+    }
 }
 
 /// 纯计算：读文件、算哈希、抽帧 / 出缩略图。**不访问数据库、不写索引**。
@@ -100,10 +112,13 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
             // 解码 / 编码只依赖文件本身，正是并行阶段该干的活。反过来（留到界面要
             // 显示时才逐张补）会让大库第一次滚动就是几百次同步解码。
             let thumb_status = process_image_thumb(&prepared.path, &content, options);
-            // 宽高单独读头（0043）：解码结果的尺寸在 AVIF/HEIC 家族里是**有界中间尺寸**
-            // （`SCAN_DECODE_BOUND = 256`），且 JPEG 解码不应用 EXIF 方向，两者都不能当
-            // 显示尺寸用。读头失败的图片按"未知"入库，消费方降级（不回填 0）。
-            let probe = crate::scan_compute::probe_image(&prepared.path);
+            // 宽高来自**准备阶段那次读头**（0043 / 第 43 轮）：解码结果的尺寸在 AVIF/HEIC
+            // 家族里是**有界中间尺寸**（`SCAN_DECODE_BOUND = 256`），且 JPEG 解码不应用 EXIF
+            // 方向，两者都不能当显示尺寸用。读头失败的图片按"未知"入库，消费方降级
+            // （不回填 0）。调用方没带读头结果时现场补一次，行为与旧实现一致。
+            let probe = prepared
+                .image_probe
+                .unwrap_or_else(|| crate::scan_compute::probe_image(&prepared.path));
             Computed {
                 content: Some(content),
                 perceptual,
@@ -296,6 +311,7 @@ mod tests {
             existing_id: None,
             existing_marks: Vec::new(),
             want_palette,
+            image_probe: None,
         }
     }
 

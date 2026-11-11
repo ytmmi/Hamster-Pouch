@@ -6,6 +6,7 @@
 //! 内存由 `scan_pool` 的**像素预算**兜底：9000² 一张图解码后约 231 MB，
 //! 不做限流的话 16 个核同时持图会 OOM。
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,11 +17,12 @@ use hp_core::{
 };
 use hp_hash::{ContentHash, PerceptualHash};
 use hp_media::{ThumbnailCache, encode_palette_json, palette_is_locked};
-use hp_store::RepoDb;
+use hp_store::{RepoDb, ScanPrepareRow};
 use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
 
 use crate::media_type::{default_file_marks, detect_media_type};
+use crate::scan_compute;
 use crate::scan_pool;
 use crate::scan_task::{Computed, Prepared, compute, pixel_cost};
 
@@ -28,6 +30,16 @@ use crate::scan_task::{Computed, Prepared, compute, pixel_cost};
 /// 逐文件发事件会把事件通道打满、拖累扫描本身（用户口径 2026-10-06：
 /// "可以固定间隔刷新，无需完全实时，防止拖累性能"）。
 const WALK_REPORT_INTERVAL: Duration = Duration::from_millis(100);
+
+/// 准备阶段**并行采集**的每文件元数据（第 43 轮）。
+///
+/// 两个字段互相独立、都只是系统调用：`detect_media_type` 对已知扩展名零 IO
+/// （只有无法识别时才嗅探 16 字节 magic），`file_stat` 一次 `metadata`。
+/// 它们不需要数据库、不需要解码，因此可以按块并行——串行版本在慢盘上是大头。
+struct PrepareMeta {
+    media_type: Option<MediaType>,
+    stat: Option<(i64, String)>,
+}
 
 /// 扫描阶段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,83 +279,117 @@ impl Scanner {
         let source_id = source.id.as_str();
 
         // 2. **串行准备**：媒体类型判定、stat、查既有行、判定调色板是否要重算。
-        //    这些都是廉价操作（一次索引查询 + 一次 stat），不涉及解码；
-        //    昂贵的解码/哈希/抽帧留到下一阶段的**并行**里做。
+        //    这些都是廉价操作，不涉及解码；昂贵的解码/哈希/抽帧留到下一阶段的**并行**里做。
+        //
+        //    既有行**一次性取回**（`docs/issues/0018` 第 43 轮）：旧实现是每个文件
+        //    `get_file_by_path`（1 条 SELECT + 1 条 marks 查询）、每张图再 `get_color_ref`
+        //    一次，5 万文件就是十几万条 SQL 串在这段循环里。这里一条
+        //    `files LEFT JOIN color_refs` 拿齐"是否变化 / 要不要补哈希 / 调色板是否锁定"，
+        //    SQL 条数与文件数脱钩。取完即用 `remove` 消费，不再占着整张表。
+        let mut existing_rows: HashMap<String, ScanPrepareRow> = db
+            .list_files_for_scan(source_id)?
+            .into_iter()
+            .map(|row| (row.relative_path.clone(), row))
+            .collect();
+
         let mut prepared_list: Vec<Prepared> = Vec::with_capacity(entries.len());
-        // 准备阶段同样是**纯串行**（媒体类型判定 / stat / 查既有行），大源上这一段可能
-        // 持续数秒；整段不发帧会让浮窗看起来停在原地（而且 `TaskOverlay` 超过 5 s
+        // 准备阶段整段不发帧会让浮窗看起来停在原地（而且 `TaskOverlay` 超过 5 s
         // 没有进度就会走"卡住"对账）。这里按同一间隔上报"正在准备的条目"。
         let mut last_prepare_report = Instant::now();
-        for path in entries.iter() {
-            let relative = match path.strip_prefix(root) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-            let relative_path = relative.to_string_lossy().replace('\\', "/");
-
+        // **元数据采集并行化**（第 43 轮）：`detect_media_type` 与 `stat` 相互独立、
+        // 都只是系统调用，而网络盘/机械盘上 5 万次 stat 串行能吃掉十几秒。
+        // 块大小取 32 个核的宽度：再大只把取消与进度的粒度拉粗，并不提升吞吐。
+        let prepare_chunk = (scan_pool::worker_count() * 32).clamp(1, 2048);
+        for chunk in entries.chunks(prepare_chunk) {
+            if !self.wait_if_paused(extra_cancel)? {
+                outcome.cancelled = true;
+                return Ok(outcome);
+            }
             if last_prepare_report.elapsed() >= WALK_REPORT_INTERVAL {
                 last_prepare_report = Instant::now();
                 on_progress(&ScanProgress {
                     processed: 0,
                     total,
                     phase: ScanPhase::Indexing,
-                    current: Some(relative_path.clone()),
+                    current: chunk
+                        .first()
+                        .and_then(|p| p.strip_prefix(root).ok())
+                        .map(|p| p.to_string_lossy().replace('\\', "/")),
                 });
             }
 
-            let media_type = match detect_media_type(path) {
-                Some(mt) => mt,
-                None => {
-                    outcome.skipped += 1;
-                    continue;
-                }
-            };
+            let metas = scan_pool::map_bounded(
+                chunk,
+                |_p: &PathBuf| 1,
+                |p: &PathBuf| PrepareMeta {
+                    media_type: detect_media_type(p),
+                    stat: file_stat(p),
+                },
+            );
 
-            let (size, mtime) = match file_stat(path) {
-                Some(v) => v,
-                None => {
-                    outcome.skipped += 1;
-                    continue;
-                }
-            };
+            for (path, meta) in chunk.iter().zip(metas) {
+                let relative = match path.strip_prefix(root) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                let relative_path = relative.to_string_lossy().replace('\\', "/");
 
-            let existing = db.get_file_by_path(source_id, &relative_path)?;
-            // 内容未变且非全量重扫 → 整条跳过（不哈希、不解码）。
-            let unchanged = match &existing {
-                Some(row) => !(options.full || row.size != size || row.mtime != mtime),
-                None => false,
-            };
-            // 音频的**存量占位行**（D11 → D115）即使 size/mtime 未变也必须重算一次：
-            // 它们的 `content_hash` 从来就是 NULL、`media_info_json` 从来没有值，
-            // "跳过"会把占位行原样留下，表现为"升了级却还是没哈希、没时长"。
-            // 判据只看**哈希是否缺失**（不是 `verify_status == placeholder`）：
-            // status 是镜像，哈希才是"这份内容到底算没算过"的事实。
-            // 算完写回 `ok` + 哈希 + 元数据，此后就走正常的"未变即跳过"。
-            let needs_audio_upgrade = media_type == MediaType::Audio
-                && existing
-                    .as_ref()
-                    .is_some_and(|row| row.content_hash.is_none());
-            let unchanged = unchanged && !needs_audio_upgrade;
-            // 调色板：仅图片需要；**手动锁定**的色值是用户的判定权，重扫不得覆盖，
-            // 因此这里就把"要不要算"定下来，省掉并行阶段那次无用的重采样。
-            let want_palette = media_type == MediaType::Image
-                && !unchanged
-                && !self.palette_is_locked(db, existing.as_ref())?;
+                let media_type = match meta.media_type {
+                    Some(mt) => mt,
+                    None => {
+                        outcome.skipped += 1;
+                        continue;
+                    }
+                };
 
-            prepared_list.push(Prepared {
-                path: path.clone(),
-                relative_path,
-                media_type,
-                size,
-                mtime,
-                unchanged,
-                existing_id: existing.as_ref().map(|row| row.id.as_str().to_string()),
-                existing_marks: existing
-                    .as_ref()
-                    .map(|row| row.marks.clone())
-                    .unwrap_or_default(),
-                want_palette,
-            });
+                let (size, mtime) = match meta.stat {
+                    Some(v) => v,
+                    None => {
+                        outcome.skipped += 1;
+                        continue;
+                    }
+                };
+
+                let existing = existing_rows.remove(&relative_path);
+                // 内容未变且非全量重扫 → 整条跳过（不哈希、不解码）。
+                let unchanged = match &existing {
+                    Some(row) => !(options.full || row.size != size || row.mtime != mtime),
+                    None => false,
+                };
+                // 音频的**存量占位行**（D11 → D115）即使 size/mtime 未变也必须重算一次：
+                // 它们的 `content_hash` 从来就是 NULL、`media_info_json` 从来没有值，
+                // "跳过"会把占位行原样留下，表现为"升了级却还是没哈希、没时长"。
+                // 判据只看**哈希是否缺失**（不是 `verify_status == placeholder`）：
+                // status 是镜像，哈希才是"这份内容到底算没算过"的事实。
+                let needs_audio_upgrade = media_type == MediaType::Audio
+                    && existing
+                        .as_ref()
+                        .is_some_and(|row| row.content_hash.is_none());
+                let unchanged = unchanged && !needs_audio_upgrade;
+                // 调色板：仅图片需要；**手动锁定**的色值是用户的判定权，重扫不得覆盖，
+                // 因此这里就把"要不要算"定下来，省掉并行阶段那次无用的重采样。
+                let want_palette = media_type == MediaType::Image
+                    && !unchanged
+                    && !palette_locked(existing.as_ref().and_then(|row| row.color_json.as_deref()));
+                // 图片头**只读一次**（第 43 轮）：这里读到的配额交给并行段限流、读到的
+                // 显示尺寸（EXIF 方向已应用，0043）直接进索引，省掉 `compute` 里那次
+                // 重复读头。只对"要重算的图片"读——未变化的图一个字节都不碰。
+                let image_probe = (media_type == MediaType::Image && !unchanged)
+                    .then(|| scan_compute::probe_image(path));
+
+                prepared_list.push(Prepared {
+                    path: path.clone(),
+                    relative_path,
+                    media_type,
+                    size,
+                    mtime,
+                    unchanged,
+                    existing_id: existing.as_ref().map(|row| row.id.clone()),
+                    existing_marks: existing.map(|row| row.marks).unwrap_or_default(),
+                    want_palette,
+                    image_probe,
+                });
+            }
         }
 
         // 3. **并行计算 → 串行写库**，按块流水线推进。
@@ -378,9 +424,15 @@ impl Scanner {
             let computed =
                 scan_pool::map_bounded(chunk, pixel_cost, |p: &Prepared| compute(p, options));
 
+            // **一块一个写事务**（第 43 轮）：旧实现每条语句各自自动提交（`files` upsert
+            // + 每条标记 + 可选 color_ref），5 万文件十几万次 WAL 提交。包进事务后提交
+            // 次数降到"每块一次"，而**取消语义不变**：块内取消照样提交已写部分再返回
+            // （逐文件自动提交时取消后同样保留已写行），出错则先回滚再上抛。
+            db.begin_write_batch()?;
             for (prep, comp) in chunk.iter().zip(computed) {
                 // **文件粒度**的取消/暂停检查：与旧实现逐文件循环的响应性一致。
                 if !self.wait_if_paused(extra_cancel)? {
+                    db.commit_write_batch()?;
                     outcome.cancelled = true;
                     return Ok(outcome);
                 }
@@ -390,9 +442,14 @@ impl Scanner {
                     phase: ScanPhase::Indexing,
                     current: Some(prep.relative_path.clone()),
                 });
-                self.write_one(db, source, prep, comp, &mut outcome)?;
+                if let Err(e) = self.write_one(db, source, prep, comp, &mut outcome) {
+                    // 回滚本身失败不该盖住真正的原因：吞掉它的错误，上抛写库错误。
+                    let _ = db.rollback_write_batch();
+                    return Err(e);
+                }
                 processed += 1;
             }
+            db.commit_write_batch()?;
         }
 
         // 收尾上报：进度必须能到达 100%（旧实现最后一格永远停在 total-1）。
@@ -403,11 +460,26 @@ impl Scanner {
             current: None,
         });
 
-        // 3. 缺失检测：索引存在但磁盘已消失 → 标记 missing（RFC 0001）
-        for row in db.list_files_by_source(source_id)? {
-            let full = root.join(&row.relative_path);
-            if !full.exists() {
-                db.update_file_status(row.id.as_str(), VerifyStatus::Missing, 0)?;
+        // 4. 缺失检测：索引里有、这次**没遍历到**、且磁盘上确实没有 → 标记 missing（RFC 0001）。
+        //
+        //    旧实现在这里 `list_files_by_source`（全表 20 列 + marks）再逐行 `exists()`：
+        //    5 万文件 = 一次全表读 + 5 万次 stat。而"遍历刚刚到过哪些路径"是比 stat 更新鲜的
+        //    第一手证据，因此：遍历到的行直接判"在"，只有"索引里有、这次没遍历到"的行才回落
+        //    到 `exists()` 兜底——遍历报错/无法访问的条目仍按磁盘现状判定，与旧口径等价；
+        //    正常情况下 stat 次数为 0。
+        //
+        //    **必须在写库之后做**：移动/重命名识别（`upsert_or_move`）会改既有行的路径，
+        //    拿写前的快照按"旧路径已消失"判定就会把刚迁走的行误标 missing。
+        let walked: HashSet<&str> = prepared_list
+            .iter()
+            .map(|prep| prep.relative_path.as_str())
+            .collect();
+        for loc in db.list_file_locations_by_source(source_id)? {
+            if walked.contains(loc.relative_path.as_str()) {
+                continue;
+            }
+            if !root.join(&loc.relative_path).exists() {
+                db.update_file_status(&loc.id, VerifyStatus::Missing, 0)?;
                 outcome.missing += 1;
             }
         }
@@ -443,8 +515,15 @@ impl Scanner {
             .ok_or_else(|| HpError::NotFound(format!("无法读取文件: {relative_path}")))?;
         let existing = db.get_file_by_path(source.id.as_str(), relative_path)?;
         // 单文件分析**总是**重算（这正是"重新分析"的语义），因此 `unchanged` 恒为 false。
-        let want_palette =
-            media_type == MediaType::Image && !self.palette_is_locked(db, existing.as_ref())?;
+        // 调色板锁定在这里只需一次单行查询：单文件路径没有"批量快照"可言，
+        // 与源扫描共用同一个判定函数（[`palette_locked`]），口径不会分叉。
+        let color_json = match existing.as_ref() {
+            Some(row) => db.get_color_ref(row.id.as_str())?.map(|c| c.color_json),
+            None => None,
+        };
+        let want_palette = media_type == MediaType::Image && !palette_locked(color_json.as_deref());
+        let image_probe =
+            (media_type == MediaType::Image).then(|| scan_compute::probe_image(&path));
         let prepared = Prepared {
             path: path.clone(),
             relative_path: relative_path.to_string(),
@@ -458,25 +537,11 @@ impl Scanner {
                 .map(|row| row.marks.clone())
                 .unwrap_or_default(),
             want_palette,
+            image_probe,
         };
         let computed = compute(&prepared, options);
         self.write_one(db, source, &prepared, computed, &mut outcome)?;
         Ok(outcome)
-    }
-
-    /// 某文件当前的调色板是否被**手动锁定**（`locked: true`）。
-    ///
-    /// 锁定是用户的判定权，重扫不得覆盖；在**准备阶段**就问一次，可以让并行阶段
-    /// 干脆不算它（省下一次全尺寸重采样）。查询失败按"未锁定"处理，与旧实现
-    /// `write_palette` 里 `if let Ok(Some(..))` 的容错口径一致。
-    fn palette_is_locked(&self, db: &RepoDb, existing: Option<&FileIndexRow>) -> HpResult<bool> {
-        let Some(row) = existing else {
-            return Ok(false);
-        };
-        Ok(matches!(
-            db.get_color_ref(row.id.as_str())?,
-            Some(existing_color) if palette_is_locked(&existing_color.color_json)
-        ))
     }
 
     /// **串行写库**：把并行阶段算好的派生数据落成索引行（+ 调色板）。
@@ -701,6 +766,17 @@ fn default_marks_for(prep: &Prepared) -> Vec<FileMark> {
         .and_then(|e| e.to_str())
         .unwrap_or("");
     default_file_marks(prep.media_type, ext)
+}
+
+/// 调色板是否被**手动锁定**（`color_json.locked == true`）。
+///
+/// 锁定是用户的判定权，重扫不得覆盖（D82）；锁定时干脆不算它，省下一次全尺寸重采样。
+/// 判定只依赖 `color_refs.color_json`，因此源扫描可以把这一列**随既有行一起**取回来
+/// （[`hp_store::ScanPrepareRow::color_json`]），不必再逐图查一次；单文件重分析拿不到
+/// 批量快照，就自己查一行（`rescan_file`）。两种路径共用这里，口径不会分叉。
+/// 缺行或 JSON 解析失败一律按"未锁定"处理（`hp_media::palette_is_locked` 的口径）。
+fn palette_locked(color_json: Option<&str>) -> bool {
+    color_json.is_some_and(palette_is_locked)
 }
 
 /// 读取文件 size 与 mtime（mtime 存 epoch 纳秒十进制字符串，便于精确比较）。

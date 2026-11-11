@@ -178,6 +178,50 @@ fn move_rename_preserves_identity() {
         .expect("查询失败")
         .expect("新路径应已索引");
     assert_eq!(after.id, id_before, "移动/重命名应保留文件身份");
+    assert_eq!(
+        after.verify_status,
+        VerifyStatus::Ok,
+        "刚迁移到新路径的行不该被顺带标成 missing"
+    );
+}
+
+/// 缺失检测的口径：**索引里有、磁盘上真的没有**才标 missing（RFC 0001）。
+///
+/// 这条同时钉住两件事：删除的文件必须被标出来（`exists()` 兜底路径不能失效），
+/// 而内容未变、这次仍被遍历到的文件**一个都不能**被误标（`docs/issues/0018` 第 43 轮
+/// 把"遍历见过即算在"作为第一手证据，只有没见过的行才走 stat 兜底）。
+#[test]
+fn missing_is_marked_only_for_vanished_files() {
+    let tmp = tempfile::tempdir().expect("创建临时目录失败");
+    let (mut db, source) = setup(&tmp);
+    let dir = Path::new(&source.local_path);
+    make_png(&dir.join("keep.png"), 1);
+    make_png(&dir.join("gone.png"), 2);
+
+    let first = scan(&mut db, &source, false).expect("首次扫描失败");
+    assert_eq!(first.missing, 0, "首次扫描没有可缺失的行");
+
+    std::fs::remove_file(dir.join("gone.png")).expect("删除文件失败");
+
+    // 第二遍是**增量**扫描：keep.png 内容未变（照旧遍历到），gone.png 已消失。
+    let second = scan(&mut db, &source, false).expect("二次扫描失败");
+    assert_eq!(second.missing, 1, "只应标出真正消失的那一个");
+    assert_eq!(second.indexed, 0, "内容未变的文件不该被重算或重建");
+
+    let keep = db
+        .get_file_by_path(source.id.as_str(), "keep.png")
+        .expect("查询失败")
+        .expect("仍应索引");
+    assert_eq!(
+        keep.verify_status,
+        VerifyStatus::Ok,
+        "遍历到的文件不能被标 missing"
+    );
+    let gone = db
+        .get_file_by_path(source.id.as_str(), "gone.png")
+        .expect("查询失败")
+        .expect("行仍在（只标状态，不删行）");
+    assert_eq!(gone.verify_status, VerifyStatus::Missing);
 }
 
 #[test]

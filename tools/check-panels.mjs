@@ -635,6 +635,12 @@ const colorCommandSrc = readFileSync(
   join(ROOT, "apps/desktop/src-tauri/src/commands/color.rs"),
   "utf8",
 );
+// 第 43 轮（D160）：调色板"锁定与否"的那一列跟着扫描快照一起取回，
+// 因此快照查询所在的存储层也进入这条断言的读取面。
+const fileRepoSrc = readFileSync(
+  join(ROOT, "crates/hp-store/src/repo/file_repo.rs"),
+  "utf8",
+);
 const colorValue = await import(
   pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/colorValue.ts")).href
 );
@@ -723,10 +729,14 @@ check(
     // ③ 手动锁定的色值在**准备阶段**就被排除（`want_palette` 为假 → 并行阶段不算它）。
     //    `locked:true` 是用户的判定权，重扫不得抹掉——旧实现是在写入前 return，
     //    现在提前到"决定要不要算"，语义相同且省下一次全尺寸重采样。
-    /fn palette_is_locked\(&self, db: &RepoDb, existing: Option<&FileIndexRow>\) -> HpResult<bool>/.test(
-      scannerPaletteSrc,
-    ) &&
-    /Some\(existing_color\) if palette_is_locked\(&existing_color\.color_json\)/.test(
+    //    第 43 轮（D160）：锁定判定不再逐图 `get_color_ref`，改为读**随快照一起取回**的
+    //    `color_refs.color_json`（`list_files_for_scan` 的 LEFT JOIN）；判据收敛到自由函数
+    //    `palette_locked`，源扫描与单文件重分析共用同一口径。
+    /fn palette_locked\(color_json: Option<&str>\) -> bool/.test(scannerPaletteSrc) &&
+    /color_json\.is_some_and\(palette_is_locked\)/.test(scannerPaletteSrc) &&
+    // 锁定列必须由那一条 JOIN 返回（整源一次 SELECT，而不是每图一条查询）。
+    /LEFT JOIN color_refs/.test(fileRepoSrc) &&
+    /!palette_locked\(existing\.as_ref\(\)\.and_then\(\|row\| row\.color_json\.as_deref\(\)\)\)/.test(
       scannerPaletteSrc,
     ) &&
     // ④ 两条触发链路都设 `want_palette`：源扫描的准备阶段 + 单文件重新分析。
