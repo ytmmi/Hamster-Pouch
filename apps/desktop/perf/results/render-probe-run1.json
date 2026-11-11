@@ -1,0 +1,311 @@
+{
+  "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0",
+  "hasGpu": true,
+  "preferredFormat": "bgra8unorm",
+  "adapters": [
+    {
+      "request": "core",
+      "ok": true,
+      "info": {
+        "vendor": "intel",
+        "architecture": "gen-12lp",
+        "device": "",
+        "description": "",
+        "isFallbackAdapter": null,
+        "infoIsFallbackAdapter": false
+      },
+      "adapterMaxTexture2D": 16384,
+      "maxTextureDimension2D": 8192,
+      "maxBufferSize": 268435456,
+      "canary": {
+        "result": "pass",
+        "maxDelta": 0,
+        "samples": [
+          {
+            "name": "red",
+            "expect": [
+              255,
+              0,
+              0,
+              255
+            ],
+            "got": [
+              255,
+              0,
+              0,
+              255
+            ]
+          },
+          {
+            "name": "green",
+            "expect": [
+              0,
+              255,
+              0,
+              255
+            ],
+            "got": [
+              0,
+              255,
+              0,
+              255
+            ]
+          },
+          {
+            "name": "blue",
+            "expect": [
+              0,
+              0,
+              255,
+              255
+            ],
+            "got": [
+              0,
+              0,
+              255,
+              255
+            ]
+          },
+          {
+            "name": "white",
+            "expect": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "got": [
+              255,
+              255,
+              255,
+              255
+            ]
+          }
+        ],
+        "canvasError": null,
+        "validationError": null,
+        "clearOnly": {
+          "result": "pass",
+          "delta": 0,
+          "got": [
+            10,
+            20,
+            30,
+            255
+          ]
+        }
+      },
+      "micro": {
+        "upload2048x4Ms": 123.7,
+        "upload2048PerMs": 30.9,
+        "emptyDraw30Ms": 15.4,
+        "emptyDrawPerFrameMs": 0.51
+      }
+    },
+    {
+      "request": "low-power",
+      "ok": true,
+      "info": {
+        "vendor": "intel",
+        "architecture": "gen-12lp",
+        "device": "",
+        "description": "",
+        "isFallbackAdapter": null,
+        "infoIsFallbackAdapter": false
+      },
+      "adapterMaxTexture2D": 16384,
+      "maxTextureDimension2D": 8192,
+      "maxBufferSize": 268435456,
+      "canary": {
+        "result": "pass",
+        "maxDelta": 0,
+        "samples": [
+          {
+            "name": "red",
+            "expect": [
+              255,
+              0,
+              0,
+              255
+            ],
+            "got": [
+              255,
+              0,
+              0,
+              255
+            ]
+          },
+          {
+            "name": "green",
+            "expect": [
+              0,
+              255,
+              0,
+              255
+            ],
+            "got": [
+              0,
+              255,
+              0,
+              255
+            ]
+          },
+          {
+            "name": "blue",
+            "expect": [
+              0,
+              0,
+              255,
+              255
+            ],
+            "got": [
+              0,
+              0,
+              255,
+              255
+            ]
+          },
+          {
+            "name": "white",
+            "expect": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "got": [
+              255,
+              255,
+              255,
+              255
+            ]
+          }
+        ],
+        "canvasError": null,
+        "validationError": null,
+        "clearOnly": {
+          "result": "pass",
+          "delta": 0,
+          "got": [
+            10,
+            20,
+            30,
+            255
+          ]
+        }
+      },
+      "micro": {
+        "upload2048x4Ms": 29.7,
+        "upload2048PerMs": 7.4,
+        "emptyDraw30Ms": 5.1,
+        "emptyDrawPerFrameMs": 0.17
+      }
+    },
+    {
+      "request": "fallback",
+      "ok": false,
+      "reason": "no-adapter"
+    },
+    {
+      "request": "compat",
+      "ok": true,
+      "info": {
+        "vendor": "intel",
+        "architecture": "gen-12lp",
+        "device": "",
+        "description": "",
+        "isFallbackAdapter": null,
+        "infoIsFallbackAdapter": false
+      },
+      "adapterMaxTexture2D": 16384,
+      "maxTextureDimension2D": 4096,
+      "maxBufferSize": 268435456,
+      "canary": {
+        "result": "pass",
+        "maxDelta": 0,
+        "samples": [
+          {
+            "name": "red",
+            "expect": [
+              255,
+              0,
+              0,
+              255
+            ],
+            "got": [
+              255,
+              0,
+              0,
+              255
+            ]
+          },
+          {
+            "name": "green",
+            "expect": [
+              0,
+              255,
+              0,
+              255
+            ],
+            "got": [
+              0,
+              255,
+              0,
+              255
+            ]
+          },
+          {
+            "name": "blue",
+            "expect": [
+              0,
+              0,
+              255,
+              255
+            ],
+            "got": [
+              0,
+              0,
+              255,
+              255
+            ]
+          },
+          {
+            "name": "white",
+            "expect": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "got": [
+              255,
+              255,
+              255,
+              255
+            ]
+          }
+        ],
+        "canvasError": null,
+        "validationError": null,
+        "clearOnly": {
+          "result": "pass",
+          "delta": 0,
+          "got": [
+            10,
+            20,
+            30,
+            255
+          ]
+        }
+      },
+      "micro": {
+        "upload2048x4Ms": 25.5,
+        "upload2048PerMs": 6.4,
+        "emptyDraw30Ms": 7.3,
+        "emptyDrawPerFrameMs": 0.24
+      }
+    }
+  ],
+  "probedAt": "2026-11-11T04:16:46.277Z",
+  "app": "E:\\Hamster Pouch\\apps\\desktop\\src-tauri\\target\\release\\release\\hamster-pouch-desktop.exe"
+}

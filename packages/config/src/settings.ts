@@ -35,6 +35,10 @@ export const SETTING_KEYS = {
   interfacePagesEnabled: "ui.interfacePagesEnabled",
   /** 「界面页」标签条停靠位置（D124，默认左侧）。 */
   interfacePagesPosition: "ui.interfacePagesPosition",
+  /** 图像渲染后端偏好（`auto` / `webgpu` / `canvas2d` / `dom`，RFC 0013，默认 auto）。 */
+  imageBackend: "ui.imageBackend",
+  /** 每帧分块上传预算（MiB，默认 32；只约束 LOD1 分块流）。 */
+  imageUploadBudgetMB: "ui.imageUploadBudgetMB",
   /** 是否开启内置 MCP 服务（D119，默认关）。 */
   mcpEnabled: "mcp.enabled",
   /** MCP 服务监听端口（仅本机回环，默认 57321）。 */
@@ -136,6 +140,43 @@ export function resolveInterfacePagesEnabled(value: unknown): boolean {
 
 export function resolveInterfacePagesPosition(value: unknown): InterfacePagesPosition {
   return isInterfacePagesPosition(value) ? value : DEFAULT_INTERFACE_PAGES_POSITION;
+}
+
+// ==================== 图像渲染后端设置（D160；「全部设置 → 界面 → 性能」） ====================
+
+/**
+ * 图像查看器的渲染后端（RFC 0013）。`auto` 是出厂档：按运行时探测的阶梯自动选；
+ * 后三档是**强制**档，只给排障用——它们跳过探测，直接按各自的降级链构造。
+ */
+export const IMAGE_BACKENDS = ["auto", "webgpu", "canvas2d", "dom"] as const;
+export type ImageBackend = (typeof IMAGE_BACKENDS)[number];
+
+/** 出厂默认：自动（探测可用则上 GPU，否则逐级降到 canvas2d / dom）。 */
+export const DEFAULT_IMAGE_BACKEND: ImageBackend = "auto";
+
+/** 每帧分块上传预算（MiB）：32 MiB ≈ 8 块 1024² 的 rgba8。只约束 LOD1 分块流。 */
+export const DEFAULT_IMAGE_UPLOAD_BUDGET_MB = 32;
+
+/** 预算的合法闭区间；越界值在读取处夹紧（RFC §9 的「读取处夹紧」）。 */
+export const IMAGE_UPLOAD_BUDGET_MIN_MB = 4;
+export const IMAGE_UPLOAD_BUDGET_MAX_MB = 256;
+
+export function isImageBackend(value: unknown): value is ImageBackend {
+  return (
+    value === "auto" || value === "webgpu" || value === "canvas2d" || value === "dom"
+  );
+}
+
+/** 把（可能缺失/非法的）设置值收敛为合法后端偏好。 */
+export function resolveImageBackend(value: unknown): ImageBackend {
+  return isImageBackend(value) ? value : DEFAULT_IMAGE_BACKEND;
+}
+
+/** 把预算（MiB）夹进 4–256；非有限数按默认值处理。 */
+export function resolveImageUploadBudgetMB(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_IMAGE_UPLOAD_BUDGET_MB;
+  return Math.min(IMAGE_UPLOAD_BUDGET_MAX_MB, Math.max(IMAGE_UPLOAD_BUDGET_MIN_MB, Math.round(n)));
 }
 
 // ==================== MCP 服务设置（D119；「全部设置 → MCP」） ====================
@@ -375,6 +416,34 @@ export const SYSTEM_SETTING_DECLS: readonly SettingDecl[] = [
     ],
     keywords: ["position", "side", "left", "right", "位置", "左侧", "右侧", "左右"],
     section_key: "settings.section.interfacePages",
+  },
+  // 图像渲染后端两项（RFC 0013 / D160）：**独立「性能」分节**——它们不影响任何界面布局，
+  // 只影响图像查看器的帧耗时，混进「其他设置」会让排障时找不到。
+  {
+    id: SETTING_KEYS.imageBackend,
+    category: "interface",
+    owner: { kind: "system" },
+    title_key: "settings.interface.imageBackend",
+    kind: "select",
+    default: DEFAULT_IMAGE_BACKEND,
+    options: [
+      { value: "auto", title_key: "settings.interface.imageBackend.auto" },
+      { value: "webgpu", title_key: "settings.interface.imageBackend.webgpu" },
+      { value: "canvas2d", title_key: "settings.interface.imageBackend.canvas2d" },
+      { value: "dom", title_key: "settings.interface.imageBackend.dom" },
+    ],
+    keywords: ["image", "render", "backend", "gpu", "webgpu", "canvas", "图像", "渲染", "后端"],
+    section_key: "settings.section.performance",
+  },
+  {
+    id: SETTING_KEYS.imageUploadBudgetMB,
+    category: "interface",
+    owner: { kind: "system" },
+    title_key: "settings.interface.imageUploadBudgetMB",
+    kind: "numberInput",
+    default: DEFAULT_IMAGE_UPLOAD_BUDGET_MB,
+    keywords: ["image", "upload", "budget", "memory", "上传", "预算", "显存"],
+    section_key: "settings.section.performance",
   },
   {
     id: SETTING_KEYS.language,

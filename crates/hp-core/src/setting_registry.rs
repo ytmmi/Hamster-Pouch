@@ -143,6 +143,28 @@ pub const SYSTEM_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &["left", "right"],
         requires_capability: None,
     },
+    // 图像渲染后端两项（RFC 0013 / D160）：「全部设置 → 界面 → 性能」。
+    //
+    // 为什么独立成「性能」分节：它们不改变任何界面布局，只影响图像查看器的帧耗时；
+    // 排障时用户要按名字找得到「图像后端」这一档开关。
+    SettingDeclFact {
+        id: "ui.imageBackend",
+        owner_kind: "system",
+        owner_id: None,
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["auto", "webgpu", "canvas2d", "dom"],
+        requires_capability: None,
+    },
+    SettingDeclFact {
+        id: "ui.imageUploadBudgetMB",
+        owner_kind: "system",
+        owner_id: None,
+        kind: "numberInput",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
     // MCP 服务三项（D119）：「全部设置 → MCP」。
     //
     // 为什么独立成大类：这是**外部进程接入本机数据**的边界，开关与写权限

@@ -3994,9 +3994,9 @@ const decodeSrc = readFileSync(
   "utf8",
 );
 check(
-  "换图是原子替换：url + 尺寸 + 文件 id 同一个状态对象，渲染两值都取自它",
+  "换图是原子替换：url + 尺寸 + 文件 id（+ LOD0 档）同一个状态对象，渲染两值都取自它",
   /useState<ShownImage \| null>\(null\)/.test(imageViewerPanelSrc) &&
-    /setShown\(\{ url: nextUrl, natural: size, fileId \}\)/.test(imageViewerPanelSrc) &&
+    /setShown\(\{ url: nextUrl, natural: size, fileId, lowResUrl \}\)/.test(imageViewerPanelSrc) &&
     /const url = shown\?\.url \?\? "";/.test(imageViewerPanelSrc) &&
     /const natural = shown\?\.natural \?\? null;/.test(imageViewerPanelSrc) &&
     // 反向锚点：不得再出现"先换 URL、尺寸另一次提交"的老写法（那正是"半新半旧"帧的来源）。
@@ -4019,11 +4019,26 @@ check(
       imageViewerPanelSrc,
     ),
 );
+// 绘制元素搬进表面层之后（RFC 0013 §10），这条不变量的**位置**变了，判据本身不变：
+// 舞台只提供宿主节点，每张图必须由 `surfaceDom` 现建一个 `<img>`（`decoding="sync"`），
+// 新节点就绪后才摘旧节点。复用同一个元素换 `src` 会把旧图层的光栅拉成新尺寸（缺陷 0028 的形态）。
+const domSurfaceSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/render/surfaceDom.ts"),
+  "utf8",
+);
 check(
-  "舞台：每张图一个新元素（`key={url}`）+ `decoding=\"sync\"`（复用元素会把旧图层的光栅拉成新尺寸）",
-  /key=\{url\}/.test(stageSrc) &&
-    /decoding="sync"/.test(stageSrc) &&
-    /className=\{`iv-image\$\{natural \? "" : " iv-image-pending"\}`\}/.test(stageSrc),
+  "舞台不再自己持有 <img>；表面层每张图现建一个元素 + `decoding=\"sync\"`（复用元素会把旧图层的光栅拉成新尺寸）",
+  // 舞台把绘制节点交给表面（宿主 div），不得再有 <img>。
+  !/<img\b/.test(stripComments(stageSrc)) &&
+    /document\.createElement\("img"\)/.test(domSurfaceSrc) &&
+    /el\.decoding = "sync"/.test(domSurfaceSrc) &&
+    /el\.className = "iv-image"/.test(domSurfaceSrc) &&
+    // 反向锚点：不得对**旧**节点重新赋 src（只允许给新建的 `el` 赋）。
+    !/previous\.src =/.test(domSurfaceSrc) &&
+    !/node\.src =/.test(domSurfaceSrc) &&
+    // 新节点就位后才摘旧节点：中间没有空舞台帧。
+    /const previous = node;/.test(domSurfaceSrc) &&
+    /detach\(previous\);/.test(domSurfaceSrc),
 );
 check(
   "解码模块是 DOM 工具（不得变成组件/纯函数混装）：无 React 依赖，且只导出 `decodeImageSize`",

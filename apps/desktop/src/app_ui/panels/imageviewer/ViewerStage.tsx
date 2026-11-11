@@ -16,12 +16,13 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
   type PointerEvent,
   type ReactNode,
   type JSX,
 } from "react";
 
+import { useImageSurface } from "../../render/useImageSurface";
+import type { Preference } from "../../render/capabilities";
 import {
   clampOffset,
   scaledSize,
@@ -51,6 +52,15 @@ export interface ViewerStageProps {
   onTransform: (next: ViewTransform) => void;
   /** 是否允许拖动平移（图像已超出舞台）。 */
   pannable: boolean;
+  /** 渲染后端偏好（`ui.imageBackend` 的落地值，RFC 0013）。 */
+  backend: Preference;
+  /**
+   * LOD0 低清档 URL（原图长边 > 4096 时才有）：先上它对位，再切全分辨率。
+   * `null` = 小图走"单张整纹理"快路径，与改造前的 `<img>` 行为等价。
+   */
+  lowResUrl?: string | null;
+  /** 每帧 LOD1 分块上传预算（字节）；只约束大图分块流，小图整张上传不计入。 */
+  uploadBudgetBytes?: number;
   /** 图像不可用时的占位内容（文案由面板给）。 */
   placeholder?: ReactNode;
   /** 舞台内的浮层（导航器）：必须随舞台尺寸定位，因此挂在这里而不是面板外层。 */
@@ -69,6 +79,9 @@ export function ViewerStage({
   onViewport,
   onTransform,
   pannable,
+  backend,
+  lowResUrl,
+  uploadBudgetBytes,
   placeholder,
   overlay,
 }: ViewerStageProps): JSX.Element {
@@ -158,16 +171,28 @@ export function ViewerStage({
     }
   };
 
-  /** 图像样式：装饰性变换**只改 transform**（GPU 缩放，不重新布局/重采样位图）。 */
-  const imageStyle: CSSProperties = natural
-    ? {
-        width: `${natural.width}px`,
-        height: `${natural.height}px`,
-        transform:
-          `translate(calc(-50% + ${transform.offset.x}px), calc(-50% + ${transform.offset.y}px)) ` +
-          `scale(${transform.zoom})`,
-      }
-    : {};
+  /**
+   * 表面控制器（RFC 0013 §10）：舞台只负责"给一块铺满的宿主 + 上报变换"，
+   * 真正画像素的是 `render/` 里的某一档后端。`alt` 与两个回调原样透传，
+   * 面板看到的 `onNatural` / `onFailed` 时序与改造前完全一致。
+   */
+  const surface = useImageSurface(transform, {
+    preference: backend,
+    alt,
+    uploadBudgetBytes,
+    onNatural,
+    onFailed,
+  });
+
+  useEffect(() => {
+    if (!url) {
+      surface.clearSource();
+      return;
+    }
+    // `natural === null` 表示"原图尺寸还没解出来"，按 0×0 交给表面走待解码兜底
+    // （与 `.iv-image-pending` 的 contain 几何同口径）。
+    surface.showSource(url, natural ?? { width: 0, height: 0 }, lowResUrl ?? null);
+  }, [surface, url, natural, lowResUrl]);
 
   return (
     <div
@@ -180,33 +205,18 @@ export function ViewerStage({
       onDoubleClick={(event) => event.preventDefault()}
     >
       {!url && placeholder}
-      {url && (
-        <img
-          /**
-           * **每张图一个新元素**（`key={url}`，缺陷 0028）：复用同一个 `<img>` 换 `src` 时，
-           * 合成器可能把**旧图层的光栅**按新盒子拉伸（"下一张被拉成上一张的大小"），
-           * 换元素则不存在"上一张的光栅"可被复用。
-           */
-          key={url}
-          className={`iv-image${natural ? "" : " iv-image-pending"}`}
-          src={url}
-          alt={alt}
-          draggable={false}
-          /**
-           * `decoding="sync"`：要**画就画解码好的位图**。面板已经在换图前解过一次码
-           * （`viewerDecode.ts`），这里只是保证"成为可见元素的第一次绘制"不带空位图。
-           */
-          decoding="sync"
-          style={imageStyle}
-          onLoad={(event) =>
-            onNatural({
-              width: event.currentTarget.naturalWidth,
-              height: event.currentTarget.naturalHeight,
-            })
-          }
-          onError={onFailed}
-        />
-      )}
+      {/*
+        图像的绘制节点由表面自己创建（`<img>` / `<canvas>`），舞台只提供这块铺满的宿主。
+        缺陷 0028 的"不得复用同一个 `<img>` 换 src"由 dom 表面在 `setSource` 里执行
+        （每次新建元素、解码完成才摘旧元素），舞台这一层不再持有任何图像元素。
+      */}
+      <div
+        ref={surface.hostRef}
+        className="iv-surface"
+        role={url ? "img" : undefined}
+        aria-label={url ? alt : undefined}
+        data-backend={surface.backend ?? undefined}
+      />
       {overlay}
     </div>
   );

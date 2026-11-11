@@ -52,6 +52,8 @@ import {
 import {
   resolveDateFormat,
   resolveDateShowTime,
+  resolveImageBackend,
+  resolveImageUploadBudgetMB,
   resolveSizeUnit,
   SETTING_KEYS,
 } from "@hamster-pouch/config";
@@ -63,6 +65,8 @@ import { resolveImageUrlOutcome } from "../../shared/imageUrl";
 import { needsPreview, resolvePreviewUrl } from "../../shared/previewUrl";
 import { usePanelForeground } from "../../shared/panelForeground";
 import { useHostSettingValue } from "../../shared/settingValue";
+import { resolveThumbUrl } from "../../shared/thumbUrl";
+import { LOD0_BUCKET_PX, shouldPrefetchLowRes } from "../../render/tiles";
 import { ViewerFilmstrip } from "./ViewerFilmstrip";
 import { ViewerInfoBar } from "./ViewerInfoBar";
 import { ViewerNavigator } from "./ViewerNavigator";
@@ -112,6 +116,13 @@ interface ShownImage {
   natural: Size | null;
   /** 它属于哪个文件（`wantRef` 据此丢弃过期结果）。 */
   fileId: string;
+  /**
+   * LOD0 低清档的 URL（RFC 0013：D159 的 1280 档缩略图），大图才有；`null` = 不走低清。
+   *
+   * 它必须和 `url`/`natural` **同一批**提交：低清档若是晚一帧才到，表面层会为了它再
+   * `setSource` 一次，把已经上屏的全分辨率顶回 1280 档——用户会看到"清楚→糊→清楚"。
+   */
+  lowResUrl: string | null;
 }
 
 export interface ImageViewerPanelProps {
@@ -169,6 +180,15 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
   const url = shown?.url ?? "";
   /** 正在显示的图的原图尺寸（`null` = 兜底路径尚未解码出来）。 */
   const natural = shown?.natural ?? null;
+  /** 渲染后端偏好（RFC 0013）：`auto` 时由 `render/` 的能力探测决定实际档位。 */
+  const imageBackend = resolveImageBackend(
+    useHostSettingValue(SETTING_KEYS.imageBackend, panelApi),
+  );
+  /** 每帧 LOD1 上传预算（MiB → 字节）；读取处夹紧到 4–256。 */
+  const uploadBudgetBytes =
+    resolveImageUploadBudgetMB(useHostSettingValue(SETTING_KEYS.imageUploadBudgetMB, panelApi)) *
+    1024 *
+    1024;
   /** 当前图像的 token（asset URL；空串 = 尚未解析出 URL）。 */
   const token = url;
   /**
@@ -258,8 +278,20 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
   const showImage = useCallback(async (nextUrl: string, fileId: string) => {
     const size = await decodeImageSize(nextUrl);
     if (wantRef.current !== fileId) return; // 期间已经切走
+    /**
+     * LOD0 低清档：**只对大图**取（判据是原图长边 > 4096，不是文件体积——体积大但边长小的图
+     * 整张上传本来就是一次拷贝，加一层低清反而多一帧）。`size` 未知（预解码失败）时按大图处理
+     * （RFC §10）：宁可按大图多取一张缩略图，也不要先闪一张全尺寸白板。
+     *
+     * 解析放在这里而不是渲染路径上：`resolveThumbUrl` 是异步的，在渲染里算只能拿到 Promise；
+     * 而低清档必须与 `url`/`natural` 同批落地，否则表面层会二次 `setSource`（见 `ShownImage`）。
+     */
+    const repo = appRef.current.repoId;
+    const lowResUrl =
+      repo && shouldPrefetchLowRes(size) ? await resolveThumbUrl(repo, fileId, LOD0_BUCKET_PX) : null;
+    if (wantRef.current !== fileId) return; // 取缩略图的这段时间里又切走了
     setFailed(false);
-    setShown({ url: nextUrl, natural: size, fileId });
+    setShown({ url: nextUrl, natural: size, fileId, lowResUrl });
   }, []);
 
   /** 原图加载失败时的一次兜底：改用后端全分辨率预览（HEIC/HEIF 之外的自定义格式等）。 */
@@ -525,6 +557,9 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
           natural={natural}
           transform={transform}
           pannable={pannable}
+          backend={imageBackend}
+          lowResUrl={shown?.lowResUrl ?? null}
+          uploadBudgetBytes={uploadBudgetBytes}
           onWheelZoom={handleWheelZoom}
           // 兜底路径（预解码没给出尺寸）才用得到：`<img>` 解码完成后回填尺寸。
           onNatural={(size) =>

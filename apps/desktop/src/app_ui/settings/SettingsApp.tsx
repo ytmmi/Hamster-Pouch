@@ -33,6 +33,7 @@ import { publishSettingChanged } from "../core/settingChangeStore";
 import type { Translate, TranslationKey } from "../i18n";
 import { AboutPanel } from "./AboutPanel";
 import { McpServiceStatus } from "./McpServiceStatus";
+import { RenderBackendStatus } from "./RenderBackendStatus";
 import {
   allSettingCategories,
   decodeSettingValue,
@@ -298,6 +299,13 @@ export function SettingsApp({
                       />
                     </Fragment>
                   ))}
+                  {/*
+                    「性能」分节末尾补一行只读事实（RFC 0013 §9）：偏好可能是 auto，
+                    真正在画的那一档由运行时探测决定，用户得看得见。
+                  */}
+                  {category === "interface" && section.titleKey === "settings.section.performance" && (
+                    <RenderBackendStatus t={t} />
+                  )}
                 </section>
               ))}
             {/*

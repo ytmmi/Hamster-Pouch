@@ -5282,6 +5282,28 @@ button.danger {
   cursor: grab;
 }
 
+/*
+ * 表面宿主（RFC 0013）：舞台里所有后端的绘制节点都挂在它下面。
+ *
+ * `inset: 0` 贴在舞台上等于**内边距盒**（边框之内），与改造前 `<img>` 的定位基准
+ * （`left/top: 50%` 相对内边距盒）逐像素一致——这是 dom 档保持 A/B 基线的前提。
+ * `contain: strict` 让 canvas 的重绘不牵连舞台之外的布局。
+ */
+.iv-surface {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  contain: strict;
+}
+
+/* canvas2d 后端：尺寸由 JS 按 dpr 写到 style 上，这里只管贴边与层级。 */
+.iv-surface-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+}
+
 .iv-stage-dragging {
   cursor: grabbing;
 }
