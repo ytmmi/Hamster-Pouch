@@ -75,7 +75,7 @@ pnpm app:build    # 编译并打出便携发布包
 | `packages/` | 前端共享包：`config`、`ui`、`shared-types` |
 | `crates/` | Rust 核心库（见下表） |
 | `plugins/` | 插件：`system/`（palette、python-core）、`examples/` |
-| `external-cli/` | 随仓库分发的 ffmpeg 与 mpv |
+| `external-cli/` | 随仓库分发的 FFmpeg（mpv 已于 2026-11 移出，见[第三方组件](#第三方组件)） |
 | `tools/` | 门禁脚本与数据管线（`check-*.mjs`、`tagdict/`） |
 | `.github/` | CI 与手动发布 workflow |
 | `docs/` | 规范、决策记录、架构与路线图 |
@@ -99,8 +99,8 @@ pnpm app:build    # 编译并打出便携发布包
 | 环境变量 | 作用 |
 | --- | --- |
 | `VITE_HP_UI` | 前端 UI 变体：`app_ui`（默认）/ `test_ui` / `dev_ui` |
-| `HP_MPV_BIN` | mpv 可执行文件路径（优先于 `external-cli/mpv/`） |
-| `HP_MPV_EMBED` | 设为 `1` 时启用主窗口级 mpv 渲染嵌入（仅诊断） |
+| `HP_MPV_BIN` | mpv 可执行文件路径（仅休眠的 libmpv 通道用；mpv 资产已不随仓库分发） |
+| `HP_MPV_EMBED` | 设为 `1` 时启用主窗口级 mpv 渲染嵌入（仅诊断，休眠通道） |
 | `HP_TEST_VIDEO` | 媒体测试用视频路径 |
 
 ## 构建与发布
@@ -111,7 +111,7 @@ pnpm app:build    # 编译并打出便携发布包
 | `pnpm app:package` | 用现有编译产物打包 |
 | `pnpm clean` | 清理编译产物（保留活动数据与依赖） |
 
-- 产物是自包含文件夹（`apps/desktop/src-tauri/target/release/`），整夹搬走仍可运行：exe + `external-cli\`（[FFmpeg](https://ffmpeg.org/) 运行时子集、[mpv](https://mpv.io/)）+ `plugins\system\` + 基底词库。开发包用 NTFS 硬链接，发布包为真实复制。
+- 产物是自包含文件夹（`apps/desktop/src-tauri/target/release/`），整夹搬走仍可运行：exe + `external-cli\`（[FFmpeg](https://ffmpeg.org/) 运行时子集）+ `plugins\system\` + 基底词库。开发包用 NTFS 硬链接，发布包为真实复制。mpv 已于 2026-11 移出仓库（libmpv 通道退役，缺陷 0047），**发布包不再包含它**；本机自备 `external-cli/mpv/` 时本地打包仍会带上（见下节第三方组件）。
 - 扩展插件以独立压缩包分发（`plugins-dist/*.zip`），解压后从「扩展」菜单安装，不与主程序合包。
 - 发布走手动流程：`Actions → Release Package → Run workflow`，输入 `version`（**留空则把当前版本的 patch 数字 +1、后缀原样保留**，如 `0.1.0-Alpha` → `0.1.1-Alpha`；填写则原样使用）、`publish`（是否创建 GitHub Release）、`notes`。同一版本重跑会覆盖资产。
 - 版本号三处同源（`tauri.conf.json` / 桥接 crate 的 `Cargo.toml` / `apps/desktop/package.json`），由 `node tools/version.mjs` 统一读写：`--current` 显示当前版本、`--next` 预览 +1 结果、`--write <v>` 指定版本、`--apply` 按 `HP_VERSION` 或 +1 落盘。`pnpm app:build` 的第一步就是 `--apply`，所以本地构建同样遵循"无指定版本号就 +1"。
@@ -126,7 +126,7 @@ pnpm app:build    # 编译并打出便携发布包
 | 组件 | 版本 | 许可 | 说明 |
 | --- | --- | --- | --- |
 | [FFmpeg](https://ffmpeg.org/) | N-125157（2026-06-22） | GPL-3.0（`--enable-gpl --enable-version3`） | 元数据探测、缩略图、音频波形；`external-cli/ffmpeg/` 随包分发 |
-| [mpv](https://mpv.io/) | v0.41.0-1023-g69e63f425 | GPL-2.0-or-later | 随仓库分发（`mpv.exe` 走 Git LFS）；当前播放器面板使用 DOM `<video>`，libmpv 通道休眠 |
+| [mpv](https://mpv.io/) | v0.41.0-1023-g69e63f425 | GPL-2.0-or-later | **不再随仓库与发布包分发**（2026-11 移出，缺陷 0047）；当前播放器面板使用 DOM `<video>`，libmpv 通道休眠 |
 | [libheif](https://github.com/strukturag/libheif) | 1.23.x（vcpkg） | LGPL-3.0 | HEIC / HEIF / AVIF 进程内解码 |
 | [libwebp](https://chromium.googlesource.com/webm/libwebp) | 随 `libwebp-sys` vendored | BSD-3-Clause | 缩略图进程内 WebP 编码 |
 | [SQLite](https://sqlite.org/) | 3.x（rusqlite） | Public Domain | 仓库库 / 全局库 / 词库 |
@@ -147,4 +147,4 @@ EPUB 排印规则参考了 [Readium CSS](https://github.com/readium/css) 与 [fo
 
 ## 许可证
 
-[GNU General Public License v3.0](LICENSE)（GPL-3.0）。随包分发的 FFmpeg 与 mpv 均为 GPL 构建，再分发时须一并遵守其许可。
+[GNU General Public License v3.0](LICENSE)（GPL-3.0）。随包分发的 FFmpeg 为 GPL 构建，再分发时须一并遵守其许可；mpv（GPL-2.0-or-later）自 2026-11 起已不随仓库与发布包分发，若在本机构建时自行带入，则由构建者自行遵守其许可。

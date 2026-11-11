@@ -737,8 +737,8 @@ HamsterPouch/
                               #   包整夹搬走仍可用。
                               #   ffmpeg 只带**运行时子集**（bin\ 全部 + LICENSE.txt），
                               #   ffplay.exe / doc / include / lib / presets 不带。
-                              #   mpv 是**可选**资产（目录不入库 ⇒ 新克隆没有）：
-                              #   存在则入包、缺失则跳过，不裁剪。
+                              #   mpv 是**可选**资产（2026-11-11 / D162 起资产已移出
+                              #   仓库 ⇒ 新克隆与 CI 没有）：存在则入包、缺失则跳过，不裁剪。
                               #   门禁：`pnpm check:bundled-runtime`
   docs/
     architecture/             # 文件架构、总体架构、决策清单
