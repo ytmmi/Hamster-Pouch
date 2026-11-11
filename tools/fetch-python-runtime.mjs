@@ -6,8 +6,8 @@
  *   1. **D20**：能部署在项目内的一律项目内化，但版本必须用**锁定文件**固定
  *      （`tools/python-runtime.lock.json`：URL + 字节数 + sha256），不靠"本机碰巧有 Python"。
  *   2. 解释器约 12MB 压缩 / 25MB 展开，且是**第三方二进制**：入库会污染版本库，也不该让
- *      GitHub 单文件上限成为约束（与 `external-cli/mpv` 同口径；`.gitignore` 忽略
- *      `plugins/system/python-core/runtime/`）。
+ *      GitHub 单文件上限成为约束（`.gitignore` 忽略 `plugins/system/python-core/runtime/`；
+ *      2026-11-11 / D162 之后仓库里已不再有任何这类随包二进制资产）。
  *   3. 用户机器**不依赖系统 Python**（RFC 0009「内嵌或随包发布」）：所以构建期必须把它
  *      落到插件目录里，`pnpm app:build` 才有可发布的东西。
  *

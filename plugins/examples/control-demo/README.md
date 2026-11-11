@@ -23,7 +23,7 @@
 
 ## `bin/control-demo.exe` 不在仓库里（有意）
 
-与 `external-cli/mpv` 同理：**可执行文件不入库**，需要本地构建一次。它的源码就是
+与 `plugins/system/python-core/runtime` 同理：**可执行文件不入库**，需要本地构建一次。它的源码就是
 测试夹具 `crates/hp-plugin-host/src/bin/fake_panel_plugin.rs`（同一份代码既当
 `tests/` 的被测对端，也当本示例——这样"示例能跑"与"测试通过"不会各说各话）。
 
