@@ -44,11 +44,11 @@ import { activeLrcIndex, lrcWindow, pairLrcLines, type LrcDoc, type LrcItem } fr
 import { stageVars } from "./haze";
 import type { PlayerStyle } from "./playerStyle";
 import type { RepeatMode } from "./queueView";
-import { formatMs, formatRemaining } from "./time";
+import { formatClock, formatMs, formatRemaining } from "./time";
 import { lyricIndent } from "./lyricView";
 
-/** 当前行前后各渲染几行（3 行 ≈ 7 行可见，够看又不会占满整屏）。 */
-const LRC_RADIUS = 3;
+/** 当前行前后各渲染几行（2 行 ≈ 5 行可见：与参考图的歌词窗口一致，也够看）。 */
+const LRC_RADIUS = 2;
 
 export interface MusicStageProps {
   /** 当前样式（在设置里切换）。 */
@@ -100,9 +100,16 @@ export function MusicStage(props: MusicStageProps) {
     () => (items ? lrcWindow(items.length, activeIndex, LRC_RADIUS) : { start: 0, end: 0 }),
     [items, activeIndex],
   );
+  // 既没有封面也没有歌词：舞台上只剩一块晕染，控件列改成居中一列（见 styles.css）。
+  const plain = !props.coverUrl && !lyrics;
 
   return (
-    <div className="player-music" data-style={style} style={stageVars(props.hazeColors)}>
+    <div
+      className="player-music"
+      data-style={style}
+      data-plain={plain ? "true" : undefined}
+      style={stageVars(props.hazeColors)}
+    >
       <div className="player-haze" aria-hidden="true">
         {props.coverUrl ? (
           <img className="player-haze-art" src={props.coverUrl} alt="" draggable={false} />
@@ -238,7 +245,7 @@ function SeekBar({
       />
       {variant === "haze" ? (
         <div className="player-seek-times mono">
-          <span>{formatMs(positionMs)}</span>
+          <span>{known ? formatClock(positionMs) : formatMs(positionMs)}</span>
           <span>{formatRemaining(positionMs, known ? durationMs : null)}</span>
         </div>
       ) : null}

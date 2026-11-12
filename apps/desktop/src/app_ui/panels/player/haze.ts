@@ -44,13 +44,67 @@ export function hazeColorsOf(colors: readonly string[]): string[] {
 }
 
 /**
+ * 把主色拉到"能当光斑用"的区间：**饱和度至少 0.42、亮度落在 0.30–0.58**。
+ *
+ * 主色是"封面里出现最多的颜色"，浅色封面（白底插画、和纸封面）的主色常常接近
+ * `#eeeeee`——直接拿去当光斑并 `mix-blend-mode: screen`，整块背景会发白，
+ * 白字压在上面根本读不出来。这里统一压回深色高饱和，封面只决定**色相**。
+ * 近乎无彩（通道差 < 24）的颜色按强调基色混一次，避免"灰盘配灰晕"。
+ */
+export function vivid(hex: string): string {
+  const rgb = toRgb(hex);
+  if (!rgb) return HAZE_FALLBACK_COLORS[0];
+  const [h, s, l] = rgbToHsl(rgb);
+  const safeHue = Math.max(...rgb) - Math.min(...rgb) < 24 ? hueOf(ACCENT_BASE) : h;
+  const saturation = Math.max(0.42, Math.min(1, s));
+  const lightness = Math.max(0.3, Math.min(0.58, l));
+  return toHex(hslToRgb(safeHue, saturation, lightness));
+}
+
+/** 旋转色相（保持 s/l）。 */
+export function shiftHue(hex: string, degrees: number): string {
+  const rgb = toRgb(hex);
+  if (!rgb) return hex;
+  const [h, s, l] = rgbToHsl(rgb);
+  return toHex(hslToRgb(h + degrees, s, l));
+}
+
+/**
+ * 拉开色相距离：相邻两层至少差 `MIN_HUE_GAP` 度。
+ *
+ * 封面常常只有一个色系（一张紫发插画 → 三个紫），三层光斑叠起来就是一块单色，
+ * "流动"完全看不出来。这里只动色相（亮度/饱和度保留封面倾向），把第二、三层
+ * 各推开一档，晕染才有参考图那种"粉 → 紫 → 蓝"的过渡。
+ */
+const MIN_HUE_GAP = 26;
+
+function spreadHues(colors: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const color of colors) {
+    let hue = hueOf(color);
+    let candidate = color;
+    for (let guard = 0; guard < 4; guard += 1) {
+      const clash = out.some((prev) => {
+        const gap = Math.abs(((hue - hueOf(prev) + 540) % 360) - 180);
+        return gap < MIN_HUE_GAP;
+      });
+      if (!clash) break;
+      hue = (hue + 34) % 360;
+      candidate = shiftHue(color, 34 * (guard + 1));
+    }
+    out.push(candidate);
+  }
+  return out;
+}
+
+/**
  * 三层色晕的 CSS 变量（直接摊到容器的 `style` 上）。
  *
  * 变量名固定为 `--player-haze-a/b/c`，样式表只消费这三个——颜色在组件里算，
  * 样式表里不出现任何具体色值（换封面不会让样式表失去意义）。
  */
 export function hazeVars(colors: readonly string[]): Record<string, string> {
-  const [a, b, c] = hazeColorsOf(colors);
+  const [a, b, c] = spreadHues(hazeColorsOf(colors).map(vivid));
   return {
     "--player-haze-a": a,
     "--player-haze-b": b,
@@ -79,6 +133,52 @@ function toRgb(hex: string): [number, number, number] | null {
 function toHex(rgb: readonly [number, number, number]): string {
   const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
   return `#${rgb.map((v) => clamp(v).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** `#rrggbb` → HSL（h 度数 0–360，s/l 0–1）。 */
+function rgbToHsl([r, g, b]: readonly [number, number, number]): [number, number, number] {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) return [0, 0, l];
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === rn) h = ((gn - bn) / d) % 6;
+  else if (max === gn) h = (bn - rn) / d + 2;
+  else h = (rn - gn) / d + 4;
+  return [((h * 60) % 360 + 360) % 360, s, l];
+}
+
+/** 只取色相（度数）。 */
+function hueOf(hex: string): number {
+  const rgb = toRgb(hex);
+  return rgb ? rgbToHsl(rgb)[0] : 0;
+}
+
+/** HSL → `#rrggbb`。 */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = (((h % 360) + 360) % 360) / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  const m = l - c / 2;
+  const table: [number, number, number][] = [
+    [c, x, 0],
+    [x, c, 0],
+    [0, c, x],
+    [0, x, c],
+    [x, 0, c],
+    [c, 0, x],
+  ];
+  const pick = table[Math.min(5, Math.floor(hp))];
+  return [
+    (pick[0] + m) * 255,
+    (pick[1] + m) * 255,
+    (pick[2] + m) * 255,
+  ];
 }
 
 /**
@@ -152,7 +252,7 @@ function pickAccent(colors: readonly string[]): string {
  * - `--player-disc-ring`：唱片外那两道细环。
  */
 export function stageVars(colors: readonly string[]): Record<string, string> {
-  const [a, b, c] = hazeColorsOf(colors);
+  const [a, b, c] = spreadHues(hazeColorsOf(colors).map(vivid));
   const accentBase = pickAccent([a, b, c]);
   const accent = mixHex(accentBase, ACCENT_BASE, 0.45);
   return {
@@ -161,8 +261,8 @@ export function stageVars(colors: readonly string[]): Record<string, string> {
     "--player-ink-dim": withAlpha(darken(accentBase, 0.62), 0.62),
     "--player-accent": accent,
     "--player-accent-soft": withAlpha(accent, 0.24),
-    "--player-sky-1": lighten(mixHex(accentBase, a, 0.35), 0.86),
-    "--player-sky-2": lighten(mixHex(b, c, 0.5), 0.74),
+    "--player-sky-1": lighten(mixHex(accentBase, a, 0.35), 0.9),
+    "--player-sky-2": lighten(mixHex(b, c, 0.5), 0.8),
     // 只"提亮主色"在浅色封面上会得到一张几乎看不见的盘（主色本身接近白）。
     // 先混入强调基色把饱和度拉回来，再提亮——盘始终是"带封面倾向的淡紫"。
     "--player-disc-1": lighten(mixHex(a, ACCENT_BASE, 0.42), 0.5),

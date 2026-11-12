@@ -483,9 +483,12 @@ apps/desktop/src/app_ui/
                             #     换配色：haze = 左列封面卡 + 进度/传输/音量 + 右侧大号歌词；
                             #     disc = 左侧曲名/歌词 + 进度/传输 + 右上按封面上色的大唱片。
                             #     共用的是数据与规则（歌词窗口、队列、配色函数、传输行为）。
-                            #     haze 的非当前行**高斯模糊 + 逐行右移**（`lyricIndent`），
-                            #     disc 不模糊不错位、靠透明度分层；disc 的唱片不是黑胶黑，
-                            #     盘体取主色提亮、盘外两道独立细环；
+                            #     haze 的非当前行**高斯模糊 + 逐行右移**（`lyricIndent`，
+                            #     模糊半径按**字号**算 ≈ 8%：行高 19px 配 1.6px，与参考图
+                            #     40px 字配 4px 同量级），disc 不模糊不错位、靠透明度分层；
+                            #     disc 的唱片不是黑胶黑，盘体取主色提亮、盘外两道独立细环；
+                            #     歌词窗口 `LRC_RADIUS = 2`（可见 5 行）；`data-plain`
+                            #     （既无封面又无歌词）时左列收成单列居中，不留空舞台；
                             #     收藏是**非交互 `<span role="img">`**，不是 disabled 按钮——
                             #     按钮会暗示"点了会有反应"；无封面不渲染 `<img>`、无歌词
                             #     整块 `Lyrics` 直接 return null）
@@ -513,9 +516,15 @@ apps/desktop/src/app_ui/
                             #     `stageVars` 再从同一组主色算出样式 2 的整套颜色——天空渐变、
                             #     墨色文字、强调色、唱片盘体与两道细环；**前端不从封面取色**，
                             #     封面经 convertFileSrc 是跨源资源、canvas 读像素会被 taint；
-                            #     非法/不足用 HAZE_FALLBACK_COLORS 循环补足）
-                            #   time.ts 时间格式（`formatMs` = 已播时长，`formatRemaining`
-                            #     = 倒计时 `-3:24`：样式 1 的进度条右端是"还剩多久"）
+                            #     非法/不足用 HAZE_FALLBACK_COLORS 循环补足。
+                            #     `vivid` 把主色**归一化**（饱和度 ≥ 0.42、亮度 0.30–0.58）：
+                            #     主色是"封面占比最高的颜色"，白底封面的主色是 `#eeeeee`，
+                            #     直接当光斑会让整块底发白、白字读不出；`spreadHues` 再让
+                            #     相邻色相至少差 26°（不足就沿色环推），单色系封面才有过渡）
+                            #   time.ts 时间格式（`formatMs` = 已播时长、`≤ 0` 记作"未知"，
+                            #     `formatClock` = 同一口径但**允许 0**（进度条起点必须是
+                            #     `0:00`，它是合法位置），`formatRemaining` = 倒计时 `-3:24`：
+                            #     样式 1 的进度条右端是"还剩多久"）
                             #   playerStyle.ts 样式声明（`PLAYER_STYLES = ["haze","disc"]`、
                             #     缺省 haze、`normalizePlayerStyle` 兜底、标题键派生）
                             #   trackInfo.ts 曲名/艺人（文件名首个 `" - "` 切分；索引里没有

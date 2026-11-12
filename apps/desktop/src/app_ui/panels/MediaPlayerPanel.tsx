@@ -154,6 +154,15 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   const wasVisibleRef = useRef(Boolean(panelApi.isVisible && panelApi.isActive));
   /** 播放命令进行中：抑制重复触发。 */
   const busyRef = useRef(false);
+  /**
+   * 下一次 src 就绪是否**自动出声**。
+   *
+   * 只有"用户点了播放 / 双击了文件"才是 `true`；单纯切换选中（只想看时长、换封
+   * 面）只预载元数据，不自动播放（D142：首次播放必须由用户手势发起）。
+   */
+  const autoPlayRef = useRef(false);
+  /** 当前 `<video>` 里装的是哪个文件（避免同文件重复换源丢掉进度）。 */
+  const loadedFileIdRef = useRef<string | null>(null);
   /** 最新 app 上下文（供只订阅一次的 effect 读取，避免闭包过期）。 */
   const appRef = useRef(app);
   appRef.current = app;
@@ -210,6 +219,8 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     busyRef.current = true;
     try {
       const path = await api.filePath({ repoId: ctx.repoId, fileId });
+      autoPlayRef.current = true;
+      loadedFileIdRef.current = fileId;
       setVideoUrl(convertFileSrc(path));
       setPositionMs(0);
       setScrubMs(null);
@@ -315,18 +326,47 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   // src 变化（或新的播放请求）→ 自动播放：重置到开头再播。
   // 同文件重复请求时 src 不变，靠 `playToken` 触发；`load()` 强制重新加载。
   useEffect(() => {
-    if (!videoUrl || playToken === 0) {
+    if (!videoUrl || !autoPlayRef.current) {
       return;
     }
     const video = videoRef.current;
     if (!video) {
       return;
     }
+    autoPlayRef.current = false;
     video.pause();
     video.currentTime = 0;
     video.load();
     void video.play().catch(() => undefined);
   }, [videoUrl, playToken]);
+
+  // 选中变化 → **只预载**（时长/进度条立刻可用、封面与色晕先出来），不自动出声。
+  // 之前是"点播放才挂 src"，于是音乐模式在开唱前两端一直是 `--:--`。
+  useEffect(() => {
+    const file = app.selectedFile;
+    const repoId = app.repoId;
+    if (!repoId || !file) return;
+    if (file.media_type !== "audio" && file.media_type !== "video") return;
+    if (loadedFileIdRef.current === file.id) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const path = await api.filePath({ repoId, fileId: file.id });
+        if (cancelled) return;
+        autoPlayRef.current = false;
+        loadedFileIdRef.current = file.id;
+        setVideoUrl(convertFileSrc(path));
+        setPositionMs(0);
+        setScrubMs(null);
+        setDurationMs(0);
+      } catch {
+        // 预载失败不弹错：等用户真的点播放时 `loadAndPlay` 会报出来。
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [app.repoId, app.selectedFile]);
 
   // 音乐取料：选中音频就向后端要封面/歌词/色晕（非音频 → 清空）。
   // 只依赖"选中了哪个文件"，不依赖队列：换队列不该重取封面。

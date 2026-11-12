@@ -5697,18 +5697,20 @@ button.danger {
 }
 
 .player-lyrics[data-variant="haze"] .player-lyric {
-  filter: blur(2.6px);
-  opacity: 0.52;
+  /* 模糊半径按**字号**算：行高 ≈ 19px 时 1.6px ≈ 8%，与参考图（40px 字配 4px）同量级。
+     前几版用 2.6px 硬值，非当前行糊成一团，反而看不出是字。 */
+  filter: blur(1.6px);
+  opacity: 0.56;
 }
 
 .player-lyrics[data-variant="haze"] .player-lyric[data-distance="2"] {
-  filter: blur(3.4px);
-  opacity: 0.4;
+  filter: blur(2.2px);
+  opacity: 0.44;
 }
 
 .player-lyrics[data-variant="haze"] .player-lyric[data-distance="3"] {
-  filter: blur(4.2px);
-  opacity: 0.28;
+  filter: blur(2.8px);
+  opacity: 0.3;
 }
 
 .player-lyrics[data-variant="haze"] .player-lyric.is-active {
@@ -5728,8 +5730,10 @@ button.danger {
 
 /* 样式 2：不模糊、不错位，靠**颜色深浅**分层（参考图是淡紫灰 → 深藏青）。 */
 .player-lyrics[data-variant="disc"] {
-  justify-content: center;
+  justify-content: flex-start;
   gap: clamp(9px, 2.1cqh, 24px);
+  /* 最多铺到一半高度：再长就裁掉，进度条与传输行不能被歌词顶出画面。 */
+  max-height: 42cqh;
   margin: clamp(4px, 1cqh, 12px) 0 clamp(10px, 2.8cqh, 30px);
 }
 
@@ -5789,11 +5793,21 @@ button.danger {
 /* 没有封面：卡片不再被"封面 → 音量"的距离撑开，改成紧凑居中一列。 */
 .player-card[data-empty="true"] {
   justify-content: center;
-  gap: clamp(10px, 2.6cqh, 30px);
-  padding-bottom: 0;
   gap: clamp(8px, 2cqh, 20px);
+  padding-bottom: 0;
   min-width: 0;
   height: 100%;
+}
+
+/* 既没有封面也没有歌词：舞台只剩一块晕染，控件列居中成"无封面播放器"，
+   而不是贴着左边缘缩成一小团。 */
+.player-music[data-plain="true"] .player-layout[data-variant="haze"] {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+}
+
+.player-music[data-plain="true"] .player-card {
+  width: min(100%, 460px);
 }
 
 .player-art {
@@ -5831,8 +5845,10 @@ button.danger {
 
 .player-layout[data-variant="disc"] {
   display: flex;
-  align-items: center;
-  padding: 6cqh 4cqw 6cqh 7cqw;
+  /* 参考图是"信息页"：标题压在顶部（≈9%），歌词往下铺，进度/传输在 47–55%，
+     下面一大片留给浅色底——**不是**把整列垂直居中。 */
+  align-items: flex-start;
+  padding: 9cqh 4cqw 6cqh 7cqw;
   /* 浅色底 + 深色字，整体氛围与样式 1 相反。 */
   color: var(--player-ink, #232840);
 }
@@ -5880,7 +5896,8 @@ button.danger {
 .player-info {
   position: relative;
   z-index: 2;
-  width: 58%;
+  /* 58% 会让进度条压到唱片边沿；52% 刚好停在外环之外（参考图也是断在唱片左侧）。 */
+  width: 52%;
   min-width: 0;
   display: flex;
   flex-direction: column;

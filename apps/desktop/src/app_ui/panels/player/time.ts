@@ -20,6 +20,25 @@ export function formatMs(ms: number | null | undefined): string {
 }
 
 /**
+ * 允许 0 的时钟（`0:00`）。
+ *
+ * 进度条的**起点**是合法的 0，不能像 [`formatMs`] 那样把它当成"没有时长"；
+ * 参考图样式 1 的左端就写着 `0:00`。
+ */
+export function formatClock(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) {
+    return "--:--";
+  }
+  const total = Math.floor(ms / 1000);
+  const s = total % 60;
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  const mm = h > 0 ? String(m).padStart(2, "0") : String(m);
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+/**
  * 剩余时长（播放器样式 1 的进度条右端是 `-3:24` 这种**倒计时**，不是总时长）。
  *
  * 两端都已知时返回带减号的剩余；否则退回 `--:--`。
