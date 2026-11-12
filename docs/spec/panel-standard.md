@@ -415,6 +415,16 @@
     - `pnpm check:panels` 断言：三种媒体类型同一条取图路径（正向锚点 `needsThumb` 含 `audio`）+ 单元模块内**零** `IntersectionObserver` + 组件与缓存同源 + 波形几何**三条行为断言**（互逆运算 / 留白被算进绘制盒 / 越界与"不适用"都有确定答案。越界指 `positionMs` 略大于 `durationMs`——浏览器两个值来自不同来源、末帧常差几毫秒；"不适用"指时长未知时返回 `null`，**不画一根在 0 上的假游标**，那会被读成"播放卡在开头"）。**回退即红实测 2 处**：`waveDrawnBox` 的 `left` 恒 0 → 留白断言红；`waveCursorX` 不补回留白 → 互逆断言红（探针存档 `archive/2026-10-17-audio-waveform-mutation-probe/`）。
     - **播放器的两条定位路径只有一份实现**：进度条拖动与波形点击**共用** `commitSeek`——各写一遍 `currentTime = …` 就会把夹紧范围各写一遍，迟早出现"进度条能拖到末帧、波形点不到"。查看器的音频舞台同款（时长与位置取自 `<audio>` 元素本身，不是索引元数据——判据是"永远与正在播的这份文件一致"，旧库未升级或换源都不会错位）。**视频不画波形**：波形的横轴必须与音频时间线性对应才可读，视频那张图只能是"某一帧"或"整段抽样"，两者语义不同。
 
+19. **音乐播放器（2026-11-13 / D165）**：播放器面板选中**音频**时，画面区换成音乐舞台（选中视频仍是原来的 `<video>`）。参考图口径进化成两套排版：封面卡 / 唱片，在「全部设置 → 面板 → 媒体播放器 → 样式」切换。
+
+    - **传输按钮只属于音乐模式**：本条**改写**了 RFC 0005 的「面板不放播放 / 暂停 / 定位 / 停止」——原文针对的是**视频**（画面本身可点，按钮只会挡住画面语义），音乐舞台没有"可点的画面"，按钮就是唯一的操作入口。**边界是媒体类型**而不是面板级开关：`media_type === "audio"` 才出现 上一首 / 播放暂停 / 下一首，视频分支一个按钮都没有（门禁双向钉住：`<MusicStage` 只出现一次且落在 `isAudio ? (` 分支里；面板源码不得出现 `player-transport`——按钮只有音乐舞台一份实现，面板不再自己拼一套）。
+    - **队列 = 媒体预览里的同一串文件**：范围与媒体预览 / 图像查看器同一口径（相册 → 源或子目录 → 全仓库），`audio` 与 `video` 共用一条保序队列，**步进只在同类里走**、端点循环（`panels/player/queueView.ts` 的 `stepPlayable`，零依赖、门禁直接 import 按行为断言）。切曲**复用宿主的选中**（`setSelectedIds` + `setSelectedFile`），于是媒体预览的高亮、元数据面板、后续拖拽都跟着变——播放器不是第二套"当前文件"。**视频也能切换**（用户同批要求"像图像查看器一样"）：← / → 走同类队列，视频仍不出现按钮（单击画面语义不变）。播放结束：音乐自动续播下一首，到队尾回落到"首帧暂停"。
+    - **取料只有一条命令**（`player.media`；后端 `crates/hp-media/src/artwork.rs` + `apps/desktop/src-tauri/src/commands/player.rs`）：封面**内嵌优先**（ffmpeg 抽 `0:v:0` 首帧，`scale=min(640,iw)`、mjpeg q=3），**再找同目录同名图片**（`a.mp3` ↔ `a.jpg` / `jpeg` / `png` / `webp` / `bmp`，扩展名按这个顺序取），都没有就**不显示图**（不画空框、不占位）；"没有封面"同样缓存（`<hash>.audio-cover.none`），否则每次选中同一首都要先跑一次 ffmpeg 才知道没有。歌词取**同目录同名 `.lrc`**，编码由 `hp_book::decode_file_limited` 判（UTF-8 / GBK / UTF-16，200k 字符上限），没有文件则**整个歌词块不渲染**。
+    - **色晕的颜色只能来自后端**：封面经 `convertFileSrc` 是**跨源**资源，前端 canvas 读像素会被 taint（`getImageData` 抛安全错误）——因此 `player.media` 顺带回 `haze_colors`（`hp_media::extract_palette` 5 色，与色彩参考面板同一份算法），前端只负责铺三层、不足时循环取色（`panels/player/haze.ts`）。**没有封面 / 取色失败必须有兜底晕染**（`#7b5cff` / `#ff6f9c` / `#4aa3ff`）：用户口径是"无封面则用兜底的默认颜色晕"，不是"没封面就没背景"。
+    - **两种样式只差排版与动效**：`panel.player.style`（`select`，`haze` / `disc`，缺省 `haze`；声明与 Rust 镜像的候选逐项一致）。色晕三条 24s / 32s / 38s 的漂移（时长不同才不会整齐划一地一起呼吸）；唱片**只在播放时转**（`data-playing` → `animation-play-state: running`），暂停**停在当前角度**（`paused` 而非归零——归零会被读成"重新开始"）；`prefers-reduced-motion: reduce` 全停。动效只表达状态，不做装饰性循环。
+    - **收藏只有图标**：渲染成非交互 `span[role="img"]`（不是 disabled `button`——禁用态暗示"现在不能用"，而实际情况是"功能还没做"）。功能后续补。
+    - `pnpm check:panels` **433 → 446 项**，新增 13 条按行为 / 结构写：LRC 一行多标签与 `[offset:]` 平移、纯文本歌词 `synced: false`、当前行二分边界（未到第一句 `-1`）、歌词窗口两端夹紧、曲名 / 艺人按首个 `" - "` 切分、色晕三层 / 兜底 / 非法值剔除、同类步进与端点循环、队列边界、样式声明（候选 == `PLAYER_STYLES`、缺省 == `DEFAULT_PLAYER_STYLE`）、传输按钮只在音乐模式、无封面 / 无歌词不渲染、收藏是 `span` 不是按钮、唱片 `data-playing` + `paused` / `running` + reduced-motion。
+
 - **`cargo test -p hp-core`**：面板声明的硬错误清单、命名空间规则、`settings.kind` 白名单、`has_class = false` 的类目拒绝、`mount.overlay_content = false` 的浮层拒绝。
 - **回归**：内置 16 个面板的声明必须能通过校验且与现状一致（**零行为变化**）；插件面板缺失时蓝图可保存且灰显「未接通」。
 - `pnpm typecheck` / `pnpm build` / `check-line-count` / `check-doc-status` 通过。

@@ -467,6 +467,36 @@ apps/desktop/src/app_ui/
                             #   进度条右侧另有**音量**（2026-11-07 / D142）：音量图标 + 点开的
                             #   竖状控制条（`rotate(-90deg)` 的原生 range），值存面板设置
                             #   `panel.player.volume`（默认 100），不新增播放器命令 / 事件
+                            #   **音乐模式**（2026-11-13 / D165）：选中音频时 `.player-stage`
+                            #   换成 `<MusicStage>`（画面区里那支 `<video>` 保留但 1px 透明，
+                            #   音频仍靠它出声——**只有一条播放通道**，不是第二套播放器），
+                            #   出现 上一首 / 播放暂停 / 下一首 三枚按钮；视频模式**不渲染**
+                            #   这个组件，D142「视频不放传输控件」的口径因此原样成立
+                            #   排版校准与 RFC 0005 的收窄理由见 panel-standard §5.2 第 19 项
+    player/                 # 音乐模式的取料与视图（2026-11-13 / D165；与 imageviewer/ 同构的
+                            #   多文件功能域，主面板仍是上一行的 `MediaPlayerPanel.tsx`）
+                            #   MusicStage.tsx 音乐舞台（两套样式**共用一份 DOM**：haze = 左侧
+                            #     封面卡 + 右侧大号歌词；disc = 左侧曲目/歌词 + 右侧转动唱片；
+                            #     收藏是**非交互 `<span role="img">`**，不是 disabled 按钮——
+                            #     按钮会暗示"点了会有反应"；无封面不渲染 `<img>`、无歌词
+                            #     整块 `Lyrics` 直接 return null）
+                            #   lrc.ts LRC 解析纯函数（一行多时间标签、`[offset:±ms]` 平移、
+                            #     无时间轴退化成 `synced:false` 的整块文本；`activeLrcIndex`
+                            #     二分找当前行、`lrcWindow` 取上下文窗口并两端夹紧）
+                            #   queueView.ts 队列纯函数（**零依赖**：只有零依赖才能被门禁
+                            #     直接 import 断言；`playableFiles` / `stepPlayable` 在**同类**
+                            #     里走、端点循环、不跨 audio↔video）
+                            #   usePlayerQueue.ts 队列取数（相册走 album.members、其余走
+                            #     file.query + mediaTypes:['audio','video']，复用媒体预览的
+                            #     drainPages / sortFiles / 会话排序覆盖——播放顺序与预览列表
+                            #     同一份口径；世代号取消，与 useViewerSequence 同构）
+                            #   haze.ts 色晕取色（后端色板 → 三个 CSS 变量；非法/不足用
+                            #     HAZE_FALLBACK_COLORS 循环补足；**前端不从封面取色**——
+                            #     封面经 convertFileSrc 是跨源资源，canvas 读像素会被 taint）
+                            #   playerStyle.ts 样式声明（`PLAYER_STYLES = ["haze","disc"]`、
+                            #     缺省 haze、`normalizePlayerStyle` 兜底、标题键派生）
+                            #   trackInfo.ts 曲名/艺人（文件名首个 `" - "` 切分；索引里没有
+                            #     title/artist，读标签未排期，D115 ⑫）
     BlueprintPanel.tsx      # 蓝图编辑器主面板（**入口装配**：状态 + 文档命令 + 层工具 + 图编辑动作；
                             #   界面拼给下面四个区块组件；含当前层状态）
     BlueprintDocList.tsx    # 蓝图文档列表（新建/带结构创建开关/选中/设为默认/模板下拉）
