@@ -31,6 +31,12 @@ pub struct ScanPrepareRow {
     pub marks: Vec<FileMark>,
     /// `color_refs.color_json`；`None` = 还没有调色板行。`locked: true` 时重扫不得覆盖（D82）。
     pub color_json: Option<String>,
+    /// 该行是否已被收敛成「仅索引」（`files.index_only`，迁移 0016）。
+    ///
+    /// 扫描据此判断**排除状态有没有变**：`true` 表示衍生产物已被有意清除，若这行现已回到
+    /// 可见范围（用户取消了排除），就必须**强制重算**而不是按 size/mtime 判"未变化"跳过——
+    /// 跳过会让它的哈希与缩略图永远回不来。
+    pub index_only: bool,
 }
 
 /// 缺失检测用的最小行：`(id, relative_path)`，不带标记、不带其余 18 列。
@@ -213,6 +219,124 @@ impl RepoDb {
         Ok(())
     }
 
+    /// 写入/清除某行的「仅索引」标记（`files.index_only`，迁移 0016）。
+    ///
+    /// 该列**不在 `FILE_COLUMNS` 里**（它不属于索引语义，见迁移注释），所以只能经由本方法
+    /// 读写：扫描在写完行之后按 `Prepared::excluded` 调一次，代价是一条按主键的 UPDATE。
+    pub fn set_file_index_only(&mut self, file_id: &str, index_only: bool) -> HpResult<()> {
+        require_nonempty(file_id, "文件 ID")?;
+        self.conn()
+            .execute(
+                "UPDATE files SET index_only = ?2 WHERE id = ?1",
+                params![file_id, index_only as i64],
+            )
+            .map_err(|e| store_err("写入仅索引标记", e))?;
+        Ok(())
+    }
+
+    /// 清除一批文件行的**衍生产物**并把它们标成仅索引，返回实际更新行数。
+    ///
+    /// 清的是"能从内容重新算出来的大东西"：内容哈希（含算法与版本）、感知哈希、
+    /// `media_info_json`、`thumb_status`。**不动** `relative_path` / `size` / `mtime` /
+    /// `missing_status` / `width` / `height`，也不动 `file_marks`、`color_refs`、评分与
+    /// 相册成员——索引与用户数据正是排除功能承诺"可还原"的那部分（D149）。
+    ///
+    /// 宽高刻意保留：回填任务按 `width IS NULL AND media_type = 'image'` 挑行，
+    /// 清掉等于把被排除的图片排队送去解码，与"不产衍生产物"直接冲突（0043）。
+    pub fn clear_file_derivatives(&mut self, file_ids: &[String]) -> HpResult<u64> {
+        if file_ids.is_empty() {
+            return Ok(0);
+        }
+        let tx = self
+            .conn()
+            .unchecked_transaction()
+            .map_err(|e| store_err("开启衍生产物清理事务", e))?;
+        let mut affected = 0u64;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "UPDATE files SET
+                         index_only = 1,
+                         content_hash = NULL,
+                         content_hash_algo = NULL,
+                         content_hash_algo_version = NULL,
+                         perceptual_hash = NULL,
+                         perceptual_hash_algo = NULL,
+                         perceptual_hash_algo_version = NULL,
+                         media_info_json = NULL,
+                         thumb_status = ?2
+                     WHERE id = ?1",
+                )
+                .map_err(|e| store_err("准备衍生产物清理", e))?;
+            for id in file_ids {
+                affected += stmt
+                    .execute(params![id, ThumbStatus::NotGenerated.as_i64()])
+                    .map_err(|e| store_err("清理衍生产物", e))? as u64;
+            }
+        }
+        tx.commit().map_err(|e| store_err("提交衍生产物清理", e))?;
+        Ok(affected)
+    }
+
+    /// 列出某源内**落在被排除子树下、还挂着衍生产物**的行：`(file_id, content_hash)`。
+    ///
+    /// `index_only = 1` 的行已经在更早一轮清理过，跳过它们是"收敛"而不是"漏掉"：
+    /// 这个方法每次扫描与每次排除都会跑，结果集必然逐轮变小。
+    ///
+    /// **注意谓词的极性**：[`EXCLUDED_PATH_PREDICATE`] 的语义是"**可见**"（它整体写作
+    /// `NOT EXISTS`，相册成员、目录树都直接拿它当可见过滤用），所以这里要**取反**——
+    /// 漏了那个 `NOT` 就会把"可见行"当成"待清理行"，清理逻辑会一行也捞不到。
+    pub fn list_excluded_derivative_rows(
+        &self,
+        source_id: &str,
+    ) -> HpResult<Vec<(String, String)>> {
+        require_nonempty(source_id, "媒体源 ID")?;
+        let sql = format!(
+            "SELECT f.id, f.content_hash FROM files f
+             WHERE f.source_id = ?1
+               AND f.index_only = 0
+               AND f.content_hash IS NOT NULL
+               AND NOT {EXCLUDED_PATH_PREDICATE}"
+        );
+        let mut stmt = self
+            .conn()
+            .prepare(&sql)
+            .map_err(|e| store_err("查询被排除行的衍生产物", e))?;
+        let rows = stmt
+            .query_map(params![source_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| store_err("读取被排除行的衍生产物", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_err("解析被排除行的衍生产物", e))?;
+        Ok(rows)
+    }
+
+    /// 仓库内是否还有**可见**（未被排除、且未标成仅索引）的行引用这个内容哈希。
+    ///
+    /// 排除清理的第一问：这份内容的缩略图缓存还有别人要用吗。有（同一内容的可见副本）
+    /// 就**留着**——缓存文件按内容寻址，删掉会让可见那张图下次请求时白白重建；
+    /// 没有才删。谓词与查询同源（[EXCLUDED_PATH_PREDICATE]），因此被排除子树里的其它行
+    /// 天然不参与计数，不会把"自己"算成引用。
+    ///
+    /// 注意范围是**单个仓库库**：缩略图缓存根本是进程级共享（跨仓库），所以这里返回
+    /// `false` 只说明"本仓库没人要"，别的仓库若引用同一哈希，下次请求会按需重建——
+    /// 缓存是可再生产物（`ThumbnailCache::purge_hash` 会按哈希清，命中不到就下次重建）。
+    pub fn has_visible_content_hash(&self, content_hash: &str) -> HpResult<bool> {
+        require_nonempty(content_hash, "内容哈希")?;
+        let sql = format!(
+            "SELECT 1 FROM files f
+             WHERE f.content_hash = ?1 AND f.index_only = 0 AND {EXCLUDED_PATH_PREDICATE}
+             LIMIT 1"
+        );
+        let found: Option<i64> = self
+            .conn()
+            .query_row(&sql, params![content_hash], |row| row.get(0))
+            .optional()
+            .map_err(|e| store_err("查询哈希可见引用", e))?;
+        Ok(found.is_some())
+    }
+
     /// 按文件 ID 查询索引行；不存在返回 `None`。
     pub fn get_file(&self, file_id: &str) -> HpResult<Option<FileIndexRow>> {
         let mut row = self
@@ -309,7 +433,8 @@ impl RepoDb {
         let mut stmt = self
             .conn()
             .prepare(
-                "SELECT f.id, f.relative_path, f.size, f.mtime, f.content_hash, c.color_json
+                "SELECT f.id, f.relative_path, f.size, f.mtime, f.content_hash, f.index_only,
+                        c.color_json
                  FROM files f LEFT JOIN color_refs c ON c.file_id = f.id
                  WHERE f.source_id = ?1",
             )
@@ -323,7 +448,8 @@ impl RepoDb {
                     mtime: row.get(3)?,
                     content_hash: row.get(4)?,
                     marks: Vec::new(),
-                    color_json: row.get(5)?,
+                    index_only: row.get::<_, i64>(5)? != 0,
+                    color_json: row.get(6)?,
                 })
             })
             .map_err(|e| store_err("读取扫描准备行", e))?

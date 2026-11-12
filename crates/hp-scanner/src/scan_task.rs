@@ -43,6 +43,11 @@ pub struct Prepared {
     /// 限流时读一次头、`compute` 里又读一次同一份头。只有"要重算的图片"有值，
     /// 未变化的图一个字节都不碰。
     pub image_probe: Option<ImageProbe>,
+    /// 该路径是否**落在被排除子树下**（`source_exclusion`，D149 + 2026-11-12 口径）。
+    ///
+    /// 为真时这份内容**只建索引**：不读内容、不算哈希、不出缩略图、不算感知哈希与调色板、
+    /// 不 `probe` 媒体信息。`compute` 会直接返回空产物，写库再把 `index_only` 落成 1。
+    pub excluded: bool,
 }
 
 /// 并行计算阶段的产物：纯数据，不含数据库句柄。
@@ -70,7 +75,9 @@ pub struct Computed {
 /// 配额来自准备阶段那次读头（[`Prepared::image_probe`]，第 43 轮）；调用方没带
 /// （自建 `Prepared` 的测试/工具）时现场读一次头，与旧行为完全一致。
 pub fn pixel_cost(prepared: &Prepared) -> u64 {
-    if prepared.unchanged || prepared.media_type != MediaType::Image {
+    // 被排除的条目根本不进解码队列，配额按最小单位算（否则准备阶段没读头，
+    // 这里会为了一个"不打算解码"的文件去读一次文件头，等于把省掉的工作又做回来）。
+    if prepared.unchanged || prepared.excluded || prepared.media_type != MediaType::Image {
         return 1;
     }
     match prepared.image_probe {
@@ -85,6 +92,15 @@ pub fn pixel_cost(prepared: &Prepared) -> u64 {
 /// 且 `hp_media` 侧已改为**原子落盘**（先写临时文件再改名），因此并发安全。
 pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
     if prepared.unchanged {
+        return Computed::default();
+    }
+    // **只建索引**（2026-11-12）：被排除的子树不读内容。放在 `match` 之前是为了让这条
+    // 分支不可能被某个媒体类型漏掉——这里早退，写库阶段拿到的就是"无哈希、无缩略图、
+    // 无感知哈希、无媒体信息、无调色板"的空产物，缩略图缓存也不会被写。
+    //
+    // 注意**不能**把这种行写成 `unreadable`：那是"读了但读不出来"的语义（RFC 0001），
+    // 会让界面报损坏；这里是有意不读，`thumb_status` 落 `NotGenerated` 即可。
+    if prepared.excluded {
         return Computed::default();
     }
 
@@ -364,6 +380,7 @@ mod tests {
             existing_marks: Vec::new(),
             want_palette,
             image_probe: None,
+            excluded: false,
         }
     }
 

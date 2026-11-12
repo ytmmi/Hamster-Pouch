@@ -115,18 +115,18 @@ fn rescan_with_dimensions_overwrites() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// 迁移之后 `PRAGMA user_version` 必须是 15（0015 是最后一条迁移）。
+/// 迁移之后 `PRAGMA user_version` 必须是 16（0016 是最后一条迁移）。
 ///
 /// 版本号是**权威**（database-schema.md 第 5 节）；写入方（回填任务）会按它判断
 /// 列是否存在，所以这里把它钉死在测试里。
 #[test]
-fn schema_version_bumped_to_15() {
+fn schema_version_bumped_to_16() {
     let (dir, db) = temp_db("version");
-    assert_eq!(db.schema_version().expect("读版本失败"), 15);
+    assert_eq!(db.schema_version().expect("读版本失败"), 16);
     let meta = db.meta("schema_version").expect("读镜像失败");
     assert_eq!(
         meta.as_deref(),
-        Some("15"),
+        Some("16"),
         "repo_meta 镜像键必须与权威值同步"
     );
     let _ = std::fs::remove_dir_all(&dir);

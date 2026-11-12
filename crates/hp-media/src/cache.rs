@@ -197,6 +197,44 @@ impl ThumbnailCache {
             .join(format!("{content_hash}.book-{section}-{index}.{ext}"))
     }
 
+    /// 删除某内容哈希对应的**全部**缓存产物，返回删掉的文件数。
+    ///
+    /// 为什么按"文件名前缀"扫分片目录、而不是逐个 `path_for_*` 列路径：同一哈希的产物形态
+    /// 会随功能增加（缩略图各档 `@dim`、预览、波形、封面、元数据、目录、正文插图……），
+    /// 逐个列举必然漏掉后加的那一种，而漏掉的正是"排除之后还赖在磁盘上的大文件"。
+    /// 分片目录里每个文件名都以 `<hash>` 开头（见各 `path_for_*`），前缀匹配就是这条
+    /// 不变式的直接表达。
+    ///
+    /// 删除单文件失败**吞掉**：缓存是纯可再生数据，删不掉只是浪费磁盘；反过来因为一个
+    /// 被占用的文件就让整个排除操作报错，用户会看到"排除成功但缩略图还在"。
+    /// 分片目录清空后顺手删掉（失败忽略），免得反复排除/恢复在缓存根留下成片空目录。
+    pub fn purge_hash(&self, content_hash: &str) -> u64 {
+        if content_hash.is_empty() {
+            return 0;
+        }
+        let dir = self.shard_dir(content_hash);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return 0;
+        };
+        let dotted = format!("{content_hash}.");
+        let at = format!("{content_hash}@");
+        let mut removed = 0u64;
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            if !(name.starts_with(&dotted) || name.starts_with(&at)) {
+                continue;
+            }
+            if std::fs::remove_file(entry.path()).is_ok() {
+                removed += 1;
+            }
+        }
+        let _ = std::fs::remove_dir(&dir);
+        removed
+    }
+
     /// 确保缓存根目录存在。
     pub fn ensure_dir(&self) -> HpResult<()> {
         std::fs::create_dir_all(&self.root)

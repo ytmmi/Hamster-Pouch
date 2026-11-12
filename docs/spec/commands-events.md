@@ -195,8 +195,18 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 | `source.list` / 图标 | 源不再出现 | 源照常在列，只是 `file_count` 变小 |
 
 - 语义是**路径前缀**：排除 `a/b` 会连带藏着 `a/b/c`，但 **`a/bc` 不受影响**。
-- **扫描器不过滤被排除的目录**（`hp-scanner` 不改）：照常索引它们。若扫描跳过，增量扫描会把
-  既有行判成 `missing` 并清掉——那等于删除数据，与"软排除"自相矛盾。
+- **扫描仍遍历被排除的目录，但只建索引**（D164）：拒绝的是"跳过遍历"，不是"照常处理"——
+  若扫描不遍历，增量扫描会把既有行判成 `missing` 并清掉，那等于删除数据，与"软排除"自相矛盾。
+  因此遍历照旧，但命中的行只写索引（路径 / 类型 / 大小 / 时间 / 标记）：**不读内容、不算内容哈希、
+  不算感知哈希、不取调色板、不 probe 媒体信息、不出缩略图**，落库时 `files.index_only = 1`。
+- **排除时当场清衍生产物**：`source.exclude` 写完排除记录后必跑一次
+  `purge_excluded_derivatives`（`crates/hp-scanner/src/derivatives.rs`）：按内容哈希分组，**同一哈希只要还
+  有可见行引用就整组跳过**（缓存按哈希分片、跨路径共享，删了会连累没被排除的那份）；其余组把缓存
+  按哈希删掉（`ThumbnailCache::purge_hash`），并把该子树这些行标成 `index_only = 1`、清空
+  `content_hash` / `perceptual_hash` / `media_info_json`（`thumb_status` 归 0）。清理失败不阻断命令，
+  下次扫描再收敛（扫描开始时也会跑一次，兜住上次失败或外部改动）。
+- **取消排除不自建扫描**：恢复的行 `index_only = 1`，下一次扫描发现"标记与当前排除状态不一致"
+  即强制重算（重新哈希 → 缩略图按需重建）。界面只承诺"下次扫描重建"，不在命令里偷偷起扫描任务。
 - 过滤点共四处，缺一处就会出现"这里没了、那里还在"：`file.query`（`RepoDb::query_files`）、
   相册成员分页（`RepoDb::query_album_members_page`）、相册全量可见成员
   （`hp-album` 的 `visible_members`）、以及 `source.tree` 建树**之前**的相对路径过滤。

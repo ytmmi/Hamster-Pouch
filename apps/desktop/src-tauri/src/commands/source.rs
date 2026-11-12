@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use hp_core::{HpError, HpResult, Source};
-use hp_scanner::{ScanOptions, ScanOutcome, ScanPhase, ScanProgress};
+use hp_scanner::{ScanOptions, ScanOutcome, ScanPhase, ScanProgress, purge_excluded_derivatives};
 use hp_store::{RepoDb, build_source_tree, retain_visible_paths};
 use serde::Serialize;
 use tauri::State;
@@ -484,6 +484,13 @@ pub(crate) fn source_exclude(
         let mut guard = lock_repo(&state)?;
         let db = open_repo_mut(&mut guard)?;
         db.exclude_source_dir(&source_id, &relative_path)?;
+        // **衍生产物当场收干净**（2026-11-12 用户口径）：被排除的子树只保留索引，已经扫过的
+        // 缩略图 / 预览 / 媒体信息 / 波形这些大文件立刻删掉，不等下一次扫描。
+        // 缓存按内容哈希寻址且可再生：同一份内容若在可见范围还有副本，清理会**保留**它
+        // （先问 `has_visible_content_hash`），因此这里删的只是"本仓库没人再用"的那份。
+        // 失败不阻断命令：描述符已经写进 `source_exclusion`，排除本身已经成立；
+        // `scan_source_inner` 开头会再收敛一次（历史库也是这样补上的）。
+        let _ = purge_excluded_derivatives(db, &source_id, Some(state.thumb_cache.as_ref()));
         Ok(SourceExclusionList {
             items: db
                 .list_source_exclusions(&source_id)?

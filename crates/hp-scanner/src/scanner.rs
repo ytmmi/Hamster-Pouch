@@ -17,10 +17,11 @@ use hp_core::{
 };
 use hp_hash::{ContentHash, PerceptualHash};
 use hp_media::{ThumbnailCache, encode_palette_json, palette_is_locked};
-use hp_store::{RepoDb, ScanPrepareRow};
+use hp_store::{RepoDb, ScanPrepareRow, is_excluded_path};
 use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
 
+use crate::derivatives::purge_excluded_derivatives;
 use crate::media_type::{default_file_marks, detect_media_type};
 use crate::scan_compute;
 use crate::scan_pool;
@@ -286,6 +287,19 @@ impl Scanner {
         //    一次，5 万文件就是十几万条 SQL 串在这段循环里。这里一条
         //    `files LEFT JOIN color_refs` 拿齐"是否变化 / 要不要补哈希 / 调色板是否锁定"，
         //    SQL 条数与文件数脱钩。取完即用 `remove` 消费，不再占着整张表。
+        // **先收敛"被排除子树的衍生产物"**（2026-11-12 用户口径）：本轮之前就已排除的子树
+        // 可能还留着哈希与缩略图（那时扫描照样全量处理）。扫描是唯一会周期性跑到的收敛点，
+        // 在这里清一次，历史库不需要额外的升级任务。
+        //
+        // 失败**不中断扫描**：清缓存是尽力而为的卫生工作，删不掉只是多占磁盘；让一次扫描
+        // 因为删不掉某个占用中的文件而失败，用户会看到"扫描报错"却查不出哪里坏了。
+        // `None` 缓存（工具/测试直接调扫描）时只收敛数据库列，不碰磁盘。
+        let _ = purge_excluded_derivatives(db, source_id, options.thumbnail_cache.as_ref());
+
+        // 被排除的子树**只建索引**：准备阶段要给每个条目算"现在还该不该产衍生产物"，
+        // 前缀集合一次取回即可（这张表只记被排除的目录本身，行数是个位数）。
+        let exclusion_prefixes = db.source_exclusion_prefixes(source_id)?;
+
         let mut existing_rows: HashMap<String, ScanPrepareRow> = db
             .list_files_for_scan(source_id)?
             .into_iter()
@@ -350,10 +364,20 @@ impl Scanner {
                     }
                 };
 
+                // 是否落在被排除子树下（路径前缀，`a/bc` 不算 `a/b` 的后代，D149）。
+                let excluded = is_excluded_path(&relative_path, &exclusion_prefixes);
+
                 let existing = existing_rows.remove(&relative_path);
                 // 内容未变且非全量重扫 → 整条跳过（不哈希、不解码）。
+                //
+                // **排除状态变了也算"变了"**：从「仅索引」回到可见要补回哈希与缩略图，
+                // 从可见掉进被排除要把衍生产物清掉。少这一条，两种转换都会被判成未变化
+                // 而永远收敛不了（旧行 index_only 与当前排除态相反就是证据）。
                 let unchanged = match &existing {
-                    Some(row) => !(options.full || row.size != size || row.mtime != mtime),
+                    Some(row) => {
+                        !(options.full || row.size != size || row.mtime != mtime)
+                            && row.index_only == excluded
+                    }
                     None => false,
                 };
                 // 音频的**存量占位行**（D11 → D115）即使 size/mtime 未变也必须重算一次：
@@ -370,11 +394,15 @@ impl Scanner {
                 // 因此这里就把"要不要算"定下来，省掉并行阶段那次无用的重采样。
                 let want_palette = media_type == MediaType::Image
                     && !unchanged
+                    // 被排除的图片不算调色板：那要整张解码，正是"不产衍生产物"要省的工作。
+                    && !excluded
                     && !palette_locked(existing.as_ref().and_then(|row| row.color_json.as_deref()));
                 // 图片头**只读一次**（第 43 轮）：这里读到的配额交给并行段限流、读到的
                 // 显示尺寸（EXIF 方向已应用，0043）直接进索引，省掉 `compute` 里那次
                 // 重复读头。只对"要重算的图片"读——未变化的图一个字节都不碰。
-                let image_probe = (media_type == MediaType::Image && !unchanged)
+                // 被排除的图片连文件头都不读：`probe_image` 要读几十 KB 到几 MB 的头，
+                // 而它的两个用途（限流配额、显示尺寸）对一行「仅索引」都没有意义。
+                let image_probe = (media_type == MediaType::Image && !unchanged && !excluded)
                     .then(|| scan_compute::probe_image(path));
 
                 prepared_list.push(Prepared {
@@ -388,6 +416,7 @@ impl Scanner {
                     existing_marks: existing.map(|row| row.marks).unwrap_or_default(),
                     want_palette,
                     image_probe,
+                    excluded,
                 });
             }
         }
@@ -538,6 +567,9 @@ impl Scanner {
                 .unwrap_or_default(),
             want_palette,
             image_probe,
+            // 单文件「重新分析」是用户的**显式要求**：按完整口径算一遍，并把 `index_only`
+            // 落回 0（若这一行原来属于被排除子树，下一次源扫描会再把它收敛回去）。
+            excluded: false,
         };
         let computed = compute(&prepared, options);
         self.write_one(db, source, &prepared, computed, &mut outcome)?;
@@ -638,6 +670,12 @@ impl Scanner {
             db.upsert_file(&row)?;
             outcome.changed += 1;
         }
+
+        // **排除状态随行落库**（`files.index_only`，迁移 0016）。放在 upsert 之后：
+        // `upsert_file` 的列清单里刻意没有这一列（它不属于索引语义，且 `FileIndexRow`
+        // 的 20 列被相册分页的追加列下标依赖），新行默认 0，这里再按当前口径改写。
+        // 只在"要写这一行"的路径上执行——未变化的行在上面早退，不产生无用 UPDATE。
+        db.set_file_index_only(id.as_str(), prep.excluded)?;
 
         // **标记单独落库**（D102）：它在 `file_marks` 一对多表，不在 `files` 行里。
         // 用"补齐到目标集合"（`INSERT OR IGNORE`）而不是"清空重写"：既保证幂等，
