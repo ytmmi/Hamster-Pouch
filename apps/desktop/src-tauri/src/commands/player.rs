@@ -41,6 +41,15 @@ const LYRICS_MAX_CHARS: usize = 200_000;
 /// 歌词最多读多少字节（字符上限之外的字节闸门，交给 `hp_book` 的截断口径）。
 const LYRICS_MAX_BYTES: usize = 4 * 1024 * 1024;
 
+/// 封面取几个主色给前端的"晕染"用。
+///
+/// 取 5 的理由：样式 1 / 样式 2 的晕染层各画 3–5 团，三到五个色已经能表达
+/// "这张封面是什么色调"，再多只会让色团互相糊成一团。
+const HAZE_COLOR_COUNT: usize = 5;
+
+/// 取主色的解码超时（与缩略图同档；封面已经缩到 640，实际都是几十毫秒）。
+const HAZE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// `player.media` 返回体。
 #[derive(Serialize)]
 pub(crate) struct PlayerMediaResult {
@@ -48,6 +57,12 @@ pub(crate) struct PlayerMediaResult {
     cover_path: Option<String>,
     /// 已解码的**歌词正文**（LRC 原文，解析在前端）；无歌词文件则 `null`。
     lyrics_text: Option<String>,
+    /// 封面主色（`#rrggbb`，按占比降序）——前端色晕的**唯一**取色来源。
+    ///
+    /// **为什么在后端算**：封面经 `convertFileSrc` 是跨源资源，前端 canvas 读像素会
+    /// 被 taint（`getImageData` 抛安全错误），因此前端**不可能**自己取色。
+    /// 空数组 = 没有封面（或取色失败），前端用 CSS 兜底晕染。
+    haze_colors: Vec<String>,
 }
 
 impl PlayerMediaResult {
@@ -55,6 +70,7 @@ impl PlayerMediaResult {
         Self {
             cover_path: None,
             lyrics_text: None,
+            haze_colors: Vec::new(),
         }
     }
 }
@@ -165,9 +181,25 @@ pub(crate) async fn player_media(
                 ffmpeg.as_deref(),
             );
             let lyrics = read_lyrics(&src_for_task);
+            // 取色失败 = 没有兜底色（前端用 CSS 默认晕染），不向上抛：
+            // 色晕是观感，不该让"封面取不到色"变成切歌失败。
+            let haze = cover
+                .as_deref()
+                .and_then(|path| {
+                    hp_media::extract_palette(
+                        path,
+                        HAZE_COLOR_COUNT,
+                        ffmpeg.as_deref(),
+                        HAZE_TIMEOUT,
+                    )
+                    .ok()
+                })
+                .map(|palette| palette.colors)
+                .unwrap_or_default();
             Ok::<PlayerMediaResult, HpError>(PlayerMediaResult {
                 cover_path: cover.map(|p| p.to_string_lossy().to_string()),
                 lyrics_text: lyrics,
+                haze_colors: haze,
             })
         })
         .await

@@ -25,4 +25,12 @@ export interface PlayerMediaResult {
    * 无同名 `.lrc` / 文件为空则 `null`，面板不显示歌词区。
    */
   lyrics_text: string | null;
+  /**
+   * 封面主色（`#rrggbb`，按占比降序）；空数组 = 没有封面 / 取色失败。
+   *
+   * **必须由后端给**：封面经 `convertFileSrc` 是跨源资源，前端 canvas 读像素会被
+   * taint（`getImageData` 直接抛安全错误），所以色晕的取色只能在后端做
+   * （`hp_media::extract_palette`，与色彩参考面板同一份算法）。
+   */
+  haze_colors: string[];
 }
