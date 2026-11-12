@@ -5341,25 +5341,26 @@ button.danger {
 /* ---- 样式 1：封面卡 + 歌词 ---- */
 .player-cover-card {
   flex: none;
+  /* 卡片高度**贴合内容**（封面 + 曲名），不是铺满舞台：参考图里封面下方紧接
+     曲名，剩下的高度全留给歌词；铺满会把下半张卡留成一块空面板。位置靠上，
+     与参考图里"封面从左上角起、歌词压在垂直中线"的构图一致。 */
+  align-self: flex-start;
+  margin-top: 2%;
   width: 38%;
   max-width: 250px;
   min-width: 132px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 10px;
-  background: rgba(14, 8, 28, 0.32);
   overflow: hidden;
 }
 
-/* 无封面：不画空框（用户口径"没定义封面就不显示图片"）。 */
+/* 无封面：不画空框（用户口径"没定义封面就不显示图片"），只把文字区放宽一点。 */
 .player-cover-card[data-empty="true"] {
-  border-color: transparent;
-  background: transparent;
-  padding: 4px 2px;
-  justify-content: flex-end;
+  width: auto;
+  max-width: 320px;
+  align-self: center;
+  margin-top: 0;
 }
 
 .player-cover {
@@ -5367,8 +5368,9 @@ button.danger {
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
 }
 
 .player-cover-meta {
@@ -5384,7 +5386,7 @@ button.danger {
 }
 
 .player-track-title {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   line-height: 1.35;
   overflow: hidden;
@@ -5394,7 +5396,7 @@ button.danger {
 
 .player-track-artist {
   margin-top: 2px;
-  font-size: 12px;
+  font-size: 12.5px;
   opacity: 0.72;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5415,6 +5417,8 @@ button.danger {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  /* 歌词不贴着封面卡起排：参考图里封面与歌词之间留着一大片晕染。 */
+  padding-left: 6%;
   overflow: hidden;
 }
 
@@ -5425,6 +5429,8 @@ button.danger {
   flex-direction: column;
   justify-content: center;
   gap: 16px;
+  /* 文字不贴面板左边缘（参考图里标题/歌词起点在面板宽度约 1/9 处）。 */
+  padding-left: 7%;
 }
 
 .player-lyrics {
@@ -5437,15 +5443,16 @@ button.danger {
 .player-lyric {
   font-size: 14px;
   line-height: 1.5;
-  opacity: 0.42;
+  opacity: 0.4;
   transition: opacity 160ms ease, font-size 160ms ease;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* 当前行明显大于邻行（参考图里约 1.6 倍），一眼能看出唱到哪。 */
 .player-lyric.is-active {
-  font-size: 19px;
+  font-size: 22px;
   font-weight: 600;
   opacity: 1;
 }
@@ -5456,13 +5463,18 @@ button.danger {
   width: 42%;
   min-width: 120px;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  /* 唱片靠上、靠右（参考图里圆心在面板上三分之一、右边缘几乎贴边），
+     不是垂直居中的正中央。 */
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding-top: 1%;
+  padding-right: 1%;
 }
 
 .player-disc {
   position: relative;
-  width: min(100%, 240px);
+  /* 参考图里唱片直径约为面板宽的 1/3；上限 400px，窄面板按百分比缩。 */
+  width: min(100%, 400px);
   aspect-ratio: 1;
   border-radius: 50%;
   background: radial-gradient(circle at 50% 50%, #2a2038 0 32%, #15101f 33% 100%);
@@ -5489,9 +5501,10 @@ button.danger {
 
 .player-disc-cover {
   position: absolute;
-  inset: 16%;
-  width: 68%;
-  height: 68%;
+  /* 内圈标签约占直径 56%：留出足够黑胶面积，"在转"才看得出来。 */
+  inset: 22%;
+  width: 56%;
+  height: 56%;
   border-radius: 50%;
   object-fit: cover;
 }
