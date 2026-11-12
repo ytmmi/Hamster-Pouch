@@ -5472,6 +5472,10 @@ button.danger {
   width: 100%;
   height: 14px;
   margin: 0;
+  /* 全局 `input { border: 1px solid var(--border); padding: 4px 6px }` 会给
+     range 套一圈方框——音乐舞台里的两根条都是自绘轨道，必须清掉。 */
+  border: 0;
+  padding: 0;
   background: transparent;
   cursor: pointer;
 }
@@ -5767,7 +5771,9 @@ button.danger {
   display: grid;
   grid-template-columns: minmax(0, 30%) minmax(0, 1fr);
   column-gap: 9cqw;
-  align-items: center;
+  /* 左列**撑满高度**再把内容摊开（参考图是"封面在上、音量在下、中间均匀留白"，
+     而不是把整列当一块居中放）。 */
+  align-items: stretch;
   padding: 6cqh 5cqw 6cqh 5.5cqw;
 }
 
@@ -5775,8 +5781,9 @@ button.danger {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  height: 100%;
   /* 底部留白：参考图的音量行在 82% 处，不是贴着面板底边。 */
-  padding-bottom: 9cqh;
+  padding-bottom: 4cqh;
 }
 
 /* 没有封面：卡片不再被"封面 → 音量"的距离撑开，改成紧凑居中一列。 */
@@ -5911,9 +5918,12 @@ button.danger {
 /* 大唱片：右上角、被面板边缘裁掉一部分（参考图就是这么裁的）。 */
 .player-vinyl {
   position: absolute;
-  top: -16%;
-  right: -12%;
-  width: min(96cqh, 62cqw);
+  /* 参考图的大唱片：直径 ≈ 面板高的 60%，圆心在 (58% 宽, 20% 高)，被上/右
+     两条边裁掉一部分。用 `right: 21%` 让右缘落在 79% 宽处，`top: -10%` 让圆心
+     升到 20% 高——两个百分比都跟着面板走，换尺寸时构图不变。 */
+  top: -10%;
+  right: 21%;
+  width: 60cqh;
   aspect-ratio: 1;
   z-index: 1;
   pointer-events: none;
@@ -5944,7 +5954,7 @@ button.danger {
   background:
     repeating-radial-gradient(
       circle at 50% 50%,
-      rgba(255, 255, 255, 0.16) 0 1px,
+      rgba(255, 255, 255, 0.26) 0 1px,
       rgba(255, 255, 255, 0) 1px 5px
     ),
     radial-gradient(
@@ -5984,7 +5994,8 @@ button.danger {
 }
 
 /* 窄面板：两列挤不下时收敛成一列（封面让位，歌词优先）。 */
-@container (max-width: 420px) {
+/* 窄面板（≈ 仓库里播放器的常见宽度）走单列：文字铺满、唱片退成背景。 */
+@container (max-width: 560px) {
   .player-layout[data-variant="haze"] {
     grid-template-columns: minmax(0, 1fr);
     /* 第二行吃掉剩余高度：歌词多了就从句首句尾两侧裁掉，当前句永远在中间。 */
@@ -6011,13 +6022,14 @@ button.danger {
     width: 100%;
   }
 
-  /* 唱片退到右下角当背景，别把文字挤出面板。 */
+  /* 唱片退到右下角当背景：大部分在画外，只露一段弧——窄面板里它一旦完整
+     出现就会压住传输行，读起来像"图没放好"。 */
   .player-vinyl {
-    opacity: 0.32;
+    opacity: 0.26;
     top: auto;
-    bottom: -34%;
-    right: -26%;
-    width: min(82cqh, 96cqw);
+    bottom: -46%;
+    right: -34%;
+    width: min(78cqh, 92cqw);
   }
 }
 

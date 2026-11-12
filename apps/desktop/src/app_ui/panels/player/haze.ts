@@ -147,7 +147,8 @@ function pickAccent(colors: readonly string[]): string {
  * - `--player-ink` / `--player-ink-dim`：样式 2 的字色（浅底深字）。
  * - `--player-accent` / `--player-accent-soft`：样式 2 的强调色（播放键底、进度已播段）。
  * - `--player-sky-1` / `--player-sky-2`：样式 2 的浅色底（提亮后的主色）。
- * - `--player-disc-1` / `--player-disc-2`：唱片本体（主色提亮两档，**不是黑色**）。
+ * - `--player-disc-1` / `--player-disc-2`：唱片本体（主色**先往冷紫压一档再提亮**，
+ *   不是黑色，也不会因为封面本身很白而淡成"看不见的盘"）。
  * - `--player-disc-ring`：唱片外那两道细环。
  */
 export function stageVars(colors: readonly string[]): Record<string, string> {
@@ -162,8 +163,10 @@ export function stageVars(colors: readonly string[]): Record<string, string> {
     "--player-accent-soft": withAlpha(accent, 0.24),
     "--player-sky-1": lighten(mixHex(accentBase, a, 0.35), 0.86),
     "--player-sky-2": lighten(mixHex(b, c, 0.5), 0.74),
-    "--player-disc-1": lighten(mixHex(accentBase, a, 0.3), 0.58),
-    "--player-disc-2": lighten(mixHex(accentBase, a, 0.5), 0.3),
+    // 只"提亮主色"在浅色封面上会得到一张几乎看不见的盘（主色本身接近白）。
+    // 先混入强调基色把饱和度拉回来，再提亮——盘始终是"带封面倾向的淡紫"。
+    "--player-disc-1": lighten(mixHex(a, ACCENT_BASE, 0.42), 0.5),
+    "--player-disc-2": lighten(mixHex(a, ACCENT_BASE, 0.62), 0.26),
     "--player-disc-ring": withAlpha(mixHex(accent, INK_BASE, 0.35), 0.45),
   };
 }
