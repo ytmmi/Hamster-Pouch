@@ -416,6 +416,16 @@ export const zhCN = {
   "player.volume": "音量",
   "player.settings.autoPauseOnTabSwitch": "切换标签时自动暂停",
   "player.settings.volume": "音量",
+  "player.play": "播放",
+  "player.pause": "暂停",
+  "player.prevTrack": "上一首",
+  "player.nextTrack": "下一首",
+  "player.lyrics": "歌词",
+  "player.favorite": "收藏",
+  "player.queueFailed": "读取播放队列失败：{err}",
+  "player.settings.style": "样式",
+  "player.settings.style.haze": "样式 1 · 色晕",
+  "player.settings.style.disc": "样式 2 · 唱片",
 
   // 色彩参考
   "color.imageOnly": "色彩参考仅支持图片",

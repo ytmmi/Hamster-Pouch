@@ -622,6 +622,19 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
         default: true,
       },
       {
+        // 音乐模式的样式（用户 2026-11-13 要求"多种样式，设置内切换"）：
+        // 取值域与 `panels/player/playerStyle.ts` 的 `PLAYER_STYLES` 逐项一致，
+        // 非法值由 `normalizePlayerStyle` 回落缺省（样式 1 色晕）。
+        key: "style",
+        kind: "select",
+        title_key: "player.settings.style",
+        default: "haze",
+        options: [
+          { value: "haze", title_key: "player.settings.style.haze" },
+          { value: "disc", title_key: "player.settings.style.disc" },
+        ],
+      },
+      {
         // 音量按**百分比**存（0 = 静音，100 = 原声）：宿主 `slider` 的取值域恰是
         // 0–100（浏览器 range 的默认 min/max），因此这一项不需要面板另立数值口径
         // ——与 `bookreader.pageWidth` / `brightness` 同款（声明层没有 min/max，

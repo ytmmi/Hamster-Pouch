@@ -1,5 +1,5 @@
 /**
- * 媒体播放器面板 — DOM `<video>` 播放控制（与查看器同构，2026-09 决策更新）。
+ * 媒体播放器面板 — DOM `<video>` 播放控制 + **音乐模式**（两种样式）。
  *
  * **为什么放弃 libmpv 原生窗口（决策见 `docs/rfc/0005-media-capabilities.md`）**：
  * mpv 渲染到 Win32 原生子窗口，该窗口**永远盖在 WebView 之上**——打开「全部设置」
@@ -8,7 +8,7 @@
  * 后端广播链路，真机反复不可靠（"单击无任何效果"）。DOM `<video>` 完全在 WebView
  * 内：内嵌于面板、被浮层自然覆盖、点击由浏览器原生派发——三者一并解决。
  *
- * **交互约定（2026-09 用户裁决）**：面板不放任何播放/暂停/定位/停止按钮：
+ * ## 视频的交互约定（2026-09 用户裁决）
  *
  * 1. **单击视频画面 = 暂停 / 继续**（读取 DOM 元素实时的 `.paused`，无状态过期）；
  * 2. 画面下方一根**进度条**，可拖动定位，实时同步；
@@ -16,35 +16,47 @@
  * 4. 切标签默认自动暂停（可在「全部设置 → 面板 → 媒体播放器」关闭，默认开）；
  * 5. 播放完成回到首帧并暂停。
  *
+ * ## 音乐模式（2026-11-13 用户裁决，改写上面的第 1 条适用范围）
+ *
+ * 选中**音频**时画面区换成音乐播放器：封面、曲名/艺人、歌词、播放控件，两种样式
+ * 在「全部设置 → 面板 → 媒体播放器 → 样式」里切换（`panels/player/*`）。这条
+ * 明确**放宽**了"面板不放传输控制"的裁决——参考图里就是有播放/暂停与上一首/下一首
+ * 的按钮，裁决原文已同步改写为"视频不放，音乐模式放"（RFC 0005）。
+ *
+ * - **队列** = 当前范围（相册 → 源/子目录 → 全仓库，与媒体预览同一口径）里的
+ *   音频；上一首/下一首只在**同类**里走、端点循环（`usePlayerQueue`）；
+ * - **视频也能切换**（用户同批要求"像图像查看器一样"）：按 ←/→ 走同类队列，
+ *   视频仍不出现传输按钮（它的单击画面语义不变）；
+ * - **封面**：后端 `player.media` 先取内嵌封面，再找同目录同名图片，都没有就
+ *   **不显示图**（不画空框）；
+ * - **歌词**：同目录同名 `.lrc`（UTF-8/GBK 由后端解码），没有文件就**不显示歌词**；
+ * - **色晕**：封面主色来自后端（前端 canvas 读跨源资源会被 taint），没有封面时
+ *   走 CSS 兜底色晕；
+ * - **播放中唱片转动**（样式 2），暂停停在当前角度；
+ * - **收藏只显示图标**（功能后续做）。
+ *
  * ## 音量（2026-11-07 / D142）
  *
  * 进度条**右侧**一枚**音量图标**，点它展开一条**竖状**音量条（再点 / 点别处 / Esc
  * 收起）。图标本身就报告音量状态：静音时是喇叭加叉，音量过半才画出第二道声波。
- *
- * 这条控件不违反上面那条"不放按钮"的裁决：被点名禁掉的是播放 / 暂停 / 定位 / 停止
- * 四类**传输控制**，而音量是**输出**控制——它不可能取代单击画面这个暂停入口，也不会
- * 让进度条变成"控制区"。裁决原文与范围见 `docs/rfc/0005-media-capabilities.md`。
- *
- * 音量存成**百分比**面板设置（`panel.player.volume`，0 = 静音、100 = 原声，默认 100）：
- * 宿主 `slider` 的取值域恰是 0–100，所以声明层不需要（也没有）min/max，越界值由
- * `clampVolume` 夹紧——与 `bookreader.pageWidth` / `brightness` 同款。
+ * 音量是**输出**控制，不在"不放传输控制"的禁令里。存成百分比面板设置
+ * （`panel.player.volume`，0 = 静音、100 = 原声，默认 100）；声明层没有 min/max，
+ * 越界值由 `clampVolume` 夹紧——与 `bookreader.pageWidth` / `brightness` 同款。
  *
  * 播放来源：蓝图双击视频（`payload.play`）→ `playerPlayStore.requestPlayerPlay(fileId)`
  * → 本面板解析路径、`convertFileSrc` 后加载并自动播放；单击画面且尚无源时播放
  * 当前选中的视频/音频文件。
- *
- * ## 音频的波形图（2026-10-17 / D115）
- *
- * **`media_type === "audio"` 时**，进度条上方多一条后端生成的**波形图**
- * （`shared/AudioWaveform`）：进度条只回答"播到哪儿了"，波形回答"哪儿有声"。
- * 游标按当前播放位置实时移动，点 / 拖波形即定位——与进度条拖动**共用**同一条
- * `commitSeek`，因此两条定位路径不会给出不一致的结果。
- *
- * 视频**不画波形**：波形的横轴必须与音频时间线性对应才可读（后端按整段画），
- * 而视频那张图只能是"某一帧"或"整段抽样"，两者语义不同。视频画面本身就是它的内容。
  */
 
-import { useCallback, useEffect, useRef, useState, type JSX } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../shared/api";
@@ -53,11 +65,14 @@ import { AudioWaveform } from "../shared/AudioWaveform";
 import { usePanelSettingValue } from "../shared/settingValue";
 import { publishSettingChanged } from "../core/settingChangeStore";
 import { useApp } from "../core/AppContext";
-import {
-  getPlayerPlayRequest,
-  subscribePlayerPlay,
-} from "../core/playerPlayStore";
+import { getPlayerPlayRequest, subscribePlayerPlay } from "../core/playerPlayStore";
 import type { PanelRenderCtx } from "../core/panelRegistry";
+import { MusicStage } from "./player/MusicStage";
+import { normalizePlayerStyle } from "./player/playerStyle";
+import { parseLrc, type LrcDoc } from "./player/lrc";
+import { trackArtistOf, trackTitleOf } from "./player/trackInfo";
+import { playableKindOf, stepPlayable } from "./player/queueView";
+import { usePlayerQueue } from "./player/usePlayerQueue";
 
 export interface MediaPlayerPanelProps {
   /** dockview 面板 API；独立窗口宿主传替身（恒为激活）。 */
@@ -76,6 +91,18 @@ const PLAYER_VOLUME_SETTING_KEY = "panel.player.volume";
 /** 音量缺省值（= 原声），与设置声明里的 `default` 保持一致。 */
 const PLAYER_VOLUME_DEFAULT = 100;
 
+/** 音乐取料（封面 / 歌词 / 色晕）的空值：没有音频、取料失败都回落它。 */
+const EMPTY_MEDIA: PlayerMedia = { coverUrl: null, lyrics: null, hazeColors: [] };
+
+interface PlayerMedia {
+  /** 封面 URL（`convertFileSrc` 过的本地路径）；`null` = 没有封面。 */
+  coverUrl: string | null;
+  /** 解析后的歌词；`null` = 没有歌词文件。 */
+  lyrics: LrcDoc | null;
+  /** 封面色（空数组 = 用兜底色晕）。 */
+  hazeColors: string[];
+}
+
 /**
  * 音量夹紧到 0–100 的整数。
  *
@@ -91,7 +118,8 @@ function clampVolume(value: number): number {
 
 export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.Element {
   const app = useApp();
-  /** 当前加载的视频源（`convertFileSrc` 后的可播 URL）；`null` = 无源。 */
+  const rootRef = useRef<HTMLDivElement>(null);
+  /** 当前加载的媒体源（`convertFileSrc` 后的可播 URL）；`null` = 无源。 */
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   /** 播放请求序号：每次请求 +1，触发"加载后自动播放"（同文件重播也生效）。 */
   const [playToken, setPlayToken] = useState(0);
@@ -101,6 +129,8 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   const [scrubMs, setScrubMs] = useState<number | null>(null);
   const [durationMs, setDurationMs] = useState(0);
   const [positionMs, setPositionMs] = useState(0);
+  /** 元素是否在播（唱片转动、播放/暂停图标用；来源是 DOM 真实事件）。 */
+  const [playing, setPlaying] = useState(false);
   /** 「切换标签时自动暂停」当前值（未设置 = 默认开）；用 ref 供可见性回调读取。 */
   const autoPauseRef = useRef(true);
   /** 设置是否已从存储读到（未读到前不自动暂停，避免用未经确认的默认值）。 */
@@ -112,6 +142,14 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   /** 最新 app 上下文（供只订阅一次的 effect 读取，避免闭包过期）。 */
   const appRef = useRef(app);
   appRef.current = app;
+
+  const selectedFile = app.selectedFile;
+  const isAudio = selectedFile?.media_type === "audio";
+  const kind = playableKindOf(selectedFile);
+  /** 音乐模式的样式（设置里切换；非法值回落缺省）。 */
+  const style = normalizePlayerStyle(usePanelSettingValue("player", "style", panelApi));
+  /** 当前范围里的可播放队列（上一首/下一首 + 视频切换共用）。 */
+  const queue = usePlayerQueue(app, panelApi);
 
   /**
    * 音量（百分比 0–100）。走面板设置的**标准读取路径**：`usePanelSettingValue`
@@ -127,6 +165,11 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   const volume =
     draftVolume ??
     (typeof storedVolume === "number" ? clampVolume(storedVolume) : PLAYER_VOLUME_DEFAULT);
+
+  /** 音乐取料（封面 / 歌词 / 色晕）。 */
+  const [media, setMedia] = useState<PlayerMedia>(EMPTY_MEDIA);
+  /** 取料世代号：快速连点上一首/下一首时，旧请求的结果必须作废。 */
+  const mediaGenerationRef = useRef(0);
 
   /** 读取「切换标签时自动暂停」设置（未设置 = 默认开）。 */
   const reloadAutoPauseSetting = useCallback(async () => {
@@ -181,28 +224,49 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   }, [app, loadAndPlay]);
 
   /**
-   * 单击画面 = 暂停 / 继续（有源时）；无源时播放当前选中文件。
+   * 暂停 / 继续（画面单击与音乐控件共用）。
    *
    * 状态读取的是 DOM 元素**实时的** `.paused`（浏览器保证当前值），不做任何本地
-   * 快照——快速连点每次都是"读到最新态再取反"，暂停后单击必然继续，没有旧路径
-   * "两次读到相同旧值 → 两次都暂停"的问题。
+   * 快照——快速连点每次都是"读到最新态再取反"。无源时退化为"播放当前选中文件"。
    */
-  const handleStageClick = useCallback(async () => {
-    if (busyRef.current) {
-      return;
-    }
+  const togglePlay = useCallback(() => {
     const video = videoRef.current;
-    if (video) {
-      if (video.paused) {
-        // 用户手势内发起播放，自动播放策略不会拦截。
-        void video.play().catch(() => undefined);
-      } else {
-        video.pause();
-      }
+    if (!video || !videoUrl) {
+      void playSelected();
       return;
     }
-    await playSelected();
-  }, [playSelected]);
+    if (video.paused) {
+      // 用户手势内发起播放，自动播放策略不会拦截。
+      void video.play().catch(() => undefined);
+    } else {
+      video.pause();
+    }
+  }, [playSelected, videoUrl]);
+
+  /** 换一首（`±1`）：选中目标文件并立即播放；同类队列端点循环。 */
+  const stepTrack = useCallback(
+    (delta: number) => {
+      const ctx = appRef.current;
+      const current = ctx.selectedFile;
+      const currentKind = playableKindOf(current);
+      if (!current || !currentKind) return;
+      const nextIndex = stepPlayable(queue.files, queue.index, delta, currentKind);
+      const target = queue.files[nextIndex];
+      if (!target) return;
+      if (target.id !== current.id) {
+        ctx.setSelectedIds(new Set([target.id]));
+        ctx.setSelectedFile(target);
+      }
+      void loadAndPlay(target.id);
+    },
+    [loadAndPlay, queue.files, queue.index],
+  );
+
+  /** 音乐控件的"上一首 / 下一首"是否可用（队列里至少有一个同类文件）。 */
+  const canStep = useMemo(
+    () => kind !== null && queue.index >= 0 && queue.files.some((f) => f.media_type === kind),
+    [kind, queue.files, queue.index],
+  );
 
   // 播放请求（蓝图双击）：挂载即读一次（面板可能后挂载），再订阅后续请求。
   useEffect(() => {
@@ -234,7 +298,34 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     void video.play().catch(() => undefined);
   }, [videoUrl, playToken]);
 
-  // 面板可见性 → 切标签自动暂停。隐藏用 DOM 元素的 `pause()`（视频在后台标签
+  // 音乐取料：选中音频就向后端要封面/歌词/色晕（非音频 → 清空）。
+  // 只依赖"选中了哪个文件"，不依赖队列：换队列不该重取封面。
+  useEffect(() => {
+    const generation = ++mediaGenerationRef.current;
+    const file = app.selectedFile;
+    const repoId = app.repoId;
+    if (!repoId || !file || file.media_type !== "audio") {
+      setMedia(EMPTY_MEDIA);
+      return;
+    }
+    void (async () => {
+      try {
+        const result = await api.playerMedia({ repoId, fileId: file.id });
+        if (mediaGenerationRef.current !== generation) return;
+        setMedia({
+          coverUrl: result.cover_path ? convertFileSrc(result.cover_path) : null,
+          lyrics: result.lyrics_text ? parseLrc(result.lyrics_text) : null,
+          hazeColors: result.haze_colors ?? [],
+        });
+      } catch {
+        // 取料失败不该挡住播放：没有封面/歌词，面板照常出声。
+        if (mediaGenerationRef.current !== generation) return;
+        setMedia(EMPTY_MEDIA);
+      }
+    })();
+  }, [app.repoId, app.selectedFile, app.refreshKey]);
+
+  // 面板可见性 → 切标签自动暂停。隐藏用 DOM 元素的 `pause()`（媒体在后台标签
   // 保持加载与进度，切回即暂停帧，单击继续）。
   useEffect(() => {
     void reloadAutoPauseSetting();
@@ -324,7 +415,7 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     setDraftVolume(clampVolume(value));
   };
 
-  /** 视频元数据就绪 → 进度条总时长。 */
+  /** 媒体元数据就绪 → 进度条总时长。 */
   const onLoadedMetadata = () => {
     const video = videoRef.current;
     if (video && Number.isFinite(video.duration)) {
@@ -332,7 +423,7 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     }
   };
 
-  /** 播放位置推进 → 进度条（拖动中不被覆盖）。 */
+  /** 播放位置推进 → 进度条 / 歌词（拖动中不被覆盖）。 */
   const onTimeUpdate = () => {
     const video = videoRef.current;
     if (video && !scrubbingRef.current) {
@@ -348,10 +439,17 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     }
   };
 
-  /** 播放完成 → 回到首帧并暂停（用户裁决）。 */
+  /**
+   * 播放完成：音乐且队列里还有下一首 → **自动续播**（音乐播放器该有的行为）；
+   * 其余（视频、队列只有这一首）→ 回到首帧并暂停（用户裁决）。
+   */
   const onEnded = () => {
     const video = videoRef.current;
     if (!video) {
+      return;
+    }
+    if (isAudio && canStep) {
+      stepTrack(1);
       return;
     }
     video.currentTime = 0;
@@ -360,10 +458,10 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   };
 
   /**
-   * 真正把播放位置移过去（**进度条拖动与波形点击共用**）。
+   * 真正把播放位置移过去。
    *
-   * 收成一处是刻意的：两条定位路径若各写一遍 `currentTime = ...`，
-   * 夹紧范围 / 长度校验就会各写一遍，迟早出现"进度条能拖到末帧、波形点不到"这类不一致。
+   * 收成一处是刻意的：进度条 / 波形 / 将来别的定位入口若各写一遍 `currentTime = ...`，
+   * 夹紧范围就会各写一遍，迟早出现"进度条能拖到末帧、别处点不到"这类不一致。
    */
   const commitSeek = useCallback((ms: number) => {
     const video = videoRef.current;
@@ -386,33 +484,57 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     commitSeek(value);
   };
 
+  /**
+   * ← / → 切换上一个/下一个（与图像查看器同一套键盘语言）。
+   *
+   * 只用无修饰的左右方向键；`Tab` / `Enter` 等一律放行（不 `preventDefault`），
+   * 否则音量条等原生控件会失去键盘操作。
+   */
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    stepTrack(event.key === "ArrowLeft" ? -1 : 1);
+  };
+
   const displayPosition = scrubMs ?? positionMs;
   const seekable = Boolean(videoUrl) && durationMs > 0;
-  /**
-   * 当前源是否为音频（波形只画音频，见文件头）。
-   *
-   * 判据用 `app.selectedFile.media_type`：面板可能还没加载源，
-   * 那时不画波形是对的（没有内容可对应）。
-   */
-  const isAudio = app.selectedFile?.media_type === "audio";
+  const title = trackTitleOf(selectedFile?.relative_path);
+  const artist = trackArtistOf(selectedFile?.relative_path);
 
   return (
-    <div className="panel">
+    <div
+      ref={rootRef}
+      className="panel"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      onPointerDown={(event) => {
+        // 点击画面即把键盘焦点交给面板（`<div>` 不会因子元素被点击而自动获得焦点）；
+        // 控件是 `<button>`，点它们时不抢焦点。`preventScroll` 防止聚焦引起跳动。
+        if ((event.target as HTMLElement).closest("button")) return;
+        rootRef.current?.focus({ preventScroll: true });
+      }}
+    >
       <div className="viewer-info">
-        <span>{app.selectedFile?.relative_path ?? app.t("common.noSelection")}</span>
-        <span className="dim">{app.selectedFile?.media_type ?? "—"}</span>
+        <span>{selectedFile?.relative_path ?? app.t("common.noSelection")}</span>
+        <span className="dim">{selectedFile?.media_type ?? "—"}</span>
       </div>
 
       {/*
         画面区：DOM `<video>`（与查看器同构）——完全在 WebView 内，天然内嵌面板、
         被「全部设置」等浮层自然覆盖、点击由浏览器原生派发。
+        音频时它是**看不见的播放器**（媒体元素仍在，只是 1px 透明），画面交给音乐模式。
         按用户裁决：**不显示**「单击暂停/播放」等提示文字，也不设悬停提示。
       */}
-      <div className="player-stage" onClick={() => void handleStageClick()}>
+      <div
+        className="player-stage"
+        onClick={isAudio ? undefined : () => togglePlay()}
+        data-mode={isAudio ? "music" : "video"}
+      >
         {videoUrl ? (
           <video
             ref={videoRef}
-            className="player-video"
+            className={isAudio ? "player-video is-audio" : "player-video"}
             src={videoUrl}
             preload="metadata"
             playsInline
@@ -420,19 +542,39 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
             onTimeUpdate={onTimeUpdate}
             onSeeked={onSeeked}
             onEnded={onEnded}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
             aria-label={app.t("player.progress")}
           />
-        ) : (
+        ) : null}
+        {isAudio ? (
+          <MusicStage
+            style={style}
+            coverUrl={media.coverUrl}
+            title={title}
+            artist={artist}
+            hazeColors={media.hazeColors}
+            lyrics={media.lyrics}
+            positionMs={positionMs}
+            playing={playing}
+            canPrev={canStep}
+            canNext={canStep}
+            onPrev={() => stepTrack(-1)}
+            onNext={() => stepTrack(1)}
+            onToggle={togglePlay}
+            t={app.t}
+          />
+        ) : videoUrl ? null : (
           <div className="player-surface" />
         )}
       </div>
 
-      {/* 音频波形（D115）：进度条上方一条整段起伏，游标随播放位置走，点 / 拖即定位。
-          视频不画——见文件头（波形的横轴必须与时间线性对应才有意义）。 */}
-      {isAudio && videoUrl && app.selectedFile && (
+      {/* 音频波形（D115）：整段起伏 + 随播放位置移动的游标，点 / 拖即定位。
+          音乐模式下也保留——它是"哪儿有声"的唯一读法，与封面/歌词不冲突。 */}
+      {isAudio && videoUrl && selectedFile && (
         <AudioWaveform
           repoId={app.repoId ?? ""}
-          fileId={app.selectedFile.id}
+          fileId={selectedFile.id}
           durationMs={durationMs > 0 ? durationMs : null}
           positionMs={displayPosition}
           onSeek={(seconds) => commitSeek(seconds * 1000)}

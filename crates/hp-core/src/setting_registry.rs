@@ -227,6 +227,17 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
         options: &[],
         requires_capability: None,
     },
+    // 媒体播放器（`panel.player.*`）：音乐模式样式（`haze` 色晕卡 / `disc` 唱片）。
+    // `select` 的候选必须与 TS 声明逐项一致——`validate_setting_value` 拒绝空候选。
+    SettingDeclFact {
+        id: "style",
+        owner_kind: "panel",
+        owner_id: Some("player"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["haze", "disc"],
+        requires_capability: None,
+    },
     // 媒体播放器（`panel.player.*`）：音量（百分比 0–100）。
     //
     // 与 `bookreader.pageWidth` / `brightness` 同款：`slider` 的**取值域由控件给**

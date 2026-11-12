@@ -5230,6 +5230,329 @@ button.danger {
   color: var(--fg-dim);
 }
 
+/*
+ * ===== 音乐模式（2026-11-13）=====
+ *
+ * 两种样式共用一套结构：`.player-music` 里永远有 `.player-haze`（背景色晕）、
+ * `.player-music-body`（封面/文字/歌词/唱片）与 `.player-transport`（上一首 /
+ * 播放暂停 / 下一首），差异只由 `[data-style]` 决定。
+ *
+ * 文字颜色**不跟主题**：底色是封面取色的高饱和晕染，深浅主题下都得是浅色字
+ * （`--player-ink`），否则浅色主题会变成"白底白字"。收藏图标只显示、不交互，
+ * 因此没有 hover / active 态。
+ *
+ * 所有动画都在 `prefers-reduced-motion: reduce` 下停用——色晕与唱片都是装饰，
+ * 用户要求减少动态时不该继续转。
+ */
+.player-stage[data-mode="music"] {
+  position: relative;
+  overflow: hidden;
+  border-radius: 4px;
+  /* 无源/取色失败时的兜底底色：色晕层盖在它上面，不至于露出面板底色。 */
+  background: #1b1230;
+}
+
+/* 音频模式下 `<video>` 只负责出声：1px 透明，不参与布局，也不接收指针事件。 */
+.player-video.is-audio {
+  position: absolute;
+  inset: auto auto 0 0;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.player-music {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* 色晕：三层模糊光斑缓慢漂移（色值来自后端封面色，见 haze.ts）。 */
+.player-haze {
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.player-haze-blob {
+  position: absolute;
+  width: 62%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  filter: blur(46px);
+  opacity: 0.72;
+  mix-blend-mode: screen;
+  animation: player-haze-drift 28s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.player-haze-blob-a {
+  top: -14%;
+  left: -8%;
+  background: var(--player-haze-a, #7b5cff);
+  animation-duration: 24s;
+}
+
+.player-haze-blob-b {
+  bottom: -24%;
+  left: 18%;
+  background: var(--player-haze-b, #ff6f9c);
+  animation-duration: 32s;
+  animation-delay: -8s;
+}
+
+.player-haze-blob-c {
+  top: 4%;
+  right: -12%;
+  background: var(--player-haze-c, #4aa3ff);
+  animation-duration: 38s;
+  animation-delay: -16s;
+}
+
+@keyframes player-haze-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(6%, -5%, 0) scale(1.12);
+  }
+  100% {
+    transform: translate3d(-5%, 6%, 0) scale(1.04);
+  }
+}
+
+.player-music-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 20px;
+  padding: 18px 20px 6px;
+  overflow: hidden;
+}
+
+/* ---- 样式 1：封面卡 + 歌词 ---- */
+.player-cover-card {
+  flex: none;
+  width: 38%;
+  max-width: 250px;
+  min-width: 132px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(14, 8, 28, 0.32);
+  overflow: hidden;
+}
+
+/* 无封面：不画空框（用户口径"没定义封面就不显示图片"）。 */
+.player-cover-card[data-empty="true"] {
+  border-color: transparent;
+  background: transparent;
+  padding: 4px 2px;
+  justify-content: flex-end;
+}
+
+.player-cover {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.player-cover-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.player-track {
+  min-width: 0;
+}
+
+.player-track-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-track-artist {
+  margin-top: 2px;
+  font-size: 12px;
+  opacity: 0.72;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-fav {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.player-music-lyrics {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.player-music-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+}
+
+.player-lyrics {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.player-lyric {
+  font-size: 14px;
+  line-height: 1.5;
+  opacity: 0.42;
+  transition: opacity 160ms ease, font-size 160ms ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-lyric.is-active {
+  font-size: 19px;
+  font-weight: 600;
+  opacity: 1;
+}
+
+/* ---- 样式 2：文字 + 唱片 ---- */
+.player-disc-zone {
+  flex: none;
+  width: 42%;
+  min-width: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.player-disc {
+  position: relative;
+  width: min(100%, 240px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, #2a2038 0 32%, #15101f 33% 100%);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+  animation: player-disc-spin 14s linear infinite;
+  /* 暂停即停在当前角度：不是把角度归零重来。 */
+  animation-play-state: paused;
+}
+
+.player-disc[data-playing="true"] {
+  animation-play-state: running;
+}
+
+.player-disc-groove {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: repeating-radial-gradient(
+    circle at 50% 50%,
+    rgba(255, 255, 255, 0.07) 0 1px,
+    rgba(255, 255, 255, 0) 1px 4px
+  );
+}
+
+.player-disc-cover {
+  position: absolute;
+  inset: 16%;
+  width: 68%;
+  height: 68%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+@keyframes player-disc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- 传输控件（音乐模式专有；视频没有，见 RFC 0005 修订） ---- */
+.player-transport {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 4px 20px 14px;
+}
+
+.player-transport-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: inherit;
+  cursor: pointer;
+}
+
+.player-transport-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.player-transport-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.player-transport-play {
+  width: 42px;
+  height: 42px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #2a1b46;
+}
+
+.player-transport-play:hover:not(:disabled) {
+  background: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-haze-blob,
+  .player-disc {
+    animation: none;
+  }
+}
+
 /* ===== 图像查看器面板 ===== */
 
 .iv-panel {
