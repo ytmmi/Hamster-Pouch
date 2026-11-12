@@ -20,4 +20,5 @@ export * from "./layout";
 export * from "./blueprint";
 export * from "./plugin";
 export * from "./mcp";
+export * from "./player";
 export * from "./app";

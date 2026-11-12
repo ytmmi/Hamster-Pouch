@@ -20,4 +20,5 @@ export * from "./blueprint";
 export * from "./interfacePages";
 export * from "./panelMarks";
 export * from "./mcp";
+export * from "./player";
 export * from "./app";

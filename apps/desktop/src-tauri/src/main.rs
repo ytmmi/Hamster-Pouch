@@ -242,6 +242,9 @@ fn main() {
             commands::file::file_reverify,
             // 文件标记（D102）：可多值、与类目正交的用户标记；蓝图按它分派行为。
             commands::file::file_set_marks,
+            // 播放器面板的旁挂取料：内嵌封面（缓存在 `<hash>.audio-cover.jpg`）与
+            // 同名 `.lrc` 歌词（编码自动判定）。无封面 / 无歌词返回 null，不是错误。
+            commands::player::player_media,
             // 图书预览面板的取数：EPUB 作者/简介/内嵌封面（磁盘缓存，按内容哈希失效）。
             commands::book::book_meta,
             // 查看器的正文取数：txt/md（判编码后按字符分页）与 epub（按章节分页，

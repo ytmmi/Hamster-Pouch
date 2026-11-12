@@ -284,6 +284,17 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 | `reader.addAnnotation` | 新建一条阅读批注 | `{ repoId, fileId, kind, cursor, progress, title, excerpt, note }` | `{ ok, data: { id, kind, cursor, progress, title, excerpt, note, created_at } }` | **已包装** | 代码 `commands/reader.rs` 的 `reader_add_annotation`。`id`（UUID）与 `created_at` 由**后端**生成，因此前端**新增后回读列表**而不是本地拼装（拼假的 id 会让紧接着的删除失败）。**内容校验在仓储侧**（`hp_core::validate_annotation_content`）：① 种类与内容必须匹配——**书签不需要正文**（它只有位置），**笔记 / 高亮至少要有一项非空**（一条没有文字的高亮在列表里就是一行空白，用户会以为没存上）；② **游标非空**（没有位置的批注跳不回去，等于一条坏记录）；③ 文本不超 `ANNOTATION_TEXT_MAX_CHARS`（20000 字符，防"整章正文被当 excerpt 传进来"）。违约 → `validation`（**不是静默写一条坏记录**）。`excerpt` 是**选中的原文快照**（冗余存原文是刻意的：正文可能因换编码 / 换版本而变，但"我当时划的是这句话"是读者的记录，不该跟着正文漂移）；`note` 是读者写的话——**分两列**，合成一列就无法区分"这段是原文"与"这段是我写的"，而两者在界面上的排版完全不同（原文引用块 vs 我的批注）。前端 `api/book.ts` 的 `readerAddAnnotation` |
 | `reader.deleteAnnotation` | 删除一条阅读批注 | `{ repoId, annotationId }` | `{ ok, data: null }` | **已包装** | 代码 `commands/reader.rs` 的 `reader_delete_annotation`。**幂等**：删一个不存在的 id 也成功（用户在列表里连点两下删除不该报错，与 `file.setMarks` 的"增删各自幂等"同一口径）。**不按 `file_id` 限定**：主键 `id` 已经全局唯一，多带一个条件只会让"删别的书的批注"从"找不到"变成"静默无操作"（更难排查）。**没有"编辑"命令**是刻意的：批注是**留痕**，改一条旧笔记会让"我当时怎么想的"变得不可信——要改就删了重写（与"标签是活的、批注是历史"同一思路）。前端 `api/book.ts` 的 `readerDeleteAnnotation` |
 
+### 3.3.3 `player.*`（音乐播放器的**旁挂取料**；2026-11-13 新增）
+
+> **为什么需要一条命令**：播放本身不需要后端（`file.path` + DOM `<video>`，D163），
+> 但音乐播放器要显示的两样东西**不是文件系统里的路径**：封面常常**内嵌在音频容器里**
+> （attached picture），歌词常常是**同目录同名 `.lrc`**（还得判编码）。
+> 这条命令只做这两件"取料"的事，**不碰播放状态**——播放/暂停/切歌全在前端。
+
+| 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
+| --- | --- | --- | --- | --- | --- |
+| `player.media` | 取音乐播放器要显示的**封面绝对路径**与**歌词正文** | `{ repoId, fileId }` | `{ ok, data: { cover_path, lyrics_text } }` | **已包装** | 代码 `commands/player.rs` 的 `player_media`。**只对音频有意义**：非 `audio` 类型一律返回两个 `null`（视频的"封面"就是它自己的画面）。**封面回退顺序（用户 2026-11-13 口径）**：① 内嵌封面（容器里的 attached picture，ffmpeg `-map 0:v:0 -frames:v 1` 解一帧、等比缩到长边 `AUDIO_COVER_MAX_DIM = 640` 的 JPEG）→ ② **同目录同名图片**（`a.mp3` ↔ `a.jpg` / `a.jpeg` / `a.png` / `a.webp` / `a.bmp`，扩展名大小写不敏感、按该顺序取优先级）→ ③ 都没有 = `null`（面板画兜底晕染，**不画假封面**）。内嵌封面按内容哈希落到 `<hash>.audio-cover.jpg`；**"确定没有封面"这个结论也落盘**（`<hash>.audio-cover.none` 空标记），否则没有封面的歌每次打开播放器都要再起一次 ffmpeg 去证明同一件事——注意只有 ffmpeg **明确判定没有这条流**时才落标记，超时/二进制缺失这类"这次问不出来"不落（下次仍会重试）。**歌词**：同目录同名 `.lrc`，编码（UTF-8 / GBK / UTF-16）交给 `hp_book::decode_file_limited` 自动判定（与纯文本阅读同一条路径，不引第二套判定），上限 20 万字符 / 4 MiB；`lyrics_text` 是**LRC 原文**，`[mm:ss.xx]` 的切分与当前行高亮在前端（渲染策略属界面，不进契约）。**无歌词文件 / 空文件 → `null`**。**失败降级为"没有封面 / 没有歌词"，不是错误**：封面只是观感、歌词只是附赠，一首解不出封面的 mp3 不该让播放器变成错误态（与 `book.meta` 同口径）。解析与 ffmpeg 调用都在**阻塞线程**里跑；缓存键是内容哈希，文件一变自动失效。前端 `api/player.ts` 的 `playerMedia`，消费方 `panels/MediaPlayerPanel.tsx` |
+
 ### 3.4 `album.*`
 | 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
 | --- | --- | --- | --- | --- | --- |

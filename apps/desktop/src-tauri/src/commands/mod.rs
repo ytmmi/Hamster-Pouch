@@ -33,6 +33,9 @@ pub(crate) mod plugin_control_channel;
 pub(crate) mod plugin_control_event;
 pub(crate) mod plugin_lifecycle;
 pub(crate) mod plugin_panel_data;
+// 播放器面板的旁挂取料（`player.media`：内嵌封面 / 同名封面图 / 同名 .lrc 歌词）。
+// 播放本身仍走 `file.path` + DOM `<video>`，这里只补"要显示但盘上没有现成路径"的两样。
+pub(crate) mod player;
 // Python 运行时（随包 system 插件）的状态 / 自检命令面（issues/0040）：
 // 与 plugin_catalog 拆开；启停复用 plugin_lifecycle，不另设命令。
 pub(crate) mod python_runtime;

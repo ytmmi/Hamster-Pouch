@@ -197,6 +197,26 @@ impl ThumbnailCache {
             .join(format!("{content_hash}.book-{section}-{index}.{ext}"))
     }
 
+    /// 音频**内嵌封面**的缓存路径（`<hash>.audio-cover.jpg`）。
+    ///
+    /// 封面是从音频容器里解出来的，每首歌只解一次：解一次要起一个 ffmpeg 子进程
+    /// （读整段容器头 + 解一帧图），播放器每次切换歌曲都重解是不可接受的开销。
+    /// 与波形图/缩略图同一套失效口径——**内容哈希是键**，文件一变哈希就变。
+    pub fn path_for_audio_cover(&self, content_hash: &str) -> PathBuf {
+        self.shard_dir(content_hash)
+            .join(format!("{content_hash}.audio-cover.jpg"))
+    }
+
+    /// 音频**无内嵌封面**的标记路径（`<hash>.audio-cover.none`）。
+    ///
+    /// 没有封面是常态（实测语料里大量 mp3 只带 ID3 文本标签），不落这个标记的话，
+    /// 每打开一次播放器就要为同一首歌再起一次 ffmpeg 去证明"它确实没有封面"——
+    /// 拿不到图是**确定性的结论**，值得缓存。空文件即为标记（内容无意义）。
+    pub fn path_for_audio_cover_missing(&self, content_hash: &str) -> PathBuf {
+        self.shard_dir(content_hash)
+            .join(format!("{content_hash}.audio-cover.none"))
+    }
+
     /// 删除某内容哈希对应的**全部**缓存产物，返回删掉的文件数。
     ///
     /// 为什么按"文件名前缀"扫分片目录、而不是逐个 `path_for_*` 列路径：同一哈希的产物形态

@@ -9,6 +9,7 @@
 //! 同 crate 的 `probe` / `thumbnail` / `cache` / `palette` / `exif` / `decode` / `waveform`
 //! 属 M2 能力，**仍在生产使用**。
 
+mod artwork;
 mod cache;
 mod decode;
 mod dimensions;
@@ -23,6 +24,10 @@ mod thumbnail;
 mod waveform;
 mod webp;
 
+pub use artwork::{
+    AUDIO_COVER_MAX_DIM, AUDIO_COVER_QUALITY, COVER_EXTS, LYRICS_EXTS, extract_embedded_cover,
+    find_sibling_cover, find_sibling_lyrics, find_sibling_with_exts,
+};
 pub use cache::{ThumbFormat, ThumbnailCache};
 pub use decode::{decode_image_fallback, ensure_libheif_hooks};
 pub use dimensions::{apply_orientation, display_dimensions, header_dimensions};
