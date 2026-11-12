@@ -7220,6 +7220,9 @@ const queueView = await import(
 const trackInfoMod = await import(
   pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/player/trackInfo.ts")).href
 );
+const musicStageMod = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/player/lyricView.ts")).href
+);
 const hazeMod = await import(
   pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/player/haze.ts")).href
 );
@@ -7349,6 +7352,129 @@ check(
     queueView.playableFiles([{ media_type: "audio" }, { media_type: "image" }]).length === 1,
 );
 check(
+  "D165：随机只在**同类**里抽且不抽到自己（单曲队列原地不动）；循环 `off` 在端点停住、`all` 环绕",
+  (() => {
+    const files = [
+      { media_type: "audio" },
+      { media_type: "video" },
+      { media_type: "audio" },
+      { media_type: "audio" },
+    ];
+    const shuffleFirst = { shuffle: true, random: () => 0 };
+    const shuffleLast = { shuffle: true, random: () => 0.9999 };
+    return (
+      // 随机落到"同类里的其它项"，不会抽回自己、也不会抽到视频/图片。
+      queueView.stepPlayable(files, 0, 1, "audio", shuffleFirst) === 2 &&
+      queueView.stepPlayable(files, 0, 1, "audio", shuffleLast) === 3 &&
+      queueView.stepPlayable(files, 2, -1, "audio", { shuffle: true, random: () => 0 }) === 0 &&
+      // 同类只有自己 → 原地不动（不是 -1，也不是跳到别的类型）。
+      queueView.stepPlayable([{ media_type: "audio" }, { media_type: "video" }], 0, 1, "audio", shuffleFirst) === 0 &&
+      // 端点：off 停住（-1）且按钮禁用；all/one 都环绕（one 只管自动续播）。
+      queueView.stepPlayable(files, 3, 1, "audio", { repeat: "off" }) === -1 &&
+      queueView.canStepPlayable(files, 3, 1, "audio", { repeat: "off" }) === false &&
+      queueView.stepPlayable(files, 3, 1, "audio", { repeat: "all" }) === 0 &&
+      queueView.stepPlayable(files, 3, 1, "audio", { repeat: "one" }) === 0 &&
+      queueView.stepPlayable(files, 0, -1, "audio", { repeat: "off" }) === -1 &&
+      queueView.canStepPlayable(files, 0, 1, "audio", { repeat: "all" }) === true
+    );
+  })(),
+);
+check(
+  "D165：双语歌词按「同刻双时间标签」配对成主+副（间隔超过阈值不硬配，空行不配）",
+  (() => {
+    const paired = lrcMod.pairLrcLines([
+      { timeMs: 1000, text: "原文" },
+      { timeMs: 1080, text: "译文" },
+      { timeMs: 5000, text: "下一句原文" },
+      { timeMs: 8000, text: "隔太远" },
+      { timeMs: 8010, text: "   " },
+    ]);
+    return (
+      lrcMod.LRC_PAIR_GAP_MS === 120 &&
+      paired.length === 4 &&
+      paired[0].main === "原文" &&
+      paired[0].sub === "译文" &&
+      paired[0].timeMs === 1000 &&
+      paired[1].main === "下一句原文" &&
+      paired[1].sub === null &&
+      // 下一行是空行 → 不把空白当译文。
+      paired[2].main === "隔太远" &&
+      paired[2].sub === null &&
+      // 空行自己成一项（空行是分段用的，不是译文），不会被吞掉。
+      paired[3].main === "   " &&
+      paired[3].sub === null &&
+      // 放宽阈值可以把 3 秒的间隔也配上（阈值是参数，不是写死的语义）。
+      lrcMod.pairLrcLines(
+        [
+          { timeMs: 0, text: "a" },
+          { timeMs: 3000, text: "b" },
+        ],
+        3000,
+      )[0].sub === "b"
+    );
+  })(),
+);
+check(
+  "D165：两套样式的颜色都由封面主色**算**出来（换一组主色整套变量就变，CSS 里不写死封面色）",
+  (() => {
+    const warm = hazeMod.stageVars(["#e0709e", "#8f6ee8", "#5b8fe0"]);
+    const cold = hazeMod.stageVars(["#1f8f6e", "#2a6fd0", "#c9d34a"]);
+    // 纯色是 `#rrggbb`，带透明度的是 `rgba(...)`（`withAlpha` 的产物）。
+    const color = /^(?:#[0-9a-f]{6}|rgba?\([^)]*\))$/i;
+    const keys = [
+      "--player-haze-a",
+      "--player-haze-b",
+      "--player-haze-c",
+      "--player-ink",
+      "--player-accent",
+      "--player-sky-1",
+      "--player-sky-2",
+      "--player-disc-1",
+      "--player-disc-2",
+      "--player-disc-ring",
+    ];
+    // 音乐段的 CSS 里不得出现这两组主色的字面值：颜色只能走变量。
+    const musicCss = stylesSource.slice(
+      stylesSource.indexOf(".player-stage[data-mode=\"music\"]"),
+      stylesSource.indexOf("/* ===== 图像查看器面板 ===== */"),
+    );
+    return (
+      keys.every((key) => color.test(warm[key] ?? "") && color.test(cold[key] ?? "")) &&
+      // 同一组主色 → 完全确定（不掺随机数）；换主色 → 至少唱片/天空这两处跟着变。
+      JSON.stringify(hazeMod.stageVars(["#e0709e", "#8f6ee8", "#5b8fe0"])) === JSON.stringify(warm) &&
+      warm["--player-disc-1"] !== cold["--player-disc-1"] &&
+      warm["--player-sky-1"] !== cold["--player-sky-1"] &&
+      !musicCss.includes("#e0709e") &&
+      !musicCss.includes("#8f6ee8") &&
+      !musicCss.includes("#5b8fe0") &&
+      // 墨色只允许以 `var(--player-ink, #232840)` 的兜底形态出现（变量没注入时
+      // 至少不出现白底白字），不允许写成裸色值。
+      (musicCss.match(/#232840/g) ?? []).length ===
+        (musicCss.match(/var\(--player-[a-z0-9-]+, #232840\)/g) ?? []).length
+    );
+  })(),
+);
+check(
+  "D165：样式 1 的歌词错位随面板宽度缩放（单位是 `cqw`，不是固定像素）；样式 2 不错位",
+  (() => {
+    const indent = (d) => musicStageMod.lyricIndent(d);
+    return (
+      indent(0) === 0 &&
+      indent(-1) === 0 &&
+      indent(1) > 0 &&
+      indent(2) > indent(1) &&
+      indent(3) > indent(2) &&
+      // 远处的行不再无限右移（阶梯部分 5 行封顶，只剩一点行号抖动），
+      // 长歌词不会把行推出可视区。
+      indent(9) < 20 &&
+      indent(9) - indent(5) < 2 &&
+      /marginLeft: `\$\{indent\}cqw`/.test(musicStageSrc) &&
+      // 错位只发生在 haze 变体：样式 2 是"左对齐 + 透明度分层"。
+      /variant === "haze" && !isActive /.test(musicStageSrc)
+    );
+  })(),
+);
+check(
   "D165：样式是面板设置 `panel.player.style`（select，候选与 `PLAYER_STYLES` 逐项相等、缺省 `haze`）",
   (() => {
     const decl = playerSpec?.settings?.find((setting) => setting.key === "style");
@@ -7377,8 +7503,10 @@ check(
 );
 check(
   "D165：无封面不出图、无歌词不出块（结构上不渲染，不是空框或「暂无歌词」占位）",
-  (musicStageSrc.match(/\{props\.coverUrl \? \(/g) ?? []).length >= 2 &&
-    /if \(!lines \|\| lines\.lines\.length === 0\) return null;/.test(musicStageSrc) &&
+  // 封面三处（背景糊图 / 样式 1 封面卡 / 样式 2 唱片中心）都是"有 URL 才渲染 img"，
+  // 歌词块是"没有句子就 return null"——都不是画个空框或写「暂无歌词」。
+  (musicStageSrc.match(/\{props\.coverUrl \? \(/g) ?? []).length >= 3 &&
+    /if \(!items \|\| items\.length === 0\) return null;/.test(musicStageSrc) &&
     !/player\.noLyrics/.test(musicStageSrc),
 );
 check(

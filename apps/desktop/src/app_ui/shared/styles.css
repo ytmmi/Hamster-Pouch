@@ -5233,23 +5233,31 @@ button.danger {
 /*
  * ===== 音乐模式（2026-11-13）=====
  *
- * 两种样式共用一套结构：`.player-music` 里永远有 `.player-haze`（背景色晕）、
- * `.player-music-body`（封面/文字/歌词/唱片）与 `.player-transport`（上一首 /
- * 播放暂停 / 下一首），差异只由 `[data-style]` 决定。
+ * 两套样式，**两套完全不同的排版**（用户口径：切换按钮的位置和形状都不一样）：
  *
- * 文字颜色**不跟主题**：底色是封面取色的高饱和晕染，深浅主题下都得是浅色字
- * （`--player-ink`），否则浅色主题会变成"白底白字"。收藏图标只显示、不交互，
- * 因此没有 hover / active 态。
+ * - 样式 1 `[data-style="haze"]`：深底浅字。整块背景是**封面本身的高斯模糊**
+ *   （`.player-haze-art`）再叠三层主色光斑；左边一列是"封面 → 曲名/艺人 → 进度 →
+ *   传输 → 音量"的整张播放卡，右边是歌词。非当前歌词**高斯模糊 + 逐行右移**。
+ * - 样式 2 `[data-style="disc"]`：浅底深字。背景是主色提亮后的"天空"，左边是
+ *   曲名/歌词/进度/传输，右上角一张**按封面上色**的大唱片（不是黑胶的黑），
+ *   唱片外两道细环；唱片只在播放时转，暂停停在当前角度。
  *
- * 所有动画都在 `prefers-reduced-motion: reduce` 下停用——色晕与唱片都是装饰，
- * 用户要求减少动态时不该继续转。
+ * 尺寸全部走容器查询单位（`cqw` / `cqh`）——面板被 dockview 拖成任意大小都按比例
+ * 缩放，而不是一到窄面板就把封面和歌词挤成一条。`clamp()` 兜住上下限。
+ *
+ * 颜色只从 `stageVars()` 摊出来的 CSS 变量取（`--player-haze-*` / `--player-ink`
+ * / `--player-accent` / `--player-disc-*` …），样式表里不写死任何封面相关的色值。
+ *
+ * 所有动效都在 `prefers-reduced-motion: reduce` 下停用——色晕与唱片都是装饰。
  */
 .player-stage[data-mode="music"] {
   position: relative;
   overflow: hidden;
   border-radius: 4px;
-  /* 无源/取色失败时的兜底底色：色晕层盖在它上面，不至于露出面板底色。 */
+  /* 无源 / 取色失败时的兜底底色：色晕层盖在它上面，不至于露出面板底色。 */
   background: #1b1230;
+  /* 子元素用 cqw/cqh 描述自己，跟随面板尺寸等比缩放。 */
+  container-type: size;
 }
 
 /* 音频模式下 `<video>` 只负责出声：1px 透明，不参与布局，也不接收指针事件。 */
@@ -5264,121 +5272,145 @@ button.danger {
 }
 
 .player-music {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.92);
+  color: #fff;
+  user-select: none;
 }
 
-/* 色晕：三层模糊光斑缓慢漂移（色值来自后端封面色，见 haze.ts）。 */
+/* ---------- 背景：封面高斯模糊 + 三层主色光斑 ---------- */
+
 .player-haze {
   position: absolute;
-  inset: -20%;
-  pointer-events: none;
+  inset: 0;
   overflow: hidden;
+  background: #241a3a;
+}
+
+/* 暗角：只靠模糊的封面会整体发白发灰，参考图的边角是深紫——用一层径向暗角
+   把四周压暗，中间的色晕才显得饱和。纯装饰，不接收指针事件。 */
+.player-haze::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      125% 95% at 0% 100%,
+      color-mix(in srgb, var(--player-haze-c, #4aa3ff) 42%, #14061f),
+      transparent 62%
+    ),
+    radial-gradient(
+      130% 100% at 100% 0%,
+      color-mix(in srgb, var(--player-haze-b, #ff6f9c) 26%, #14061f),
+      transparent 58%
+    );
+  pointer-events: none;
+}
+
+.player-haze-art {
+  position: absolute;
+  inset: -30%;
+  width: 160%;
+  height: 160%;
+  object-fit: cover;
+  /* 参考图的底就是"封面糊开"：模糊半径按面板高度缩放，窄面板也不会糊成纯色。 */
+  filter: blur(clamp(16px, 5.2cqh, 46px)) saturate(1.85) contrast(1.08) brightness(0.68);
+  transform: scale(1.12);
+  animation: player-haze-breathe 46s ease-in-out infinite alternate;
 }
 
 .player-haze-blob {
   position: absolute;
-  width: 62%;
-  aspect-ratio: 1;
   border-radius: 50%;
-  filter: blur(46px);
-  opacity: 0.72;
+  filter: blur(clamp(24px, 8cqh, 70px));
+  opacity: 0.68;
   mix-blend-mode: screen;
-  animation: player-haze-drift 28s ease-in-out infinite alternate;
   will-change: transform;
 }
 
 .player-haze-blob-a {
-  top: -14%;
-  left: -8%;
+  width: 62%;
+  height: 78%;
+  left: -10%;
+  top: -18%;
   background: var(--player-haze-a, #7b5cff);
-  animation-duration: 24s;
+  animation: player-haze-drift-a 27s ease-in-out infinite alternate;
 }
 
 .player-haze-blob-b {
-  bottom: -24%;
-  left: 18%;
+  width: 58%;
+  height: 74%;
+  right: -12%;
+  top: -10%;
   background: var(--player-haze-b, #ff6f9c);
-  animation-duration: 32s;
-  animation-delay: -8s;
+  animation: player-haze-drift-b 34s ease-in-out infinite alternate;
 }
 
 .player-haze-blob-c {
-  top: 4%;
-  right: -12%;
+  width: 74%;
+  height: 64%;
+  left: 16%;
+  bottom: -28%;
   background: var(--player-haze-c, #4aa3ff);
-  animation-duration: 38s;
-  animation-delay: -16s;
+  animation: player-haze-drift-c 41s ease-in-out infinite alternate;
 }
 
-@keyframes player-haze-drift {
-  0% {
-    transform: translate3d(0, 0, 0) scale(1);
+@keyframes player-haze-breathe {
+  from {
+    transform: scale(1.12) translate3d(-1.5%, -1%, 0);
   }
-  50% {
-    transform: translate3d(6%, -5%, 0) scale(1.12);
-  }
-  100% {
-    transform: translate3d(-5%, 6%, 0) scale(1.04);
+  to {
+    transform: scale(1.26) translate3d(1.5%, 1.5%, 0);
   }
 }
 
-.player-music-body {
+@keyframes player-haze-drift-a {
+  from {
+    transform: translate3d(-4%, -3%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(9%, 7%, 0) scale(1.18);
+  }
+}
+
+@keyframes player-haze-drift-b {
+  from {
+    transform: translate3d(5%, 2%, 0) scale(1.12);
+  }
+  to {
+    transform: translate3d(-8%, 9%, 0) scale(1);
+  }
+}
+
+@keyframes player-haze-drift-c {
+  from {
+    transform: translate3d(2%, 4%, 0) scale(0.95);
+  }
+  to {
+    transform: translate3d(-6%, -6%, 0) scale(1.2);
+  }
+}
+
+/* ---------- 两套样式的公共骨架 ---------- */
+
+.player-layout {
   position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  gap: 20px;
-  padding: 18px 20px 6px;
-  overflow: hidden;
-}
-
-/* ---- 样式 1：封面卡 + 歌词 ---- */
-.player-cover-card {
-  flex: none;
-  /* 卡片高度**贴合内容**（封面 + 曲名），不是铺满舞台：参考图里封面下方紧接
-     曲名，剩下的高度全留给歌词；铺满会把下半张卡留成一块空面板。位置靠上，
-     与参考图里"封面从左上角起、歌词压在垂直中线"的构图一致。 */
-  align-self: flex-start;
-  margin-top: 2%;
-  width: 38%;
-  max-width: 250px;
-  min-width: 132px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow: hidden;
-}
-
-/* 无封面：不画空框（用户口径"没定义封面就不显示图片"），只把文字区放宽一点。 */
-.player-cover-card[data-empty="true"] {
-  width: auto;
-  max-width: 320px;
-  align-self: center;
-  margin-top: 0;
-}
-
-.player-cover {
-  display: block;
+  z-index: 1;
   width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  height: 100%;
 }
 
-.player-cover-meta {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
+/* 参考图里顶部那道短横——纯装饰，不进无障碍树。 */
+.player-topline {
+  position: absolute;
+  top: 3.4cqh;
+  left: 50%;
+  width: clamp(34px, 5.4cqw, 74px);
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.55);
+  transform: translateX(-50%);
 }
 
 .player-track {
@@ -5386,9 +5418,9 @@ button.danger {
 }
 
 .player-track-title {
-  font-size: 17px;
+  font-size: clamp(12px, 2.5cqh, 23px);
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5396,91 +5428,535 @@ button.danger {
 
 .player-track-artist {
   margin-top: 2px;
-  font-size: 12.5px;
-  opacity: 0.72;
+  font-size: clamp(10px, 1.55cqh, 14px);
+  opacity: 0.75;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* 收藏只显示、不交互（`role="img"` 的 span），所以没有任何 hover/active 态。 */
 .player-fav {
-  flex: none;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.78);
+  flex: none;
 }
 
-.player-music-lyrics {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  /* 歌词不贴着封面卡起排：参考图里封面与歌词之间留着一大片晕染。 */
-  padding-left: 6%;
-  overflow: hidden;
+.player-fav[data-shape="star"] {
+  width: clamp(22px, 4.4cqh, 36px);
+  height: clamp(22px, 4.4cqh, 36px);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.92);
 }
 
-.player-music-meta {
-  flex: 1;
-  min-width: 0;
+.player-fav[data-shape="heart"] {
+  color: #ff4d6d;
+  filter: drop-shadow(0 2px 6px rgba(255, 77, 109, 0.45));
+}
+
+/* ---------- 进度条（两种样式共用形状，配色不同） ---------- */
+
+.player-seek {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 16px;
-  /* 文字不贴面板左边缘（参考图里标题/歌词起点在面板宽度约 1/9 处）。 */
-  padding-left: 7%;
+  gap: 3px;
+  min-width: 0;
 }
+
+.player-seek-bar,
+.player-volume-bar {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.player-seek-bar::-webkit-slider-runnable-track,
+.player-volume-bar::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to right,
+    var(--player-seek-fill) 0 var(--player-seek-pct, 0%),
+    var(--player-seek-track) var(--player-seek-pct, 0%) 100%
+  );
+}
+
+.player-seek-bar::-webkit-slider-thumb,
+.player-volume-bar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: var(--player-seek-thumb);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.player-seek-bar:disabled,
+.player-volume-bar:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.player-seek-times {
+  display: flex;
+  justify-content: space-between;
+  font-size: clamp(9px, 1.25cqh, 11px);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* 样式 1：白轨道 + 白点（参考图里进度条是纯白的）。 */
+.player-seek[data-variant="haze"] {
+  --player-seek-fill: #ffffff;
+  --player-seek-track: rgba(255, 255, 255, 0.24);
+  --player-seek-thumb: #ffffff;
+}
+
+/* 样式 2：长春花紫已播段 + 深色小圆点（参考图的进度条比样式 1 细而短）。 */
+.player-seek[data-variant="disc"] {
+  --player-seek-fill: var(--player-accent, #6f6ff2);
+  --player-seek-track: rgba(35, 40, 64, 0.14);
+  --player-seek-thumb: var(--player-ink, #232840);
+}
+
+/* ---------- 传输控件：两套样式的位置与形状不同 ---------- */
+
+.player-transport {
+  display: flex;
+  align-items: center;
+}
+
+.player-transport-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: background-color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
+}
+
+.player-transport-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.player-transport-btn[data-role="shuffle"][data-on="false"],
+.player-transport-btn[data-role="repeat"][data-mode="off"] {
+  opacity: 0.5;
+}
+
+/* 样式 1：五枚无底白色 glyph，**铺满整张卡的宽度**（space-between）。 */
+.player-transport[data-variant="haze"] {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.player-transport[data-variant="haze"] .player-transport-btn {
+  width: clamp(24px, 4.6cqh, 36px);
+  height: clamp(24px, 4.6cqh, 36px);
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.player-transport[data-variant="haze"] .player-transport-btn[data-on="true"],
+.player-transport[data-variant="haze"] .player-transport-btn[data-mode="all"],
+.player-transport[data-variant="haze"] .player-transport-btn[data-mode="one"] {
+  color: #ffffff;
+  opacity: 1;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
+.player-transport[data-variant="haze"] .player-transport-play {
+  width: clamp(30px, 5.6cqh, 44px);
+  height: clamp(30px, 5.6cqh, 44px);
+}
+
+.player-transport[data-variant="haze"] .player-transport-play svg {
+  width: clamp(24px, 4.4cqh, 34px);
+  height: clamp(24px, 4.4cqh, 34px);
+}
+
+/* 样式 2：上一首 / **大圆底播放** / 下一首，随机与循环缩到两端，末尾一枚红心。 */
+.player-transport[data-variant="disc"] {
+  gap: clamp(10px, 2.1cqh, 22px);
+  color: var(--player-ink, #232840);
+}
+
+.player-transport[data-variant="disc"] .player-transport-btn {
+  width: clamp(26px, 4.4cqh, 38px);
+  height: clamp(26px, 4.4cqh, 38px);
+  opacity: 0.78;
+}
+
+.player-transport[data-variant="disc"] .player-transport-btn[data-on="true"],
+.player-transport[data-variant="disc"] .player-transport-btn[data-mode="all"],
+.player-transport[data-variant="disc"] .player-transport-btn[data-mode="one"] {
+  color: var(--player-accent, #6f6ff2);
+  opacity: 1;
+}
+
+.player-transport[data-variant="disc"] .player-transport-play {
+  width: clamp(44px, 8.6cqh, 76px);
+  height: clamp(44px, 8.6cqh, 76px);
+  opacity: 1;
+  background: var(--player-accent, #6f6ff2);
+  color: #ffffff;
+  box-shadow: 0 8px 22px var(--player-accent-soft, rgba(111, 111, 242, 0.24));
+}
+
+.player-transport[data-variant="disc"] .player-transport-play:hover:not(:disabled) {
+  background: var(--player-accent, #6f6ff2);
+  filter: brightness(1.08);
+}
+
+.player-transport[data-variant="disc"] .player-transport-play svg {
+  width: clamp(20px, 3.8cqh, 34px);
+  height: clamp(20px, 3.8cqh, 34px);
+}
+
+/* ---------- 音量 ---------- */
+
+.player-volume-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.player-volume-icon {
+  display: inline-flex;
+  flex: none;
+  opacity: 0.85;
+}
+
+.player-volume-bar {
+  flex: 1;
+  min-width: 0;
+  --player-seek-fill: #ffffff;
+  --player-seek-track: rgba(255, 255, 255, 0.22);
+  --player-seek-thumb: #ffffff;
+}
+
+.player-volume-bar::-webkit-slider-runnable-track {
+  height: 2px;
+}
+
+.player-volume-bar::-webkit-slider-thumb {
+  width: 8px;
+  height: 8px;
+  margin-top: -3px;
+}
+
+/* ---------- 歌词 ---------- */
 
 .player-lyrics {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  min-width: 0;
   overflow: hidden;
 }
 
 .player-lyric {
-  font-size: 14px;
-  line-height: 1.5;
+  min-width: 0;
+  transition: opacity 0.3s ease, filter 0.3s ease, transform 0.3s ease;
+}
+
+/* 样式 1：当前行清晰放大，其余**高斯模糊**并按行距往右错开（`marginLeft` 由组件算）。 */
+.player-lyrics[data-variant="haze"] {
+  justify-content: center;
+  gap: clamp(10px, 2.6cqh, 30px);
+  /* 给右侧留 4% 余量：模糊的行向右错开后不该贴到面板边缘。 */
+  padding-right: 4%;
+}
+
+.player-lyrics[data-variant="haze"] .player-lyric-main {
+  font-size: clamp(12px, 2.8cqh, 28px);
+  line-height: 1.3;
+  color: #ffffff;
+}
+
+.player-lyrics[data-variant="haze"] .player-lyric-sub {
+  margin-top: 2px;
+  font-size: clamp(9px, 1.65cqh, 17px);
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.player-lyrics[data-variant="haze"] .player-lyric {
+  filter: blur(2.6px);
+  opacity: 0.52;
+}
+
+.player-lyrics[data-variant="haze"] .player-lyric[data-distance="2"] {
+  filter: blur(3.4px);
   opacity: 0.4;
-  transition: opacity 160ms ease, font-size 160ms ease;
+}
+
+.player-lyrics[data-variant="haze"] .player-lyric[data-distance="3"] {
+  filter: blur(4.2px);
+  opacity: 0.28;
+}
+
+.player-lyrics[data-variant="haze"] .player-lyric.is-active {
+  filter: none;
+  opacity: 1;
+}
+
+.player-lyrics[data-variant="haze"] .player-lyric.is-active .player-lyric-main {
+  font-size: clamp(16px, 4.6cqh, 46px);
+  font-weight: 600;
+  text-shadow: 0 0 22px rgba(255, 255, 255, 0.4);
+}
+
+.player-lyrics[data-variant="haze"] .player-lyric.is-active .player-lyric-sub {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* 样式 2：不模糊、不错位，靠**颜色深浅**分层（参考图是淡紫灰 → 深藏青）。 */
+.player-lyrics[data-variant="disc"] {
+  justify-content: center;
+  gap: clamp(9px, 2.1cqh, 24px);
+  margin: clamp(4px, 1cqh, 12px) 0 clamp(10px, 2.8cqh, 30px);
+}
+
+.player-lyrics[data-variant="disc"] .player-lyric-main {
+  font-size: clamp(12px, 2.5cqh, 26px);
+  line-height: 1.32;
+  color: var(--player-ink, #232840);
+  opacity: 0.42;
+}
+
+.player-lyrics[data-variant="disc"] .player-lyric-sub {
+  margin-top: 1px;
+  font-size: clamp(9px, 1.5cqh, 15px);
+  color: var(--player-ink, #232840);
+  opacity: 0.28;
+}
+
+.player-lyrics[data-variant="disc"] .player-lyric[data-distance="2"] .player-lyric-main {
+  opacity: 0.26;
+}
+
+.player-lyrics[data-variant="disc"] .player-lyric[data-distance="3"] .player-lyric-main {
+  opacity: 0.16;
+}
+
+.player-lyrics[data-variant="disc"] .player-lyric.is-active .player-lyric-main {
+  font-size: clamp(15px, 3.6cqh, 38px);
+  font-weight: 700;
+  opacity: 1;
+}
+
+.player-lyrics[data-variant="disc"] .player-lyric.is-active .player-lyric-sub {
+  opacity: 0.66;
+}
+
+/* ---------- 样式 1：左列播放卡 ---------- */
+
+.player-layout[data-variant="haze"] {
+  display: grid;
+  grid-template-columns: minmax(0, 30%) minmax(0, 1fr);
+  column-gap: 9cqw;
+  align-items: center;
+  padding: 6cqh 5cqw 6cqh 5.5cqw;
+}
+
+.player-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  /* 底部留白：参考图的音量行在 82% 处，不是贴着面板底边。 */
+  padding-bottom: 9cqh;
+}
+
+/* 没有封面：卡片不再被"封面 → 音量"的距离撑开，改成紧凑居中一列。 */
+.player-card[data-empty="true"] {
+  justify-content: center;
+  gap: clamp(10px, 2.6cqh, 30px);
+  padding-bottom: 0;
+  gap: clamp(8px, 2cqh, 20px);
+  min-width: 0;
+  height: 100%;
+}
+
+.player-art {
+  width: 100%;
+  max-width: 44cqh;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.42);
+}
+
+.player-art[data-empty="true"] {
+  display: none;
+}
+
+.player-cover {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.player-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.player-card-head .player-track {
+  flex: 1;
+}
+
+/* ---------- 样式 2：左侧文字 + 右上角大唱片 ---------- */
+
+.player-layout[data-variant="disc"] {
+  display: flex;
+  align-items: center;
+  padding: 6cqh 4cqw 6cqh 7cqw;
+  /* 浅色底 + 深色字，整体氛围与样式 1 相反。 */
+  color: var(--player-ink, #232840);
+}
+
+.player-music[data-style="disc"] .player-haze {
+  background: linear-gradient(
+    155deg,
+    var(--player-sky-1, #eceafd) 0%,
+    var(--player-sky-2, #dfe4fb) 58%,
+    var(--player-sky-1, #eceafd) 100%
+  );
+}
+
+/* 样式 2 是浅底，压暗的暗角会把整块弄脏——只留一层极淡的同色晕。 */
+.player-music[data-style="disc"] .player-haze::after {
+  background: radial-gradient(
+    120% 95% at 0% 100%,
+    color-mix(in srgb, var(--player-haze-c, #4aa3ff) 8%, transparent),
+    transparent 60%
+  );
+}
+
+/* 样式 2 不用封面糊底：它要的是"干净的浅色画布"，颜色只从唱片上看。 */
+.player-music[data-style="disc"] .player-haze-art {
+  display: none;
+}
+
+.player-music[data-style="disc"] .player-haze-blob {
+  opacity: 0.16;
+  mix-blend-mode: normal;
+}
+
+.player-music[data-style="disc"] .player-volume-row {
+  max-width: 55%;
+  color: var(--player-ink, #232840);
+  opacity: 0.5;
+}
+
+.player-music[data-style="disc"] .player-volume-bar {
+  --player-seek-fill: var(--player-ink, #232840);
+  --player-seek-track: rgba(35, 40, 64, 0.14);
+  --player-seek-thumb: var(--player-ink, #232840);
+}
+
+.player-info {
+  position: relative;
+  z-index: 2;
+  width: 58%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(6px, 1.6cqh, 18px);
+}
+
+.player-info-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  min-width: 0;
+  font-size: clamp(13px, 3cqh, 30px);
+  line-height: 1.25;
+}
+
+.player-info-title {
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 当前行明显大于邻行（参考图里约 1.6 倍），一眼能看出唱到哪。 */
-.player-lyric.is-active {
-  font-size: 22px;
-  font-weight: 600;
-  opacity: 1;
+.player-info-dash {
+  opacity: 0.5;
+  font-weight: 400;
 }
 
-/* ---- 样式 2：文字 + 唱片 ---- */
-.player-disc-zone {
-  flex: none;
-  width: 42%;
-  min-width: 120px;
-  display: flex;
-  /* 唱片靠上、靠右（参考图里圆心在面板上三分之一、右边缘几乎贴边），
-     不是垂直居中的正中央。 */
-  align-items: flex-start;
-  justify-content: flex-end;
-  padding-top: 1%;
-  padding-right: 1%;
+.player-info-artist {
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.player-disc {
-  position: relative;
-  /* 参考图里唱片直径约为面板宽的 1/3；上限 400px，窄面板按百分比缩。 */
-  width: min(100%, 400px);
+/* 大唱片：右上角、被面板边缘裁掉一部分（参考图就是这么裁的）。 */
+.player-vinyl {
+  position: absolute;
+  top: -16%;
+  right: -12%;
+  width: min(96cqh, 62cqw);
   aspect-ratio: 1;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* 两道**非标准**细环：不是黑胶纹路，是比唱片本体更大的装饰圆。 */
+.player-vinyl-ring {
+  position: absolute;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 50%, #2a2038 0 32%, #15101f 33% 100%);
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
-  animation: player-disc-spin 14s linear infinite;
-  /* 暂停即停在当前角度：不是把角度归零重来。 */
+  border: 1px solid var(--player-disc-ring, rgba(90, 90, 200, 0.4));
+  opacity: 0.9;
+}
+
+.player-vinyl-ring-inner {
+  inset: 11%;
+}
+
+.player-vinyl-ring-outer {
+  inset: 4%;
+  opacity: 0.62;
+}
+
+/* 唱片本体：**按封面上色**（主色提亮两档），不是黑胶的黑色。 */
+.player-disc {
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background:
+    repeating-radial-gradient(
+      circle at 50% 50%,
+      rgba(255, 255, 255, 0.16) 0 1px,
+      rgba(255, 255, 255, 0) 1px 5px
+    ),
+    radial-gradient(
+      circle at 38% 30%,
+      var(--player-disc-1, #d9d6fb) 0%,
+      var(--player-disc-2, #b9b4f2) 62%,
+      var(--player-disc-2, #b9b4f2) 100%
+    );
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 22px 54px rgba(40, 40, 120, 0.28);
+  animation: player-disc-spin 16s linear infinite;
   animation-play-state: paused;
 }
 
@@ -5488,79 +5964,66 @@ button.danger {
   animation-play-state: running;
 }
 
-.player-disc-groove {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: repeating-radial-gradient(
-    circle at 50% 50%,
-    rgba(255, 255, 255, 0.07) 0 1px,
-    rgba(255, 255, 255, 0) 1px 4px
-  );
-}
-
 .player-disc-cover {
   position: absolute;
-  /* 内圈标签约占直径 56%：留出足够黑胶面积，"在转"才看得出来。 */
-  inset: 22%;
-  width: 56%;
-  height: 56%;
+  inset: 25%;
+  width: 50%;
+  height: 50%;
   border-radius: 50%;
   object-fit: cover;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55);
 }
 
 @keyframes player-disc-spin {
+  from {
+    transform: rotate(0deg);
+  }
   to {
     transform: rotate(360deg);
   }
 }
 
-/* ---- 传输控件（音乐模式专有；视频没有，见 RFC 0005 修订） ---- */
-.player-transport {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 4px 20px 14px;
-}
+/* 窄面板：两列挤不下时收敛成一列（封面让位，歌词优先）。 */
+@container (max-width: 420px) {
+  .player-layout[data-variant="haze"] {
+    grid-template-columns: minmax(0, 1fr);
+    /* 第二行吃掉剩余高度：歌词多了就从句首句尾两侧裁掉，当前句永远在中间。 */
+    grid-template-rows: auto minmax(0, 1fr);
+    /* stretch：歌词块必须填满第二行才会"从两侧裁"，居中放会整块溢出面板底边。 */
+    align-items: stretch;
+    row-gap: 2.4cqh;
+    padding: 4cqh 6cqw;
+  }
 
-.player-transport-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.14);
-  color: inherit;
-  cursor: pointer;
-}
+  .player-card {
+    height: auto;
+    align-items: stretch;
+    padding-bottom: 0;
+    gap: clamp(6px, 1.6cqh, 14px);
+  }
 
-.player-transport-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.26);
-}
+  .player-art {
+    align-self: center;
+    max-width: 24cqh;
+  }
 
-.player-transport-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
+  .player-info {
+    width: 100%;
+  }
 
-.player-transport-play {
-  width: 42px;
-  height: 42px;
-  background: rgba(255, 255, 255, 0.9);
-  color: #2a1b46;
-}
-
-.player-transport-play:hover:not(:disabled) {
-  background: #fff;
+  /* 唱片退到右下角当背景，别把文字挤出面板。 */
+  .player-vinyl {
+    opacity: 0.32;
+    top: auto;
+    bottom: -34%;
+    right: -26%;
+    width: min(82cqh, 96cqw);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .player-haze-blob,
+  .player-haze-art,
   .player-disc {
     animation: none;
   }

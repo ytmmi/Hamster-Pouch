@@ -87,6 +87,56 @@ export function parseLrc(text: string): LrcDoc {
   return { lines: indexed.map((item) => item.line), synced: true };
 }
 
+/**
+ * 一行歌词**成对**之后的形态：原文 + 译文。
+ *
+ * 参考图里每句歌词都是"原文一行大字 + 译文一行小字"（用户 2026-11-13 指着参考图
+ * 要求照做）。双语 `.lrc` 的通行写法是**同一时刻两个时间标签**（原文一行、译文一行），
+ * 所以这里按"相邻两行时间几乎相同"来配对，而不是去猜哪种语言是译文。
+ */
+export interface LrcItem {
+  timeMs: number;
+  main: string;
+  /** 译文；`null` = 这句只有原文。 */
+  sub: string | null;
+}
+
+/** 视为"同一时刻"的容差：双语 LRC 的译文常在原文后几十毫秒，超过这个就不配对。 */
+export const LRC_PAIR_GAP_MS = 120;
+
+/**
+ * 把逐行歌词配成"原文 + 译文"。
+ *
+ * 规则：按时间顺序扫，若**下一行**与当前行时间差 ≤ `maxGapMs`，且下一行不是空行，
+ * 就把下一行当译文并入（两句并作一句，当前时间取靠前的那句）。其余情况译文为
+ * `null`。纯文本歌词（`timeMs === -1`）不配对——没有时间就无从判断谁是谁的译文。
+ */
+export function pairLrcLines(
+  lines: readonly LrcLine[],
+  maxGapMs: number = LRC_PAIR_GAP_MS,
+): LrcItem[] {
+  const items: LrcItem[] = [];
+  const gap = Number.isFinite(maxGapMs) ? Math.max(0, maxGapMs) : LRC_PAIR_GAP_MS;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const next = lines[i + 1];
+    const pairable =
+      next !== undefined &&
+      line.timeMs >= 0 &&
+      next.timeMs >= 0 &&
+      next.timeMs - line.timeMs <= gap &&
+      next.text.trim() !== "" &&
+      next.text.trim() !== line.text.trim();
+    if (pairable) {
+      items.push({ timeMs: line.timeMs, main: line.text, sub: next.text });
+      i += 1;
+      continue;
+    }
+    items.push({ timeMs: line.timeMs, main: line.text, sub: null });
+  }
+  return items;
+}
+
 /** 读 `[offset:…]`；没有则该 0。 */
 function readOffset(rawLines: readonly string[]): number {
   for (const line of rawLines) {
@@ -108,7 +158,10 @@ function isMetaTag(line: string): boolean {
  * 纯函数里最容易写错的一处（`-1` / 空数组 / 乱序输入），用二分把边界写死。
  * 输入必须已按时间升序（[`parseLrc`] 的返回值满足）。
  */
-export function activeLrcIndex(lines: readonly LrcLine[], positionMs: number): number {
+export function activeLrcIndex(
+  lines: readonly { timeMs: number }[],
+  positionMs: number,
+): number {
   if (lines.length === 0 || !Number.isFinite(positionMs)) return -1;
   let low = 0;
   let high = lines.length - 1;

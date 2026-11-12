@@ -61,7 +61,6 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
-import { AudioWaveform } from "../shared/AudioWaveform";
 import { usePanelSettingValue } from "../shared/settingValue";
 import { publishSettingChanged } from "../core/settingChangeStore";
 import { useApp } from "../core/AppContext";
@@ -71,8 +70,15 @@ import { MusicStage } from "./player/MusicStage";
 import { normalizePlayerStyle } from "./player/playerStyle";
 import { parseLrc, type LrcDoc } from "./player/lrc";
 import { trackArtistOf, trackTitleOf } from "./player/trackInfo";
-import { playableKindOf, stepPlayable } from "./player/queueView";
+import {
+  canStepPlayable,
+  playableKindOf,
+  stepPlayable,
+  type RepeatMode,
+  type StepOptions,
+} from "./player/queueView";
 import { usePlayerQueue } from "./player/usePlayerQueue";
+import { formatMs } from "./player/time";
 
 export interface MediaPlayerPanelProps {
   /** dockview 面板 API；独立窗口宿主传替身（恒为激活）。 */
@@ -131,6 +137,15 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   const [positionMs, setPositionMs] = useState(0);
   /** 元素是否在播（唱片转动、播放/暂停图标用；来源是 DOM 真实事件）。 */
   const [playing, setPlaying] = useState(false);
+  /**
+   * 随机播放 / 循环模式（用户 2026-11-13 批准"随机和循环可以做"）。
+   *
+   * 只存在**本次会话**里，不落库：它们是"这次怎么听"，跟"这个面板长什么样"不是
+   * 一类东西（样式与音量才是设置）。缺省循环 = 列表循环，与既有"端点环绕"一致。
+   */
+  const [shuffle, setShuffle] = useState(false);
+  const [repeat, setRepeat] = useState<RepeatMode>("all");
+  const stepOptions: StepOptions = { shuffle, repeat };
   /** 「切换标签时自动暂停」当前值（未设置 = 默认开）；用 ref 供可见性回调读取。 */
   const autoPauseRef = useRef(true);
   /** 设置是否已从存储读到（未读到前不自动暂停，避免用未经确认的默认值）。 */
@@ -250,7 +265,7 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
       const current = ctx.selectedFile;
       const currentKind = playableKindOf(current);
       if (!current || !currentKind) return;
-      const nextIndex = stepPlayable(queue.files, queue.index, delta, currentKind);
+      const nextIndex = stepPlayable(queue.files, queue.index, delta, currentKind, stepOptions);
       const target = queue.files[nextIndex];
       if (!target) return;
       if (target.id !== current.id) {
@@ -259,13 +274,28 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
       }
       void loadAndPlay(target.id);
     },
-    [loadAndPlay, queue.files, queue.index],
+    [loadAndPlay, queue.files, queue.index, shuffle, repeat],
   );
 
-  /** 音乐控件的"上一首 / 下一首"是否可用（队列里至少有一个同类文件）。 */
-  const canStep = useMemo(
-    () => kind !== null && queue.index >= 0 && queue.files.some((f) => f.media_type === kind),
-    [kind, queue.files, queue.index],
+  /**
+   * "上一首 / 下一首"是否可用。
+   *
+   * 与步进**同一份规则**（`canStepPlayable`）：循环关闭且已在队尾时"下一首"就是
+   * 不可用的，按钮不能还亮着让人点出一个"什么都没发生"。
+   */
+  const canPrev = useMemo(
+    () =>
+      kind !== null &&
+      queue.index >= 0 &&
+      canStepPlayable(queue.files, queue.index, -1, kind, stepOptions),
+    [kind, queue.files, queue.index, shuffle, repeat],
+  );
+  const canNext = useMemo(
+    () =>
+      kind !== null &&
+      queue.index >= 0 &&
+      canStepPlayable(queue.files, queue.index, 1, kind, stepOptions),
+    [kind, queue.files, queue.index, shuffle, repeat],
   );
 
   // 播放请求（蓝图双击）：挂载即读一次（面板可能后挂载），再订阅后续请求。
@@ -448,9 +478,18 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     if (!video) {
       return;
     }
-    if (isAudio && canStep) {
-      stepTrack(1);
-      return;
+    if (isAudio) {
+      // 单曲循环：不清空进度、直接从头再放（不换文件，避免重新取封面/歌词）。
+      if (repeat === "one") {
+        video.currentTime = 0;
+        void video.play().catch(() => undefined);
+        return;
+      }
+      // 列表循环 / 随机 / 还有下一首：续播；循环关闭且到头：落到下面的"回首帧暂停"。
+      if (canNext) {
+        stepTrack(1);
+        return;
+      }
     }
     video.currentTime = 0;
     video.pause();
@@ -555,13 +594,23 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
             artist={artist}
             hazeColors={media.hazeColors}
             lyrics={media.lyrics}
-            positionMs={positionMs}
+            positionMs={displayPosition}
+            durationMs={durationMs}
             playing={playing}
-            canPrev={canStep}
-            canNext={canStep}
+            volume={volume}
+            shuffle={shuffle}
+            repeat={repeat}
+            canPrev={canPrev}
+            canNext={canNext}
             onPrev={() => stepTrack(-1)}
             onNext={() => stepTrack(1)}
             onToggle={togglePlay}
+            onSeek={onScrub}
+            onSeekCommit={onScrubCommit}
+            onVolume={onVolumeInput}
+            onVolumeCommit={commitVolume}
+            onToggleShuffle={() => setShuffle((on) => !on)}
+            onToggleRepeat={() => setRepeat((mode) => (mode === "all" ? "off" : mode === "off" ? "one" : "all"))}
             t={app.t}
           />
         ) : videoUrl ? null : (
@@ -569,21 +618,10 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
         )}
       </div>
 
-      {/* 音频波形（D115）：整段起伏 + 随播放位置移动的游标，点 / 拖即定位。
-          音乐模式下也保留——它是"哪儿有声"的唯一读法，与封面/歌词不冲突。 */}
-      {isAudio && videoUrl && selectedFile && (
-        <AudioWaveform
-          repoId={app.repoId ?? ""}
-          fileId={selectedFile.id}
-          durationMs={durationMs > 0 ? durationMs : null}
-          positionMs={displayPosition}
-          onSeek={(seconds) => commitSeek(seconds * 1000)}
-          className="player-wave"
-          t={app.t}
-        />
-      )}
-
-      {/* 进度条：画面下方，拖动定位，实时同步播放进度 */}
+      {/* 进度条：画面下方，拖动定位，实时同步播放进度。
+          音乐模式**不渲染**这一行：进度/音量/传输都已收进音乐舞台（参考图的布局
+          把它们放在封面下方，不是面板底部），两套进度条同时出现只会互相打架。 */}
+      {!isAudio && (
       <div className="player-progress">
         <span className="player-time mono">{formatMs(displayPosition)}</span>
         <input
@@ -636,6 +674,7 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -681,18 +720,4 @@ function VolumeIcon({ volume }: { volume: number }): JSX.Element {
       )}
     </svg>
   );
-}
-
-/** 毫秒 → `m:ss` / `h:mm:ss`；非正值显示 `--:--`。 */
-function formatMs(ms: number | null | undefined): string {
-  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms <= 0) {
-    return "--:--";
-  }
-  const total = Math.floor(ms / 1000);
-  const s = total % 60;
-  const m = Math.floor(total / 60) % 60;
-  const h = Math.floor(total / 3600);
-  const mm = h > 0 ? String(m).padStart(2, "0") : String(m);
-  const ss = String(s).padStart(2, "0");
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }

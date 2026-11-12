@@ -1,57 +1,109 @@
 /**
- * 播放器队列的**纯逻辑**（零依赖，门禁直接 import 驱动）。
+ * 播放队列的**步进规则**（纯逻辑、零依赖：门禁直接 import 驱动）。
  *
- * 与 `usePlayerQueue.ts` 的分工：这里只回答"哪些文件可播、同类前后一步走到哪"，
- * 取数与排序（`file.query` / `album.members` / `drainPages` / `sortFiles`）在钩子里。
- * 分开的理由是可测——"上一首/下一首只在同类里走、端点循环"是产品口径，不是
- * 渲染细节，必须由 `pnpm check:panels` 按行为钉住，而不是靠读源码相信它。
+ * 队列就是媒体预览里那一串文件（同相册 / 同源），播放器只挑出**同类型**的相邻项
+ * 来回走：音频不跳进视频、视频也不跳进音频。随机与循环是播放器收到的新需求
+ * （用户 2026-11-13："随机和循环可以做（同相册或源音频队列）"），规则全部收在
+ * 这个文件里，界面只负责把结果落到宿主选中上。
  *
- * 用户 2026-11-13 口径：上一首/下一首的范围 = 同相册或同源的音频队列；同一批
- * 还要求"播放器能像图像查看器那样切换视频"。两件事共用一条队列（`audio` +
- * `video` 的保序子序列），步进时**只在同类里走**：听歌不该跳到 `pv.mp4`，
- * 看视频也不该跳到 mp3。
+ * 三条边界写死在这里，因为它们最容易在界面上表现成"偶尔失灵"：
+ *
+ * - 端点：`repeat: "off"` 时走到头就停在原地（返回 `-1`，由调用方决定要不要停），
+ *   `"all"` / `"one"` 时环绕；
+ * - 随机：只在**同类**里抽，且不抽到自己（只有一首时原地不动）；
+ * - 当前位置不属于该类：原地不动，不猜语义（例如在视频上按"上一首"）。
  */
 
-/** 队列里"能播"的媒体类型（也是 `player.media` 接受的类型）。 */
 export type PlayableKind = "audio" | "video";
 
-/** 该文件是否可播（音频/视频）。 */
-export function isPlayable(file: { media_type: string } | null): boolean {
-  return file?.media_type === "audio" || file?.media_type === "video";
+/** 循环模式：关 / 列表循环 / 单曲循环。 */
+export type RepeatMode = "off" | "all" | "one";
+
+/** 步进选项（都有缺省：`all` + 不随机，等于"按顺序环绕"）。 */
+export interface StepOptions {
+  /** 随机播放：在同类里随机取一首（不是打乱整个队列的索引）。 */
+  shuffle?: boolean;
+  /** 循环模式：影响走到端点时是环绕还是停住。 */
+  repeat?: RepeatMode;
+  /** 随机源（默认 `Math.random`；门禁注入固定值以断言"不抽到自己"）。 */
+  random?: () => number;
 }
 
-/** 媒体类型 → 步进用的同类键（非音频/视频 → `null`）。 */
-export function playableKindOf(file: { media_type: string } | null): PlayableKind | null {
-  if (file?.media_type === "audio") return "audio";
-  if (file?.media_type === "video") return "video";
+/** 只有音频与视频进队列（图片/文本走各自的面板）。 */
+export function isPlayable(file: { media_type: string }): boolean {
+  return file.media_type === "audio" || file.media_type === "video";
+}
+
+/** 队列项的类别；不可播放时 `null`。 */
+export function playableKindOf(file: { media_type: string } | null | undefined): PlayableKind | null {
+  if (!file) return null;
+  if (file.media_type === "audio") return "audio";
+  if (file.media_type === "video") return "video";
   return null;
 }
 
-/** 过滤出可播项（队列只收音频/视频；相册成员里还混着图片与文档）。 */
+/** 过滤出可播放项（队列 hook 拉完分页后过一遍）。 */
 export function playableFiles<T extends { media_type: string }>(files: readonly T[]): T[] {
-  return files.filter((file) => isPlayable(file));
+  return files.filter(isPlayable);
+}
+
+/** 同类项在**原数组**里的下标（保持原顺序，就是排队顺序）。 */
+function peerIndexes(
+  files: readonly { media_type: string }[],
+  kind: PlayableKind,
+): number[] {
+  const peers: number[] = [];
+  files.forEach((file, index) => {
+    if (file.media_type === kind) peers.push(index);
+  });
+  return peers;
 }
 
 /**
- * 在**同类**里前后走 `delta` 步（`±1`），到端点循环。
+ * 在同类里走 `delta` 步，返回**原数组下标**。
  *
- * 边界（`delta = 0`、单个文件、不在队列内、同类为空）都返回原下标或 `-1`，
- * 由调用方决定"不动"——这里不猜产品语义。循环（而非停住）：音乐队列走到末尾
- * 回到第一首，是播放器该有的行为；单曲队列就是原地重播。
+ * 返回 `-1` 只表示"按当前循环设置走不过去了"（端点且 `repeat: "off"`），
+ * 其余情况（当前位置不属于该类、`delta === 0`、同类为空）一律原地返回。
  */
-export function stepPlayable<T extends { media_type: string }>(
-  files: readonly T[],
+export function stepPlayable(
+  files: readonly { media_type: string }[],
   index: number,
   delta: number,
   kind: PlayableKind,
+  options: StepOptions = {},
 ): number {
-  const peers: number[] = [];
-  for (let i = 0; i < files.length; i += 1) {
-    if (playableKindOf(files[i]) === kind) peers.push(i);
-  }
+  if (!Number.isFinite(delta) || delta === 0) return index;
+  const peers = peerIndexes(files, kind);
   if (peers.length === 0) return -1;
-  if (delta === 0 || index < 0 || !peers.includes(index)) return index;
-  const at = peers.indexOf(index);
-  const next = (at + (delta > 0 ? 1 : -1) + peers.length) % peers.length;
-  return peers[next];
+  const pos = peers.indexOf(index);
+  // 当前位置不在队列里（选中项被过滤掉 / 还没进队列）：不猜，原地不动。
+  if (pos < 0) return index;
+
+  const repeat = options.repeat ?? "all";
+  if (options.shuffle) {
+    const others = peers.filter((peer) => peer !== index);
+    if (others.length === 0) return index;
+    const random = options.random ?? Math.random;
+    const raw = random();
+    const pick = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), 0.999_999) : 0;
+    return others[Math.floor(pick * others.length)];
+  }
+
+  const target = pos + Math.sign(delta);
+  if (target >= 0 && target < peers.length) return peers[target];
+  if (repeat === "off") return -1;
+  // 环绕（`one` 只影响"自动续播"，手动点上一首/下一首照样换曲）。
+  return peers[(target + peers.length) % peers.length];
+}
+
+/** "还有没有下一首/上一首"（按钮禁用的唯一依据，和步进规则同一份逻辑）。 */
+export function canStepPlayable(
+  files: readonly { media_type: string }[],
+  index: number,
+  delta: number,
+  kind: PlayableKind,
+  options: StepOptions = {},
+): boolean {
+  const target = stepPlayable(files, index, delta, kind, options);
+  return target >= 0 && target !== index;
 }
