@@ -7231,6 +7231,10 @@ const musicStyleMod = await import(
 );
 const musicSpec = config.panelSpec("music");
 const videoSpec = config.panelSpec("player");
+const playableQueueSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/playableQueue.ts"),
+  "utf8",
+);
 const videoPanelSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/MediaPlayerPanel.tsx"),
   "utf8",
@@ -7519,6 +7523,14 @@ check(
     !/data-mode/.test(videoPanelSrc) &&
     // 播放请求也分家：音频进 `musicPlayStore`，视频进 `playerPlayStore`。
     /requestMusicPlay/.test(readFileSync(join(ROOT, "apps/desktop/src/app_ui/core/blueprintExecutor.ts"), "utf8")),
+);
+check(
+  "D166：`\"any\"` 是队列口径不是媒体类型——取数时展开成 `[\"audio\", \"video\"]`",
+  // 后端逐个校验 `media_types`，把口径值直接发过去会被判成「未知媒体类型」
+  // （真机实测：面板一挂载就在状态栏报「读取播放队列失败：请求内容不合法」）。
+  /mediaTypes: kind === "any" \? \["audio", "video"\] : \[kind\]/.test(playableQueueSrc) &&
+    !/mediaTypes: \[kind\]/.test(playableQueueSrc),
+  playableQueueSrc.match(/mediaTypes:[^,\n]*/)?.[0] ?? "",
 );
 check(
   "D166：无封面不出图、无歌词不出块（结构上不渲染，不是空框或「暂无歌词」占位）",

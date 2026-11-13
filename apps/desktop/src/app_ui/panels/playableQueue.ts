@@ -125,7 +125,9 @@ export function usePlayableQueue(
               api.fileQuery({
                 repoId: scope.repoId,
                 filter: {
-                  mediaTypes: [kind],
+                  // `"any"` 是队列口径，不是媒体类型：后端逐个校验 `media_types`，
+                  // 传 `["any"]` 会被判成「未知媒体类型」。
+                  mediaTypes: kind === "any" ? ["audio", "video"] : [kind],
                   sourceId: scope.sourceId ?? undefined,
                   dirPrefix: scope.dirPath ?? undefined,
                 },
