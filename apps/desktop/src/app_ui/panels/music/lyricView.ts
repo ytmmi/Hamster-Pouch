@@ -35,52 +35,32 @@ export function lyricIndent(distance: number): number {
 export const LYRIC_LEAD_MS = 480;
 
 /**
- * 按**字素**切分歌词。
+ * 把行内进度换成 CSS 百分比字符串（给 `clip-path` / 渐变用）。
  *
- * 逐字填充必须按"用户眼里的一个字"切：`split("")` 会把 surrogate pair 劈开，
- * `Array.from` 也只到**码位**——`👩‍🎤` 这种 ZWJ 组合会被拆成 4 个 span。有
- * `Intl.Segmenter` 就用它，没有才退回码位切分（老引擎上最多把 emoji 拆开，
- * 中文歌词不受影响）。
+ * 单独成一个函数是为了让"边界值"有唯一出处：进度 0 必须给 `0%`、进度 1 必须给 `100%`，
+ * 否则 `calc(100% - 100%)` 与 `calc(100% - 100.0001%)` 在亚像素上会各差一点点。
  */
-export function lyricChars(text: string): string[] {
-  const Segmenter = (
-    Intl as unknown as {
-      Segmenter?: new (
-        locale?: string,
-        options?: { granularity: "grapheme" },
-      ) => { segment: (input: string) => Iterable<{ segment: string }> };
-    }
-  ).Segmenter;
-  if (!Segmenter) return Array.from(text);
-  const segmenter = new Segmenter("zh-Hans", { granularity: "grapheme" });
-  return Array.from(segmenter.segment(text), (part) => part.segment);
+export function lyricFillPercent(progress: number): string {
+  if (!Number.isFinite(progress) || progress <= 0) return "0%";
+  if (progress >= 1) return "100%";
+  return `${(Math.round(progress * 10000) / 100).toFixed(2)}%`;
 }
 
-/**
- * 当前行**已唱到第几个字**（逐字从左到右填充，用户 2026-11-13 D171 选定）。
- *
- * `progress` 是这一行的时间进度（0–1，见 `lineProgress`）。向下取整而不是四舍五入：
- * 唱到 60% 时第 6 个字不该提前亮——用户看到的是"唱到哪儿、亮到哪儿"。
- */
-export function sungCharCount(length: number, progress: number): number {
-  if (!Number.isFinite(length) || length <= 0) return 0;
-  if (!Number.isFinite(progress) || progress <= 0) return 0;
-  return Math.min(length, Math.floor(length * Math.min(progress, 1)));
-}
-
-/**
- * 一行歌词的时间进度（0–1）。
- *
- * 终点取**下一行的起始时刻**；最后一行没有下一行时给 `DEFAULT_LINE_MS` 的兜底
- * 时长（否则最后一句会永远停在 0%，整句都不亮）。
- */
+/** 末行没有"下一行"时的兜底时长（否则最后一句的进度条永远停在 0%）。 */
 export const DEFAULT_LINE_MS = 4000;
 
+/**
+ * 一行歌词的**时间进度**（0–1）——当前句的填充条就按它推进。
+ *
+ * 终点取**下一行的起始时刻**（不是"这一行的字符数"）：LRC 只给每句的开始时间，句长
+ * 只能由下一句反推。`positionMs` 传进来的必须是**同一个时钟**（`MusicStage` 传的是
+ * `positionMs + LYRIC_LEAD_MS`，与判定当前行的时钟一致）——两个时钟不一致就会出现
+ * "高亮比声音慢半拍、末尾两个字还没亮就换句"（用户 2026-11-13 报的正是这个）。
+ */
 export function lineProgress(startMs: number, endMs: number | null, positionMs: number): number {
   if (!Number.isFinite(startMs) || !Number.isFinite(positionMs)) return 0;
-  const end = endMs !== null && Number.isFinite(endMs) && endMs > startMs
-    ? endMs
-    : startMs + DEFAULT_LINE_MS;
+  const end =
+    endMs !== null && Number.isFinite(endMs) && endMs > startMs ? endMs : startMs + DEFAULT_LINE_MS;
   if (positionMs <= startMs) return 0;
   return Math.min(1, (positionMs - startMs) / (end - startMs));
 }

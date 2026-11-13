@@ -560,12 +560,13 @@ apps/desktop/src/app_ui/
                             #     行推出可视区；阶梯 5 行封顶 + 按行号取的小抖动，避免等距
                             #     排成表格。抽成独立文件的原因同 queueView：组件是 JSX，
                             #     门禁 import 不了）
-                            #     另含 D171 的跟拍三件套：`LYRIC_LEAD_MS`（480ms，当前行判定
-                            #     时刻 = `positionMs + LYRIC_LEAD_MS`，让淡入收尾正好是新句
-                            #     开唱）、`lyricChars`（`Intl.Segmenter` 的 grapheme 粒度切字，
-                            #     emoji / 组合字不劈开）、`sungCharCount` + `lineProgress`
-                            #     （把"这一行过去多少时间"换算成"已唱到第几个字"，末行用
-                            #     `DEFAULT_LINE_MS` 兜底））
+                            #     另含歌词跟拍三件套（D171 → D172 改口径）：`LYRIC_LEAD_MS`
+                            #     （480ms，`clockMs = positionMs + LYRIC_LEAD_MS`，判行与填充
+                            #     **共用这一个时钟**）、`lineProgress`（把"这一行过去多少时间"
+                            #     换算成 0–1，终点取下一行起点、末行用 `DEFAULT_LINE_MS` 兜底）、
+                            #     `lyricFillPercent`（换成 CSS 百分比，0 / 1 两个边界有唯一出处）。
+                            #     D171 的逐字方案（`lyricChars` / `sungCharCount`）已删除——D172
+                            #     改成进度条式填充，不再按字跳格）
                             #   queueView.ts 队列纯函数（**零依赖**：只有零依赖才能被门禁
                             #     直接 import 断言；`playableFiles` / `stepPlayable` 在**同类**
                             #     里走、不跨 audio↔video；`StepOptions.shuffle` 只在同类里抽

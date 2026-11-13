@@ -45,16 +45,10 @@ import { stageVars } from "./haze";
 import type { MusicStyle } from "./musicStyle";
 import type { RepeatMode } from "./queueView";
 import { formatClock, formatMs, formatRemaining } from "./time";
-import {
-  LYRIC_LEAD_MS,
-  lineProgress,
-  lyricChars,
-  lyricIndent,
-  sungCharCount,
-} from "./lyricView";
+import { LYRIC_LEAD_MS, lineProgress, lyricFillPercent, lyricIndent } from "./lyricView";
 
 /** 当前行前后各渲染几行（2 行 ≈ 5 行可见：与参考图的歌词窗口一致，也够看）。 */
-const LRC_RADIUS = 2;
+const LRC_RADIUS = 3;
 
 export interface MusicStageProps {
   /** 当前样式（在设置里切换）。 */
@@ -100,11 +94,14 @@ export function MusicStage(props: MusicStageProps) {
   /** 噪波滤镜的 id（每个实例一份，避免两个音乐面板互相抢同一个 `url(#…)`）。 */
   const noiseId = `player-haze-noise-${useId().replace(/[^\w-]/g, "")}`;
   const items = useMemo(() => (lyrics ? pairLrcLines(lyrics.lines) : null), [lyrics]);
-  // 判定用 `positionMs + LYRIC_LEAD_MS`：行的淡入/放大过渡约 0.5s，提前一个过渡
-  // 时长触发，动画收尾那一刻正好切到正在唱的那句（用户 2026-11-13 D171）。
+  // 歌词的"当前时刻"只有一个：`positionMs + LYRIC_LEAD_MS`。行的淡入/放大过渡约 0.5s，
+  // 提前一个过渡时长判定，动画收尾那一刻正好是新句开唱（用户 2026-11-13 D171）。
+  // **填充进度必须用同一个时钟**——早先判定用提前量、填充用原始播放位置，两个钟差 480ms，
+  // 于是高亮比声音慢半拍、末尾两个字还没亮就换句（用户 2026-11-13 D172 报的现象）。
+  const clockMs = positionMs + LYRIC_LEAD_MS;
   const activeIndex = useMemo(
-    () => (lyrics?.synced && items ? activeLrcIndex(items, positionMs + LYRIC_LEAD_MS) : -1),
-    [lyrics, items, positionMs],
+    () => (lyrics?.synced && items ? activeLrcIndex(items, clockMs) : -1),
+    [lyrics, items, clockMs],
   );
   const visible = useMemo(
     () => (items ? lrcWindow(items.length, activeIndex, LRC_RADIUS) : { start: 0, end: 0 }),
@@ -198,7 +195,7 @@ export function MusicStage(props: MusicStageProps) {
             start={visible.start}
             end={visible.end}
             active={activeIndex}
-            positionMs={positionMs}
+            clockMs={clockMs}
             variant="haze"
             t={t}
           />
@@ -222,7 +219,7 @@ export function MusicStage(props: MusicStageProps) {
             start={visible.start}
             end={visible.end}
             active={activeIndex}
-            positionMs={positionMs}
+            clockMs={clockMs}
             variant="disc"
             t={t}
           />
@@ -510,7 +507,7 @@ function Lyrics({
   start,
   end,
   active,
-  positionMs,
+  clockMs,
   variant,
   t,
 }: {
@@ -518,7 +515,7 @@ function Lyrics({
   start: number;
   end: number;
   active: number;
-  positionMs: number;
+  clockMs: number;
   variant: MusicStyle;
   t: MusicStageProps["t"];
 }) {
@@ -530,14 +527,13 @@ function Lyrics({
         const distance = active < 0 ? index + 1 : index - active;
         const isActive = index === active;
         const indent = variant === "haze" && !isActive ? lyricIndent(distance) : 0;
-        // 当前句逐字从左到右填充（用户 2026-11-13 D171，参考图 2 的口径）：已唱到的
-        // 字换高亮色、未唱部分保持淡色，边界随播放推进——不是整句一起亮。
+        // 当前句按**进度条**推进（用户 2026-11-13 D172：不要逐字跳格）：同一行文字渲两层，
+        // 上层是"已唱"色、用 `clip-path` 从左往右揭开，边界连续移动；`clockMs` 与判定当前行
+        // 用的是同一个时钟，所以进度条在换句的瞬间正好走满。
         const next = items[index + 1];
         const progress = isActive
-          ? lineProgress(item.timeMs, next ? next.timeMs : null, positionMs)
+          ? lineProgress(item.timeMs, next ? next.timeMs : null, clockMs)
           : 0;
-        const chars = isActive ? lyricChars(item.main) : null;
-        const sung = chars ? sungCharCount(chars.length, progress) : 0;
         return (
           <div
             key={`${item.timeMs}-${index}`}
@@ -545,20 +541,19 @@ function Lyrics({
             data-distance={Math.min(Math.max(distance, 0), 3)}
             style={indent > 0 ? { marginLeft: `${indent}cqw` } : undefined}
           >
-            <div className="player-lyric-main">
-              {chars
-                ? chars.map((char, charIndex) => (
-                    <span
-                      // 同一句里可能重复字，位置参与 key 才稳定。
-                      key={`${charIndex}-${char}`}
-                      className="player-lyric-char"
-                      data-sung={charIndex < sung ? "true" : "false"}
-                    >
-                      {char}
-                    </span>
-                  ))
-                : item.main}
-            </div>
+            {isActive ? (
+              <div
+                className="player-lyric-main"
+                style={{ ["--player-lyric-progress" as string]: lyricFillPercent(progress) }}
+              >
+                <span className="player-lyric-base">{item.main}</span>
+                <span className="player-lyric-fill" aria-hidden="true">
+                  {item.main}
+                </span>
+              </div>
+            ) : (
+              <div className="player-lyric-main">{item.main}</div>
+            )}
             {item.sub ? <div className="player-lyric-sub">{item.sub}</div> : null}
           </div>
         );

@@ -7434,28 +7434,47 @@ check(
   Number.isFinite(musicStageMod.LYRIC_LEAD_MS) &&
     musicStageMod.LYRIC_LEAD_MS >= 400 &&
     musicStageMod.LYRIC_LEAD_MS <= 700 &&
-    /activeLrcIndex\(items, positionMs \+ LYRIC_LEAD_MS\)/.test(musicStageSrc),
+    /const clockMs = positionMs \+ LYRIC_LEAD_MS;/.test(musicStageSrc) &&
+    /activeLrcIndex\(items, clockMs\)/.test(musicStageSrc),
 );
 
 check(
-  "D171：当前句逐字从左到右填充（已唱到的字换色，边界随播放推进）",
-  // 用户 2026-11-13：「当前句的歌词显示增加实时的颜色变化」（参考图 2 样式 1）。
-  eqList(musicStageMod.lyricChars("雨と太陽"), ["雨", "と", "太", "陽"]) &&
-    // emoji / 组合字不劈开（Array.from 而不是 split("")）。
-    musicStageMod.lyricChars("👩‍🎤a").length === 2 &&
-    musicStageMod.sungCharCount(10, 0) === 0 &&
-    musicStageMod.sungCharCount(10, 0.31) === 3 &&
-    musicStageMod.sungCharCount(10, 1) === 10 &&
-    musicStageMod.sungCharCount(10, 5) === 10 &&
-    musicStageMod.sungCharCount(0, 0.5) === 0 &&
-    // 行内进度：起点 0、终点 1、超过终点封顶；没有下一句时用兜底时长。
-    musicStageMod.lineProgress(1000, 3000, 1000) === 0 &&
-    musicStageMod.lineProgress(1000, 3000, 2000) === 0.5 &&
-    musicStageMod.lineProgress(1000, 3000, 9000) === 1 &&
-    musicStageMod.lineProgress(1000, null, 1000 + musicStageMod.DEFAULT_LINE_MS / 2) === 0.5 &&
-    /className="player-lyric-char"/.test(musicStageSrc) &&
-    /data-sung=\{charIndex < sung \? "true" : "false"\}/.test(musicStageSrc) &&
-    /\.player-lyric-char\[data-sung="true"\]/.test(stylesSource),
+  "D172：当前句是**进度条**式填充（两层文字 + `clip-path`），不逐字跳格",
+  // 用户 2026-11-13：「歌词不逐字填充，而是改为类似进度条的显示方式」。
+  musicStageMod.lyricFillPercent(0) === "0%" &&
+    musicStageMod.lyricFillPercent(0.5) === "50.00%" &&
+    musicStageMod.lyricFillPercent(1) === "100%" &&
+    musicStageMod.lyricFillPercent(1.4) === "100%" &&
+    musicStageMod.lyricFillPercent(Number.NaN) === "0%" &&
+    /className="player-lyric-fill"/.test(musicStageSrc) &&
+    /\["--player-lyric-progress" as string\]/.test(musicStageSrc) &&
+    /lyricFillPercent\(progress\)/.test(musicStageSrc) &&
+    // 逐字方案必须彻底消失（否则两层方案和逐字方案会同时上色）。
+    !/player-lyric-char/.test(musicStageSrc) &&
+    !/player-lyric-char/.test(stylesSource) &&
+    /\.player-lyric-fill \{/.test(stylesSource) &&
+    /clip-path: inset\(0 calc\(100% - var\(--player-lyric-progress, 0%\)\) 0 0\)/.test(stylesSource),
+);
+
+check(
+  "D172：填充进度与「当前行」判定共用一个时钟（否则高亮落后半拍、末尾不填满）",
+  // 用户 2026-11-13：「会落后 2 个字，然后最后 2 个字不填充就跳到了下一句」——
+  // 根因是判行用 `positionMs + LYRIC_LEAD_MS`、填充用 `positionMs`，两个钟差 480ms。
+  /const clockMs = positionMs \+ LYRIC_LEAD_MS;/.test(musicStageSrc) &&
+    /activeLrcIndex\(items, clockMs\)/.test(musicStageSrc) &&
+    /lineProgress\(item\.timeMs, next \? next\.timeMs : null, clockMs\)/.test(musicStageSrc) &&
+    !/lineProgress\(item\.timeMs, next \? next\.timeMs : null, positionMs\)/.test(musicStageSrc) &&
+    (musicStageSrc.match(/clockMs=\{clockMs\}/g) ?? []).length === 2,
+);
+
+check(
+  "D172：歌词窗口是 7 行（当前行上下各 3 行）",
+  // 用户 2026-11-13：「歌词显示由当前的 5 行改为 7 行」。
+  /const LRC_RADIUS = 3;/.test(musicStageSrc) &&
+    /lrcWindow\(items\.length, activeIndex, LRC_RADIUS\)/.test(musicStageSrc) &&
+    JSON.stringify(lrcMod.lrcWindow(20, 10, 3)) === JSON.stringify({ start: 7, end: 14 }) &&
+    JSON.stringify(lrcMod.lrcWindow(20, 0, 3)) === JSON.stringify({ start: 0, end: 4 }) &&
+    JSON.stringify(lrcMod.lrcWindow(5, 4, 3)) === JSON.stringify({ start: 1, end: 5 }),
 );
 
 check(

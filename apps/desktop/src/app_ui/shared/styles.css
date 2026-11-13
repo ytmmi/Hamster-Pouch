@@ -5883,15 +5883,29 @@ button.danger {
   color: rgba(255, 255, 255, 0.9);
 }
 
-/* 当前句**逐字**填充（用户 2026-11-13 D171，参考图 2 的口径：唱到的字亮、没唱到的淡）。
-   字色自带 0.18s 过渡，边界推进时不会一格一格地"跳"。 */
-.player-lyrics[data-variant="haze"] .player-lyric-char {
+/* 当前句按**进度条**推进（用户 2026-11-13 D172：不要逐字跳格）。
+   同一行文字渲染两层：底层是"未唱"的淡色，上层是"已唱"的亮色，用 `clip-path` 从左往右
+   揭开——边界是连续移动的，跟播放位置同步；`transition` 让 `timeupdate`（约 4Hz）之间也
+   看不出台阶。 */
+.player-lyrics[data-variant="haze"] .player-lyric.is-active .player-lyric-base {
   color: rgba(255, 255, 255, 0.55);
-  transition: color 0.18s linear;
 }
 
-.player-lyrics[data-variant="haze"] .player-lyric.is-active .player-lyric-char[data-sung="true"] {
+.player-lyrics[data-variant="haze"] .player-lyric-fill {
   color: #fff;
+}
+
+.player-lyric-main {
+  position: relative;
+}
+
+.player-lyric-fill {
+  position: absolute;
+  inset: 0;
+  /* 蒙版宽度 = 已播进度：右侧被裁掉的部分露出底层文字。 */
+  clip-path: inset(0 calc(100% - var(--player-lyric-progress, 0%)) 0 0);
+  transition: clip-path 0.2s linear;
+  pointer-events: none;
 }
 
 /* 样式 2：不模糊、不错位，靠**颜色深浅**分层（参考图是淡紫灰 → 深藏青）。 */
@@ -5944,14 +5958,13 @@ button.danger {
   opacity: 1;
 }
 
-/* 样式 2 的逐字填充反过来：**没唱到的淡紫、唱到的深墨**（参考图 1 里最后一个"握"就是
-   已经唱到的那一格）。浅底上"越唱越深"比"越唱越亮"更清楚。 */
-.player-lyrics[data-variant="disc"] .player-lyric-char {
+/* 样式 2 的进度条反过来：**没唱到的淡紫、唱到的深墨**（浅底上"越唱越深"比"越唱越亮"
+   更清楚，也与参考图 1 里那个深色的末字一致）。 */
+.player-lyrics[data-variant="disc"] .player-lyric.is-active .player-lyric-base {
   color: color-mix(in srgb, var(--player-accent, #5b46c9) 62%, transparent);
-  transition: color 0.18s linear;
 }
 
-.player-lyrics[data-variant="disc"] .player-lyric.is-active .player-lyric-char[data-sung="true"] {
+.player-lyrics[data-variant="disc"] .player-lyric-fill {
   color: var(--player-ink, #232840);
 }
 
