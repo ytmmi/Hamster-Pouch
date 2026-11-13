@@ -214,6 +214,10 @@ apps/desktop/src/app_ui/
                         #   都不像版本号"必须与"确认已最新"分开，否则首发前会谎称已是最新
   menu/               # 顶部功能条、右键菜单
   shared/             # **AudioWaveform**（音频波形图：三处面板共用的一套显示 + 取图；
+                      #   手势（2026-11-13 / D168）：`onSeek` 之外还收 `onTap`——`pointerup` 时位移
+                      #   < `WAVE_DRAG_THRESHOLD_PX`（4px）算**点击**（媒体播放器用它暂停/继续），
+                      #   否则算**拖拽定位**；并 `stopPropagation()`，否则冒泡到画面区会再取反一次
+
                       #     纯几何在 waveformView：waveDrawnBox/waveCursorPercent/waveSeekSeconds）、
                       #   TagInput、SwitchToggle（胶囊开关：**所有**勾选框的唯一实现）、
                       #   panelLayout（布局 JSON 规范化）、settingValue（设置值读取 + 四条触发源热加载：宿主项与面板项共用）、
@@ -470,7 +474,12 @@ apps/desktop/src/app_ui/
                             #   2026-11-13 用户澄清"视频播放器可以播放音频，只是音频只有
                             #   基础功能"——音频在这里只有单击暂停 / 进度条 / 波形 / 音量
                             #   （波形**顶替视频区**：`.player-stage[data-stage="audio"]` 里
-                            #   `<video>` 缩成 1px 透明只出声、`AudioWaveform` 绝对定位铺满；
+                            #   `<video>` 缩成 1px 透明只出声、`AudioWaveform` 绝对定位铺满（波形上
+                            #   **单击 = 暂停/继续、拖动 = 定位**）；播放内核自 2026-11-13 D168 起
+                            #   **不在设源的同一拍 `play()`**：`loadAndPlay` 只认领文件 + 换 src，
+                            #   真正的 play 放在 `onLoadedMetadata`（`autoPlayRef` 为真才播），
+                            #   `loadedFileIdRef` 在 `await filePath` **之前**认领（否则"选中即预载"
+                            #   的 effect 会抢着预载并清掉 autoPlay）；
                             #   选中即预载 `src`（`autoPlayRef` / `loadedFileIdRef`）但不出声），
                             #   封面 / 歌词 / 两套样式 / 上一首下一首都归 `MusicPlayerPanel`。
                             #   DOM `<video>` 播放控制，
@@ -517,6 +526,16 @@ apps/desktop/src/app_ui/
                             #     歌词窗口 `LRC_RADIUS = 2`（可见 5 行）；
                             #     收藏是**非交互 `<span role="img">`**，不是 disabled 按钮——
                             #     按钮会暗示"点了会有反应"；无歌词整块 `Lyrics` 直接 return null；
+                            #     disc 的控制区（进度/传输/音量/收藏）从 2026-11-13 D168 起固定在
+                            #     **面板底部、只占左列**：`.player-layout[data-variant="disc"]` 是两行
+                            #     网格（`minmax(0, 1fr) auto`），`.player-bar` 占 `grid-column: 1;
+                            #     grid-row: 2`——不再用"给歌词块加 min-height"把控制条顶下去；
+                            #     收藏爱心是**空心描边**（实心红留给"已收藏"，功能未实装）；
+                            #     色晕是**噪波**：根节点注入 `--player-haze-noise` 指向 `useId()`
+                            #     生成的内联 SVG 滤镜（feTurbulence + `<animate baseFrequency>`
+                            #     + feDisplacementMap），那个 `<svg>` 必须 `position: absolute;
+                            #     width: 0; height: 0`，否则按内联 SVG 默认 300×150 占位、
+                            #     把整块舞台往下推；
                             #     无封面**不省略那一块**：`CoverVisual` 用曲名渲染占位封面
                             #     （同一块画布、同样的圆角与投影），**唱片圆心例外**（不写字，
                             #     无封面就是唱片的正常部分）；`data-has-lyrics` 让"没有歌词"
@@ -537,7 +556,11 @@ apps/desktop/src/app_ui/
                             #     直接 import 断言；`playableFiles` / `stepPlayable` 在**同类**
                             #     里走、不跨 audio↔video；`StepOptions.shuffle` 只在同类里抽
                             #     且不抽自己，`repeat` = off / all / one —— off 在端点返回
-                            #     -1 并禁用按钮、all/one 环绕、one 只管自动续播）
+                            #     -1 并禁用按钮、all/one 环绕、one 只管自动续播）；
+                            #     2026-11-13 D168 起再收一层 `PlaybackMode {shuffle, repeat}`：
+                            #     `DEFAULT_PLAYBACK_MODE = {shuffle: false, repeat: "off"}`，
+                            #     `toggleShuffleMode` / `cycleRepeatMode` 保证**随机与循环互斥**
+                            #     （点其一取消另一个，循环 off→all→one→off），门禁直接跑行为等式）
                             #   useMusicQueue.ts 音乐队列（`usePlayableQueue(..., "audio")` 的
                             #     一档：面板侧不必再传 kind，类型固定为"只收音频"）
                             #   haze.ts 配色（后端色板 → CSS 变量：`hazeVars` 给**两盏**色晕
@@ -747,6 +770,10 @@ HamsterPouch/
                               #     -show_entries format_tags` 读 `title` / `artist`（大小写与
                               #     `album_artist` 都认）；**索引里没有标签字段**，所以播放时按需读、
                               #     不落库；读不到只是 `None`，播放器回退到文件名切分
+                              #   + 歌词（2026-11-13 / D168）：`AudioTags.lyrics` 从 `LYRICS` /
+                              #     `UNSYNCEDLYRICS` / `SYNCEDLYRICS` / `LRC` 等键取；值若是一段
+                              #     JSON 再取其中 `lyrics` / `lrc` 字段；按**字符**截断 20 万
+                              #     （中文按字节切会切碎）。微云 flac 的歌词就整段在 `LYRICS` 标签里
     hp-book/                  # 电子书元数据 / 封面 / **正文 + 目录**解析（EPUB = ZIP + OPF；txt/md 需判编码）
                               #   自实现最小 ZIP 读取器（zip.rs）+ 极简 XML 取值（xml.rs）+
                               #   EPUB 元数据解析（epub.rs）+ 封面格式判定（cover.rs）+ 格式分发（meta.rs）；

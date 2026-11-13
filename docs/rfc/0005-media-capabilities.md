@@ -131,12 +131,17 @@
   - **两种样式是音乐面板的设置**：`panel.music.style`（`select`，`haze` / `disc`，缺省 `haze`），
     与音量、自动暂停同在一个设置组；取值归一化在 `panels/music/musicStyle.ts`，设置层的
     `select` 候选与它逐项一致（`check:settings` 断言 TS ↔ Rust 镜像）。
-  - **动效只表达状态**：晕染**两盏**光斑以 31s/39s 做三段位移+缩放，整层再叠一条 52s 的色相漂移
-    （`player-haze-tint`）——只漂位置会让"颜色本身"看着是死的（用户 2026-11-13：
-    「颜色晕是会运动变化的，不是固定的」）；样式 2 的唱片**只在播放时转**，暂停时 `animation-play-state: paused` 停在**当前
-    角度**（不是回到 0°——那读起来像"刚放上去"）；`prefers-reduced-motion: reduce` 下两个
-    动画都停。收藏**只显示图标、不可交互**（功能后续），因此用非交互 `span` 而非 disabled
-    按钮——disabled 会给出"这个按钮现在不能用"的错误暗示。
+  - **动效只表达状态**：晕染是**会变换的噪波**（用户 2026-11-13 D168 原话："变换、运动指的是
+    色团移动、交融、形状变换，就像放大的、随着时间变换的噪波一样"）——两盏色团各挂一条
+    `feTurbulence` + `feDisplacementMap` 的 SVG 滤镜（`--player-haze-noise`，`baseFrequency`
+    用 `<animate>` 在 43s 内往复），再做互质的 `border-radius` morph（71s / 83s）与位移
+    （47s / 61s），整层叠一条 52s 的色相漂移（`player-haze-tint`）。只漂位置会被看成"一张图
+    在平移"，而形状不变就没有"交融"；那个内联 `<svg>` 必须 `position: absolute; width: 0;
+    height: 0`——否则默认尺寸会撑开布局。样式 2 的唱片**只在播放时转**，暂停时
+    `animation-play-state: paused` 停在**当前角度**（不是回到 0°——那读起来像"刚放上去"）；
+    `prefers-reduced-motion: reduce` 下全部动画停。收藏**只显示图标、不可交互**（功能后续），
+    因此用非交互 `span` 而非 disabled 按钮——disabled 会给出"这个按钮现在不能用"的错误暗示；
+    爱心是**空心描边**，实心红留给"已收藏"。
   - **两套样式不是同一张排版换配色**（2026-11-13 第二轮，用户："要和参考图几乎一致"）：
     **样式 1（`haze`）** 深底浅字，背景是**两盏主色光斑**（不垫封面糊图——用户 2026-11-13「样式 1 不是直接对封面的高斯模糊」）；
     左列是
@@ -166,7 +171,8 @@
     `src`，于是音乐舞台在开唱前永远是 `--:--`——参考图的未开唱状态写着 `0:00` / `-3:24`。
     现在选中变化的 effect **只预载**（`preload="metadata"`，`autoPlayRef = false`），时长、
     进度条、封面、色晕立刻到位；**首次播放仍然必须由用户手势发起**（D142 原样有效），
-    "选中"不等于"开始播放"。
+    "选中"不等于"开始播放"。预载与"点了播放"会竞争同一个文件：`loadAndPlay` 必须先认领
+    `loadedFileIdRef`（在 `await` 之前）再换源，否则两边的 `autoPlayRef` 互相覆盖。
   - **`0:00` 是合法位置**：`formatMs()` 把 `≤ 0` 当成"没有时长"（视频模式的历史口径），
     但进度条的起点必须显示 `0:00`——音乐面板左端用 `formatClock()`（允许 0），右端仍是
     倒计时 `formatRemaining()`。
@@ -184,9 +190,32 @@
     画面区不再是黑块——`.player-stage[data-stage="audio"]` 里 `<video>` 缩成 1px 透明只出声，
     `AudioWaveform` **绝对定位铺满整个画面区**（不是"进度条上方再加一条波形"）。进度条、
     音量、单击暂停这些基础能力照旧；**没有**上一首/下一首（那是音乐面板的事）。
-  - **控制条在歌词底下**：样式 2 的歌词列 `min-height: 30cqh` 托住中部，进度与传输因此落在
-    歌词下方；没有歌词时用 `.player-info[data-has-lyrics="false"] .player-seek { margin-top }`
-    补同样的空白，不把控制条贴到标题下面。
+  - **控制区固定在面板底部，只占左列**（2026-11-13 D168 用户裁决："控制图标默认在面板底部，
+    和样式 1 类似，不是和唱片平齐"）：样式 2 的舞台是两行网格（`grid-template-rows:
+    minmax(0, 1fr) auto`），标题与歌词在第一行，`SeekBar` / `Transport` / `VolumeBar` 装进
+    `.player-bar`（`grid-column: 1; grid-row: 2`）——宽度天然等于左列，**不会横跨唱片下方**。
+    早先用「给歌词块一个 `min-height: 30cqh` 把控制条顶下去」的写法已删除：那是把排版意图
+    藏进一个跟歌词无关的数值里，歌词一多就失效。
+  - **播放内核等 `loadedmetadata` 才播**（2026-11-13 D168 真机修）：设源与 `play()` 不能在同一
+    拍——`video.load()` 之后立刻 `play()` 会被 Chromium 以 `AbortError: The play() request was
+    interrupted by a call to load()` 拒掉，表现为"切歌成功但没声音"。两个面板统一为：`loadAndPlay`
+    只认领文件 + 换 `src`，真正的 `play()` 放在 `onLoadedMetadata` 里（`autoPlayRef.current` 为真
+    才播）；切歌前先 `setPlaying(false)`，图标不靠元素事件才纠正。`loadedFileIdRef` 必须在
+    `await api.filePath()` **之前**认领——否则"选中即预载"的 effect 会抢着预载并清掉 `autoPlayRef`，
+    结果是有源、有进度、就是不出声。
+  - **音频舞台上单击 = 暂停/继续、拖动 = 定位**（2026-11-13 D168）：波形铺满画面区后，单纯
+    `click → seek` 会与"单击暂停"打架。`AudioWaveform` 用指针手势区分：`pointerup` 时位移
+    < `WAVE_DRAG_THRESHOLD_PX`（4px）算点击（调 `onTap`），否则算拖拽（调 `onSeek`），并
+    `stopPropagation()` 防止冒泡到画面区再取反一次。
+  - **随机与循环互斥**（2026-11-13 D168 用户裁决："当点击了其中之一要取消另一个，不能图标上
+    两个都是启用状态"）：`queueView.ts` 的 `toggleShuffleMode` / `cycleRepeatMode` 是纯函数——
+    点随机即把 `repeat` 归 `off`，点循环即把 `shuffle` 归 `false`，循环档位 `off → all → one →
+    off`；默认 `{ shuffle: false, repeat: "off" }`（顺序播放）。
+  - **歌词 .lrc 优先、内嵌标签兜底**（2026-11-13 用户裁决，D168）：同目录同名 `.lrc` 存在就
+    读它（编码按 BOM → UTF-8 合法性 → chardetng → GBK 兜底）；没有才用音频内嵌标签
+    （`hp_media::read_audio_tags` 的 `lyrics`，认 `LYRICS` / `UNSYNCEDLYRICS` / `SYNCEDLYRICS` /
+    `LRC` 等键，值若是 JSON 再取其中的 `lyrics` / `lrc` 字段）。内嵌文本本来就有标签编码，
+    已按 UTF-8 解出，不再做编码嗅探；两者都没有才整块不渲染歌词。
 - **首次播放必须内嵌（随 DOM `<video>` 方案天然满足）**：DOM 元素永远在面板内，不存在
   "渲染目标未就绪弹独立窗口"的时序竞争（`docs/issues/0001` 的根因 1–6 一并消除）。
 - **IPC 管道的两条硬约束（2026-09 实测，`media.*` 命令层仍遵守）**：mpv 的命名管道
