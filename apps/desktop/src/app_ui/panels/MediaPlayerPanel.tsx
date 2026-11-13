@@ -104,8 +104,8 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   const app = useApp();
   /** 当前加载的视频源（`convertFileSrc` 后的可播 URL）；`null` = 无源。 */
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  /** 播放请求序号：每次请求 +1，触发"加载后自动播放"（同文件重播也生效）。 */
-  const [playToken, setPlayToken] = useState(0);
+  /** 当前源的 URL（与 `videoUrl` 同步保存在 ref 里，供异步回调比较"源有没有换"）。 */
+  const videoUrlRef = useRef<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   /** 拖动进度条中：此时以本地值为准，不被 timeupdate 覆盖。 */
   const scrubbingRef = useRef(false);
@@ -132,6 +132,7 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   /** 最新 app 上下文（供只订阅一次的 effect 读取，避免闭包过期）。 */
   const appRef = useRef(app);
   appRef.current = app;
+  videoUrlRef.current = videoUrl;
 
   /**
    * 音量（百分比 0–100）。走面板设置的**标准读取路径**：`usePanelSettingValue`
@@ -170,19 +171,30 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
       return;
     }
     busyRef.current = true;
+    // 先认领这个文件，再等路径：否则"选中变化 → 只预载"那条 effect 会抢在前面
+    // 把 `autoPlayRef` 打回 false，切视频/切音频就只换源不出声。
+    loadedFileIdRef.current = fileId;
     try {
       const path = await api.filePath({ repoId: ctx.repoId, fileId });
-      // 这条路径一定出声（双击视频 / 无源时单击画面 / 点传输键）。
+      // 这条路径一定出声（双击 / 无源时单击画面 / 重播同一个文件）。
       autoPlayRef.current = true;
-      loadedFileIdRef.current = fileId;
-      setVideoUrl(convertFileSrc(path));
       setPositionMs(0);
       setScrubMs(null);
       setDurationMs(0);
-      // 触发"src 就绪后自动播放"（双击视频 = 立即播放；被浏览器策略拦截则等用户单击）。
-      setPlayToken((token) => token + 1);
+      const nextUrl = convertFileSrc(path);
+      if (nextUrl === videoUrlRef.current && videoRef.current) {
+        // 同一个文件再播：源没换，元素不会重新加载——回到开头直接出声即可
+        // （换源那次不能这么做，见 `onLoadedMetadata`）。
+        autoPlayRef.current = false;
+        videoRef.current.currentTime = 0;
+        void videoRef.current.play().catch(() => undefined);
+        ctx.status(ctx.t("player.playing"), "ok");
+        return;
+      }
+      setVideoUrl(nextUrl);
       ctx.status(ctx.t("player.playing"), "ok");
     } catch (e) {
+      loadedFileIdRef.current = null;
       ctx.status(ctx.t("player.playFailed", { err: errorTextOf(ctx.t, e) }), "error");
     } finally {
       busyRef.current = false;
@@ -299,23 +311,6 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
       }
     });
   }, [loadAndPlay]);
-
-  // src 变化（或新的播放请求）→ 自动播放：重置到开头再播。
-  // 同文件重复请求时 src 不变，靠 `playToken` 触发；`load()` 强制重新加载。
-  useEffect(() => {
-    if (!videoUrl || !autoPlayRef.current) {
-      return;
-    }
-    const video = videoRef.current;
-    if (!video) {
-      return;
-    }
-    autoPlayRef.current = false;
-    video.pause();
-    video.currentTime = 0;
-    video.load();
-    void video.play().catch(() => undefined);
-  }, [videoUrl, playToken]);
 
   /**
    * 选中变化 → **只预载元数据，不出声**（用户 2026-11-13 真机反馈：双击音频进播放器时
@@ -444,11 +439,26 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     setDraftVolume(clampVolume(value));
   };
 
-  /** 视频元数据就绪 → 进度条总时长。 */
+  /**
+   * 元数据就绪 → 总时长；若这次请求"要出声"，在这里 `play()`。
+   *
+   * **不能**在设 `src` 的同一拍调 `play()`：`load()` 与 `play()` 抢同一个元素时，
+   * Chromium 以 `AbortError: The play() request was interrupted by a call to load()`
+   * 拒绝播放——音频的表现就是"切过去了但不出声，图标也不动"。等 `loadedmetadata`
+   * 再播既没有竞态，也不会被自动播放策略拦下（请求本身来自点击 / 蓝图动作）。
+   */
   const onLoadedMetadata = () => {
     const video = videoRef.current;
-    if (video && Number.isFinite(video.duration)) {
+    if (!video) {
+      return;
+    }
+    if (Number.isFinite(video.duration)) {
       setDurationMs(Math.round(video.duration * 1000));
+    }
+    if (autoPlayRef.current) {
+      autoPlayRef.current = false;
+      video.currentTime = 0;
+      void video.play().catch(() => undefined);
     }
   };
 
@@ -567,6 +577,7 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
             durationMs={durationMs > 0 ? durationMs : null}
             positionMs={displayPosition}
             onSeek={(seconds) => commitSeek(seconds * 1000)}
+            onTap={() => void handleStageClick()}
             className="player-wave"
             t={app.t}
           />

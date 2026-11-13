@@ -26,19 +26,25 @@ use hp_core::{HpError, HpResult};
 
 use crate::process::{hidden_command, run_with_timeout};
 
-/// 音频标签。两个字段都可能为空（文件没打标签是常态）。
+/// 音频标签。字段都可能为空（文件没打标签是常态）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AudioTags {
     /// 曲名（`TITLE` / `title`）。
     pub title: Option<String>,
     /// 艺术家（`ARTIST` / `album_artist` 兜底）。
     pub artist: Option<String>,
+    /// 内嵌歌词（`LYRICS` / `UNSYNCEDLYRICS` / … 或标签里的一段 JSON，见
+    /// [`lyrics_of_tags`]）。
+    ///
+    /// 只给**音乐播放器**做兜底：同目录若有同名 `.lrc`，以那份为准（用户
+    /// 2026-11-13 裁决）——`.lrc` 可以手改、可以双语，文件内的标签改不了。
+    pub lyrics: Option<String>,
 }
 
 impl AudioTags {
-    /// 两个字段都为空——调用方据此决定是否回退到文件名。
+    /// 三个字段都为空——调用方据此决定是否回退到文件名。
     pub fn is_empty(&self) -> bool {
-        self.title.is_none() && self.artist.is_none()
+        self.title.is_none() && self.artist.is_none() && self.lyrics.is_none()
     }
 }
 
@@ -109,7 +115,99 @@ fn parse_tags_json(bytes: &[u8]) -> HpResult<AudioTags> {
     Ok(AudioTags {
         title: get(&["title", "TITLE", "Title"]),
         artist: get(&["artist", "ARTIST", "Artist", "album_artist", "ALBUM_ARTIST"]),
+        lyrics: lyrics_of_tags(tags),
     })
+}
+
+/// 歌词可能出现的标签名（不同来源的叫法差别很大，逐个试）。
+const LYRICS_KEYS: &[&str] = &[
+    "LYRICS",
+    "lyrics",
+    "Lyrics",
+    "UNSYNCEDLYRICS",
+    "unsyncedlyrics",
+    "UNSYNCED LYRICS",
+    "unsynced_lyrics",
+    "SYNCEDLYRICS",
+    "syncedlyrics",
+    "LYRIC",
+    "lyric",
+    "LRC",
+    "lrc",
+];
+
+/// 内嵌歌词上限（字符）。与 `.lrc` 的读取上限一致：正常歌词是几 KB 量级，
+/// 上限只用来挡住"把整张专辑塞进标签"的异常文件。
+const LYRICS_MAX_CHARS: usize = 200_000;
+
+/// 从 `format_tags` 里取歌词。
+///
+/// 两条路径，先专名后兜底：
+///
+/// 1. [`LYRICS_KEYS`] 里的专名标签，值**就是** LRC 文本（微信/微云、网易云、
+///    Foobar 等导出常见这种）；
+/// 2. 值本身是一段 JSON（用户 2026-11-13 提到的 `[weiyun]` 文件就是这么存的），
+///    从 `lyrics` / `lyric` / `lrc` 字段里取出字符串。
+///
+/// 认不出来就当没有——歌词是增强，不是播放的前提。
+fn lyrics_of_tags(tags: Option<&serde_json::Value>) -> Option<String> {
+    let tags = tags?;
+    let map = tags.as_object()?;
+
+    for key in LYRICS_KEYS {
+        if let Some(text) = tag_text(map.get(*key)) {
+            let text = text.trim_start_matches('\u{feff}').trim();
+            if !text.is_empty() {
+                return Some(truncate_chars(text, LYRICS_MAX_CHARS));
+            }
+        }
+    }
+
+    // 兜底：任何标签里塞了 JSON，就看它有没有 lyrics / lyric / lrc 字段。
+    for (_, raw) in map {
+        let Some(text) = tag_text(Some(raw)) else {
+            continue;
+        };
+        let trimmed = text.trim();
+        if !trimmed.starts_with('{') {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+        for key in ["lyrics", "lyric", "lrc", "LRC"] {
+            if let Some(found) = value.get(key).and_then(|v| v.as_str()) {
+                let found = found.trim();
+                if !found.is_empty() {
+                    return Some(truncate_chars(found, LYRICS_MAX_CHARS));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 标签值是字符串或字符串数组（Vorbis 允许多值），取第一条非空。
+fn tag_text(raw: Option<&serde_json::Value>) -> Option<String> {
+    let raw = raw?;
+    let text = match raw {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .find_map(|item| item.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        _ => return None,
+    };
+    (!text.trim().is_empty()).then_some(text)
+}
+
+/// 按**字符**截断（不能按字节切，中文会被切坏）。
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    text.chars().take(max_chars).collect()
 }
 
 #[cfg(test)]
@@ -151,6 +249,29 @@ mod tests {
             Some("Various"),
             "没有 artist 时用 album_artist 兜底"
         );
+    }
+
+    #[test]
+    fn reads_lyrics_tag_text() {
+        let json =
+            br#"{"format":{"tags":{"TITLE":"half","LYRICS":"[00:02.50]first\n[00:07.50]second"}}}"#;
+        let tags = parse_tags_json(json).expect("应能解析");
+        let lyrics = tags.lyrics.expect("应读到歌词");
+        assert!(lyrics.contains("[00:02.50]"), "歌词应是原样的 LRC 文本");
+        assert!(lyrics.contains('\n'), "换行要保留");
+    }
+
+    #[test]
+    fn reads_lyrics_from_json_tag() {
+        let json = br#"{"format":{"tags":{"WEIYUN":"{\"lyrics\":\"[00:01.00]in json\"}"}}}"#;
+        let tags = parse_tags_json(json).expect("应能解析");
+        assert_eq!(tags.lyrics.as_deref(), Some("[00:01.00]in json"));
+    }
+
+    #[test]
+    fn no_lyrics_is_none() {
+        let json = br#"{"format":{"tags":{"TITLE":"x","COMMENT":"{not json"}}}"#;
+        assert!(parse_tags_json(json).expect("应能解析").lyrics.is_none());
     }
 
     #[test]

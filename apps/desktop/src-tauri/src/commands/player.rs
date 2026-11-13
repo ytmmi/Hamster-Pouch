@@ -142,13 +142,25 @@ fn resolve_cover(
 }
 
 /// 读同目录同名 `.lrc`（编码自动判定），空文件当作没有歌词。
-fn read_lyrics(src_path: &Path) -> Option<String> {
-    let path = hp_media::find_sibling_lyrics(src_path)?;
-    let decoded = hp_book::decode_file_limited(&path, LYRICS_MAX_CHARS, LYRICS_MAX_BYTES).ok()?;
-    // BOM 已由解码层处理，但个别 GBK 文件会在首行留一个 U+FEFF 的"伪 BOM"，
-    // 前端解析时它会让第一行时间标签匹配失败，这里顺手剥掉。
-    let text = decoded.text.trim_start_matches('\u{feff}');
-    (!text.trim().is_empty()).then(|| text.to_string())
+/// 取歌词：**同目录同名 `.lrc` 优先，音频内嵌标签作兜底**（用户 2026-11-13 裁决）。
+///
+/// 为什么 `.lrc` 优先：它是外部文件，可以手改、可以放双语对照，改完立刻生效；
+/// 内嵌标签写在音频里，用户改不了——两者都有时，用户维护的那份更该赢。
+fn read_lyrics(src_path: &Path, embedded: Option<&str>) -> Option<String> {
+    if let Some(path) = hp_media::find_sibling_lyrics(src_path) {
+        let decoded =
+            hp_book::decode_file_limited(&path, LYRICS_MAX_CHARS, LYRICS_MAX_BYTES).ok()?;
+        // BOM 已由解码层处理，但个别 GBK 文件会在首行留一个 U+FEFF 的"伪 BOM"，
+        // 前端解析时它会让第一行时间标签匹配失败，这里顺手剥掉。
+        let text = decoded.text.trim_start_matches('\u{feff}');
+        if !text.trim().is_empty() {
+            return Some(text.to_string());
+        }
+    }
+    // 没有 `.lrc`（或那份是空的）→ 用标签里自带的 LRC 文本。
+    // 内嵌歌词已是 UTF-8 字符串（ffprobe 的 JSON 输出），不需要再判编码。
+    let embedded = embedded?.trim_start_matches('\u{feff}');
+    (!embedded.trim().is_empty()).then(|| embedded.to_string())
 }
 
 /// `player.media`：按 `file_id` 返回封面路径与歌词正文。
@@ -198,12 +210,12 @@ pub(crate) async fn player_media(
                 &cache_for_task,
                 ffmpeg.as_deref(),
             );
-            let lyrics = read_lyrics(&src_for_task);
             // 标签读不出来 = 没有标签（前端回落文件名），不是错误。
             let tags = ffprobe_for_task
                 .as_deref()
                 .and_then(|bin| hp_media::read_audio_tags(&src_for_task, bin, TAGS_TIMEOUT).ok())
                 .unwrap_or_default();
+            let lyrics = read_lyrics(&src_for_task, tags.lyrics.as_deref());
             // 取色失败 = 没有兜底色（前端用 CSS 默认晕染），不向上抛：
             // 色晕是观感，不该让"封面取不到色"变成切歌失败。
             let haze = cover

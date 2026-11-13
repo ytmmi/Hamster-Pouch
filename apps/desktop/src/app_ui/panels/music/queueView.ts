@@ -19,6 +19,35 @@ export type PlayableKind = "audio" | "video";
 /** 循环模式：关 / 列表循环 / 单曲循环。 */
 export type RepeatMode = "off" | "all" | "one";
 
+/**
+ * 播放模式的**互斥状态机**（用户 2026-11-13 D168 裁决）。
+ *
+ * 随机与循环在同一时刻只能亮一个：点随机就取消循环，点循环就取消随机。
+ * 默认是"顺序播放"（`shuffle: false` + `repeat: "off"`）——比默认列表循环更像
+ * 用户对"我刚放了一首歌"的预期，也避免与随机抢同一枚视觉高亮。
+ */
+export interface PlaybackMode {
+  shuffle: boolean;
+  repeat: RepeatMode;
+}
+
+export const DEFAULT_PLAYBACK_MODE: PlaybackMode = { shuffle: false, repeat: "off" };
+
+/** 点随机键：开随机就关循环；再点一次回到顺序播放。 */
+export function toggleShuffleMode(mode: PlaybackMode): PlaybackMode {
+  if (mode.shuffle) {
+    return { shuffle: false, repeat: mode.repeat };
+  }
+  return { shuffle: true, repeat: "off" };
+}
+
+/** 点循环键：`off → all → one → off`；只要不是 `off`，随机必然被取消。 */
+export function cycleRepeatMode(mode: PlaybackMode): PlaybackMode {
+  const next: RepeatMode = mode.repeat === "off" ? "all" : mode.repeat === "all" ? "one" : "off";
+  // 无论进哪一档循环，随机都被取消：两个图标不能同时亮着（同一条裁决）。
+  return { shuffle: false, repeat: next };
+}
+
 /** 步进选项（都有缺省：`all` + 不随机，等于"按顺序环绕"）。 */
 export interface StepOptions {
   /** 随机播放：在同类里随机取一首（不是打乱整个队列的索引）。 */

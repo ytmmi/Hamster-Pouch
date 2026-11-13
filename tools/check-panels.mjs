@@ -7247,6 +7247,10 @@ const musicStageSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/music/MusicStage.tsx"),
   "utf8",
 );
+const waveformSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/AudioWaveform.tsx"),
+  "utf8",
+);
 
 check(
   "D166：LRC 一行多个时间标签拆成多句，`[offset:]` 整份平移（正数 = 歌词提前）",
@@ -7597,16 +7601,22 @@ check(
     hazeMod.hazeVars(["#eeeeee"])["--player-haze-a"] !== "#eeeeee",
 );
 check(
-  "D167：色晕会随时间变化（整层色相漂移 + 两盏光斑各自漂移），减少动效时全停",
-  // 用户 2026-11-13：「样式1、2的颜色晕是会运动变化的，不是固定的，要修正」。
+  "D168：色晕是随时间变换的噪波（位移 + 形状 morph + 色相漂移），减少动效时全停",
+  // 用户 2026-11-13 D168：「变换、运动指的是色团移动、交融、形状变换，就像放大的、
+  // 随着时间变换的噪波一样」——所以除了位移，还要有噪波位移与 border-radius 变形。
   /animation: player-haze-tint 52s/.test(stylesSource) &&
-    /@keyframes player-haze-tint/.test(stylesSource) &&
+    /filter: var\(--player-haze-noise, none\) blur\(/.test(stylesSource) &&
+    /@keyframes player-haze-morph-a/.test(stylesSource) &&
+    /@keyframes player-haze-morph-b/.test(stylesSource) &&
     (() => {
       const start = stylesSource.indexOf("@keyframes player-haze-drift-a {");
       const end = stylesSource.indexOf("@keyframes player-haze-drift-b {");
       const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
       return /0% \{/.test(body) && /50% \{/.test(body) && /100% \{/.test(body);
     })() &&
+    /feTurbulence/.test(musicStageSrc) &&
+    /feDisplacementMap/.test(musicStageSrc) &&
+    /attributeName="baseFrequency"/.test(musicStageSrc) &&
     // 第三盏光斑已经删掉（两色口径），别再把 `drift-c` 留在样式表里。
     !/player-haze-drift-c/.test(stylesSource) &&
     !/player-haze-blob-c/.test(stylesSource) &&
@@ -7618,8 +7628,8 @@ check(
     })(),
 );
 check(
-  "D167：样式 2 的唱片钉在右上并被裁切、控制条落在歌词底下（没歌词也留出那块）",
-  // 用户 2026-11-13：「控制条是在歌词底下的，唱片占比大，唱片中心偏移部分在右上角」。
+  "D168：样式 2 的控制区固定在面板底部、只占左侧列宽（唱片仍钉在右上被裁切）",
+  // 用户 2026-11-13 D168：「控制图标默认在面板底部，和样式 1 类似，不是和唱片平齐」。
   (() => {
     const start = stylesSource.indexOf(".player-vinyl {");
     const end = stylesSource.indexOf("}", start);
@@ -7630,9 +7640,22 @@ check(
       /width: min\(120cqh, 78cqw\)/.test(body)
     );
   })() &&
-    /min-height: 30cqh/.test(stylesSource) &&
-    /\.player-info\[data-has-lyrics="false"\] \.player-seek \{/.test(stylesSource) &&
-    /data-has-lyrics=\{items && items\.length > 0 \? "true" : "false"\}/.test(musicStageSrc),
+    (() => {
+      const start = stylesSource.indexOf(".player-bar {");
+      const end = stylesSource.indexOf("}", start);
+      const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
+      // 底栏落在左列第二行：宽度天然等于左列，不会横跨唱片下方。
+      return /grid-column: 1/.test(body) && /grid-row: 2/.test(body);
+    })() &&
+    (() => {
+      const start = stylesSource.indexOf('.player-layout[data-variant="disc"] {');
+      const end = stylesSource.indexOf("}", start);
+      const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
+      return /grid-template-rows: minmax\(0, 1fr\) auto/.test(body);
+    })() &&
+    /<div className="player-bar" data-variant="disc">/.test(musicStageSrc) &&
+    // 旧口径（用 min-height 把控制条顶到画面中部）必须彻底消失。
+    !/min-height: 30cqh/.test(stylesSource),
 );
 check(
   "D166：收藏只是图标（非交互 `span`，不是 disabled 按钮——禁用会暗示「现在不能用」）",
@@ -7655,6 +7678,71 @@ check(
     /@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*\.player-disc[^}]*animation:\s*none/.test(
       stylesSource,
     ),
+);
+check(
+  "D168：收藏爱心是空心描边（实心红留给「已收藏」，而收藏功能尚未实装）",
+  (() => {
+    const start = musicStageSrc.indexOf("function HeartIcon");
+    const end = musicStageSrc.indexOf("function SpeakerIcon");
+    const body = start >= 0 && end > start ? musicStageSrc.slice(start, end) : "";
+    return body.includes('fill="none"') && body.includes('stroke="currentColor"');
+  })(),
+);
+check(
+  "D168：随机与循环互斥（点其一必取消另一个，缺省是顺序播放）",
+  // 用户 2026-11-13 D168：「随机和循环的功能是冲突的，当点击了其中之一要取消另一个」。
+  queueView.DEFAULT_PLAYBACK_MODE.shuffle === false &&
+    queueView.DEFAULT_PLAYBACK_MODE.repeat === "off" &&
+    JSON.stringify(queueView.toggleShuffleMode({ shuffle: false, repeat: "off" })) ===
+      JSON.stringify({ shuffle: true, repeat: "off" }) &&
+    // 循环开着时点随机：循环被取消。
+    JSON.stringify(queueView.toggleShuffleMode({ shuffle: false, repeat: "all" })) ===
+      JSON.stringify({ shuffle: true, repeat: "off" }) &&
+    // 再点一次随机：回到顺序播放。
+    JSON.stringify(queueView.toggleShuffleMode({ shuffle: true, repeat: "off" })) ===
+      JSON.stringify({ shuffle: false, repeat: "off" }) &&
+    // 循环档位 off → all → one → off，且每一档都取消随机。
+    JSON.stringify(queueView.cycleRepeatMode({ shuffle: false, repeat: "off" })) ===
+      JSON.stringify({ shuffle: false, repeat: "all" }) &&
+    JSON.stringify(queueView.cycleRepeatMode({ shuffle: true, repeat: "all" })) ===
+      JSON.stringify({ shuffle: false, repeat: "one" }) &&
+    JSON.stringify(queueView.cycleRepeatMode({ shuffle: false, repeat: "one" })) ===
+      JSON.stringify({ shuffle: false, repeat: "off" }) &&
+    /toggleShuffleMode\(current\)/.test(musicPanelSrc) &&
+    /cycleRepeatMode\(current\)/.test(musicPanelSrc),
+);
+check(
+  "D168：播放内核不在「设源」的同一拍调 play()（load/play 竞态会让切歌不出声）",
+  // 真机现象：切歌成功但没声音、图标还停在「||」。两面板都必须等 loadedmetadata 再播。
+  !/\.load\(\)/.test(videoPanelSrc) &&
+    !/\.load\(\)/.test(musicPanelSrc) &&
+    /const onLoadedMetadata = \(\) => \{/.test(videoPanelSrc) &&
+    /const onLoadedMetadata = \(\) => \{/.test(musicPanelSrc) &&
+    /if \(autoPlayRef\.current\) \{/.test(videoPanelSrc) &&
+    /if \(autoPlayRef\.current\) \{/.test(musicPanelSrc) &&
+    // 切歌先落「暂停」态：图标不能等元素事件才纠正。
+    /setPlaying\(false\);/.test(musicPanelSrc),
+);
+check(
+  "D168：播放器音频时波形单击 = 暂停/继续、拖动 = 定位",
+  // 用户口径：媒体播放器的单击暂停/继续要与视频一致；波形铺满画面区后必须区分
+  // 「单击」与「拖动」，否则点一下既定位又切换播放。
+  /onTap\?: \(\) => void;/.test(waveformSrc) &&
+    /WAVE_DRAG_THRESHOLD_PX = 4/.test(waveformSrc) &&
+    /onPointerUp=\{onSeek \|\| onTap \? onPointerUp : undefined\}/.test(waveformSrc) &&
+    /event\.stopPropagation\(\);/.test(waveformSrc) &&
+    /onTap=\{\(\) => void handleStageClick\(\)\}/.test(videoPanelSrc),
+);
+check(
+  "D168：歌词优先读同目录 .lrc，读不到才用音频内嵌标签",
+  // 用户 2026-11-13：微云下载的 flac 把 LRC 存在 `LYRICS` 标签里（也可能是一段 JSON）。
+  /pub lyrics: Option<String>/.test(audioTagsSrc) &&
+    /const LYRICS_KEYS: &\[&str\] = &\[/.test(audioTagsSrc) &&
+    /fn lyrics_of_tags\(/.test(audioTagsSrc) &&
+    /"UNSYNCEDLYRICS"/.test(audioTagsSrc) &&
+    // JSON 标签兜底：任意标签里塞了 {"lyrics": "..."} 也能取出来。
+    /starts_with\('\{'\)/.test(audioTagsSrc) &&
+    /read_lyrics\(&src_for_task, tags\.lyrics\.as_deref\(\)\)/.test(playerCommandSrc),
 );
 
 // ============================== 汇总 ==============================

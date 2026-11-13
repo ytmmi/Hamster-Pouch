@@ -5336,13 +5336,28 @@ button.danger {
   animation: player-haze-tint 52s ease-in-out infinite alternate;
 }
 
+/* SVG 滤镜本身不参与布局：它一旦按内联元素算尺寸（300×150）就会把舞台内容整体推下去。 */
+.player-haze-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .player-haze-blob {
   position: absolute;
   border-radius: 50%;
-  filter: blur(clamp(24px, 8cqh, 70px));
+  /*
+   * 先过 SVG 噪波位移（`feTurbulence` + `feDisplacementMap`，见 `MusicStage.tsx`
+   * 里的滤镜定义），再高斯模糊：位移把圆边撕成流体，模糊把撕痕揉开——合起来才是
+   * 用户说的"像放大的、随时间变换的噪波"。滤镜 id 由组件用 `useId` 生成，
+   * 通过 `--player-haze-noise` 传进来；没有该变量时退回纯模糊（退化路径）。
+   */
+  filter: var(--player-haze-noise, none) blur(clamp(24px, 8cqh, 70px));
   opacity: 0.72;
   mix-blend-mode: screen;
-  will-change: transform;
+  will-change: transform, border-radius;
 }
 
 .player-haze-blob-a {
@@ -5351,7 +5366,10 @@ button.danger {
   left: -14%;
   top: -22%;
   background: var(--player-haze-a, #b9a4ff);
-  animation: player-haze-drift-a 31s ease-in-out infinite alternate;
+  /* 位移与形状两套周期互质（47s / 71s）：叠起来不会出现"整块一起呼吸"的机械感。 */
+  animation:
+    player-haze-drift-a 47s ease-in-out infinite alternate,
+    player-haze-morph-a 71s ease-in-out infinite;
 }
 
 .player-haze-blob-b {
@@ -5360,7 +5378,9 @@ button.danger {
   right: -16%;
   bottom: -24%;
   background: var(--player-haze-b, #ffb3cd);
-  animation: player-haze-drift-b 39s ease-in-out infinite alternate;
+  animation:
+    player-haze-drift-b 61s ease-in-out infinite alternate,
+    player-haze-morph-b 83s ease-in-out infinite;
 }
 
 @keyframes player-haze-tint {
@@ -5369,6 +5389,40 @@ button.danger {
   }
   to {
     filter: hue-rotate(20deg) saturate(1.14);
+  }
+}
+
+/*
+ * 形状 morph：`border-radius` 的八个值各自缓慢变化，色团才会"长出来又化掉"。
+ * 不用 `alternate`——来回摆动会被眼睛认出是"往复"，而噪波是持续单向演化。
+ */
+@keyframes player-haze-morph-a {
+  0% {
+    border-radius: 46% 54% 58% 42% / 52% 44% 56% 48%;
+  }
+  33% {
+    border-radius: 63% 37% 44% 56% / 39% 61% 39% 61%;
+  }
+  66% {
+    border-radius: 38% 62% 57% 43% / 59% 41% 59% 41%;
+  }
+  100% {
+    border-radius: 46% 54% 58% 42% / 52% 44% 56% 48%;
+  }
+}
+
+@keyframes player-haze-morph-b {
+  0% {
+    border-radius: 58% 42% 39% 61% / 44% 56% 44% 56%;
+  }
+  33% {
+    border-radius: 41% 59% 62% 38% / 61% 39% 61% 39%;
+  }
+  66% {
+    border-radius: 61% 39% 43% 57% / 38% 62% 38% 62%;
+  }
+  100% {
+    border-radius: 58% 42% 39% 61% / 44% 56% 44% 56%;
   }
 }
 
@@ -5736,12 +5790,10 @@ button.danger {
 .player-lyrics[data-variant="disc"] {
   justify-content: flex-start;
   gap: clamp(9px, 2.1cqh, 24px);
-  /* 最多铺到一半高度：再长就裁掉，进度条与传输行不能被歌词顶出画面。 */
-  max-height: 42cqh;
-  /* 最短也占住这块：控制条始终在"歌词底下"（约画面中部），不会因为没歌词
-     就贴到标题下面、把下半屏全空着（用户 2026-11-13：「控制条是在歌词底下的」）。 */
-  min-height: 30cqh;
-  margin: clamp(4px, 1cqh, 12px) 0 clamp(10px, 2.8cqh, 30px);
+  /* 吃掉信息区的剩余高度：歌词长了就在这块里裁切，绝不把底栏顶出去。 */
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: clamp(4px, 1cqh, 12px) 0 0;
 }
 
 .player-lyrics[data-variant="disc"] .player-lyric-main {
@@ -5859,13 +5911,30 @@ button.danger {
 /* ---------- 样式 2：左侧文字 + 右上角大唱片 ---------- */
 
 .player-layout[data-variant="disc"] {
-  display: flex;
-  /* 参考图是"信息页"：标题压在顶部（≈9%），歌词往下铺，进度/传输在 47–55%，
-     下面一大片留给浅色底——**不是**把整列垂直居中。 */
-  align-items: flex-start;
-  padding: 9cqh 4cqw 6cqh 7cqw;
+  /*
+   * 两行两列：左列上行是"标题 + 歌词"，左列下行是**固定在面板底部**的控制区；
+   * 右列整高留给唱片（用户 2026-11-13 D168：「控制图标默认在面板底部，和样式 1
+   * 类似，不是和唱片平齐」，且底栏「只占左侧列宽」）。
+   */
+  display: grid;
+  grid-template-columns: minmax(0, 52%) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  row-gap: clamp(6px, 1.4cqh, 16px);
+  align-items: start;
+  /* 标题压在顶部（≈9%），底部留出控制区的呼吸位。 */
+  padding: 9cqh 4cqw 4cqh 7cqw;
   /* 浅色底 + 深色字，整体氛围与样式 1 相反。 */
   color: var(--player-ink, #232840);
+}
+
+/* 左列下行的控制区：宽度天然等于左列（不横跨唱片下方）。 */
+.player-bar {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(6px, 1.5cqh, 16px);
+  min-width: 0;
 }
 
 .player-music[data-style="disc"] .player-haze {
@@ -5908,21 +5977,17 @@ button.danger {
   --player-seek-thumb: var(--player-ink, #232840);
 }
 
-/* 没有歌词时，控制条不该贴着标题：留一段与"歌词区"等价的空白，
-   让进度/传输仍落在画面中部（用户 2026-11-13：「控制条是在歌词底下的」）。 */
-.player-info[data-has-lyrics="false"] .player-seek {
-  margin-top: min(16cqh, 110px);
-}
-
 .player-info {
   position: relative;
   z-index: 2;
-  /* 58% 会让进度条压到唱片边沿；52% 刚好停在外环之外（参考图也是断在唱片左侧）。 */
-  width: 52%;
+  grid-column: 1;
+  grid-row: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: clamp(6px, 1.6cqh, 18px);
+  overflow: hidden;
 }
 
 .player-info-head {
@@ -6090,8 +6155,17 @@ button.danger {
     max-width: 24cqh;
   }
 
+  .player-layout[data-variant="disc"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .player-info {
     width: 100%;
+    grid-column: 1;
+  }
+
+  .player-bar {
+    grid-column: 1;
   }
 
   /* 唱片退到右下角当背景：大部分在画外，只露一段弧——窄面板里它一旦完整

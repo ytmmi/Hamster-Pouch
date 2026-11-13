@@ -54,8 +54,11 @@ import { parseLrc, type LrcDoc } from "./music/lrc";
 import { trackArtistOf, trackTitleOf } from "./music/trackInfo";
 import {
   canStepPlayable,
+  cycleRepeatMode,
+  DEFAULT_PLAYBACK_MODE,
   stepPlayable,
-  type RepeatMode,
+  toggleShuffleMode,
+  type PlaybackMode,
   type StepOptions,
 } from "./music/queueView";
 import { useMusicQueue } from "./music/useMusicQueue";
@@ -115,7 +118,8 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
   /** 当前加载的音频源（`convertFileSrc` 后的可播 URL）；`null` = 无源。 */
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   /** 播放请求序号：每次请求 +1，触发"加载后自动播放"（同文件重播也生效）。 */
-  const [playToken, setPlayToken] = useState(0);
+  /** 当前源的 URL（异步回调里判断"源有没有换"）。 */
+  const sourceUrlRef = useRef<string | null>(null);
   const audioRef = useRef<HTMLVideoElement>(null);
   const [durationMs, setDurationMs] = useState(0);
   const [positionMs, setPositionMs] = useState(0);
@@ -125,10 +129,11 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
    * 随机 / 循环（用户 2026-11-13 批准"随机和循环可以做"）。
    *
    * 只存在**本次会话**里，不落库：它们是"这次怎么听"，跟"这个面板长什么样"不是
-   * 一类东西（样式与音量才是设置）。缺省循环 = 列表循环，与"端点环绕"一致。
+   * 一类东西（样式与音量才是设置）。缺省 = 顺序播放（不随机、不循环），且两者
+   * **互斥**：点其一必取消另一个（用户 2026-11-13 裁决，见 `queueView.ts`）。
    */
-  const [shuffle, setShuffle] = useState(false);
-  const [repeat, setRepeat] = useState<RepeatMode>("all");
+  const [mode, setMode] = useState<PlaybackMode>(DEFAULT_PLAYBACK_MODE);
+  const { shuffle, repeat } = mode;
   const stepOptions: StepOptions = { shuffle, repeat };
   /** 「切换标签时自动暂停」当前值（未设置 = 默认开）；用 ref 供可见性回调读取。 */
   const autoPauseRef = useRef(true);
@@ -148,6 +153,7 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
   /** 最新 app 上下文（供只订阅一次的 effect 读取，避免闭包过期）。 */
   const appRef = useRef(app);
   appRef.current = app;
+  sourceUrlRef.current = sourceUrl;
 
   const selectedFile = app.selectedFile;
   const isAudio = selectedFile?.media_type === "audio";
@@ -194,17 +200,32 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
       return;
     }
     busyRef.current = true;
+    // 先认领这个文件，再等路径：否则"选中变化 → 只预载"那条 effect 会抢在前面
+    // 把 `autoPlayRef` 打回 false（它看到 `loadedFileIdRef` 还是旧文件就自己去预载），
+    // 于是切歌后有源、有进度、就是不出声。
+    loadedFileIdRef.current = fileId;
     try {
       const path = await api.filePath({ repoId: ctx.repoId, fileId });
       autoPlayRef.current = true;
-      loadedFileIdRef.current = fileId;
-      setSourceUrl(convertFileSrc(path));
       setPositionMs(0);
       setDurationMs(0);
-      // 触发"src 就绪后自动播放"（被浏览器策略拦截则等用户单击）。
-      setPlayToken((token) => token + 1);
+      // 切歌先落"暂停"这一态：图标由元素事件驱动，但换源到真正出声之间有一段
+      // 异步间隙，不先落下来的话旧曲目的"||"会一直挂着（用户真机反馈的现象）。
+      setPlaying(false);
+      const nextUrl = convertFileSrc(path);
+      if (nextUrl === sourceUrlRef.current && audioRef.current) {
+        // 同一首再播：源没换，直接回到开头出声（换源那次交给 `onLoadedMetadata`）。
+        autoPlayRef.current = false;
+        audioRef.current.currentTime = 0;
+        void audioRef.current.play().catch(() => undefined);
+        ctx.status(ctx.t("music.playing"), "ok");
+        return;
+      }
+      setSourceUrl(nextUrl);
       ctx.status(ctx.t("music.playing"), "ok");
     } catch (e) {
+      // 路径没拿到：把认领退回去，选中变化时那条预载 effect 还能再试一次。
+      loadedFileIdRef.current = null;
       ctx.status(ctx.t("music.playFailed", { err: errorTextOf(ctx.t, e) }), "error");
     } finally {
       busyRef.current = false;
@@ -284,23 +305,6 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
       }
     });
   }, [loadAndPlay]);
-
-  // src 变化（或新的播放请求）→ 自动播放：重置到开头再播。
-  // 同文件重复请求时 src 不变，靠 `playToken` 触发；`load()` 强制重新加载。
-  useEffect(() => {
-    if (!sourceUrl || !autoPlayRef.current) {
-      return;
-    }
-    const audio = audioRef.current;
-    if (!audio) {
-      return;
-    }
-    autoPlayRef.current = false;
-    audio.pause();
-    audio.currentTime = 0;
-    audio.load();
-    void audio.play().catch(() => undefined);
-  }, [sourceUrl, playToken]);
 
   // 选中变化 → **只预载**（时长/进度条立刻可用、封面与色晕先出来），不自动出声。
   useEffect(() => {
@@ -413,11 +417,25 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
     setDraftVolume(clampVolume(value));
   };
 
-  /** 媒体元数据就绪 → 进度条总时长。 */
+  /**
+   * 元数据就绪 → 总时长；若这次请求"要出声"，在这里 `play()`。
+   *
+   * **不能**在设 `src` 的同一拍调 `play()`：`load()` 与 `play()` 抢同一个元素时，
+   * Chromium 以 `AbortError: The play() request was interrupted by a call to load()`
+   * 拒绝播放——真机表现就是"切了歌但不出声，图标还停在播放中"。
+   */
   const onLoadedMetadata = () => {
     const audio = audioRef.current;
-    if (audio && Number.isFinite(audio.duration)) {
+    if (!audio) {
+      return;
+    }
+    if (Number.isFinite(audio.duration)) {
       setDurationMs(Math.round(audio.duration * 1000));
+    }
+    if (autoPlayRef.current) {
+      autoPlayRef.current = false;
+      audio.currentTime = 0;
+      void audio.play().catch(() => undefined);
     }
   };
 
@@ -557,10 +575,8 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
             onSeekCommit={commitSeek}
             onVolume={onVolumeInput}
             onVolumeCommit={commitVolume}
-            onToggleShuffle={() => setShuffle((on) => !on)}
-            onToggleRepeat={() =>
-              setRepeat((mode) => (mode === "all" ? "off" : mode === "off" ? "one" : "all"))
-            }
+            onToggleShuffle={() => setMode((current) => toggleShuffleMode(current))}
+            onToggleRepeat={() => setMode((current) => cycleRepeatMode(current))}
             t={app.t}
           />
         ) : (

@@ -37,7 +37,7 @@
  * 这里刻意渲染成非交互的 `<span>`：禁用按钮仍会进 Tab 序并被读屏读成"不可用"。
  */
 
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 
 import type { TranslationKey } from "../../i18n";
 import { activeLrcIndex, lrcWindow, pairLrcLines, type LrcDoc, type LrcItem } from "./lrc";
@@ -91,6 +91,8 @@ export interface MusicStageProps {
 
 export function MusicStage(props: MusicStageProps) {
   const { style, lyrics, positionMs, playing, t } = props;
+  /** 噪波滤镜的 id（每个实例一份，避免两个音乐面板互相抢同一个 `url(#…)`）。 */
+  const noiseId = `player-haze-noise-${useId().replace(/[^\w-]/g, "")}`;
   const items = useMemo(() => (lyrics ? pairLrcLines(lyrics.lines) : null), [lyrics]);
   const activeIndex = useMemo(
     () => (lyrics?.synced && items ? activeLrcIndex(items, positionMs) : -1),
@@ -101,12 +103,54 @@ export function MusicStage(props: MusicStageProps) {
     [items, activeIndex],
   );
   return (
-    <div className="player-music" data-style={style} style={stageVars(props.hazeColors)}>
+    <div
+      className="player-music"
+      data-style={style}
+      style={{
+        ...stageVars(props.hazeColors),
+        ["--player-haze-noise" as string]: `url(#${noiseId})`,
+      }}
+    >
       {/*
         背景：**只用封面色板里的一两个主色**做光斑（用户 2026-11-13 口径：
         "在封面的颜色板上选 1-2 个颜色进行颜色晕的渲染，样式 1 不是直接进行封面的
         高斯模糊"）。因此这里既没有封面糊图、也没有第三种颜色。
       */}
+      {/*
+        色团要"像放大的、随时间变换的噪波"（用户 2026-11-13 D168）——靠两层叠加：
+        ① `feTurbulence` + `feDisplacementMap` 把圆形色团的边缘撕成不规则流体，
+           `baseFrequency` 用 SMIL 缓慢漂移，形状才会自己长出来又化掉；
+        ② CSS 关键帧同时改 `border-radius` 与位移/缩放，周期互质（47s / 61s），
+           两者叠加后不会出现"整块一起呼吸"的机械感。
+        `useId` 保证同一页面里两个实例的滤镜 id 不撞。
+      */}
+      <svg className="player-haze-defs" aria-hidden="true" focusable="false">
+        <defs>
+          <filter id={noiseId} x="-30%" y="-30%" width="160%" height="160%">
+            <feTurbulence
+              type="fractalNoise"
+              baseFrequency="0.006 0.010"
+              numOctaves={3}
+              seed={7}
+              result="noise"
+            >
+              <animate
+                attributeName="baseFrequency"
+                dur="43s"
+                values="0.005 0.009;0.012 0.006;0.007 0.011;0.005 0.009"
+                repeatCount="indefinite"
+              />
+            </feTurbulence>
+            <feDisplacementMap
+              in="SourceGraphic"
+              in2="noise"
+              scale={72}
+              xChannelSelector="R"
+              yChannelSelector="G"
+            />
+          </filter>
+        </defs>
+      </svg>
       <div className="player-haze" aria-hidden="true">
         <span className="player-haze-blob player-haze-blob-a" />
         <span className="player-haze-blob player-haze-blob-b" />
@@ -157,6 +201,13 @@ export function MusicStage(props: MusicStageProps) {
               ) : null}
             </div>
             <Lyrics items={items} start={visible.start} end={visible.end} active={activeIndex} variant="disc" t={t} />
+          </div>
+          {/*
+            控制区固定在**面板底部**、宽度只占左侧列（用户 2026-11-13 D168 裁决：
+            "默认在面板底部，和样式 1 类似，不是和唱片平齐"）。歌词因此不会再被
+            进度条挤到画面中部——它是信息区，控制区是另一块。
+          */}
+          <div className="player-bar" data-variant="disc">
             <SeekBar
               variant="disc"
               positionMs={positionMs}
@@ -536,12 +587,22 @@ function StarIcon() {
   );
 }
 
+/**
+ * 收藏爱心：**空心描边**。
+ *
+ * 实心红心是"已收藏"的语义，而收藏功能尚未实装（用户 2026-11-13 D168：
+ * "默认应该是空心的，红色实心表示已收藏"）——所以这里只画轮廓，不留任何
+ * "已经收藏了"的误导。
+ */
 function HeartIcon() {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
       <path
         d="M12 20.5s-7.6-4.7-7.6-9.7A4.3 4.3 0 0 1 12 7.9a4.3 4.3 0 0 1 7.6 2.9c0 5-7.6 9.7-7.6 9.7z"
-        fill="currentColor"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
       />
     </svg>
   );

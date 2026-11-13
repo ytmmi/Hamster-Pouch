@@ -32,6 +32,14 @@ import {
   type WaveGeometry,
 } from "./waveformView";
 
+/**
+ * 判定"拖动"的位移阈值（px）。
+ *
+ * 触屏与触控板的一次单击常带 1–2px 抖动；不设阈值的话，单击会被读成定位，
+ * "点一下暂停/继续"这条手感就永远走不到。
+ */
+const WAVE_DRAG_THRESHOLD_PX = 4;
+
 export interface AudioWaveformProps {
   repoId: string;
   /** 音频文件 id（缓存与去重的键）。 */
@@ -55,8 +63,13 @@ export interface AudioWaveformProps {
   durationMs?: number | null;
   /** 当前播放位置（ms）；静态展示（媒体预览单元）不传。 */
   positionMs?: number | null;
-  /** 点击 / 拖动波形定位（查看器与播放器传；媒体预览单元不传）。 */
+  /** 拖动波形定位（查看器与播放器传；媒体预览单元不传）。 */
   onSeek?: (seconds: number) => void;
+  /**
+   * 单击波形（不是拖动）时的动作。播放器传"暂停/继续"，与视频面板"点画面即暂停"
+   * 保持同一条手感；拖动才算定位，两种操作互不吞掉对方。
+   */
+  onTap?: () => void;
   /** 波形区修饰类（各面板给不同尺寸）。 */
   className?: string;
   t: Translate;
@@ -75,6 +88,7 @@ export function AudioWaveform({
   durationMs = null,
   positionMs = null,
   onSeek,
+  onTap,
   className = "",
   t,
 }: AudioWaveformProps): JSX.Element {
@@ -155,6 +169,49 @@ export function AudioWaveform({
     if (seconds !== null) onSeek(seconds);
   };
 
+  /**
+   * 指针手势：**拖动定位、单击交给 `onTap`**。
+   *
+   * 阈值（4px）是给"手抖"的余地：触屏点一下常带 1–2px 位移，若不设阈值，一次
+   * 单击也会被当成"定位到刚点的位置"，于是"点一下暂停"永远变成"跳到某处"。
+   */
+  const gestureRef = useRef<{ id: number; startX: number; moved: boolean } | null>(null);
+
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!onSeek && !onTap) return;
+    gestureRef.current = { id: event.pointerId, startX: event.clientX, moved: false };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.id !== event.pointerId) return;
+    if (!gesture.moved && Math.abs(event.clientX - gesture.startX) >= WAVE_DRAG_THRESHOLD_PX) {
+      gesture.moved = true;
+    }
+    if (gesture.moved) seekAt(event.clientX);
+  };
+
+  const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const gesture = gestureRef.current;
+    gestureRef.current = null;
+    if (!gesture || gesture.id !== event.pointerId) return;
+    if (gesture.moved) {
+      seekAt(event.clientX);
+    } else if (onTap) {
+      onTap();
+    } else {
+      seekAt(event.clientX);
+    }
+    // 单击已经处理过：别让同一指针事件再冒到画面区，否则"点波形暂停"会被
+    // 画面区的 `handleStageClick` 再取反一次（等于没点）。
+    event.stopPropagation();
+  };
+
+  const onPointerCancel = () => {
+    gestureRef.current = null;
+  };
+
   if (url === null) {
     return <span className={`wf-fallback ${className}`.trim()}>{t("media.waveUnavailable")}</span>;
   }
@@ -163,9 +220,12 @@ export function AudioWaveform({
     <div
       ref={containerRef}
       className={`wf-wave ${className}`.trim()}
-      // 定位交互只在传了 `onSeek` 时挂：静态展示的波形不该看起来可点。
-      onClick={onSeek ? (e) => seekAt(e.clientX) : undefined}
-      style={onSeek ? { cursor: "pointer" } : undefined}
+      // 交互只在传了 `onSeek` / `onTap` 时挂：静态展示的波形不该看起来可点。
+      onPointerDown={onSeek || onTap ? onPointerDown : undefined}
+      onPointerMove={onSeek || onTap ? onPointerMove : undefined}
+      onPointerUp={onSeek || onTap ? onPointerUp : undefined}
+      onPointerCancel={onSeek || onTap ? onPointerCancel : undefined}
+      style={onSeek || onTap ? { cursor: "pointer" } : undefined}
     >
       {/*
         `loading="lazy"` 在这里**不用**：波形图是"这个单元的内容本体"，
