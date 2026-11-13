@@ -468,7 +468,10 @@ apps/desktop/src/app_ui/
     mediaPreviewScroll.ts   # 滚动位置恢复的纯逻辑（与后台翻页的时序冲突，缺陷 0018 第 6 轮）
     MediaPlayerPanel.tsx    # 媒体播放器面板（**通用播放器**：视频 + 音频的基础播放；
                             #   2026-11-13 用户澄清"视频播放器可以播放音频，只是音频只有
-                            #   基础功能"——音频在这里只有单击暂停 / 进度条 / 波形 / 音量，
+                            #   基础功能"——音频在这里只有单击暂停 / 进度条 / 波形 / 音量
+                            #   （波形**顶替视频区**：`.player-stage[data-stage="audio"]` 里
+                            #   `<video>` 缩成 1px 透明只出声、`AudioWaveform` 绝对定位铺满；
+                            #   选中即预载 `src`（`autoPlayRef` / `loadedFileIdRef`）但不出声），
                             #   封面 / 歌词 / 两套样式 / 上一首下一首都归 `MusicPlayerPanel`。
                             #   DOM `<video>` 播放控制，
                             #   音频多一条**波形图**——2026-10-17 / D115：游标随播放位置走、
@@ -511,11 +514,14 @@ apps/desktop/src/app_ui/
                             #     模糊半径按**字号**算 ≈ 8%：行高 19px 配 1.6px，与参考图
                             #     40px 字配 4px 同量级），disc 不模糊不错位、靠透明度分层；
                             #     disc 的唱片不是黑胶黑，盘体取主色提亮、盘外两道独立细环；
-                            #     歌词窗口 `LRC_RADIUS = 2`（可见 5 行）；`data-plain`
-                            #     （既无封面又无歌词）时左列收成单列居中，不留空舞台；
+                            #     歌词窗口 `LRC_RADIUS = 2`（可见 5 行）；
                             #     收藏是**非交互 `<span role="img">`**，不是 disabled 按钮——
-                            #     按钮会暗示"点了会有反应"；无封面不渲染 `<img>`、无歌词
-                            #     整块 `Lyrics` 直接 return null）
+                            #     按钮会暗示"点了会有反应"；无歌词整块 `Lyrics` 直接 return null；
+                            #     无封面**不省略那一块**：`CoverVisual` 用曲名渲染占位封面
+                            #     （同一块画布、同样的圆角与投影），**唱片圆心例外**（不写字，
+                            #     无封面就是唱片的正常部分）；`data-has-lyrics` 让"没有歌词"
+                            #     时用 `margin-top` 补出同样的空白，控制条始终在歌词底下；
+                            #     disc 的唱片钉在右上（`top:-32%` / `right:-18%`）并被裁切）
                             #   lrc.ts LRC 解析纯函数（一行多时间标签、`[offset:±ms]` 平移、
                             #     无时间轴退化成 `synced:false` 的整块文本；`activeLrcIndex`
                             #     二分找当前行、`lrcWindow` 取上下文窗口并两端夹紧；
@@ -534,7 +540,8 @@ apps/desktop/src/app_ui/
                             #     -1 并禁用按钮、all/one 环绕、one 只管自动续播）
                             #   useMusicQueue.ts 音乐队列（`usePlayableQueue(..., "audio")` 的
                             #     一档：面板侧不必再传 kind，类型固定为"只收音频"）
-                            #   haze.ts 配色（后端色板 → CSS 变量：`hazeVars` 给三团色晕，
+                            #   haze.ts 配色（后端色板 → CSS 变量：`hazeVars` 给**两盏**色晕
+                            #     （用户 2026-11-13「在封面的颜色板上选 1-2 个颜色」），
                             #     `stageVars` 再从同一组主色算出样式 2 的整套颜色——天空渐变、
                             #     墨色文字、强调色、唱片盘体与两道细环；**前端不从封面取色**，
                             #     封面经 convertFileSrc 是跨源资源、canvas 读像素会被 taint；
@@ -542,7 +549,9 @@ apps/desktop/src/app_ui/
                             #     `vivid` 把主色**归一化**（饱和度 ≥ 0.42、亮度 0.30–0.58）：
                             #     主色是"封面占比最高的颜色"，白底封面的主色是 `#eeeeee`，
                             #     直接当光斑会让整块底发白、白字读不出；`spreadHues` 再让
-                            #     相邻色相至少差 26°（不足就沿色环推），单色系封面才有过渡）
+                            #     相邻色相至少差 26°（不足就沿色环推），单色系封面才有过渡）。
+                            #     **兜底色例外**：`HAZE_FALLBACK_COLORS` 是浅色系且不经 `vivid`
+                            #     压暗（用户「默认的颜色晕不要暗色」），由 `stagePalette` 分流）
                             #   time.ts 时间格式（`formatMs` = 已播时长、`≤ 0` 记作"未知"，
                             #     `formatClock` = 同一口径但**允许 0**（进度条起点必须是
                             #     `0:00`，它是合法位置），`formatRemaining` = 倒计时 `-3:24`：
@@ -729,6 +738,15 @@ HamsterPouch/
                               #     （⇒ 按内容哈希缓存）；只出一种尺寸 `WAVE_SIZE`（1200×240，
                               #     三处面板共用同一张，避免第二条取图命令与第二个缓存）；
                               #     落盘复用 thumbnail 的**原子写**（temp + rename，并行安全）
+                              #   artwork.rs **音乐播放器的取料**（2026-11-13 / D165、D167）：内嵌封面
+                              #     （ffmpeg `-map 0:v:0 -frames:v 1`，等比缩到长边 640 的 JPEG；
+                              #     没有视频流时 ffmpeg 以 "matches no streams" 退出，按"没有封面"
+                              #     而不是错误处理）、同目录同名图片（jpg/jpeg/png/webp/bmp 优先序）、
+                              #     同目录同名 `.lrc` 定位——只做"找文件/抽一帧"，编码判定交给 hp-book
+                              #   tags.rs 音频标签（2026-11-13 / D167）：`ffprobe -print_format json
+                              #     -show_entries format_tags` 读 `title` / `artist`（大小写与
+                              #     `album_artist` 都认）；**索引里没有标签字段**，所以播放时按需读、
+                              #     不落库；读不到只是 `None`，播放器回退到文件名切分
     hp-book/                  # 电子书元数据 / 封面 / **正文 + 目录**解析（EPUB = ZIP + OPF；txt/md 需判编码）
                               #   自实现最小 ZIP 读取器（zip.rs）+ 极简 XML 取值（xml.rs）+
                               #   EPUB 元数据解析（epub.rs）+ 封面格式判定（cover.rs）+ 格式分发（meta.rs）；
