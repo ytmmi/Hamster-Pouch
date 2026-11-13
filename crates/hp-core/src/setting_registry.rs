@@ -218,6 +218,7 @@ pub const SYSTEM_SETTING_DECLS: &[SettingDeclFact] = &[
 /// `select` 的候选必须逐项列出：`validate_setting_value` 对**空 `options` 的 `select`**
 /// 直接拒绝（失败关闭），因此镜像漏写候选会让该项在真机上完全无法写入。
 pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
+    // 媒体播放器（`panel.player.*`）：切标签自动暂停（视频）。
     SettingDeclFact {
         id: "autoPauseOnTabSwitch",
         owner_kind: "panel",
@@ -225,17 +226,6 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
         kind: "switch",
         scope: SettingScope::App,
         options: &[],
-        requires_capability: None,
-    },
-    // 媒体播放器（`panel.player.*`）：音乐模式样式（`haze` 色晕卡 / `disc` 唱片）。
-    // `select` 的候选必须与 TS 声明逐项一致——`validate_setting_value` 拒绝空候选。
-    SettingDeclFact {
-        id: "style",
-        owner_kind: "panel",
-        owner_id: Some("player"),
-        kind: "select",
-        scope: SettingScope::App,
-        options: &["haze", "disc"],
         requires_capability: None,
     },
     // 媒体播放器（`panel.player.*`）：音量（百分比 0–100）。
@@ -247,6 +237,38 @@ pub const PANEL_SETTING_DECLS: &[SettingDeclFact] = &[
         id: "volume",
         owner_kind: "panel",
         owner_id: Some("player"),
+        kind: "slider",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    // 音乐播放器（`panel.music.*`，2026-11-13 / D166）：**独立面板**，与上面的
+    // 媒体播放器各存各的设置——两个面板可以同时开着，音量/自动暂停互不干扰。
+    SettingDeclFact {
+        id: "autoPauseOnTabSwitch",
+        owner_kind: "panel",
+        owner_id: Some("music"),
+        kind: "switch",
+        scope: SettingScope::App,
+        options: &[],
+        requires_capability: None,
+    },
+    // 音乐播放器样式（`haze` 色晕卡 / `disc` 唱片）。
+    // `select` 的候选必须与 TS 声明逐项一致——`validate_setting_value` 拒绝空候选。
+    SettingDeclFact {
+        id: "style",
+        owner_kind: "panel",
+        owner_id: Some("music"),
+        kind: "select",
+        scope: SettingScope::App,
+        options: &["haze", "disc"],
+        requires_capability: None,
+    },
+    // 音乐播放器音量（百分比 0–100），口径同 `panel.player.volume`。
+    SettingDeclFact {
+        id: "volume",
+        owner_kind: "panel",
+        owner_id: Some("music"),
         kind: "slider",
         scope: SettingScope::App,
         options: &[],

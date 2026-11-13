@@ -73,8 +73,13 @@ export interface BlueprintExecutor {
   ) => void;
   /** 展开组：恢复成员面板尺寸。 */
   expandPanels: (panelIds: string[]) => void;
-  /** 播放文件（action payload { play: true } 联动）。 */
-  playFile: (fileId: string) => void;
+  /**
+   * 播放文件（action payload { play: true } 联动）。
+   *
+   * `mediaType` 决定落到哪个面板：音频进**音乐播放器**（D166 的独立面板），
+   * 其余进媒体播放器——两条播放请求通道各自独立，互不抢 `src`。
+   */
+  playFile: (fileId: string, mediaType?: string) => void;
   /** 界面跳转（D48）：切换到目标层（页面）；执行方负责持久化当前层并套用其布局。 */
   navigateLayer: (layerKey: string) => void;
   /**
@@ -554,7 +559,7 @@ export class BlueprintEngine {
     // payload.play 联动（显示播放器时同时发起播放，RFC 0007 默认蓝图）。
     const payload = action.payload as { play?: boolean } | undefined;
     if (payload?.play && input.target.fileId) {
-      executor.playFile(input.target.fileId);
+      executor.playFile(input.target.fileId, input.target.mediaType);
     }
   }
 

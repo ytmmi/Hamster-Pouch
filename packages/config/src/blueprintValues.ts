@@ -19,8 +19,14 @@ import { OVERLAY_ANCHORS, TOKEN_LEVELS } from "./blueprintOverlay";
 /** 蓝图 schema 版本（与 hp-core `BLUEPRINT_SCHEMA_VERSION` 同源）。 */
 export const BLUEPRINT_SCHEMA_VERSION = 3;
 
-/** 当前内置默认蓝图版本（引擎据此自动升级旧库存默认）。 */
-export const DEFAULT_BLUEPRINT_VERSION = 8;
+/**
+ * 当前内置默认蓝图版本（引擎据此自动升级旧库存默认）。
+ *
+ * - **8**（D155，2026-11-10）：2 层 / 51 节点 / 48 边。
+ * - **9**（D166，2026-11-13）：`l_main` 新增 `c_music`（独立音乐播放器面板），
+ *   音频双击的落点从「元数据」改为「音乐播放器」——52 节点 / 49 边。
+ */
+export const DEFAULT_BLUEPRINT_VERSION = 9;
 
 /**
  * **宿主内置**节点类型取值域（RFC 0007 决策 1 / D46/D47/D50）——封闭清单，**12 种**。

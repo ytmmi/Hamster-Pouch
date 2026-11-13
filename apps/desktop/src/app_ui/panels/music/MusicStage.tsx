@@ -42,7 +42,7 @@ import { useMemo } from "react";
 import type { TranslationKey } from "../../i18n";
 import { activeLrcIndex, lrcWindow, pairLrcLines, type LrcDoc, type LrcItem } from "./lrc";
 import { stageVars } from "./haze";
-import type { PlayerStyle } from "./playerStyle";
+import type { MusicStyle } from "./musicStyle";
 import type { RepeatMode } from "./queueView";
 import { formatClock, formatMs, formatRemaining } from "./time";
 import { lyricIndent } from "./lyricView";
@@ -52,7 +52,7 @@ const LRC_RADIUS = 2;
 
 export interface MusicStageProps {
   /** 当前样式（在设置里切换）。 */
-  style: PlayerStyle;
+  style: MusicStyle;
   /** 封面图 URL（`convertFileSrc` 过的本地资源）；`null` = 没有封面。 */
   coverUrl: string | null;
   /** 曲名（文件名推导，见 `trackInfo.ts`）。 */
@@ -215,7 +215,7 @@ function SeekBar({
   onSeekCommit,
   t,
 }: {
-  variant: PlayerStyle;
+  variant: MusicStyle;
   positionMs: number;
   durationMs: number;
   onSeek: (ms: number) => void;
@@ -241,7 +241,7 @@ function SeekBar({
         onMouseUp={(event) => onSeekCommit(Number((event.target as HTMLInputElement).value))}
         onTouchEnd={(event) => onSeekCommit(Number((event.target as HTMLInputElement).value))}
         onKeyUp={(event) => onSeekCommit(Number((event.target as HTMLInputElement).value))}
-        aria-label={t("player.progress")}
+        aria-label={t("music.progress")}
       />
       {variant === "haze" ? (
         <div className="player-seek-times mono">
@@ -264,7 +264,7 @@ function Transport(props: MusicStageProps) {
         data-role="shuffle"
         data-on={props.shuffle ? "true" : "false"}
         onClick={props.onToggleShuffle}
-        aria-label={t("player.shuffle")}
+        aria-label={t("music.shuffle")}
         aria-pressed={props.shuffle}
       >
         <ShuffleIcon />
@@ -275,7 +275,7 @@ function Transport(props: MusicStageProps) {
         data-role="prev"
         onClick={props.onPrev}
         disabled={!props.canPrev}
-        aria-label={t("player.prevTrack")}
+        aria-label={t("music.prevTrack")}
       >
         <PrevIcon />
       </button>
@@ -284,7 +284,7 @@ function Transport(props: MusicStageProps) {
         className="player-transport-btn player-transport-play"
         data-role="play"
         onClick={props.onToggle}
-        aria-label={t(playing ? "player.pause" : "player.play")}
+        aria-label={t(playing ? "music.pause" : "music.play")}
       >
         {playing ? <PauseIcon /> : <PlayIcon />}
       </button>
@@ -294,7 +294,7 @@ function Transport(props: MusicStageProps) {
         data-role="next"
         onClick={props.onNext}
         disabled={!props.canNext}
-        aria-label={t("player.nextTrack")}
+        aria-label={t("music.nextTrack")}
       >
         <NextIcon />
       </button>
@@ -314,9 +314,9 @@ function Transport(props: MusicStageProps) {
 }
 
 function repeatLabelKey(mode: RepeatMode): TranslationKey {
-  if (mode === "one") return "player.repeatOne";
-  if (mode === "all") return "player.repeatAll";
-  return "player.repeatOff";
+  if (mode === "one") return "music.repeatOne";
+  if (mode === "all") return "music.repeatAll";
+  return "music.repeatOff";
 }
 
 /** 音量（细条 + 图标；样式 2 里它淡到几乎只是提示，但不至于逼用户切样式调音量）。 */
@@ -348,7 +348,7 @@ function VolumeBar({
         onMouseUp={(event) => onVolumeCommit(Number((event.target as HTMLInputElement).value))}
         onTouchEnd={(event) => onVolumeCommit(Number((event.target as HTMLInputElement).value))}
         onKeyUp={(event) => onVolumeCommit(Number((event.target as HTMLInputElement).value))}
-        aria-label={t("player.volume")}
+        aria-label={t("music.volume")}
       />
     </div>
   );
@@ -368,12 +368,12 @@ function Lyrics({
   start: number;
   end: number;
   active: number;
-  variant: PlayerStyle;
+  variant: MusicStyle;
   t: MusicStageProps["t"];
 }) {
   if (!items || items.length === 0) return null;
   return (
-    <div className="player-lyrics" data-variant={variant} aria-label={t("player.lyrics")}>
+    <div className="player-lyrics" data-variant={variant} aria-label={t("music.lyrics")}>
       {items.slice(start, end).map((item, offset) => {
         const index = start + offset;
         const distance = active < 0 ? index + 1 : index - active;
@@ -401,7 +401,7 @@ function FavoriteIcon({ shape, t }: { shape: "star" | "heart"; t: MusicStageProp
     <span
       className="player-fav"
       data-shape={shape}
-      aria-label={t("player.favorite")}
+      aria-label={t("music.favorite")}
       role="img"
     >
       {shape === "star" ? <StarIcon /> : <HeartIcon />}

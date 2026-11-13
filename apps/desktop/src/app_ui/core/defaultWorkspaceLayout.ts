@@ -87,6 +87,13 @@ export function addDefaultPanels(dv: DockviewApi, t: Translate): void {
   });
   dv.addPanel({
     ...PANEL_MIN_SIZE,
+    id: "music",
+    component: "music",
+    title: panelTitle("music", t),
+    position: { referencePanel: "player", direction: "within" },
+  });
+  dv.addPanel({
+    ...PANEL_MIN_SIZE,
     id: "tasks",
     component: "tasks",
     title: panelTitle("tasks", t),

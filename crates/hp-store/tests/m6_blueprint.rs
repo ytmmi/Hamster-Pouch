@@ -434,12 +434,12 @@ fn default_blueprint_fixture_validates() {
     let errors = graph.validate();
     assert!(errors.is_empty(), "默认蓝图校验失败: {errors:?}");
     // 数量随随包「演示布局」走：布局增删面板时这里与夹具一并更新（D155）。
-    assert_eq!(graph.nodes.len(), 51, "默认蓝图应有 51 个节点");
-    assert_eq!(graph.edges.len(), 48, "默认蓝图应有 48 条边");
+    assert_eq!(graph.nodes.len(), 52, "默认蓝图应有 52 个节点");
+    assert_eq!(graph.edges.len(), 49, "默认蓝图应有 49 条边");
     assert_eq!(
         graph.default_version,
-        Some(8),
-        "演示布局新增「界面 2」后内置默认升版（D51 / D155）"
+        Some(9),
+        "新增独立音乐播放器面板后内置默认升版（D51 / D155 / D166）"
     );
     assert_eq!(graph.schema_version, BLUEPRINT_SCHEMA_VERSION);
 
@@ -533,7 +533,7 @@ fn default_blueprint_fixture_validates() {
             && e.to != "g_media"),
         "中栏（blk_center）应只包含标签组，不应直接连控件"
     );
-    for member in ["c_media", "c_player"] {
+    for member in ["c_media", "c_player", "c_music"] {
         assert!(
             graph.edges.iter().any(|e| e.from == "g_media"
                 && e.to == member
@@ -600,6 +600,7 @@ fn default_blueprint_fixture_validates() {
             "imageviewer",
             "media",
             "metadata",
+            "music",
             "player",
             "repo",
             "sources",

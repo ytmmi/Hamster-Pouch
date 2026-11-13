@@ -21,6 +21,7 @@ import type {
 } from "./blueprintEngine";
 import type { OverlayHost } from "./overlayHost";
 import { panelTitle } from "./panelRegistry";
+import { requestMusicPlay } from "./musicPlayStore";
 import { requestPlayerPlay } from "./playerPlayStore";
 
 /** 在 dockview 里找"包含最多指定面板"的组（用于 `toward:<组>` 吸收目标解析）。 */
@@ -220,11 +221,18 @@ export function useBlueprintExecutor(deps: BlueprintExecutorDeps): BlueprintExec
           expandGroup(panel.api.group);
         }
       },
-      playFile: (fileId: string) => {
-        // 双击视频 = 显示播放器并播放：播放器面板是 DOM `<video>`（与查看器同构，
+      playFile: (fileId: string, mediaType?: string) => {
+        // 双击媒体 = 显示对应面板并播放：两个面板都是 DOM `<video>`（与查看器同构，
         // 见 RFC 0005 2026-09 决策更新），libmpv 原生窗口方案已退役。这里只投递
         // "播放哪个文件"的请求，由面板自行解析路径并播放；不再有 EMBED_NOT_READY
         // 时序竞争（旧实现 `docs/issues/0001`）。
+        //
+        // 分流（D166）：**音频进音乐播放器**（独立面板，有自己的队列/歌词/样式），
+        // 其余（视频）进媒体播放器。两条通道分开，同时开着也不会互相抢 `src`。
+        if (mediaType === "audio") {
+          requestMusicPlay(fileId);
+          return;
+        }
         requestPlayerPlay(fileId);
       },
       // 界面跳转（D48/D54）：切到目标层 = 持久化当前层 + 套用该层布局 + 对账蓝图语义。

@@ -1,7 +1,7 @@
 /**
  * 面板注册表 — 面板 id / 标题 / 渲染函数，供 dockview 与菜单共用。
  *
- * **内置 16 个面板**的组件表在 `PANEL_DEFS`（行为与 RFC 0010 之前完全一致）；
+ * **内置 17 个面板**的组件表在 `PANEL_DEFS`（行为与 RFC 0010 之前完全一致）；
  * **插件注册的面板**（`docs/spec/panel-standard.md`）走 `allPanelDefs()` 的动态路径：
  * 宿主按注册表里的声明生成面板项，内部 UI 仍由控件 schema 与宿主白名单决定
  * （`docs/spec/control-standard.md`），插件不得创建自由 React 组件（D44/RFC 0010 决策 2）。
@@ -25,6 +25,7 @@ import { BookReaderPanel } from "../panels/bookreader/BookReaderPanel";
 import { ColorPanel } from "../panels/ColorPanel";
 import { ImageViewerPanel } from "../panels/imageviewer/ImageViewerPanel";
 import { MediaPlayerPanel } from "../panels/MediaPlayerPanel";
+import { MusicPlayerPanel } from "../panels/MusicPlayerPanel";
 import { MediaPreviewPanel } from "../panels/MediaPreviewPanel";
 import { MetadataPanel } from "../panels/MetadataPanel";
 import { PluginPanel } from "../panels/PluginPanel";
@@ -54,7 +55,7 @@ export interface PanelDef {
   render: (ctx: PanelRenderCtx) => JSX.Element;
 }
 
-/** 宿主内置 16 个面板（顺序与 `PANEL_IDS` 一致）。 */
+/** 宿主内置 17 个面板（顺序与 `PANEL_IDS` 一致）。 */
 export const PANEL_DEFS: PanelDef[] = [
   { id: "repo", titleKey: "panel.repo", render: () => <RepoPanel /> },
   { id: "sources", titleKey: "panel.sources", render: () => <SourcePanel /> },
@@ -77,8 +78,11 @@ export const PANEL_DEFS: PanelDef[] = [
   { id: "tagtable", titleKey: "panel.tagtable", render: () => <TagTablePanel /> },
   // 色彩参考持有面板设置（`color.valueFormat`），同样需要激活状态才凑齐四条热加载触发源。
   { id: "color", titleKey: "panel.color", render: (ctx) => <ColorPanel api={ctx.api} /> },
-  // 媒体播放器持有**原生**渲染子窗口（libmpv，D14），必须知道激活状态才能显隐。
+  // 媒体播放器（视频）持有面板设置（`player.volume` / `autoPauseOnTabSwitch`），
+  // 需要激活状态凑齐四条热加载触发源。
   { id: "player", titleKey: "panel.player", render: (ctx) => <MediaPlayerPanel api={ctx.api} /> },
+  // 音乐播放器（D166）：**独立面板**，同样持有自己的面板设置（样式 / 音量 / 自动暂停）。
+  { id: "music", titleKey: "panel.music", render: (ctx) => <MusicPlayerPanel api={ctx.api} /> },
   { id: "tasks", titleKey: "panel.tasks", render: () => <TaskPanel /> },
   { id: "plugins", titleKey: "panel.plugins", render: () => <PluginPanel /> },
   { id: "blueprint", titleKey: "panel.blueprint", render: () => <BlueprintPanel /> },
@@ -98,7 +102,7 @@ function pluginPanelDef(spec: PanelSpec): PanelDef {
   };
 }
 
-/** 全部面板项（内置 16 个 + 当前已注册的插件面板）。 */
+/** 全部面板项（内置 17 个 + 当前已注册的插件面板）。 */
 export function allPanelDefs(): PanelDef[] {
   const pluginSpecs = pluginRegisteredPanels();
   return pluginSpecs.length === 0
@@ -130,7 +134,7 @@ export function panelRender(id: string, ctx: PanelRenderCtx): JSX.Element | null
   return def ? def.render(ctx) : null;
 }
 
-/** dockview 组件表（内置 16 个；与 `PANEL_DEFS` 一一对应）。 */
+/** dockview 组件表（内置 17 个；与 `PANEL_DEFS` 一一对应）。 */
 export const DOCK_COMPONENTS: Record<string, FC<IDockviewPanelProps>> = buildComponents(
   PANEL_DEFS,
 );

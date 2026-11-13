@@ -47,7 +47,7 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { key: "l_2", name: "界面 2", is_home: false },
   ],
   nodes: [
-    // 层 l_main（主界面）：48 节点
+    // 层 l_main（主界面）：49 节点
     { key: "blk_left", type: "layout_block", layer: "l_main", name: "左栏", position: { x: 337, y: 40 } },
     { key: "blk_center", type: "layout_block", layer: "l_main", name: "中栏", position: { x: 337, y: 210 } },
     { key: "blk_right", type: "layout_block", layer: "l_main", name: "右栏", position: { x: 337, y: 380 } },
@@ -57,6 +57,7 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { key: "g_media", type: "group", layer: "l_main", name: "媒体·查看器·播放", mode: "exclusive", position: { x: 637, y: 550 } },
     { key: "c_media", type: "control", layer: "l_main", panel_id: "media", title_key: "panel.media", position: { x: 937, y: 210 } },
     { key: "c_player", type: "control", layer: "l_main", panel_id: "player", title_key: "panel.player", position: { x: 937, y: 380 } },
+    { key: "c_music", type: "control", layer: "l_main", panel_id: "music", title_key: "panel.music", position: { x: 1237, y: 890 } },
     { key: "k_image", type: "class", layer: "l_main", control: "c_media", media_type: "image", position: { x: 1237, y: 210 } },
     { key: "k_video", type: "class", layer: "l_main", control: "c_media", media_type: "video", position: { x: 1237, y: 380 } },
     { key: "k_audio", type: "class", layer: "l_main", control: "c_media", media_type: "audio", position: { x: 1237, y: 550 } },
@@ -72,7 +73,7 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { key: "e_dbl_aud", type: "event", layer: "l_main", position: { x: 1837, y: 720 }, trigger: "double_click" },
     { key: "a_show_viewer", type: "action", layer: "l_main", position: { x: 2137, y: 380 }, target: "c_1_3", op: "show" },
     { key: "a_show_player", type: "action", layer: "l_main", position: { x: 2137, y: 550 }, target: "c_player", op: "show", payload: { play: true } },
-    { key: "a_show_meta", type: "action", layer: "l_main", position: { x: 2137, y: 720 }, target: "c_player", op: "show" },
+    { key: "a_show_music", type: "action", layer: "l_main", position: { x: 2137, y: 720 }, target: "c_music", op: "show", payload: { play: true } },
     { key: "ui", type: "interface", layer: "l_main", position: { x: 37, y: 40 } },
     { key: "ov_1", type: "overlay", layer: "l_main", position: { x: 2737, y: 42 }, visible: true, height: 2, size: { width: 200, height: 600 }, shadow: "sm", radius: "lg", hide_label: true },
     { key: "c_1", type: "control", layer: "l_main", panel_id: "tasks", position: { x: 2737, y: 212 } },
@@ -109,6 +110,7 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { from: "blk_right", to: "g_inspector", kind: "contains", order: 5 },
     { from: "g_media", to: "c_media", kind: "contains", order: 6 },
     { from: "g_media", to: "c_player", kind: "contains", order: 8 },
+    { from: "g_media", to: "c_music", kind: "contains", order: 9 },
     { from: "g_inspector", to: "c_tags", kind: "contains", order: 10 },
     { from: "c_media", to: "k_image", kind: "contains", order: 12 },
     { from: "c_media", to: "k_video", kind: "contains", order: 13 },
@@ -120,7 +122,7 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { from: "o_aud", to: "e_dbl_aud", kind: "on", order: 20 },
     { from: "e_dbl_img", to: "a_show_viewer", kind: "fires", order: 21 },
     { from: "e_dbl_vid", to: "a_show_player", kind: "fires", order: 22 },
-    { from: "e_dbl_aud", to: "a_show_meta", kind: "fires", order: 23 },
+    { from: "e_dbl_aud", to: "a_show_music", kind: "fires", order: 23 },
     { from: "ui", to: "blk_left", kind: "contains", order: 24 },
     { from: "ui", to: "blk_center", kind: "contains", order: 25 },
     { from: "ui", to: "blk_right", kind: "contains", order: 26 },

@@ -120,8 +120,8 @@ check(
   titleMismatch.map((s) => `${s.id}: ${config.PANEL_TITLES[s.id]} != ${s.titleKey}`).join(" | "),
 );
 check(
-  "内置面板恰好 16 个",
-  builtinIds.length === 16,
+  "内置面板恰好 17 个",
+  builtinIds.length === 17,
   `实际 ${builtinIds.length}`,
 );
 
@@ -172,7 +172,7 @@ for (const spec of config.BUILTIN_PANEL_SPECS) {
 check(
   "control.panel_id ↔ 面板注册表 blueprint_node 双向一致",
   carrierProblems.length === 0,
-  carrierProblems.join(" | ") || "16 个面板全部指向 control，且 control 允许 panel_id",
+  carrierProblems.join(" | ") || "17 个面板全部指向 control，且 control 允许 panel_id",
 );
 
 // 面板设置里 `select` 必须有候选（否则「全部设置」渲染不出、后端也拒写）。
@@ -4252,7 +4252,7 @@ config.unregisterPluginPanels("dev.hamsterpouch.palette");
 const afterUnregister = config.allPanels().map((p) => p.id);
 check(
   "插件卸载后注册项消失（节点与边由蓝图侧按「未接通」保留，不在此删除用户数据）",
-  !afterUnregister.includes(pluginPanelId) && afterUnregister.length === 16,
+  !afterUnregister.includes(pluginPanelId) && afterUnregister.length === 17,
   `panels=${afterUnregister.length}`,
 );
 
@@ -7205,42 +7205,47 @@ check(
   );
 }
 
-// ==================== 媒体播放器：音乐模式与两种样式（D165） ====================
+// ==================== 音乐播放器面板：两套样式 / 队列 / 歌词取料（D166） ====================
 //
 // 防的是"功能写了但口径没接上"：歌词时间轴、同类队列步进、曲名/艺人切分、色晕兜底
 // 都是**纯逻辑**，按行为断言；"无封面不出图 / 无歌词不出块 / 收藏只是图标 / 传输按钮
 // 只属于音乐模式"这类产品口径按源码锚点断言（组件是 .tsx，Node 剥不了 JSX）。
 
 const lrcMod = await import(
-  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/player/lrc.ts")).href
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/music/lrc.ts")).href
 );
 const queueView = await import(
-  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/player/queueView.ts")).href
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/music/queueView.ts")).href
 );
 const trackInfoMod = await import(
-  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/player/trackInfo.ts")).href
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/music/trackInfo.ts")).href
 );
 const musicStageMod = await import(
-  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/player/lyricView.ts")).href
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/music/lyricView.ts")).href
 );
 const hazeMod = await import(
-  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/player/haze.ts")).href
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/music/haze.ts")).href
 );
-const playerStyleMod = await import(
-  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/player/playerStyle.ts")).href
+const musicStyleMod = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/music/musicStyle.ts")).href
 );
-const playerSpec = config.panelSpec("player");
-const playerPanelSrc = readFileSync(
+const musicSpec = config.panelSpec("music");
+const videoSpec = config.panelSpec("player");
+const videoPanelSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/MediaPlayerPanel.tsx"),
   "utf8",
 );
+const musicPanelSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/MusicPlayerPanel.tsx"),
+  "utf8",
+);
 const musicStageSrc = readFileSync(
-  join(ROOT, "apps/desktop/src/app_ui/panels/player/MusicStage.tsx"),
+  join(ROOT, "apps/desktop/src/app_ui/panels/music/MusicStage.tsx"),
   "utf8",
 );
 
 check(
-  "D165：LRC 一行多个时间标签拆成多句，`[offset:]` 整份平移（正数 = 歌词提前）",
+  "D166：LRC 一行多个时间标签拆成多句，`[offset:]` 整份平移（正数 = 歌词提前）",
   (() => {
     const doc = lrcMod.parseLrc("[offset:+500]\n[00:02.00][00:03.00]dup\n[00:01.50]one");
     const times = doc.lines.map((line) => line.timeMs);
@@ -7252,7 +7257,7 @@ check(
   JSON.stringify(lrcMod.parseLrc("[offset:+500]\n[00:02.00]a\n[00:01.50]b").lines),
 );
 check(
-  "D165：没有时间轴的纯文本歌词仍然显示（`synced: false`、`timeMs = -1`，不当作「没有歌词」）",
+  "D166：没有时间轴的纯文本歌词仍然显示（`synced: false`、`timeMs = -1`，不当作「没有歌词」）",
   (() => {
     const doc = lrcMod.parseLrc("第一句\n\n第二句");
     return (
@@ -7263,7 +7268,7 @@ check(
   })(),
 );
 check(
-  "D165：当前行 = 最后一个 `timeMs <= position` 的行；未到第一句为 `-1`（边界不落空档）",
+  "D166：当前行 = 最后一个 `timeMs <= position` 的行；未到第一句为 `-1`（边界不落空档）",
   (() => {
     const lines = [
       { timeMs: 1000, text: "" },
@@ -7282,7 +7287,7 @@ check(
   })(),
 );
 check(
-  "D165：歌词窗口两端夹紧且不改行号（长歌词只渲染窗口，DOM 数不随歌词长度增长）",
+  "D166：歌词窗口两端夹紧且不改行号（长歌词只渲染窗口，DOM 数不随歌词长度增长）",
   (() => {
     const head = lrcMod.lrcWindow(10, 0, 3);
     const tail = lrcMod.lrcWindow(10, 9, 3);
@@ -7302,7 +7307,7 @@ check(
   })(),
 );
 check(
-  "D165：曲名与艺人按**首个**「 - 」切分；切不出时整串是曲名、艺人为空（索引里没有标签字段）",
+  "D166：曲名与艺人按**首个**「 - 」切分；切不出时整串是曲名、艺人为空（索引里没有标签字段）",
   trackInfoMod.trackTitleOf("/m/夏日乐队 - 千变万华.flac") === "千变万华" &&
     trackInfoMod.trackArtistOf("/m/夏日乐队 - 千变万华.flac") === "夏日乐队" &&
     trackInfoMod.trackTitleOf("/m/只有曲名.mp3") === "只有曲名" &&
@@ -7310,7 +7315,7 @@ check(
     trackInfoMod.trackTitleOf("/m/A - B - C.mp3") === "B - C",
 );
 check(
-  "D165：色晕三层取自封面主色（不足循环、非法值剔除、无封面走兜底三色）",
+  "D166：色晕三层取自封面主色（不足循环、非法值剔除、无封面走兜底三色）",
   eqList(hazeMod.hazeColorsOf([]), [...hazeMod.HAZE_FALLBACK_COLORS]) &&
     eqList(hazeMod.hazeColorsOf(["#112233"]), ["#112233", "#112233", "#112233"]) &&
     eqList(hazeMod.hazeColorsOf(["#112233", "#445566", "#778899", "#aabbcc"]), [
@@ -7323,7 +7328,7 @@ check(
       "--player-haze-a,--player-haze-b,--player-haze-c",
 );
 check(
-  "D165：上一首 / 下一首只在**同类**里走、端点循环（音频不跳视频，视频也不跳音频）",
+  "D166：上一首 / 下一首只在**同类**里走、端点循环（音频不跳视频，视频也不跳音频）",
   (() => {
     const files = [
       { media_type: "audio" },
@@ -7342,7 +7347,7 @@ check(
   })(),
 );
 check(
-  "D165：队列边界（空 / 不在队列内 / delta 0）返回原值或 `-1`；队列只收音频与视频",
+  "D166：队列边界（空 / 不在队列内 / delta 0）返回原值或 `-1`；队列只收音频与视频",
   queueView.stepPlayable([], 0, 1, "audio") === -1 &&
     queueView.stepPlayable([{ media_type: "audio" }], 0, 0, "audio") === 0 &&
     queueView.stepPlayable([{ media_type: "audio" }], -1, 1, "audio") === -1 &&
@@ -7352,7 +7357,7 @@ check(
     queueView.playableFiles([{ media_type: "audio" }, { media_type: "image" }]).length === 1,
 );
 check(
-  "D165：随机只在**同类**里抽且不抽到自己（单曲队列原地不动）；循环 `off` 在端点停住、`all` 环绕",
+  "D166：随机只在**同类**里抽且不抽到自己（单曲队列原地不动）；循环 `off` 在端点停住、`all` 环绕",
   (() => {
     const files = [
       { media_type: "audio" },
@@ -7380,7 +7385,7 @@ check(
   })(),
 );
 check(
-  "D165：双语歌词按「同刻双时间标签」配对成主+副（间隔超过阈值不硬配，空行不配）",
+  "D166：双语歌词按「同刻双时间标签」配对成主+副（间隔超过阈值不硬配，空行不配）",
   (() => {
     const paired = lrcMod.pairLrcLines([
       { timeMs: 1000, text: "原文" },
@@ -7415,7 +7420,7 @@ check(
   })(),
 );
 check(
-  "D165：两套样式的颜色都由封面主色**算**出来（换一组主色整套变量就变，CSS 里不写死封面色）",
+  "D166：两套样式的颜色都由封面主色**算**出来（换一组主色整套变量就变，CSS 里不写死封面色）",
   (() => {
     const warm = hazeMod.stageVars(["#e0709e", "#8f6ee8", "#5b8fe0"]);
     const cold = hazeMod.stageVars(["#1f8f6e", "#2a6fd0", "#c9d34a"]);
@@ -7455,7 +7460,7 @@ check(
   })(),
 );
 check(
-  "D165：样式 1 的歌词错位随面板宽度缩放（单位是 `cqw`，不是固定像素）；样式 2 不错位",
+  "D166：样式 1 的歌词错位随面板宽度缩放（单位是 `cqw`，不是固定像素）；样式 2 不错位",
   (() => {
     const indent = (d) => musicStageMod.lyricIndent(d);
     return (
@@ -7475,34 +7480,45 @@ check(
   })(),
 );
 check(
-  "D165：样式是面板设置 `panel.player.style`（select，候选与 `PLAYER_STYLES` 逐项相等、缺省 `haze`）",
+  "D166：样式是**音乐面板**的设置 `panel.music.style`（select，候选与 `MUSIC_STYLES` 逐项相等、缺省 `haze`）",
   (() => {
-    const decl = playerSpec?.settings?.find((setting) => setting.key === "style");
+    const decl = musicSpec?.settings?.find((setting) => setting.key === "style");
     const values = (decl?.options ?? []).map((option) => option.value);
     return (
       decl?.kind === "select" &&
-      decl?.default === playerStyleMod.DEFAULT_PLAYER_STYLE &&
-      eqList(values, [...playerStyleMod.PLAYER_STYLES]) &&
-      playerStyleMod.PLAYER_STYLE_SETTING_KEY === "style" &&
-      playerStyleMod.normalizePlayerStyle("disc") === "disc" &&
+      decl?.default === musicStyleMod.DEFAULT_MUSIC_STYLE &&
+      eqList(values, [...musicStyleMod.MUSIC_STYLES]) &&
+      musicStyleMod.MUSIC_STYLE_SETTING_KEY === "style" &&
+      musicStyleMod.normalizeMusicStyle("disc") === "disc" &&
       // 未知值（旧版本 / 手改库）落回缺省，不是空白舞台。
-      playerStyleMod.normalizePlayerStyle("nope") === playerStyleMod.DEFAULT_PLAYER_STYLE &&
-      playerStyleMod.playerStyleTitleKey("disc") === "player.settings.style.disc"
+      musicStyleMod.normalizeMusicStyle("nope") === musicStyleMod.DEFAULT_MUSIC_STYLE &&
+      musicStyleMod.musicStyleTitleKey("disc") === "music.settings.style.disc" &&
+      // 媒体播放器（视频）不持有样式设置：样式只属于音乐面板。
+      !videoSpec?.settings?.some((setting) => setting.key === "style")
     );
   })(),
-  JSON.stringify(playerSpec?.settings?.find((setting) => setting.key === "style") ?? null),
+  JSON.stringify(musicSpec?.settings?.find((setting) => setting.key === "style") ?? null),
 );
 check(
-  "D165：传输按钮**只**在音乐模式出现（视频分支仍一个按钮都没有，单击画面语义不变）",
-  (playerPanelSrc.match(/<MusicStage/g) ?? []).length === 1 &&
-    /isAudio \? \(\s*<MusicStage/.test(playerPanelSrc) &&
-    /data-mode=\{isAudio \? "music" : "video"\}/.test(playerPanelSrc) &&
+  "D166：音乐播放器是**独立面板**（`music`），媒体播放器只做视频——传输按钮只在音乐面板里",
+  // 注册层：两个面板各自是注册项，设置各存各的。
+  config.BUILTIN_PANEL_IDS.includes("music") &&
+    musicSpec?.titleKey === "panel.music" &&
+    musicSpec?.category === "media" &&
+    // 音乐面板源码：舞台只被 `MusicStage` 一处渲染，外面套的是音乐模式画布。
+    (musicPanelSrc.match(/<MusicStage/g) ?? []).length === 1 &&
+    /data-mode="music"/.test(musicPanelSrc) &&
     /className="player-transport"/.test(musicStageSrc) &&
-    // 面板自己不得再拼传输按钮：按钮只有音乐舞台一份实现。
-    !/player-transport/.test(playerPanelSrc),
+    // 视频面板：一个音乐符号都不许有（独立面板，不是"同一面板的另一模式"）。
+    !/<MusicStage/.test(videoPanelSrc) &&
+    !/player-transport/.test(videoPanelSrc) &&
+    !/player-lyrics|player-haze|player-vinyl|player-disc/.test(videoPanelSrc) &&
+    !/data-mode/.test(videoPanelSrc) &&
+    // 播放请求也分家：音频进 `musicPlayStore`，视频进 `playerPlayStore`。
+    /requestMusicPlay/.test(readFileSync(join(ROOT, "apps/desktop/src/app_ui/core/blueprintExecutor.ts"), "utf8")),
 );
 check(
-  "D165：无封面不出图、无歌词不出块（结构上不渲染，不是空框或「暂无歌词」占位）",
+  "D166：无封面不出图、无歌词不出块（结构上不渲染，不是空框或「暂无歌词」占位）",
   // 封面三处（背景糊图 / 样式 1 封面卡 / 样式 2 唱片中心）都是"有 URL 才渲染 img"，
   // 歌词块是"没有句子就 return null"——都不是画个空框或写「暂无歌词」。
   (musicStageSrc.match(/\{props\.coverUrl \? \(/g) ?? []).length >= 3 &&
@@ -7510,7 +7526,7 @@ check(
     !/player\.noLyrics/.test(musicStageSrc),
 );
 check(
-  "D165：收藏只是图标（非交互 `span`，不是 disabled 按钮——禁用会暗示「现在不能用」）",
+  "D166：收藏只是图标（非交互 `span`，不是 disabled 按钮——禁用会暗示「现在不能用」）",
   (() => {
     const start = musicStageSrc.indexOf("function FavoriteIcon");
     const end = musicStageSrc.indexOf("function PlayIcon");
@@ -7519,7 +7535,7 @@ check(
   })(),
 );
 check(
-  "D165：唱片只在播放时旋转，暂停停在当前角度（不归零），减少动效时全停",
+  "D166：唱片只在播放时旋转，暂停停在当前角度（不归零），减少动效时全停",
   /data-playing=\{playing \? "true" : "false"\}/.test(musicStageSrc) &&
     /\.player-disc\s*\{[^}]*animation:\s*player-disc-spin[^}]*animation-play-state:\s*paused/.test(
       stylesSource,

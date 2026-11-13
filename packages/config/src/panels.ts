@@ -2,7 +2,7 @@
  * 面板注册表（RFC 0010 决策 4 / `docs/spec/panel-standard.md`）。
  *
  * 「面板」是 dockview 承载单元与功能边界（蓝图节点枚举 `control`），**可注册**：
- * 宿主内置 16 个 + 插件注册项（`plugin.<plugin_id>.<local_id>`）。它与「控件」
+ * 宿主内置 17 个 + 插件注册项（`plugin.<plugin_id>.<local_id>`）。它与「控件」
  * （面板**内部**的 26 种宿主 UI 单元，`docs/spec/control-standard.md`）**不是一回事**。
  *
  * 声明是**纯数据**：不含代码、样式、像素布局或任意表达式；`origin` 由宿主按实际安装方式
@@ -114,7 +114,7 @@ export interface PanelSpec {
   category: PanelCategory;
   /** **有无类目**：该面板能否挂「类目」节点（第 5.1 节）。 */
   hasClass: boolean;
-  /** 该面板在蓝图里由哪种节点承载（内置 16 个均为 `control`）。 */
+  /** 该面板在蓝图里由哪种节点承载（内置 17 个均为 `control`）。 */
   blueprintNode: string;
   /** 面板自身设置项（供「全部设置 → 面板」按面板分节渲染）。 */
   settings?: readonly PanelSettingDecl[];
@@ -151,7 +151,7 @@ export function isValidPanelId(id: string): boolean {
   return isBareId(id) || isPluginNamespacedId(id);
 }
 
-// ============================== 内置 16 个面板 ==============================
+// ============================== 内置 17 个面板 ==============================
 
 /** 宿主内置面板 id（封闭清单）。 */
 export const BUILTIN_PANEL_IDS = [
@@ -168,6 +168,7 @@ export const BUILTIN_PANEL_IDS = [
   "tagtable",
   "color",
   "player",
+  "music",
   "tasks",
   "plugins",
   "blueprint",
@@ -181,10 +182,10 @@ export type PanelId = BuiltinPanelId | `plugin.${string}`;
 const SYSTEM_ORIGIN: PanelOrigin = { kind: "system" };
 
 /**
- * 宿主内置 16 个面板的声明（顺序即 `PANEL_IDS` 顺序）。
+ * 宿主内置 17 个面板的声明（顺序即 `PANEL_IDS` 顺序）。
  *
  * `has_class` 如实反映当前默认蓝图：**媒体预览（`media`）、图书预览（`bookpreview`）、
- * 相册（`albums`）与源（`sources`）有类目**，其余 12 个没有条目分类（第 5.1 节）。
+ * 相册（`albums`）与源（`sources`）有类目**，其余 13 个没有条目分类（第 5.1 节）。
  *
  * **`albums` / `sources` 于 2026-11-01（D135）由 `false` 改为 `true`**：此前它们确实没有
  * "按媒体类型分类"的层，但用户口径是"相册面板的条目就是相册、源面板的条目就是源"——
@@ -608,6 +609,7 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
     ],
   },
   {
+    // 媒体播放器（视频）。音乐**不在这里**：它是独立面板 `music`（D166）。
     id: "player",
     titleKey: "panel.player",
     category: "media",
@@ -622,19 +624,6 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
         default: true,
       },
       {
-        // 音乐模式的样式（用户 2026-11-13 要求"多种样式，设置内切换"）：
-        // 取值域与 `panels/player/playerStyle.ts` 的 `PLAYER_STYLES` 逐项一致，
-        // 非法值由 `normalizePlayerStyle` 回落缺省（样式 1 色晕）。
-        key: "style",
-        kind: "select",
-        title_key: "player.settings.style",
-        default: "haze",
-        options: [
-          { value: "haze", title_key: "player.settings.style.haze" },
-          { value: "disc", title_key: "player.settings.style.disc" },
-        ],
-      },
-      {
         // 音量按**百分比**存（0 = 静音，100 = 原声）：宿主 `slider` 的取值域恰是
         // 0–100（浏览器 range 的默认 min/max），因此这一项不需要面板另立数值口径
         // ——与 `bookreader.pageWidth` / `brightness` 同款（声明层没有 min/max，
@@ -646,12 +635,50 @@ export const BUILTIN_PANEL_SPECS: readonly PanelSpec[] = [
       },
     ],
   },
+  {
+    // 音乐播放器（2026-11-13 / D166）：**独立面板**，只处理 `media_type === "audio"`。
+    // 面板自己的音量与自动暂停，与媒体播放器面板互不干扰（两个面板可以同时开着）。
+    id: "music",
+    titleKey: "panel.music",
+    category: "media",
+    hasClass: false,
+    blueprintNode: "control",
+    origin: SYSTEM_ORIGIN,
+    settings: [
+      {
+        key: "autoPauseOnTabSwitch",
+        kind: "switch",
+        title_key: "music.settings.autoPauseOnTabSwitch",
+        default: true,
+      },
+      {
+        // 音乐面板的样式（用户 2026-11-13 要求"多种样式，设置内切换"）：
+        // 取值域与 `panels/music/musicStyle.ts` 的 `MUSIC_STYLES` 逐项一致，
+        // 非法值由 `normalizeMusicStyle` 回落缺省（样式 1 色晕）。
+        key: "style",
+        kind: "select",
+        title_key: "music.settings.style",
+        default: "haze",
+        options: [
+          { value: "haze", title_key: "music.settings.style.haze" },
+          { value: "disc", title_key: "music.settings.style.disc" },
+        ],
+      },
+      {
+        // 音量（0–100 百分比）：口径同 `player.volume`，越界值由面板夹紧。
+        key: "volume",
+        kind: "slider",
+        title_key: "music.settings.volume",
+        default: 100,
+      },
+    ],
+  },
   { id: "tasks", titleKey: "panel.tasks", category: "system", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "plugins", titleKey: "panel.plugins", category: "system", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
   { id: "blueprint", titleKey: "panel.blueprint", category: "system", hasClass: false, blueprintNode: "control", origin: SYSTEM_ORIGIN },
 ];
 
-/** 规范面板 ID 列表（内置 16 个；插件面板不进这张常量表，走运行时注册表）。 */
+/** 规范面板 ID 列表（内置 17 个；插件面板不进这张常量表，走运行时注册表）。 */
 export const PANEL_IDS: readonly PanelId[] = BUILTIN_PANEL_IDS;
 
 /** 面板 ID → 标题翻译键（内置；插件面板用 `panelTitleKeyOf`）。 */
@@ -712,7 +739,7 @@ export function unregisterPluginPanels(pluginId?: string): void {
   bumpPanels();
 }
 
-/** 全部已注册面板（内置 16 个 + 插件项）。 */
+/** 全部已注册面板（内置 17 个 + 插件项）。 */
 export function allPanels(): readonly PanelSpec[] {
   return pluginPanels.length === 0 ? BUILTIN_PANEL_SPECS : [...BUILTIN_PANEL_SPECS, ...pluginPanels];
 }

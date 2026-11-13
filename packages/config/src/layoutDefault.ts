@@ -71,6 +71,7 @@ export const DEFAULT_LAYOUT_LAYERS: Readonly<Record<string, LayoutLayerState>> =
               "views": [
                 "media",
                 "player",
+                "music",
                 "imageviewer",
                 "bookpreview",
                 "bookreader"
@@ -162,6 +163,12 @@ export const DEFAULT_LAYOUT_LAYERS: Readonly<Record<string, LayoutLayerState>> =
       "player": {
         "id": "player",
         "contentComponent": "player",
+        "minimumHeight": 22,
+        "minimumWidth": 6
+      },
+      "music": {
+        "id": "music",
+        "contentComponent": "music",
         "minimumHeight": 22,
         "minimumWidth": 6
       },
@@ -282,6 +289,7 @@ export const DEFAULT_LAYOUT_LAYERS: Readonly<Record<string, LayoutLayerState>> =
               "views": [
                 "media",
                 "player",
+                "music",
                 "imageviewer",
                 "bookpreview",
                 "bookreader"
@@ -373,6 +381,12 @@ export const DEFAULT_LAYOUT_LAYERS: Readonly<Record<string, LayoutLayerState>> =
       "player": {
         "id": "player",
         "contentComponent": "player",
+        "minimumHeight": 22,
+        "minimumWidth": 6
+      },
+      "music": {
+        "id": "music",
+        "contentComponent": "music",
         "minimumHeight": 22,
         "minimumWidth": 6
       },
