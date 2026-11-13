@@ -7500,7 +7500,7 @@ check(
   JSON.stringify(musicSpec?.settings?.find((setting) => setting.key === "style") ?? null),
 );
 check(
-  "D166：音乐播放器是**独立面板**（`music`），媒体播放器只做视频——传输按钮只在音乐面板里",
+  "D166：音乐播放器是**独立面板**（`music`），媒体播放器是**通用**播放器（视频 + 音频基础功能）——特化符号只在音乐面板里",
   // 注册层：两个面板各自是注册项，设置各存各的。
   config.BUILTIN_PANEL_IDS.includes("music") &&
     musicSpec?.titleKey === "panel.music" &&
@@ -7509,7 +7509,10 @@ check(
     (musicPanelSrc.match(/<MusicStage/g) ?? []).length === 1 &&
     /data-mode="music"/.test(musicPanelSrc) &&
     /className="player-transport"/.test(musicStageSrc) &&
-    // 视频面板：一个音乐符号都不许有（独立面板，不是"同一面板的另一模式"）。
+    // 媒体播放器面板：音频只是"基础功能"——波形在、播放队列混装、音乐特化符号统统不在。
+    // （用户 2026-11-13 裁决：视频播放器可以播放音频，只是音频只有基础功能。）
+    /<AudioWaveform/.test(videoPanelSrc) &&
+    /usePlayableQueue\(app, panelApi, "any"\)/.test(videoPanelSrc) &&
     !/<MusicStage/.test(videoPanelSrc) &&
     !/player-transport/.test(videoPanelSrc) &&
     !/player-lyrics|player-haze|player-vinyl|player-disc/.test(videoPanelSrc) &&

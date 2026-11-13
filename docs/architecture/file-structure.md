@@ -466,18 +466,24 @@ apps/desktop/src/app_ui/
                             #   + `thumbPixelSize`（D159：按视图几何 × 图片宽度 × DPR 算缩略图长边需求）
     mediaPreviewVirtualRows.tsx # 行虚拟化的共享钩子（定高 / 测量 / 变量行高 + 滚动窗口）
     mediaPreviewScroll.ts   # 滚动位置恢复的纯逻辑（与后台翻页的时序冲突，缺陷 0018 第 6 轮）
-    MediaPlayerPanel.tsx    # 媒体播放器面板（**只做视频**；DOM `<video>` 播放控制，
+    MediaPlayerPanel.tsx    # 媒体播放器面板（**通用播放器**：视频 + 音频的基础播放；
+                            #   2026-11-13 用户澄清"视频播放器可以播放音频，只是音频只有
+                            #   基础功能"——音频在这里只有单击暂停 / 进度条 / 波形 / 音量，
+                            #   封面 / 歌词 / 两套样式 / 上一首下一首都归 `MusicPlayerPanel`。
+                            #   DOM `<video>` 播放控制，
                             #   音频多一条**波形图**——2026-10-17 / D115：游标随播放位置走、
                             #   点 / 拖即定位，且与进度条拖动**共用** `commitSeek`（两条定位
                             #   路径只有一份实现）；视频不画波形，理由见 A/D115 ②⑫）
                             #   进度条右侧另有**音量**（2026-11-07 / D142）：音量图标 + 点开的
                             #   竖状控制条（`rotate(-90deg)` 的原生 range），值存面板设置
                             #   `panel.player.volume`（默认 100），不新增播放器命令 / 事件
-                            #   **一个传输按钮都没有**（D142 原样有效，音频已搬去独立面板，
+                            #   **一个传输按钮都没有**（D142 原样有效，音乐舞台搬去了独立面板，
                             #   见下面的 `MusicPlayerPanel.tsx`）；**视频可像图像查看器那样切换**
                             #   （2026-11-13 用户裁决）：面板聚焦后 ← / → 走上/下一个视频，
-                            #   队列复用 `playableQueue.ts` 的 `kind = "video"`，切曲同样复用
-                            #   宿主选中（`setSelectedIds` + `setSelectedFile`）——
+                            #   队列用 `playableQueue.ts` 的 `kind = "any"`（一条队列混装音频与
+                            #   视频，顺序即媒体预览顺序）再按 `stepPlayable(..., "video")`
+                            #   只在视频里走；放音频时方向键不动（"基础功能"里没有上一首）；
+                            #   切曲同样复用宿主选中（`setSelectedIds` + `setSelectedFile`）——
                             #   播放器不是第二套"当前文件"
     MusicPlayerPanel.tsx    # 音乐播放器面板（2026-11-13 / D165 → D166 **独立成面板**，
                             #   `panel_id = "music"`，**只做音频**）：播放请求来自
@@ -488,7 +494,10 @@ apps/desktop/src/app_ui/
                             #   于是未开唱就有 `0:00` / `-0:37`；两套样式由设置
                             #   `panel.music.style` 切换，随机 / 循环只存会话 state
     playableQueue.ts        # 可播放队列的取数（**两个播放面板共用**：`usePlayableQueue(app,
-                            #   panelApi, kind)`。相册走 `album.members`，其余走 `file.query`
+                            #   panelApi, kind: QueueKind)`，`kind` 取 `"audio"` / `"video"` /
+                            #   `"any"`——音乐面板只要音频，媒体播放器面板要 `"any"`
+                            #   （音频与视频混装，用户 2026-11-13 裁决）。相册走 `album.members`，
+                            #   其余走 `file.query`
                             #   + `mediaTypes:[kind]`，复用媒体预览的 `drainPages` /
                             #   `sortFiles` / 会话排序覆盖——播放顺序与预览列表同一份口径；
                             #   世代号取消，与 `useViewerSequence` 同构）

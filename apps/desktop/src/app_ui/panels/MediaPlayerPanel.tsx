@@ -33,6 +33,15 @@
  * → 本面板解析路径、`convertFileSrc` 后加载并自动播放；单击画面且尚无源时播放
  * 当前选中的视频/音频文件。
  *
+ * ## 本面板是通用播放器，不是"视频专用"（2026-11-13 用户裁决）
+ *
+ * 音频也能在这里播——但只给**基础功能**：单击画面暂停/继续、进度条、波形、音量。
+ * 封面、歌词、两套样式、随机/循环、上一首/下一首都不在这里，它们在独立面板
+ * `music`（D166）：音乐是"特化视图"，本面板是"什么都能放"的那一个。
+ *
+ * 队列因此**同时收音频与视频**（`usePlayableQueue(…, "any")`），顺序与媒体预览
+ * 一致；只有视频接 ←/→ 切段（音频没有上一首/下一首，这是用户对"基础功能"的界定）。
+ *
  * ## 音频的波形图（2026-10-17 / D115）
  *
  * **`media_type === "audio"` 时**，进度条上方多一条后端生成的**波形图**
@@ -183,13 +192,20 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   }, [app, loadAndPlay]);
 
   /**
-   * 视频队列（2026-11-13 用户裁决："播放器要能像图像查看器那样切视频"）：
-   * 范围与媒体预览同一口径（相册 → 源或子目录 → 全仓库），**只收 `video`**——
-   * 上一段 / 下一段不该跳到 mp3（音频归独立的音乐播放器面板，D166）。
+   * 播放队列（2026-11-13 用户裁决）：一条队列**混合音频与视频**，范围与媒体预览
+   * 同一口径（相册 → 源或子目录 → 全仓库），顺序即媒体预览看到的顺序。
+   *
+   * 本面板是**通用**播放器（视频 + 音频的基础播放），音频的特化视图（封面 / 歌词 /
+   * 两套样式 / 上一首下一首）在独立面板 `music` 里（D166）。队列之所以不受类型
+   * 收窄，是因为"当前播的是哪个文件"由宿主选中决定——宿主选中可以是音频。
    */
-  const queue = usePlayableQueue(app, panelApi, "video");
+  const queue = usePlayableQueue(app, panelApi, "any");
 
-  /** 切到队列里的上/下一个视频（复用宿主选中，不另立"播放器下标"）。 */
+  /** 当前文件是否视频：只有视频才做 ←/→ 切段（用户裁决：音频只有基础功能）。 */
+  const canStepByKeyboard =
+    app.selectedFile?.media_type === "video";
+
+  /** 切到队列里的上/下一个**视频**（复用宿主选中，不另立"播放器下标"）。 */
   const stepTrack = useCallback(
     (delta: number) => {
       const next = stepPlayable(queue.files, queue.index, delta, "video");
@@ -204,7 +220,12 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     [app, loadAndPlay, queue.files, queue.index],
   );
 
-  /** ← / → 切上/下一个视频（带修饰键一律放行，不抢浏览器/系统快捷键）。 */
+  /**
+   * ← / → 切上/下一个视频（带修饰键一律放行，不抢浏览器/系统快捷键）。
+   *
+   * 音频不接方向键：用户 2026-11-13 裁决"音频只有基础功能"——本面板给音频的是
+   * 单击暂停/继续、进度条、波形、音量；上一首/下一首属于音乐面板（`music`）。
+   */
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
@@ -217,13 +238,16 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
       if (target && /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName)) {
         return;
       }
+      if (!canStepByKeyboard) {
+        return;
+      }
       if (!canStepPlayable(queue.files, queue.index, event.key === "ArrowLeft" ? -1 : 1, "video")) {
         return;
       }
       event.preventDefault();
       stepTrack(event.key === "ArrowLeft" ? -1 : 1);
     },
-    [queue.files, queue.index, stepTrack],
+    [canStepByKeyboard, queue.files, queue.index, stepTrack],
   );
 
   /**

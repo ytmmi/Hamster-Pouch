@@ -1,10 +1,17 @@
 /**
  * **可播放队列**（当前音频 / 视频所属的相册或源，顺序与媒体预览一致）。
  *
- * 音乐播放器面板（`kind = "audio"`）与媒体播放器面板（`kind = "video"`）共用这一份实现：
- * 两者都要"按同一份顺序切上一个/下一个"，各写一遍必然漂移（排序、范围优先级、
- * 取消语义全都要对齐）。队列**只装同一种媒体类型**——听歌不跳到 `pv.mp4`，
- * 看视频也不跳到 mp3；跨类型的步进由 `queueView.stepPlayable` 再兜一层。
+ * 音乐播放器面板（`kind = "audio"`）、媒体播放器面板（`kind = "any"`）与任何将来
+ * 需要"按播放器顺序走一格"的面板共用这一份实现：各写一遍必然漂移（排序、范围优先级、
+ * 取消语义全都要对齐）。
+ *
+ * - `kind = "audio"` / `"video"`：队列只装该类型（音乐面板的上一首/下一首不跨类型）。
+ * - `kind = "any"`：音频与视频混在一条队列里，**顺序就是媒体预览看到的顺序**——
+ *   媒体播放器面板用它（用户 2026-11-13 裁决："一条队列混合音频与视频"），
+ *   于是 ←/→ 在同一个面板里可以连续走完一段混排内容。
+ *
+ * 跨类型的步进仍由 `queueView.stepPlayable` 兜一层：传 `"audio"` / `"video"` 时
+ * 只在同类里走，不会从 mp3 跳到 mp4。
  *
  * 来源优先级与媒体预览/图像查看器**同一条口径**（`viewerScopeOf` /
  * `scopeKindOf` 直接复用，不写第三份）：相册 → 源或子目录 → 全仓库。
@@ -36,6 +43,14 @@ import { playableFiles, playableKindOf, type PlayableKind } from "./music/queueV
 /** 单页条数（`file.query` / `album.members` 的后端上限同样是 1000）。 */
 export const QUEUE_PAGE_LIMIT = 1000;
 
+/**
+ * 队列口径：只要一种媒体类型，或"可播放的都收"（`"any"`）。
+ *
+ * `"any"` 存在的理由：媒体播放器面板既能放视频也能放音频（用户 2026-11-13 裁决：
+ * "视频播放器可以播放音频，只是音频只有基础功能"），它的一条队列要同时覆盖两者。
+ */
+export type QueueKind = PlayableKind | "any";
+
 /** 队列：当前范围里的可播放文件 + 当前位置。 */
 export interface PlayableQueue {
   files: FileItem[];
@@ -54,7 +69,7 @@ export interface PlayableQueue {
 export function usePlayableQueue(
   app: AppContextValue,
   panelApi: PanelRenderCtx["api"] | undefined,
-  kind: PlayableKind,
+  kind: QueueKind,
 ): PlayableQueue {
   const { repoId, albumId, sourceId, dirPath, refreshKey, selectedFile, status, t } = app;
   const [rawFiles, setRawFiles] = useState<FileItem[]>([]);
@@ -77,8 +92,11 @@ export function usePlayableQueue(
   const sortDir = sortSession.dir ?? (isSortDirection(defaultSortDir) ? defaultSortDir : "asc");
 
   useEffect(() => {
-    const sameKind = (items: FileItem[]) =>
-      playableFiles(items).filter((file) => playableKindOf(file) === kind);
+    // `"any"` 时不做类型过滤：一条队列里音频与视频按媒体预览的顺序混排。
+    const keepKind = (items: FileItem[]) =>
+      kind === "any"
+        ? playableFiles(items)
+        : playableFiles(items).filter((file) => playableKindOf(file) === kind);
     const scope: ViewerScope | null = repoId
       ? { repoId, albumId, sourceId, dirPath }
       : null;
@@ -120,12 +138,12 @@ export function usePlayableQueue(
             if (firstRendered) return;
             firstRendered = true;
             if (isCancelled()) return;
-            setRawFiles(sameKind(accumulated));
+            setRawFiles(keepKind(accumulated));
           },
           isCancelled,
         });
         if (isCancelled()) return;
-        setRawFiles(sameKind(drained));
+        setRawFiles(keepKind(drained));
         setTruncated(!drained.complete);
       } catch (e) {
         if (isCancelled()) return;
