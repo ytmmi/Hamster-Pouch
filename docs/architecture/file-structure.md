@@ -157,6 +157,12 @@ apps/desktop/src/app_ui/
                         #   媒体预览与图像查看器胶片栏消费同一份；模块加载即订阅
                         #   settingChangeStore——「全部设置」显式改排序即放弃覆盖，
                         #   不依赖哪个面板恰好挂载着
+    playerPlayStore.ts  # 媒体播放器的**播放请求通道**（`requestPlayerPlay` / `subscribePlayerPlay`）：
+                        #   蓝图双击视频只投递"播放哪个文件"，由面板解析路径并播放——
+                        #   宿主不持有播放状态，也就没有"面板还没挂载"的时序竞争
+    musicPlayStore.ts   # 音乐播放器的**播放请求通道**（`requestMusicPlay` / `subscribeMusicPlay`，
+                        #   2026-11-13 / D166）：与 `playerPlayStore` 刻意分开——音频与视频
+                        #   是两个面板、两条通道，同时开着也不会互相抢 `src`
     InterfacePageBar.tsx  # 垂直「界面页」标签条（D124 / D124-R2 / D124-R3 / D124-R4 / D124-R5）：界面（= 蓝图层）
                         #   导航 + 页面组。收起是工作区里 12px 的**真实占位列**（与面板同层、不覆盖内容），
                         #   指针移入才把 200px 面板**绝对定位**滑出到面板之上（展开态才脱离布局）。
@@ -460,25 +466,34 @@ apps/desktop/src/app_ui/
                             #   + `thumbPixelSize`（D159：按视图几何 × 图片宽度 × DPR 算缩略图长边需求）
     mediaPreviewVirtualRows.tsx # 行虚拟化的共享钩子（定高 / 测量 / 变量行高 + 滚动窗口）
     mediaPreviewScroll.ts   # 滚动位置恢复的纯逻辑（与后台翻页的时序冲突，缺陷 0018 第 6 轮）
-    MediaPlayerPanel.tsx    # 媒体播放器面板（DOM `<video>` 播放控制；音频多一条**波形图**
-                            #   ——2026-10-17 / D115：游标随播放位置走、点 / 拖即定位，
-                            #   且与进度条拖动**共用** `commitSeek`（两条定位路径只有一份实现）；
-                            #   视频不画波形，理由见 A/D115 ②⑫）
+    MediaPlayerPanel.tsx    # 媒体播放器面板（**只做视频**；DOM `<video>` 播放控制，
+                            #   音频多一条**波形图**——2026-10-17 / D115：游标随播放位置走、
+                            #   点 / 拖即定位，且与进度条拖动**共用** `commitSeek`（两条定位
+                            #   路径只有一份实现）；视频不画波形，理由见 A/D115 ②⑫）
                             #   进度条右侧另有**音量**（2026-11-07 / D142）：音量图标 + 点开的
                             #   竖状控制条（`rotate(-90deg)` 的原生 range），值存面板设置
                             #   `panel.player.volume`（默认 100），不新增播放器命令 / 事件
-                            #   **音乐模式**（2026-11-13 / D165）：选中音频时 `.player-stage`
-                            #   换成 `<MusicStage>`（画面区里那支 `<video>` 保留但 1px 透明，
-                            #   音频仍靠它出声——**只有一条播放通道**，不是第二套播放器），
-                            #   出现 随机 / 上一首 / 播放暂停 / 下一首 / 循环 五枚按钮；视频
-                            #   模式**不渲染**这个组件，D142「视频不放传输控件」的口径因此
-                            #   原样成立。**音乐模式下底部进度条与波形不渲染**——进度条已经
-                            #   在音乐舞台里（两套进度条会互相打架），波形是"音频没有画面时
-                            #   的替代品"，有了音乐舞台就不需要
-                            #   随机 / 循环只存面板 state（**不落库**：它们是"这次怎么听"）
-                            #   排版校准与 RFC 0005 的收窄理由见 panel-standard §5.2 第 19 项
-    player/                 # 音乐模式的取料与视图（2026-11-13 / D165；与 imageviewer/ 同构的
-                            #   多文件功能域，主面板仍是上一行的 `MediaPlayerPanel.tsx`）
+                            #   **一个传输按钮都没有**（D142 原样有效，音频已搬去独立面板，
+                            #   见下面的 `MusicPlayerPanel.tsx`）；**视频可像图像查看器那样切换**
+                            #   （2026-11-13 用户裁决）：面板聚焦后 ← / → 走上/下一个视频，
+                            #   队列复用 `playableQueue.ts` 的 `kind = "video"`，切曲同样复用
+                            #   宿主选中（`setSelectedIds` + `setSelectedFile`）——
+                            #   播放器不是第二套"当前文件"
+    MusicPlayerPanel.tsx    # 音乐播放器面板（2026-11-13 / D165 → D166 **独立成面板**，
+                            #   `panel_id = "music"`，**只做音频**）：播放请求来自
+                            #   `core/musicPlayStore` 的 `requestMusicPlay`（蓝图音频双击
+                            #   `a_show_music` 的落点，与视频的 `requestPlayerPlay` 是两条
+                            #   独立通道，同时开着互不抢 `src`）；选中即预载元数据但**不出声**
+                            #   （`preload="metadata"` + `autoPlayRef`，首次播放仍须用户手势），
+                            #   于是未开唱就有 `0:00` / `-0:37`；两套样式由设置
+                            #   `panel.music.style` 切换，随机 / 循环只存会话 state
+    playableQueue.ts        # 可播放队列的取数（**两个播放面板共用**：`usePlayableQueue(app,
+                            #   panelApi, kind)`。相册走 `album.members`，其余走 `file.query`
+                            #   + `mediaTypes:[kind]`，复用媒体预览的 `drainPages` /
+                            #   `sortFiles` / 会话排序覆盖——播放顺序与预览列表同一份口径；
+                            #   世代号取消，与 `useViewerSequence` 同构）
+    music/                  # 音乐播放器的取料与视图（2026-11-13 / D165、D166；与
+                            #   imageviewer/ 同构的多文件功能域，主面板是 `MusicPlayerPanel.tsx`）
                             #   MusicStage.tsx 音乐舞台（两套样式是**两套排版**而不是一套 DOM
                             #     换配色：haze = 左列封面卡 + 进度/传输/音量 + 右侧大号歌词；
                             #     disc = 左侧曲名/歌词 + 进度/传输 + 右上按封面上色的大唱片。
@@ -508,10 +523,8 @@ apps/desktop/src/app_ui/
                             #     里走、不跨 audio↔video；`StepOptions.shuffle` 只在同类里抽
                             #     且不抽自己，`repeat` = off / all / one —— off 在端点返回
                             #     -1 并禁用按钮、all/one 环绕、one 只管自动续播）
-                            #   usePlayerQueue.ts 队列取数（相册走 album.members、其余走
-                            #     file.query + mediaTypes:['audio','video']，复用媒体预览的
-                            #     drainPages / sortFiles / 会话排序覆盖——播放顺序与预览列表
-                            #     同一份口径；世代号取消，与 useViewerSequence 同构）
+                            #   useMusicQueue.ts 音乐队列（`usePlayableQueue(..., "audio")` 的
+                            #     一档：面板侧不必再传 kind，类型固定为"只收音频"）
                             #   haze.ts 配色（后端色板 → CSS 变量：`hazeVars` 给三团色晕，
                             #     `stageVars` 再从同一组主色算出样式 2 的整套颜色——天空渐变、
                             #     墨色文字、强调色、唱片盘体与两道细环；**前端不从封面取色**，
@@ -525,8 +538,8 @@ apps/desktop/src/app_ui/
                             #     `formatClock` = 同一口径但**允许 0**（进度条起点必须是
                             #     `0:00`，它是合法位置），`formatRemaining` = 倒计时 `-3:24`：
                             #     样式 1 的进度条右端是"还剩多久"）
-                            #   playerStyle.ts 样式声明（`PLAYER_STYLES = ["haze","disc"]`、
-                            #     缺省 haze、`normalizePlayerStyle` 兜底、标题键派生）
+                            #   musicStyle.ts 样式声明（`MUSIC_STYLES = ["haze","disc"]`、
+                            #     缺省 haze、`normalizeMusicStyle` 兜底、标题键派生）
                             #   trackInfo.ts 曲名/艺人（文件名首个 `" - "` 切分；索引里没有
                             #     title/artist，读标签未排期，D115 ⑫）
     BlueprintPanel.tsx      # 蓝图编辑器主面板（**入口装配**：状态 + 文档命令 + 层工具 + 图编辑动作；
@@ -772,7 +785,7 @@ HamsterPouch/
     shared-types/             # 由 Rust 类型生成的前端共享类型，生成文件必须标记来源
                               #   （marker：`// @generated by hp-dto (ts-rs) — DO NOT EDIT` + source + regenerate）
     config/                   # 前端共享配置、常量、面板注册表类型、布局类型
-      panels.ts               # **面板注册表**（RFC 0010 决策 4：内置 16 个 + 插件可注册；`category` /
+      panels.ts               # **面板注册表**（RFC 0010 决策 4：内置 17 个 + 插件可注册；`category` /
                               #   `has_class` 有无类目 / `blueprint_node` / `settings` / `mount` / `origin`）
       settings.ts             # 应用设置键与默认值（「全部设置」设置注册表，`docs/spec/settings-standard.md`）
       blueprint.ts            # 蓝图图文档类型 / 分层工具 / 解析层校验 / 用户保存与旧默认识别（取值域再导出）

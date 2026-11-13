@@ -525,7 +525,7 @@ libmpv 播放路径 2026-09 起休眠（播放器面板改走 DOM `<video>`，�
 
 本节原声明两条只读命令 `panel.registry` / `panel.settings`。**经 2026-09 裁决，二者均不实现为 Tauri 命令**，理由与 `setting.registry` / `setting.search` 同源（见 3.13 规则第一条）：
 
-- **面板注册表是声明式数据**：宿主内置 16 项在 `packages/config/src/panels.ts`（`BUILTIN_PANEL_SPECS`），插件项经既有 `plugin.contributions` 命令到达前端并登记进注册表。做成命令必须在 Rust 侧重新推导同一份数据。
+- **面板注册表是声明式数据**：宿主内置 17 项在 `packages/config/src/panels.ts`（`BUILTIN_PANEL_SPECS`），插件项经既有 `plugin.contributions` 命令到达前端并登记进注册表。做成命令必须在 Rust 侧重新推导同一份数据。
 - **面板设置项 = 声明（TS）+ 当前值**：声明在面板 `settings[]`，当前值由 `setting.get` / `setting.list` 取。属前端组合，不需要专用命令。
 
 | 原声明 | 裁决 | 前端落点 |

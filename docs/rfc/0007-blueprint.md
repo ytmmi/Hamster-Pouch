@@ -398,7 +398,7 @@ CREATE TABLE blueprint_templates (
 ```
 
 > ⚠️ **上例是"结构示意（12 节点 / 13 边）"，不是真实内置默认图。**
-> 真实内置默认蓝图是 **51 节点 / 48 边**（`default_version` 当前 = 8，**2 层**「主界面」+「界面 2」），权威来源只有一个：
+> 真实内置默认蓝图是 **52 节点 / 49 边**（`default_version` 当前 = 9，**2 层**「主界面」+「界面 2」），权威来源只有一个：
 > **`packages/config/src/blueprintDefault.ts` 的 `DEFAULT_BLUEPRINT` 常量**，其 JSON 由 `pnpm generate:blueprint-fixture`
 > 导出为 `crates/hp-store/tests/default_blueprint.json`（Rust 侧 `include_str!` 引用，测试断言 51/48）。
 >
