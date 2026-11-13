@@ -7419,6 +7419,46 @@ check(
   })(),
 );
 check(
+  "D171：失焦不暂停——两个面板都只在「面板隐藏」时暂停（判据不得掺 `isActive`）",
+  // 用户 2026-11-13：「音乐播放器在失去焦点后继续播放……只在面板隐藏、切换时暂停，
+  // 媒体播放器也同（样修改）」。
+  /const visible = Boolean\(panelApi\.isVisible\);/.test(musicPanelSrc) &&
+    /const visible = Boolean\(panelApi\.isVisible\);/.test(videoPanelSrc) &&
+    !/panelApi\.isVisible && panelApi\.isActive/.test(musicPanelSrc) &&
+    !/panelApi\.isVisible && panelApi\.isActive/.test(videoPanelSrc),
+);
+
+check(
+  "D171：歌词切换提前一个过渡时长（动画收尾刚好切到正在唱的句）",
+  // 用户 2026-11-13：「切换歌词时提前一点，使动画结束刚好切换到正在唱的歌词」。
+  Number.isFinite(musicStageMod.LYRIC_LEAD_MS) &&
+    musicStageMod.LYRIC_LEAD_MS >= 400 &&
+    musicStageMod.LYRIC_LEAD_MS <= 700 &&
+    /activeLrcIndex\(items, positionMs \+ LYRIC_LEAD_MS\)/.test(musicStageSrc),
+);
+
+check(
+  "D171：当前句逐字从左到右填充（已唱到的字换色，边界随播放推进）",
+  // 用户 2026-11-13：「当前句的歌词显示增加实时的颜色变化」（参考图 2 样式 1）。
+  eqList(musicStageMod.lyricChars("雨と太陽"), ["雨", "と", "太", "陽"]) &&
+    // emoji / 组合字不劈开（Array.from 而不是 split("")）。
+    musicStageMod.lyricChars("👩‍🎤a").length === 2 &&
+    musicStageMod.sungCharCount(10, 0) === 0 &&
+    musicStageMod.sungCharCount(10, 0.31) === 3 &&
+    musicStageMod.sungCharCount(10, 1) === 10 &&
+    musicStageMod.sungCharCount(10, 5) === 10 &&
+    musicStageMod.sungCharCount(0, 0.5) === 0 &&
+    // 行内进度：起点 0、终点 1、超过终点封顶；没有下一句时用兜底时长。
+    musicStageMod.lineProgress(1000, 3000, 1000) === 0 &&
+    musicStageMod.lineProgress(1000, 3000, 2000) === 0.5 &&
+    musicStageMod.lineProgress(1000, 3000, 9000) === 1 &&
+    musicStageMod.lineProgress(1000, null, 1000 + musicStageMod.DEFAULT_LINE_MS / 2) === 0.5 &&
+    /className="player-lyric-char"/.test(musicStageSrc) &&
+    /data-sung=\{charIndex < sung \? "true" : "false"\}/.test(musicStageSrc) &&
+    /\.player-lyric-char\[data-sung="true"\]/.test(stylesSource),
+);
+
+check(
   "D166：上一首 / 下一首只在**同类**里走、端点循环（音频不跳视频，视频也不跳音频）",
   (() => {
     const files = [

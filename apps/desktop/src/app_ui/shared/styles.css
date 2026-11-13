@@ -5883,6 +5883,17 @@ button.danger {
   color: rgba(255, 255, 255, 0.9);
 }
 
+/* 当前句**逐字**填充（用户 2026-11-13 D171，参考图 2 的口径：唱到的字亮、没唱到的淡）。
+   字色自带 0.18s 过渡，边界推进时不会一格一格地"跳"。 */
+.player-lyrics[data-variant="haze"] .player-lyric-char {
+  color: rgba(255, 255, 255, 0.55);
+  transition: color 0.18s linear;
+}
+
+.player-lyrics[data-variant="haze"] .player-lyric.is-active .player-lyric-char[data-sung="true"] {
+  color: #fff;
+}
+
 /* 样式 2：不模糊、不错位，靠**颜色深浅**分层（参考图是淡紫灰 → 深藏青）。 */
 .player-lyrics[data-variant="disc"] {
   /* 行簇在信息区里均匀铺开：只有五句可见时也能一路排到控制区上沿，
@@ -5931,6 +5942,17 @@ button.danger {
   /* 参考图的当前句是**紫色**（强调色），不是深墨色——浅底上这样才跳得出来。 */
   color: var(--player-accent, #5b46c9);
   opacity: 1;
+}
+
+/* 样式 2 的逐字填充反过来：**没唱到的淡紫、唱到的深墨**（参考图 1 里最后一个"握"就是
+   已经唱到的那一格）。浅底上"越唱越深"比"越唱越亮"更清楚。 */
+.player-lyrics[data-variant="disc"] .player-lyric-char {
+  color: color-mix(in srgb, var(--player-accent, #5b46c9) 62%, transparent);
+  transition: color 0.18s linear;
+}
+
+.player-lyrics[data-variant="disc"] .player-lyric.is-active .player-lyric-char[data-sung="true"] {
+  color: var(--player-ink, #232840);
 }
 
 .player-lyrics[data-variant="disc"] .player-lyric.is-active .player-lyric-sub {

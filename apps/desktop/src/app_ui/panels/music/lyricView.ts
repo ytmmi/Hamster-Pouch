@@ -24,3 +24,63 @@ export function lyricIndent(distance: number): number {
   const jitter = ((Math.max(1, Math.round(distance)) * 29) % 23) / 8;
   return Math.round((step + jitter) * 100) / 100;
 }
+
+/**
+ * 歌词切换的**提前量**（毫秒，用户 2026-11-13 D171：「切换歌词时提前一点，使动画
+ * 结束刚好切换到正在唱的歌词」）。
+ *
+ * 行的淡入/放大过渡约 0.5s（见 `styles.css` 的 `.player-lyric`），所以把判定时刻
+ * 提前一个过渡时长，动画收尾的那一刻正好是新的一行开始唱。
+ */
+export const LYRIC_LEAD_MS = 480;
+
+/**
+ * 按**字素**切分歌词。
+ *
+ * 逐字填充必须按"用户眼里的一个字"切：`split("")` 会把 surrogate pair 劈开，
+ * `Array.from` 也只到**码位**——`👩‍🎤` 这种 ZWJ 组合会被拆成 4 个 span。有
+ * `Intl.Segmenter` 就用它，没有才退回码位切分（老引擎上最多把 emoji 拆开，
+ * 中文歌词不受影响）。
+ */
+export function lyricChars(text: string): string[] {
+  const Segmenter = (
+    Intl as unknown as {
+      Segmenter?: new (
+        locale?: string,
+        options?: { granularity: "grapheme" },
+      ) => { segment: (input: string) => Iterable<{ segment: string }> };
+    }
+  ).Segmenter;
+  if (!Segmenter) return Array.from(text);
+  const segmenter = new Segmenter("zh-Hans", { granularity: "grapheme" });
+  return Array.from(segmenter.segment(text), (part) => part.segment);
+}
+
+/**
+ * 当前行**已唱到第几个字**（逐字从左到右填充，用户 2026-11-13 D171 选定）。
+ *
+ * `progress` 是这一行的时间进度（0–1，见 `lineProgress`）。向下取整而不是四舍五入：
+ * 唱到 60% 时第 6 个字不该提前亮——用户看到的是"唱到哪儿、亮到哪儿"。
+ */
+export function sungCharCount(length: number, progress: number): number {
+  if (!Number.isFinite(length) || length <= 0) return 0;
+  if (!Number.isFinite(progress) || progress <= 0) return 0;
+  return Math.min(length, Math.floor(length * Math.min(progress, 1)));
+}
+
+/**
+ * 一行歌词的时间进度（0–1）。
+ *
+ * 终点取**下一行的起始时刻**；最后一行没有下一行时给 `DEFAULT_LINE_MS` 的兜底
+ * 时长（否则最后一句会永远停在 0%，整句都不亮）。
+ */
+export const DEFAULT_LINE_MS = 4000;
+
+export function lineProgress(startMs: number, endMs: number | null, positionMs: number): number {
+  if (!Number.isFinite(startMs) || !Number.isFinite(positionMs)) return 0;
+  const end = endMs !== null && Number.isFinite(endMs) && endMs > startMs
+    ? endMs
+    : startMs + DEFAULT_LINE_MS;
+  if (positionMs <= startMs) return 0;
+  return Math.min(1, (positionMs - startMs) / (end - startMs));
+}

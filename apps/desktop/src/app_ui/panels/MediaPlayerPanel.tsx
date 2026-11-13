@@ -117,7 +117,8 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   /** 设置是否已从存储读到（未读到前不自动暂停，避免用未经确认的默认值）。 */
   const autoPauseLoadedRef = useRef(false);
   /** 上次可见性（只对"可见→隐藏"的**转换**做自动暂停；挂载即隐藏不算切走）。 */
-  const wasVisibleRef = useRef(Boolean(panelApi.isVisible && panelApi.isActive));
+  // 初始值同样只看「是否显示」：挂载时另有一个面板在前台并不代表本面板被隐藏。
+  const wasVisibleRef = useRef(Boolean(panelApi.isVisible));
   /** 播放命令进行中：抑制重复触发。 */
   const busyRef = useRef(false);
   /**
@@ -354,7 +355,8 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   useEffect(() => {
     void reloadAutoPauseSetting();
     const sync = () => {
-      const visible = Boolean(panelApi.isVisible && panelApi.isActive);
+      // 判据只看「面板是否显示」：失焦不算隐藏（用户 2026-11-13 D171，与音乐面板同口径）。
+      const visible = Boolean(panelApi.isVisible);
       const prevVisible = wasVisibleRef.current;
       wasVisibleRef.current = visible;
       if (visible) {
