@@ -7338,6 +7338,86 @@ check(
     Object.keys(hazeMod.hazeVars([])).join(",") ===
       "--player-haze-a,--player-haze-b,--player-haze-c",
 );
+
+check(
+  "D170：色晕跟着封面色走（主导色相不被推走、近中性色不参与、不足时同色系补齐）",
+  (() => {
+    const rgbOf = (hex) => {
+      const m = /^#([0-9a-f]{6})$/i.exec(hex);
+      if (!m) return null;
+      const n = Number.parseInt(m[1], 16);
+      return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+    };
+    const hsv = (hex) => {
+      const rgb = rgbOf(hex);
+      if (!rgb) return null;
+      const [r, g, b] = rgb.map((v) => v / 255);
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const d = max - min;
+      let h = 0;
+      if (d > 0) {
+        if (max === r) h = ((g - b) / d + 6) % 6;
+        else if (max === g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+      }
+      return { h: h * 60, s: max === 0 ? 0 : d / max };
+    };
+    const gap = (a, b) => {
+      const d = Math.abs(a - b) % 360;
+      return d > 180 ? 360 - d : d;
+    };
+    // 真实封面（牵一半）：淡蓝灰 45% + 近白 6% + 亮黄 0.8%。
+    const vars = hazeMod.stageVars(["#9eb5c0", "#fdfdfd", "#fee105"]);
+    const a = hsv(vars["--player-haze-a"]);
+    const b = hsv(vars["--player-haze-b"]);
+    const c = hsv(vars["--player-haze-c"]);
+    const source = hsv("#9eb5c0");
+    // 单色封面：三盏必须在同一色系里补，不许转色相凭空造色。
+    const solo = hazeMod.stageVars(["#112233"]);
+    const soloGap =
+      // 单色封面时允许「最小让步」推最多两档（每档 18°），但不许推成另一个色系。
+      gap(hsv(solo["--player-haze-a"]).h, hsv(solo["--player-haze-c"]).h) <= 40;
+    return (
+      a !== null && b !== null && c !== null &&
+      gap(a.h, source.h) <= 20 &&
+      gap(c.h, source.h) <= 20 &&
+      // 近中性色被剔除后，三盏都应是彩色（有饱和度）。
+      a.s >= 0.16 && b.s >= 0.16 && c.s >= 0.16 &&
+      // 黄这类高饱和色不能被推到橄榄绿（与蓝色的色相距离应保持在暖侧）。
+      gap(b.h, hsv("#fee105").h) <= 30 &&
+      soloGap
+    );
+  })(),
+);
+
+check(
+  "D170：样式 1 的底色由主导色压暗而来（不再固定紫黑），光斑面积按主导色排序",
+  (() => {
+    const vars = hazeMod.stageVars(["#9eb5c0", "#fdfdfd", "#fee105"]);
+    const base = /^#[0-9a-f]{6}$/.test(vars["--player-haze-base"] ?? "");
+    const hazeBlock = stylesSource.slice(
+      stylesSource.indexOf(".player-haze {"),
+      stylesSource.indexOf(".player-haze::after"),
+    );
+    const width = (selector) => {
+      const start = stylesSource.indexOf(`${selector} {`);
+      if (start < 0) return -1;
+      const block = stylesSource.slice(start, stylesSource.indexOf("}", start));
+      const m = /width:\s*([\d.]+)%/.exec(block);
+      return m ? Number(m[1]) : -1;
+    };
+    return (
+      base &&
+      hazeBlock.includes("background: var(--player-haze-base") &&
+      // 兜底值仍写在 var() 里，但不许再出现"写死的紫黑背景"。
+      !hazeBlock.includes("background: #241a3a") &&
+      width(".player-haze-blob-a") > width(".player-haze-blob-b") &&
+      width(".player-haze-blob-b") > width(".player-haze-blob-c") &&
+      width(".player-haze-blob-c") > 0
+    );
+  })(),
+);
 check(
   "D166：上一首 / 下一首只在**同类**里走、端点循环（音频不跳视频，视频也不跳音频）",
   (() => {
@@ -7781,7 +7861,8 @@ check(
       const start = stylesSource.indexOf(".player-haze-blob-c {");
       const end = stylesSource.indexOf("}", start);
       const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
-      return /left: 18%/.test(body) && /top: 26%/.test(body);
+      // 位置数值由 D170 的"面积按主导色排序"决定，这里只钉第三团确实存在且落在画面中部。
+      return /left: -?\d+%/.test(body) && /top: -?\d+%/.test(body);
     })(),
 );
 

@@ -5302,7 +5302,8 @@ button.danger {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background: #241a3a;
+  /* 基调跟着封面主导色走：固定紫色底会让任何封面都偏紫（用户 2026-11-13）。 */
+  background: var(--player-haze-base, #241a3a);
 }
 
 /* 暗角：光斑是 screen 混合，边角容易被提亮成灰白——用一层径向暗角把四周压暗，
@@ -5314,12 +5315,12 @@ button.danger {
   background:
     radial-gradient(
       125% 95% at 0% 100%,
-      color-mix(in srgb, var(--player-haze-b, #ff6f9c) 42%, #14061f),
+      color-mix(in srgb, var(--player-haze-b, #ff6f9c) 30%, #0c0713),
       transparent 62%
     ),
     radial-gradient(
       130% 100% at 100% 0%,
-      color-mix(in srgb, var(--player-haze-a, #7b5cff) 26%, #14061f),
+      color-mix(in srgb, var(--player-haze-a, #7b5cff) 22%, #0c0713),
       transparent 58%
     );
   pointer-events: none;
@@ -5355,16 +5356,17 @@ button.danger {
    * 通过 `--player-haze-noise` 传进来；没有该变量时退回纯模糊（退化路径）。
    */
   filter: var(--player-haze-noise, none) blur(clamp(16px, 5.4cqh, 46px));
-  opacity: 0.66;
+  opacity: 0.72;
   mix-blend-mode: screen;
   will-change: transform, border-radius;
 }
 
 .player-haze-blob-a {
-  width: 72%;
-  height: 92%;
-  left: -18%;
-  top: -26%;
+  /* 面积按主导色排序：a 是封面里最大那块，铺满整块背景。 */
+  width: 86%;
+  height: 104%;
+  left: -22%;
+  top: -32%;
   background: var(--player-haze-a, #b9a4ff);
   /* 位移与形状两套周期互质（47s / 71s）：叠起来不会出现"整块一起呼吸"的机械感。 */
   animation:
@@ -5373,10 +5375,12 @@ button.danger {
 }
 
 .player-haze-blob-b {
-  width: 68%;
-  height: 86%;
-  right: -20%;
-  bottom: -28%;
+  /* b 是第二块：只当暖色点缀，不能跟 a 抢版面。 */
+  opacity: 0.5;
+  width: 52%;
+  height: 64%;
+  right: -14%;
+  bottom: -20%;
   background: var(--player-haze-b, #ffb3cd);
   animation:
     player-haze-drift-b 61s ease-in-out infinite alternate,
@@ -5387,10 +5391,11 @@ button.danger {
    "两个圆贴在一起"（用户 2026-11-13 的原话）。三团互咬 + 大尺度噪波位移之后，
    边界不再是几何圆弧。 */
 .player-haze-blob-c {
-  width: 64%;
-  height: 70%;
-  left: 18%;
-  top: 26%;
+  opacity: 0.42;
+  width: 46%;
+  height: 56%;
+  left: 24%;
+  top: 30%;
   background: var(--player-haze-c, #9fc6ff);
   animation:
     player-haze-drift-c 79s ease-in-out infinite alternate,
