@@ -540,7 +540,15 @@ apps/desktop/src/app_ui/
                             #     （同一块画布、同样的圆角与投影），**唱片圆心例外**（不写字，
                             #     无封面就是唱片的正常部分）；`data-has-lyrics` 让"没有歌词"
                             #     时用 `margin-top` 补出同样的空白，控制条始终在歌词底下；
-                            #     disc 的唱片钉在右上（`top:-32%` / `right:-18%`）并被裁切）
+                            #     disc 的唱片钉在右上（`top:-32%` / `right:-18%`）并被裁切）；
+                            #     2026-11-13 D169：色晕回到**三团**（`blob-a/b/c`，第三团压在中间
+                            #     补缝——只有两团时中间是一道直边，看上去就是"两个圆贴在一起"），
+                            #     `feDisplacementMap` 的 `scale` = 140、`numOctaves` = 4；
+                            #     传输行在 disc 下拆成**三段网格**（`.player-transport-side` /
+                            #     `.player-transport-main` / `.player-transport-side-end`），
+                            #     随机+循环贴左端、上一首+播放+下一首居中、收藏贴右端——两端与
+                            #     进度条两沿对齐；歌词行的过渡由 CSS 承担（`transition` 四档时长
+                            #     + `player-lyric-in` 淡入），切歌不硬切）
                             #   lrc.ts LRC 解析纯函数（一行多时间标签、`[offset:±ms]` 平移、
                             #     无时间轴退化成 `synced:false` 的整块文本；`activeLrcIndex`
                             #     二分找当前行、`lrcWindow` 取上下文窗口并两端夹紧；
@@ -563,18 +571,22 @@ apps/desktop/src/app_ui/
                             #     （点其一取消另一个，循环 off→all→one→off），门禁直接跑行为等式）
                             #   useMusicQueue.ts 音乐队列（`usePlayableQueue(..., "audio")` 的
                             #     一档：面板侧不必再传 kind，类型固定为"只收音频"）
-                            #   haze.ts 配色（后端色板 → CSS 变量：`hazeVars` 给**两盏**色晕
-                            #     （用户 2026-11-13「在封面的颜色板上选 1-2 个颜色」），
+                            #   haze.ts 配色（后端色板 → CSS 变量：`hazeVars` 给**三盏**色晕
+                            #     （用户 2026-11-13 D167 要「1-2 个颜色」，D169 改口「最大的 3 个
+                            #     色块」，因此 `HAZE_LAYER_COUNT = 3`、键是 a/b/c），
                             #     `stageVars` 再从同一组主色算出样式 2 的整套颜色——天空渐变、
                             #     墨色文字、强调色、唱片盘体与两道细环；**前端不从封面取色**，
                             #     封面经 convertFileSrc 是跨源资源、canvas 读像素会被 taint；
                             #     非法/不足用 HAZE_FALLBACK_COLORS 循环补足。
-                            #     `vivid` 把主色**归一化**（饱和度 ≥ 0.42、亮度 0.30–0.58）：
+                            #     `vivid` 把主色**归一化**（饱和度 ≥ 0.4 且再抬 8%、亮度收在
+                            #     0.32–0.52——三团叠在一起时太亮的一团会盖掉另两团）：
                             #     主色是"封面占比最高的颜色"，白底封面的主色是 `#eeeeee`，
                             #     直接当光斑会让整块底发白、白字读不出；`spreadHues` 再让
                             #     相邻色相至少差 26°（不足就沿色环推），单色系封面才有过渡）。
                             #     **兜底色例外**：`HAZE_FALLBACK_COLORS` 是浅色系且不经 `vivid`
-                            #     压暗（用户「默认的颜色晕不要暗色」），由 `stagePalette` 分流）
+                            #     压暗（用户「默认的颜色晕不要暗色」），由 `stagePalette` 分流。
+                            #     D169 起色源换成 `player.media` 回的**三个主导色**（面积最大、
+                            #     互不近似），而不是 8 色频率色板的前三个）
                             #   time.ts 时间格式（`formatMs` = 已播时长、`≤ 0` 记作"未知"，
                             #     `formatClock` = 同一口径但**允许 0**（进度条起点必须是
                             #     `0:00`，它是合法位置），`formatRemaining` = 倒计时 `-3:24`：

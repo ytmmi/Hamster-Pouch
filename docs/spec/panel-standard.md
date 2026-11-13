@@ -439,7 +439,19 @@
         7. **歌词：同目录 `.lrc` 优先，音频内嵌标签兜底**（用户 2026-11-13：微云下载的 flac 把整段 LRC 存在 `LYRICS` 标签里）。`hp_media::read_audio_tags` 依次找 `LYRICS` / `UNSYNCEDLYRICS` / `SYNCEDLYRICS` / `LRC` 等键，值若是一段 JSON 再取其中的 `lyrics` / `lrc` 字段；按字符截断 20 万字符。内嵌文本已是 UTF-8，所以不走 `hp_book` 的编码嗅探。
     - **收藏只有图标**：渲染成非交互 `span[role="img"]`（不是 disabled `button`——禁用态暗示"现在不能用"，而实际情况是"功能还没做"）。功能后续补。
     - 面板按"单文件 ≤ 1200 行"分文件：`MusicPlayerPanel.tsx`（面板装配：播放请求、预载、队列步进、设置读取）、`panels/music/MusicStage.tsx`（两套排版的展示层）、`lrc.ts`（解析 / 双语配对 / 当前行）、`lyricView.ts`（错位纯函数，JSX 之外以便门禁 import）、`queueView.ts`（步进 / 随机 / 循环纯函数）、`useMusicQueue.ts`（取数 + 排序 + 世代号取消）、`trackInfo.ts`（曲名 / 艺人切分）、`haze.ts`（色晕与整套派生色）、`musicStyle.ts`（样式取值域）、`time.ts`（时间格式化）、`core/musicPlayStore.ts`（播放请求通道）。
-    - `pnpm check:panels` **433 → 461 项**，新增 28 条按行为 / 结构写：LRC 一行多标签与 `[offset:]` 平移、纯文本歌词 `synced: false`、当前行二分边界（未到第一句 `-1`）、歌词窗口两端夹紧、曲名 / 艺人按首个 `" - "` 切分、色晕三层 / 兜底 / 非法值剔除、同类步进与端点循环、队列边界、**随机只在同类且不抽自己 / `off` 端点停住 / `all` 环绕**、**双语配对（阈值、空行不配、阈值是参数）**、**两套配色由主色算出（换主色整套变量变、CSS 无主色字面值）**、**歌词错位随宽度缩放且远处封顶**、样式声明（候选 == `MUSIC_STYLES`、缺省 == `DEFAULT_MUSIC_STYLE`、媒体播放器不持有 `style`）、**独立面板**（`music` 在 `BUILTIN_PANEL_IDS`、`titleKey` 是 `panel.music`、视频面板源码不含任何音乐符号、`playFile` 走 `requestMusicPlay`）、无封面 / 无歌词不渲染、收藏是 `span` 不是按钮、唱片 `data-playing` + `paused` / `running` + reduced-motion、**`"any"` 是队列口径不是媒体类型（取数时必须展开成 `["audio", "video"]`）**、**曲名 / 艺人先读 ffprobe 标签再回退文件名**、**唱片圆心缺封面不写字**、**兜底色是浅色且不经 `vivid`**、**色晕有 `player-haze-tint` + 三段漂移且无第三盏残留**、**唱片钉右上 / 控制条落在歌词底下**、**色晕是噪波（`feTurbulence` + `feDisplacementMap` + 两盏 morph）**、**样式 2 底栏在左列底部（`.player-bar` 占 `grid-row: 2`，旧 `min-height` 口径必须消失）**、**收藏爱心空心描边**、**随机与循环互斥（`toggleShuffleMode` / `cycleRepeatMode` 六条行为等式）**、**播放内核不在设源的同一拍 `play()`（两面板都不许出现 `.load()`）**、**波形单击 / 拖动分离（`onTap` + `WAVE_DRAG_THRESHOLD_PX = 4`）**、**歌词 `.lrc` 优先、内嵌标签兜底**。
+    - `pnpm check:panels` **433 → 468 项**，新增 35 条按行为 / 结构写：LRC 一行多标签与 `[offset:]` 平移、纯文本歌词 `synced: false`、当前行二分边界（未到第一句 `-1`）、歌词窗口两端夹紧、曲名 / 艺人按首个 `" - "` 切分、色晕三层 / 兜底 / 非法值剔除、同类步进与端点循环、队列边界、**随机只在同类且不抽自己 / `off` 端点停住 / `all` 环绕**、**双语配对（阈值、空行不配、阈值是参数）**、**两套配色由主色算出（换主色整套变量变、CSS 无主色字面值）**、**歌词错位随宽度缩放且远处封顶**、样式声明（候选 == `MUSIC_STYLES`、缺省 == `DEFAULT_MUSIC_STYLE`、媒体播放器不持有 `style`）、**独立面板**（`music` 在 `BUILTIN_PANEL_IDS`、`titleKey` 是 `panel.music`、视频面板源码不含任何音乐符号、`playFile` 走 `requestMusicPlay`）、无封面 / 无歌词不渲染、收藏是 `span` 不是按钮、唱片 `data-playing` + `paused` / `running` + reduced-motion、**`"any"` 是队列口径不是媒体类型（取数时必须展开成 `["audio", "video"]`）**、**曲名 / 艺人先读 ffprobe 标签再回退文件名**、**唱片圆心缺封面不写字**、**兜底色是浅色且不经 `vivid`**、**色晕有 `player-haze-tint` + 三段漂移且无第三盏残留**、**唱片钉右上 / 控制条落在歌词底下**、**色晕是噪波（`feTurbulence` + `feDisplacementMap` + 两盏 morph）**、**样式 2 底栏在左列底部（`.player-bar` 占 `grid-row: 2`，旧 `min-height` 口径必须消失）**、**收藏爱心空心描边**、**随机与循环互斥（`toggleShuffleMode` / `cycleRepeatMode` 六条行为等式）**、**播放内核不在设源的同一拍 `play()`（两面板都不许出现 `.load()`）**、**波形单击 / 拖动分离（`onTap` + `WAVE_DRAG_THRESHOLD_PX = 4`）**、**歌词 `.lrc` 优先、内嵌标签兜底**；**色晕取封面面积最大的三个色块（后端 `dominant_colors_from_image`，按面积、跳过近重复、彩色优先于白底）**、**三团光斑互咬（`blob-c` 补缝 + `scale 140` 噪波位移，不是「两个圆贴在一起」）**、**暂停态切歌不自动播放（`loadAndPlay(fileId, autoplay)` 跟随切换那一刻的播放状态）**、**歌词切换是过渡不是硬切（行级 `transition` + 新行 `player-lyric-in` 淡入）**、**样式 2 歌词吃满信息区并落到控制区上沿（`flex: 1 1 auto` + 底部渐隐）**、**样式 2 音量条与进度条等长（图标绝对定位进留白，不占轨道宽度）**、**样式 2 传输行是三段网格（随机/循环贴左、上下一首居中、收藏贴右，与进度条两端对齐）**。
+
+    **2026-11-13 第三轮（D169，用户八条真机反馈）**：色晕选色从"频率最高的前两个颜色"改成
+    **封面面积最大的三个色块**（后端 `hp_media::dominant_colors_from_image`：96² 重采样 →
+    5 位/通道分桶 → 按面积排序 → RGB 距离 < 46 的去重 → 彩色像素占比够高时排除近白/近黑；
+    与色彩参考面板的 8 色频率色板**不是同一份算法**，两者服务的问题不同）；光斑回到**三团**并
+    加大噪波位移（`scale 140`、`numOctaves 4`），第三团压在中间补缝，否则两团之间是一道直边，
+    看上去就是"两个圆贴在一起"。播放器侧：**暂停态切歌不再自动播放**（`loadAndPlay` 增加
+    `autoplay` 参数，`stepTrack` 传切换那一刻的 `playing`）；歌词行加 `transition`（清晰度/位移/
+    字号各一档）与进入动画，切换不再是硬切；样式 2 的歌词区 `flex: 1 1 auto` 并加底部渐隐遮罩，
+    一直落到控制区上沿；音量条与进度条等长（音符图标绝对定位挪进左列留白）；传输行改三段网格
+    `1fr auto 1fr`，随机/循环贴左端、收藏贴右端，与进度条两端对齐。
+
 
 - **`cargo test -p hp-core`**：面板声明的硬错误清单、命名空间规则、`settings.kind` 白名单、`has_class = false` 的类目拒绝、`mount.overlay_content = false` 的浮层拒绝。
 - **回归**：内置 17 个面板的声明必须能通过校验且与现状一致（**零行为变化**）；插件面板缺失时蓝图可保存且灰显「未接通」。
