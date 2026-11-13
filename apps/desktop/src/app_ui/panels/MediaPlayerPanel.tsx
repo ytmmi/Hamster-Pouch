@@ -88,6 +88,13 @@ const PLAYER_VOLUME_SETTING_KEY = "panel.player.volume";
 const PLAYER_VOLUME_DEFAULT = 100;
 
 /**
+ * 画面区「单击 = 暂停 / 继续」的容差（px）。
+ *
+ * 按下与抬起的位移超过它就当拖动（比如拖动窗口分隔条时指针扫过画面），不触发暂停。
+ */
+const STAGE_TAP_SLOP_PX = 6;
+
+/**
  * 音量夹紧到 0–100 的整数。
  *
  * 设置声明里**没有** min/max（见 `docs/spec/panel-standard.md` 第 5.3 节），范围由
@@ -121,6 +128,8 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   const wasVisibleRef = useRef(Boolean(panelApi.isVisible));
   /** 播放命令进行中：抑制重复触发。 */
   const busyRef = useRef(false);
+  /** 画面区「单击」的容差（px）：按下到抬起的位移超过它就当拖动，不算点击。 */
+  const stagePressRef = useRef<{ id: number; x: number; y: number } | null>(null);
   /**
    * 下一次 src 就绪时是否**出声**。
    *
@@ -298,6 +307,41 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     }
     await playSelected();
   }, [playSelected]);
+
+  /**
+   * 画面区「单击 = 暂停 / 继续」由 **pointerdown → pointerup** 自己判，不再用 `onClick`。
+   *
+   * 真机（2026-11-14，D176）：dockview 在 `mousedown` 时会把指针交给自己的内容容器
+   * （事件日志里 `mousedown` 的 target 从 `VIDEO` 变成 `DIV.dv-content-container`），
+   * 按下与抬起的 target 不同，浏览器就不再合成 `click` —— 画面区一个点击都收不到。
+   * 改成按下记起点、抬起比位移：没挪动才算单击，挪过阈值就当拖动放行。
+   */
+  const onStagePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+    stagePressRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  }, []);
+
+  const onStagePointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const press = stagePressRef.current;
+      stagePressRef.current = null;
+      if (!press || press.id !== event.pointerId || event.button !== 0) {
+        return;
+      }
+      const moved = Math.abs(event.clientX - press.x) + Math.abs(event.clientY - press.y);
+      if (moved > STAGE_TAP_SLOP_PX) {
+        return;
+      }
+      void handleStageClick();
+    },
+    [handleStageClick],
+  );
+
+  const onStagePointerCancel = useCallback(() => {
+    stagePressRef.current = null;
+  }, []);
 
   // 播放请求（蓝图双击）：挂载即读一次（面板可能后挂载），再订阅后续请求。
   useEffect(() => {
@@ -549,7 +593,9 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
       <div
         className="player-stage"
         data-stage={isAudio ? "audio" : "video"}
-        onClick={() => void handleStageClick()}
+        onPointerDown={onStagePointerDown}
+        onPointerUp={onStagePointerUp}
+        onPointerCancel={onStagePointerCancel}
       >
         {videoUrl ? (
           <video
@@ -613,6 +659,8 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
           <button
             type="button"
             className={`player-volume-btn${volumeOpen ? " is-open" : ""}`}
+            tabIndex={-1}
+            onMouseDown={(event) => event.preventDefault()}
             onClick={() => setVolumeOpen((open) => !open)}
             aria-label={app.t("player.volume")}
             aria-expanded={volumeOpen}

@@ -239,6 +239,35 @@
   - **填充与判行必须共用一个时钟**（2026-11-13 D172 缺陷修复）：判行用 `positionMs + LYRIC_LEAD_MS`、
     填充却用 `positionMs` 时，两个钟差 480ms，现象正是用户报的"高亮落后 2 个字、末尾 2 个字还没
     走满就跳句"。现在两者都取 `clockMs = positionMs + LYRIC_LEAD_MS`，进度条在换句那一刻刚好走满。
+  - **当前句是"单层字形蒙版"，不是两层文字叠加**（2026-11-14 D173 真机修）：两层方案里"已唱"
+    那层是绝对定位的盒子，`clip-path` 的边缘会把文字外发光一起切断，屏幕上出现一道**白色矩形
+    边界**；歌词一旦折行，横向裁剪又让两行各自从中间截断，看起来像"整块被平移"。现在只有一层
+    文字：`background-image: linear-gradient(to right, 已唱 0%, 已唱 var(--player-lyric-progress),
+    未唱 …)` 配 `background-clip: text; color: transparent`，字形本身就是边界，光晕改用
+    `filter: drop-shadow` 重新挂上；折行时（`Range.getClientRects().length > 1`）渐变改 `to bottom`，
+    逐行从上往下推。
+  - **填充边界是渐变的，不是刀切**（2026-11-14 D176 用户："不使用进度条式竖直的僵硬边界，而是加
+    一个 1-0 的透明度柔和过渡"）：渐变两端各留 6%（`calc(var(--player-lyric-progress) - 6%)` /
+    `+ 6%`），扫过时是一条软边在移动，而不是一条竖线。
+  - **样式 2 的歌词字号比样式 1 小一档**（2026-11-14 用户："样式2的歌词字体小一点"）：正文
+    `clamp(11px, 2.9cqh, 23px)`、当前句 `clamp(14px, 4.1cqh, 33px)`、译文 `clamp(9px, 1.3cqh, 13px)`。
+  - **日语假名注音**（2026-11-14 D176）：歌词里形如 `心臓（しんぞう）` 的全角括号假名渲染成
+    `<ruby>底字<rt>かな</rt></ruby>`——只把"汉字 + 括号内全是假名"当注音（`(weiyun)`、`（Cover）`
+    这类原样保留），`rt` 小一档、`ruby-position: over`；含注音的行把 `line-height` 放开到 2.05，
+    否则小字会压到上一行正文上（渲染目检确认过）。
+  - **音乐面板的空格 / 方向键**（2026-11-14 D176）：面板聚焦时空格 = 暂停/继续、←/→ = 上一首 /
+    下一首；带修饰键一律放行（那是系统快捷键的），输入框里的按键也放行。
+  - **视频画面区的单击改用指针手势**（2026-11-14 D176 真机修）：dockview 在 `mousedown` 时会把指针
+    交给自己的内容容器（事件日志里 target 从 `VIDEO` 变成 `DIV.dv-content-container`），按下与抬起
+    落在不同元素上，浏览器就不再合成 `click` —— 画面区一个点击都收不到，表现为"点击暂停/继续失效"。
+    改成 `pointerdown` 记起点、`pointerup` 比位移（≤ `STAGE_TAP_SLOP_PX` 6px 才算单击），拖动时不触发。
+  - **色晕是烘焙纹理，不是实时滤镜**（2026-11-14 D175 用户："优化渲染颜色晕的性能问题"）：三团光斑
+    的形状用 `feTurbulence` + `feDisplacementMap` + `feGaussianBlur` **离线烘成三张 data-URI 纹理**
+    （seed 11 / 23 / 37 各不相同，避免"同一张图转了个角度"），运行时只做 `mask-image` +
+    `transform` / `opacity` 动画，关键帧里不出现 `filter` / `border-radius` / 位置属性；同引擎实测
+    51.3 → 158.5 fps（p95 30.4ms → 6.2ms）。旧实现每团一个实时滤镜、外层再跑 52s `hue-rotate`，
+    三个大滤镜层每帧重新栅格化。烘焙纹理里**只画白色圆、不要黑色打底**——CSS mask 用的是 alpha，
+    黑色矩形会让整块不透明、光斑变成方块（踩过一次）。
   - **播放内核等 `loadedmetadata` 才播**（2026-11-13 D168 真机修）：设源与 `play()` 不能在同一
     拍——`video.load()` 之后立刻 `play()` 会被 Chromium 以 `AbortError: The play() request was
     interrupted by a call to load()` 拒掉，表现为"切歌成功但没声音"。两个面板统一为：`loadAndPlay`

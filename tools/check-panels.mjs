@@ -7439,21 +7439,55 @@ check(
 );
 
 check(
-  "D172：当前句是**进度条**式填充（两层文字 + `clip-path`），不逐字跳格",
-  // 用户 2026-11-13：「歌词不逐字填充，而是改为类似进度条的显示方式」。
+  "D173：当前句高亮是**字形蒙版**（渐变 + `background-clip: text`），不是两层裁切盒",
+  // 用户 2026-11-13：「样式1歌词高亮会有明显的白色矩形边界」——两层方案里上层的裁切边
+  // 会切断文字外发光，屏幕上出现一道矩形；改成单层字形蒙版后没有盒子边。
   musicStageMod.lyricFillPercent(0) === "0%" &&
     musicStageMod.lyricFillPercent(0.5) === "50.00%" &&
     musicStageMod.lyricFillPercent(1) === "100%" &&
-    musicStageMod.lyricFillPercent(1.4) === "100%" &&
-    musicStageMod.lyricFillPercent(Number.NaN) === "0%" &&
-    /className="player-lyric-fill"/.test(musicStageSrc) &&
+    /className="player-lyric-main is-filling"/.test(musicStageSrc) &&
     /\["--player-lyric-progress" as string\]/.test(musicStageSrc) &&
-    /lyricFillPercent\(progress\)/.test(musicStageSrc) &&
-    // 逐字方案必须彻底消失（否则两层方案和逐字方案会同时上色）。
-    !/player-lyric-char/.test(musicStageSrc) &&
-    !/player-lyric-char/.test(stylesSource) &&
-    /\.player-lyric-fill \{/.test(stylesSource) &&
-    /clip-path: inset\(0 calc\(100% - var\(--player-lyric-progress, 0%\)\) 0 0\)/.test(stylesSource),
+    !/player-lyric-(base|fill)/.test(musicStageSrc) &&
+    !/player-lyric-(base|fill)/.test(stylesSource) &&
+    /\.player-lyric-main\.is-filling \{/.test(stylesSource) &&
+    /background-clip: text;/.test(stylesSource) &&
+    /@property --player-lyric-progress \{/.test(stylesSource) &&
+    /syntax: "<percentage>";/.test(stylesSource) &&
+    /transition: --player-lyric-progress 0\.2s linear;/.test(stylesSource),
+);
+
+check(
+  "D174：传输按钮不抢焦点，且空格 / 回车 / 方向键在按钮上被吞掉",
+  // 用户 2026-11-14：「当焦点在播放暂停图标时，空格、方向键都可以触发播放暂停」。
+  // 三层保险：`tabIndex={-1}`（不进 Tab 序列）、`onMouseDown` 不抢焦点、`onKeyDown` 拦激活键。
+  (() => {
+    const volumeBlock = (() => {
+      const at = videoPanelSrc.indexOf("className={`player-volume-btn");
+      return at < 0 ? "" : videoPanelSrc.slice(at, at + 320);
+    })();
+    return (
+      /const keepFocusOnStage = \(event: \{ preventDefault: \(\) => void \}\) => \{/.test(musicStageSrc) &&
+      /const swallowButtonKeys = \(event: \{/.test(musicStageSrc) &&
+      /event\.key === " " \|\| event\.key === "Enter" \|\| event\.key === "Spacebar" \|\| event\.key\.startsWith\("Arrow"\)/
+        .test(musicStageSrc) &&
+      (musicStageSrc.match(/onMouseDown=\{keepFocusOnStage\}/g) ?? []).length === 5 &&
+      (musicStageSrc.match(/onKeyDown=\{swallowButtonKeys\}/g) ?? []).length === 5 &&
+      (musicStageSrc.match(/^\s+tabIndex=\{-1\}$/gm) ?? []).length === 5 &&
+      /tabIndex=\{-1\}/.test(volumeBlock) &&
+      /onMouseDown=\{\(event\) => event\.preventDefault\(\)\}/.test(volumeBlock)
+    );
+  })(),
+);
+
+check(
+  "D173：折行的当前句按行序填（纵向渐变），不把两行当一整块横着切",
+  // 用户 2026-11-13：「如果歌词换行也被当成一个整体进行平移高亮」——横向渐变会让折行后的
+  // 两行各自从中间截断；折行时换成 `to bottom`，并用量到的行数（`data-wrapped`）驱动。
+  /const range = document\.createRange\(\);/.test(musicStageSrc) &&
+    /range\.getClientRects\(\)\.length > 1/.test(musicStageSrc) &&
+    /data-wrapped=\{wrapped \? "true" : "false"\}/.test(musicStageSrc) &&
+    /\.player-lyric-main\.is-filling\[data-wrapped="true"\] \{/.test(stylesSource) &&
+    /to bottom,/.test(stylesSource),
 );
 
 check(
@@ -7744,35 +7778,53 @@ check(
     hazeMod.hazeVars(["#eeeeee"])["--player-haze-a"] !== "#eeeeee",
 );
 check(
-  "D168：色晕是随时间变换的噪波（位移 + 形状 morph + 色相漂移），减少动效时全停",
-  // 用户 2026-11-13 D168：「变换、运动指的是色团移动、交融、形状变换，就像放大的、
-  // 随着时间变换的噪波一样」——所以除了位移，还要有噪波位移与 border-radius 变形。
-  /animation: player-haze-tint 52s/.test(stylesSource) &&
-    /filter: var\(--player-haze-noise, none\) blur\(/.test(stylesSource) &&
-    /@keyframes player-haze-morph-a/.test(stylesSource) &&
-    /@keyframes player-haze-morph-b/.test(stylesSource) &&
-    (() => {
-      const start = stylesSource.indexOf("@keyframes player-haze-drift-a {");
-      const end = stylesSource.indexOf("@keyframes player-haze-drift-b {");
-      const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
-      return /0% \{/.test(body) && /50% \{/.test(body) && /100% \{/.test(body);
-    })() &&
-    /feTurbulence/.test(musicStageSrc) &&
-    /feDisplacementMap/.test(musicStageSrc) &&
-    /attributeName="baseFrequency"/.test(musicStageSrc) &&
-    // 三团光斑缺一不可：只有两团时中间是一道直边，看上去就是"两个圆贴在一起"
-    // （用户 2026-11-13 D169 的原话），第三团负责补缝。
-    /player-haze-blob-c/.test(stylesSource) &&
-    /player-haze-drift-c/.test(stylesSource) &&
-    /player-haze-morph-c/.test(stylesSource) &&
-    (musicStageSrc.match(/player-haze-blob player-haze-blob-/g) ?? []).length === 3 &&
-    (() => {
-      const start = stylesSource.indexOf("@media (prefers-reduced-motion: reduce) {");
-      const end = stylesSource.indexOf(".player-disc {", start);
-      const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
-      return body.includes(".player-haze,") && body.includes(".player-haze-blob,");
-    })(),
+  "D175：色晕是**合成层动画**——噪波形状离线烘焙成纹理，动画只动 transform / opacity",
+  // 用户 2026-11-14：「优化渲染颜色晕的性能问题，可以使用 webGPU 进行渲染和其他优化方式」。
+  // 旧实现每团一个实时 `feTurbulence`+`feDisplacementMap` 滤镜、外层再跑 52s 的
+  // `hue-rotate` 动画，三个大滤镜层每帧重新栅格化（同引擎实测 51 fps / p95 30ms /
+  // 峰值 265ms）。现在形状烘焙进 data-URI 纹理，元素只剩合成器动画（158 fps / p95 6ms）。
+  (() => {
+    const textures = ["a", "b", "c"].map((key) => {
+      const match = stylesSource.match(new RegExp(`--player-haze-tex-${key}: url\\("data:image/svg\\+xml;base64,([^"]+)"\\);`));
+      return match ? Buffer.from(match[1], "base64").toString("utf8") : "";
+    });
+    return (
+      textures.every((svg) => /feTurbulence/.test(svg) && /feDisplacementMap/.test(svg) && /feGaussianBlur/.test(svg)) &&
+      // 每团用不同的种子，叠起来才不会看出"同一张图转了个角度"。
+      new Set(textures.map((svg) => (svg.match(/seed='(\d+)'/) ?? [])[1])).size === 3 &&
+      // 运行时不再有任何滤镜：形状来自 mask，动画只动 transform / opacity。
+      !/filter: url\(#/.test(stylesSource) &&
+      /-webkit-mask-image: var\(--player-haze-tex-a\)/.test(stylesSource) &&
+      /contain: strict/.test(stylesSource) &&
+      /will-change: transform/.test(stylesSource) &&
+      // 关键帧里只许出现 transform / opacity（出现 border-radius / filter 就说明又在逐帧重绘）。
+      ["a", "b", "c"].every((key) => {
+        const at = stylesSource.indexOf(`@keyframes player-haze-drift-${key} {`);
+        if (at < 0) return false;
+        // 用花括号配平取出这一个关键帧块（三块之间还夹着注释，不能按"下一个 @"切）。
+        const open = stylesSource.indexOf("{", at);
+        let depth = 0;
+        let end = open;
+        for (let i = open; i < stylesSource.length; i += 1) {
+          if (stylesSource[i] === "{") depth += 1;
+          else if (stylesSource[i] === "}") {
+            depth -= 1;
+            if (depth === 0) { end = i; break; }
+          }
+        }
+        const body = stylesSource.slice(open, end);
+        return /transform:/.test(body) && !/border-radius|filter:|margin|left:|top:/.test(body);
+      }) &&
+      // 减少动效时依旧全停。
+      (() => {
+        const at = stylesSource.indexOf("@media (prefers-reduced-motion: reduce) {");
+        const body = at >= 0 ? stylesSource.slice(at, stylesSource.indexOf(".player-disc {", at)) : "";
+        return body.includes(".player-haze,") && body.includes(".player-haze-blob,");
+      })()
+    );
+  })(),
 );
+
 check(
   "D168：样式 2 的控制区固定在面板底部、只占左侧列宽（唱片仍钉在右上被裁切）",
   // 用户 2026-11-13 D168：「控制图标默认在面板底部，和样式 1 类似，不是和唱片平齐」。
@@ -7911,18 +7963,57 @@ check(
 );
 
 check(
-  "D169：色晕是**三团互咬的噪波**，不是两个圆贴在一起（位移尺度 + 第三团补缝）",
-  // 用户 2026-11-13：「像 2 个圆贴在一起高斯模糊了一下，改为更加类似噪波的形状」。
-  /scale=\{140\}/.test(musicStageSrc) &&
-    /numOctaves=\{4\}/.test(musicStageSrc) &&
-    (musicStageSrc.match(/player-haze-blob player-haze-blob-/g) ?? []).length === 3 &&
+  "D176：色晕仍是**三团互咬的噪波**（三张不同纹理，第三团补缝）",
+  // 用户 2026-11-13 D169：「像 2 个圆贴在一起高斯模糊了一下，改为更加类似噪波的形状」。
+  (musicStageSrc.match(/player-haze-blob player-haze-blob-/g) ?? []).length === 3 &&
+    (stylesSource.match(/--player-haze-tex-[abc]: url\("data:image\/svg\+xml;base64,/g) ?? []).length === 3 &&
     (() => {
       const start = stylesSource.indexOf(".player-haze-blob-c {");
       const end = stylesSource.indexOf("}", start);
       const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
       // 位置数值由 D170 的"面积按主导色排序"决定，这里只钉第三团确实存在且落在画面中部。
-      return /left: -?\d+%/.test(body) && /top: -?\d+%/.test(body);
+      return /left: -?\d+%/.test(body) && /top: -?\d+%/.test(body) && /mask-image: var\(--player-haze-tex-c\)/.test(body);
     })(),
+);
+
+check(
+  "D176：当前句填充是**柔和过渡**（进度两侧各留一段渐变），不是竖直硬边",
+  // 用户 2026-11-14：「不使用进度条式竖直的僵硬边界，而是加一个 1-0 的透明度柔和过渡」。
+  /calc\(var\(--player-lyric-progress, 0%\) - 6%\)/.test(stylesSource) &&
+    /calc\(var\(--player-lyric-progress, 0%\) \+ 6%\)/.test(stylesSource) &&
+    // 折行时同样的柔和边界换到纵向。
+    (() => {
+      const at = stylesSource.indexOf('.player-lyric-main.is-filling[data-wrapped="true"] {');
+      const body = at >= 0 ? stylesSource.slice(at, stylesSource.indexOf("}", at)) : "";
+      return /to bottom/.test(body) && /- 6%/.test(body) && /\+ 6%/.test(body);
+    })(),
+);
+
+check(
+  "D176：日语假名注音（`汉字（かな）` → `<ruby>` + `<rt>`）",
+  // 用户 2026-11-14：「音乐播放器实现日语假名注音显示功能」，数据形如
+  // `心拍数（はーとびーと）`、`君（きみ）の隣（となり）でさ`。
+  (() => {
+    const ruby = readFileSync(join(ROOT, "apps/desktop/src/app_ui/panels/music/ruby.ts"), "utf8");
+    return (
+      /export function parseRuby\(/.test(ruby) &&
+      /export function hasRuby\(/.test(ruby) &&
+      /（/.test(ruby) &&
+      /<ruby/.test(musicStageSrc) &&
+      /<rt>/.test(musicStageSrc) &&
+      /<LyricText text=\{/.test(musicStageSrc) &&
+      /\.player-lyric rt \{/.test(stylesSource) &&
+      /ruby-position: over/.test(stylesSource)
+    );
+  })(),
+);
+
+check(
+  "D176：音乐面板聚焦时空格暂停/继续、方向键上一首/下一首",
+  // 用户 2026-11-14：「音乐播放器面板焦点在时，空格暂停/继续、方向键上一首和下一首」。
+  /if \(event\.key === " " \|\| event\.key === "Spacebar"\) \{/.test(musicPanelSrc) &&
+    /togglePlay\(\);/.test(musicPanelSrc) &&
+    /stepTrack\(event\.key === "ArrowLeft" \? -1 : 1\)/.test(musicPanelSrc),
 );
 
 check(
@@ -7957,10 +8048,14 @@ check(
   "D169：样式 2 歌词一直落到控制区上沿（吃满信息区 + 底部渐隐，不留空档）",
   // 用户 2026-11-13：「歌词显示范围向下延伸，以进度条上方一点点为边界」。
   (() => {
-    const start = stylesSource.indexOf('.player-lyrics[data-variant="disc"] {');
-    const end = stylesSource.indexOf("}", start);
-    const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
-    return /flex: 1 1 auto/.test(body) && /mask-image: linear-gradient/.test(body);
+    // 同一个选择器可能出现多块（主题变量一块、排版一块），要挑出"排版"那块。
+    const needle = '.player-lyrics[data-variant="disc"] {';
+    for (let at = stylesSource.indexOf(needle); at >= 0; at = stylesSource.indexOf(needle, at + 1)) {
+      const end = stylesSource.indexOf("}", at);
+      const body = end > at ? stylesSource.slice(at, end) : "";
+      if (/flex: 1 1 auto/.test(body) && /mask-image: linear-gradient/.test(body)) return true;
+    }
+    return false;
   })(),
 );
 

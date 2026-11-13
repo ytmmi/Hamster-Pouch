@@ -5301,202 +5301,101 @@ button.danger {
 .player-haze {
   position: absolute;
   inset: 0;
+  z-index: 0;
   overflow: hidden;
-  /* 基调跟着封面主导色走：固定紫色底会让任何封面都偏紫（用户 2026-11-13）。 */
   background: var(--player-haze-base, #241a3a);
+  contain: strict;
+  pointer-events: none;
 }
 
-/* 暗角：光斑是 screen 混合，边角容易被提亮成灰白——用一层径向暗角把四周压暗，
-   中间的色晕才显得饱和。纯装饰，不接收指针事件。 */
+/* 罩一层静态暗角：四角压下去，中间留给文字。渐变不参与动画。 */
 .player-haze::after {
   content: "";
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(
-      125% 95% at 0% 100%,
-      color-mix(in srgb, var(--player-haze-b, #ff6f9c) 30%, #0c0713),
-      transparent 62%
-    ),
-    radial-gradient(
-      130% 100% at 100% 0%,
-      color-mix(in srgb, var(--player-haze-a, #7b5cff) 22%, #0c0713),
-      transparent 58%
-    );
-  pointer-events: none;
+    radial-gradient(120% 90% at 50% 46%, transparent 34%,
+      color-mix(in srgb, var(--player-haze-b, #ff6f9c) 30%, #0c0713) 100%),
+    radial-gradient(80% 70% at 16% 8%, transparent 30%,
+      color-mix(in srgb, var(--player-haze-a, #7b5cff) 22%, #0c0713) 100%);
+  opacity: 0.9;
 }
 
-/*
- * 色晕**是会动的**（用户 2026-11-13：「颜色晕是会运动变化的，不是固定的」）。
- *
- * 三层叠加：整层色相缓慢漂移（`player-haze-tint`，让颜色本身变，不只是位置变）
- * + 两盏光斑各自大范围位移/呼吸（`player-haze-drift-*`）。周期故意拉长到
- * 30–60 s：这是"氛围"，不该让人盯着看节奏。
- */
-.player-haze {
-  animation: player-haze-tint 52s ease-in-out infinite alternate;
-}
-
-/* SVG 滤镜本身不参与布局：它一旦按内联元素算尺寸（300×150）就会把舞台内容整体推下去。 */
-.player-haze-defs {
-  position: absolute;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
+/* 色团：形状来自**离线烘焙**的噪波纹理（见文件末尾的 `--player-haze-tex-*`），
+   自身只做 `transform` / `opacity` 动画 —— 合成器合成，不重绘、不算滤镜。 */
 .player-haze-blob {
   position: absolute;
-  border-radius: 50%;
-  /*
-   * 先过 SVG 噪波位移（`feTurbulence` + `feDisplacementMap`，见 `MusicStage.tsx`
-   * 里的滤镜定义），再高斯模糊：位移把圆边撕成流体，模糊把撕痕揉开——合起来才是
-   * 用户说的"像放大的、随时间变换的噪波"。滤镜 id 由组件用 `useId` 生成，
-   * 通过 `--player-haze-noise` 传进来；没有该变量时退回纯模糊（退化路径）。
-   */
-  filter: var(--player-haze-noise, none) blur(clamp(16px, 5.4cqh, 46px));
-  opacity: 0.72;
-  mix-blend-mode: screen;
-  will-change: transform, border-radius;
+  display: block;
+  opacity: 0.66;
+  background: var(--player-haze-a, #b9a4ff);
+  -webkit-mask-image: var(--player-haze-tex-a);
+  mask-image: var(--player-haze-tex-a);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  will-change: transform;
+  animation: player-haze-drift-a 47s ease-in-out infinite alternate;
 }
 
 .player-haze-blob-a {
-  /* 面积按主导色排序：a 是封面里最大那块，铺满整块背景。 */
   width: 86%;
   height: 104%;
   left: -22%;
   top: -32%;
-  background: var(--player-haze-a, #b9a4ff);
-  /* 位移与形状两套周期互质（47s / 71s）：叠起来不会出现"整块一起呼吸"的机械感。 */
-  animation:
-    player-haze-drift-a 47s ease-in-out infinite alternate,
-    player-haze-morph-a 71s ease-in-out infinite;
 }
 
 .player-haze-blob-b {
-  /* b 是第二块：只当暖色点缀，不能跟 a 抢版面。 */
-  opacity: 0.5;
   width: 52%;
   height: 64%;
   right: -14%;
   bottom: -20%;
+  opacity: 0.5;
   background: var(--player-haze-b, #ffb3cd);
-  animation:
-    player-haze-drift-b 61s ease-in-out infinite alternate,
-    player-haze-morph-b 83s ease-in-out infinite;
+  -webkit-mask-image: var(--player-haze-tex-b);
+  mask-image: var(--player-haze-tex-b);
+  animation: player-haze-drift-b 61s ease-in-out infinite alternate;
 }
 
-/* 第三团：压在中间偏下，负责"补缝"——只有两团时中间是一道直边，看起来就是
-   "两个圆贴在一起"（用户 2026-11-13 的原话）。三团互咬 + 大尺度噪波位移之后，
-   边界不再是几何圆弧。 */
 .player-haze-blob-c {
-  opacity: 0.42;
   width: 46%;
   height: 56%;
   left: 24%;
   top: 30%;
+  opacity: 0.42;
   background: var(--player-haze-c, #9fc6ff);
-  animation:
-    player-haze-drift-c 79s ease-in-out infinite alternate,
-    player-haze-morph-c 97s ease-in-out infinite;
+  -webkit-mask-image: var(--player-haze-tex-c);
+  mask-image: var(--player-haze-tex-c);
+  animation: player-haze-drift-c 79s ease-in-out infinite alternate;
 }
 
-@keyframes player-haze-tint {
-  from {
-    filter: hue-rotate(-16deg) saturate(1.02);
-  }
-  to {
-    filter: hue-rotate(20deg) saturate(1.14);
-  }
-}
-
-/*
- * 形状 morph：`border-radius` 的八个值各自缓慢变化，色团才会"长出来又化掉"。
- * 不用 `alternate`——来回摆动会被眼睛认出是"往复"，而噪波是持续单向演化。
- */
-@keyframes player-haze-morph-a {
-  0% {
-    border-radius: 46% 54% 58% 42% / 52% 44% 56% 48%;
-  }
-  33% {
-    border-radius: 63% 37% 44% 56% / 39% 61% 39% 61%;
-  }
-  66% {
-    border-radius: 38% 62% 57% 43% / 59% 41% 59% 41%;
-  }
-  100% {
-    border-radius: 46% 54% 58% 42% / 52% 44% 56% 48%;
-  }
-}
-
-@keyframes player-haze-morph-b {
-  0% {
-    border-radius: 58% 42% 39% 61% / 44% 56% 44% 56%;
-  }
-  33% {
-    border-radius: 41% 59% 62% 38% / 61% 39% 61% 39%;
-  }
-  66% {
-    border-radius: 61% 39% 43% 57% / 38% 62% 38% 62%;
-  }
-  100% {
-    border-radius: 58% 42% 39% 61% / 44% 56% 44% 56%;
-  }
-}
-
+/* 位移 / 缩放 / 旋转三者周期互质（47s / 61s / 79s），叠起来不会同时回到原点。 */
 @keyframes player-haze-drift-a {
-  0% {
-    transform: translate3d(-8%, -6%, 0) scale(0.92);
-  }
-  50% {
-    transform: translate3d(16%, 12%, 0) scale(1.16);
-  }
-  100% {
-    transform: translate3d(4%, 22%, 0) scale(1.02);
-  }
+  0% { transform: translate3d(-4%, -3%, 0) scale(0.92) rotate(-4deg); opacity: 0.6; }
+  50% { transform: translate3d(6%, 2%, 0) scale(1.06) rotate(2deg); opacity: 0.74; }
+  100% { transform: translate3d(2%, 5%, 0) scale(0.98) rotate(6deg); opacity: 0.64; }
 }
 
 @keyframes player-haze-drift-b {
-  0% {
-    transform: translate3d(8%, 10%, 0) scale(1.14);
-  }
-  50% {
-    transform: translate3d(-18%, -12%, 0) scale(0.94);
-  }
-  100% {
-    transform: translate3d(-4%, -22%, 0) scale(1.1);
-  }
+  0% { transform: translate3d(4%, 3%, 0) scale(1.04) rotate(3deg); opacity: 0.44; }
+  50% { transform: translate3d(-6%, -4%, 0) scale(0.9) rotate(-6deg); opacity: 0.58; }
+  100% { transform: translate3d(-2%, 4%, 0) scale(1.08) rotate(-2deg); opacity: 0.48; }
 }
 
 @keyframes player-haze-drift-c {
-  0% {
-    transform: translate3d(-6%, 8%, 0) scale(0.9) rotate(-6deg);
-  }
-  50% {
-    transform: translate3d(14%, -10%, 0) scale(1.22) rotate(9deg);
-  }
-  100% {
-    transform: translate3d(-12%, -4%, 0) scale(1.04) rotate(-3deg);
-  }
+  0% { transform: translate3d(0, -3%, 0) scale(0.9) rotate(-6deg); opacity: 0.36; }
+  50% { transform: translate3d(-4%, 4%, 0) scale(1.12) rotate(7deg); opacity: 0.5; }
+  100% { transform: translate3d(4%, 1%, 0) scale(0.96) rotate(2deg); opacity: 0.4; }
 }
 
-@keyframes player-haze-morph-c {
-  0% {
-    border-radius: 52% 48% 41% 59% / 47% 57% 43% 53%;
-  }
-  33% {
-    border-radius: 37% 63% 66% 34% / 58% 36% 64% 42%;
-  }
-  66% {
-    border-radius: 64% 36% 38% 62% / 41% 63% 37% 59%;
-  }
-  100% {
-    border-radius: 52% 48% 41% 59% / 47% 57% 43% 53%;
-  }
+/* 噪波纹理：`feTurbulence` 撕边 + `feDisplacementMap` 形变 + `feGaussianBlur`
+   软化，全部塞进 data-URI SVG 里 —— 浏览器只栅格化一次，之后当位图用。
+   三团种子/频率/位移尺度各不相同，所以叠起来不会"像两个圆贴在一起"。 */
+.player-music {
+  --player-haze-tex-a: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc0MjAnIGhlaWdodD0nNDIwJyB2aWV3Qm94PScwIDAgNDIwIDQyMCc+PGRlZnM+PGZpbHRlciBpZD0nZicgeD0nLTYwJScgeT0nLTYwJScgd2lkdGg9JzIyMCUnIGhlaWdodD0nMjIwJSc+PGZlVHVyYnVsZW5jZSB0eXBlPSdmcmFjdGFsTm9pc2UnIGJhc2VGcmVxdWVuY3k9JzAuMDAzNSAwLjAwNTUnIG51bU9jdGF2ZXM9JzUnIHNlZWQ9JzExJyByZXN1bHQ9J24nLz48ZmVEaXNwbGFjZW1lbnRNYXAgaW49J1NvdXJjZUdyYXBoaWMnIGluMj0nbicgc2NhbGU9JzIxMCcgeENoYW5uZWxTZWxlY3Rvcj0nUicgeUNoYW5uZWxTZWxlY3Rvcj0nRycvPjxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249JzknLz48L2ZpbHRlcj48L2RlZnM+PGNpcmNsZSBjeD0nMjEwJyBjeT0nMjEwJyByPScxNzAnIGZpbGw9JyNmZmYnIGZpbHRlcj0ndXJsKCNmKScvPjwvc3ZnPg==");
+  --player-haze-tex-b: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc0MjAnIGhlaWdodD0nNDIwJyB2aWV3Qm94PScwIDAgNDIwIDQyMCc+PGRlZnM+PGZpbHRlciBpZD0nZicgeD0nLTYwJScgeT0nLTYwJScgd2lkdGg9JzIyMCUnIGhlaWdodD0nMjIwJSc+PGZlVHVyYnVsZW5jZSB0eXBlPSdmcmFjdGFsTm9pc2UnIGJhc2VGcmVxdWVuY3k9JzAuMDA1NSAwLjAwMzUnIG51bU9jdGF2ZXM9JzUnIHNlZWQ9JzIzJyByZXN1bHQ9J24nLz48ZmVEaXNwbGFjZW1lbnRNYXAgaW49J1NvdXJjZUdyYXBoaWMnIGluMj0nbicgc2NhbGU9JzE5MCcgeENoYW5uZWxTZWxlY3Rvcj0nUicgeUNoYW5uZWxTZWxlY3Rvcj0nRycvPjxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249JzExJy8+PC9maWx0ZXI+PC9kZWZzPjxjaXJjbGUgY3g9JzIxMCcgY3k9JzIxMCcgcj0nMTcwJyBmaWxsPScjZmZmJyBmaWx0ZXI9J3VybCgjZiknLz48L3N2Zz4=");
+  --player-haze-tex-c: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc0MjAnIGhlaWdodD0nNDIwJyB2aWV3Qm94PScwIDAgNDIwIDQyMCc+PGRlZnM+PGZpbHRlciBpZD0nZicgeD0nLTYwJScgeT0nLTYwJScgd2lkdGg9JzIyMCUnIGhlaWdodD0nMjIwJSc+PGZlVHVyYnVsZW5jZSB0eXBlPSdmcmFjdGFsTm9pc2UnIGJhc2VGcmVxdWVuY3k9JzAuMDA0NSAwLjAwNzAnIG51bU9jdGF2ZXM9JzUnIHNlZWQ9JzM3JyByZXN1bHQ9J24nLz48ZmVEaXNwbGFjZW1lbnRNYXAgaW49J1NvdXJjZUdyYXBoaWMnIGluMj0nbicgc2NhbGU9JzE3MCcgeENoYW5uZWxTZWxlY3Rvcj0nUicgeUNoYW5uZWxTZWxlY3Rvcj0nRycvPjxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249JzEyJy8+PC9maWx0ZXI+PC9kZWZzPjxjaXJjbGUgY3g9JzIxMCcgY3k9JzIxMCcgcj0nMTcwJyBmaWxsPScjZmZmJyBmaWx0ZXI9J3VybCgjZiknLz48L3N2Zz4=");
 }
-
-/* ---------- 两套样式的公共骨架 ---------- */
 
 .player-layout {
   position: relative;
@@ -5883,29 +5782,77 @@ button.danger {
   color: rgba(255, 255, 255, 0.9);
 }
 
-/* 当前句按**进度条**推进（用户 2026-11-13 D172：不要逐字跳格）。
-   同一行文字渲染两层：底层是"未唱"的淡色，上层是"已唱"的亮色，用 `clip-path` 从左往右
-   揭开——边界是连续移动的，跟播放位置同步；`transition` 让 `timeupdate`（约 4Hz）之间也
-   看不出台阶。 */
-.player-lyrics[data-variant="haze"] .player-lyric.is-active .player-lyric-base {
-  color: rgba(255, 255, 255, 0.55);
+/* 当前句按**进度条**推进（用户 2026-11-13 D172 口径），但**只画一层字形**：
+   `background-image` 的硬边渐变乘 `background-clip: text`，染色只落在字形像素上。
+   早先"两层文字 + `clip-path` 裁上层"的写法，裁切边会把文字外发光一起切断，屏幕上出现
+   一道白色矩形边框（用户 2026-11-13 D173）——换成字形蒙版后没有盒子边，矩形不可能出现。 */
+@property --player-lyric-progress {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
 }
 
-.player-lyrics[data-variant="haze"] .player-lyric-fill {
-  color: #fff;
+.player-lyrics[data-variant="haze"] {
+  --player-lyric-sung: #fff;
+  --player-lyric-unsung: rgba(255, 255, 255, 0.55);
 }
 
-.player-lyric-main {
-  position: relative;
+.player-lyric-main.is-filling {
+  /* 填充的边界不是硬线：在进度两侧各留一小段渐变，透明度 1 → 0 柔和过渡
+     （用户 2026-11-14 D176：「不要竖直的僵硬边界，加一个 1-0 的透明度柔和过渡」）。
+     两端夹紧只是防止进度 0% / 100% 时渐变停靠点越界。 */
+  background-image: linear-gradient(
+    to right,
+    var(--player-lyric-sung) 0%,
+    var(--player-lyric-sung) max(0%, calc(var(--player-lyric-progress, 0%) - 6%)),
+    var(--player-lyric-unsung) min(100%, calc(var(--player-lyric-progress, 0%) + 6%)),
+    var(--player-lyric-unsung) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  /* `timeupdate` 只有 ~4Hz，自定义属性可插值后靠过渡把台阶补成连续。 */
+  transition: --player-lyric-progress 0.2s linear;
 }
 
-.player-lyric-fill {
-  position: absolute;
-  inset: 0;
-  /* 蒙版宽度 = 已播进度：右侧被裁掉的部分露出底层文字。 */
-  clip-path: inset(0 calc(100% - var(--player-lyric-progress, 0%)) 0 0);
-  transition: clip-path 0.2s linear;
-  pointer-events: none;
+/* 折行时换纵向渐变：横向渐变会让两行各自从中间截断，看起来像整块被平移着高亮
+   （用户 2026-11-13 D173 的第二个问题）；纵向按行序先填满上一行再填下一行。 */
+.player-lyric-main.is-filling[data-wrapped="true"] {
+  background-image: linear-gradient(
+    to bottom,
+    var(--player-lyric-sung) 0%,
+    var(--player-lyric-sung) max(0%, calc(var(--player-lyric-progress, 0%) - 6%)),
+    var(--player-lyric-unsung) min(100%, calc(var(--player-lyric-progress, 0%) + 6%)),
+    var(--player-lyric-unsung) 100%
+  );
+}
+
+/* 注音（振り仮名）：汉字上方一行小号假名，颜色跟着这句走（用户 2026-11-14 D176）。 */
+/*
+ * 有注音的行要**多占一点高度**：`<rt>` 挂在上方，line-height 不放开的话，
+ * 小字会压到上一行的正文上（真机 / 渲染目检都出现过）。
+ */
+.player-lyric ruby {
+  ruby-position: over;
+  ruby-align: center;
+  line-height: 2.05;
+}
+
+.player-lyric rt {
+  font-size: 0.46em;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  opacity: 0.82;
+  /* 注音不参与"逐字/进度"染色的对齐计算：它只是挂在底字上的小字。 */
+  -webkit-text-fill-color: currentColor;
+  text-fill-color: currentColor;
+}
+
+
+/* 外发光挪到字形的 drop-shadow：`color: transparent` 下 `text-shadow` 没有颜色可投。 */
+.player-lyrics[data-variant="haze"] .player-lyric.is-active .player-lyric-main.is-filling {
+  filter: drop-shadow(0 0 18px rgba(255, 255, 255, 0.3));
 }
 
 /* 样式 2：不模糊、不错位，靠**颜色深浅**分层（参考图是淡紫灰 → 深藏青）。 */
@@ -5928,7 +5875,8 @@ button.danger {
 }
 
 .player-lyrics[data-variant="disc"] .player-lyric-main {
-  font-size: clamp(12px, 3.4cqh, 27px);
+  /* 用户 2026-11-14：「样式2的歌词字体小一点」——比样式 1 收一档，五行+注音也放得下。 */
+  font-size: clamp(11px, 2.9cqh, 23px);
   line-height: 1.32;
   color: var(--player-ink, #232840);
   opacity: 0.42;
@@ -5937,7 +5885,7 @@ button.danger {
 
 .player-lyrics[data-variant="disc"] .player-lyric-sub {
   margin-top: 1px;
-  font-size: clamp(9px, 1.5cqh, 15px);
+  font-size: clamp(9px, 1.3cqh, 13px);
   color: var(--player-ink, #232840);
   opacity: 0.28;
 }
@@ -5951,21 +5899,20 @@ button.danger {
 }
 
 .player-lyrics[data-variant="disc"] .player-lyric.is-active .player-lyric-main {
-  font-size: clamp(16px, 4.9cqh, 40px);
+  font-size: clamp(14px, 4.1cqh, 33px);
   font-weight: 700;
   /* 参考图的当前句是**紫色**（强调色），不是深墨色——浅底上这样才跳得出来。 */
   color: var(--player-accent, #5b46c9);
   opacity: 1;
 }
 
-/* 样式 2 的进度条反过来：**没唱到的淡紫、唱到的深墨**（浅底上"越唱越深"比"越唱越亮"
-   更清楚，也与参考图 1 里那个深色的末字一致）。 */
-.player-lyrics[data-variant="disc"] .player-lyric.is-active .player-lyric-base {
-  color: color-mix(in srgb, var(--player-accent, #5b46c9) 62%, transparent);
+.player-lyrics[data-variant="disc"] {
+  --player-lyric-sung: var(--player-ink, #232840);
+  --player-lyric-unsung: color-mix(in srgb, var(--player-accent, #5b46c9) 62%, transparent);
 }
 
-.player-lyrics[data-variant="disc"] .player-lyric-fill {
-  color: var(--player-ink, #232840);
+.player-lyrics[data-variant="disc"] .player-lyric.is-active .player-lyric-main.is-filling {
+  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--player-accent, #5b46c9) 28%, transparent));
 }
 
 .player-lyrics[data-variant="disc"] .player-lyric.is-active .player-lyric-sub {

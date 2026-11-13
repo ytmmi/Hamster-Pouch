@@ -515,8 +515,20 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
    * 只用无修饰的左右方向键；`Tab` / `Enter` 等一律放行（不 `preventDefault`），
    * 否则音量条等原生控件会失去键盘操作。
    */
+  /**
+   * 面板获得焦点时的键盘：空格 = 暂停/继续，←/→ = 上一首/下一首。
+   *
+   * 用户 2026-11-14：「音乐播放器面板焦点在时，空格暂停/继续、方向键上一首和下一首」。
+   * 传输按钮自身 `tabIndex={-1}` 且吞掉激活键，所以这里收到的一定是"焦点在面板上"
+   * 的按键；按住修饰键时一律放行，不抢系统快捷键。
+   */
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.key === " " || event.key === "Spacebar") {
+      event.preventDefault();
+      togglePlay();
+      return;
+    }
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
     stepTrack(event.key === "ArrowLeft" ? -1 : 1);

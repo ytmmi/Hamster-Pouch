@@ -480,6 +480,10 @@ apps/desktop/src/app_ui/
                             #   真正的 play 放在 `onLoadedMetadata`（`autoPlayRef` 为真才播），
                             #   `loadedFileIdRef` 在 `await filePath` **之前**认领（否则"选中即预载"
                             #   的 effect 会抢着预载并清掉 autoPlay）；
+                            #   画面区单击**不用 `onClick`**（2026-11-14 D176）：dockview 在
+                            #   `mousedown` 时把指针交给内容容器，按下/抬起的 target 不同，
+                            #   浏览器就不合成 click；改成 `pointerdown` 记起点 + `pointerup`
+                            #   比位移（`STAGE_TAP_SLOP_PX` = 6px 以内才算单击）；
                             #   选中即预载 `src`（`autoPlayRef` / `loadedFileIdRef`）但不出声），
                             #   封面 / 歌词 / 两套样式 / 上一首下一首都归 `MusicPlayerPanel`。
                             #   DOM `<video>` 播放控制，
@@ -516,6 +520,10 @@ apps/desktop/src/app_ui/
     music/                  # 音乐播放器的取料与视图（2026-11-13 / D165、D166；与
                             #   imageviewer/ 同构的多文件功能域，主面板是 `MusicPlayerPanel.tsx`）
                             #   MusicStage.tsx 音乐舞台（两套样式是**两套排版**而不是一套 DOM
+                            #   2026-11-14 D176 起歌词正文走 `<LyricText text>`（有注音就出
+                            #   `<ruby>`+`<rt>`），当前句是**单层字形蒙版**（`background-clip:
+                            #   text` + 两端留 6% 过渡带的渐变；折行时渐变转纵向），
+                            #   `player-lyric-(base|fill)` 两层结构已删。
                             #     换配色：haze = 左列封面卡 + 进度/传输/音量 + 右侧大号歌词；
                             #     disc = 左侧曲名/歌词 + 进度/传输 + 右上按封面上色的大唱片。
                             #     共用的是数据与规则（歌词窗口、队列、配色函数、传输行为）。
@@ -567,6 +575,12 @@ apps/desktop/src/app_ui/
                             #     `lyricFillPercent`（换成 CSS 百分比，0 / 1 两个边界有唯一出处）。
                             #     D171 的逐字方案（`lyricChars` / `sungCharCount`）已删除——D172
                             #     改成进度条式填充，不再按字跳格）
+                            #   ruby.ts 假名注音纯函数（2026-11-14 D176：`心臓（しんぞう）`
+                            #     这种「汉字 + 全角括号假名」渲染成 `<ruby>`+`<rt>`——
+                            #     `parseRuby(text)` 切成 `{text, ruby?}` 段，`hasRuby(text)`
+                            #     给组件判断要不要走 ruby 分支；**只认全角括号且括号内全是
+                            #     假名**，`(weiyun)` / `（Cover）` 这类实词括号原样保留。
+                            #     零依赖，门禁可直接 import 断言切分结果）
                             #   queueView.ts 队列纯函数（**零依赖**：只有零依赖才能被门禁
                             #     直接 import 断言；`playableFiles` / `stepPlayable` 在**同类**
                             #     里走、不跨 audio↔video；`StepOptions.shuffle` 只在同类里抽
@@ -597,6 +611,10 @@ apps/desktop/src/app_ui/
                             #     **兜底色例外**：`HAZE_FALLBACK_COLORS` 是浅色系且不经 `vivid`
                             #     压暗（用户「默认的颜色晕不要暗色」），由 `stagePalette` 分流。
                             #     D169 起色源换成 `player.media` 回的**三个主导色**（面积最大、
+                            #     2026-11-14 D175 起色团形状由 `styles.css` 里的三张
+                            #     `--player-haze-tex-a/b/c`（data-URI SVG，各自 feTurbulence +
+                            #     feDisplacementMap + feGaussianBlur，seed 11/23/37）做 mask，
+                            #     运行时只跑 transform/opacity（51.3 → 158.5 fps）。
                             #     互不近似），而不是 8 色频率色板的前三个）
                             #   time.ts 时间格式（`formatMs` = 已播时长、`≤ 0` 记作"未知"，
                             #     `formatClock` = 同一口径但**允许 0**（进度条起点必须是

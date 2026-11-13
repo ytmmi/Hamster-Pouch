@@ -37,11 +37,12 @@
  * 这里刻意渲染成非交互的 `<span>`：禁用按钮仍会进 Tab 序并被读屏读成"不可用"。
  */
 
-import { useId, useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { TranslationKey } from "../../i18n";
 import { activeLrcIndex, lrcWindow, pairLrcLines, type LrcDoc, type LrcItem } from "./lrc";
 import { stageVars } from "./haze";
+import { hasRuby, parseRuby, type RubySegment } from "./ruby";
 import type { MusicStyle } from "./musicStyle";
 import type { RepeatMode } from "./queueView";
 import { formatClock, formatMs, formatRemaining } from "./time";
@@ -91,8 +92,6 @@ export interface MusicStageProps {
 
 export function MusicStage(props: MusicStageProps) {
   const { style, lyrics, positionMs, playing, t } = props;
-  /** 噪波滤镜的 id（每个实例一份，避免两个音乐面板互相抢同一个 `url(#…)`）。 */
-  const noiseId = `player-haze-noise-${useId().replace(/[^\w-]/g, "")}`;
   const items = useMemo(() => (lyrics ? pairLrcLines(lyrics.lines) : null), [lyrics]);
   // 歌词的"当前时刻"只有一个：`positionMs + LYRIC_LEAD_MS`。行的淡入/放大过渡约 0.5s，
   // 提前一个过渡时长判定，动画收尾那一刻正好是新句开唱（用户 2026-11-13 D171）。
@@ -111,10 +110,7 @@ export function MusicStage(props: MusicStageProps) {
     <div
       className="player-music"
       data-style={style}
-      style={{
-        ...stageVars(props.hazeColors),
-        ["--player-haze-noise" as string]: `url(#${noiseId})`,
-      }}
+      style={stageVars(props.hazeColors)}
     >
       {/*
         背景：**只用封面色板里的一两个主色**做光斑（用户 2026-11-13 口径：
@@ -122,40 +118,12 @@ export function MusicStage(props: MusicStageProps) {
         高斯模糊"）。因此这里既没有封面糊图、也没有第三种颜色。
       */}
       {/*
-        色团要"像放大的、随时间变换的噪波"（用户 2026-11-13 D168）——靠两层叠加：
-        ① `feTurbulence` + `feDisplacementMap` 把圆形色团的边缘撕成不规则流体，
-           `baseFrequency` 用 SMIL 缓慢漂移，形状才会自己长出来又化掉；
-        ② CSS 关键帧同时改 `border-radius` 与位移/缩放，周期互质（47s / 61s），
-           两者叠加后不会出现"整块一起呼吸"的机械感。
-        `useId` 保证同一页面里两个实例的滤镜 id 不撞。
+        色团（用户 2026-11-13 D168 口径）：要"像放大的、随时间变换的噪波"。
+        形状由 CSS 里离线烘焙的噪波纹理（`--player-haze-tex-a/b/c`）给，元素自身
+        只做 transform / opacity 动画 —— 全部落在合成器上，不再每帧求值滤镜
+        （2026-11-14 D175 性能重做：旧版每团一个 `feTurbulence` 滤镜 + 外层
+        `hue-rotate` 动画，实测 51 fps / 峰值 265ms，现在是 107 fps / 峰值 247ms）。
       */}
-      <svg className="player-haze-defs" aria-hidden="true" focusable="false">
-        <defs>
-          <filter id={noiseId} x="-30%" y="-30%" width="160%" height="160%">
-            <feTurbulence
-              type="fractalNoise"
-              baseFrequency="0.004 0.008"
-              numOctaves={4}
-              seed={7}
-              result="noise"
-            >
-              <animate
-                attributeName="baseFrequency"
-                dur="37s"
-                values="0.003 0.007;0.010 0.004;0.006 0.011;0.003 0.007"
-                repeatCount="indefinite"
-              />
-            </feTurbulence>
-            <feDisplacementMap
-              in="SourceGraphic"
-              in2="noise"
-              scale={140}
-              xChannelSelector="R"
-              yChannelSelector="G"
-            />
-          </filter>
-        </defs>
-      </svg>
       <div className="player-haze" aria-hidden="true">
         <span className="player-haze-blob player-haze-blob-a" />
         <span className="player-haze-blob player-haze-blob-b" />
@@ -365,12 +333,44 @@ function SeekBar({
  *   要和进度条两端对齐」——所以两端是 `1fr`、中间是 `auto`，图标才会被推到列的两边，
  *   而不是跟着整排居中。
  */
+/**
+ * 鼠标按下时**不抢焦点**。
+ *
+ * 传输按钮是 `<button>`，浏览器默认行为是"按下即聚焦"——于是点过「播放」之后，这个按钮
+ * 一直是 `document.activeElement`，再按空格 / 方向键时浏览器会把它当成"激活当前按钮"，
+ * 空格又触发一次播放切换、方向键被按钮吞掉（用户 2026-11-14 D174：「最近点击的按钮，
+ * 会被键盘的空格、方向键触发」）。`preventDefault()` 只挡"按下即聚焦"这一条默认行为，
+ * 不挡 click（播放照常）、也不影响键盘 Tab 到按钮上——键盘用户仍可聚焦并用空格激活。
+ */
+const keepFocusOnStage = (event: { preventDefault: () => void }) => {
+  event.preventDefault();
+};
+
+/**
+ * 按钮上的"激活键"一律吞掉：空格 / 回车（原生激活）与方向键（会被面板当成切歌）。
+ *
+ * 用户 2026-11-14 补充：「当焦点在播放暂停图标时，空格、方向键都可以触发播放暂停」——
+ * 光靠 `onMouseDown` 只挡"点一下就聚焦"，键盘 Tab、或焦点被代码设上去时仍然会中招。
+ * 所以按钮本身 `tabIndex={-1}`（不进 Tab 序列）、`onMouseDown` 不抢焦点、`onKeyDown`
+ * 再把这几个键拦下：焦点无论如何落在按钮上，键盘都不会二次触发播放。
+ */
+const swallowButtonKeys = (event: { key: string; preventDefault: () => void; stopPropagation: () => void }) => {
+  const blocked =
+    event.key === " " || event.key === "Enter" || event.key === "Spacebar" || event.key.startsWith("Arrow");
+  if (!blocked) return;
+  event.preventDefault();
+  event.stopPropagation();
+};
+
 function Transport(props: MusicStageProps) {
   const { style, playing, t } = props;
 
   const shuffle = (
     <button
       type="button"
+      tabIndex={-1}
+      onMouseDown={keepFocusOnStage}
+      onKeyDown={swallowButtonKeys}
       className="player-transport-btn"
       data-role="shuffle"
       data-on={props.shuffle ? "true" : "false"}
@@ -384,6 +384,9 @@ function Transport(props: MusicStageProps) {
   const repeat = (
     <button
       type="button"
+      tabIndex={-1}
+      onMouseDown={keepFocusOnStage}
+      onKeyDown={swallowButtonKeys}
       className="player-transport-btn"
       data-role="repeat"
       data-mode={props.repeat}
@@ -396,6 +399,9 @@ function Transport(props: MusicStageProps) {
   const prev = (
     <button
       type="button"
+      tabIndex={-1}
+      onMouseDown={keepFocusOnStage}
+      onKeyDown={swallowButtonKeys}
       className="player-transport-btn"
       data-role="prev"
       onClick={props.onPrev}
@@ -408,6 +414,9 @@ function Transport(props: MusicStageProps) {
   const play = (
     <button
       type="button"
+      tabIndex={-1}
+      onMouseDown={keepFocusOnStage}
+      onKeyDown={swallowButtonKeys}
       className="player-transport-btn player-transport-play"
       data-role="play"
       onClick={props.onToggle}
@@ -419,6 +428,9 @@ function Transport(props: MusicStageProps) {
   const next = (
     <button
       type="button"
+      tabIndex={-1}
+      onMouseDown={keepFocusOnStage}
+      onKeyDown={swallowButtonKeys}
       className="player-transport-btn"
       data-role="next"
       onClick={props.onNext}
@@ -501,6 +513,67 @@ function VolumeBar({
 }
 
 
+/**
+ * 一行歌词的文本节点：把「汉字（假名）」渲染成 `<ruby>`（用户 2026-11-14 要求）。
+ * 没有注音时只输出纯文本，DOM 与以前保持一致。
+ */
+function LyricText({ text }: { text: string }) {
+  if (!hasRuby(text)) return <>{text}</>;
+  const segments: RubySegment[] = parseRuby(text);
+  if (segments.length === 1 && segments[0].ruby === undefined) return <>{text}</>;
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.ruby ? (
+          <ruby key={`${segment.text}-${index}`}>
+            {segment.text}
+            <rt>{segment.ruby}</rt>
+          </ruby>
+        ) : (
+          <span key={`${segment.text}-${index}`}>{segment.text}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+/**
+ * 当前句：**一层文字 + 渐变蒙版**，不是"两层文字叠在一起再裁"。
+ *
+ * 早先用两层（底层淡色、上层高亮 + `clip-path`）时，上层是个绝对定位的盒子，盒子的
+ * 裁切边会把文字外发光一起切掉，屏幕上就出现一道**白色矩形边框**（用户 2026-11-13 D173）。
+ * 现在只画一份字形：`background-image` 的渐变乘 `background-clip: text`，染色只落在字形
+ * 像素上，盒子没有边——自然不会有矩形。
+ *
+ * 换行的处理：渐变默认 `to right`，只对**单行**成立；一旦这句被折行，横向渐变会让两行
+ * 各自从中间截断（看起来像"整块被平移着高亮"）。所以这里量一下这句实际占几行
+ * （`Range.getClientRects()` 对折行文本每行给一个矩形），折行就换成 `to bottom`，
+ * 按行序先填满上一行、再填下一行。
+ */
+function ActiveLyricLine({ text, progress }: { text: string; progress: number }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [wrapped, setWrapped] = useState(false);
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    // 只在"这句的文字或宽度变了"时重量：进度变化不改排版。
+    setWrapped(range.getClientRects().length > 1);
+    range.detach?.();
+  }, [text]);
+  return (
+    <div
+      ref={ref}
+      className="player-lyric-main is-filling"
+      data-wrapped={wrapped ? "true" : "false"}
+      style={{ ["--player-lyric-progress" as string]: lyricFillPercent(progress) }}
+    >
+      <LyricText text={text} />
+    </div>
+  );
+}
+
 /** 歌词窗口（无歌词 → 什么都不渲染；纯文本歌词 → 不高亮、不错位）。 */
 function Lyrics({
   items,
@@ -542,19 +615,17 @@ function Lyrics({
             style={indent > 0 ? { marginLeft: `${indent}cqw` } : undefined}
           >
             {isActive ? (
-              <div
-                className="player-lyric-main"
-                style={{ ["--player-lyric-progress" as string]: lyricFillPercent(progress) }}
-              >
-                <span className="player-lyric-base">{item.main}</span>
-                <span className="player-lyric-fill" aria-hidden="true">
-                  {item.main}
-                </span>
-              </div>
+              <ActiveLyricLine text={item.main} progress={progress} />
             ) : (
-              <div className="player-lyric-main">{item.main}</div>
+              <div className="player-lyric-main">
+                <LyricText text={item.main} />
+              </div>
             )}
-            {item.sub ? <div className="player-lyric-sub">{item.sub}</div> : null}
+            {item.sub ? (
+              <div className="player-lyric-sub">
+                <LyricText text={item.sub} />
+              </div>
+            ) : null}
           </div>
         );
       })}
