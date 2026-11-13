@@ -73,7 +73,9 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { key: "e_dbl_aud", type: "event", layer: "l_main", position: { x: 1837, y: 720 }, trigger: "double_click" },
     { key: "a_show_viewer", type: "action", layer: "l_main", position: { x: 2137, y: 380 }, target: "c_1_3", op: "show" },
     { key: "a_show_player", type: "action", layer: "l_main", position: { x: 2137, y: 550 }, target: "c_player", op: "show", payload: { play: true } },
-    { key: "a_show_music", type: "action", layer: "l_main", position: { x: 2137, y: 720 }, target: "c_music", op: "show", payload: { play: true } },
+    // 音频双击 → **媒体播放器**（用户 2026-11-13 口径：通用播放器负责放音频，音乐面板是特化视图，
+    // 由「窗口 → 组件」打开，不抢双击落点）。
+    { key: "a_play_audio", type: "action", layer: "l_main", position: { x: 2137, y: 720 }, target: "c_player", op: "show", payload: { play: true } },
     { key: "ui", type: "interface", layer: "l_main", position: { x: 37, y: 40 } },
     { key: "ov_1", type: "overlay", layer: "l_main", position: { x: 2737, y: 42 }, visible: true, height: 2, size: { width: 200, height: 600 }, shadow: "sm", radius: "lg", hide_label: true },
     { key: "c_1", type: "control", layer: "l_main", panel_id: "tasks", position: { x: 2737, y: 212 } },
@@ -122,7 +124,7 @@ export const DEFAULT_BLUEPRINT: BlueprintGraph = {
     { from: "o_aud", to: "e_dbl_aud", kind: "on", order: 20 },
     { from: "e_dbl_img", to: "a_show_viewer", kind: "fires", order: 21 },
     { from: "e_dbl_vid", to: "a_show_player", kind: "fires", order: 22 },
-    { from: "e_dbl_aud", to: "a_show_music", kind: "fires", order: 23 },
+    { from: "e_dbl_aud", to: "a_play_audio", kind: "fires", order: 23 },
     { from: "ui", to: "blk_left", kind: "contains", order: 24 },
     { from: "ui", to: "blk_center", kind: "contains", order: 25 },
     { from: "ui", to: "blk_right", kind: "contains", order: 26 },

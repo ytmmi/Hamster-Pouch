@@ -7319,17 +7319,18 @@ check(
     trackInfoMod.trackTitleOf("/m/A - B - C.mp3") === "B - C",
 );
 check(
-  "D166：色晕三层取自封面主色（不足循环、非法值剔除、无封面走兜底三色）",
-  eqList(hazeMod.hazeColorsOf([]), [...hazeMod.HAZE_FALLBACK_COLORS]) &&
-    eqList(hazeMod.hazeColorsOf(["#112233"]), ["#112233", "#112233", "#112233"]) &&
+  "D167：色晕只用封面主色板里的**一到两个**颜色（不足循环、非法值剔除、无封面走兜底）",
+  // 用户 2026-11-13：「在封面的颜色板上选 1-2 个颜色进行颜色晕的渲染」——
+  // 因此光斑固定两盏，第三个主色不再参与渲染。
+  hazeMod.HAZE_LAYER_COUNT === 2 &&
+    eqList(hazeMod.hazeColorsOf([]), [...hazeMod.HAZE_FALLBACK_COLORS].slice(0, 2)) &&
+    eqList(hazeMod.hazeColorsOf(["#112233"]), ["#112233", "#112233"]) &&
     eqList(hazeMod.hazeColorsOf(["#112233", "#445566", "#778899", "#aabbcc"]), [
       "#112233",
       "#445566",
-      "#778899",
     ]) &&
-    eqList(hazeMod.hazeColorsOf(["nope", "#abc"]), ["#abc", "#abc", "#abc"]) &&
-    Object.keys(hazeMod.hazeVars([])).join(",") ===
-      "--player-haze-a,--player-haze-b,--player-haze-c",
+    eqList(hazeMod.hazeColorsOf(["nope", "#abc"]), ["#abc", "#abc"]) &&
+    Object.keys(hazeMod.hazeVars([])).join(",") === "--player-haze-a,--player-haze-b",
 );
 check(
   "D166：上一首 / 下一首只在**同类**里走、端点循环（音频不跳视频，视频也不跳音频）",
@@ -7433,7 +7434,6 @@ check(
     const keys = [
       "--player-haze-a",
       "--player-haze-b",
-      "--player-haze-c",
       "--player-ink",
       "--player-accent",
       "--player-sky-1",
@@ -7533,12 +7533,106 @@ check(
   playableQueueSrc.match(/mediaTypes:[^,\n]*/)?.[0] ?? "",
 );
 check(
-  "D166：无封面不出图、无歌词不出块（结构上不渲染，不是空框或「暂无歌词」占位）",
-  // 封面三处（背景糊图 / 样式 1 封面卡 / 样式 2 唱片中心）都是"有 URL 才渲染 img"，
-  // 歌词块是"没有句子就 return null"——都不是画个空框或写「暂无歌词」。
-  (musicStageSrc.match(/\{props\.coverUrl \? \(/g) ?? []).length >= 3 &&
+  "D167：缺封面用曲名渲染占位封面（同一块画布），缺歌词整块不渲染",
+  // 用户 2026-11-13：「不是省略封面，而是用音乐名渲染封面进行占位，禁止因为缺失封面
+  // 而改变样式的布局」。因此封面两处都**恒常渲染**，只是内容在 `CoverVisual` 里二选一：
+  // 有 URL 出 `<img>`，没有则出带曲名的占位块。
+  (musicStageSrc.match(/<CoverVisual/g) ?? []).length === 2 &&
+    /className=\{`\$\{className\} is-placeholder`\}/.test(musicStageSrc) &&
+    /player-cover-name/.test(musicStageSrc) &&
+    /player-cover\.is-placeholder/.test(stylesSource) &&
+    /player-disc-cover\.is-placeholder/.test(stylesSource) &&
+    !/data-empty/.test(musicStageSrc) &&
     /if \(!items \|\| items\.length === 0\) return null;/.test(musicStageSrc) &&
     !/player\.noLyrics/.test(musicStageSrc),
+);
+const audioTagsSrc = readFileSync(join(ROOT, "crates/hp-media/src/tags.rs"), "utf8");
+const playerCommandSrc = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/player.rs"),
+  "utf8",
+);
+check(
+  "D167：曲名/艺人**先读音频标签**（ffprobe），读不到或没定义才回退文件名（左艺人、右曲名）",
+  // 用户 2026-11-13 裁决：「读取音频标签(title/artist)，无法读取，或未标签定义就回退(左艺人、右曲名)」。
+  // 索引里没有标签字段（D115 ⑫ 的标签索引仍未排期），所以标签是播放时按需读的。
+  /pub fn read_audio_tags\(/.test(audioTagsSrc) &&
+    /-show_entries/.test(audioTagsSrc) &&
+    /format_tags/.test(audioTagsSrc) &&
+    /album_artist/.test(audioTagsSrc) &&
+    /hp_media::read_audio_tags/.test(playerCommandSrc) &&
+    /ffprobe/.test(playerCommandSrc) &&
+    /title: tags\.title/.test(playerCommandSrc) &&
+    /artist: tags\.artist/.test(playerCommandSrc) &&
+    /media\.tagTitle \?\? trackTitleOf/.test(musicPanelSrc) &&
+    /media\.tagArtist \?\? trackArtistOf/.test(musicPanelSrc),
+);
+check(
+  "D167：唱片圆心缺封面时不渲染文字——唱片只有「有没有图」，没有「少一块」（用户 m02898）",
+  // 同一块画布，但两种占位的内容不同：封面卡写字（用户 m02560 要的"用音乐名占位"），
+  // 唱片圆**不写字**（写上去像贴纸，而不是唱片本身）。
+  /label = true,/.test(musicStageSrc) &&
+    /label\?: boolean;/.test(musicStageSrc) &&
+    /label=\{false\}/.test(musicStageSrc) &&
+    /\{label \? <span className="player-cover-name">\{title\}<\/span> : null\}/.test(musicStageSrc) &&
+    (() => {
+      const start = stylesSource.indexOf(".player-disc-cover.is-placeholder {");
+      const end = stylesSource.indexOf("}", start);
+      const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
+      return body.length > 0 && !/line-clamp|font-/.test(body);
+    })(),
+);
+check(
+  "D167：兜底色晕是**浅色**（默认可读白字），且兜底色不经 `vivid` 压暗",
+  // 用户 2026-11-13：「默认的颜色晕不要暗色」。vivid 会把颜色压到 0.30–0.58 亮度，
+  // 那只对"封面主色常常是白底"有用；兜底色本来就该是亮的氛围色。
+  hazeMod.HAZE_FALLBACK_COLORS.every((hex) => {
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    return (r + g + b) / 3 > 0.6;
+  }) &&
+    hazeMod.hazeVars([])["--player-haze-a"] === hazeMod.HAZE_FALLBACK_COLORS[0] &&
+    hazeMod.hazeVars([])["--player-haze-b"] === hazeMod.HAZE_FALLBACK_COLORS[1] &&
+    // 有封面色时才做色相铺开：单色系封面也要能铺出两盏不同色相的光斑。
+    hazeMod.hazeVars(["#eeeeee"])["--player-haze-a"] !== "#eeeeee",
+);
+check(
+  "D167：色晕会随时间变化（整层色相漂移 + 两盏光斑各自漂移），减少动效时全停",
+  // 用户 2026-11-13：「样式1、2的颜色晕是会运动变化的，不是固定的，要修正」。
+  /animation: player-haze-tint 52s/.test(stylesSource) &&
+    /@keyframes player-haze-tint/.test(stylesSource) &&
+    (() => {
+      const start = stylesSource.indexOf("@keyframes player-haze-drift-a {");
+      const end = stylesSource.indexOf("@keyframes player-haze-drift-b {");
+      const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
+      return /0% \{/.test(body) && /50% \{/.test(body) && /100% \{/.test(body);
+    })() &&
+    // 第三盏光斑已经删掉（两色口径），别再把 `drift-c` 留在样式表里。
+    !/player-haze-drift-c/.test(stylesSource) &&
+    !/player-haze-blob-c/.test(stylesSource) &&
+    (() => {
+      const start = stylesSource.indexOf("@media (prefers-reduced-motion: reduce) {");
+      const end = stylesSource.indexOf(".player-disc {", start);
+      const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
+      return body.includes(".player-haze,") && body.includes(".player-haze-blob,");
+    })(),
+);
+check(
+  "D167：样式 2 的唱片钉在右上并被裁切、控制条落在歌词底下（没歌词也留出那块）",
+  // 用户 2026-11-13：「控制条是在歌词底下的，唱片占比大，唱片中心偏移部分在右上角」。
+  (() => {
+    const start = stylesSource.indexOf(".player-vinyl {");
+    const end = stylesSource.indexOf("}", start);
+    const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
+    return (
+      /top: -\d+%/.test(body) &&
+      /right: -\d+%/.test(body) &&
+      /width: min\(120cqh, 78cqw\)/.test(body)
+    );
+  })() &&
+    /min-height: 30cqh/.test(stylesSource) &&
+    /\.player-info\[data-has-lyrics="false"\] \.player-seek \{/.test(stylesSource) &&
+    /data-has-lyrics=\{items && items\.length > 0 \? "true" : "false"\}/.test(musicStageSrc),
 );
 check(
   "D166：收藏只是图标（非交互 `span`，不是 disabled 按钮——禁用会暗示「现在不能用」）",

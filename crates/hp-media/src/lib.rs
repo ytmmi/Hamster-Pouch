@@ -19,6 +19,7 @@ mod palette;
 mod probe;
 mod process;
 mod svg;
+mod tags;
 mod thumb_decode;
 mod thumbnail;
 mod waveform;
@@ -39,6 +40,7 @@ pub use palette::{
 pub use probe::{MediaProbe, probe};
 pub use process::hidden_command;
 pub use svg::{SVG_EXTS, is_svg, rasterize_svg};
+pub use tags::{AudioTags, read_audio_tags};
 pub use thumbnail::{
     IMAGE_THUMB_DIM_LADDER, IMAGE_THUMB_MAX_DIM, IMAGE_THUMB_MAX_LADDER_DIM,
     IMAGE_THUMB_WEBP_QUALITY, VIDEO_BLACK_SKIP_WINDOW, encode_image_thumbnail, extract_thumbnail,

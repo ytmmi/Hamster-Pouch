@@ -100,33 +100,25 @@ export function MusicStage(props: MusicStageProps) {
     () => (items ? lrcWindow(items.length, activeIndex, LRC_RADIUS) : { start: 0, end: 0 }),
     [items, activeIndex],
   );
-  // 既没有封面也没有歌词：舞台上只剩一块晕染，控件列改成居中一列（见 styles.css）。
-  const plain = !props.coverUrl && !lyrics;
-
   return (
-    <div
-      className="player-music"
-      data-style={style}
-      data-plain={plain ? "true" : undefined}
-      style={stageVars(props.hazeColors)}
-    >
+    <div className="player-music" data-style={style} style={stageVars(props.hazeColors)}>
+      {/*
+        背景：**只用封面色板里的一两个主色**做光斑（用户 2026-11-13 口径：
+        "在封面的颜色板上选 1-2 个颜色进行颜色晕的渲染，样式 1 不是直接进行封面的
+        高斯模糊"）。因此这里既没有封面糊图、也没有第三种颜色。
+      */}
       <div className="player-haze" aria-hidden="true">
-        {props.coverUrl ? (
-          <img className="player-haze-art" src={props.coverUrl} alt="" draggable={false} />
-        ) : null}
         <span className="player-haze-blob player-haze-blob-a" />
         <span className="player-haze-blob player-haze-blob-b" />
-        <span className="player-haze-blob player-haze-blob-c" />
       </div>
 
       {style === "haze" ? (
         <div className="player-layout" data-variant="haze">
           <span className="player-topline" aria-hidden="true" />
-          <div className="player-card" data-empty={props.coverUrl ? "false" : "true"}>
-            <div className="player-art" data-empty={props.coverUrl ? "false" : "true"}>
-              {props.coverUrl ? (
-                <img className="player-cover" src={props.coverUrl} alt="" draggable={false} />
-              ) : null}
+          <div className="player-card">
+            {/* 缺封面时**不缩排、不省略**：同一块画布，内容换成曲名（D167）。 */}
+            <div className="player-art">
+              <CoverVisual coverUrl={props.coverUrl} title={props.title} className="player-cover" />
             </div>
             <div className="player-card-head">
               <TrackHeading title={props.title} artist={props.artist} />
@@ -152,7 +144,7 @@ export function MusicStage(props: MusicStageProps) {
         </div>
       ) : (
         <div className="player-layout" data-variant="disc">
-          <div className="player-info">
+          <div className="player-info" data-has-lyrics={items && items.length > 0 ? "true" : "false"}>
             <div className="player-info-head">
               <span className="player-info-title">{props.title}</span>
               {props.artist ? (
@@ -181,18 +173,56 @@ export function MusicStage(props: MusicStageProps) {
               t={t}
             />
           </div>
-          {props.coverUrl ? (
-            <div className="player-vinyl">
-              <span className="player-vinyl-ring player-vinyl-ring-outer" aria-hidden="true" />
-              <span className="player-vinyl-ring player-vinyl-ring-inner" aria-hidden="true" />
-              <div className="player-disc" data-playing={playing ? "true" : "false"}>
-                <img className="player-disc-cover" src={props.coverUrl} alt="" draggable={false} />
-              </div>
+          {/* 唱片始终在场（构图不因缺封面变化），中心圆里换成曲名（D167）。 */}
+          <div className="player-vinyl">
+            <span className="player-vinyl-ring player-vinyl-ring-outer" aria-hidden="true" />
+            <span className="player-vinyl-ring player-vinyl-ring-inner" aria-hidden="true" />
+            <div className="player-disc" data-playing={playing ? "true" : "false"}>
+              <CoverVisual
+                coverUrl={props.coverUrl}
+                title={props.title}
+                className="player-disc-cover"
+                label={false}
+              />
             </div>
-          ) : null}
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * 封面画面的两种形态：有封面就是那张图，没有封面就在**同一块画布**上画占位（D167）。
+ *
+ * 占位不换排版：同样的宽高、同样的圆角 / 圆形，缺封面不会让任何一块挪位。用户口径：
+ * 「如果缺失封面，不是省略封面，而是用音乐名渲染封面进行占位，禁止因为缺失封面而
+ * 改变样式的布局」。
+ *
+ * **两种占位内容不同**（用户 2026-11-13 追加）：
+ * - 样式 1 的封面卡是独立的方块 → 占位写曲名（它是全场唯一"本该有张图"的位置）。
+ * - 样式 2 的封面嵌在唱片圆心 → 占位**不写文字**，圆心直接变成唱片自己的一部分
+ *   （盘心），因为那圈东西的本义是"唱片的中轴"，不是"墙上的画框"。
+ */
+function CoverVisual({
+  coverUrl,
+  title,
+  className,
+  label = true,
+}: {
+  coverUrl: string | null;
+  title: string;
+  className: string;
+  /** 占位上是否写字。样式 2 传 `false`：圆心不写曲名。 */
+  label?: boolean;
+}) {
+  if (coverUrl) {
+    return <img className={className} src={coverUrl} alt="" draggable={false} />;
+  }
+  return (
+    <span className={`${className} is-placeholder`} aria-hidden="true">
+      {label ? <span className="player-cover-name">{title}</span> : null}
+    </span>
   );
 }
 

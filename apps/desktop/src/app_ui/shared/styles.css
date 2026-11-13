@@ -1472,6 +1472,34 @@ button.danger {
   flex: none;
 }
 
+/*
+ * 音频模式（媒体播放器面板）：波形**占原本视频视图的位置**。
+ *
+ * 用户口径（2026-11-13）：「波形图占据原本视频视图的地方，不是在下面再加一个波形图，
+ * 而上面大块因无视频而黑在哪里」。因此音频时 `<video>` 退成 1px 透明（只出声），
+ * 波形绝对定位铺满画面区，画面区不再留一块黑底。
+ */
+.player-stage[data-stage="audio"] {
+  border-radius: 4px;
+  background: var(--bg-2, #101014);
+}
+
+.player-video.is-audio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.player-stage[data-stage="audio"] .player-wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
 .mp-fallback {
   color: var(--fg-dim);
   font-size: 11px;
@@ -5260,17 +5288,6 @@ button.danger {
   container-type: size;
 }
 
-/* 音频模式下 `<video>` 只负责出声：1px 透明，不参与布局，也不接收指针事件。 */
-.player-video.is-audio {
-  position: absolute;
-  inset: auto auto 0 0;
-  width: 1px;
-  height: 1px;
-  min-height: 0;
-  opacity: 0;
-  pointer-events: none;
-}
-
 .player-music {
   position: absolute;
   inset: 0;
@@ -5279,7 +5296,7 @@ button.danger {
   user-select: none;
 }
 
-/* ---------- 背景：封面高斯模糊 + 三层主色光斑 ---------- */
+/* ---------- 背景：封面色板里的一两个主色光斑（不用封面糊图） ---------- */
 
 .player-haze {
   position: absolute;
@@ -5288,8 +5305,8 @@ button.danger {
   background: #241a3a;
 }
 
-/* 暗角：只靠模糊的封面会整体发白发灰，参考图的边角是深紫——用一层径向暗角
-   把四周压暗，中间的色晕才显得饱和。纯装饰，不接收指针事件。 */
+/* 暗角：光斑是 screen 混合，边角容易被提亮成灰白——用一层径向暗角把四周压暗，
+   中间的色晕才显得饱和。纯装饰，不接收指针事件。 */
 .player-haze::after {
   content: "";
   position: absolute;
@@ -5297,98 +5314,85 @@ button.danger {
   background:
     radial-gradient(
       125% 95% at 0% 100%,
-      color-mix(in srgb, var(--player-haze-c, #4aa3ff) 42%, #14061f),
+      color-mix(in srgb, var(--player-haze-b, #ff6f9c) 42%, #14061f),
       transparent 62%
     ),
     radial-gradient(
       130% 100% at 100% 0%,
-      color-mix(in srgb, var(--player-haze-b, #ff6f9c) 26%, #14061f),
+      color-mix(in srgb, var(--player-haze-a, #7b5cff) 26%, #14061f),
       transparent 58%
     );
   pointer-events: none;
 }
 
-.player-haze-art {
-  position: absolute;
-  inset: -30%;
-  width: 160%;
-  height: 160%;
-  object-fit: cover;
-  /* 参考图的底就是"封面糊开"：模糊半径按面板高度缩放，窄面板也不会糊成纯色。 */
-  filter: blur(clamp(16px, 5.2cqh, 46px)) saturate(1.85) contrast(1.08) brightness(0.68);
-  transform: scale(1.12);
-  animation: player-haze-breathe 46s ease-in-out infinite alternate;
+/*
+ * 色晕**是会动的**（用户 2026-11-13：「颜色晕是会运动变化的，不是固定的」）。
+ *
+ * 三层叠加：整层色相缓慢漂移（`player-haze-tint`，让颜色本身变，不只是位置变）
+ * + 两盏光斑各自大范围位移/呼吸（`player-haze-drift-*`）。周期故意拉长到
+ * 30–60 s：这是"氛围"，不该让人盯着看节奏。
+ */
+.player-haze {
+  animation: player-haze-tint 52s ease-in-out infinite alternate;
 }
 
 .player-haze-blob {
   position: absolute;
   border-radius: 50%;
   filter: blur(clamp(24px, 8cqh, 70px));
-  opacity: 0.68;
+  opacity: 0.72;
   mix-blend-mode: screen;
   will-change: transform;
 }
 
 .player-haze-blob-a {
-  width: 62%;
-  height: 78%;
-  left: -10%;
-  top: -18%;
-  background: var(--player-haze-a, #7b5cff);
-  animation: player-haze-drift-a 27s ease-in-out infinite alternate;
+  width: 66%;
+  height: 84%;
+  left: -14%;
+  top: -22%;
+  background: var(--player-haze-a, #b9a4ff);
+  animation: player-haze-drift-a 31s ease-in-out infinite alternate;
 }
 
 .player-haze-blob-b {
-  width: 58%;
-  height: 74%;
-  right: -12%;
-  top: -10%;
-  background: var(--player-haze-b, #ff6f9c);
-  animation: player-haze-drift-b 34s ease-in-out infinite alternate;
+  width: 62%;
+  height: 80%;
+  right: -16%;
+  bottom: -24%;
+  background: var(--player-haze-b, #ffb3cd);
+  animation: player-haze-drift-b 39s ease-in-out infinite alternate;
 }
 
-.player-haze-blob-c {
-  width: 74%;
-  height: 64%;
-  left: 16%;
-  bottom: -28%;
-  background: var(--player-haze-c, #4aa3ff);
-  animation: player-haze-drift-c 41s ease-in-out infinite alternate;
-}
-
-@keyframes player-haze-breathe {
+@keyframes player-haze-tint {
   from {
-    transform: scale(1.12) translate3d(-1.5%, -1%, 0);
+    filter: hue-rotate(-16deg) saturate(1.02);
   }
   to {
-    transform: scale(1.26) translate3d(1.5%, 1.5%, 0);
+    filter: hue-rotate(20deg) saturate(1.14);
   }
 }
 
 @keyframes player-haze-drift-a {
-  from {
-    transform: translate3d(-4%, -3%, 0) scale(1);
+  0% {
+    transform: translate3d(-8%, -6%, 0) scale(0.92);
   }
-  to {
-    transform: translate3d(9%, 7%, 0) scale(1.18);
+  50% {
+    transform: translate3d(16%, 12%, 0) scale(1.16);
+  }
+  100% {
+    transform: translate3d(4%, 22%, 0) scale(1.02);
   }
 }
 
 @keyframes player-haze-drift-b {
-  from {
-    transform: translate3d(5%, 2%, 0) scale(1.12);
+  0% {
+    transform: translate3d(8%, 10%, 0) scale(1.14);
   }
-  to {
-    transform: translate3d(-8%, 9%, 0) scale(1);
+  50% {
+    transform: translate3d(-18%, -12%, 0) scale(0.94);
   }
-}
-
-@keyframes player-haze-drift-c {
-  from {
-    transform: translate3d(2%, 4%, 0) scale(0.95);
-  }
-  to {
-    transform: translate3d(-6%, -6%, 0) scale(1.2);
+  100% {
+    transform: translate3d(-4%, -22%, 0) scale(1.1);
   }
 }
 
@@ -5734,11 +5738,14 @@ button.danger {
   gap: clamp(9px, 2.1cqh, 24px);
   /* 最多铺到一半高度：再长就裁掉，进度条与传输行不能被歌词顶出画面。 */
   max-height: 42cqh;
+  /* 最短也占住这块：控制条始终在"歌词底下"（约画面中部），不会因为没歌词
+     就贴到标题下面、把下半屏全空着（用户 2026-11-13：「控制条是在歌词底下的」）。 */
+  min-height: 30cqh;
   margin: clamp(4px, 1cqh, 12px) 0 clamp(10px, 2.8cqh, 30px);
 }
 
 .player-lyrics[data-variant="disc"] .player-lyric-main {
-  font-size: clamp(12px, 2.5cqh, 26px);
+  font-size: clamp(12px, 3.4cqh, 27px);
   line-height: 1.32;
   color: var(--player-ink, #232840);
   opacity: 0.42;
@@ -5760,8 +5767,10 @@ button.danger {
 }
 
 .player-lyrics[data-variant="disc"] .player-lyric.is-active .player-lyric-main {
-  font-size: clamp(15px, 3.6cqh, 38px);
+  font-size: clamp(16px, 4.9cqh, 40px);
   font-weight: 700;
+  /* 参考图的当前句是**紫色**（强调色），不是深墨色——浅底上这样才跳得出来。 */
+  color: var(--player-accent, #5b46c9);
   opacity: 1;
 }
 
@@ -5790,26 +5799,6 @@ button.danger {
   padding-bottom: 4cqh;
 }
 
-/* 没有封面：卡片不再被"封面 → 音量"的距离撑开，改成紧凑居中一列。 */
-.player-card[data-empty="true"] {
-  justify-content: center;
-  gap: clamp(8px, 2cqh, 20px);
-  padding-bottom: 0;
-  min-width: 0;
-  height: 100%;
-}
-
-/* 既没有封面也没有歌词：舞台只剩一块晕染，控件列居中成"无封面播放器"，
-   而不是贴着左边缘缩成一小团。 */
-.player-music[data-plain="true"] .player-layout[data-variant="haze"] {
-  grid-template-columns: minmax(0, 1fr);
-  justify-items: center;
-}
-
-.player-music[data-plain="true"] .player-card {
-  width: min(100%, 460px);
-}
-
 .player-art {
   width: 100%;
   max-width: 44cqh;
@@ -5819,15 +5808,41 @@ button.danger {
   box-shadow: 0 16px 38px rgba(0, 0, 0, 0.42);
 }
 
-.player-art[data-empty="true"] {
-  display: none;
-}
-
 .player-cover {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/*
+ * 缺封面时的**占位封面**（D167，用户 2026-11-13）：
+ * 「不是省略封面，而是用音乐名渲染封面进行占位，禁止因为缺失封面而改变样式的布局」。
+ * 因此它占的是同一块画布（同尺寸、同圆角），只是把图片换成「两个主色 + 曲名」。
+ */
+.player-cover.is-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9%;
+  text-align: center;
+  background:
+    radial-gradient(circle at 26% 18%, var(--player-haze-a, #7b5cff), transparent 64%),
+    linear-gradient(152deg, var(--player-haze-b, #ff6f9c) 0%, #221636 92%);
+}
+
+.player-cover-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  font-size: clamp(13px, 5.6cqh, 28px);
+  font-weight: 600;
+  line-height: 1.32;
+  letter-spacing: 0.01em;
+  color: #fff;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  word-break: break-word;
 }
 
 .player-card-head {
@@ -5893,6 +5908,12 @@ button.danger {
   --player-seek-thumb: var(--player-ink, #232840);
 }
 
+/* 没有歌词时，控制条不该贴着标题：留一段与"歌词区"等价的空白，
+   让进度/传输仍落在画面中部（用户 2026-11-13：「控制条是在歌词底下的」）。 */
+.player-info[data-has-lyrics="false"] .player-seek {
+  margin-top: min(16cqh, 110px);
+}
+
 .player-info {
   position: relative;
   z-index: 2;
@@ -5918,6 +5939,9 @@ button.danger {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* 曲名先按内容占位：艺人名很长时该被截的是**艺人**，不是把曲名挤成"洛…"。 */
+  flex: 0 0 auto;
+  max-width: 62%;
 }
 
 .player-info-dash {
@@ -5930,17 +5954,18 @@ button.danger {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1 1 auto;
 }
 
 /* 大唱片：右上角、被面板边缘裁掉一部分（参考图就是这么裁的）。 */
 .player-vinyl {
   position: absolute;
-  /* 参考图的大唱片：直径 ≈ 面板高的 60%，圆心在 (58% 宽, 20% 高)，被上/右
-     两条边裁掉一部分。用 `right: 21%` 让右缘落在 79% 宽处，`top: -10%` 让圆心
-     升到 20% 高——两个百分比都跟着面板走，换尺寸时构图不变。 */
-  top: -10%;
-  right: 21%;
-  width: 60cqh;
+  /* 用户 2026-11-13：「唱片是中心点偏移、部分固定在右上角的」「唱片占比大」。
+     按参考图量：盘体直径 ≈ 面板高的 90%，圆心落在 (≈77% 宽, ≈28% 高)，上/右两边
+     各被裁掉一截。宽用 cqh 钉直径（面板变高时盘跟着变大），位置用百分比跟面板走。 */
+  top: -32%;
+  right: -18%;
+  width: min(120cqh, 78cqw);
   aspect-ratio: 1;
   z-index: 1;
   pointer-events: none;
@@ -5966,13 +5991,15 @@ button.danger {
 /* 唱片本体：**按封面上色**（主色提亮两档），不是黑胶的黑色。 */
 .player-disc {
   position: absolute;
-  inset: 18%;
+  /* 盘体占 `player-vinyl` 的 72%（剩下的边由两道细环吃掉）。 */
+  inset: 14%;
   border-radius: 50%;
   background:
+    /* 极淡的纹路：参考图的唱片是"一整块淡紫"，纹路只是让它不像纯色圆片。 */
     repeating-radial-gradient(
       circle at 50% 50%,
-      rgba(255, 255, 255, 0.26) 0 1px,
-      rgba(255, 255, 255, 0) 1px 5px
+      rgba(255, 255, 255, 0.07) 0 1px,
+      rgba(255, 255, 255, 0) 1px 14px
     ),
     radial-gradient(
       circle at 38% 30%,
@@ -5993,12 +6020,40 @@ button.danger {
 
 .player-disc-cover {
   position: absolute;
-  inset: 25%;
-  width: 50%;
-  height: 50%;
+  /* 圆心图占盘体的 52%（参考图的封面圆差不多是盘的一半多一点）。 */
+  inset: 24%;
+  width: 52%;
+  height: 52%;
   border-radius: 50%;
   object-fit: cover;
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55);
+}
+
+/* 唱片圆心缺封面：**不写字**，直接变成唱片自己的盘心（用户 2026-11-13：
+   「无封面时封面部分就改为唱片的正常部分」）。这块仍是同一个圆、同占位，
+   所以布局不受影响；只是它不再假装"这里本该有一张图"。 */
+.player-disc-cover.is-placeholder {
+  display: block;
+  padding: 0;
+  background:
+    radial-gradient(
+      circle at 36% 30%,
+      rgba(255, 255, 255, 0.62) 0%,
+      rgba(255, 255, 255, 0.26) 58%,
+      rgba(255, 255, 255, 0.12) 100%
+    );
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    0 0 22px rgba(255, 255, 255, 0.18);
+}
+
+/* 极小的轴孔：盘心正中那个点，让"没有封面"读成"唱片"，不是"破了个洞"。 */
+.player-disc-cover.is-placeholder::after {
+  content: "";
+  position: absolute;
+  inset: 46%;
+  border-radius: 50%;
+  background: rgba(60, 52, 96, 0.35);
 }
 
 @keyframes player-disc-spin {
@@ -6051,8 +6106,8 @@ button.danger {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .player-haze,
   .player-haze-blob,
-  .player-haze-art,
   .player-disc {
     animation: none;
   }

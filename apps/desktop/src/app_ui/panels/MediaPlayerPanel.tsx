@@ -120,6 +120,15 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   const wasVisibleRef = useRef(Boolean(panelApi.isVisible && panelApi.isActive));
   /** 播放命令进行中：抑制重复触发。 */
   const busyRef = useRef(false);
+  /**
+   * 下一次 src 就绪时是否**出声**。
+   *
+   * 分两种来由：双击 / 点画面 = 要播放（true）；只是选中了文件 = 只预载（false）。
+   * 不区分的话，选中文件就会自动响——D142 的「首次播放必须由用户手势」当场作废。
+   */
+  const autoPlayRef = useRef(false);
+  /** 当前 `<video>` 里装的是哪个文件（预载与播放请求据此去重）。 */
+  const loadedFileIdRef = useRef<string | null>(null);
   /** 最新 app 上下文（供只订阅一次的 effect 读取，避免闭包过期）。 */
   const appRef = useRef(app);
   appRef.current = app;
@@ -163,6 +172,9 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     busyRef.current = true;
     try {
       const path = await api.filePath({ repoId: ctx.repoId, fileId });
+      // 这条路径一定出声（双击视频 / 无源时单击画面 / 点传输键）。
+      autoPlayRef.current = true;
+      loadedFileIdRef.current = fileId;
       setVideoUrl(convertFileSrc(path));
       setPositionMs(0);
       setScrubMs(null);
@@ -291,18 +303,56 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   // src 变化（或新的播放请求）→ 自动播放：重置到开头再播。
   // 同文件重复请求时 src 不变，靠 `playToken` 触发；`load()` 强制重新加载。
   useEffect(() => {
-    if (!videoUrl || playToken === 0) {
+    if (!videoUrl || !autoPlayRef.current) {
       return;
     }
     const video = videoRef.current;
     if (!video) {
       return;
     }
+    autoPlayRef.current = false;
     video.pause();
     video.currentTime = 0;
     video.load();
     void video.play().catch(() => undefined);
   }, [videoUrl, playToken]);
+
+  /**
+   * 选中变化 → **只预载元数据，不出声**（用户 2026-11-13 真机反馈：双击音频进播放器时
+   * 上面是一大块黑的，因为 `<video>` 根本没建，进度条也是 `--:--`）。
+   *
+   * 预载只做两件事：拿到 `duration`（进度条两端立刻是 `0:00 / -3:39`，可拖动）、
+   * 让画面区有真正的源。**不调用 `play()`**——出声仍要一个用户手势（D142）。
+   */
+  useEffect(() => {
+    const file = app.selectedFile;
+    if (!app.repoId || !file) {
+      return;
+    }
+    if (loadedFileIdRef.current === file.id) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const path = await api.filePath({ repoId: app.repoId!, fileId: file.id });
+        if (cancelled) {
+          return;
+        }
+        autoPlayRef.current = false;
+        loadedFileIdRef.current = file.id;
+        setVideoUrl(convertFileSrc(path));
+        setPositionMs(0);
+        setScrubMs(null);
+        setDurationMs(0);
+      } catch {
+        /* 预载失败不打扰用户：真要点播放时 `loadAndPlay` 会报错。 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [app.repoId, app.selectedFile]);
 
   // 面板可见性 → 切标签自动暂停。隐藏用 DOM 元素的 `pause()`（视频在后台标签
   // 保持加载与进度，切回即暂停帧，单击继续）。
@@ -484,11 +534,17 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
         被「全部设置」等浮层自然覆盖、点击由浏览器原生派发。
         按用户裁决：**不显示**「单击暂停/播放」等提示文字，也不设悬停提示。
       */}
-      <div className="player-stage" onClick={() => void handleStageClick()}>
+      <div
+        className="player-stage"
+        data-stage={isAudio ? "audio" : "video"}
+        onClick={() => void handleStageClick()}
+      >
         {videoUrl ? (
           <video
             ref={videoRef}
-            className="player-video"
+            /* 音频模式下 `<video>` 只负责出声：1px 透明、绝对定位、不接收指针事件，
+               画面区留给波形图（用户口径：波形占原本视频视图的位置，不是压在下面）。 */
+            className={isAudio ? "player-video is-audio" : "player-video"}
             src={videoUrl}
             preload="metadata"
             playsInline
@@ -501,21 +557,21 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
         ) : (
           <div className="player-surface" />
         )}
-      </div>
 
-      {/* 音频波形（D115）：进度条上方一条整段起伏，游标随播放位置走，点 / 拖即定位。
-          视频不画——见文件头（波形的横轴必须与时间线性对应才有意义）。 */}
-      {isAudio && videoUrl && app.selectedFile && (
-        <AudioWaveform
-          repoId={app.repoId ?? ""}
-          fileId={app.selectedFile.id}
-          durationMs={durationMs > 0 ? durationMs : null}
-          positionMs={displayPosition}
-          onSeek={(seconds) => commitSeek(seconds * 1000)}
-          className="player-wave"
-          t={app.t}
-        />
-      )}
+        {/* 音频波形（D115）：占满画面区，游标随播放位置走，点 / 拖即定位。
+            视频不画——见文件头（波形的横轴必须与时间线性对应才有意义）。 */}
+        {isAudio && videoUrl && app.selectedFile && (
+          <AudioWaveform
+            repoId={app.repoId ?? ""}
+            fileId={app.selectedFile.id}
+            durationMs={durationMs > 0 ? durationMs : null}
+            positionMs={displayPosition}
+            onSeek={(seconds) => commitSeek(seconds * 1000)}
+            className="player-wave"
+            t={app.t}
+          />
+        )}
+      </div>
 
       {/* 进度条：画面下方，拖动定位，实时同步播放进度 */}
       <div className="player-progress">

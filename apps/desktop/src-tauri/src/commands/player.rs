@@ -50,6 +50,12 @@ const HAZE_COLOR_COUNT: usize = 5;
 /// 取主色的解码超时（与缩略图同档；封面已经缩到 640，实际都是几十毫秒）。
 const HAZE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// 读音频标签（title / artist）的超时。
+///
+/// ffprobe 只读容器的 `format_tags`，不扫流，实测几毫秒；5 s 是"外置盘休眠被唤醒"
+/// 的上限。超时 = 没有标签，回落到文件名切分（见 [`hp_media::read_audio_tags`]）。
+const TAGS_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// `player.media` 返回体。
 #[derive(Serialize)]
 pub(crate) struct PlayerMediaResult {
@@ -63,6 +69,14 @@ pub(crate) struct PlayerMediaResult {
     /// 被 taint（`getImageData` 抛安全错误），因此前端**不可能**自己取色。
     /// 空数组 = 没有封面（或取色失败），前端用 CSS 兜底晕染。
     haze_colors: Vec<String>,
+    /// 容器标签里的**曲名**（`TITLE`）；没有标签则 `null`。
+    ///
+    /// 为什么不从文件名切：下载源的命名并不统一（`曲名 - 艺人` 与 `艺人 - 曲名`
+    /// 都常见），同一条切分规则必然把某一类读反。标签是文件自己声明的，没有歧义；
+    /// 前端只在 `null` 时回落到文件名（D167）。
+    title: Option<String>,
+    /// 容器标签里的**艺术家**（`ARTIST`，缺失时 `album_artist`）；没有则 `null`。
+    artist: Option<String>,
 }
 
 impl PlayerMediaResult {
@@ -71,6 +85,8 @@ impl PlayerMediaResult {
             cover_path: None,
             lyrics_text: None,
             haze_colors: Vec::new(),
+            title: None,
+            artist: None,
         }
     }
 }
@@ -149,7 +165,7 @@ pub(crate) async fn player_media(
 
     let outcome = async {
         // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard（与 `thumb.get` 同款）。
-        let (src_path, media_type, content_hash, cache, ffmpeg) = {
+        let (src_path, media_type, content_hash, cache, ffmpeg, ffprobe) = {
             let guard = lock_repo(&state)?;
             let db = open_repo(&guard)?;
             let file = db
@@ -162,6 +178,7 @@ pub(crate) async fn player_media(
                 file.content_hash,
                 (*state.thumb_cache).clone(),
                 (*state.ffmpeg_bin).clone(),
+                (*state.ffprobe_bin).clone(),
             )
         };
 
@@ -173,6 +190,7 @@ pub(crate) async fn player_media(
         let hash_for_task = content_hash.clone();
         let cache_for_task = cache.clone();
         let src_for_task = src_path.clone();
+        let ffprobe_for_task = ffprobe.clone();
         tauri::async_runtime::spawn_blocking(move || {
             let cover = resolve_cover(
                 &src_for_task,
@@ -181,6 +199,11 @@ pub(crate) async fn player_media(
                 ffmpeg.as_deref(),
             );
             let lyrics = read_lyrics(&src_for_task);
+            // 标签读不出来 = 没有标签（前端回落文件名），不是错误。
+            let tags = ffprobe_for_task
+                .as_deref()
+                .and_then(|bin| hp_media::read_audio_tags(&src_for_task, bin, TAGS_TIMEOUT).ok())
+                .unwrap_or_default();
             // 取色失败 = 没有兜底色（前端用 CSS 默认晕染），不向上抛：
             // 色晕是观感，不该让"封面取不到色"变成切歌失败。
             let haze = cover
@@ -200,6 +223,8 @@ pub(crate) async fn player_media(
                 cover_path: cover.map(|p| p.to_string_lossy().to_string()),
                 lyrics_text: lyrics,
                 haze_colors: haze,
+                title: tags.title,
+                artist: tags.artist,
             })
         })
         .await

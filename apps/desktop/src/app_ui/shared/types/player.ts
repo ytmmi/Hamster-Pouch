@@ -33,4 +33,13 @@ export interface PlayerMediaResult {
    * （`hp_media::extract_palette`，与色彩参考面板同一份算法）。
    */
   haze_colors: string[];
+  /**
+   * 容器标签里的**曲名**（`TITLE`）；文件没打标签则 `null`。
+   *
+   * 有标签就用标签，没有才回落到文件名切分——下载源命名不统一（`曲名 - 艺人`
+   * 与 `艺人 - 曲名` 都常见），切分规则必然读反某一类（D167）。
+   */
+  title: string | null;
+  /** 容器标签里的**艺术家**（`ARTIST`，缺失时取 `album_artist`）；没有则 `null`。 */
+  artist: string | null;
 }

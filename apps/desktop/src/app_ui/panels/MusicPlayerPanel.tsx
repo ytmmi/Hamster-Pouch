@@ -75,7 +75,13 @@ const MUSIC_VOLUME_SETTING_KEY = "panel.music.volume";
 const MUSIC_VOLUME_DEFAULT = 100;
 
 /** 取料（封面 / 歌词 / 色晕）的空值：没有音频、取料失败都回落它。 */
-const EMPTY_MEDIA: PanelMedia = { coverUrl: null, lyrics: null, hazeColors: [] };
+const EMPTY_MEDIA: PanelMedia = {
+  coverUrl: null,
+  lyrics: null,
+  hazeColors: [],
+  tagTitle: null,
+  tagArtist: null,
+};
 
 interface PanelMedia {
   /** 封面 URL（`convertFileSrc` 过的本地路径）；`null` = 没有封面。 */
@@ -84,6 +90,10 @@ interface PanelMedia {
   lyrics: LrcDoc | null;
   /** 封面色（空数组 = 用兜底色晕）。 */
   hazeColors: string[];
+  /** 标签里的曲名；`null` = 没标签（回落到文件名切分）。 */
+  tagTitle: string | null;
+  /** 标签里的艺术家；`null` = 没标签。 */
+  tagArtist: string | null;
 }
 
 /**
@@ -336,6 +346,8 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
           coverUrl: result.cover_path ? convertFileSrc(result.cover_path) : null,
           lyrics: result.lyrics_text ? parseLrc(result.lyrics_text) : null,
           hazeColors: result.haze_colors ?? [],
+          tagTitle: result.title ?? null,
+          tagArtist: result.artist ?? null,
         });
       } catch {
         // 取料失败不该挡住播放：没有封面/歌词，面板照常出声。
@@ -478,8 +490,10 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
     stepTrack(event.key === "ArrowLeft" ? -1 : 1);
   };
 
-  const title = trackTitleOf(selectedFile?.relative_path);
-  const artist = trackArtistOf(selectedFile?.relative_path);
+  // 曲名 / 艺术家：**标签优先，文件名兜底**（D167）。
+  // 标签是文件自己声明的，没有"哪一侧是艺人"的歧义；文件名只在没标签时用。
+  const title = media.tagTitle ?? trackTitleOf(selectedFile?.relative_path);
+  const artist = media.tagArtist ?? trackArtistOf(selectedFile?.relative_path);
 
   return (
     <div
