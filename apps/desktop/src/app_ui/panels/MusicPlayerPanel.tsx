@@ -193,8 +193,14 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
     }
   }, []);
 
-  /** 加载并播放指定文件（蓝图双击请求与"无源时点播放"共用）。 */
-  const loadAndPlay = useCallback(async (fileId: string) => {
+  /**
+   * 加载指定文件；`autoplay` 为假时**只换源、不出声**。
+   *
+   * 为什么要这个开关（用户 2026-11-13）：「控制图标是暂停时，切换下一首，禁止
+   * 自动播放，图标是播放时才可以自动播放」。切歌是"用户的意图延续"——暂停态下
+   * 点下一首，期望的是"翻到下一首停在开头"，不是"突然开始放"。
+   */
+  const loadAndPlay = useCallback(async (fileId: string, autoplay = true) => {
     const ctx = appRef.current;
     if (!ctx.repoId) {
       return;
@@ -206,7 +212,7 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
     loadedFileIdRef.current = fileId;
     try {
       const path = await api.filePath({ repoId: ctx.repoId, fileId });
-      autoPlayRef.current = true;
+      autoPlayRef.current = autoplay;
       setPositionMs(0);
       setDurationMs(0);
       // 切歌先落"暂停"这一态：图标由元素事件驱动，但换源到真正出声之间有一段
@@ -214,15 +220,19 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
       setPlaying(false);
       const nextUrl = convertFileSrc(path);
       if (nextUrl === sourceUrlRef.current && audioRef.current) {
-        // 同一首再播：源没换，直接回到开头出声（换源那次交给 `onLoadedMetadata`）。
+        // 同一首再播：源没换，直接回到开头（换源那次交给 `onLoadedMetadata`）。
         autoPlayRef.current = false;
         audioRef.current.currentTime = 0;
-        void audioRef.current.play().catch(() => undefined);
-        ctx.status(ctx.t("music.playing"), "ok");
+        if (autoplay) {
+          void audioRef.current.play().catch(() => undefined);
+          ctx.status(ctx.t("music.playing"), "ok");
+        }
         return;
       }
       setSourceUrl(nextUrl);
-      ctx.status(ctx.t("music.playing"), "ok");
+      if (autoplay) {
+        ctx.status(ctx.t("music.playing"), "ok");
+      }
     } catch (e) {
       // 路径没拿到：把认领退回去，选中变化时那条预载 effect 还能再试一次。
       loadedFileIdRef.current = null;
@@ -275,9 +285,10 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
         ctx.setSelectedIds(new Set([target.id]));
         ctx.setSelectedFile(target);
       }
-      void loadAndPlay(target.id);
+      // 是否出声跟随**切换那一刻**的播放状态：暂停态切歌只换曲目、不自动播放。
+      void loadAndPlay(target.id, playing);
     },
-    [loadAndPlay, queue.files, queue.index, shuffle, repeat],
+    [loadAndPlay, playing, queue.files, queue.index, shuffle, repeat],
   );
 
   /**

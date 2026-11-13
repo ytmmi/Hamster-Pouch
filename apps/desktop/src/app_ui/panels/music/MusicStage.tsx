@@ -129,22 +129,22 @@ export function MusicStage(props: MusicStageProps) {
           <filter id={noiseId} x="-30%" y="-30%" width="160%" height="160%">
             <feTurbulence
               type="fractalNoise"
-              baseFrequency="0.006 0.010"
-              numOctaves={3}
+              baseFrequency="0.004 0.008"
+              numOctaves={4}
               seed={7}
               result="noise"
             >
               <animate
                 attributeName="baseFrequency"
-                dur="43s"
-                values="0.005 0.009;0.012 0.006;0.007 0.011;0.005 0.009"
+                dur="37s"
+                values="0.003 0.007;0.010 0.004;0.006 0.011;0.003 0.007"
                 repeatCount="indefinite"
               />
             </feTurbulence>
             <feDisplacementMap
               in="SourceGraphic"
               in2="noise"
-              scale={72}
+              scale={140}
               xChannelSelector="R"
               yChannelSelector="G"
             />
@@ -154,6 +154,7 @@ export function MusicStage(props: MusicStageProps) {
       <div className="player-haze" aria-hidden="true">
         <span className="player-haze-blob player-haze-blob-a" />
         <span className="player-haze-blob player-haze-blob-b" />
+        <span className="player-haze-blob player-haze-blob-c" />
       </div>
 
       {style === "haze" ? (
@@ -334,62 +335,105 @@ function SeekBar({
   );
 }
 
-/** 传输控件：两种样式的位置与形状不同（见文件头）。 */
+/**
+ * 传输控件：两种样式的**位置与形状不同**（见文件头）。
+ *
+ * - 样式 1（haze）：五枚无底 glyph 平铺在封面下面，等距铺满左列。
+ * - 样式 2（disc）：分成三段——左右两端各贴住进度条的两端（随机/循环在左，收藏在右），
+ *   上一首/播放/下一首居中。用户 2026-11-13：「随机播放、上一首、下一首、收藏等图标
+ *   要和进度条两端对齐」——所以两端是 `1fr`、中间是 `auto`，图标才会被推到列的两边，
+ *   而不是跟着整排居中。
+ */
 function Transport(props: MusicStageProps) {
   const { style, playing, t } = props;
+
+  const shuffle = (
+    <button
+      type="button"
+      className="player-transport-btn"
+      data-role="shuffle"
+      data-on={props.shuffle ? "true" : "false"}
+      onClick={props.onToggleShuffle}
+      aria-label={t("music.shuffle")}
+      aria-pressed={props.shuffle}
+    >
+      <ShuffleIcon />
+    </button>
+  );
+  const repeat = (
+    <button
+      type="button"
+      className="player-transport-btn"
+      data-role="repeat"
+      data-mode={props.repeat}
+      onClick={props.onToggleRepeat}
+      aria-label={t(repeatLabelKey(props.repeat))}
+    >
+      {props.repeat === "one" ? <RepeatOneIcon /> : <RepeatIcon />}
+    </button>
+  );
+  const prev = (
+    <button
+      type="button"
+      className="player-transport-btn"
+      data-role="prev"
+      onClick={props.onPrev}
+      disabled={!props.canPrev}
+      aria-label={t("music.prevTrack")}
+    >
+      <PrevIcon />
+    </button>
+  );
+  const play = (
+    <button
+      type="button"
+      className="player-transport-btn player-transport-play"
+      data-role="play"
+      onClick={props.onToggle}
+      aria-label={t(playing ? "music.pause" : "music.play")}
+    >
+      {playing ? <PauseIcon /> : <PlayIcon />}
+    </button>
+  );
+  const next = (
+    <button
+      type="button"
+      className="player-transport-btn"
+      data-role="next"
+      onClick={props.onNext}
+      disabled={!props.canNext}
+      aria-label={t("music.nextTrack")}
+    >
+      <NextIcon />
+    </button>
+  );
+
+  if (style === "disc") {
+    return (
+      <div className="player-transport" data-variant="disc">
+        <div className="player-transport-side">
+          {shuffle}
+          {repeat}
+        </div>
+        <div className="player-transport-main">
+          {prev}
+          {play}
+          {next}
+        </div>
+        <div className="player-transport-side player-transport-side-end">
+          <FavoriteIcon shape="heart" t={t} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="player-transport" data-variant={style}>
-      <button
-        type="button"
-        className="player-transport-btn"
-        data-role="shuffle"
-        data-on={props.shuffle ? "true" : "false"}
-        onClick={props.onToggleShuffle}
-        aria-label={t("music.shuffle")}
-        aria-pressed={props.shuffle}
-      >
-        <ShuffleIcon />
-      </button>
-      <button
-        type="button"
-        className="player-transport-btn"
-        data-role="prev"
-        onClick={props.onPrev}
-        disabled={!props.canPrev}
-        aria-label={t("music.prevTrack")}
-      >
-        <PrevIcon />
-      </button>
-      <button
-        type="button"
-        className="player-transport-btn player-transport-play"
-        data-role="play"
-        onClick={props.onToggle}
-        aria-label={t(playing ? "music.pause" : "music.play")}
-      >
-        {playing ? <PauseIcon /> : <PlayIcon />}
-      </button>
-      <button
-        type="button"
-        className="player-transport-btn"
-        data-role="next"
-        onClick={props.onNext}
-        disabled={!props.canNext}
-        aria-label={t("music.nextTrack")}
-      >
-        <NextIcon />
-      </button>
-      <button
-        type="button"
-        className="player-transport-btn"
-        data-role="repeat"
-        data-mode={props.repeat}
-        onClick={props.onToggleRepeat}
-        aria-label={t(repeatLabelKey(props.repeat))}
-      >
-        {props.repeat === "one" ? <RepeatOneIcon /> : <RepeatIcon />}
-      </button>
-      {style === "disc" ? <FavoriteIcon shape="heart" t={t} /> : null}
+      {shuffle}
+      {prev}
+      {play}
+      {next}
+      {repeat}
     </div>
   );
 }

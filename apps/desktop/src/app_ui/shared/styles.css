@@ -5354,17 +5354,17 @@ button.danger {
    * 用户说的"像放大的、随时间变换的噪波"。滤镜 id 由组件用 `useId` 生成，
    * 通过 `--player-haze-noise` 传进来；没有该变量时退回纯模糊（退化路径）。
    */
-  filter: var(--player-haze-noise, none) blur(clamp(24px, 8cqh, 70px));
-  opacity: 0.72;
+  filter: var(--player-haze-noise, none) blur(clamp(16px, 5.4cqh, 46px));
+  opacity: 0.66;
   mix-blend-mode: screen;
   will-change: transform, border-radius;
 }
 
 .player-haze-blob-a {
-  width: 66%;
-  height: 84%;
-  left: -14%;
-  top: -22%;
+  width: 72%;
+  height: 92%;
+  left: -18%;
+  top: -26%;
   background: var(--player-haze-a, #b9a4ff);
   /* 位移与形状两套周期互质（47s / 71s）：叠起来不会出现"整块一起呼吸"的机械感。 */
   animation:
@@ -5373,14 +5373,28 @@ button.danger {
 }
 
 .player-haze-blob-b {
-  width: 62%;
-  height: 80%;
-  right: -16%;
-  bottom: -24%;
+  width: 68%;
+  height: 86%;
+  right: -20%;
+  bottom: -28%;
   background: var(--player-haze-b, #ffb3cd);
   animation:
     player-haze-drift-b 61s ease-in-out infinite alternate,
     player-haze-morph-b 83s ease-in-out infinite;
+}
+
+/* 第三团：压在中间偏下，负责"补缝"——只有两团时中间是一道直边，看起来就是
+   "两个圆贴在一起"（用户 2026-11-13 的原话）。三团互咬 + 大尺度噪波位移之后，
+   边界不再是几何圆弧。 */
+.player-haze-blob-c {
+  width: 64%;
+  height: 70%;
+  left: 18%;
+  top: 26%;
+  background: var(--player-haze-c, #9fc6ff);
+  animation:
+    player-haze-drift-c 79s ease-in-out infinite alternate,
+    player-haze-morph-c 97s ease-in-out infinite;
 }
 
 @keyframes player-haze-tint {
@@ -5447,6 +5461,33 @@ button.danger {
   }
   100% {
     transform: translate3d(-4%, -22%, 0) scale(1.1);
+  }
+}
+
+@keyframes player-haze-drift-c {
+  0% {
+    transform: translate3d(-6%, 8%, 0) scale(0.9) rotate(-6deg);
+  }
+  50% {
+    transform: translate3d(14%, -10%, 0) scale(1.22) rotate(9deg);
+  }
+  100% {
+    transform: translate3d(-12%, -4%, 0) scale(1.04) rotate(-3deg);
+  }
+}
+
+@keyframes player-haze-morph-c {
+  0% {
+    border-radius: 52% 48% 41% 59% / 47% 57% 43% 53%;
+  }
+  33% {
+    border-radius: 37% 63% 66% 34% / 58% 36% 64% 42%;
+  }
+  66% {
+    border-radius: 64% 36% 38% 62% / 41% 63% 37% 59%;
+  }
+  100% {
+    border-radius: 52% 48% 41% 59% / 47% 57% 43% 53%;
   }
 }
 
@@ -5648,10 +5689,39 @@ button.danger {
   height: clamp(24px, 4.4cqh, 34px);
 }
 
-/* 样式 2：上一首 / **大圆底播放** / 下一首，随机与循环缩到两端，末尾一枚红心。 */
+/* 样式 2：随机/循环贴左端、上一首、大圆底播放、下一首居中、红心贴右端。 */
 .player-transport[data-variant="disc"] {
-  gap: clamp(10px, 2.1cqh, 22px);
+  /*
+   * 三段网格：两端 `1fr`、中间 `auto`（用户 2026-11-13：「随机播放、上一首、
+   * 下一首、收藏等图标要和进度条两端对齐」）。用 `space-between` 做不到——它只
+   * 保证"首尾两枚"贴边，中间的循环键会把红心从右边界挤开；分组之后两端各自
+   * 贴在列的左右边界上，与进度条的两端严丝合缝。
+   */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  width: 100%;
+  gap: 0;
   color: var(--player-ink, #232840);
+}
+
+.player-transport-side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: clamp(6px, 1.4cqh, 16px);
+  min-width: 0;
+}
+
+.player-transport-side-end {
+  justify-content: flex-end;
+}
+
+.player-transport-main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(10px, 2.1cqh, 22px);
 }
 
 .player-transport[data-variant="disc"] .player-transport-btn {
@@ -5730,7 +5800,28 @@ button.danger {
 
 .player-lyric {
   min-width: 0;
-  transition: opacity 0.3s ease, filter 0.3s ease, transform 0.3s ease;
+  /*
+   * 歌词是**滚动的高亮**，不是"每隔几秒换一张幻灯片"（用户 2026-11-13：
+   * 「优化显示歌词的效果，不要硬切换」）。行本身跨行存活时不换 DOM，靠这些
+   * transition 平滑过渡：清晰度（filter）比透明度慢一点，视觉上像"对上焦"；
+   * 字号用 0.45s，避免一行突然胖起来把邻居挤开。
+   */
+  transition:
+    opacity 0.5s ease,
+    filter 0.55s ease,
+    transform 0.55s ease,
+    margin-left 0.7s ease,
+    font-size 0.45s ease,
+    color 0.45s ease;
+  /* 新进入窗口的行淡入并轻轻上浮，避免歌词窗口滑动时"啪"地出现一行。 */
+  animation: player-lyric-in 0.5s ease-out;
+}
+
+@keyframes player-lyric-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
 }
 
 /* 样式 1：当前行清晰放大，其余**高斯模糊**并按行距往右错开（`marginLeft` 由组件算）。 */
@@ -5745,6 +5836,7 @@ button.danger {
   font-size: clamp(12px, 2.8cqh, 28px);
   line-height: 1.3;
   color: #ffffff;
+  transition: font-size 0.45s ease, opacity 0.5s ease;
 }
 
 .player-lyrics[data-variant="haze"] .player-lyric-sub {
@@ -5788,12 +5880,21 @@ button.danger {
 
 /* 样式 2：不模糊、不错位，靠**颜色深浅**分层（参考图是淡紫灰 → 深藏青）。 */
 .player-lyrics[data-variant="disc"] {
-  justify-content: flex-start;
-  gap: clamp(9px, 2.1cqh, 24px);
-  /* 吃掉信息区的剩余高度：歌词长了就在这块里裁切，绝不把底栏顶出去。 */
+  /* 行簇在信息区里均匀铺开：只有五句可见时也能一路排到控制区上沿，
+     而不是"贴着标题挤在上半截、下面空一片"。 */
+  justify-content: space-evenly;
+  gap: clamp(7px, 1.7cqh, 20px);
+  /*
+   * **吃满信息区剩下的高度**，一直落到控制区上沿（用户 2026-11-13：
+   * 「歌词显示范围向下延伸，以进度条上方一点点为边界，当前歌词和进度条之间
+   * 空缺太多」）。所以这里不留 `margin-bottom`，另给底部一道渐隐遮罩：
+   * 歌词被裁掉时是"淡出"而不是"被刀切"。
+   */
   flex: 1 1 auto;
   min-height: 0;
   margin: clamp(4px, 1cqh, 12px) 0 0;
+  padding-bottom: 2px;
+  mask-image: linear-gradient(to bottom, #000 88%, transparent 100%);
 }
 
 .player-lyrics[data-variant="disc"] .player-lyric-main {
@@ -5801,6 +5902,7 @@ button.danger {
   line-height: 1.32;
   color: var(--player-ink, #232840);
   opacity: 0.42;
+  transition: font-size 0.45s ease, color 0.45s ease, opacity 0.5s ease;
 }
 
 .player-lyrics[data-variant="disc"] .player-lyric-sub {
@@ -5919,7 +6021,8 @@ button.danger {
   display: grid;
   grid-template-columns: minmax(0, 52%) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
-  row-gap: clamp(6px, 1.4cqh, 16px);
+  /* 歌词要一直落到控制区上沿：行间距只留"一点点空气"。 */
+  row-gap: clamp(2px, 0.6cqh, 8px);
   align-items: start;
   /* 标题压在顶部（≈9%），底部留出控制区的呼吸位。 */
   padding: 9cqh 4cqw 4cqh 7cqw;
@@ -5933,7 +6036,7 @@ button.danger {
   grid-row: 2;
   display: flex;
   flex-direction: column;
-  gap: clamp(6px, 1.5cqh, 16px);
+  gap: clamp(4px, 1.1cqh, 12px);
   min-width: 0;
 }
 
@@ -5966,9 +6069,28 @@ button.danger {
 }
 
 .player-music[data-style="disc"] .player-volume-row {
-  max-width: 55%;
+  /*
+   * 与进度条**等长**（用户 2026-11-13：「进度条和音量条的长度要一致，以进度条的
+   * 长度为准」）。音符图标因此不再占布局宽度，改为绝对定位挪到左列的**留白区**里
+   * （布局本身有 7cqw 左内距，图标放得下）——这样两根轨道都是从列的左边界起、
+   * 到右边界止，长度与两端都能对上。
+   */
+  position: relative;
+  width: 100%;
+  max-width: none;
   color: var(--player-ink, #232840);
   opacity: 0.5;
+}
+
+.player-music[data-style="disc"] .player-volume-icon {
+  position: absolute;
+  right: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.player-music[data-style="disc"] .player-volume-bar {
+  width: 100%;
 }
 
 .player-music[data-style="disc"] .player-volume-bar {
@@ -5982,11 +6104,16 @@ button.danger {
   z-index: 2;
   grid-column: 1;
   grid-row: 1;
+  /* 网格的 `align-items: start` 只对"不该被拉伸"的项有用：信息列必须撑满第 1 行，
+     否则歌词区只按内容高度收口，控制区上方就会空出一大块（用户 2026-11-13 D169：
+     「歌词显示范围向下延伸，以进度条上方一点点为边界」）。 */
+  align-self: stretch;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: clamp(6px, 1.6cqh, 18px);
+  /* 标题与歌词之间只留一点气口：多留一档，歌词区就少一档（用户要的是"贴到进度条"）。 */
+  gap: clamp(4px, 0.9cqh, 10px);
   overflow: hidden;
 }
 

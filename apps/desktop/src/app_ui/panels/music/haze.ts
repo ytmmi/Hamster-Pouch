@@ -26,12 +26,13 @@
 export const HAZE_FALLBACK_COLORS = ["#b9a4ff", "#ffb3cd", "#9fc6ff"] as const;
 
 /**
- * 色晕光斑层数（**两盏**）。
+ * 色晕光斑层数（**三盏**）。
  *
- * 用户 2026-11-13 口径：「在封面的颜色板上选 1-2 个颜色进行颜色晕的渲染」——
- * 因此光斑只用主色板的前两个颜色，不再铺第三盏，也不再垫封面的高斯模糊图。
+ * 用户 2026-11-13 追加：「颜色晕并没有选取封面中最大的 3 个色块」——后端现在按面积
+ * 给出三个互不近似的主导色（`hp_media::dominant_colors_from_image`），这里就画三团。
+ * 少于三个时循环取色，保证"层数恒定"，样式结构不随封面漂移。
  */
-export const HAZE_LAYER_COUNT = 2;
+export const HAZE_LAYER_COUNT = 3;
 
 /** `#rrggbb` / `#rgb`：后端只会回这一种形态，非法值当作没有（不把脏值塞进 style）。 */
 const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -43,10 +44,10 @@ const INK_BASE = "#151a2e";
 const ACCENT_BASE = "#6f6ff2";
 
 /**
- * 把后端主色裁成两盏光斑要用的颜色。
+ * 把后端主导色裁成三盏光斑要用的颜色。
  *
- * 只有一个合法色时**循环取色**（两盏同色，靠不同位置/尺寸仍能叠出层次）；
- * 一个合法色都没有 → 兜底两色。非法值逐个剔除，不整体放弃。
+ * 不足三个时**循环取色**（三盏同色，靠不同位置/尺寸/形变仍能叠出层次）；
+ * 一个合法色都没有 → 兜底三色。非法值逐个剔除，不整体放弃。
  */
 export function hazeColorsOf(colors: readonly string[]): string[] {
   const valid = colors.filter((c) => typeof c === "string" && HEX_COLOR.test(c));
@@ -66,9 +67,11 @@ export function vivid(hex: string): string {
   const rgb = toRgb(hex);
   if (!rgb) return HAZE_FALLBACK_COLORS[0];
   const [h, s, l] = rgbToHsl(rgb);
-  const safeHue = Math.max(...rgb) - Math.min(...rgb) < 24 ? hueOf(ACCENT_BASE) : h;
-  const saturation = Math.max(0.42, Math.min(1, s));
-  const lightness = Math.max(0.3, Math.min(0.58, l));
+  // 主导色已经过"彩色像素优先"的筛选，色相可信；只有真的近乎无彩时才借强调色相。
+  const safeHue = Math.max(...rgb) - Math.min(...rgb) < 18 ? hueOf(ACCENT_BASE) : h;
+  const saturation = Math.max(0.4, Math.min(1, s * 1.08));
+  // 亮度窗口收窄到 0.32–0.52：三团色叠在一起时，太亮的那团会把另两团盖掉。
+  const lightness = Math.max(0.32, Math.min(0.52, l));
   return toHex(hslToRgb(safeHue, saturation, lightness));
 }
 
@@ -115,15 +118,16 @@ function spreadHues(colors: readonly string[]): string[] {
  * 样式表里不出现任何具体色值（换封面不会让样式表失去意义）。
  */
 export function hazeVars(colors: readonly string[]): Record<string, string> {
-  const [a, b] = stagePalette(colors);
+  const [a, b, c] = stagePalette(colors);
   return {
     "--player-haze-a": a,
     "--player-haze-b": b,
+    "--player-haze-c": c,
   };
 }
 
 /**
- * 两盏光斑的最终色：**有封面就走 [`vivid`] + [`spreadHues`]，没有封面就用兜底色原样**。
+ * 三盏光斑的最终色：**有封面就走 [`vivid`] + [`spreadHues`]，没有封面就用兜底色原样**。
  *
  * 兜底色的用途是"没有封面时的氛围"，本来就该是亮的（用户口径「默认的颜色晕不要
  * 暗色」）；把它也过一遍 `vivid`（亮度上限 0.58）会得出两组发暗的紫，正好与
@@ -277,8 +281,8 @@ function pickAccent(colors: readonly string[]): string {
  * - `--player-disc-ring`：唱片外那两道细环。
  */
 export function stageVars(colors: readonly string[]): Record<string, string> {
-  const [a, b] = stagePalette(colors);
-  const accentBase = pickAccent([a, b]);
+  const [a, b, c] = stagePalette(colors);
+  const accentBase = pickAccent([a, b, c]);
   const accent = mixHex(accentBase, ACCENT_BASE, 0.45);
   return {
     ...hazeVars(colors),

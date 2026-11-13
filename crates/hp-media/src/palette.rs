@@ -122,6 +122,117 @@ pub fn extract_palette_from_image(img: &image::DynamicImage, max_colors: usize) 
     Palette { colors }
 }
 
+/// 音乐播放器色晕用的**主导色**：按面积取前 `count` 个色块，并且互不近似。
+///
+/// 与 [`extract_palette_from_image`] 的区别是**目的不同**，不是精度不同：
+/// - 调色板（色彩参考面板）要"这张图有哪些颜色"，所以按频率给出 8 个桶；
+/// - 色晕要"这块背景该是什么氛围"，所以只取**面积最大**的几个色块，并且必须
+///   互不相似（同一张图上三个 `#eeeeee` 级别的近白会合成一团灰，用户看到的就是
+///   "两团模糊的圆"而不是层次）。
+///
+/// 近无彩像素（饱和度 < 0.12）只在**彩色像素不足**时才参与：白底插画的主色常常是
+/// 白纸本身，直接选它会让整块背景失去封面氛围（这正是一开始"洗白"的原因）。
+pub fn dominant_colors_from_image(img: &image::DynamicImage, count: usize) -> Vec<String> {
+    const BUCKET_SHIFT: u8 = 3; // 5 位/通道：9216 个采样点里够细，又不会被噪声劈碎
+    const MIN_DISTANCE: f32 = 46.0; // 两个色块在 RGB 空间的最小距离
+    const MIN_SATURATION: f32 = 0.12;
+
+    let small = img.resize_exact(96, 96, image::imageops::FilterType::Triangle);
+    let rgb = small.to_rgb8();
+
+    let mut buckets: HashMap<u32, (u32, [f32; 3])> = HashMap::new();
+    for px in rgb.pixels() {
+        let r = px[0];
+        let g = px[1];
+        let b = px[2];
+        let key = ((r >> BUCKET_SHIFT) as u32) << 16
+            | ((g >> BUCKET_SHIFT) as u32) << 8
+            | (b >> BUCKET_SHIFT) as u32;
+        let entry = buckets.entry(key).or_insert((0, [0.0, 0.0, 0.0]));
+        entry.0 += 1;
+        entry.1[0] += f32::from(r);
+        entry.1[1] += f32::from(g);
+        entry.1[2] += f32::from(b);
+    }
+
+    struct Candidate {
+        weight: u32,
+        rgb: [f32; 3],
+        saturation: f32,
+    }
+
+    let candidates: Vec<Candidate> = buckets
+        .into_values()
+        .map(|(weight, sum)| {
+            let n = weight as f32;
+            let rgb = [sum[0] / n, sum[1] / n, sum[2] / n];
+            Candidate {
+                weight,
+                rgb,
+                saturation: saturation_of(rgb),
+            }
+        })
+        .collect();
+
+    let total: u32 = candidates.iter().map(|c| c.weight).sum();
+    let chromatic: u32 = candidates
+        .iter()
+        .filter(|c| c.saturation >= MIN_SATURATION)
+        .map(|c| c.weight)
+        .sum();
+    // 彩色像素占比够高就只从它们里选（避免白纸/黑边吃掉一个名额）。
+    let prefer_chromatic = total > 0 && chromatic * 5 >= total;
+
+    let mut ordered: Vec<&Candidate> = candidates
+        .iter()
+        .filter(|c| !prefer_chromatic || c.saturation >= MIN_SATURATION)
+        .collect();
+    // 面积优先；同面积时饱和度高的优先（同样的"块"，有颜色的那块更有信息量）。
+    ordered.sort_by(|a, b| {
+        b.weight
+            .cmp(&a.weight)
+            .then(b.saturation.total_cmp(&a.saturation))
+    });
+
+    let mut picked: Vec<[f32; 3]> = Vec::new();
+    for candidate in ordered {
+        if picked.len() >= count {
+            break;
+        }
+        let distinct = picked.iter().all(|existing| {
+            let dr = existing[0] - candidate.rgb[0];
+            let dg = existing[1] - candidate.rgb[1];
+            let db = existing[2] - candidate.rgb[2];
+            (dr * dr + dg * dg + db * db).sqrt() >= MIN_DISTANCE
+        });
+        if distinct {
+            picked.push(candidate.rgb);
+        }
+    }
+
+    picked.iter().map(|rgb| hex_of(*rgb)).collect()
+}
+
+/// HSV 里的饱和度（0–1）；色晕只关心"有没有颜色"，不看明度。
+fn saturation_of(rgb: [f32; 3]) -> f32 {
+    let max = rgb[0].max(rgb[1]).max(rgb[2]);
+    let min = rgb[0].min(rgb[1]).min(rgb[2]);
+    if max <= 0.0 {
+        return 0.0;
+    }
+    (max - min) / max
+}
+
+fn hex_of(rgb: [f32; 3]) -> String {
+    let channel = |value: f32| value.round().clamp(0.0, 255.0) as u8;
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        channel(rgb[0]),
+        channel(rgb[1]),
+        channel(rgb[2])
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,6 +296,45 @@ mod tests {
         assert!(!palette_is_locked("not json"));
         assert!(!palette_is_locked(r#"{"locked":"true"}"#));
         assert!(!palette_is_locked(""));
+    }
+
+    #[test]
+    fn dominant_colors_take_largest_blocks_and_skip_near_duplicates() {
+        // 三块面积递减的纯色 + 一块近白底：期望按面积给出三块**互不相同**的色。
+        let mut img = image::RgbImage::from_pixel(96, 96, image::Rgb([250, 250, 250]));
+        for y in 0..96 {
+            for x in 0..96 {
+                let color = if x < 48 && y < 60 {
+                    [200, 40, 40] // 面积 48×60 = 2880
+                } else if x >= 48 && y < 40 {
+                    [40, 160, 60] // 面积 48×40 = 1920
+                } else if y >= 60 && x < 30 {
+                    [40, 60, 200] // 面积 30×36 = 1080
+                } else {
+                    [250, 250, 250]
+                };
+                img.put_pixel(x, y, image::Rgb(color));
+            }
+        }
+        let colors = dominant_colors_from_image(&image::DynamicImage::ImageRgb8(img), 3);
+        assert_eq!(colors.len(), 3, "应取到三个主导色: {colors:?}");
+        assert!(
+            colors.iter().all(|c| c != "#fafafa"),
+            "近白底不该挤进主导色: {colors:?}"
+        );
+        for (i, a) in colors.iter().enumerate() {
+            for b in colors.iter().skip(i + 1) {
+                assert_ne!(a, b, "主导色必须互不相同: {colors:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn dominant_colors_respect_count() {
+        let img = image::RgbImage::from_pixel(32, 32, image::Rgb([10, 120, 200]));
+        let colors = dominant_colors_from_image(&image::DynamicImage::ImageRgb8(img), 3);
+        assert_eq!(colors.len(), 1, "纯色图只该有一个主导色: {colors:?}");
+        assert_eq!(colors[0], "#0a78c8");
     }
 
     fn nanos() -> String {

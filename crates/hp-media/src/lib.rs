@@ -34,8 +34,8 @@ pub use decode::{decode_image_fallback, ensure_libheif_hooks};
 pub use dimensions::{apply_orientation, display_dimensions, header_dimensions};
 pub use exif::{ImageExif, extract_exif, orientation_of};
 pub use palette::{
-    DEFAULT_PALETTE_SIZE, PALETTE_FORMAT_VERSION, Palette, encode_palette_json, extract_palette,
-    extract_palette_from_image, palette_is_locked,
+    DEFAULT_PALETTE_SIZE, PALETTE_FORMAT_VERSION, Palette, dominant_colors_from_image,
+    encode_palette_json, extract_palette, extract_palette_from_image, palette_is_locked,
 };
 pub use probe::{MediaProbe, probe};
 pub use process::hidden_command;

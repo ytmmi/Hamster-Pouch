@@ -41,14 +41,21 @@ const LYRICS_MAX_CHARS: usize = 200_000;
 /// 歌词最多读多少字节（字符上限之外的字节闸门，交给 `hp_book` 的截断口径）。
 const LYRICS_MAX_BYTES: usize = 4 * 1024 * 1024;
 
-/// 封面取几个主色给前端的"晕染"用。
+/// 封面取几个主导色给前端的"晕染"用。
 ///
-/// 取 5 的理由：样式 1 / 样式 2 的晕染层各画 3–5 团，三到五个色已经能表达
-/// "这张封面是什么色调"，再多只会让色团互相糊成一团。
-const HAZE_COLOR_COUNT: usize = 5;
+/// **取 3**（用户 2026-11-13：「颜色晕并没有选取封面中最大的 3 个色块」）：
+/// 色晕只画三团光斑，取更多颜色既画不出来，也会让相邻色团糊成一团。
+/// 选色算法是 `hp_media::dominant_colors_from_image` —— 按**面积**排序、跳过近似的
+/// 重复色块、并且在彩色像素足够时排除近白/近黑，所以拿到的是"封面里最大的三块颜色"，
+/// 不是"频率最高的三个 RGB 桶"（那张白底插画原先会给出三个 `#eeeeee` 级别的近白）。
+const HAZE_COLOR_COUNT: usize = 3;
 
 /// 取主色的解码超时（与缩略图同档；封面已经缩到 640，实际都是几十毫秒）。
 const HAZE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 取主色时的有界解码尺寸：色晕只要"这块图是什么色调"，64/96 像素都够，
+/// 但重采样本身在大图上不便宜（`docs/issues/0018`），所以先有界解码。
+const HAZE_DECODE_BOUND: u32 = 256;
 
 /// 读音频标签（title / artist）的超时。
 ///
@@ -221,15 +228,15 @@ pub(crate) async fn player_media(
             let haze = cover
                 .as_deref()
                 .and_then(|path| {
-                    hp_media::extract_palette(
+                    hp_media::decode_image_fallback(
                         path,
-                        HAZE_COLOR_COUNT,
                         ffmpeg.as_deref(),
+                        HAZE_DECODE_BOUND,
                         HAZE_TIMEOUT,
                     )
                     .ok()
                 })
-                .map(|palette| palette.colors)
+                .map(|img| hp_media::dominant_colors_from_image(&img, HAZE_COLOR_COUNT))
                 .unwrap_or_default();
             Ok::<PlayerMediaResult, HpError>(PlayerMediaResult {
                 cover_path: cover.map(|p| p.to_string_lossy().to_string()),

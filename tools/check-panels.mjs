@@ -7323,18 +7323,20 @@ check(
     trackInfoMod.trackTitleOf("/m/A - B - C.mp3") === "B - C",
 );
 check(
-  "D167：色晕只用封面主色板里的**一到两个**颜色（不足循环、非法值剔除、无封面走兜底）",
-  // 用户 2026-11-13：「在封面的颜色板上选 1-2 个颜色进行颜色晕的渲染」——
-  // 因此光斑固定两盏，第三个主色不再参与渲染。
-  hazeMod.HAZE_LAYER_COUNT === 2 &&
-    eqList(hazeMod.hazeColorsOf([]), [...hazeMod.HAZE_FALLBACK_COLORS].slice(0, 2)) &&
-    eqList(hazeMod.hazeColorsOf(["#112233"]), ["#112233", "#112233"]) &&
+  "D169：色晕用封面主导色里**最大的三个**（不足循环、非法值剔除、无封面走兜底）",
+  // 用户 2026-11-13 先要「1-2 个颜色」（D167），随后改口「最大的 3 个色块」（D169）：
+  // 光斑固定三盏，后端也只给三个主导色。
+  hazeMod.HAZE_LAYER_COUNT === 3 &&
+    eqList(hazeMod.hazeColorsOf([]), [...hazeMod.HAZE_FALLBACK_COLORS].slice(0, 3)) &&
+    eqList(hazeMod.hazeColorsOf(["#112233"]), ["#112233", "#112233", "#112233"]) &&
     eqList(hazeMod.hazeColorsOf(["#112233", "#445566", "#778899", "#aabbcc"]), [
       "#112233",
       "#445566",
+      "#778899",
     ]) &&
-    eqList(hazeMod.hazeColorsOf(["nope", "#abc"]), ["#abc", "#abc"]) &&
-    Object.keys(hazeMod.hazeVars([])).join(",") === "--player-haze-a,--player-haze-b",
+    eqList(hazeMod.hazeColorsOf(["nope", "#abc"]), ["#abc", "#abc", "#abc"]) &&
+    Object.keys(hazeMod.hazeVars([])).join(",") ===
+      "--player-haze-a,--player-haze-b,--player-haze-c",
 );
 check(
   "D166：上一首 / 下一首只在**同类**里走、端点循环（音频不跳视频，视频也不跳音频）",
@@ -7597,7 +7599,9 @@ check(
   }) &&
     hazeMod.hazeVars([])["--player-haze-a"] === hazeMod.HAZE_FALLBACK_COLORS[0] &&
     hazeMod.hazeVars([])["--player-haze-b"] === hazeMod.HAZE_FALLBACK_COLORS[1] &&
-    // 有封面色时才做色相铺开：单色系封面也要能铺出两盏不同色相的光斑。
+    hazeMod.hazeVars([])["--player-haze-c"] === hazeMod.HAZE_FALLBACK_COLORS[2] &&
+    hazeMod.HAZE_LAYER_COUNT === 3 &&
+    // 有封面色时才做色相铺开：单色系封面也要能铺出三盏不同色相的光斑。
     hazeMod.hazeVars(["#eeeeee"])["--player-haze-a"] !== "#eeeeee",
 );
 check(
@@ -7617,9 +7621,12 @@ check(
     /feTurbulence/.test(musicStageSrc) &&
     /feDisplacementMap/.test(musicStageSrc) &&
     /attributeName="baseFrequency"/.test(musicStageSrc) &&
-    // 第三盏光斑已经删掉（两色口径），别再把 `drift-c` 留在样式表里。
-    !/player-haze-drift-c/.test(stylesSource) &&
-    !/player-haze-blob-c/.test(stylesSource) &&
+    // 三团光斑缺一不可：只有两团时中间是一道直边，看上去就是"两个圆贴在一起"
+    // （用户 2026-11-13 D169 的原话），第三团负责补缝。
+    /player-haze-blob-c/.test(stylesSource) &&
+    /player-haze-drift-c/.test(stylesSource) &&
+    /player-haze-morph-c/.test(stylesSource) &&
+    (musicStageSrc.match(/player-haze-blob player-haze-blob-/g) ?? []).length === 3 &&
     (() => {
       const start = stylesSource.indexOf("@media (prefers-reduced-motion: reduce) {");
       const end = stylesSource.indexOf(".player-disc {", start);
@@ -7743,6 +7750,114 @@ check(
     // JSON 标签兜底：任意标签里塞了 {"lyrics": "..."} 也能取出来。
     /starts_with\('\{'\)/.test(audioTagsSrc) &&
     /read_lyrics\(&src_for_task, tags\.lyrics\.as_deref\(\)\)/.test(playerCommandSrc),
+);
+
+// ==================== 音乐播放器：八条真机反馈补丁（D169） ====================
+
+check(
+  "D169：色晕取封面**面积最大的三个色块**（按面积排序、跳过近似重复、彩色优先于白底）",
+  // 用户 2026-11-13：「颜色晕并没有选取封面中最大的 3 个色块修复」。算法在后端：
+  // `hp_media::dominant_colors_from_image`，由 `player.media` 直接回三个色。
+  /pub fn dominant_colors_from_image\(/.test(
+    readFileSync(join(ROOT, "crates/hp-media/src/palette.rs"), "utf8"),
+  ) &&
+    /dominant_colors_from_image/.test(
+      readFileSync(join(ROOT, "crates/hp-media/src/lib.rs"), "utf8"),
+    ) &&
+    /const HAZE_COLOR_COUNT: usize = 3;/.test(playerCommandSrc) &&
+    /hp_media::dominant_colors_from_image\(&img, HAZE_COLOR_COUNT\)/.test(playerCommandSrc) &&
+    // 近重复色块必须被距离闸门挡掉，否则"三个色"会退化成同一个颜色的三个副本。
+    /MIN_DISTANCE/.test(readFileSync(join(ROOT, "crates/hp-media/src/palette.rs"), "utf8")) &&
+    hazeMod.HAZE_LAYER_COUNT === 3,
+);
+
+check(
+  "D169：色晕是**三团互咬的噪波**，不是两个圆贴在一起（位移尺度 + 第三团补缝）",
+  // 用户 2026-11-13：「像 2 个圆贴在一起高斯模糊了一下，改为更加类似噪波的形状」。
+  /scale=\{140\}/.test(musicStageSrc) &&
+    /numOctaves=\{4\}/.test(musicStageSrc) &&
+    (musicStageSrc.match(/player-haze-blob player-haze-blob-/g) ?? []).length === 3 &&
+    (() => {
+      const start = stylesSource.indexOf(".player-haze-blob-c {");
+      const end = stylesSource.indexOf("}", start);
+      const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
+      return /left: 18%/.test(body) && /top: 26%/.test(body);
+    })(),
+);
+
+check(
+  "D169：暂停态切歌**不自动播放**（图标是播放时才续播）",
+  // 用户 2026-11-13：「控制图标是暂停时，切换下一首，禁止自动播放，图标是播放时才可以自动播放」。
+  /const loadAndPlay = useCallback\(async \(fileId: string, autoplay = true\)/.test(
+    musicPanelSrc,
+  ) &&
+    /autoPlayRef\.current = autoplay;/.test(musicPanelSrc) &&
+    /void loadAndPlay\(target\.id, playing\);/.test(musicPanelSrc) &&
+    /\[loadAndPlay, playing, queue\.files/.test(musicPanelSrc),
+);
+
+check(
+  "D169：歌词切换是**过渡**不是硬切（行级 transition + 新行淡入）",
+  // 用户 2026-11-13：「优化显示歌词的效果，不要硬切换」。
+  (() => {
+    const start = stylesSource.indexOf(".player-lyric {");
+    const end = stylesSource.indexOf("}", start);
+    const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
+    return (
+      /transition:/.test(body) &&
+      /opacity 0\.5s/.test(body) &&
+      /filter 0\.55s/.test(body) &&
+      /margin-left 0\.7s/.test(body) &&
+      /animation: player-lyric-in 0\.5s/.test(body)
+    );
+  })() && /@keyframes player-lyric-in/.test(stylesSource),
+);
+
+check(
+  "D169：样式 2 歌词一直落到控制区上沿（吃满信息区 + 底部渐隐，不留空档）",
+  // 用户 2026-11-13：「歌词显示范围向下延伸，以进度条上方一点点为边界」。
+  (() => {
+    const start = stylesSource.indexOf('.player-lyrics[data-variant="disc"] {');
+    const end = stylesSource.indexOf("}", start);
+    const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
+    return /flex: 1 1 auto/.test(body) && /mask-image: linear-gradient/.test(body);
+  })(),
+);
+
+check(
+  "D169：样式 2 的音量条与进度条等长（图标挪进留白，不再占轨道宽度）",
+  // 用户 2026-11-13：「进度条和音量条的长度要一致，以进度条的长度为准」。
+  (() => {
+    const start = stylesSource.indexOf('.player-music[data-style="disc"] .player-volume-row {');
+    const end = stylesSource.indexOf("}", start);
+    const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
+    return /width: 100%/.test(body) && /max-width: none/.test(body);
+  })() &&
+    (() => {
+      const start = stylesSource.indexOf('.player-music[data-style="disc"] .player-volume-icon {');
+      const end = stylesSource.indexOf("}", start);
+      const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
+      return /position: absolute/.test(body) && /right: calc\(100% \+ 10px\)/.test(body);
+    })(),
+);
+
+check(
+  "D169：样式 2 的随机/上下一首/收藏与进度条两端对齐（三段网格，不是 space-between）",
+  // 用户 2026-11-13：「随机播放、上一首、下一首、收藏等图标要和进度条两端对齐」。
+  (() => {
+    const start = stylesSource.indexOf('.player-transport[data-variant="disc"] {');
+    const end = stylesSource.indexOf("}", start);
+    const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
+    return (
+      /display: grid/.test(body) &&
+      /grid-template-columns: 1fr auto 1fr/.test(body) &&
+      /width: 100%/.test(body)
+    );
+  })() &&
+    /<div className="player-transport-side">/.test(musicStageSrc) &&
+    /<div className="player-transport-main">/.test(musicStageSrc) &&
+    /player-transport-side player-transport-side-end/.test(musicStageSrc) &&
+    /\.player-transport-side-end \{[^}]*justify-content: flex-end/.test(stylesSource),
 );
 
 // ============================== 汇总 ==============================
