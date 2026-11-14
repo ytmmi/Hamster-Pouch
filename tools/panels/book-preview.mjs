@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { check, eqList, stripComments } from "./harness.mjs";
 import {
-  BOOK_BRIDGE_SRC, BOOK_FAMILY_FILES, MEDIA_FAMILY_FILES, ROOT, config, format,
+  BOOK_BRIDGE_SRC, BOOK_FAMILY_FILES, FILE_BRIDGE_SRC, MEDIA_FAMILY_FILES, ROOT, config, format,
   masonry, mediaActionsSrc, optionValues, registrySource, stylesSource, viewerReaderSrc,
 } from "./shared.mjs";
 export default async function run() {
@@ -808,9 +808,7 @@ check(
   /pub media_types: &'a \[MediaType\]/.test(
     readFileSync(join(ROOT, "crates/hp-repo/src/file_repo.rs"), "utf8"),
   ) &&
-    /media_types: Option<Vec<String>>/.test(
-      readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"), "utf8"),
-    ) &&
+    /media_types: Option<Vec<String>>/.test(FILE_BRIDGE_SRC) &&
     // 空集合 = 不筛（不是"什么都不返回"）；非空即"只这些"。
     /空切片 = 不筛/.test(
       readFileSync(join(ROOT, "crates/hp-repo/src/file_repo.rs"), "utf8"),
@@ -865,9 +863,7 @@ check(
     readFileSync(join(ROOT, "crates/hp-scanner/src/scan_task.rs"), "utf8"),
   ) &&
     // 缩略图：PDF 的封面走 `book.meta` 的磁盘缓存，索引期**不**产出缩略图。
-    /MediaType::Text \| MediaType::Pdf => false/.test(
-      readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"), "utf8"),
-    ) &&
+    /MediaType::Text \| MediaType::Pdf => false/.test(FILE_BRIDGE_SRC) &&
     // 缩略图格式表：文本与 PDF 都没有缩略图（`hp-media`）。
     // **音频不在这一支**（2026-10-17 / D115）：它有自己的波形图格式
     // （`ThumbFormat::WaveformPng`，见下一条断言），因此这里的取值域只含文本与 PDF。

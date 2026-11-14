@@ -1368,6 +1368,12 @@ D212 | 面板激活/可见性的订阅口与设置热加载的四条触发源各
 | --- | --- | --- | --- |
 | D216 | **`crates/hp-book/src/epub_text.rs`（1190 行）拆成 `epub_text/`**：① 按职责切四份——`mod.rs` 143 行（模块文档 + `EpubSectionRead` + `read_epub_section`，对外就这三个名字）、`blocks.rs` 294 行（`image_block` / `figure_from_inner` / `element_inner_text` / `blocks_from_xhtml` 的逐标签主循环）、`spine.rs` 52 行（`SpineRead` / `read_spine`）、`tests.rs` 725 行（原 `mod tests` 原样搬出）；② `mod.rs` 里 `pub use blocks::blocks_from_xhtml`、`pub(crate) use blocks::element_inner_text`、`pub(crate) use spine::{SpineRead, read_spine}`（`toc.rs:45` 与 `epub_rich` 的引用路径因此不变），`lib.rs:47` 的再导出一字未改；③ 新增门禁 `tools/check-book-structure.mjs` 5 条（原单文件不得复活 / 四份齐全 / 两个公开入口各只有一处 / 用例只在 tests.rs / 每份 ≤ 800 行），注册进 `package.json`（`check:*` 40 → 41）与 `tools/hooks/pre-commit` | 1190 行里 725 行是用例，实现只有 462 行却横跨三件事（XHTML→块、图片/图注抽取、spine 读取），距 `check:line-count` 的 1200 行上限只剩 10 行；三件事的改动理由各不相同，混在一起时「加一条用例」与「改一行解析」永远在同一个文件里抢位置 | `cargo check -p hp-book --all-targets` 零 error 零 warning；`cargo test -p hp-book` **150 passed**；`check:book-structure` 5/5；全量 `check:*` 41 条；变异：往 `epub_text/spine.rs` 补一份 `fn blocks_from_xhtml` → 4/5 并指名 `blocks_from_xhtml=blocks.rs,spine.rs`，回退即 5/5 |
 
+### 第 99 轮 · D217：文件命令族单文件拆成目录（2026-11-15）
+
+| 决定 | 做法 | 为什么 | 验证 |
+| --- | --- | --- | --- |
+| D217 | **`apps/desktop/src-tauri/src/commands/file.rs`（1032 行）拆成 `file/`**：① 按职责切三份——`mod.rs` 337 行（`FileMetadataResult` + metadata / query / path / rename / trash / setMarks / reverify 七条库内读写命令）、`preview.rs` 391 行（`ThumbJob` / `generate_thumbnail` / `is_natively_renderable` / `should_serve_original` / `thumb_get` / `preview_get`）、`task.rs` 323 行（`file_reanalyze` / `run_reanalyze` / `start_backfill` / `run_backfill` 与回填常量）；② `mod.rs` 用 `pub(crate) mod preview; pub(crate) mod task;` + `pub(crate) use task::start_backfill;`，`repo.rs` 的调用路径不变；③ `main.rs` 的 `invoke_handler` 改写子模块路径（`commands::file::preview::thumb_get` 等四条）——`#[tauri::command]` 生成的 `__cmd__*` 只在定义它的模块里，靠 `pub(crate) use` 再导出函数无效；④ 新增 `tools/check-file-structure.mjs` 6 条 | 1032 行里三件事互不相干（取图策略 / 长任务骨架 / 库内读写），距 `check:line-count` 的 1200 行上限只剩 168 行；拆完若不钉门禁，下一个人把取图策略写回 mod.rs 也不会有人发现 | `cargo check --all-targets` 零 error 零 warning；桥接层 `cargo clippy` 0 warning、`cargo test` **95 passed**；`check:panels` 488/488、`check:commands` 18/18、`check:task-shell` 4/4、`check:db-boundary` 18/18、`check:file-structure` 6/6；变异：往 `file/mod.rs` 补一份 `fn generate_thumbnail()` → 5/6 并指名 `mod.rs:fn generate_thumbnail(`，回退即 6/6 |
+
 
 
 

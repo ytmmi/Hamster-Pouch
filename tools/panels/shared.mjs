@@ -16,6 +16,14 @@ export const BOOK_BRIDGE_SRC = ["mod", "cache", "paging", "cover", "source"]
   )
   .join("\n");
 
+// 文件命令族自 D217 起按职责拆成 `file/{mod,preview,task}.rs`：命令形态、缩略图分流、
+// 原图回退三条判据分散在不同文件里，断言仍按「桥接层整体」匹配，拼成一份源码再跑正则。
+export const FILE_BRIDGE_SRC = ["mod", "preview", "task"]
+  .map((name) =>
+    readFileSync(join(ROOT, `apps/desktop/src-tauri/src/commands/file/${name}.rs`), "utf8"),
+  )
+  .join("\n");
+
 export const config = await import(pathToFileURL(join(ROOT, "packages/config/src/index.ts")).href);
 // `.tsx` 不能直接被 Node 的 TS 剥离加载（JSX 不是可剥离语法），因此组件表用**源码解析**
 // 断言（与 `tools/control-check.mjs` 对 `ControlRenderer.tsx` 的做法一致）。

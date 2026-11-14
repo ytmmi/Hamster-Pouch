@@ -12,7 +12,7 @@
 // 1. `catch_unwind` 只出现在 commands/task_shell.rs；
 // 2. `.tasks.start(` 只出现在 commands/task_shell.rs；
 // 3. `.tasks.finish(` 只出现在 commands/task_shell.rs 与 tasks.rs；
-// 4. 四个任务入口都经外壳起线程：file.rs 2 处（分析 + 回填）、source.rs 2 处（扫描 + 卸载）；
+// 4. 四个任务入口都经外壳起线程：file/task.rs 2 处（分析 + 回填）、source.rs 2 处（扫描 + 卸载）；
 // 5. 外壳自己不做空：两个入口都在，且 `catch_unwind` 与 `tasks.finish` 仍在里面。
 //
 // 用法：pnpm check:task-shell
@@ -107,8 +107,8 @@ report(shellMissing.length === 0, "外壳自身仍承担 panic 收敛与收尾",
 
 // 四个任务入口逐个钉住：漏改一处就退回手抄。
 const ENTRIES = [
-  ["apps/desktop/src-tauri/src/commands/file.rs", "spawn_repo_task(", 1],
-  ["apps/desktop/src-tauri/src/commands/file.rs", "spawn_task_at(", 1],
+  ["apps/desktop/src-tauri/src/commands/file/task.rs", "spawn_repo_task(", 1],
+  ["apps/desktop/src-tauri/src/commands/file/task.rs", "spawn_task_at(", 1],
   ["apps/desktop/src-tauri/src/commands/source.rs", "spawn_repo_task(", 2],
 ];
 const entryProblems = [];

@@ -8,7 +8,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { check, eqList } from "./harness.mjs";
-import { ROOT, config, format, optionValues, registrySource, stylesSource } from "./shared.mjs";
+import {
+  FILE_BRIDGE_SRC, ROOT, config, format, optionValues, registrySource, stylesSource,
+} from "./shared.mjs";
 export default async function run() {
 // ==================== 色彩参考（`panel.color`）的色值格式设置 + 按需提取 ====================
 //
@@ -164,7 +166,7 @@ check(
     // （`file.reanalyze` 自 2026-09 起是**后台任务**：带上任务的取消标志，见 `check:commands`
     //  的"单文件分析 = 与源扫描同款的后台任务"那组断言。）
     /\.scanner\s*\.rescan_file\(\s*&mut db,\s*&source,\s*&file\.relative_path,\s*&options,\s*Some\(&cancel\),?\s*\)/.test(
-      readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"), "utf8"),
+      FILE_BRIDGE_SRC,
     ) &&
     // `options.full` 仍然强制重算（"源全量重扫"会把全部图片的调色板刷新一遍）。
     /options\.full \|\| row\.size != size \|\| row\.mtime != mtime/.test(scannerPaletteSrc) &&

@@ -277,10 +277,12 @@ check(
 // 前端浮窗（`core/taskStore.ts`）只认事件、不认命令，因此这里断言的是"事件族与任务语义一致"，
 // 而不是"又写了一个弹窗组件"。
 
-const fileBridgeSrc = readFileSync(
-  join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"),
-  "utf8",
-);
+// D217：文件命令族按职责拆成 `file/{mod,preview,task}.rs`，断言仍按整体拼源码。
+const fileBridgeSrc = ["mod", "preview", "task"]
+  .map((name) =>
+    readFileSync(join(ROOT, `apps/desktop/src-tauri/src/commands/file/${name}.rs`), "utf8"),
+  )
+  .join("\n");
 const tasksSrc = readFileSync(join(ROOT, "apps/desktop/src-tauri/src/tasks.rs"), "utf8");
 // D196：登记 / panic 收敛 / 收尾搬进长任务外壳，断言跟着指向外壳。
 const taskShellSrc = readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/task_shell.rs"), "utf8");

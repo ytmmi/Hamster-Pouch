@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { check, eqList, stripComments } from "./harness.mjs";
 import {
-  MEDIA_FAMILY_FILES, ROOT, config, fileAt, format, masonry,
+  FILE_BRIDGE_SRC, MEDIA_FAMILY_FILES, ROOT, config, fileAt, format, masonry,
   mediaPaging, mediaSortStore, mediaView, optionValues, pageStub, registrySource,
   scroll, stylesSource,
 } from "./shared.mjs";
@@ -334,7 +334,7 @@ check(
       return m ? [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]).sort() : null;
     };
     const rust = listOf(
-      readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"), "utf8"),
+      FILE_BRIDGE_SRC,
       "NATIVE_RENDER_EXTS: &\\[&str\\] = &",
     );
     const ts = listOf(

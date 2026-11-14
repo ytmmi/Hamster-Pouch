@@ -105,7 +105,14 @@ crates/hp-dict/migrations/   # 迁移 SQL（forward-only，发布后禁止修改
     task_shell.rs     # 长任务外壳（D196）：登记 / 起线程 / panic 收敛 / 收尾只此一处，四个入口（scan /
                       #   unmount / reanalyze / backfill）只给出 body 与三态事件
     repo.rs  source.rs  album.rs
-    tag.rs   rating.rs  color.rs  file.rs
+    tag.rs   rating.rs  color.rs
+    file/               # 文件命令族（D217 起是目录，原单文件 1032 行按取图策略 / 长任务 / 库内读写三分）
+      mod.rs            #   库内读写类命令（metadata / query / path / rename / trash / setMarks / reverify）+ FileMetadataResult；
+                        #   子模块以 pub(crate) 导出，start_backfill 由 repo.rs 调用
+      preview.rs        #   取图策略只有一份：generate_thumbnail / is_natively_renderable / should_serve_original +
+                        #   thumb.get / preview.get（白名单与原图回退三条判据只在这里）
+      task.rs           #   两条长任务：file.reanalyze 与 file.backfill 只给 task_shell 的 body 与三态事件；
+                        #   `#[tauri::command]` 生成的 __cmd__* 只在本模块，main.rs 必须写 commands::file::task::*
     layout.rs           # 布局预设与仓库绑定（RFC 0011）：12 个命令全走 `with_global` / `with_global_mut`，导出落盘在锁外（D198）
     plugin.rs           # 插件包：列出 / 发现 / 安装（本地与随包）/ 版本与回滚
     plugin_lifecycle.rs # 插件按仓库启用 / 禁用 / 状态 / 加载（含 plugin.changed|loaded 发射点）
