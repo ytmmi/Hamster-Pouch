@@ -10,7 +10,7 @@ use hp_core::{
 };
 use rusqlite::params;
 
-use crate::util::{require_nonempty, store_err};
+use hp_db::{require_nonempty, store_err};
 
 use super::tag_lib_db::TagLibDb;
 
@@ -34,7 +34,7 @@ impl TagLibDb {
         if from_tag_id == to_tag_id {
             return Err(HpError::InvalidArgument("库 2 关系不允许自环".into()));
         }
-        let id = format!("rel-{}", &crate::util::uuid().replace('-', "")[..16]);
+        let id = format!("rel-{}", &hp_db::uuid().replace('-', "")[..16]);
         self.conn()
             .execute(
                 "INSERT OR IGNORE INTO tag_relation
@@ -45,7 +45,7 @@ impl TagLibDb {
                     from_tag_id,
                     to_tag_id,
                     relation_kind.as_str(),
-                    crate::util::now_iso()
+                    hp_db::now_iso()
                 ],
             )
             .map_err(|e| store_err("写入库 2 关系", e))?;
@@ -74,7 +74,7 @@ impl TagLibDb {
             ));
         }
         require_nonempty(&concept.id, "tag 概念 ID")?;
-        let now = crate::util::now_iso();
+        let now = hp_db::now_iso();
         let tx = self
             .conn()
             .unchecked_transaction()

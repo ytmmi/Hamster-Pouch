@@ -13,7 +13,7 @@
 | manifest 解析与包发现 | `crates/hp-plugin-host/src/manifest.rs` |
 | 来源判定与信任推导 | `crates/hp-plugin-host/src/trust.rs`（RFC 0009：现仍读 manifest 自称，**待改**） |
 | 安装（本地路径 / git / 归档包） | `crates/hp-plugin-host/src/install.rs` |
-| 注册表与按仓库状态 | `crates/hp-store/src/global/plugin_repo.rs`、`plugin_repo_state` |
+| 注册表与按仓库状态 | `crates/hp-global/src/plugin_repo.rs`、`plugin_repo_state` |
 | 桥接命令与事件 | `apps/desktop/src-tauri/src/commands/plugin.rs`（安装 / 发现 / 版本）· `plugin_lifecycle.rs`（启用 / 禁用 / 状态 / 加载）· `plugin_contributions.rs`（注册视图）· `plugin_control_channel.rs`（schema 与业务级校验）· `plugin_control_event.rs`（事件回传）；另有 `plugin_catalog.rs` 的「扩展」目录通道与 `plugin_panel_data.rs` 的面板取数通道 |
 | 控件 schema（面板**内部** UI） | `docs/spec/control-standard.md`（控件通道）；`contributions` 见第 4 节 |
 | **面板注册表**（插件可注册） | `docs/spec/panel-standard.md`（RFC 0010 决策 4） |

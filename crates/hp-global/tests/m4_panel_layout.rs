@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use hp_store::GlobalDb;
+use hp_global::GlobalDb;
 
 fn temp_global_path(tag: &str) -> PathBuf {
     tempfile::tempdir()
@@ -21,7 +21,7 @@ fn open(tag: &str) -> GlobalDb {
 }
 
 /// 断言错误码（`HpError::code()`：validation / not_found / conflict / io …）。
-fn assert_code(result: Result<impl std::fmt::Debug, hp_store::HpError>, code: &str) {
+fn assert_code(result: Result<impl std::fmt::Debug, hp_core::HpError>, code: &str) {
     let err = result.expect_err("应返回错误");
     assert_eq!(err.code(), code, "错误码不符：{err}");
 }

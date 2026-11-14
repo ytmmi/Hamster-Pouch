@@ -13,7 +13,7 @@
   data/pixiv_tags.sqlite     - pixiv_tags(name, cn_name, en_name, posts, categories)，169K+ 条
 
 输出：
-  output/tag_dict.sqlite     - 内置词库（表结构对齐 hp-store migrations/dict/0001_init.sql）
+  output/tag_dict.sqlite     - 内置词库（表结构对齐 hp-dict migrations/dict/0001_init.sql）
 
 步骤：
   1. 读取 pixiv 全量词条
@@ -53,7 +53,7 @@ PIXIV_DEFAULT_CAT = "general"
 # 日文判定：含假名即视为日文（pixiv name 为日文或英文原始标签）
 KANA_RE = re.compile(r"[\u3040-\u30ff]")
 
-# 词库 DDL：与 crates/hp-store/migrations/dict/0001_init.sql 保持一致
+# 词库 DDL：与 crates/hp-dict/migrations/dict/0001_init.sql 保持一致
 DDL = """
 CREATE TABLE IF NOT EXISTS dict_meta (
   key   TEXT PRIMARY KEY,

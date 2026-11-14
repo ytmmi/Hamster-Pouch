@@ -38,7 +38,7 @@ interface HpError {
 前端 `apps/desktop/src/app_ui/shared/api/response.ts` 提供统一解包层 `unwrapApi` 与
 `code → i18n` 文案映射（三套语言都有 `error.code.*` 键）。
 **已按新口径落地**：`setting.get/set/list/reset`（见 3.13）与 `plugin.panelSchema` / `plugin.validateControl`（见 3.11）。
-**其余命令仍裸返回**（错误一律 `String`，`hp_err_to_string`），逐条差异见 `docs/architecture/command-event-drift.md` 与第 3 节各表的「迁移状态」列。
+**D76 已收尾（2026-11-14 复核）**：桥接层 144 条 `#[tauri::command]` **全部**返回 `ApiResponse<T>`（126 条）或 `ApiAsync<T>`（18 条），**0 条裸返回**，`hp_err_to_string` 只剩 `ApiAsync` 的内部通道；前端 `test_ui` 的 22 处裸 `invoke` 也已在 D182 改成 `invoke<ApiResponse<T>>(...).then(unwrapApi)`。逐条差异见 `docs/architecture/command-event-drift.md` 与第 3 节各表的「迁移状态」列。
 
 **两处**有意的**排序调整**（不改 D76 的批次口径，只说明实际执行顺序）：
 
@@ -221,7 +221,7 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 
 | 命令 | 用途 | 请求 | 响应 | 迁移状态 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| `file.query` | **游标分页**查询文件 | `{ repoId, filter?, cursor?, limit? }` | `{ ok, data: { items, nextCursor } }` | **已包装** | 代码 `commands/file.rs` 的 `file_query`；**D76 批次 `file` 已迁移 + D78 游标分页已落地（2026-09）**。`filter` = `{ mediaTypes?, sourceId?, dirPrefix? }`（`mediaTypes` 为**集合**、缺省/空 = 不筛；2026-10-08 由单值 `mediaType` 改为集合，见 D95）；`limit` **只是页大小**；把 `nextCursor` 原样回传即可续页，`null` = 末页。**排序键 = `(relative_path, source_id, id)` 升序**（`relative_path` 单独不是全序：同名不同源会并列）。游标是**不透明字符串**（当前编码 `{路径字节长度}`+US+路径+US+sourceId+US+id，先读长度再按字节切，因此路径里出现分隔符也不歧义）；非法游标 → `validation`，**不静默从头开始**。键集游标在翻页途中库内容变动时**不漏项/不重复**（原 `offset` 分页会），用例 `crates/hp-store/tests/m2_source_file.rs` 的 `cursor_pagination_is_stable_under_inserts` |
+| `file.query` | **游标分页**查询文件 | `{ repoId, filter?, cursor?, limit? }` | `{ ok, data: { items, nextCursor } }` | **已包装** | 代码 `commands/file.rs` 的 `file_query`；**D76 批次 `file` 已迁移 + D78 游标分页已落地（2026-09）**。`filter` = `{ mediaTypes?, sourceId?, dirPrefix? }`（`mediaTypes` 为**集合**、缺省/空 = 不筛；2026-10-08 由单值 `mediaType` 改为集合，见 D95）；`limit` **只是页大小**；把 `nextCursor` 原样回传即可续页，`null` = 末页。**排序键 = `(relative_path, source_id, id)` 升序**（`relative_path` 单独不是全序：同名不同源会并列）。游标是**不透明字符串**（当前编码 `{路径字节长度}`+US+路径+US+sourceId+US+id，先读长度再按字节切，因此路径里出现分隔符也不歧义）；非法游标 → `validation`，**不静默从头开始**。键集游标在翻页途中库内容变动时**不漏项/不重复**（原 `offset` 分页会），用例 `crates/hp-repo/tests/m2_source_file.rs` 的 `cursor_pagination_is_stable_under_inserts` |
 | `file.backfill` | 手动触发一轮图片尺寸回填（`files.width` 为 `NULL` 的图片行） | `{}` | `{ ok, data: { taskId } }` | **已包装** | **后台任务**（2026-11-11 第 37 轮裁决 2，缺陷 0043 阶段 2）：登记 `TaskKind::Backfill` → 独立仓库库连接上按 `id` **键集分页**读 `width IS NULL` 的图片行，逐行读头写显示尺寸（EXIF 方向已应用）。**平时不用调**——`repo.open` 之后后端自动跑一轮（已有任务在跑则直接跳过，不排队）。进度/收尾用独立事件 `file.backfill.progress` / `file.backfill.completed`（不复用 `scan.progress`：两者的"总量"口径不同）；**没有暂停点**。前端 `api/file.ts` 的 `fileBackfill()` |
 | `file.reverify` | 重新校验单个文件 | `{ repoId, fileId }` | `{ ok, data: { verifyStatus } }` | **已包装** | 代码 `commands/file.rs` 的 `file_reverify`；线上 `data` 是**裸状态串**（文档写 `{ verifyStatus }`，差异随 D78/D76 收尾一并处理） |
 | `file.metadata` | 读取文件元数据 | `{ repoId, fileId }` | `{ ok, data: { size, mtime, hash, mediaType, ... } }` | **已包装** | `data` 是 `FileMetadataResult` 对象，字段为蛇形：`content_hash`（文档 `hash`）、`source_id`、`relative_path`、`media_type`、`subtype`、`verify_status`、`media_info_json`、`exif_json` |

@@ -2,7 +2,7 @@
 //! 对应 docs/roadmap/phase-1-top-level-plan.md 的 M2 范围。
 
 use hp_core::{FileId, FileIndexRow, MediaType, ThumbStatus, VerifyStatus};
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
     tempfile::tempdir()
@@ -159,7 +159,7 @@ fn query_files_media_type_set_filter() {
         let (rows, _) = db
             .query_files(
                 "repo-1",
-                &hp_store::FileQueryFilter {
+                &hp_repo::FileQueryFilter {
                     media_types,
                     source_id: Some(s.id.as_str()),
                     ..Default::default()
@@ -228,7 +228,7 @@ fn query_files_dir_prefix_filter() {
     let (all, next) = db
         .query_files(
             "repo-1",
-            &hp_store::FileQueryFilter {
+            &hp_repo::FileQueryFilter {
                 source_id: Some(s.id.as_str()),
                 ..Default::default()
             },
@@ -243,7 +243,7 @@ fn query_files_dir_prefix_filter() {
     let (filtered, _) = db
         .query_files(
             "repo-1",
-            &hp_store::FileQueryFilter {
+            &hp_repo::FileQueryFilter {
                 source_id: Some(s.id.as_str()),
                 dir_prefix: Some("Raw"),
                 ..Default::default()
@@ -295,7 +295,7 @@ fn cursor_pagination_is_stable_under_inserts() {
         db.upsert_file(&row(rel)).expect("写入失败");
     }
 
-    let filter = hp_store::FileQueryFilter {
+    let filter = hp_repo::FileQueryFilter {
         source_id: Some(s.id.as_str()),
         ..Default::default()
     };
@@ -342,10 +342,10 @@ fn cursor_pagination_is_stable_under_inserts() {
     assert_eq!(all_first_page[0].relative_path, "a.jpg");
 
     // 游标是不透明字符串：编码/解码往返一致；非法游标报错（不静默从头开始）。
-    let round = hp_store::FileQueryCursor::decode(&cursor1.encode()).expect("游标往返失败");
+    let round = hp_repo::FileQueryCursor::decode(&cursor1.encode()).expect("游标往返失败");
     assert_eq!(round, cursor1);
     assert!(
-        hp_store::FileQueryCursor::decode("garbage").is_err(),
+        hp_repo::FileQueryCursor::decode("garbage").is_err(),
         "非法游标必须报错"
     );
 

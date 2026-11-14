@@ -883,7 +883,7 @@ name = "hp-ai"
 version = "0.1.0"
 dependencies = [
  "hp-core",
- "hp-store",
+ "hp-repo",
  "tempfile",
  "time",
  "uuid",
@@ -895,7 +895,7 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "hp-pathrule",
- "hp-store",
+ "hp-repo",
  "serde_json",
  "tempfile",
  "time",
@@ -934,6 +934,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hp-dict"
+version = "0.1.0"
+dependencies = [
+ "hp-core",
+ "hp-db",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "hp-dto"
 version = "0.1.0"
 dependencies = [
@@ -947,7 +959,7 @@ name = "hp-fsops"
 version = "0.1.0"
 dependencies = [
  "hp-core",
- "hp-store",
+ "hp-repo",
  "serde_json",
  "tempfile",
 ]
@@ -958,9 +970,11 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "hp-db",
+ "hp-repo",
  "rusqlite",
  "serde_json",
  "tempfile",
+ "uuid",
 ]
 
 [[package]]
@@ -1031,10 +1045,12 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "hp-db",
+ "hp-global",
  "hp-pathrule",
  "rusqlite",
  "serde_json",
  "tempfile",
+ "uuid",
 ]
 
 [[package]]
@@ -1045,27 +1061,13 @@ dependencies = [
  "hp-hash",
  "hp-media",
  "hp-pathrule",
- "hp-store",
+ "hp-repo",
  "image",
  "notify",
  "serde_json",
  "tempfile",
  "time",
  "walkdir",
-]
-
-[[package]]
-name = "hp-store"
-version = "0.1.0"
-dependencies = [
- "hp-core",
- "hp-db",
- "hp-global",
- "hp-repo",
- "rusqlite",
- "serde_json",
- "tempfile",
- "uuid",
 ]
 
 [[package]]

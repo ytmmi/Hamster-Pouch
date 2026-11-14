@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use hp_store::TagDictDb;
+use hp_dict::TagDictDb;
 
 fn genfile_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tools/tagdict/output/tag_dict.sqlite")

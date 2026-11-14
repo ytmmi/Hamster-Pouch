@@ -18,8 +18,8 @@ use std::time::Instant;
 
 use hp_core::{FileId, FileIndexRow, MediaType, ThumbStatus, VerifyStatus};
 use hp_media::ThumbnailCache;
+use hp_repo::RepoDb;
 use hp_scanner::{ScanOptions, Scanner, detect_media_type, file_stat};
-use hp_store::RepoDb;
 use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
 

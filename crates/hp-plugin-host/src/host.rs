@@ -42,7 +42,7 @@ pub struct LoadOutcome {
     pub grants: Vec<Capability>,
 }
 
-/// 插件宿主（无状态；所有持久化经 `hp-store`）。
+/// 插件宿主（无状态；所有持久化经 `hp-global`）。
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PluginHost;
 

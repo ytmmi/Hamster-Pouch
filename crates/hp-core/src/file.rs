@@ -173,7 +173,7 @@ pub struct FileIndexRow {
     pub media_type: MediaType,
     /// 该文件的**标记集合**（2026-10-10 / D102：可多值、与类目正交）。
     ///
-    /// 由 `file_marks` 表装载（`hp-store` 的 `list_files_*` 会一并带出）；
+    /// 由 `file_marks` 表装载（`hp-repo` 的 `list_files_*` 会一并带出）；
     /// **不是** `files` 上的列（`files.subtype` 已废弃、新代码不读不写）。
     pub marks: Vec<FileMark>,
     pub content_hash: Option<String>,

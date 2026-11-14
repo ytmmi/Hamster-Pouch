@@ -4,8 +4,8 @@
 use std::path::Path;
 
 use hp_core::{MediaType, Source, VerifyStatus};
+use hp_repo::RepoDb;
 use hp_scanner::{ScanOptions, ScanProgress, Scanner};
-use hp_store::RepoDb;
 
 /// 生成一张确定性的灰度 PNG（不同 seed 得到不同内容）。
 fn make_png(path: &Path, seed: u8) {

@@ -154,7 +154,7 @@ Python 插件的分发因此回到「源码可审计」的路径：用户能读�
 ## 版本目录与回滚
 
 - 布局：`<plugin_root>/<plugin_id>/<version>/`，回滚即切回旧目录（D2 已确认，实现已具备）。
-- **缺 `active_version`**：`plugin_registry` 无此列，更新是 upsert 覆盖（`crates/hp-store/src/global/plugin_repo.rs`），旧版本的 `manifest_json` 随覆盖丢失。
+- **缺 `active_version`**：`plugin_registry` 无此列，更新是 upsert 覆盖（`crates/hp-global/src/plugin_repo.rs`），旧版本的 `manifest_json` 随覆盖丢失。
 - 需要补：注册表增加 `active_version` 与 `updated_at`；每个版本目录保留自己的 manifest 副本，回滚与审计都能取到当时的清单。
 - `plugin.rollback` 目前只返回目录路径，不切换活跃版本，必须改为原子更新注册表。
 - 旧版本清理策略：保留最近 N 个版本、用户可手动清理；清理必须避开 `active_version`。

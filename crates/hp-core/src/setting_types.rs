@@ -8,7 +8,7 @@
 //! `{ id, category, owner, title_key, kind, default?, scope?, requires_capability?,
 //! keywords?, section_key? }`。
 //!
-//! 本文件只承载纯数据与纯校验，不依赖 Tauri/SQLite/文件系统；落库在 hp-store，
+//! 本文件只承载纯数据与纯校验，不依赖 Tauri/SQLite/文件系统；落库在 hp-global，
 //! 界面在 `apps/desktop/src/app_ui/settings/`。
 
 use std::fmt;

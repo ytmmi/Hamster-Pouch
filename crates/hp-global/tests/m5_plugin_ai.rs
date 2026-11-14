@@ -7,7 +7,8 @@ use hp_core::{
     AiTagUndo, Capability, FileId, PluginId, PluginRegistryRow, PluginRepoState, RepoId,
     RuntimeKind, SourceKind, TagId, TagSource, TrustLevel,
 };
-use hp_store::{GlobalDb, RepoDb};
+use hp_global::GlobalDb;
+use hp_repo::RepoDb;
 
 fn temp_global_path(tag: &str) -> PathBuf {
     tempfile::tempdir()

@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use hp_core::{AnnotationKind, FileId, FileIndexRow, MediaType, ThumbStatus, VerifyStatus};
-use hp_store::{NewAnnotation, RepoDb};
+use hp_repo::{NewAnnotation, RepoDb};
 
 fn temp_repo_path(tag: &str) -> PathBuf {
     tempfile::tempdir()

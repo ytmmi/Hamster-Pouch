@@ -1,5 +1,5 @@
 /**
- * 生成 Rust 侧内置默认蓝图夹具（crates/hp-store/tests/default_blueprint.json）。
+ * 生成 Rust 侧内置默认蓝图夹具（crates/hp-repo/tests/default_blueprint.json）。
  *
  * 背景：内置默认蓝图常量只有唯一权威来源 `packages/config/src/blueprintDefault.ts`；
  * Rust 测试（`m6_blueprint.rs::default_blueprint_fixture_validates`）需要一个
@@ -18,7 +18,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 const sourcePath = join(root, "packages", "config", "src", "blueprintDefault.ts");
-const fixturePath = join(root, "crates", "hp-store", "tests", "default_blueprint.json");
+const fixturePath = join(root, "crates", "hp-repo", "tests", "default_blueprint.json");
 
 const mod = await import(pathToFileURL(sourcePath).href);
 const { DEFAULT_BLUEPRINT } = mod;

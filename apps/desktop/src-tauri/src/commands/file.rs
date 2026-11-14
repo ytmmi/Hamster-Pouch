@@ -7,8 +7,8 @@
 
 use hp_core::{HpError, HpResult, MediaType};
 use hp_media::extract_exif;
+use hp_repo::RepoDb;
 use hp_scanner::ScanOptions;
-use hp_store::RepoDb;
 use serde::Serialize;
 use tauri::State;
 
@@ -308,7 +308,7 @@ pub(crate) struct FileQueryPage {
 ///
 /// - 请求 `{ repoId, filter?, cursor?, limit? }`：`limit` 只是**页大小**；
 /// - 响应 `{ items, nextCursor }`：把 `nextCursor` 原样回传即可续页，`null` 表示末页；
-/// - **排序键**：`(relative_path, source_id, id)` 升序（见 `hp_store::FileQueryFilter` 的文档）；
+/// - **排序键**：`(relative_path, source_id, id)` 升序（见 `hp_repo::FileQueryFilter` 的文档）；
 /// - 游标是**键集游标**：翻页途中库内容变动不会漏项/重复（原 `offset` 分页会）。
 #[tauri::command]
 pub(crate) fn file_query(
@@ -333,13 +333,13 @@ pub(crate) fn file_query(
             .collect::<HpResult<Vec<_>>>()?;
         let parsed_cursor = match cursor.as_deref().map(str::trim) {
             None | Some("") => None,
-            Some(raw) => Some(hp_store::FileQueryCursor::decode(raw)?),
+            Some(raw) => Some(hp_repo::FileQueryCursor::decode(raw)?),
         };
         let guard = lock_repo(&state)?;
         let db = open_repo(&guard)?;
         let (rows, next) = db.query_files(
             &repo_id,
-            &hp_store::FileQueryFilter {
+            &hp_repo::FileQueryFilter {
                 media_types: &media_types,
                 source_id: filter.source_id.as_deref(),
                 dir_prefix: filter.dir_prefix.as_deref(),

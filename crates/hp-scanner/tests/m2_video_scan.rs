@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use hp_core::ThumbStatus;
+use hp_repo::RepoDb;
 use hp_scanner::{ScanOptions, ScanPhase, ScanProgress, Scanner};
-use hp_store::RepoDb;
 
 /// 捆绑的 ffmpeg/ffprobe；不存在则返回 None。
 fn bundled_bins() -> Option<(PathBuf, PathBuf)> {

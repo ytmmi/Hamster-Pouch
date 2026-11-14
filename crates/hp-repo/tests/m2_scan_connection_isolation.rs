@@ -5,7 +5,7 @@
 //! 界面命令就会在扫描期间报错或阻塞。
 
 use hp_core::{FileId, FileIndexRow, MediaType, ThumbStatus, VerifyStatus};
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 fn sample_row(source_id: &str, relative_path: &str) -> FileIndexRow {
     FileIndexRow {

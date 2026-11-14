@@ -1,4 +1,4 @@
-//! 通用工具（随 `Db` 一起下沉到本 crate：领域层经 `hp-store::util` 再导出取用）。
+//! 通用工具（随 `Db` 一起下沉到本 crate：领域层直接 `use hp_db::{…}` 取用）。
 
 use hp_core::{HpError, HpResult};
 use time::OffsetDateTime;

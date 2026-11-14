@@ -3,7 +3,7 @@
 use hp_core::{
     AddedBy, FileId, FileIndexRow, HpError, HpResult, Source, ThumbStatus, VerifyStatus,
 };
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 use crate::util;
 

@@ -9,7 +9,7 @@
 //! - 文件索引与解释数据保留：重新挂载**同一路径**复用原源（同 id、同别名），不新建行。
 
 use hp_core::{FileId, FileIndexRow, MediaType, SourceId, ThumbStatus, VerifyStatus};
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
     tempfile::tempdir()

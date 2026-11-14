@@ -2,7 +2,7 @@
 //! 对应 docs/roadmap/phase-1-top-level-plan.md 的 M4 验证线。
 
 use hp_core::{FileId, FileIndexRow, MediaType, SourceId, ThumbStatus, VerifyStatus};
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
     tempfile::tempdir()

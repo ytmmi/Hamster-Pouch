@@ -3,7 +3,8 @@
 use std::path::PathBuf;
 
 use hp_core::{FileIndexRow, HpError, HpResult};
-use hp_store::{GlobalDb, RepoDb};
+use hp_global::GlobalDb;
+use hp_repo::RepoDb;
 use serde::Serialize;
 use tauri::Emitter;
 
@@ -229,13 +230,13 @@ pub(crate) fn tag_lib_base_path() -> Result<PathBuf, String> {
 /// 否则扩展数据不会生效（用户会看到「装完启用后界面毫无变化」）。
 ///
 /// 返回 `None` = 无内置基底库（首次运行尚未分发）或打开失败——调用方应保持原状。
-pub(crate) fn build_tag_lib_set(plugin_root: &std::path::Path) -> Option<hp_store::TagLibSet> {
+pub(crate) fn build_tag_lib_set(plugin_root: &std::path::Path) -> Option<hp_dict::TagLibSet> {
     let path = tag_lib_base_path().ok()?;
     if !path.is_file() {
         return None;
     }
-    let db = hp_store::TagLibDb::open_readonly(&path, hp_core::LibLayer::Base).ok()?;
-    let mut set = hp_store::TagLibSet::new();
+    let db = hp_dict::TagLibDb::open_readonly(&path, hp_core::LibLayer::Base).ok()?;
+    let mut set = hp_dict::TagLibSet::new();
     set.add(db);
     // 扩展包：tag 数据是**应用级共享参考数据**（D34/D36），因此装配**全部已安装**的
     // 扩展，不按仓库启用状态过滤——这与「启用是仓库级」的插件语义冲突，属 D36.1
@@ -271,7 +272,7 @@ pub(crate) fn build_tag_lib_set(plugin_root: &std::path::Path) -> Option<hp_stor
 /// 以**只读**方式逐个打开并加入聚合层。单个包损坏/缺失数据文件时**跳过该包**并继续
 /// （不因一个坏包让整个词库不可用）。返回成功装配的扩展包数量。
 pub(crate) fn attach_tag_lib_extensions(
-    set: &mut hp_store::TagLibSet,
+    set: &mut hp_dict::TagLibSet,
     plugin_root: &std::path::Path,
 ) -> usize {
     let mut attached = 0usize;
@@ -392,8 +393,8 @@ fn find_tag_lib_data(dir: &std::path::Path) -> Option<PathBuf> {
 }
 
 /// 打开并加入聚合层；成功返回 true。
-fn attach_one(set: &mut hp_store::TagLibSet, db_path: &std::path::Path) -> bool {
-    match hp_store::TagLibDb::open_readonly(db_path, hp_core::LibLayer::Extension) {
+fn attach_one(set: &mut hp_dict::TagLibSet, db_path: &std::path::Path) -> bool {
+    match hp_dict::TagLibDb::open_readonly(db_path, hp_core::LibLayer::Extension) {
         Ok(db) => {
             set.add(db);
             true
@@ -749,7 +750,7 @@ mod tests {
         // 词库产物只是它借用的一个真实 sqlite 夹具。`tools/tagdict/output/` 不入库
         // （见 `.gitignore`），因此新克隆与 CI 上必然没有它——这与同文件里
         // `base_plus_three_extensions_attach_as_four_queryable_layers` 及
-        // `crates/hp-store/tests/tag_lib_artifacts.rs` 的既有口径一致
+        // `crates/hp-dict/tests/tag_lib_artifacts.rs` 的既有口径一致
         // （"CI 无产物时跳过"）。此前这里写的是 `expect(...)`，单把这一条变成
         // "新克隆必红"，与仓库自己登记的 CI 口径相悖。
         let Some(base) = find_upwards("tools/tagdict/output/tag_lib_base.sqlite3") else {
@@ -773,7 +774,7 @@ mod tests {
             .unwrap();
         }
 
-        let mut set = hp_store::TagLibSet::new();
+        let mut set = hp_dict::TagLibSet::new();
         let n = attach_tag_lib_extensions(&mut set, &tmp);
 
         let chosen = find_tag_lib_data(&pdir.join("0.2.0")).expect("最新版本应有数据文件");
@@ -814,7 +815,7 @@ mod tests {
         let empty = std::env::temp_dir().join(format!("hp-taglib-none-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&empty);
         std::fs::create_dir_all(&empty).unwrap();
-        let mut set = hp_store::TagLibSet::new();
+        let mut set = hp_dict::TagLibSet::new();
         let n = attach_tag_lib_extensions(&mut set, &empty);
         let _ = std::fs::remove_dir_all(&empty);
 
@@ -868,9 +869,9 @@ mod tests {
                 .unwrap_or_else(|e| panic!("安装 {name} 失败: {e}"));
         }
 
-        let mut set = hp_store::TagLibSet::new();
+        let mut set = hp_dict::TagLibSet::new();
         set.add(
-            hp_store::TagLibDb::open_readonly(&base_path, hp_core::LibLayer::Base)
+            hp_dict::TagLibDb::open_readonly(&base_path, hp_core::LibLayer::Base)
                 .expect("只读打开基底库"),
         );
         let attached = attach_tag_lib_extensions(&mut set, &tmp);

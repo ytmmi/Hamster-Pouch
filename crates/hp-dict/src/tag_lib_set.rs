@@ -10,7 +10,7 @@ use hp_core::{
     HpResult, LibLayer, LibRelationKind, TagConceptDetail, TagKind, TagNameKind, TagRelationNode,
 };
 
-use crate::util::{require_nonempty, store_err};
+use hp_db::{require_nonempty, store_err};
 
 use super::tag_lib_db::TagLibDb;
 use super::tag_lib_merge::MergeIndex;

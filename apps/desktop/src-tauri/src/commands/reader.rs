@@ -23,7 +23,7 @@
 
 use hp_core::{AnnotationKind, HpError, HpResult};
 use hp_dto::ReaderAnnotationItem;
-use hp_store::NewAnnotation;
+use hp_repo::NewAnnotation;
 use tauri::State;
 
 use crate::AppState;

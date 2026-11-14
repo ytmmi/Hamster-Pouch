@@ -4,7 +4,7 @@
 //! `crates/hp-scanner/src/watcher.rs`；这里钉的是它依赖的**库层两个动作**。
 
 use hp_core::{FileId, FileIndexRow, MediaType, ThumbStatus, VerifyStatus};
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
     tempfile::tempdir()

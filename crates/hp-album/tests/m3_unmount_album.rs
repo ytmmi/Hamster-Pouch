@@ -1,7 +1,7 @@
 //! 卸载相关的相册侧不变量。
 //!
-//! 说明：**完全卸载**（删源 + 删索引 + 删派生数据）在 `hp-store::purge_source_data`
-//! （`crates/hp-store/tests/m2_source_purge.rs` 覆盖）。本文件只管相册侧的两条读取规则：
+//! 说明：**完全卸载**（删源 + 删索引 + 删派生数据）在 `hp-repo::purge_source_data`
+//! （`crates/hp-repo/tests/m2_source_purge.rs` 覆盖）。本文件只管相册侧的两条读取规则：
 //! 1. 离线媒体源的文件不出现在相册可见成员里（历史离线行兜底）；
 //! 2. 跟随源相册的根源离线时，同步必须是空操作（否则 mirror 会误清空相册）。
 
@@ -10,7 +10,7 @@ use hp_core::{
     AddedBy, AlbumKind, FileId, FileIndexRow, MediaType, SourceId, SyncMode, ThumbStatus,
     VerifyStatus,
 };
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 fn temp_db(tag: &str) -> RepoDb {
     let path = tempfile::tempdir()

@@ -248,7 +248,7 @@ pub(crate) struct TagTreeNodeItem {
     children: Vec<TagTreeNodeItem>,
 }
 
-fn tree_node_to_item(n: hp_store::TagTreeNode) -> TagTreeNodeItem {
+fn tree_node_to_item(n: hp_repo::TagTreeNode) -> TagTreeNodeItem {
     TagTreeNodeItem {
         id: n.id,
         name: n.name,
@@ -276,7 +276,7 @@ pub(crate) fn tag_tree(
             let c = db.count_tag_files(t.id.as_str())?;
             counts.insert(t.id.as_str().to_string(), c);
         }
-        let tree = hp_store::build_tag_tree(&tags, &relations, &counts);
+        let tree = hp_repo::build_tag_tree(&tags, &relations, &counts);
         Ok(tree.roots.into_iter().map(tree_node_to_item).collect())
     })())
 }

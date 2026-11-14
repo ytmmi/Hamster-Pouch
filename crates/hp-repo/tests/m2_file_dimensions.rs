@@ -5,7 +5,7 @@
 //! 扫描期怎么带进 `Computed` 由 `hp-scanner` 覆盖。
 
 use hp_core::{FileId, FileIndexRow, MediaType, SourceId, ThumbStatus, VerifyStatus};
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 use std::path::PathBuf;
 
 fn temp_db(tag: &str) -> (PathBuf, RepoDb) {

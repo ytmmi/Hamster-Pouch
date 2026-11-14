@@ -7,26 +7,28 @@
 // 在 crates/hp-db/src 之外，任何 .rs 都不许出现 pragma_update / busy_timeout / wal_checkpoint /
 // journal_mode 这几个连接级调用。
 //
-// 另外几条守住拆分后的边界本身（D185 → D186 → D187 一路拆下来，每一步都补一条反向断言，
+// 另外几条守住拆分后的边界本身（D185 → D186 → D187 → D188 一路拆下来，每一步都补一条反向断言，
 // 否则下一个人只要复制一段旧代码就能把拆分悄悄退回去）：
-//   · hp-db 不许依赖 hp-store，也不许内联 schema/迁移清单；
-//   · hp-repo / hp-global 不许依赖 hp-store（依赖方向单向：领域层 → 库 crate）；
-//   · hp-pathrule 只放纯函数，不许沾 SQLite（不依赖 rusqlite / hp-db / hp-store）；
-//   · 每个句柄的定义与它的迁移清单只能在自己那个 crate 里，hp-store 不许回填。
-import { readFileSync, readdirSync, statSync } from "node:fs";
+//   · hp-db 不许依赖任何领域 crate（依赖方向单向：领域层 → hp-db）；
+//   · hp-store 已经不存在了（D188 拆完删除），任何 crate 都不许再依赖它，也不许把目录加回来；
+//   · hp-pathrule 只放纯函数，不许沾 SQLite；
+//   · 每个句柄的定义与它的迁移清单只能在自己那个 crate 里，别的 crate 不许回填。
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const ROOT = process.cwd();
 const DB_SRC = join(ROOT, "crates", "hp-db", "src");
 const SCAN_ROOTS = [join(ROOT, "crates"), join(ROOT, "apps", "desktop", "src-tauri", "src")];
+/// 领域库 crate（拆分后各自的归处）。
+const DOMAIN_CRATES = ["hp-repo", "hp-global", "hp-dict"];
 /// 连接级配置调用：只允许出现在 hp-db。
 const FORBIDDEN = ["pragma_update(", ".busy_timeout(", "wal_checkpoint", "\"journal_mode\""];
-/// 每个库句柄：文件、必须出现的开库调用、句柄是否允许定义在这个文件所属的 crate。
+/// 每个库句柄：文件、必须出现的开库调用。
 const HANDLES = [
   ["crates/hp-repo/src/repo_db.rs", "hp_db::Db::open"],
   ["crates/hp-global/src/global_db.rs", "hp_db::Db::open"],
-  ["crates/hp-store/src/dict/dict_db.rs", "hp_db::Db::open"],
-  ["crates/hp-store/src/dict/tag_lib_db.rs", "hp_db::Db::open"],
+  ["crates/hp-dict/src/dict_db.rs", "hp_db::Db::open"],
+  ["crates/hp-dict/src/tag_lib_db.rs", "hp_db::Db::open"],
 ];
 
 let total = 0;
@@ -64,12 +66,12 @@ function manifestOf(crate) {
   return readFileSync(join(ROOT, "crates", crate, "Cargo.toml"), "utf8");
 }
 
-// ① hp-db 不许依赖 hp-store（依赖方向：领域层 → hp-db，永不反向）
-report(
-  !/hp-store/.test(manifestOf("hp-db")),
-  "hp-db 不依赖 hp-store（依赖方向单向）",
-  ["crates/hp-db/Cargo.toml 里出现了 hp-store"],
+// ① hp-db 不许依赖任何领域 crate（依赖方向：领域层 → hp-db，永不反向）
+const dbManifest = manifestOf("hp-db");
+const dbReverse = DOMAIN_CRATES.filter((c) => new RegExp(`^${c} =`, "m").test(dbManifest)).map(
+  (c) => `crates/hp-db/Cargo.toml 里出现了 ${c}`,
 );
+report(dbReverse.length === 0, "hp-db 不依赖任何领域 crate（依赖方向单向）", dbReverse);
 
 // ② hp-db 不许内联 schema / 迁移清单（那是各库 crate 的事）
 const dbFiles = walk(DB_SRC, []);
@@ -110,57 +112,64 @@ for (const [rel, needle] of HANDLES) {
 }
 report(badHandles.length === 0, `四个库句柄均经 hp-db 打开（${HANDLES.length} 个句柄）`, badHandles);
 
-// ⑤ hp-repo / hp-global 都不许依赖 hp-store（拆出来了又被依赖回去就成环）
-const reverseDeps = [];
-for (const crate of ["hp-repo", "hp-global"]) {
-  if (/hp-store/.test(manifestOf(crate))) reverseDeps.push(`crates/${crate}/Cargo.toml 里出现了 hp-store`);
+// ⑤ hp-store 已删除（D188）：目录不许回来，任何 manifest 也不许再依赖它
+const storeDirs = [join(ROOT, "crates", "hp-store")].filter((p) => existsSync(p));
+const storeRefs = [];
+for (const crate of DOMAIN_CRATES.concat(["hp-db", "hp-pathrule", "hp-scanner", "hp-album", "hp-fsops", "hp-ai", "hp-plugin-host"])) {
+  if (/^hp-store =/m.test(manifestOf(crate))) storeRefs.push(`crates/${crate}/Cargo.toml 仍依赖 hp-store`);
 }
-report(reverseDeps.length === 0, "hp-repo / hp-global 不依赖 hp-store（依赖方向单向）", reverseDeps);
+const bridgeManifest = readFileSync(join(ROOT, "apps", "desktop", "src-tauri", "Cargo.toml"), "utf8");
+if (/^hp-store =/m.test(bridgeManifest)) storeRefs.push("桥接层 Cargo.toml 仍依赖 hp-store");
+report(
+  storeDirs.length === 0 && storeRefs.length === 0,
+  "hp-store 已删除且无人再依赖（拆完不许复活）",
+  storeDirs.map((p) => relative(ROOT, p) + " 目录又出现了").concat(storeRefs),
+);
 
 // ⑥ hp-pathrule 只放纯函数：不许沾 SQLite，也不许反向依赖库 crate
 const pathruleManifest = manifestOf("hp-pathrule");
-const dirtyPathrule = ["rusqlite", "hp-db", "hp-store", "hp-repo"]
+const dirtyPathrule = ["rusqlite", "hp-db", "hp-repo", "hp-global", "hp-dict"]
   .filter((needle) => new RegExp(`^${needle} =`, "m").test(pathruleManifest))
   .map((needle) => `crates/hp-pathrule/Cargo.toml 依赖了 ${needle}`);
 report(dirtyPathrule.length === 0, "hp-pathrule 不含 SQLite 依赖（纯路径规则）", dirtyPathrule);
 
-// ⑦ 句柄的定义只能在自己那个 crate：hp-store 不许回填 repo/global（防回填）
-const storeSrc = walk(join(ROOT, "crates", "hp-store", "src"), []);
+// ⑦ 句柄的定义只能在自己那个 crate：别人不许回填（防回填）
+const OWNER = [
+  ["hp-repo", "RepoDb"],
+  ["hp-global", "GlobalDb"],
+  ["hp-dict", "TagDictDb"],
+  ["hp-dict", "TagLibDb"],
+];
 const backfill = [];
-for (const file of storeSrc) {
-  const rel = relative(ROOT, file).replace(/\\/g, "/");
-  const body = stripComments(readFileSync(file, "utf8"));
-  for (const handle of ["RepoDb", "GlobalDb"]) {
-    if (new RegExp(`pub struct ${handle}\\b`).test(body)) backfill.push(`${rel}  又定义了 ${handle}`);
+for (const crate of DOMAIN_CRATES) {
+  const files = walk(join(ROOT, "crates", crate, "src"), []);
+  for (const file of files) {
+    const rel = relative(ROOT, file).replace(/\\/g, "/");
+    const body = stripComments(readFileSync(file, "utf8"));
+    for (const [owner, handle] of OWNER) {
+      if (owner !== crate && new RegExp(`pub struct ${handle}\\b`).test(body)) {
+        backfill.push(`${rel}  又定义了 ${handle}（应在 ${owner}）`);
+      }
+    }
   }
-  if (body.includes("include_str!(\"../../migrations/repo/")) backfill.push(`${rel}  又内联了仓库库迁移`);
-  if (body.includes("include_str!(\"../../migrations/global/")) backfill.push(`${rel}  又内联了全局库迁移`);
 }
-report(
-  backfill.length === 0,
-  `仓库库/全局库句柄与迁移不在 hp-store（扫描 hp-store/src ${storeSrc.length} 个 .rs）`,
-  backfill,
-);
+report(backfill.length === 0, `句柄只在各自 crate 定义（扫描 ${DOMAIN_CRATES.length} 个领域 crate）`, backfill);
 
 // ⑧ 反向：句柄必须真的在自己那个 crate（拆完不许两边都没有）
 const missing = [];
-const expected = [
-  ["hp-repo", "RepoDb"],
-  ["hp-global", "GlobalDb"],
-];
-for (const [crate, handle] of expected) {
+for (const [crate, handle] of OWNER) {
   const files = walk(join(ROOT, "crates", crate, "src"), []);
   const found = files.some((f) => new RegExp(`pub struct ${handle}\\b`).test(stripComments(readFileSync(f, "utf8"))));
   if (!found) missing.push(`crates/${crate}/src 里找不到 pub struct ${handle}`);
 }
-report(missing.length === 0, "仓库库/全局库句柄各自落在 hp-repo / hp-global", missing);
+report(missing.length === 0, "四个库句柄各自落在 hp-repo / hp-global / hp-dict", missing);
 
 // ⑨ 迁移清单随 crate 走：每个库 crate 的 migrations 目录必须非空且版本号连续
 const migrationDirs = [
   ["hp-repo", "repo"],
   ["hp-global", "global"],
-  ["hp-store", "dict"],
-  ["hp-store", "dict_lib"],
+  ["hp-dict", "dict"],
+  ["hp-dict", "dict_lib"],
 ];
 const badMigrations = [];
 for (const [crate, sub] of migrationDirs) {

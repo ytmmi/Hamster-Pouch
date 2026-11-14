@@ -1,7 +1,7 @@
 //! hp-repo：仓库库（每仓库一个 SQLite 文件）的表结构、迁移清单与各领域仓储。
 //!
-//! 自 D186 起从 `hp-store` 拆出：global/dict 仍留在 `hp-store`，那里再导出本 crate 的公开项，
-//! 因此 `hp_store::RepoDb` 等路径对调用方保持不变。迁移 SQL 在 `crates/hp-repo/migrations/repo/`。
+//! 自 D186 起从 `hp-store` 拆出；D188 起 `hp-store` 已整个删除，调用方直接依赖本 crate，
+//! 因此 `hp_repo::RepoDb` 等路径对调用方保持不变。迁移 SQL 在 `crates/hp-repo/migrations/repo/`。
 
 mod ai_undo_repo;
 mod album_repo;

@@ -3,7 +3,7 @@
 //! 所有真实文件操作都必须生成操作记录（`ops_history`），并返回记录 ID。
 
 use hp_core::{FileId, HpError, HpResult};
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 use serde_json::json;
 
 use crate::copy;

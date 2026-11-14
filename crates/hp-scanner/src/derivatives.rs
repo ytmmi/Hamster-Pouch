@@ -14,7 +14,7 @@
 use std::collections::BTreeMap;
 
 use hp_media::ThumbnailCache;
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 /// 一次清理的统计（调用方只用于日志/测试断言，不进命令返回值）。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

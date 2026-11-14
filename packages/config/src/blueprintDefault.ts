@@ -2,7 +2,7 @@
  * 蓝图**内置默认图**（RFC 0007 决策 5 / D32 / D47 / D51）。
  *
  * 权威来源只有这一处：本文件的 `DEFAULT_BLUEPRINT` 常量；Rust 侧夹具由
- * `pnpm generate:blueprint-fixture` 从它生成（`crates/hp-store/tests/default_blueprint.json`，
+ * `pnpm generate:blueprint-fixture` 从它生成（`crates/hp-repo/tests/default_blueprint.json`，
  * `include_str!` 引用，测试断言 27 节点 / 26 边）。两侧不得手工各写一份。
  *
  * `makeEmptyBlueprint` 是新建蓝图起步用的空文档；`forUserSave` / `isObsoleteDefaultBlueprint`

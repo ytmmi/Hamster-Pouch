@@ -14,7 +14,7 @@
 
 | 事项 | 事实 | 锚点 |
 | --- | --- | --- |
-| 布局存储 | 全局配置库 `panel_layouts(id, repo_id, workspace, layer_key, layout_json, blueprint_ids_json, updated_at)`；唯一键 `(repo_id, workspace, layer_key)`；`workspace` 列装的是「布局预设名」 | `crates/hp-store/migrations/global/0001_init.sql`、`0003_layout_blueprints.sql`、`0004_layout_layers.sql` |
+| 布局存储 | 全局配置库 `panel_layouts(id, repo_id, workspace, layer_key, layout_json, blueprint_ids_json, updated_at)`；唯一键 `(repo_id, workspace, layer_key)`；`workspace` 列装的是「布局预设名」 | `crates/hp-global/migrations/global/0001_init.sql`、`0003_layout_blueprints.sql`、`0004_layout_layers.sql` |
 | 作用域 | 仓库 × 层 × 名字 三维；默认标记 `app_settings['layout.default.{repoId}']` | `apps/desktop/src-tauri/src/commands/layout.rs:220-221` |
 | 命令面 | 八条 `layout.*`（save / list / get / rename / delete / setDefault / getDefault / blueprints） | `docs/spec/commands-events.md:95-106` §3.1.1 |
 | 启动套用 | 默认仓库 → 默认布局 → 该层布局；**没有默认仓库就直接返回**（保留代码内建首屏） | `apps/desktop/src/app_ui/core/workspaceBootstrap.ts:21-59` |
@@ -128,7 +128,7 @@ CREATE TABLE layout_bindings (
    > **修订注记（2026-11-10，用户裁决）**：`媒体-测试` 的 `''` **不再保留 1365 B 旧快照，改为对齐 `l_main`**
    > （`layers_json[""] = layers_json["l_main"]`）。理由是 1365 B 那行是 2026-09-13 的旧通道残渣、无读写方，
    > 保留会让「层无关兜底」命中一个用户没在用的形状；`媒体-测试-1` 只有 `''`，原样保留。
-   > 迁移 `crates/hp-store/migrations/global/0005_layout_presets.sql` 按此裁决实现（组内存在 `l_main` 即对齐）。
+   > 迁移 `crates/hp-global/migrations/global/0005_layout_presets.sql` 按此裁决实现（组内存在 `l_main` 即对齐）。
 
 ### 决策 11：命令面
 
@@ -151,8 +151,8 @@ CREATE TABLE layout_bindings (
 
 **数据层**
 
-- 新增 `crates/hp-store/migrations/global/0005_layout_presets.sql`：建两张新表 + 决策 10 的折算 + 删死键；迁移文件**只能追加、不可回头改**（`docs/spec/database-schema.md` 第 5 节、`crates/hp-store/src/migrate.rs` 文件头）。
-- `crates/hp-store/src/global/global_db.rs`：`GLOBAL_MIGRATIONS`（`:15-18`）加 0005；`PanelLayoutRow`（`:33`）与 `save_panel_layout`（`:228`）、`set_layout_blueprints`（`:303`）、`list_panel_layouts`（`:329`）、`get_panel_layout`（`:348`）、`rename_panel_layout`（`:379`）、`delete_panel_layout`（`:402`）全部改到新表；`delete_repo`（`:437`）不能再删 `panel_layouts`（改删 `layout_bindings`）；`row_to_layout`（`:474`）/`parse_blueprint_ids`（`:488`）随之调整。
+- 新增 `crates/hp-global/migrations/global/0005_layout_presets.sql`：建两张新表 + 决策 10 的折算 + 删死键；迁移文件**只能追加、不可回头改**（`docs/spec/database-schema.md` 第 5 节、`crates/hp-db/src/migrate.rs` 文件头）。
+- `crates/hp-global/src/global_db.rs`：`GLOBAL_MIGRATIONS`（`:15-18`）加 0005；`PanelLayoutRow`（`:33`）与 `save_panel_layout`（`:228`）、`set_layout_blueprints`（`:303`）、`list_panel_layouts`（`:329`）、`get_panel_layout`（`:348`）、`rename_panel_layout`（`:379`）、`delete_panel_layout`（`:402`）全部改到新表；`delete_repo`（`:437`）不能再删 `panel_layouts`（改删 `layout_bindings`）；`row_to_layout`（`:474`）/`parse_blueprint_ids`（`:488`）随之调整。
 - 全局库版本 **4 → 5**，`docs/spec/database-schema.md:676` 的版本行必须同步。
 
 **命令层**
@@ -169,7 +169,7 @@ CREATE TABLE layout_bindings (
 
 - `tools/layout-check.mjs:46` 的 SQL 与校验对象改为 `layout_presets.layers_json` + `layout.default`；结构不变量（`grid.root.type === "branch"` 等）保持不变。
 - `tools/check-settings.mjs:139/153/305`（键空间 / legacy 清单）、`tools/check-commands.mjs`（§3.1.1 与桥接层一致性）。
-- `crates/hp-store/tests/m4_panel_layout.rs` 重写：现有断言按 `repo-1` / `repo-a` / `repo-b` 验证仓库隔离（`:1,50,65,66,97`），要改为「应用级预设 + 解析链 + 绑定 + 折算」语义。
+- `crates/hp-global/tests/m4_panel_layout.rs` 重写：现有断言按 `repo-1` / `repo-a` / `repo-b` 验证仓库隔离（`:1,50,65,66,97`），要改为「应用级预设 + 解析链 + 绑定 + 折算」语义。
 - `tools/fix-layer-layout.mjs`（往 `panel_layouts` 写 `repo_id` 的开发期修数据脚本）随之删除或改写为按新表操作。
 
 **文档**

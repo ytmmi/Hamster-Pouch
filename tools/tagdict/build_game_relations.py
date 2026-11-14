@@ -34,7 +34,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 HERE = Path(__file__).parent
 ROOT = HERE.resolve().parents[1]
-DDL_PATH = ROOT / "crates" / "hp-store" / "migrations" / "dict_lib" / "0001_init.sql"
+DDL_PATH = ROOT / "crates" / "hp-dict" / "migrations" / "dict_lib" / "0001_init.sql"
 
 # danbooru 角色的 `_(作品)` 后缀
 SUFFIX_RE = re.compile(r"_\(([^)]+)\)$")

@@ -6,7 +6,7 @@ edition.workspace = true
 [dependencies]
 hp-core = { path = "../hp-core" }
 hp-hash = { path = "../hp-hash" }
-hp-store = { path = "../hp-store" }
+hp-repo = { path = "../hp-repo" }
 # 排除判定的纯函数（D187）
 hp-pathrule = { path = "../hp-pathrule" }
 hp-media = { path = "../hp-media" }

@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DDL_PATH = ROOT / "crates" / "hp-store" / "migrations" / "dict_lib" / "0001_init.sql"
+DDL_PATH = ROOT / "crates" / "hp-dict" / "migrations" / "dict_lib" / "0001_init.sql"
 HERE = Path(__file__).parent
 
 # 每个 kind 的基底配额（D36「基础中文标准名、常用分类、默认关系」，目标数 MB 内）

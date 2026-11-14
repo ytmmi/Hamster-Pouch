@@ -6,7 +6,7 @@
 
 - 应用有一个全局配置库（应用级），每个仓库一个独立 SQLite 文件（仓库级），另有一个应用级共享的 tag 词库独立 SQLite 文件（RFC 0006）。
 - 全局库知道"有哪些仓库"；仓库库知道"这个仓库如何解释文件"；词库是"字典"——多语言参考词表（主中文、辅日/英），与仓库 tag 解耦，不参与仓库隔离。
-- UI 不得直连任何 SQLite；所有读写经过 `hp-store` 通过 Tauri 命令桥接。
+- UI 不得直连任何 SQLite；所有读写经过 `hp-repo` / `hp-global` / `hp-dict`（D188 起无中间门面）通过 Tauri 命令桥接。
 - 跨仓库默认禁止 JOIN/搜索；如未来需要，必须通过显式只读聚合服务。
 
 ## 2. 通用约定
@@ -646,14 +646,14 @@ CREATE INDEX idx_ops_history_repo ON ops_history(repo_id);
 
 ### 4.8 tag 词库库（独立 SQLite 文件，RFC 0006）
 
-> ⚠️ **本节已被 RFC 0008 / D33 / D36 / D37 取代，仅作历史对照**。**新实现以 `docs/rfc/0008-tag-libraries.md` 与 `crates/hp-store/migrations/dict_lib/0001_init.sql` 为准**，本节结构不得据以实现。
+> ⚠️ **本节已被 RFC 0008 / D33 / D36 / D37 取代，仅作历史对照**。**新实现以 `docs/rfc/0008-tag-libraries.md` 与 `crates/hp-dict/migrations/dict_lib/0001_init.sql` 为准**，本节结构不得据以实现。
 >
-> **已实施的替代结构**（RFC 0008，构建完成）：实体锚点改为「概念」（D33）；交付改为「内置轻量基底 + 按需安装的细分扩展包 + 用户数据层」（D36/D36.2）；schema 落在 `migrations/dict_lib/0001_init.sql`，表为 `tag` / `tag_source` / `tag_name` / `tag_work` / `tag_character` / `tag_artist` / `tag_relation` / `lib_meta`；Rust 侧为 `hp-core/src/tag_lib.rs` + `hp-store/src/dict/` 四文件（`tag_lib_db.rs` `TagLibDb` 单库句柄与只读查询 / `tag_lib_write.rs` 用户库写入 / `tag_lib_set.rs` `TagLibSet` 三层聚合查询层 / `tag_lib_merge.rs` 多包重复概念归并）。旧 `dict/0001_init.sql` 与 `TagDictDb` **保留作对照与回退**。
+> **已实施的替代结构**（RFC 0008，构建完成）：实体锚点改为「概念」（D33）；交付改为「内置轻量基底 + 按需安装的细分扩展包 + 用户数据层」（D36/D36.2）；schema 落在 `migrations/dict_lib/0001_init.sql`，表为 `tag` / `tag_source` / `tag_name` / `tag_work` / `tag_character` / `tag_artist` / `tag_relation` / `lib_meta`；Rust 侧为 `hp-core/src/tag_lib.rs` + `hp-dict/src/` 四文件（`tag_lib_db.rs` `TagLibDb` 单库句柄与只读查询 / `tag_lib_write.rs` 用户库写入 / `tag_lib_set.rs` `TagLibSet` 三层聚合查询层 / `tag_lib_merge.rs` 多包重复概念归并）。旧 `dict/0001_init.sql` 与 `TagDictDb` **保留作对照与回退**。
 
 ```sql
 -- 词库是应用级共享的多语言词表（主中文、辅日/英），独立于全局配置库与仓库库。
 -- 词条以原始生态 tag（pixiv/danbooru name）为锚，中文主词为展示主字段（可重复），
--- 任意语言命中后按中文聚合返回。词库访问经 hp-store 的 TagDictDb（只读为主）。
+-- 任意语言命中后按中文聚合返回。词库访问经 hp-dict 的 TagDictDb（只读为主）。
 
 -- 词库元信息：版本、来源、生成时间等
 CREATE TABLE dict_meta (
@@ -723,14 +723,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blueprints_default
 
 ## 5. 迁移策略
 
-- 三库**共用同一个版本追踪机制**：`PRAGMA user_version`。执行器在 `crates/hp-db/src/migrate.rs`（读版本 → 每版一事务执行 → 同事务写回 `user_version`），对外只经 `hp_db::Db::apply_migrations` 调用：`crates/hp-repo/src/repo_db.rs`、`crates/hp-store/src/global/global_db.rs`、`crates/hp-store/src/dict/dict_db.rs`、`crates/hp-store/src/dict/tag_lib_db.rs` 各调一次（D185 起开库流程下沉到 `hp-db`，迁移清单仍留在各句柄里）。
+- 三库**共用同一个版本追踪机制**：`PRAGMA user_version`。执行器在 `crates/hp-db/src/migrate.rs`（读版本 → 每版一事务执行 → 同事务写回 `user_version`），对外只经 `hp_db::Db::apply_migrations` 调用：`crates/hp-repo/src/repo_db.rs`、`crates/hp-global/src/global_db.rs`、`crates/hp-dict/src/dict_db.rs`、`crates/hp-dict/src/tag_lib_db.rs` 各调一次（D185 起开库流程下沉到 `hp-db`，迁移清单仍留在各句柄里）。
   - **当前仓库库版本 = 16**（`0016` 为 `files.index_only` 被排除子树的「仅索引」标记（D164）；`0015` 为 `files.width` / `files.height` 图片显示宽高（可空、可回填，缺陷 0043）；`0014` 为 `source_exclusion` 媒体源子目录排除表（软排除，与卸载同形但可还原，D149）；`0013` 为 `albums.sort_order` 同级排序位 + `idx_albums_repo_order`（拖拽排序，D132）；`0012` 为相册同步镜像身份列 + `album_sync_exclusion`（同步相册镜像树、只增不删、位置与源一致，D129）；`0011` 为 `reader_annotations` 阅读批注表（书签 / 笔记 / 高亮，D113）；`0010` 为 `file_marks` 一对多标记表 + 存量搬迁；`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列（**已废弃**）；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
-  - **当前全局配置库版本 = 5**（`global/0001_init` … `global/0005_layout_presets`，见 `crates/hp-store/src/global/global_db.rs:16`-`21` 的五个 `include_str!`；0005 建 `layout_presets` / `layout_bindings` 并折算 `panel_layouts`）；全局库内**没有**镜像表（没有 `global_meta`）。
+  - **当前全局配置库版本 = 5**（`global/0001_init` … `global/0005_layout_presets`，见 `crates/hp-global/src/global_db.rs:16`-`21` 的五个 `include_str!`；0005 建 `layout_presets` / `layout_bindings` 并折算 `panel_layouts`）；全局库内**没有**镜像表（没有 `global_meta`）。
   - **当前词库版本 = 1**（`dict_db.rs:19`）；`dict_meta`（`dict/0001:6-9`）是数据元信息 K/V，**不是** schema 版本。
 - **`repo_meta.schema_version` 是**镜像键**，每次打开仓库库都按权威值回写**（2026-09 修复缺陷 0006）：`repo_db.rs` 的 `sync_schema_version_meta` 在 `open_inner` 的汇总点（`apply_migrations` 与蓝图文档迁移之后）执行，**新建与打开两条路径共用这一处**，因此升级过的库不再与 `user_version` 分叉。回写**不能**下沉到迁移执行器（`crates/hp-db/src/migrate.rs`）：那个执行器由四个库共用，且只有仓库库**有** `repo_meta`。**版本判断一律以 `PRAGMA user_version` 为准**，不要读镜像键（该键仍无读取方）。
 - 每个仓库库打开时都会 `busy_timeout = 5s`：**扫描与完全卸载各用一条独立连接**（不占用主连接锁，避免长任务把界面命令堵住），双连接在 WAL 下并存需要这个等待窗口。
-- **开库 pragma 的单一真值在 `crates/hp-db/src/lib.rs` 的 `PragmaSet`**（D185）：`REPO` = WAL + `busy_timeout = 5s` + 外键；`GLOBAL` / `DICT` = WAL + 外键（**无** `busy_timeout`）；`TAGLIB_READONLY` = 只开外键（数据包只读，不切 WAL）。关库检查点 `PRAGMA wal_checkpoint(TRUNCATE)` 也只在 `Db::checkpoint_close` 里出现。四个库的这处差异是**现状契约**，`tools/check-db-boundary.mjs`（9 条断言）断言 `pragma_update` / `busy_timeout` / `wal_checkpoint` / `journal_mode` 不得出现在 `crates/hp-db/src/` 之外，并顺带钉住 `hp-repo` / `hp-global` 不反向依赖 `hp-store`、`hp-pathrule` 不沾 SQLite。
-- 每次启动比对并顺序应用未执行的迁移；迁移脚本**随所属 crate 走**、按库分目录存放、按 `0001_xxx.sql` 编号：仓库库在 `crates/hp-repo/migrations/repo/`（D186，16 份）、全局库在 `crates/hp-global/migrations/global/`（D187，5 份）、词库与四库单库在 `crates/hp-store/migrations/` 的 `dict/`、**`dict_lib/`**。`tools/check-db-boundary.mjs` 断言这四个目录都存在、且各自版本号从 0001 起连续——迁移清单被搬走或复制一份都会红。
+- **开库 pragma 的单一真值在 `crates/hp-db/src/lib.rs` 的 `PragmaSet`**（D185）：`REPO` = WAL + `busy_timeout = 5s` + 外键；`GLOBAL` / `DICT` = WAL + 外键（**无** `busy_timeout`）；`TAGLIB_READONLY` = 只开外键（数据包只读，不切 WAL）。关库检查点 `PRAGMA wal_checkpoint(TRUNCATE)` 也只在 `Db::checkpoint_close` 里出现。四个库的这处差异是**现状契约**，`tools/check-db-boundary.mjs`（9 条断言）断言 `pragma_update` / `busy_timeout` / `wal_checkpoint` / `journal_mode` 不得出现在 `crates/hp-db/src/` 之外，并顺带钉住 `hp-store` 已被删除且无人再依赖、`hp-pathrule` 不沾 SQLite。
+- 每次启动比对并顺序应用未执行的迁移；迁移脚本**随所属 crate 走**、按库分目录存放、按 `0001_xxx.sql` 编号：仓库库在 `crates/hp-repo/migrations/repo/`（D186，16 份）、全局库在 `crates/hp-global/migrations/global/`（D187，5 份）、词库与四库单库在 `crates/hp-dict/migrations/` 的 `dict/`、**`dict_lib/`**（D188，2 份）。`tools/check-db-boundary.mjs` 断言这四个目录都存在、且各自版本号从 0001 起连续——迁移清单被搬走或复制一份都会红。
   - `dict/` 是 RFC 0006 旧词库（保留作对照与回退，forward-only）。
   - **`dict_lib/0001_init.sql` 是 RFC 0008 四库的权威 DDL**（已实施），同时被数据管线（`tools/tagdict/*.py` 读取该文件作为唯一 schema 源）与 Rust 侧（`TagLibDb::open` 的迁移）使用。**改动四库 schema 必须追加新迁移文件，不要改 0001**。
 - 每个迁移在事务中执行；失败则回滚并阻止打开仓库，提示备份/导出策略。

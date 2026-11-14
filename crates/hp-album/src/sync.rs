@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use hp_core::{AddedBy, AlbumKind, AlbumSyncState, HpError, HpResult, SyncMode};
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 use crate::mirror::ensure_mirror_tree;
 use crate::service::{CONFLICT_REASON_PINNED_KEPT, SyncConflict, SyncOutcome};

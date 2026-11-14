@@ -6380,7 +6380,7 @@ check(
       /pub fn requires_content\(self\) -> bool/.test(core) &&
       // 外键级联有测试钉住（文件删了批注必须跟着消失）。
       /fn delete_is_idempotent_and_cascades_with_the_file/.test(
-        readFileSync(join(ROOT, "crates/hp-store/tests/m7_reader_annotations.rs"), "utf8"),
+        readFileSync(join(ROOT, "crates/hp-repo/tests/m7_reader_annotations.rs"), "utf8"),
       )
     );
   })(),

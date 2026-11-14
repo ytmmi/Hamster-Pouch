@@ -10,8 +10,8 @@
 use std::path::Path;
 
 use hp_media::{PALETTE_FORMAT_VERSION, encode_palette_json};
+use hp_repo::RepoDb;
 use hp_scanner::{ScanOptions, Scanner};
-use hp_store::RepoDb;
 
 /// 写一张纯色 PNG（`extract_palette` 对纯色的结果是确定的）。
 fn write_solid_png(path: &Path, color: [u8; 3]) {

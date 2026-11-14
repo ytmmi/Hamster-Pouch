@@ -6,7 +6,7 @@
 //! 3. 写批次能提交也能回滚（扫描按块包事务的前提）。
 
 use hp_core::{FileId, FileIndexRow, MediaType, SourceId, ThumbStatus, VerifyStatus};
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
     tempfile::tempdir()

@@ -1741,19 +1741,21 @@ dependencies = [
 
 [[package]]
 name = "hamster-pouch-desktop"
-version = "0.1.40-Alpha"
+version = "0.1.41-Alpha"
 dependencies = [
  "hp-ai",
  "hp-album",
  "hp-book",
  "hp-core",
+ "hp-dict",
  "hp-dto",
  "hp-fsops",
+ "hp-global",
  "hp-media",
  "hp-pdf",
  "hp-plugin-host",
+ "hp-repo",
  "hp-scanner",
- "hp-store",
  "serde",
  "serde_json",
  "tauri",
@@ -1916,7 +1918,7 @@ name = "hp-ai"
 version = "0.1.0"
 dependencies = [
  "hp-core",
- "hp-store",
+ "hp-repo",
  "time",
  "uuid",
 ]
@@ -1927,7 +1929,7 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "hp-pathrule",
- "hp-store",
+ "hp-repo",
  "serde_json",
  "time",
 ]
@@ -1963,6 +1965,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hp-dict"
+version = "0.1.0"
+dependencies = [
+ "hp-core",
+ "hp-db",
+ "rusqlite",
+ "serde_json",
+]
+
+[[package]]
 name = "hp-dto"
 version = "0.1.0"
 dependencies = [
@@ -1976,7 +1988,7 @@ name = "hp-fsops"
 version = "0.1.0"
 dependencies = [
  "hp-core",
- "hp-store",
+ "hp-repo",
  "serde_json",
 ]
 
@@ -2066,23 +2078,11 @@ dependencies = [
  "hp-hash",
  "hp-media",
  "hp-pathrule",
- "hp-store",
+ "hp-repo",
  "image",
  "notify",
  "time",
  "walkdir",
-]
-
-[[package]]
-name = "hp-store"
-version = "0.1.0"
-dependencies = [
- "hp-core",
- "hp-db",
- "hp-global",
- "hp-repo",
- "rusqlite",
- "serde_json",
 ]
 
 [[package]]

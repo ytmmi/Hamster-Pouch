@@ -9,8 +9,8 @@
 //!    随后直接切到索引阶段的 0/total）；
 //! 4. 中间按**固定间隔**刷新（用户口径：固定间隔即可，不追求完全实时、不拖累性能）。
 
+use hp_repo::RepoDb;
 use hp_scanner::{ScanOptions, ScanPhase, ScanProgress, Scanner};
-use hp_store::RepoDb;
 
 /// `.bin` 非媒体类型：遍历照常计入，索引阶段全部跳过 → 用例跑得很快。
 const FILES: u64 = 500;

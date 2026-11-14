@@ -5,7 +5,7 @@ members = [
   "crates/hp-repo",
   "crates/hp-global",
   "crates/hp-pathrule",
-  "crates/hp-store",
+  "crates/hp-dict",
   "crates/hp-scanner",
   "crates/hp-hash",
   "crates/hp-album",

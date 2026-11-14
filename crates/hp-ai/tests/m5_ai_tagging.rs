@@ -8,7 +8,7 @@ use hp_core::{
     AiTagCandidate, AiTaggingInput, AiTaggingOutput, FileId, FileIndexRow, HpResult, MediaType,
     ThumbStatus, VerifyStatus,
 };
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 const REPO: &str = "repo-1";
 

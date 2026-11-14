@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use hp_core::{AddedBy, AlbumKind, FileId, FileIndexRow, MediaType, ThumbStatus, VerifyStatus};
 use hp_fsops::FsOpsService;
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 const REPO_ID: &str = "repo-1";
 

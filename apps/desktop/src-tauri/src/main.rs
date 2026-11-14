@@ -11,10 +11,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use hp_ai::AiTaggingService;
+use hp_dict::TagLibSet;
+use hp_global::GlobalDb;
 use hp_media::ThumbnailCache;
 use hp_plugin_host::SupervisionRegistry;
+use hp_repo::RepoDb;
 use hp_scanner::Scanner;
-use hp_store::{GlobalDb, RepoDb, TagLibSet};
 use tauri::Manager;
 
 use commands::shared::external_bin;

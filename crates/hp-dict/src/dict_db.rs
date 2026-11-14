@@ -12,10 +12,10 @@ use hp_core::{
 };
 use rusqlite::{OptionalExtension, Row, params};
 
-use crate::util::{require_nonempty, store_err};
+use hp_db::{require_nonempty, store_err};
 
 /// 词库迁移脚本（按版本升序）。
-const DICT_MIGRATIONS: &[&str] = &[include_str!("../../migrations/dict/0001_init.sql")];
+const DICT_MIGRATIONS: &[&str] = &[include_str!("../migrations/dict/0001_init.sql")];
 
 /// tag 词库句柄（独立 SQLite 文件，应用级共享；RFC 0006 决策 1）。
 pub struct TagDictDb {
@@ -439,7 +439,7 @@ fn escape_like(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::{now_iso, uuid};
+    use hp_db::{now_iso, uuid};
     use tempfile::tempdir;
 
     fn sample_entry(source: DictSource, key: &str, zh: &str) -> TagDictEntry {

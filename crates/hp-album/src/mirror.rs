@@ -14,7 +14,7 @@
 use std::collections::BTreeSet;
 
 use hp_core::{Album, AlbumKind, AlbumSyncRule, HpResult, SyncMode};
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 use crate::media::resolve_media_type;
 

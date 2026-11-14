@@ -29,7 +29,7 @@
 | --- | --- | --- |
 | 设置注册表（宿主项） | `packages/config/src/settings.ts`（`SETTING_CATEGORIES` / `SYSTEM_SETTING_DECLS` / `allSettingDecls` / `validateSettingDecl`） | **前端注册表**（不是命令，见下） |
 | **注册表与搜索的形态（2026-09 裁决）** | `apps/desktop/src/app_ui/settings/settingsRegistry.ts`（`sectionsOf` / `searchSettings`） | **前端函数，非 Tauri 命令**：注册表 = TS 静态声明 + 插件贡献（经 `plugin.contributions` 到达前端）；搜索必须匹配 `title_key` 的**当前语言文案**，Rust 侧无 i18n。故原 `setting.registry` / `setting.search` 两条命令**已从契约撤下**（见 `docs/spec/commands-events.md` 3.13） |
-| 设置项读写 | `crates/hp-store/src/global/global_db.rs`（`set_setting` / `get_setting`，表 `app_settings`） | 键值对，**不新增库表** |
+| 设置项读写 | `crates/hp-global/src/global_db.rs`（`set_setting` / `get_setting`，表 `app_settings`） | 键值对，**不新增库表** |
 | 既有设置项 | `ui.theme` / `ui.language` / `layout.syncBlueprint` | 三者必须能在新界面找到并读写（**零行为变化**） |
 | 桥接命令与事件 | `apps/desktop/src-tauri/src/commands/repo.rs`（`setting_get` / `_set` / `_list` / `_reset` 与 `setting.changed`） | 只有 4 条命令；**注册表与搜索不经命令**（见上） |
 | 面板设置来源 | `docs/spec/panel-standard.md` 第 5.3 节（面板 `settings[]`） | 按面板分节渲染 |

@@ -254,10 +254,10 @@ mod tests {
     fn test_state() -> AppState {
         use crate::tasks::TaskRegistry;
         use hp_ai::AiTaggingService;
+        use hp_global::GlobalDb;
         use hp_media::ThumbnailCache;
         use hp_plugin_host::SupervisionRegistry;
         use hp_scanner::Scanner;
-        use hp_store::GlobalDb;
         use std::sync::{Arc, Mutex};
         AppState {
             global_db: Arc::new(Mutex::new(Some(

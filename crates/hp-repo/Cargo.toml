@@ -16,3 +16,6 @@ serde_json = "1"
 [dev-dependencies]
 # blueprint_repo.rs 的单元测试建临时仓库库
 tempfile = "3"
+# 集成测试里的蓝图模板走全局库（D188：原 hp-store/tests 按主题迁回各自 crate）
+hp-global = { path = "../hp-global" }
+uuid = { version = "1", features = ["v4"] }

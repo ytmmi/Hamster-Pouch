@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use hp_core::{HpError, HpResult};
-use hp_store::{LayoutPresetRow, SeedOutcome};
+use hp_global::{LayoutPresetRow, SeedOutcome};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 use tauri::State;

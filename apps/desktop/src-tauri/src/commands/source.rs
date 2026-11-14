@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use hp_core::{HpError, HpResult, Source};
+use hp_repo::{RepoDb, build_source_tree, retain_visible_paths};
 use hp_scanner::{ScanOptions, ScanOutcome, ScanPhase, ScanProgress, purge_excluded_derivatives};
-use hp_store::{RepoDb, build_source_tree, retain_visible_paths};
 use serde::Serialize;
 use tauri::State;
 
@@ -275,7 +275,7 @@ fn run_unmount(
     control: &TaskControl,
     source_id: &str,
     repo_path: &Path,
-) -> HpResult<hp_store::PurgeResult> {
+) -> HpResult<hp_repo::PurgeResult> {
     let mut db = RepoDb::open(repo_path)?;
     db.get_source(source_id)?
         .ok_or_else(|| HpError::NotFound(format!("媒体源不存在: {source_id}")))?;
@@ -299,12 +299,12 @@ fn run_unmount(
     let should_cancel = || control.is_cancelled();
     db.purge_source_data(source_id, &should_cancel, &mut |phase, processed, total| {
         let name = match phase {
-            hp_store::PurgePhase::Counting => "counting",
-            hp_store::PurgePhase::SyncRules => "syncRules",
-            hp_store::PurgePhase::Children => "children",
-            hp_store::PurgePhase::Derived => "derived",
-            hp_store::PurgePhase::Files => "files",
-            hp_store::PurgePhase::Source => "source",
+            hp_repo::PurgePhase::Counting => "counting",
+            hp_repo::PurgePhase::SyncRules => "syncRules",
+            hp_repo::PurgePhase::Children => "children",
+            hp_repo::PurgePhase::Derived => "derived",
+            hp_repo::PurgePhase::Files => "files",
+            hp_repo::PurgePhase::Source => "source",
         };
         emit_phase(name, processed, total);
     })
@@ -530,7 +530,7 @@ pub(crate) fn source_unexclude(
     api_from_hp(outcome)
 }
 
-fn exclusion_to_item(row: hp_store::SourceExclusion) -> SourceExclusionItem {
+fn exclusion_to_item(row: hp_repo::SourceExclusion) -> SourceExclusionItem {
     SourceExclusionItem {
         source_id: row.source_id,
         relative_path: row.relative_path,
@@ -539,7 +539,7 @@ fn exclusion_to_item(row: hp_store::SourceExclusion) -> SourceExclusionItem {
 }
 
 /// 将 hp-store 目录树节点转换为可序列化的 `SourceTreeNode`。
-fn tree_nodes_to_items(nodes: Vec<hp_store::TreeNode>, source_id: &str) -> Vec<SourceTreeNode> {
+fn tree_nodes_to_items(nodes: Vec<hp_repo::TreeNode>, source_id: &str) -> Vec<SourceTreeNode> {
     nodes
         .into_iter()
         .map(|node| {

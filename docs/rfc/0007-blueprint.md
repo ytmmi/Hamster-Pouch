@@ -400,7 +400,7 @@ CREATE TABLE blueprint_templates (
 > ⚠️ **上例是"结构示意（12 节点 / 13 边）"，不是真实内置默认图。**
 > 真实内置默认蓝图是 **52 节点 / 49 边**（`default_version` 当前 = 9，**2 层**「主界面」+「界面 2」），权威来源只有一个：
 > **`packages/config/src/blueprintDefault.ts` 的 `DEFAULT_BLUEPRINT` 常量**，其 JSON 由 `pnpm generate:blueprint-fixture`
-> 导出为 `crates/hp-store/tests/default_blueprint.json`（Rust 侧 `include_str!` 引用，测试断言 51/48）。
+> 导出为 `crates/hp-repo/tests/default_blueprint.json`（Rust 侧 `include_str!` 引用，测试断言 51/48）。
 >
 > **2026-11-10 / D155**：`default_version` 由 7 升至 8 —— 内置默认图改为与随包「演示布局」**同一份编辑**
 > （布局多出「界面 2」后蓝图必须同步，否则全新安装会出现"布局有标签页、画布没有该层"）。
@@ -412,7 +412,7 @@ CREATE TABLE blueprint_templates (
 > 上例为**单层**结构示意（`layers` 仅一项「主界面」，全部节点归属 `l_main`；示例为省篇幅只在首部节点上标出 `layer`，落库时**每个节点都带该字段**）。
 
 > **实现注记（零回归）**：内置默认蓝图（`packages/config` 的 `DEFAULT_BLUEPRINT`，`default_version` 当前=8——D155 起升版；
-> 本节下述"单层 / 27 节点 / 右栏只有一个标签组"描述的是 v7 形态，v8 的事实以常量与 `crates/hp-store/tests/m6_blueprint.rs`
+> 本节下述"单层 / 27 节点 / 右栏只有一个标签组"描述的是 v7 形态，v8 的事实以常量与 `crates/hp-repo/tests/m6_blueprint.rs`
 > 的断言为准：2 层、`ui`+`ui_2` 两个界面节点、右栏另有直接挂载的「色彩参考」「元数据」两个单面板、面板集合与演示布局逐层相等）**如实表达当前默认「媒体-测试」布局**：**单层**（`layers = [{key:"l_main", name:"主界面"}]`，每个节点都带 `layer: "l_main"`）内顶层为界面节点 `ui`；左栏（区域）＝仓库/媒体源/相册三个独立面板，布局块直接连三个面板；中栏（区域）＝一个标签组 `g_media`（成员：媒体预览/查看器/媒体播放器），媒体预览内部再分 图像/视频/音频 类目→对象；右栏（区域）＝**只有一个标签组** `g_inspector`（成员：色彩参考 / 标签·评分 / 元数据，三者同属一个 dockview 标签组）——即右栏**没有**"单面板直连布局块"的成员；**标签组优先**：布局块只连**标签组**（成员由标签组 `contains`）与**单面板**；一栏内同时存在"单面板 + 标签组"时，两者都直接挂在布局块下。界面节点只连布局块（`ui → blk_left/blk_center/blk_right`）；界面显示名取自**层名**（界面节点不再另存 `name`）。规则三元组（对象→操作→状态，全部连线）：双击 图像·双击对象 → 显示 查看器；双击 视频 → 播放器并播放；双击 音频 → 元数据。节点 `position` 按栏分列排布、互不重叠（Rust 测试 `default_blueprint_nodes_do_not_overlap` 守住该不变量）；夹具由 `pnpm generate:blueprint-fixture` 从 TS 常量生成，不在两侧手工维护。旧版内置默认由引擎按 `default_version` 自动升级（v5 → v6 引入界面节点、v6 → v7 引入分层）；用户一旦在编辑器保存即移除该标记（`forUserSave`），此后不再被自动升级覆盖。不保留旧模式兼容。
 
 ### 6. 校验：服务端 `blueprint.validate`（硬错误 + 软告警）
@@ -548,9 +548,9 @@ CREATE TABLE blueprint_templates (
 | Rust 领域模型 | `crates/hp-core/src/blueprint_warnings.rs` | **未接通软告警**（不阻塞保存）：缺必填引用、缺触发来源、无根层（D55）、跳转失效（D55）、浮层未连接到界面（D50 修订）、浮层尺寸被夹紧 |
 | Rust 领域模型 | `crates/hp-core/src/blueprint_migrate.rs` | 文档版本迁移（**v1 → v2** 引入分层，D52/D58；**v2 → v3** 把标记由类目改挂到对象之下，D137）：`migrate_document` / `migrate_graph` / `normalize_document`（写库前归一化，并补齐缺失的 `schema_version`） |
 | Rust 领域模型（测试） | `crates/hp-core/src/blueprint_tests.rs` | 蓝图**这一个功能域**的测试夹具，由 `blueprint.rs` 以 `include!` 挂载（不按被测子模块再拆） |
-| 存储 | `crates/hp-store` | 迁移 `repo/0006_blueprint.sql`、`global/0002_blueprint_templates.sql`（+ 布局侧 `global/0003_layout_blueprints.sql` / `0004_layout_layers.sql`）；`repo/blueprint_repo.rs`（list/get/save/delete/setDefault/count + 打开库时的一次性文档迁移）、`global/blueprint_template_repo.rs`（list/install/upsert） |
+| 存储 | `crates/hp-repo`（仓库库）/ `crates/hp-global`（模板表） | 迁移 `repo/0006_blueprint.sql`、`global/0002_blueprint_templates.sql`（+ 布局侧 `global/0003_layout_blueprints.sql` / `0004_layout_layers.sql`）；`repo/blueprint_repo.rs`（list/get/save/delete/setDefault/count + 打开库时的一次性文档迁移）、`global/blueprint_template_repo.rs`（list/install/upsert） |
 | 跨层 DTO | `crates/hp-dto` | 蓝图 DTO（`BlueprintItem` / `BlueprintValidateResult` / `BlueprintTemplateItem`），前端 `packages/shared-types` 由同一批类型生成。**桥接层直接使用这些类型**（`src-tauri` 依赖 `hp-dto`），不得再定义同形结构体；`BlueprintDoc` 类型**不存在**，勿引用 |
-| Tauri 桥接 | `apps/desktop/src-tauri/src/commands/blueprint.rs` | `blueprint.*` 命令：参数校验、仓库归属校验、调用 hp-store、广播 `blueprint.changed`；`commands/shared.rs` 的 `debug_log` 提供打包运行下的诊断通道 |
+| Tauri 桥接 | `apps/desktop/src-tauri/src/commands/blueprint.rs` | `blueprint.*` 命令：参数校验、仓库归属校验、调用 hp-repo / hp-global、广播 `blueprint.changed`；`commands/shared.rs` 的 `debug_log` 提供打包运行下的诊断通道 |
 | 前端配置 | `packages/config/src/blueprint.ts` | 图文档类型、**取值域常量**（节点类型/trigger/op/group mode/edge kind/media type/hide direction）、分层工具（`effectiveLayers` / `nodeLayerKey` / `edgesOfLayer` / `normalizeLayersForSave`…）、**解析层校验** `parseBlueprintDocument`、`forUserSave`、`isObsoleteDefaultBlueprint` |
 | 前端配置 | `packages/config/src/blueprintOverlay.ts` | 浮层外观档位与相对定位**纯函数**（RFC 0007 明确落在 `packages/config`）：`resolveOverlayPosition` / `overlayOffsetToPx` / `overlayOffsetLabel` / `anchorAxis` / `resolveOverlaySize` / `overlaySizeLabel` + `OVERLAY_ANCHORS` / `TOKEN_LEVELS` / `OVERLAY_MIN_SIZE` 等常量 |
 | 前端配置 | `packages/config/src/blueprintDefault.ts` | **内置默认图** `DEFAULT_BLUEPRINT`（当前 v7）与 `makeEmptyBlueprint`；Rust 夹具的唯一来源 |
@@ -625,7 +625,7 @@ CREATE TABLE blueprint_templates (
 - **开发期自检脚本**（脱离宿主跑真实实现，`tools/`）：
   - `pnpm check:blueprint-runtime`：装载/旧默认升级落库/用户图不被覆盖/无默认时补种（3 项）。
   - `pnpm check:blueprint-delete`：软删除语义（关联节点保留、灰显原因、引擎不再产出动作）+ **一次划线批量删除**（多处一次原子生效、去重/越界下标忽略、旧"逐个调用只剩最后一次"的回归对照）（**14 项**）。
-  - `pnpm check:blueprint-nodes`：节点工厂**只追加自身**（不连带补链、不跨链路挂钩、**不产生任何边**）、**所有节点都可随意创建**（空图 12 种全部可创建；子类/标记缺父时照常创建且引用留空）、**新增绝不自动连线**（12 种类型 × 默认蓝图每一个已选中节点逐个新增后边集逐项不变；容器路径与规则路径各一条显式断言）、上级推导、**层归属（D51）**、**端口/边类型一致性（CONTAINMENT ↔ kindForEdge ↔ PORT_DEFS 三者对齐）**、**父子声明的双向对称性**（`children` 与 `parents` 逐项互指）、**浮层容器与外观/定位/尺寸**（D50 修订）、**层增删改名与禁止删最后一层（D55/D60）**、九宫格锚点与双模式偏移（比例/像素/负值/越界贴边/默认最小尺寸夹紧）、结构骨架与快照、**「一键整理」几何（起始节点位置不变 / 间距 ≥ 卡片高 + 余量 / 全图不重叠且避让孤立节点）**（**项数以脚本断言为准**，当前 **89** 项，其中最后一项调用 cargo 用 hp-core 真实校验器复核 `crates/hp-store/tests/blueprint_factory/` 下的全部夹具）。**夹具目录只由脚本产出**：脚本每次运行先清空该目录再写盘（避免陈旧夹具被目录扫描当成有效样本），且写盘时去掉内置默认标记 `default_version`（否则一旦被真实装载会被判为"旧库存默认"并整篇覆盖）。
+  - `pnpm check:blueprint-nodes`：节点工厂**只追加自身**（不连带补链、不跨链路挂钩、**不产生任何边**）、**所有节点都可随意创建**（空图 12 种全部可创建；子类/标记缺父时照常创建且引用留空）、**新增绝不自动连线**（12 种类型 × 默认蓝图每一个已选中节点逐个新增后边集逐项不变；容器路径与规则路径各一条显式断言）、上级推导、**层归属（D51）**、**端口/边类型一致性（CONTAINMENT ↔ kindForEdge ↔ PORT_DEFS 三者对齐）**、**父子声明的双向对称性**（`children` 与 `parents` 逐项互指）、**浮层容器与外观/定位/尺寸**（D50 修订）、**层增删改名与禁止删最后一层（D55/D60）**、九宫格锚点与双模式偏移（比例/像素/负值/越界贴边/默认最小尺寸夹紧）、结构骨架与快照、**「一键整理」几何（起始节点位置不变 / 间距 ≥ 卡片高 + 余量 / 全图不重叠且避让孤立节点）**（**项数以脚本断言为准**，当前 **89** 项，其中最后一项调用 cargo 用 hp-core 真实校验器复核 `crates/hp-repo/tests/blueprint_factory/` 下的全部夹具）。**夹具目录只由脚本产出**：脚本每次运行先清空该目录再写盘（避免陈旧夹具被目录扫描当成有效样本），且写盘时去掉内置默认标记 `default_version`（否则一旦被真实装载会被判为"旧库存默认"并整篇覆盖）。
   - `pnpm check:blueprint-connect`：**连线体验**（D107）——渲染端口推导（该侧有端口就**一定推得出**一个声明过的端口；**端口 id 与边类型不同名**的注册类型仍画得出；无端口的侧保持为空）、**可连端口清单**（21 组期望关系逐一命中；**默认蓝图 26 条既有边全部可重放**，即"能连出来 ⇔ 已经连上"同一判据；非法组合不命中；去重 / 自身 / 未注册类型不参与）、端点**四级回落**（端口实测 → 卡片+偏移 → 卡片边沿 → 世界坐标，**只有全空才 `null`**）、就近吸附与连线容差的纯函数行为，以及三条**源码锚点**（落点必须来自 `connectTargets`、端口表必须走 `portsOf`、样式里必须有绿圈与扩大命中区；断言前先剥注释）。（**23 项**）
 
   - `pnpm check:blueprint-geometry`：刀痕命中/移开取消/容差/视口中心换算（7 项）。

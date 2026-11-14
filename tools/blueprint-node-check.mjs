@@ -13,7 +13,7 @@
  * 显式指定的上级（或同层内既有父节点）推导；缺引用就**留空**（画布灰显「未接通」），
  * 既不新建节点补链，也不挂到别的既有节点上。连线一律由使用者从端口拖出来。
  * 本脚本验证这些行为，并用 hp-core 真实校验器复核产出的文档（夹具见
- * crates/hp-store/tests/blueprint_factory/）。
+ * crates/hp-repo/tests/blueprint_factory/）。
  *
  * 用法：pnpm check:blueprint-nodes
  */
@@ -24,7 +24,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const FIXTURE_DIR = join(ROOT, "crates", "hp-store", "tests", "blueprint_factory");
+const FIXTURE_DIR = join(ROOT, "crates", "hp-repo", "tests", "blueprint_factory");
 
 const factory = await import(
   pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/blueprintNodeFactory.ts"))
@@ -129,7 +129,7 @@ const check = (label, ok, detail = "") => {
 mkdirSync(FIXTURE_DIR, { recursive: true });
 // 夹具目录**只由本脚本产出**（RFC 0007「验证」：夹具由脚本写盘，两侧不手工维护）：
 // 先清掉旧文件，避免上一次运行留下、这一次不再生成的陈旧夹具被
-// `crates/hp-store/tests/m6_blueprint.rs` 的目录扫描当成有效夹具反复校验
+// `crates/hp-repo/tests/m6_blueprint.rs` 的目录扫描当成有效夹具反复校验
 // （历史残留过 4 份 v1 文档，即 D47/D51 之前的形状）。
 for (const stale of readdirSync(FIXTURE_DIR)) {
   if (stale.endsWith(".json")) {
@@ -1361,7 +1361,7 @@ console.log(`\n已写出 ${written.length} 个工厂夹具：${written.join(", "
 const CARGO_ARGS = [
   "test",
   "-p",
-  "hp-store",
+  "hp-repo",
   "--test",
   "m6_blueprint",
   "factory_built_docs_validate",

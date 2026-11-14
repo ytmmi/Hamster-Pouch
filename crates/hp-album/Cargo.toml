@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 hp-core = { path = "../hp-core" }
-hp-store = { path = "../hp-store" }
+hp-repo = { path = "../hp-repo" }
 # 排除判定的纯函数（D187）
 hp-pathrule = { path = "../hp-pathrule" }
 serde_json = "1"

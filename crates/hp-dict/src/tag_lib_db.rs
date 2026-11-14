@@ -18,10 +18,10 @@ use hp_core::{
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
-use crate::util::{require_nonempty, store_err};
+use hp_db::{require_nonempty, store_err};
 
 /// 四库迁移脚本（按版本升序）。
-const TAGLIB_MIGRATIONS: &[&str] = &[include_str!("../../migrations/dict_lib/0001_init.sql")];
+const TAGLIB_MIGRATIONS: &[&str] = &[include_str!("../migrations/dict_lib/0001_init.sql")];
 
 /// 单个四库文件句柄。
 ///
@@ -458,7 +458,7 @@ fn escape_like(s: &str) -> String {
 mod tests {
     use super::*;
     // 聚合层（跨层查询）与本文件的句柄同属四库域，测试一并覆盖。
-    use crate::dict::TagLibSet;
+    use crate::TagLibSet;
     use tempfile::tempdir;
 
     include!("tag_lib_db_tests.rs");

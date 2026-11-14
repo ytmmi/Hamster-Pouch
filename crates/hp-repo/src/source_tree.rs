@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-/// 目录树节点（hp-store 层无 serde，字段语义见模块文档）。
+/// 目录树节点（本层无 serde，字段语义见模块文档）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeNode {
     /// 目录名（仅目录名，不含路径）。

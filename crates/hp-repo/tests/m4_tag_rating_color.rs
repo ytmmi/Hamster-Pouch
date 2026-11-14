@@ -2,7 +2,7 @@
 //! 对应 docs/roadmap/phase-1-top-level-plan.md 的 M4 范围。
 
 use hp_core::{FileId, FileIndexRow, HpError, MediaType, SourceId, ThumbStatus, VerifyStatus};
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
     tempfile::tempdir()

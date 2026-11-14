@@ -7,7 +7,7 @@ use hp_core::{
     AddedBy, Album, AlbumKind, AlbumMediaType, AlbumSyncRule, FileIndexRow, HpError, HpResult,
     SourceId, SyncMode,
 };
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 use crate::media::resolve_media_type;
 use crate::mirror::{dir_filter_json, normalize_dir};

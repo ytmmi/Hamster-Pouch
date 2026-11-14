@@ -5,7 +5,7 @@
 //! 仅当自动关联已存在同一 tag 时写入撤销记录（D6 接口保留）。
 
 use hp_core::{AiTagUndo, AiTaggingOutput, FileId, HpResult, RepoId, TagId, TagSource};
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;

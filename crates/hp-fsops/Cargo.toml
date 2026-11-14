@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 hp-core = { path = "../hp-core" }
-hp-store = { path = "../hp-store" }
+hp-repo = { path = "../hp-repo" }
 serde_json = "1"
 
 [dev-dependencies]

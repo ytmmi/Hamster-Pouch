@@ -35,7 +35,7 @@ React 面板层
 Tauri 桥接层
   apps/desktop/src-tauri：参数校验、权限检查、命令/事件桥接
 Rust 核心层
-  crates/hp-core、hp-store、hp-scanner、hp-hash、hp-album、hp-fsops、hp-plugin-host、hp-ai、hp-media、hp-book
+  crates/hp-core、hp-db、hp-repo、hp-global、hp-dict、hp-scanner、hp-hash、hp-album、hp-fsops、hp-plugin-host、hp-ai、hp-media、hp-book
 数据/文件层
   全局配置库、仓库 SQLite、tag 词库 SQLite（RFC 0006）、媒体源真实文件、缓存/缩略图、插件包目录
 ```

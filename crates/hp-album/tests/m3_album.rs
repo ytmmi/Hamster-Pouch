@@ -6,7 +6,7 @@ use hp_core::{
     AddedBy, AlbumMediaType, FileId, FileIndexRow, HpError, MediaType, SourceId, SyncMode,
     ThumbStatus, VerifyStatus,
 };
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 fn temp_db(tag: &str) -> RepoDb {
     let path = tempfile::tempdir()

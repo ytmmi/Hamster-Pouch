@@ -18,7 +18,7 @@
 //! `layers` 缺失/为空时按**单层文档**兜底（层名取界面 `name`，无则「主界面」）。
 //!
 //! 本模块是纯数据与纯逻辑，不依赖 Tauri/SQLite/文件系统；存储与命令桥接分别在
-//! hp-store 与 src-tauri。
+//! hp-repo / hp-global 与 src-tauri。
 
 use serde::{Deserialize, Serialize};
 

@@ -18,7 +18,7 @@ use hp_core::{
 use hp_hash::{ContentHash, PerceptualHash};
 use hp_media::{ThumbnailCache, encode_palette_json, palette_is_locked};
 use hp_pathrule::is_excluded_path;
-use hp_store::{RepoDb, ScanPrepareRow};
+use hp_repo::{RepoDb, ScanPrepareRow};
 use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
 
@@ -811,7 +811,7 @@ fn default_marks_for(prep: &Prepared) -> Vec<FileMark> {
 ///
 /// 锁定是用户的判定权，重扫不得覆盖（D82）；锁定时干脆不算它，省下一次全尺寸重采样。
 /// 判定只依赖 `color_refs.color_json`，因此源扫描可以把这一列**随既有行一起**取回来
-/// （[`hp_store::ScanPrepareRow::color_json`]），不必再逐图查一次；单文件重分析拿不到
+/// （[`hp_repo::ScanPrepareRow::color_json`]），不必再逐图查一次；单文件重分析拿不到
 /// 批量快照，就自己查一行（`rescan_file`）。两种路径共用这里，口径不会分叉。
 /// 缺行或 JSON 解析失败一律按"未锁定"处理（`hp_media::palette_is_locked` 的口径）。
 fn palette_locked(color_json: Option<&str>) -> bool {

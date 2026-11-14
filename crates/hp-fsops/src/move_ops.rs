@@ -1,7 +1,7 @@
 //! 源间剪切/移动实现（RFC 0001：路径变化但内容哈希一致，保留 id 与解释数据）。
 
 use hp_core::{FileId, FileIndexRow, HpError, HpResult, Source};
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 use crate::util;
 

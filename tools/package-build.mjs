@@ -614,7 +614,7 @@ if (dataStat?.isDirectory()) {
  * 一体校验（D155）：随包「演示布局」与内置默认蓝图必须**同源**。
  *
  * 两者分处两侧（布局在全局库 `layout_presets.layers_json`，蓝图在代码
- * `packages/config/src/blueprintDefault.ts` → 夹具 `crates/hp-store/tests/default_blueprint.json`），
+ * `packages/config/src/blueprintDefault.ts` → 夹具 `crates/hp-repo/tests/default_blueprint.json`），
  * 任何一侧单独改动都会让全新安装出现「布局有面板、画布无节点」或反之。
  * 这里逐层比对：层集合必须相等；每层布局挂载的面板集合必须与蓝图该层的面板控件集合相等。
  *
@@ -633,7 +633,7 @@ async function verifyDemoLayoutMatchesDefaultBlueprint(gdbPath) {
   ).trim();
   if (!rows) return;
 
-  const fixturePath = join(ROOT, "crates", "hp-store", "tests", "default_blueprint.json");
+  const fixturePath = join(ROOT, "crates", "hp-repo", "tests", "default_blueprint.json");
   const graph = JSON.parse(await readFile(fixturePath, "utf8"));
   const preset = JSON.parse(rows);
   const problems = compareBlueprintWithLayout(graph, preset);

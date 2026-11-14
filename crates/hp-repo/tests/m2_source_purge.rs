@@ -7,7 +7,7 @@
 use hp_core::{
     AlbumKind, FileId, FileIndexRow, MediaType, SourceId, SyncMode, ThumbStatus, VerifyStatus,
 };
-use hp_store::{PurgePhase, RepoDb};
+use hp_repo::{PurgePhase, RepoDb};
 use rusqlite::params;
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
@@ -263,7 +263,7 @@ fn complete_unmount_is_atomic_when_cancelled() {
         .expect("取消不应报错");
     assert_eq!(
         removed.counts,
-        hp_store::SourceDataCounts::default(),
+        hp_repo::SourceDataCounts::default(),
         "取消应回滚，不产生任何删除"
     );
     assert!(

@@ -1,6 +1,6 @@
 //! 子目录排除（D149）在相册侧的不变量。
 //!
-//! 分页取数（`RepoDb::query_album_members_page`）的过滤由 `crates/hp-store/tests/m2_source_exclusion.rs`
+//! 分页取数（`RepoDb::query_album_members_page`）的过滤由 `crates/hp-repo/tests/m2_source_exclusion.rs`
 //! 覆盖；本文件只管**全量可见成员**这条路（`AlbumService::visible_members` → `media::visible_members`）：
 //! 它是逐行读索引再筛的，SQL 侧的排除谓词帮不到它，所以必须自己再判一次——否则会出现
 //! 「源面板里没有了、相册里却还在」。
@@ -9,7 +9,7 @@ use hp_album::AlbumService;
 use hp_core::{
     AddedBy, AlbumKind, FileId, FileIndexRow, MediaType, SourceId, ThumbStatus, VerifyStatus,
 };
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 fn temp_db(tag: &str) -> RepoDb {
     let path = tempfile::tempdir()

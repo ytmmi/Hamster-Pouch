@@ -409,7 +409,7 @@ pub(crate) fn album_members(
     let outcome = (|| -> HpResult<AlbumMembersPage> {
         let parsed_cursor = match cursor.as_deref().map(str::trim) {
             None | Some("") => None,
-            Some(raw) => Some(hp_store::AlbumMemberCursor::decode(raw)?),
+            Some(raw) => Some(hp_repo::AlbumMemberCursor::decode(raw)?),
         };
         let guard = lock_repo(&state)?;
         let db = open_repo(&guard)?;

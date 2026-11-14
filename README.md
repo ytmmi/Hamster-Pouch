@@ -83,7 +83,7 @@ pnpm app:build    # 编译并打出便携发布包
 | crate | 职责 |
 | --- | --- |
 | `hp-core` | 领域模型（仓库、媒体源、相册、图像、标签、评分），无外部依赖 |
-| `hp-store` | SQLite 访问、迁移与事务 |
+| `hp-db` / `hp-repo` / `hp-global` / `hp-dict` | SQLite 连接骨架 / 仓库库 / 全局配置库 / tag 词库 |
 | `hp-scanner` | 媒体源扫描、变更检测、类型判定 |
 | `hp-hash` | BLAKE3 内容哈希与 dHash 感知哈希 |
 | `hp-album` | 相册同步规则与成员维护 |

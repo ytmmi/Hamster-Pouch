@@ -8,8 +8,8 @@ use std::path::Path;
 
 use hp_core::{MediaType, Source, ThumbStatus};
 use hp_media::ThumbnailCache;
+use hp_repo::RepoDb;
 use hp_scanner::{ScanOptions, ScanProgress, Scanner, purge_excluded_derivatives};
-use hp_store::RepoDb;
 
 /// 生成一张确定性的彩色 PNG：同样的 `seed` 必然产出同样的字节（测共享哈希用）。
 fn make_png(path: &Path, seed: u8) {

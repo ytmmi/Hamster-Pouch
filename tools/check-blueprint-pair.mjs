@@ -4,7 +4,7 @@
  *
  * 比对两组对：
  *   - **代码侧**（CI 也跑）：`packages/config/src/layoutDefault.ts` 的 `DEFAULT_LAYOUT_LAYERS`
- *     ←→ `crates/hp-store/tests/default_blueprint.json`（后者由 `generate:blueprint-fixture`
+ *     ←→ `crates/hp-repo/tests/default_blueprint.json`（后者由 `generate:blueprint-fixture`
  *     从 `blueprintDefault.ts` 生成）。这是 D158 之后"全新安装开箱即一体"的那一对：
  *     出厂播种用的就是这份布局，蓝图补种用的是那份蓝图。
  *   - **本机演示布局**（仅维护机）：全局库 `layout_presets` 里 `layout.default` 指向的那一行
@@ -25,7 +25,7 @@ import { compareBlueprintWithLayout } from "./blueprint-pair.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const codeLayoutPath = join(root, "packages", "config", "src", "layoutDefault.ts");
-const fixturePath = join(root, "crates", "hp-store", "tests", "default_blueprint.json");
+const fixturePath = join(root, "crates", "hp-repo", "tests", "default_blueprint.json");
 const defaultDb = join(
   root,
   "apps",

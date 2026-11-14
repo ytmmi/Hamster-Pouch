@@ -5,7 +5,7 @@ use hp_core::{
     AddedBy, AlbumKind, AlbumMediaType, AlbumSyncRule, AlbumSyncState, FileId, FileIndexRow,
     MediaType, SourceId, SyncMode, ThumbStatus, VerifyStatus,
 };
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
     tempfile::tempdir()

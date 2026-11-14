@@ -2,7 +2,7 @@
 
 状态：**已实施（构建完成）**。已确认方向：四个 tag 库统一为「**库 1 概念总库 + 库 2/3/4 功能补充层**」结构，库 1 的实体锚点由「原始生态 tag」改为「**概念**」。**tag 库不再作为应用内置数据交付**：应用只内置轻量基底，完整词库（含全量 artist）改为**按需安装的扩展包**，以减小应用体积。库数据在逻辑上仍是**应用级共享**的只读参考数据（不随仓库隔离）。**扩展包按生态来源细分为多个包**（见 D36.2）；承载沿用代码已实现的 `static-data` 运行形态（见 D36.1 结案）。
 
-> **实施记录（本次构建）**：权威 DDL 落在 `crates/hp-store/migrations/dict_lib/0001_init.sql`；管线为 `tools/tagdict/build_tag_lib.py`（概念化全量）、`build_base_lib.py`（基底裁剪 + 库 2 种子）、`package_extensions.py`（细分打包）；验证为 `verify_tag_lib.py`（全绿）。Rust 侧新增 `hp-core/src/tag_lib.rs`（四库领域类型）与 `hp-store/src/dict/`（`tag_lib_db.rs` 单库句柄 + `tag_lib_write.rs` 用户库写入 + `tag_lib_set.rs` 三层聚合查询层 + `tag_lib_merge.rs` 重复概念归并；2026-09 按 1200 行规则从单个 `tag_lib_db.rs` 拆开）。详见下文「实施结果」。
+> **实施记录（本次构建）**：权威 DDL 落在 `crates/hp-dict/migrations/dict_lib/0001_init.sql`；管线为 `tools/tagdict/build_tag_lib.py`（概念化全量）、`build_base_lib.py`（基底裁剪 + 库 2 种子）、`package_extensions.py`（细分打包）；验证为 `verify_tag_lib.py`（全绿）。Rust 侧新增 `hp-core/src/tag_lib.rs`（四库领域类型）与 `hp-dict/src/`（`tag_lib_db.rs` 单库句柄 + `tag_lib_write.rs` 用户库写入 + `tag_lib_set.rs` 三层聚合查询层 + `tag_lib_merge.rs` 重复概念归并；2026-09 按 1200 行规则从单个 `tag_lib_db.rs` 拆开）。详见下文「实施结果」。
 
 ## 背景
 
@@ -92,7 +92,7 @@ VOCALOID                          艺术家：人名（人类创作）/ 绘画�
   2. **扩展词库包**：完整四库数据（约 150–250MB，含 artist 152,097 条），**按需安装／更新／卸载**。承载方式与安装机制**待定**（见 D36.1）。
   3. **用户数据层**：用户自定义概念与关系写入**可写的用户库**（`lib_meta` 标记 `source=user`），与扩展包物理分离，保证包更新与卸载不丢用户数据。
 - **查询层**对「内置基底 + 已装配的扩展包 + 用户库」做统一视图，调用方不感知数据来自哪一层。**此聚合层不依赖插件系统的最终形态，可先行落地。**
-- RFC 0006 的 `tag_dict.sqlite` 保留作对照与回退；迁移落在 `crates/hp-store/migrations/dict_lib/`（`dict/` 既有迁移 forward-only，不修改）。
+- RFC 0006 的 `tag_dict.sqlite` 保留作对照与回退；迁移落在 `crates/hp-dict/migrations/dict_lib/`（`dict/` 既有迁移 forward-only，不修改）。
 
 ### D36.1 与插件系统的衔接：**已结案（构建时定案）**
 
@@ -132,7 +132,7 @@ VOCALOID                          艺术家：人名（人类创作）/ 绘画�
   - **关系重写**：库 2 关系的两端 ID 重写为代表 ID，自环丢弃、重复边去重（多个包各自贡献同一层级边时合并）。
   - **无标准名的概念不参与归并**（按独立概念处理，避免误合）。
 - **作用域**：归并只作用于**查询视图**，不改动任何数据包文件（数据包是只读资产，D36）。
-- **实现**：`crates/hp-store/src/dict/tag_lib_merge.rs`（`MergeIndex` / `ConceptKey` / `MergedConcept`）；`TagLibSet::refresh_merge()` 在装配完全部扩展包后构建一次，之后 `find` / `suggest` / `merged_concept` / `relations_of` / `relation_nodes` 自动走归并。
+- **实现**：`crates/hp-dict/src/tag_lib_merge.rs`（`MergeIndex` / `ConceptKey` / `MergedConcept`）；`TagLibSet::refresh_merge()` 在装配完全部扩展包后构建一次，之后 `find` / `suggest` / `merged_concept` / `relations_of` / `relation_nodes` 自动走归并。
 - **实测（pixiv + danbooru 两包）**：归并后 **304,572** 个概念身份，识别并合并 **2,272** 条 ID 不同的重复概念（另有 19,624 条由 `tag_id` 去重覆盖）。装配与建索引耗时约 **5 秒**（一次全表扫描/层，不逐概念查库）。
   - **四层全装（基底 + pixiv + danbooru + tagrel-games）实测 304,575**：差值 3 来自基底库独有的 `manual` 种子概念（扩展包中不存在），非口径变化。
 - **性能要求（实现约束）**：索引构建**必须**每层一次全表扫描（`all_concepts_brief` + `all_names_grouped`）。逐概念调用 `concept()` 会为每个概念跑 4 条子查询，30 万概念实测耗时 **149 秒**（优化后 4.9 秒）。
@@ -228,7 +228,7 @@ CREATE TABLE lib_meta (
 
 ## 数据管线改造（`tools/tagdict/`）——**已实施**
 
-管线脚本（均以 `crates/hp-store/migrations/dict_lib/0001_init.sql` 为**唯一 DDL 权威源**，避免 schema 双写漂移）：
+管线脚本（均以 `crates/hp-dict/migrations/dict_lib/0001_init.sql` 为**唯一 DDL 权威源**，避免 schema 双写漂移）：
 
 | 脚本 | 职责 |
 | --- | --- |

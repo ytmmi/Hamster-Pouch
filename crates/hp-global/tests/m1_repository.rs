@@ -3,7 +3,8 @@
 
 use std::path::PathBuf;
 
-use hp_store::{GlobalDb, RepoDb};
+use hp_global::GlobalDb;
+use hp_repo::RepoDb;
 
 fn temp_global_path(tag: &str) -> PathBuf {
     tempfile::tempdir()

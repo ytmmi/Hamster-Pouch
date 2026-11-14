@@ -6,9 +6,9 @@
 use std::path::PathBuf;
 
 use hp_core::LibLayer;
-use hp_store::{TagLibDb, TagLibSet};
+use hp_dict::{TagLibDb, TagLibSet};
 
-/// 定位仓库内产物（`CARGO_MANIFEST_DIR` = crates/hp-store）。
+/// 定位仓库内产物（`CARGO_MANIFEST_DIR` = crates/hp-dict）。
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()

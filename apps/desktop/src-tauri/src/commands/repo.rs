@@ -7,7 +7,7 @@ use hp_core::{
     scoped_storage_key, validate_setting_value,
 };
 use hp_plugin_host::PluginHost;
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 use serde::Serialize;
 use tauri::State;
 

@@ -12,7 +12,7 @@
 
 - 命令请求/响应、事件载荷、领域视图模型（文件索引行、相册、tag、评分、色彩参考）的源类型放在 Rust 侧。
 - 推荐方案：在 `hp-core` 中定义纯数据 DTO（不引入 Tauri/SQLite/fs 依赖），或建立独立 `crates/hp-dto` 专门承载跨层 DTO。
-- 推荐采用 `hp-dto` 独立 crate：既能保持 `hp-core` 纯净，又能让 `hp-store`、`hp-scanner`、`hp-album` 等依赖同一套稳定 DTO。最终是否单独成 crate 属于实现细节，不影响"由 Rust 类型生成"的架构决策。
+- 推荐采用 `hp-dto` 独立 crate：既能保持 `hp-core` 纯净，又能让 `hp-repo`、`hp-scanner`、`hp-album` 等依赖同一套稳定 DTO。最终是否单独成 crate 属于实现细节，不影响"由 Rust 类型生成"的架构决策。
 
 ## 3. 类型清单
 

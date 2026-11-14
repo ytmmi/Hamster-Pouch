@@ -5,7 +5,7 @@ use std::path::Path;
 use hp_core::{
     AiProviderConfigId, AiTaggingInput, AiTaggingOutput, FileId, HpError, HpResult, MediaType,
 };
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 use crate::provider::AiTaggingProvider;
 use crate::task::AiTaskQueue;

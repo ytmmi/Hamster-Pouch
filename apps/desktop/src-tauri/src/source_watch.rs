@@ -29,10 +29,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use hp_dto::{FileChangedPayload, FileCreatedPayload, FileMissingPayload, FileRestoredPayload};
+use hp_repo::RepoDb;
 use hp_scanner::{
     KnownFile, SourceWatcher, WatchDecision, decide, is_relevant_event, relative_key,
 };
-use hp_store::RepoDb;
 
 use crate::commands::shared::{EmitHp, diag_log};
 

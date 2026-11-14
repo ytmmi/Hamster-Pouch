@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use hp_core::TagRelationKind;
-use hp_store::RepoDb;
+use hp_repo::RepoDb;
 
 const REPO: &str = "repo-1";
 
