@@ -54,6 +54,7 @@
     "check:db-boundary": "node tools/check-db-boundary.mjs",
     "check:task-shell": "node tools/check-task-shell.mjs",
     "check:stores": "node tools/check-stores.mjs",
+    "check:media-url": "node tools/check-media-url.mjs",
     "check:hidden-console": "node tools/check-hidden-console.mjs",
     "check:bundled-runtime": "node tools/check-bundled-runtime.mjs",
     "check:event-names": "node tools/check-event-names.mjs",

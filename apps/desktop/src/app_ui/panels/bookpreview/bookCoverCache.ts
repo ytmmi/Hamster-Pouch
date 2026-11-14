@@ -16,10 +16,10 @@
  * （图片格式不认、文件被占用），乐观更新会让失败时界面与库不一致。
  */
 
-import { convertFileSrc } from "@tauri-apps/api/core";
 
 import { createStore } from "../../core/createStore";
 import * as api from "../../shared/api";
+import { assetUrl } from "../../shared/assetUrl";
 
 /** 一个文件的封面覆盖（已转成可直接渲染的形式）。 */
 export interface BookCoverOverride {
@@ -103,7 +103,7 @@ export function loadBookCovers(repoId: string, fileIds: string[]): Promise<void>
         // 颜色原样使用（`#rrggbb` 本身就是合法 CSS 颜色）。
         map.set(item.file_id, {
           kind: item.kind === "image" ? "image" : "color",
-          value: item.kind === "image" ? convertFileSrc(item.value) : item.value,
+          value: item.kind === "image" ? assetUrl(item.value) : item.value,
         });
       }
       coverCache.set(repoId, map);

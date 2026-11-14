@@ -28,7 +28,6 @@
  */
 
 import { Fragment, useEffect, useMemo, useState, type JSX } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 
 import {
   resolveDateFormat,
@@ -39,6 +38,7 @@ import {
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
+import { resolveSourceUrl } from "../shared/mediaUrl";
 import { useApp } from "../core/AppContext";
 import type { PanelRenderCtx } from "../core/panelRegistry";
 import type { Translate } from "../i18n";
@@ -187,9 +187,8 @@ export function MetadataPanel({ api: panelApi }: MetadataPanelProps = {}): JSX.E
     let release: (() => void) | undefined;
     void (async () => {
       try {
-        const path = await api.filePath({ repoId, fileId: file.id });
+        const url = await resolveSourceUrl(repoId, file.id);
         if (cancelled) return;
-        const url = convertFileSrc(path);
         if (type === "image") {
           const image = new Image();
           image.onload = () => {

@@ -39,10 +39,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
+import { assetUrlOrNull } from "../shared/assetUrl";
+import { resolveSourceUrl } from "../shared/mediaUrl";
 import { usePanelSettingValue } from "../shared/settingValue";
 import { publishSettingChanged } from "../core/settingChangeStore";
 import { useApp } from "../core/AppContext";
@@ -212,14 +213,13 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
     // 于是切歌后有源、有进度、就是不出声。
     loadedFileIdRef.current = fileId;
     try {
-      const path = await api.filePath({ repoId: ctx.repoId, fileId });
+      const nextUrl = await resolveSourceUrl(ctx.repoId, fileId);
       autoPlayRef.current = autoplay;
       setPositionMs(0);
       setDurationMs(0);
       // 切歌先落"暂停"这一态：图标由元素事件驱动，但换源到真正出声之间有一段
       // 异步间隙，不先落下来的话旧曲目的"||"会一直挂着（用户真机反馈的现象）。
       setPlaying(false);
-      const nextUrl = convertFileSrc(path);
       if (nextUrl === sourceUrlRef.current && audioRef.current) {
         // 同一首再播：源没换，直接回到开头（换源那次交给 `onLoadedMetadata`）。
         autoPlayRef.current = false;
@@ -328,11 +328,11 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
     let cancelled = false;
     void (async () => {
       try {
-        const path = await api.filePath({ repoId, fileId: file.id });
+        const url = await resolveSourceUrl(repoId, file.id);
         if (cancelled) return;
         autoPlayRef.current = false;
         loadedFileIdRef.current = file.id;
-        setSourceUrl(convertFileSrc(path));
+        setSourceUrl(url);
         setPositionMs(0);
         setDurationMs(0);
       } catch {
@@ -359,7 +359,7 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
         const result = await api.playerMedia({ repoId, fileId: file.id });
         if (mediaGenerationRef.current !== generation) return;
         setMedia({
-          coverUrl: result.cover_path ? convertFileSrc(result.cover_path) : null,
+          coverUrl: assetUrlOrNull(result.cover_path),
           lyrics: result.lyrics_text ? parseLrc(result.lyrics_text) : null,
           hazeColors: result.haze_colors ?? [],
           tagTitle: result.title ?? null,

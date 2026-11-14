@@ -38,8 +38,8 @@
 import { memo, useState, createElement, type JSX } from "react";
 import type { ReactNode } from "react";
 
-import { convertFileSrc } from "@tauri-apps/api/core";
 
+import { assetUrl } from "../../shared/assetUrl";
 import type { BookBlockItem, BookSpanItem } from "../../shared/types";
 
 /**
@@ -56,7 +56,7 @@ function BookImage({ path, fallback }: { path: string; fallback: string }): JSX.
   return (
     <img
       className="vr-image"
-      src={convertFileSrc(path)}
+      src={assetUrl(path)}
       alt=""
       loading="lazy"
       onError={() => setFailed(true)}

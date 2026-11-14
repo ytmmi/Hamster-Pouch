@@ -259,6 +259,14 @@ apps/desktop/src/app_ui/
                       #   ratioCache（`fileId → 宽/高` 的唯一缓存与通知口，D206：媒体预览的平铺/自适应/
                       #   瀑布流与图像查看器的胶片栏**共用同一份**——同一张图不再在两个面板各解码一次；
                       #   写入只有 setCachedRatio，批量播种静默，通知不合并（消费方各自合帧））
+     assetUrl.ts            # `convertFileSrc` 的**唯一**调用点（D208）：assetUrl / assetUrlOrNull /
+                           #   assetUrlOrEmpty 三种空值口径；面板不再直接 import convertFileSrc
+     urlCache.ts           # 结果缓存 + in-flight 去重的骨架（D208）：createUrlResolver(keyOf, load)
+                           #   给出 resolve / clear；load 抛错**不写缓存**（下次重试），在途返回同一个 Promise
+     mediaUrl.ts           # 媒体显示 URL 的**唯一**解析口（D208）：resolveSourceUrl（原图 / 音视频）与
+                           #   resolveMediaUrlOutcome（图片需要内嵌预览时走 preview.get，其余走原图；
+                           #   返回 `{ url, error }`）——取代原 shared/imageUrl.ts；thumbUrl / previewUrl /
+                           #   bookMetaCache 共用 urlCache 骨架，转换一律 assetUrl*
     interfacePages.ts     # 垂直「界面页」的**纯逻辑**（D124 / D124-R3 / D124-R4 / D124-R5）：页面组模型 + 容错解析（任何
                           #   脏数据都落回可用状态，不抛异常）+ 序列化 + 增删改（删组无损，界面回到
                           #   未分组）；另有**导航顺序** `order`（orderedPages 收敛：order 认识的排前面、
@@ -329,7 +337,7 @@ apps/desktop/src/app_ui/
                       #   换图：`ShownImage{url,natural,fileId}` 单一状态 + 每 URL 一个新 `<img>` 元素
                       #   （key+decoding=sync）；解码期间保留上一张画面——首帧不可能"半新半旧"（0026/0027/0028）
                       #   预加载：取哪些邻居在 viewerPreload（前台才取 / 大图不解码 / 同张只预热一次），
-                      #   取图策略与缓存收敛在 shared/imageUrl.ts（HEIC 预览与当前图共用一份）
+                      #   取图策略与缓存收敛在 shared/mediaUrl.ts（HEIC 预览与当前图共用一份；D208）
     ViewerPanel.tsx   # 查看器（大图/视频/音频预览 + **"书"正文阅读**；**顶部基础信息栏**
                       #   由面板设置 infoBarEnabled 控制）
                       #   **音频（2026-10-17 / D115）**：`<audio controls>` + **后端波形图**

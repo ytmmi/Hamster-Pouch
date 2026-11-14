@@ -2,10 +2,14 @@
  * 缩略图 URL 解析（媒体预览面板与图像查看器**共用**）。
  *
  * 后端 `thumb.get` 按需生成并缓存缩略图；前端只负责把返回的绝对路径转成
- * `convertFileSrc` 可用的 asset URL。这里做两件事，两者都是"每张图每档只做一次"：
+ * asset URL（`./assetUrl`，全仓唯一一处 `convertFileSrc`）。这里做两件事，两者都是
+ * "每张图每档只做一次"：
  *
  * 1. **结果缓存**（`fileId@档 ← url | null`）：面板重建或胶片栏来回滚动时不重复请求；
  * 2. **in-flight 去重**（同一个键 → Promise）：同一张图被多个单元同时请求时只发一次。
+ *
+ * 两件事都由 `./urlCache` 的骨架负责（D208）——本文件只提供「键怎么拼」与「失败怎么
+ * 表达」（缩略图不是关键路径：失败一律降级成 `null`，并且会被缓存，不反复重试）。
  *
  * **缓存键带分辨率档**（缺陷 0046）：媒体预览的"图片宽度"可以放大，缩略图随之
  * 请求更高一档；只按 fileId 缓存会让放大后的单元一直复用第一档的糊图。
@@ -15,15 +19,20 @@
  * （`file.reanalyze`）刷新后端缓存。这与媒体预览面板既有行为一致。
  */
 
-import { convertFileSrc } from "@tauri-apps/api/core";
-
 import * as api from "./api";
+import { assetUrlOrNull } from "./assetUrl";
 import { THUMB_DIM_BASE, thumbBucket, thumbCacheKey } from "./thumbSize";
+import { createUrlResolver } from "./urlCache";
 
-/** 已解析的缩略图 URL；`null` = 后端明确不可用（无缩略图）。 */
-const thumbUrlCache = new Map<string, string | null>();
-/** 正在进行的请求（按"fileId@档"去重）。 */
-const thumbPromiseCache = new Map<string, Promise<string | null>>();
+/** 键是「fileId@档」，结果是换好的 asset URL；`null` = 后端明确不可用（无缩略图）。 */
+const thumbUrls = createUrlResolver<[string, string, number], string | null>(
+  (_repoId, fileId, size) => thumbCacheKey(fileId, thumbBucket(size)),
+  (repoId, fileId, size) =>
+    api
+      .thumbGet({ repoId, fileId, size: thumbBucket(size) })
+      .then((path): string | null => assetUrlOrNull(path))
+      .catch((): null => null),
+);
 
 /**
  * 解析文件缩略图 URL。
@@ -40,36 +49,10 @@ export function resolveThumbUrl(
   fileId: string,
   size: number = THUMB_DIM_BASE,
 ): Promise<string | null> {
-  const bucket = thumbBucket(size);
-  const key = thumbCacheKey(fileId, bucket);
-  const cached = thumbUrlCache.get(key);
-  if (cached !== undefined) {
-    return Promise.resolve(cached);
-  }
-  const inflight = thumbPromiseCache.get(key);
-  if (inflight) {
-    return inflight;
-  }
-  const promise = api
-    .thumbGet({ repoId, fileId, size: bucket })
-    .then((path): string | null => {
-      const url = path ? convertFileSrc(path) : null;
-      thumbUrlCache.set(key, url);
-      return url;
-    })
-    .catch((): null => {
-      thumbUrlCache.set(key, null);
-      return null;
-    })
-    .finally(() => {
-      thumbPromiseCache.delete(key);
-    });
-  thumbPromiseCache.set(key, promise);
-  return promise;
+  return thumbUrls.resolve(repoId, fileId, size);
 }
 
 /** 清空缓存（仓库切换后旧 fileId 恒失效；目前仅供诊断与测试使用）。 */
 export function clearThumbUrlCache(): void {
-  thumbUrlCache.clear();
-  thumbPromiseCache.clear();
+  thumbUrls.clear();
 }

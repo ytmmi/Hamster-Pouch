@@ -720,8 +720,9 @@ check(
 check(
   "只为需要内嵌封面的书取元数据（txt/md 一个 IPC 都不发），并做结果缓存与 in-flight 去重",
   /if\s*\(!repoId\s*\|\|\s*!wants\)/.test(bookFamilySrc) &&
-    /inflight/.test(bookFamilySrc) &&
-    /const cached = metaCache\.get\(fileId\)/.test(bookFamilySrc),
+    // 缓存 + 在途去重由共享骨架承担（D208）：本文件只声明键与降级口径。
+    bookFamilySrc.includes("const metas = createUrlResolver<[string, string], BookDisplayMeta>(") &&
+    bookFamilySrc.includes("return metas.resolve(repoId, fileId);"),
 );
 
 // 桥接层：命令形态、坏书降级、封面落盘路径。

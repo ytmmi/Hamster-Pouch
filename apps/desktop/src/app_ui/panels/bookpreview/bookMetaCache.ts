@@ -15,9 +15,10 @@
  * ——与缩略图缓存同口径（见 `thumbUrl.ts` 的说明）。
  */
 
-import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../../shared/api";
+import { assetUrlOrNull } from "../../shared/assetUrl";
+import { createUrlResolver } from "../../shared/urlCache";
 
 /** 面板只需用到的三样（封面已转成 asset URL）。 */
 export interface BookDisplayMeta {
@@ -30,42 +31,33 @@ export interface BookDisplayMeta {
 /** 无元数据（`txt` / 解析失败）时的统一取值。 */
 const EMPTY_META: BookDisplayMeta = { author: null, description: null, coverUrl: null };
 
-const metaCache = new Map<string, BookDisplayMeta>();
-const inflight = new Map<string, Promise<BookDisplayMeta>>();
+/**
+ * 键是 `repoId/fileId`；读不到元数据时**降级为 `EMPTY_META` 并缓存**——一本书没有
+ * 元数据不该让面板进错误态（按文字封面渲染），也不必每次重试。
+ *
+ * 「命中 / 合并在途 / 落缓存 / 清空」由 `../../shared/urlCache` 的骨架负责（D208）。
+ */
+const metas = createUrlResolver<[string, string], BookDisplayMeta>(
+  (repoId, fileId) => `${repoId}/${fileId}`,
+  (repoId, fileId) =>
+    api
+      .bookMeta({ repoId, fileId })
+      .then(
+        (result): BookDisplayMeta => ({
+          author: result.author,
+          description: result.description,
+          coverUrl: assetUrlOrNull(result.cover_path),
+        }),
+      )
+      .catch((): BookDisplayMeta => EMPTY_META),
+);
 
 /** 读取一本书的元数据（带缓存与去重）；任何失败都降级为"没有元数据"。 */
 export function loadBookMeta(repoId: string, fileId: string): Promise<BookDisplayMeta> {
-  const cached = metaCache.get(fileId);
-  if (cached) return Promise.resolve(cached);
-  const pending = inflight.get(fileId);
-  if (pending) return pending;
-
-  const promise = api
-    .bookMeta({ repoId, fileId })
-    .then((result): BookDisplayMeta => {
-      const meta: BookDisplayMeta = {
-        author: result.author,
-        description: result.description,
-        coverUrl: result.cover_path ? convertFileSrc(result.cover_path) : null,
-      };
-      metaCache.set(fileId, meta);
-      return meta;
-    })
-    .catch((): BookDisplayMeta => {
-      // 一本书的元数据读不到不该让面板进错误态：按"没有元数据"渲染（文字封面）。
-      metaCache.set(fileId, EMPTY_META);
-      return EMPTY_META;
-    })
-    .finally(() => {
-      inflight.delete(fileId);
-    });
-
-  inflight.set(fileId, promise);
-  return promise;
+  return metas.resolve(repoId, fileId);
 }
 
 /** 清空缓存（仓库切换后旧 fileId 恒失效；目前仅供诊断与测试使用）。 */
 export function clearBookMetaCache(): void {
-  metaCache.clear();
-  inflight.clear();
+  metas.clear();
 }

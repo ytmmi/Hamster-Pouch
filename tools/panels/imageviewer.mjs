@@ -697,10 +697,9 @@ const preloadHookSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/useViewerPreload.ts"),
   "utf8",
 );
-const imageUrlSrc = readFileSync(
-  join(ROOT, "apps/desktop/src/app_ui/shared/imageUrl.ts"),
-  "utf8",
-);
+// 显示 URL 的策略与缓存只在 `shared/mediaUrl.ts`（D208 把图像专用的 imageUrl 扩成通用入口）。
+const mediaUrlSrc = readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/mediaUrl.ts"), "utf8");
+const urlCacheSrc = readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/urlCache.ts"), "utf8");
 
 check(
   "预加载取相邻项：以当前项为中心前后各 N 张，近的优先、同距离时向前优先",
@@ -772,20 +771,22 @@ check(
   "预热不因 effect 清理而丢弃（登记表说做过、就必须真的做，否则永不重试）",
   !/let cancelled = false;/.test(preloadHookSrc) &&
     !/if \(cancelled \|\| !url\) return;/.test(preloadHookSrc) &&
-    /void resolveImageUrl\(repoId, file\.id, file\.relative_path\)\.then\(\(url\) => \{\s*if \(!url\) return;/.test(
+    /void resolveMediaUrl\(repoId, file\.id, file\.relative_path\)\.then\(\(url\) => \{\s*if \(!url\) return;/.test(
       preloadHookSrc,
     ),
 );
 // 预加载必须走与当前图**同一份** URL 缓存，否则 HEIC 会被生成两次。
 check(
   "预加载与当前图共用同一份 URL 缓存与去重（否则 HEIC 全分辨率生成两次）",
-  /resolveImageUrl\(repoId, file\.id, file\.relative_path\)/.test(preloadHookSrc) &&
-    /resolveImageUrlOutcome\(repoId, file\.id, file\.relative_path\)/.test(imageViewerPanelSrc) &&
-    /imageUrlCache/.test(imageUrlSrc) &&
-    /imagePromiseCache/.test(imageUrlSrc) &&
+  /resolveMediaUrl\(repoId, file\.id, file\.relative_path\)/.test(preloadHookSrc) &&
+    /resolveMediaUrlOutcome\(repoId, file\.id, file\.relative_path\)/.test(imageViewerPanelSrc) &&
+    // 缓存与在途去重的骨架只有一份（shared/urlCache.ts）。
+    /const mediaUrls = createUrlResolver/.test(mediaUrlSrc) &&
+    /const settled = new Map<string, T>\(\)/.test(urlCacheSrc) &&
+    /const inflight = new Map<string, Promise<T>>\(\)/.test(urlCacheSrc) &&
     // HEIC/HEIF 复用 previewUrl 的缓存（两个入口命中同一份）。
-    /resolvePreviewUrl\(repoId, fileId\)/.test(imageUrlSrc) &&
-    /needsPreview\(relativePath\)/.test(imageUrlSrc),
+    /resolvePreviewUrl\(repoId, fileId\)/.test(mediaUrlSrc) &&
+    /needsPreview\(relativePath\)/.test(mediaUrlSrc),
 );
 check(
   "取图策略收敛到一处：面板不再自己写 needsPreview ? previewGet : filePath 分支",
@@ -890,10 +891,22 @@ check(
 // `needsPreview` 只回答"Chromium 画不了这张图"，对视频/音频无意义：
 // `preview.get` 对非图片返回 null，拿它判视频会把能播的视频变成"不可用"。
 check(
-  "查看器只在图片分支消费 needsPreview（否则视频/音频会被误送去 preview.get）",
-  /selected\.media_type === "image" && needsPreview\(selected\.relative_path\)/.test(
-    readFileSync(join(ROOT, "apps/desktop/src/app_ui/panels/ViewerPanel.tsx"), "utf8"),
-  ),
+  "查看器把媒体类型交给共享模块判定（否则视频/音频会被误送去 preview.get）",
+  (() => {
+    const viewerPanelSrc = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/ViewerPanel.tsx"),
+      "utf8",
+    );
+    return (
+      /resolveMediaUrlOutcome\(/.test(viewerPanelSrc) &&
+      // 四个参数：仓库、文件、相对路径、媒体类型——最后一个是「图片才看 needsPreview」的判据。
+      /selected\.media_type,\s*\)/.test(viewerPanelSrc) &&
+      // 面板自己不再写 needsPreview? previewGet : filePath 这类分支。
+      !/api\.previewGet\(/.test(viewerPanelSrc) &&
+      !/api\.filePath\(/.test(viewerPanelSrc) &&
+      !/convertFileSrc/.test(viewerPanelSrc)
+    );
+  })(),
 );
 
 // ==================== SVG / SVGZ 的跨语言对账（D112，2026-10-16） ====================

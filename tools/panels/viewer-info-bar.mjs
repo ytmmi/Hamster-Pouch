@@ -179,7 +179,9 @@ check(
 );
 check(
   "「书」**不取** file.path / preview.get（正文由 book.content 提供，取图那一步是白跑）",
-  /if \(!app\.repoId \|\| !selected \|\| isBookMedia\(selected\)\) return;/.test(viewerPanelSrc),
+  // 守卫在取 URL 之前：书由 `book.content` 提供正文，走取图路径就是白发一次 IPC。
+  /const repoId = app\.repoId;/.test(viewerPanelSrc) &&
+    /if \(!repoId \|\| !selected \|\| isBookMedia\(selected\)\) return;/.test(viewerPanelSrc),
 );
 check(
   "阅读区按宽度下发分栏与字号（CSS 变量），且**自己滚**（范围为查看器面板大小）",

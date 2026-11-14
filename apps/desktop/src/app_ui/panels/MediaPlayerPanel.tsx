@@ -54,11 +54,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type JSX } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { AudioWaveform } from "../shared/AudioWaveform";
+import { resolveSourceUrl } from "../shared/mediaUrl";
 import { usePanelSettingValue } from "../shared/settingValue";
 import { publishSettingChanged } from "../core/settingChangeStore";
 import { useApp } from "../core/AppContext";
@@ -185,13 +185,12 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     // 把 `autoPlayRef` 打回 false，切视频/切音频就只换源不出声。
     loadedFileIdRef.current = fileId;
     try {
-      const path = await api.filePath({ repoId: ctx.repoId, fileId });
+      const nextUrl = await resolveSourceUrl(ctx.repoId, fileId);
       // 这条路径一定出声（双击 / 无源时单击画面 / 重播同一个文件）。
       autoPlayRef.current = true;
       setPositionMs(0);
       setScrubMs(null);
       setDurationMs(0);
-      const nextUrl = convertFileSrc(path);
       if (nextUrl === videoUrlRef.current && videoRef.current) {
         // 同一个文件再播：源没换，元素不会重新加载——回到开头直接出声即可
         // （换源那次不能这么做，见 `onLoadedMetadata`）。
@@ -375,13 +374,13 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     let cancelled = false;
     void (async () => {
       try {
-        const path = await api.filePath({ repoId: app.repoId!, fileId: file.id });
+        const url = await resolveSourceUrl(app.repoId!, file.id);
         if (cancelled) {
           return;
         }
         autoPlayRef.current = false;
         loadedFileIdRef.current = file.id;
-        setVideoUrl(convertFileSrc(path));
+        setVideoUrl(url);
         setPositionMs(0);
         setScrubMs(null);
         setDurationMs(0);

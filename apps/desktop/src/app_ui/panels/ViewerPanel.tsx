@@ -35,13 +35,12 @@
  */
 
 import { useEffect, useRef, useState, type JSX } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 
-import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { AudioWaveform } from "../shared/AudioWaveform";
 import { useApp } from "../core/AppContext";
 import type { PanelRenderCtx } from "../core/panelRegistry";
+import { resolveMediaUrlOutcome } from "../shared/mediaUrl";
 import { needsPreview, resolvePreviewUrl } from "../shared/previewUrl";
 import { usePanelSwitch } from "../shared/settingValue";
 import { ViewerReader } from "./viewer/ViewerReader";
@@ -106,31 +105,30 @@ export function ViewerPanel({ api: panelApi }: ViewerPanelProps = {}): JSX.Eleme
     setAudioMeta({ durationMs: null, positionMs: 0 });
     const selected = app.selectedFile;
     // "书"没有"取图"这一步：直接跳过（否则会白发一次 file.path / preview.get）。
-    if (!app.repoId || !selected || isBookMedia(selected)) return;
+    const repoId = app.repoId;
+    if (!repoId || !selected || isBookMedia(selected)) return;
     void (async () => {
-      try {
-        // Chromium 可解的格式（AVIF/JPEG/PNG/WebP…）加载原图（全分辨率）；
-        // 其余图片走后端**全分辨率预览**（`preview.get`，缺陷 0019；2026-10-11 起
-        // 判据是白名单取反，见 `shared/previewUrl.ts`）。
-        //
-        // **必须限定图片**：`needsPreview` 的口径是"Chromium 画不了这张图"，
-        // 对视频/音频没有意义——`preview.get` 对非图片一律返回 `null`，
-        // 拿它去判视频会把"能播的视频"变成"不可用"。
-        const path =
-          selected.media_type === "image" && needsPreview(selected.relative_path)
-            ? await api.previewGet({ repoId: app.repoId!, fileId: selected.id })
-            : await api.filePath({ repoId: app.repoId!, fileId: selected.id });
-        if (!cancelled) {
-          if (path) {
-            setUrl(convertFileSrc(path));
-          } else {
-            setFailed(true);
-          }
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setFailed(true);
-          app.status(app.t("viewer.previewFailed", { err: errorTextOf(app.t, e) }), "error");
+      // 该用原图还是后端全分辨率预览，只由 `shared/mediaUrl` 决定（D208）：这里只把
+      // 媒体类型与相对路径交出去。视频/音频不会被误送去 `preview.get`（对非图片一律
+      // 返回 `null`，拿它去判视频会把"能播的视频"变成"不可用"）。
+      const outcome = await resolveMediaUrlOutcome(
+        repoId,
+        selected.id,
+        selected.relative_path,
+        selected.media_type,
+      );
+      if (cancelled) {
+        return;
+      }
+      if (outcome.url) {
+        setUrl(outcome.url);
+      } else {
+        setFailed(true);
+        if (outcome.error) {
+          app.status(
+            app.t("viewer.previewFailed", { err: errorTextOf(app.t, outcome.error) }),
+            "error",
+          );
         }
       }
     })();

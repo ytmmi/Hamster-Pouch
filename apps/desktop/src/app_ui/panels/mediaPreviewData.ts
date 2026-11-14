@@ -12,10 +12,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 
 import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
+import { assetUrlOrEmpty } from "../shared/assetUrl";
 import { useApp } from "../core/AppContext";
 import type { FileItem, SourceItem } from "../shared/types";
 import {
@@ -202,7 +202,7 @@ export function useMediaPreviewData(
       sortedFiles.map((file) => {
         const base = sourceMap.get(file.source_id) ?? "";
         const full = base ? joinPath(base, file.relative_path) : "";
-        return { file, url: full ? convertFileSrc(full) : "" };
+        return { file, url: assetUrlOrEmpty(full) };
       }),
     [sortedFiles, sourceMap],
   );

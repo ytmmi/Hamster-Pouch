@@ -1,13 +1,13 @@
 /**
  * 查看器面板 — 显示选中文件信息，提供图片/视频/音频预览。
  *
- * 通过 `file_path` 命令获取绝对路径，再用 `convertFileSrc` 构建预览 URL。
+ * 通过 `file_path` 命令获取绝对路径，再用 `shared/assetUrl` 转成预览 URL（唯一一处 `convertFileSrc`）。
  * 所有错误均降级为占位提示，不抛出。
  */
 
 import { useCallback, useEffect, useState, type JSX } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 
+import { assetUrl } from "../../app_ui/shared/assetUrl";
 import * as api from "../api";
 import type { FileItem, StatusHandler } from "../types";
 
@@ -34,7 +34,7 @@ export function ViewerPanel({
 
     try {
       const path = await api.filePath({ repoId, fileId: selectedFile.id });
-      const url = convertFileSrc(path);
+      const url = assetUrl(path);
       setPreviewSrc(url);
     } catch (e) {
       onStatus(`预览路径构建失败: ${String(e)}`, "info");

@@ -99,6 +99,16 @@ store（`storeSnapshot` + 自建 `Set` 订阅表 + `ensureMarksLoaded` / `commit
 风格：`check:stores` 第 ⑤ 条钉住「`panels/markMenu.tsx` 不得再出现 `new Set<() => void>` / `storeSnapshot` /
 `export function usePanelMarks`」与「两个面板必须从 `core/panelMarksStore` 取 hook」。
 
+**媒体显示 URL：解析与转换各只有一处**（D208）：`convertFileSrc` 曾散在 9 个文件、13 处，`imageUrl` / `thumbUrl` /
+`previewUrl` 又各自手抄一份「结果表 + 在途表 + 失败清空」。现在 `apps/desktop/src/app_ui/shared/assetUrl.ts` 是
+`convertFileSrc` 的**唯一**调用点（`assetUrl` / `assetUrlOrNull` / `assetUrlOrEmpty` 三种空值口径），
+`shared/urlCache.ts` 的 `createUrlResolver(keyOf, load)` 是结果缓存 + in-flight 去重的**唯一**骨架（`load` 抛错不写缓存，
+下次重试），`shared/mediaUrl.ts` 是媒体 URL 的**唯一**解析口（`resolveSourceUrl` 给原图/音视频；
+`resolveMediaUrlOutcome` 给「图片且需要内嵌预览」时走 `preview.get`、其余走原图，返回 `{ url, error }` 而不是抛错）。
+原 `shared/imageUrl.ts` 已删除；`bookMetaCache` 也从手抄缓存迁到骨架。判据同样是位置：`check:media-url` 钉住
+「`convertFileSrc(` 只出现在 `assetUrl.ts`」「`imageUrl.ts` 不得复活」「`new Map<string, Promise<` 只出现在 `urlCache.ts`」
+「四个播放/查看器面板不得自己 `api.filePath(`」，`check:panels` 的查看器断言同步改指 `resolveMediaUrlOutcome`。
+
 ## 插件/AI 扩展点
 
 插件首期只能做：
