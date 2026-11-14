@@ -13,7 +13,8 @@ import { useApp } from "../core/AppContext";
 import { getTask, setTask, useTask } from "../core/taskStore";
 import { ContextMenu } from "../menu/ContextMenu";
 import { SwitchToggle } from "../shared/SwitchToggle";
-import { MarkMenuTree, usePanelMarks } from "./markMenu";
+import { usePanelMarks } from "../core/panelMarksStore";
+import { MarkMenuTree } from "./markMenu";
 import { marksOf } from "../shared/panelMarks";
 import type { SourceExclusionItem, SourceTreeNode } from "../shared/types";
 

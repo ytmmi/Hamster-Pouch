@@ -2,8 +2,9 @@
  * 源面板 / 相册面板右键菜单里的**「添加标记」**子区（D134）。
  *
  * 两件事都收在这里，两个面板只接线：
- * 1. {@link usePanelMarks}：按仓库读取/写回面板本地打标状态（仿 `core/useInterfacePages.ts`
- *    的 `persist`——写回失败静默，内存里的勾选态照旧可用，下次改动会重试写）。
+ * 1. **已经搬走**：打标状态的 store 与 `usePanelMarks` 在 `core/panelMarksStore.ts`（D207）。
+ *    原先它们长在本文件里（一个视图文件同时装着渲染树、菜单交互与一段带 IPC 的模块级 store，
+ *    状态没法被单测碰到、订阅表也与 D205 的骨架并行维护）。本文件现在只剩渲染与接线。
  * 2. {@link MarkMenuTree}：树 + 勾选 + 新建自定义标记输入。
  *
  * ## 为什么树是单独一层、且默认全折叠
@@ -42,12 +43,10 @@
  * ——用户裁决是"自定义标记不同步、系统标记相同"。
  */
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type JSX } from "react";
+import { useCallback, useMemo, useState, type JSX } from "react";
 
 import { BLUEPRINT_MARK_TREE, isBuiltinMark } from "@hamster-pouch/config";
 
-import * as api from "../shared/api";
-import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { markLabel } from "./blueprintLabels";
 import {
@@ -55,10 +54,7 @@ import {
   autoMarksForMediaType,
   customMarkName,
   customMarkToken,
-  emptyPanelMarksState,
   marksOf,
-  parsePanelMarksState,
-  serializePanelMarksState,
   setMark,
   toggleMarkFromMenu,
   type PanelMarkScope,
@@ -100,7 +96,7 @@ export interface MarkMenuTreeProps {
    * 为黑色了」）。因此这里既不能 `aria-disabled`，也不能去掉 hover 反馈。
    */
   autoMarks?: readonly string[];
-  /** 当前状态（来自 {@link usePanelMarks}）。 */
+  /** 当前状态（来自 `core/panelMarksStore` 的 `usePanelMarks`）。 */
   marks: PanelMarksState;
   /** 写回（来自 {@link usePanelMarks}）。 */
   onPersist: (next: PanelMarksState) => void;
@@ -294,140 +290,6 @@ export function MarkMenuTree({
       )}
     </>
   );
-}
-
-/** {@link usePanelMarks} 的返回值。 */
-export interface PanelMarksController {
-  /** 当前状态。 */
-  marks: PanelMarksState;
-  /** 写回：状态变化即落库（失败由 {@link usePanelMarks} 报状态栏）。 */
-  persist: (next: PanelMarksState) => void;
-}
-
-/**
- * 打标状态的**模块级 store**（两个面板共用同一份）。
- *
- * 为什么不是每个面板各 `useState` 一份：落库值是**一整个仓库的整包 JSON**（相册 + 源
- * 两份 scope 都在里面）。若两个面板各持一份完整快照再各自整包写回，就会出现真实的
- * 覆盖事故——相册面板写回时会带上"它挂载时看到的"源标记，把源面板刚打的标记整段
- * 抹掉（两个面板同时在 dockview 里只是常态，不是边界情况）。
- * 共享一份之后，"谁改哪个 scope" 各自独立，整包写回永远基于**最新的完整状态**。
- *
- * 为什么放模块级而不是进 AppContext：打标状态只有这两个面板用；进 context 会让每次
- * 勾选都换 `ctxValue` 身份、进而重渲染**所有**面板（既有面板普遍以 `app` 为
- * `useCallback` 依赖并触发整棵数据重查，见 `taskStore.ts` 文件头的同类教训）。
- *
- * 读/写失败口径（两件事分开，别混成"要么全静默、要么弹窗"）：
- * - **读失败**当"没设置过"处理：任何脏值/缺失都该落回可用状态，不能让菜单打不开；
- * - **写失败**由调用方（hook 层，能拿到 `status` / `t`）报状态栏错误，但**不弹确认框**：
- *   勾选是高频轻量动作，一次 IPC 失败就拦一个对话框会把"界面偏好"读成"数据事故"。
- *   内存里的勾选态仍然生效，下一次改动会重试写。
- */
-interface MarksStoreSnapshot {
-  /** 当前生效的仓库 id（`null` = 未打开仓库）。 */
-  repoId: string | null;
-  state: PanelMarksState;
-  /** 已落库的序列化值：避免"读到什么就原样写回什么"的无谓写入（也防回声）。 */
-  persisted: string;
-}
-
-let storeSnapshot: MarksStoreSnapshot = {
-  repoId: null,
-  state: emptyPanelMarksState(),
-  persisted: "",
-};
-const storeListeners = new Set<() => void>();
-
-function notifyMarksStore(): void {
-  for (const listener of storeListeners) listener();
-}
-
-function subscribeMarksStore(listener: () => void): () => void {
-  storeListeners.add(listener);
-  return () => storeListeners.delete(listener);
-}
-
-function getMarksStoreSnapshot(): PanelMarksState {
-  return storeSnapshot.state;
-}
-
-/**
- * 切到某个仓库：状态先清空（避免读到上一个仓库的标记），再异步补读。
- *
- * 并发挂载由**同步写回 `repoId`** 天然去重：第一次调用把 `repoId` 立刻置好，第二个
- * 面板的调用看到相等即返回，不会读两遍、也不会两次解析各写一份。
- */
-function ensureMarksLoaded(repoId: string | null): void {
-  if (storeSnapshot.repoId === repoId) return;
-  storeSnapshot = { repoId, state: emptyPanelMarksState(), persisted: "" };
-  notifyMarksStore();
-  if (!repoId) return;
-  void (async () => {
-    let raw: string | null = null;
-    try {
-      raw = await api.panelMarksGet(repoId);
-    } catch {
-      // 读失败 = 当没设置过：任何脏值/缺失都该落回可用状态，不能让菜单打不开。
-      raw = null;
-    }
-    if (storeSnapshot.repoId !== repoId) {
-      // 读回过程中用户又切了仓库：这次结果作废（不能写进新仓库的状态）。
-      return;
-    }
-    storeSnapshot = { repoId, state: parsePanelMarksState(raw), persisted: raw ?? "" };
-    notifyMarksStore();
-  })();
-}
-
-/**
- * 提交新状态：先更新共享内存并广播（UI 立刻响应），再整包写回。
- *
- * 返回的 Promise 只用于让调用方把失败报进状态栏——不解析内容、不做业务校验
- * （那是 `shared/panelMarks.ts` 的职责，桥接层同样不解析）。
- */
-function commitMarks(next: PanelMarksState): Promise<void> {
-  const { repoId, persisted } = storeSnapshot;
-  storeSnapshot = { ...storeSnapshot, state: next };
-  notifyMarksStore();
-  if (!repoId) return Promise.resolve();
-  const serialized = serializePanelMarksState(next);
-  if (serialized === persisted) return Promise.resolve();
-  storeSnapshot = { ...storeSnapshot, persisted: serialized };
-  return api.panelMarksSet(repoId, serialized);
-}
-
-/**
- * 面板本地打标状态（两个面板共享同一份模块级 store）。
- *
- * 调用方只需给 `repoId`；切换仓库时 store 自己清空并重读。返回值里的 `persist`
- * 已把写失败接到状态栏（`mark.toggleFailed`，错误级）。
- */
-export function usePanelMarks(repoId: string | null): PanelMarksController {
-  const app = useApp();
-  const { status, t } = app;
-  // `useSyncExternalStore` 要求快照是**稳定引用**：store 的 `state` 只在真正变更时换身份，
-  // 所以这里不能现造对象（每次 render 新建快照会让 React 判定"永远在变"）。
-  const marks = useSyncExternalStore(
-    subscribeMarksStore,
-    getMarksStoreSnapshot,
-    getMarksStoreSnapshot,
-  );
-
-  useEffect(() => {
-    ensureMarksLoaded(repoId);
-  }, [repoId]);
-
-  const persist = useCallback(
-    (next: PanelMarksState) => {
-      void commitMarks(next).catch((err: unknown) => {
-        // 内存里的勾选态照旧可用（用户看到的就是"打上了"）；这里只补一条错误提示。
-        status(t("mark.toggleFailed", { err: errorTextOf(t, err) }), "error");
-      });
-    },
-    [status, t],
-  );
-
-  return { marks, persist };
 }
 
 /**

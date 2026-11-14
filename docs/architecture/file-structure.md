@@ -180,6 +180,11 @@ apps/desktop/src/app_ui/
                         #   媒体预览与图像查看器胶片栏消费同一份；模块加载即订阅
                         #   settingChangeStore——「全部设置」显式改排序即放弃覆盖，
                         #   不依赖哪个面板恰好挂载着
+    panelMarksStore.ts  # 面板本地打标状态的**模块级 store**（D207 从 `panels/markMenu.tsx` 搬来）：
+                        #   两个面板共用同一份整包状态（落库值是一整个仓库的 JSON，各持一份
+                        #   整包写回会抹掉对方 scope 的标记），订阅表交给 `core/createStore`；
+                        #   读写失败口径（读失败当没设置过、写失败报状态栏不弹框）随 store 一起搬来，
+                        #   视图文件只剩渲染与接线
     playerPlayStore.ts  # 媒体播放器的**播放请求通道**（`requestPlayerPlay` / `subscribePlayerPlay`）：
                         #   蓝图双击视频只投递"播放哪个文件"，由面板解析路径并播放——
                         #   宿主不持有播放状态，也就没有"面板还没挂载"的时序竞争
@@ -298,8 +303,8 @@ apps/desktop/src/app_ui/
                       #   「＋ 新建自定义标记」一件入口，已建的自定义标记列在它**下面**——旧的
                       #   「自定义标记」标题与「暂无自定义标记」空态已删；树区给 max-height +
                       #   overflow，避免 `ContextMenu` 按 scrollHeight 整体翻转后展开即跳位）
-                      #   + `usePanelMarks`（按 repoId 读一次 + 写回，仿 useInterfacePages 的
-                      #   persist，失败静默不弹窗）+ `autoMarksForAlbum`。D139 起**自动标记与
+                      #   + `autoMarksForAlbum`（`usePanelMarks` 已于 D207 搬到
+                      #   `core/panelMarksStore.ts`：本文件不再持有模块级 store）。D139 起**自动标记与
                       #   用户标记行为完全一致**（可取消、落库），`autoMarks` 只用于把系统同步
                       #   来的那几项画成灰黑色；「不可取消」那套口径已整体作废
     imageviewer/      # 图像查看器（多文件功能域：主面板 / 舞台 / 导航器 / 胶片栏 / 信息栏
@@ -465,7 +470,8 @@ apps/desktop/src/app_ui/
                       #     epub 取内嵌封面、pdf 取第一页栅格化）
                       #   --- 封面覆盖（用户口径 2026-10-09："txt 右键可以更换封面颜色或自定义图片"）---
                       #   bookCoverCache.ts 覆盖的批量缓存（按 **id 粒度**记账：翻页时 id 变多，
-                      #     按仓库整体去重会让新一页的封面永远取不到）+ 版本号订阅
+                      #     按仓库整体去重会让新一页的封面永远取不到）+ 版本号订阅（订阅表与通知
+                      #     遍历交给 `core/createStore`，D207）
                       #   useBookCoverOverride.ts 单元侧同步读（不发命令；发命令是面板的事）
                       #   BookCoverMenu.tsx 右键菜单里的「标记」多选区（按可注册清单渲染）
                       #     + 「更换封面」（预设色板 + 取色器 + 选图 + 恢复默认），两者经共享菜单的

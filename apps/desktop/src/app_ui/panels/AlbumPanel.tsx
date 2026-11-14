@@ -16,7 +16,8 @@ import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { useApp } from "../core/AppContext";
 import { ContextMenu } from "../menu/ContextMenu";
-import { MarkMenuTree, syncAlbumAutoMark, usePanelMarks } from "./markMenu";
+import { usePanelMarks } from "../core/panelMarksStore";
+import { MarkMenuTree, syncAlbumAutoMark } from "./markMenu";
 import { autoMarksOf, effectiveMarksFor } from "../shared/panelMarks";
 import type { AlbumItem } from "../shared/types";
 

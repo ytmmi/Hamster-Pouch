@@ -18,6 +18,7 @@
 
 import { convertFileSrc } from "@tauri-apps/api/core";
 
+import { createStore } from "../../core/createStore";
 import * as api from "../../shared/api";
 
 /** 一个文件的封面覆盖（已转成可直接渲染的形式）。 */
@@ -51,24 +52,21 @@ const requestedIds = new Map<string, Set<string>>();
  * 并放进依赖，拉完就重渲一次（与媒体预览的 `ratioCache` 版本号同一手法：
  * 面板是唯一消费方，一个数字足够，且能被门禁按行为断言）。
  */
-let coverCacheVersion = 0;
-const listeners = new Set<() => void>();
+const versionStore = createStore<number>(0);
 
 /** 当前版本号（面板放进依赖数组用）。 */
 export function getBookCoverVersion(): number {
-  return coverCacheVersion;
+  return versionStore.get();
 }
 
-/** 订阅封面缓存变化；返回退订函数。 */
+/** 订阅封面缓存变化；返回退订函数（订阅表与通知遍历由 `core/createStore` 负责，D207）。 */
 export function subscribeBookCovers(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+  return versionStore.subscribe(listener);
 }
 
 /** 推进版本号并通知订阅者（缓存写入 / 失效的唯一出口）。 */
 function bumpVersion(): void {
-  coverCacheVersion += 1;
-  for (const listener of [...listeners]) listener();
+  versionStore.set(versionStore.get() + 1);
 }
 
 /** 同步读某本书的封面覆盖；没有（或还没拉到）返回 `null`。 */

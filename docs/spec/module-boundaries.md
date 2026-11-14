@@ -91,6 +91,14 @@ Rust 核心层
 钉住「`shared/ratioCache.ts` 是唯一缓存」与「两个面板不得再出现 `const ratioCache = new Map<...>` / `const ratioListeners =`」——
 判据只看这两个旧符号，否则同文件里 `idToIndex` 那种普通 Map 会被误伤。
 
+**视图文件不持有模块级 store**（D207）：`panels/markMenu.tsx` 曾同时是渲染树、菜单交互与一段带 IPC 的模块级
+store（`storeSnapshot` + 自建 `Set` 订阅表 + `ensureMarksLoaded` / `commitMarks` / `usePanelMarks`）。状态在视图文件里
+没有单测入口，订阅表也与 D205 的骨架并行维护。现在 store 与 hook 都在 `apps/desktop/src/app_ui/core/panelMarksStore.ts`
+（`createStore<MarksRecord>` + 只暴露 `state` 的稳定快照），`markMenu.tsx` 只剩 `MarkMenuTree` 与接线；
+`panels/bookpreview/bookCoverCache.ts` 的「版本号 + 通知表」同样改由 `createStore<number>` 承担。判据是**位置**而不是
+风格：`check:stores` 第 ⑤ 条钉住「`panels/markMenu.tsx` 不得再出现 `new Set<() => void>` / `storeSnapshot` /
+`export function usePanelMarks`」与「两个面板必须从 `core/panelMarksStore` 取 hook」。
+
 ## 插件/AI 扩展点
 
 插件首期只能做：

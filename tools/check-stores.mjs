@@ -25,6 +25,9 @@ const STORES = [
   ["apps/desktop/src/app_ui/core/mediaSortStore.ts", "createStore"],
   ["apps/desktop/src/app_ui/core/settingChangeStore.ts", "createEventChannel"],
   ["apps/desktop/src/app_ui/render/surfaceStatsStore.ts", "createStore"],
+  // D207：视图文件里的两处「模块级 store / 版本号 + 通知表」也归位到骨架。
+  ["apps/desktop/src/app_ui/core/panelMarksStore.ts", "createStore"],
+  ["apps/desktop/src/app_ui/panels/bookpreview/bookCoverCache.ts", "createStore"],
 ];
 
 let total = 0;
@@ -87,17 +90,17 @@ for (const [rel, helper] of STORES) {
     continue;
   }
   const body = stripComments(src);
-  if (/new Set</.test(body)) handRolled.push(`${rel}  仍自建订阅表（new Set<…>）`);
+  if (/new Set<\(\) => void>/.test(body)) handRolled.push(`${rel}  仍自建订阅表（new Set<() => void>）`);
   if (/for \(const \w+ of \[\.\.\.(listeners|\w+Listeners)\]\)/.test(body) || /for \(const \w+ of (listeners|\w+Listeners)\)/.test(body)) {
     handRolled.push(`${rel}  仍手写通知循环`);
   }
-  if (!body.includes(`${helper}<`)) handRolled.push(`${rel}  没有使用 ${helper}`);
-  if (/\.subscribe\(listener\)/.test(body)) delegated += 1;
+  if (!new RegExp(`${helper}\\s*[<(]`).test(body)) handRolled.push(`${rel}  没有使用 ${helper}`);
+  if (/\.subscribe\b/.test(body)) delegated += 1;
 }
 if (delegated < STORES.length) {
   handRolled.push(`只有 ${delegated}/${STORES.length} 个 store 把 subscribe 委托给骨架`);
 }
-report(handRolled.length === 0, `六个模块级 store 共用一份订阅表骨架（${STORES.length} 个文件）`, handRolled);
+report(handRolled.length === 0, `模块级 store 共用一份订阅表骨架（${STORES.length} 个文件）`, handRolled);
 
 // ③ 两个播放请求是**独立实例**（D166：共一条会让双击视频把音乐面板吵醒）
 const playProblems = [];
@@ -174,6 +177,42 @@ for (const alias of [
   }
 }
 report(ratioProblems.length === 0, "宽高比缓存只有一份（媒体预览与胶片栏共用 shared/ratioCache）", ratioProblems);
+
+// ⑤ 视图文件不持有模块级 store（D207：打标状态从 `panels/markMenu.tsx` 搬到 `core/panelMarksStore.ts`）
+//
+// `markMenu.tsx` 曾是「渲染树 + 菜单交互 + 一段带 IPC 的模块级 store」三合一：状态没法被单测碰到，
+// 订阅表也与 D205 的骨架并行维护。搬运之后视图文件只剩接线，store 与 hook 都在 core/，
+// 门禁把「别再长回去」变成断言。
+const viewStoreProblems = [];
+const PANEL_MARKS_STORE = "apps/desktop/src/app_ui/core/panelMarksStore.ts";
+const markMenuSrc = stripComments(read("apps/desktop/src/app_ui/panels/markMenu.tsx") ?? "");
+if (markMenuSrc.includes("new Set<() => void>")) {
+  viewStoreProblems.push("panels/markMenu.tsx  仍自建订阅表（new Set<…>）");
+}
+if (/let storeSnapshot|const storeListeners/.test(markMenuSrc)) {
+  viewStoreProblems.push("panels/markMenu.tsx  仍持有模块级 store 快照（应搬去 core/panelMarksStore.ts）");
+}
+if (/export function usePanelMarks/.test(markMenuSrc)) {
+  viewStoreProblems.push("panels/markMenu.tsx  仍定义 usePanelMarks（store 的接线应在 core/）");
+}
+const marksStoreSrc = stripComments(read(PANEL_MARKS_STORE) ?? "");
+if (!marksStoreSrc) {
+  viewStoreProblems.push(`${PANEL_MARKS_STORE}  不存在`);
+} else {
+  for (const needle of ["createStore<MarksRecord>(", "export function usePanelMarks(", "store.set(", "store.get().state"]) {
+    if (!marksStoreSrc.includes(needle)) viewStoreProblems.push(`${PANEL_MARKS_STORE} 缺少 ${needle}`);
+  }
+}
+for (const rel of [
+  "apps/desktop/src/app_ui/panels/AlbumPanel.tsx",
+  "apps/desktop/src/app_ui/panels/SourcePanel.tsx",
+]) {
+  const body = stripComments(read(rel) ?? "");
+  if (!/import \{ usePanelMarks \} from "\.\.\/core\/panelMarksStore";/.test(body)) {
+    viewStoreProblems.push(`${rel}  没有从 core/panelMarksStore 取 usePanelMarks`);
+  }
+}
+report(viewStoreProblems.length === 0, "视图文件不持有模块级 store（打标状态在 core/panelMarksStore）", viewStoreProblems);
 
 console.log(`\n[check-stores] ${passed}/${total} 通过`);
 process.exit(passed === total ? 0 : 1);
