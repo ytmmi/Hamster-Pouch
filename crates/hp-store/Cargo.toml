@@ -6,6 +6,8 @@ edition.workspace = true
 [dependencies]
 hp-core = { path = "../hp-core" }
 hp-db = { path = "../hp-db" }
+# 仓库库的表结构、迁移清单与领域仓储（D186），这里只再导出
+hp-repo = { path = "../hp-repo" }
 # bundled：SQLite 源码编译进 crate，不依赖系统 SQLite（D20 本地化）
 rusqlite = { version = "0.41", features = ["bundled"] }
 serde_json = "1"

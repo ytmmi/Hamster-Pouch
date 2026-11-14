@@ -5,8 +5,8 @@ use hp_core::{
 };
 use rusqlite::{OptionalExtension, Row, params};
 
-use crate::repo::repo_db::RepoDb;
-use crate::util::{now_iso, require_nonempty, store_err};
+use crate::repo_db::RepoDb;
+use hp_db::{now_iso, require_nonempty, store_err};
 
 impl RepoDb {
     /// 写入或替换某文件的封面覆盖（`ON CONFLICT` 顶掉旧值，见迁移 0009 的说明）。

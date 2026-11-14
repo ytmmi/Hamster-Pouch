@@ -3,8 +3,8 @@
 use hp_core::{ColorRef, FileId, HpResult};
 use rusqlite::{OptionalExtension, Row, params};
 
-use crate::repo::repo_db::RepoDb;
-use crate::util::{now_iso, require_nonempty, store_err};
+use crate::repo_db::RepoDb;
+use hp_db::{now_iso, require_nonempty, store_err};
 
 impl RepoDb {
     /// 写入或更新文件色彩参考（自动提取或手动锁定，仅图片）。

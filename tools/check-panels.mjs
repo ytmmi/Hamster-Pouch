@@ -681,7 +681,7 @@ const colorCommandSrc = readFileSync(
 // 第 43 轮（D160）：调色板"锁定与否"的那一列跟着扫描快照一起取回，
 // 因此快照查询所在的存储层也进入这条断言的读取面。
 const fileRepoSrc = readFileSync(
-  join(ROOT, "crates/hp-store/src/repo/file_repo.rs"),
+  join(ROOT, "crates/hp-repo/src/file_repo.rs"),
   "utf8",
 );
 const colorValue = await import(
@@ -5341,7 +5341,7 @@ check(
   // 0010 的要点：一对多表 + 存量搬迁（只搬 book，不搬 document）。
   (() => {
     const m = readFileSync(
-      join(ROOT, "crates/hp-store/migrations/repo/0010_file_marks.sql"),
+      join(ROOT, "crates/hp-repo/migrations/repo/0010_file_marks.sql"),
       "utf8",
     );
     // 只取**可执行语句**（去掉 `--` 注释）再断言，避免注释里提到 `document` 就误判。
@@ -5360,24 +5360,24 @@ check(
     );
   })() &&
     /0010_file_marks\.sql/.test(
-      readFileSync(join(ROOT, "crates/hp-store/src/repo/repo_db.rs"), "utf8"),
+      readFileSync(join(ROOT, "crates/hp-repo/src/repo_db.rs"), "utf8"),
     ) &&
     // 0001 是 forward-only，不得被改（其中不应出现标记相关字样）。
     !/subtype|file_marks/.test(
-      readFileSync(join(ROOT, "crates/hp-store/migrations/repo/0001_init.sql"), "utf8"),
+      readFileSync(join(ROOT, "crates/hp-repo/migrations/repo/0001_init.sql"), "utf8"),
     ),
 );
 check(
   "Rust：`file.query` 的媒体类型过滤是**集合**（四个固定旗标 ⇒ SQL 静态、参数个数固定）",
   /pub media_types: &'a \[MediaType\]/.test(
-    readFileSync(join(ROOT, "crates/hp-store/src/repo/file_repo.rs"), "utf8"),
+    readFileSync(join(ROOT, "crates/hp-repo/src/file_repo.rs"), "utf8"),
   ) &&
     /media_types: Option<Vec<String>>/.test(
       readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/file.rs"), "utf8"),
     ) &&
     // 空集合 = 不筛（不是"什么都不返回"）；非空即"只这些"。
     /空切片 = 不筛/.test(
-      readFileSync(join(ROOT, "crates/hp-store/src/repo/file_repo.rs"), "utf8"),
+      readFileSync(join(ROOT, "crates/hp-repo/src/file_repo.rs"), "utf8"),
     ),
 );
 check(
@@ -6349,12 +6349,12 @@ check(
   "Rust：阅读批注（书签 / 笔记 / 高亮）落库——迁移 0011 + 三种形态共用一张表 + 写库前校验",
   (() => {
     const sql = readFileSync(
-      join(ROOT, "crates/hp-store/migrations/repo/0011_reader_annotations.sql"),
+      join(ROOT, "crates/hp-repo/migrations/repo/0011_reader_annotations.sql"),
       "utf8",
     );
-    const repoDb = readFileSync(join(ROOT, "crates/hp-store/src/repo/repo_db.rs"), "utf8");
+    const repoDb = readFileSync(join(ROOT, "crates/hp-repo/src/repo_db.rs"), "utf8");
     const repo = readFileSync(
-      join(ROOT, "crates/hp-store/src/repo/annotation_repo.rs"),
+      join(ROOT, "crates/hp-repo/src/annotation_repo.rs"),
       "utf8",
     );
     const core = readFileSync(join(ROOT, "crates/hp-core/src/annotation.rs"), "utf8");
@@ -6389,7 +6389,7 @@ check(
 check(
   "Rust：卸载源时必须清掉**标记与阅读批注**（DERIVED_TABLES 与清点成对维护）",
   (() => {
-    const purge = readFileSync(join(ROOT, "crates/hp-store/src/repo/purge_repo.rs"), "utf8");
+    const purge = readFileSync(join(ROOT, "crates/hp-repo/src/purge_repo.rs"), "utf8");
     return (
       // 两张表都带 ON DELETE CASCADE，但**显式登记**才能不依赖 foreign_keys 开关。
       /"file_marks",/.test(purge) &&

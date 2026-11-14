@@ -5,32 +5,32 @@ use std::path::Path;
 use hp_core::{HpError, HpResult};
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::util::{now_iso, require_nonempty, store_err};
+use hp_db::{now_iso, require_nonempty, store_err};
 
 /// 仓库库迁移脚本（按版本升序）。
 const REPO_MIGRATIONS: &[&str] = &[
-    include_str!("../../migrations/repo/0001_init.sql"),
-    include_str!("../../migrations/repo/0002_media_info.sql"),
-    include_str!("../../migrations/repo/0003_plugin_ai.sql"),
-    include_str!("../../migrations/repo/0004_split_tag_tables.sql"),
-    include_str!("../../migrations/repo/0005_tag_relations.sql"),
-    include_str!("../../migrations/repo/0006_blueprint.sql"),
-    include_str!("../../migrations/repo/0007_album_member_file_index.sql"),
-    include_str!("../../migrations/repo/0008_text_subtype.sql"),
-    include_str!("../../migrations/repo/0009_file_covers.sql"),
-    include_str!("../../migrations/repo/0010_file_marks.sql"),
+    include_str!("../migrations/repo/0001_init.sql"),
+    include_str!("../migrations/repo/0002_media_info.sql"),
+    include_str!("../migrations/repo/0003_plugin_ai.sql"),
+    include_str!("../migrations/repo/0004_split_tag_tables.sql"),
+    include_str!("../migrations/repo/0005_tag_relations.sql"),
+    include_str!("../migrations/repo/0006_blueprint.sql"),
+    include_str!("../migrations/repo/0007_album_member_file_index.sql"),
+    include_str!("../migrations/repo/0008_text_subtype.sql"),
+    include_str!("../migrations/repo/0009_file_covers.sql"),
+    include_str!("../migrations/repo/0010_file_marks.sql"),
     // 阅读批注（书签 / 笔记 / 高亮）：2026-10-16，D113。
-    include_str!("../../migrations/repo/0011_reader_annotations.sql"),
+    include_str!("../migrations/repo/0011_reader_annotations.sql"),
     // 同步相册的源镜像树 + 成员排除留痕：D128。
-    include_str!("../../migrations/repo/0012_album_sync_mirror.sql"),
+    include_str!("../migrations/repo/0012_album_sync_mirror.sql"),
     // 相册同级排序位：D132。
-    include_str!("../../migrations/repo/0013_album_sort_order.sql"),
+    include_str!("../migrations/repo/0013_album_sort_order.sql"),
     // 媒体源子目录排除（软排除，可恢复）：D149。
-    include_str!("../../migrations/repo/0014_source_exclusion.sql"),
+    include_str!("../migrations/repo/0014_source_exclusion.sql"),
     // 图片宽高进索引（显示尺寸，可空、可回填）：0043，2026-11-11 第 37 轮裁决。
-    include_str!("../../migrations/repo/0015_image_dimensions.sql"),
+    include_str!("../migrations/repo/0015_image_dimensions.sql"),
     // 被排除子树的「仅索引」标记（排除时清衍生产物）：2026-11-12。
-    include_str!("../../migrations/repo/0016_index_only.sql"),
+    include_str!("../migrations/repo/0016_index_only.sql"),
 ];
 
 /// 仓库库句柄。
@@ -79,7 +79,7 @@ impl RepoDb {
         let mut conn = hp_db::Db::open(path, hp_db::PragmaSet::REPO, "打开仓库库")?;
         conn.apply_migrations(REPO_MIGRATIONS)?;
         // 打开即把低版本蓝图文档一次性迁移到当前版本并回写（RFC 0007 / D52）。
-        crate::repo::blueprint_repo::migrate_blueprint_documents(conn.as_conn_mut())?;
+        crate::blueprint_repo::migrate_blueprint_documents(conn.as_conn_mut())?;
         // 版本的**唯一权威**是 `PRAGMA user_version`（database-schema.md 第 5 节）；
         // `repo_meta.schema_version` 只是镜像键，必须在**新建与打开两条路径的唯一汇合点**回写，
         // 否则升级过的库会与权威值分叉（缺陷 0006）。此处不能下沉到 `hp_db::Db::apply_migrations`：

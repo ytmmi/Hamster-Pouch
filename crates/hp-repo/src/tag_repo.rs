@@ -7,8 +7,8 @@
 use hp_core::{FileAutoTag, FileId, FileTag, HpError, HpResult, RepoId, Tag, TagId};
 use rusqlite::{OptionalExtension, Row, params};
 
-use crate::repo::repo_db::RepoDb;
-use crate::util::{now_iso, require_nonempty, store_err};
+use crate::repo_db::RepoDb;
+use hp_db::{now_iso, require_nonempty, store_err};
 
 impl RepoDb {
     // ---------- 人工组：tags / file_tags ----------

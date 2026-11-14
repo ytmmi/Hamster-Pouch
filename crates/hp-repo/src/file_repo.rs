@@ -6,9 +6,9 @@ use hp_core::{
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
-use crate::repo::repo_db::RepoDb;
-use crate::repo::source_exclusion_repo::EXCLUDED_PATH_PREDICATE;
-use crate::util::{now_iso, require_nonempty, store_err};
+use crate::repo_db::RepoDb;
+use crate::source_exclusion_repo::EXCLUDED_PATH_PREDICATE;
+use hp_db::{now_iso, require_nonempty, store_err};
 
 /// 单页最大条数（防调用方一次拉全库；契约里 `limit` 只是页大小）。
 pub const FILE_QUERY_MAX_LIMIT: i64 = 1000;

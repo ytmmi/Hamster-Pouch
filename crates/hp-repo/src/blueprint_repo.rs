@@ -14,8 +14,8 @@
 use hp_core::{BlueprintRow, HpError, HpResult};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
-use crate::repo::repo_db::RepoDb;
-use crate::util::{now_iso, require_nonempty, store_err, uuid};
+use crate::repo_db::RepoDb;
+use hp_db::{now_iso, require_nonempty, store_err, uuid};
 
 /// `blueprints` 表列清单（与迁移 0006 顺序一致）。
 const BLUEPRINT_COLUMNS: &str =

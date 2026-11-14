@@ -47,19 +47,21 @@ crates/hp-db/src/     # SQLite 连接骨架（D185）：四个库共用，不含
   lib.rs              # PragmaSet（REPO / GLOBAL / DICT / TAGLIB_READONLY）+ Db（open / open_readonly / apply_migrations / user_version / checkpoint_close）
   migrate.rs          # 共享前向迁移执行器（PRAGMA user_version，每版一事务）
   util.rs             # store_err / now_iso / uuid / require_nonempty
-crates/hp-store/src/
+crates/hp-repo/src/   # 仓库库（每仓库一个 SQLite 文件）：表结构、迁移清单与领域仓储（D186 从 hp-store 拆出）
+  lib.rs              # 模块声明 + 公开项再导出（hp-store 原样再导出，`hp_store::RepoDb` 等路径不变）
+  repo_db.rs          # 连接 / 迁移 / schema 版本
+  source_repo.rs      file_repo.rs   album_repo.rs
+  tag_repo.rs         tag_relation_repo.rs  tag_tree.rs
+  rating_repo.rs      color_repo.rs
+  cover_repo.rs       # 文件**封面覆盖**（用户自设的颜色 / 图片，迁移 0009；批量取 + 取值校验）
+  ops_repo.rs         ai_undo_repo.rs
+  blueprint_repo.rs   # 蓝图（整文档 JSON，RFC 0007；写库前归一化 schema 版本 + 打开时一次性迁移回写）
+  source_tree.rs      source_exclusion_repo.rs   annotation_repo.rs
+  purge_repo.rs       # 卸载源的逐表清理清单（`DERIVED_TABLES`：**新增引用 files(id) 的表必须登记**）
+crates/hp-repo/migrations/repo/  # 仓库库迁移 SQL（forward-only，0001_init … 0016_index_only.sql，当前版本 = 16）
+crates/hp-store/src/  # 全局库 + 词库（仓库库已拆到 hp-repo），并对 hp-repo 的公开项再导出
   lib.rs
   util.rs             # 再导出 hp-db 的四个工具（领域仓储的 `use crate::util::…` 零改动）
-  repo/               # 仓库库（每仓库一个 SQLite 文件）
-    repo_db.rs        # 连接 / 迁移 / schema 版本
-    source_repo.rs    file_repo.rs   album_repo.rs
-    tag_repo.rs       tag_relation_repo.rs  tag_tree.rs
-    rating_repo.rs    color_repo.rs
-    cover_repo.rs     # 文件**封面覆盖**（用户自设的颜色 / 图片，迁移 0009；批量取 + 取值校验）
-    ops_repo.rs       ai_undo_repo.rs
-    blueprint_repo.rs # 蓝图（整文档 JSON，RFC 0007；写库前归一化 schema 版本 + 打开时一次性迁移回写）
-    source_tree.rs
-    purge_repo.rs     # 卸载源的逐表清理清单（`DERIVED_TABLES`：**新增引用 files(id) 的表必须登记**）
   global/             # 全局配置库
     global_db.rs      plugin_repo.rs
     blueprint_template_repo.rs  # 应用级共享的蓝图模板
@@ -70,11 +72,10 @@ crates/hp-store/src/
     tag_lib_set.rs    # 四库**聚合查询层**：用户库 > 扩展包 > 内置基底的统一视图（TagLibSet）
     tag_lib_merge.rs  # 多扩展包之间的**重复概念归并**（MergeIndex，D36.3）
   migrations/         # 迁移 SQL（forward-only，发布后禁止修改；权威文本在这些文件里）
-    repo/             # 仓库库：0001_init … 0014_source_exclusion.sql（当前版本 = 14）
-    global/           # 全局配置库：0001_init … 0004_layout_layers.sql（当前版本 = 4）
+    global/           # 全局配置库：0001_init … 0005_layout_presets.sql（当前版本 = 5）
     dict/             # tag 词库：0001_init.sql
-                      # 注意：**没有** `dict_lib/` 目录——实际只有 repo/ global/ dict/ 三个。
-                      #   `docs/spec/database-schema.md` 第 5 节把迁移目录写成四者（含 `dict_lib/`），待该规范修正。
+    dict_lib/         # 四库单库句柄（TagLibDb）：0001_init.sql
+                      # 仓库库的 migrations/repo/ 已随 D186 移入 hp-repo。
   tests/              # 集成测试 + 夹具（default_blueprint.json、blueprint_factory/）
 
   main.rs             # 入口装配 + AppState

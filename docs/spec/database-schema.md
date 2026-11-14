@@ -181,7 +181,7 @@ CREATE TABLE source_exclusion (
 **读取侧口径**（不是"扫描器不索引"，而是"视图不返回"）：
 
 - `files` 的多行查询（`RepoDb::query_files`、`RepoDb::query_album_members_page`）统一拼一段
-  `EXCLUDED_PATH_PREDICATE`（`crates/hp-store/src/repo/source_exclusion_repo.rs`）：用
+  `EXCLUDED_PATH_PREDICATE`（`crates/hp-repo/src/source_exclusion_repo.rs`）：用
   `substr(f.relative_path, 1, length(e.relative_path) + 1) = e.relative_path || '/'` 判前缀，
   **不用 `LIKE`**——相对路径里 `%` / `_` 是合法字符，走 `LIKE` 要额外处理通配符与 `ESCAPE`。
 - 逐行过滤的那条路（`hp-album` 的 `visible_members`：先按源查前缀集合，再用纯函数
@@ -190,7 +190,7 @@ CREATE TABLE source_exclusion (
   （路径 / 类型 / 大小 / 时间 / 标记），只是不读内容、不算哈希、不出缩略图，这些行 `index_only = 1`。
   若扫描**跳过**它们，增量扫描会把既有行判成 `missing` 并清掉——那等于删除数据，与"软排除"直接矛盾。
 - 目录树在**建树之前**就按前缀过滤相对路径（`retain_visible_paths`，与谓词同一个模块；
-  之后才交给 `crates/hp-store/src/repo/source_tree.rs` 的 `build_source_tree`），
+  之后才交给 `crates/hp-repo/src/source_tree.rs` 的 `build_source_tree`），
   所以祖先节点的 `file_count` 与"整棵树看不到它们"自然一致。
 
 ### 4.2.2 图片宽高 `files.width` / `files.height`（迁移 repo/0015，缺陷 0043）
@@ -414,8 +414,8 @@ CREATE INDEX idx_ai_tag_undo_file ON ai_tag_undo(file_id);
 
 三条必须写明的口径（否则规范读者会误判这张表）：
 
-1. **`file_id` / `tag_id` 刻意没有外键**（**不要**为它补）。这不是遗漏：删除顺序由 `crates/hp-store/src/repo/purge_repo.rs:96`-`103` 的**显式删除**保证，理由记在 `purge_repo.rs:18`。且 SQLite 不支持 `ALTER TABLE ... ADD CONSTRAINT`，补外键必须重建表 —— 属刻意取舍，已登记为 `docs/issues/0007`。
-2. **与 §4.4 的分工**：`file_tags` / `file_auto_tags` 存**当前**关联；本表存**撤销流水**（覆盖前状态），不是关联表，不参与 tag 展示与检索。读写落点：`crates/hp-store/src/repo/ai_undo_repo.rs:21`、`:45`、`:62`、`:82`、`:96`、`:108`。
+1. **`file_id` / `tag_id` 刻意没有外键**（**不要**为它补）。这不是遗漏：删除顺序由 `crates/hp-repo/src/purge_repo.rs:96`-`103` 的**显式删除**保证，理由记在 `purge_repo.rs:18`。且 SQLite 不支持 `ALTER TABLE ... ADD CONSTRAINT`，补外键必须重建表 —— 属刻意取舍，已登记为 `docs/issues/0007`。
+2. **与 §4.4 的分工**：`file_tags` / `file_auto_tags` 存**当前**关联；本表存**撤销流水**（覆盖前状态），不是关联表，不参与 tag 展示与检索。读写落点：`crates/hp-repo/src/ai_undo_repo.rs:21`、`:45`、`:62`、`:82`、`:96`、`:108`。
 3. **库分界**：插件**注册与授权**状态在**全局库**（§3.4 / §3.5）；**单文件级 AI 撤销记录**在**仓库库**（本表）。二者不要混淆 —— 本表虽然是由 `repo/0003_plugin_ai.sql` 建立的，但它与插件注册无关，纯粹是仓库内的 AI 撤销数据。
 
 ### 4.5 评分与色彩参考 `ratings` / `color_refs`
@@ -723,14 +723,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blueprints_default
 
 ## 5. 迁移策略
 
-- 三库**共用同一个版本追踪机制**：`PRAGMA user_version`。执行器在 `crates/hp-db/src/migrate.rs`（读版本 → 每版一事务执行 → 同事务写回 `user_version`），对外只经 `hp_db::Db::apply_migrations` 调用：`crates/hp-store/src/repo/repo_db.rs`、`crates/hp-store/src/global/global_db.rs`、`crates/hp-store/src/dict/dict_db.rs`、`crates/hp-store/src/dict/tag_lib_db.rs` 各调一次（D185 起开库流程下沉到 `hp-db`，迁移清单仍留在各句柄里）。
+- 三库**共用同一个版本追踪机制**：`PRAGMA user_version`。执行器在 `crates/hp-db/src/migrate.rs`（读版本 → 每版一事务执行 → 同事务写回 `user_version`），对外只经 `hp_db::Db::apply_migrations` 调用：`crates/hp-repo/src/repo_db.rs`、`crates/hp-store/src/global/global_db.rs`、`crates/hp-store/src/dict/dict_db.rs`、`crates/hp-store/src/dict/tag_lib_db.rs` 各调一次（D185 起开库流程下沉到 `hp-db`，迁移清单仍留在各句柄里）。
   - **当前仓库库版本 = 16**（`0016` 为 `files.index_only` 被排除子树的「仅索引」标记（D164）；`0015` 为 `files.width` / `files.height` 图片显示宽高（可空、可回填，缺陷 0043）；`0014` 为 `source_exclusion` 媒体源子目录排除表（软排除，与卸载同形但可还原，D149）；`0013` 为 `albums.sort_order` 同级排序位 + `idx_albums_repo_order`（拖拽排序，D132）；`0012` 为相册同步镜像身份列 + `album_sync_exclusion`（同步相册镜像树、只增不删、位置与源一致，D129）；`0011` 为 `reader_annotations` 阅读批注表（书签 / 笔记 / 高亮，D113）；`0010` 为 `file_marks` 一对多标记表 + 存量搬迁；`0009` 为 `file_covers` 表；`0008` 为 `files.subtype` 列（**已废弃**）；`0007` 为 `album_member(file_id)` 索引；读 `repo_db.rs`）。
   - **当前全局配置库版本 = 5**（`global/0001_init` … `global/0005_layout_presets`，见 `crates/hp-store/src/global/global_db.rs:16`-`21` 的五个 `include_str!`；0005 建 `layout_presets` / `layout_bindings` 并折算 `panel_layouts`）；全局库内**没有**镜像表（没有 `global_meta`）。
   - **当前词库版本 = 1**（`dict_db.rs:19`）；`dict_meta`（`dict/0001:6-9`）是数据元信息 K/V，**不是** schema 版本。
 - **`repo_meta.schema_version` 是**镜像键**，每次打开仓库库都按权威值回写**（2026-09 修复缺陷 0006）：`repo_db.rs` 的 `sync_schema_version_meta` 在 `open_inner` 的汇总点（`apply_migrations` 与蓝图文档迁移之后）执行，**新建与打开两条路径共用这一处**，因此升级过的库不再与 `user_version` 分叉。回写**不能**下沉到迁移执行器（`crates/hp-db/src/migrate.rs`）：那个执行器由四个库共用，且只有仓库库**有** `repo_meta`。**版本判断一律以 `PRAGMA user_version` 为准**，不要读镜像键（该键仍无读取方）。
 - 每个仓库库打开时都会 `busy_timeout = 5s`：**扫描与完全卸载各用一条独立连接**（不占用主连接锁，避免长任务把界面命令堵住），双连接在 WAL 下并存需要这个等待窗口。
 - **开库 pragma 的单一真值在 `crates/hp-db/src/lib.rs` 的 `PragmaSet`**（D185）：`REPO` = WAL + `busy_timeout = 5s` + 外键；`GLOBAL` / `DICT` = WAL + 外键（**无** `busy_timeout`）；`TAGLIB_READONLY` = 只开外键（数据包只读，不切 WAL）。关库检查点 `PRAGMA wal_checkpoint(TRUNCATE)` 也只在 `Db::checkpoint_close` 里出现。四个库的这处差异是**现状契约**，`tools/check-db-boundary.mjs` 断言 `pragma_update` / `busy_timeout` / `wal_checkpoint` / `journal_mode` 不得出现在 `crates/hp-db/src/` 之外。
-- 每次启动比对并顺序应用未执行的迁移；迁移脚本存放在 `crates/hp-store/migrations/`（当前分 `repo/`、`global/`、`dict/`、**`dict_lib/`** 四个目录），按 `0001_xxx.sql` 编号。
+- 每次启动比对并顺序应用未执行的迁移；迁移脚本按库分目录存放、按 `0001_xxx.sql` 编号：仓库库在 `crates/hp-repo/migrations/repo/`（D186 随 `hp-repo` 一起迁出，共 16 份），全局库 / 词库 / 四库单库在 `crates/hp-store/migrations/` 的 `global/`、`dict/`、**`dict_lib/`**。
   - `dict/` 是 RFC 0006 旧词库（保留作对照与回退，forward-only）。
   - **`dict_lib/0001_init.sql` 是 RFC 0008 四库的权威 DDL**（已实施），同时被数据管线（`tools/tagdict/*.py` 读取该文件作为唯一 schema 源）与 Rust 侧（`TagLibDb::open` 的迁移）使用。**改动四库 schema 必须追加新迁移文件，不要改 0001**。
 - 每个迁移在事务中执行；失败则回滚并阻止打开仓库，提示备份/导出策略。

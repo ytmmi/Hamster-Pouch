@@ -6,8 +6,8 @@
 use hp_core::{AiTagUndo, FileId, HpError, HpResult, RepoId, TagId, TagSource};
 use rusqlite::{OptionalExtension, Row, params};
 
-use crate::repo::repo_db::RepoDb;
-use crate::util::{require_nonempty, store_err};
+use crate::repo_db::RepoDb;
+use hp_db::{require_nonempty, store_err};
 
 impl RepoDb {
     /// 写入一条 AI 覆盖撤销记录。

@@ -19,7 +19,7 @@ const SCAN_ROOTS = [join(ROOT, "crates"), join(ROOT, "apps", "desktop", "src-tau
 const FORBIDDEN = ["pragma_update(", ".busy_timeout(", "wal_checkpoint", "\"journal_mode\""];
 /// 四个句柄必须走 hp_db::Db（不许自己开 Connection）。
 const HANDLES = [
-  ["crates/hp-store/src/repo/repo_db.rs", "hp_db::Db::open"],
+  ["crates/hp-repo/src/repo_db.rs", "hp_db::Db::open"],
   ["crates/hp-store/src/global/global_db.rs", "hp_db::Db::open"],
   ["crates/hp-store/src/dict/dict_db.rs", "hp_db::Db::open"],
   ["crates/hp-store/src/dict/tag_lib_db.rs", "hp_db::Db::open"],
@@ -103,5 +103,27 @@ for (const [rel, needle] of HANDLES) {
 }
 report(badHandles.length === 0, `四个库句柄均经 hp-db 打开（${HANDLES.length} 个句柄）`, badHandles);
 
+// ⑤ hp-repo 不许依赖 hp-store（仓库库已从 hp-store 拆出，反向依赖又会成环）
+const repoManifest = readFileSync(join(ROOT, "crates", "hp-repo", "Cargo.toml"), "utf8");
+report(
+  !/hp-store/.test(repoManifest),
+  "hp-repo 不依赖 hp-store（依赖方向单向）",
+  ["crates/hp-repo/Cargo.toml 里出现了 hp-store"],
+);
+
+// ⑥ 仓库库的句柄与迁移清单只在 hp-repo：hp-store 不许再长出 repo 模块（防回填）
+const storeSrc = walk(join(ROOT, "crates", "hp-store", "src"), []);
+const backfill = [];
+for (const file of storeSrc) {
+  const rel = relative(ROOT, file).replace(/\\/g, "/");
+  const body = stripComments(readFileSync(file, "utf8"));
+  if (/pub struct RepoDb\b/.test(body)) backfill.push(`${rel}  又定义了 RepoDb`);
+  if (body.includes("include_str!(\"../../migrations/repo/")) backfill.push(`${rel}  又内联了仓库库迁移`);
+}
+report(
+  backfill.length === 0,
+  `仓库库句柄与迁移只在 hp-repo（扫描 hp-store/src ${storeSrc.length} 个 .rs）`,
+  backfill,
+);
 console.log(`\n[check-db-boundary] ${passed}/${total} 通过`);
 process.exit(passed === total ? 0 : 1);

@@ -210,7 +210,7 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 - 过滤点共四处，缺一处就会出现"这里没了、那里还在"：`file.query`（`RepoDb::query_files`）、
   相册成员分页（`RepoDb::query_album_members_page`）、相册全量可见成员
   （`hp-album` 的 `visible_members`）、以及 `source.tree` 建树**之前**的相对路径过滤。
-  判定口径单点定义在 `EXCLUDED_PATH_PREDICATE`（`crates/hp-store/src/repo/source_exclusion_repo.rs`）。
+  判定口径单点定义在 `EXCLUDED_PATH_PREDICATE`（`crates/hp-repo/src/source_exclusion_repo.rs`）。
 - `count_files` / `count_album_members` 这类**原始计数**刻意不带过滤（它们回答"库里有多少行"）；
   界面数字请用过滤版本（如 `RepoDb::count_visible_album_members`）。
 - 排除整个源不在本功能范围内：那正是卸载。

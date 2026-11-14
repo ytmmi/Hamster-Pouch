@@ -2,6 +2,7 @@
 members = [
   "crates/hp-core",
   "crates/hp-db",
+  "crates/hp-repo",
   "crates/hp-store",
   "crates/hp-scanner",
   "crates/hp-hash",

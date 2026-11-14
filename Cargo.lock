@@ -1010,6 +1010,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hp-repo"
+version = "0.1.0"
+dependencies = [
+ "hp-core",
+ "hp-db",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "hp-scanner"
 version = "0.1.0"
 dependencies = [
@@ -1031,6 +1042,7 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "hp-db",
+ "hp-repo",
  "rusqlite",
  "serde_json",
  "tempfile",

@@ -12,8 +12,8 @@
 use hp_core::{AnnotationKind, HpError, HpResult, ReaderAnnotation, validate_annotation_content};
 use rusqlite::{OptionalExtension, Row, params};
 
-use crate::repo::repo_db::RepoDb;
-use crate::util::{now_iso, require_nonempty, store_err, uuid};
+use crate::repo_db::RepoDb;
+use hp_db::{now_iso, require_nonempty, store_err, uuid};
 
 /// 新建阅读批注的入参（取代 8 个位置参数，clippy 的 too_many_arguments 检查）。
 ///

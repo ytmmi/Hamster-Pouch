@@ -6,8 +6,8 @@
 use hp_core::{HpError, HpResult};
 use rusqlite::{OptionalExtension, Row, params};
 
-use crate::repo::repo_db::RepoDb;
-use crate::util::{now_iso, require_nonempty, store_err, uuid};
+use crate::repo_db::RepoDb;
+use hp_db::{now_iso, require_nonempty, store_err, uuid};
 
 /// 操作历史行：与 `ops_history` 表一一对应。
 #[derive(Debug, Clone, PartialEq)]

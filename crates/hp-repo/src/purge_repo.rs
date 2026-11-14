@@ -35,8 +35,8 @@
 use hp_core::{HpError, HpResult};
 use rusqlite::params;
 
-use crate::repo::repo_db::RepoDb;
-use crate::util::{now_iso, require_nonempty, store_err};
+use crate::repo_db::RepoDb;
+use hp_db::{now_iso, require_nonempty, store_err};
 
 /// 某媒体源的数据清点（卸载警告弹窗与进度都用它）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

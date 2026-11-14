@@ -3,8 +3,8 @@
 use hp_core::{HpError, HpResult, RepoId, Source, SourceId};
 use rusqlite::{OptionalExtension, Row, params};
 
-use crate::repo::repo_db::RepoDb;
-use crate::util::{now_iso, require_nonempty, store_err};
+use crate::repo_db::RepoDb;
+use hp_db::{now_iso, require_nonempty, store_err};
 
 impl RepoDb {
     /// 挂载媒体源到仓库；返回写入的 `Source`。

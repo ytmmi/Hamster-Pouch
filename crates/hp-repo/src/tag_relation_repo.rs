@@ -5,8 +5,8 @@
 use hp_core::{HpError, HpResult, RepoId, Tag, TagId, TagRelation, TagRelationKind};
 use rusqlite::{OptionalExtension, Row, params};
 
-use crate::repo::repo_db::RepoDb;
-use crate::util::{now_iso, require_nonempty, store_err, uuid};
+use crate::repo_db::RepoDb;
+use hp_db::{now_iso, require_nonempty, store_err, uuid};
 
 impl RepoDb {
     /// 建立一条 tag 关系（幂等：同 `(repo, from, to, kind)` 已存在则返回已有关系）。
