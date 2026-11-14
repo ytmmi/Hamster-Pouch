@@ -8,7 +8,7 @@ use hp_core::{
     PanelSettingDecl, PluginId, PluginManifest, PluginRegistryRow, PluginRepoState, RepoId,
     RuntimeKind,
 };
-use hp_store::GlobalDb;
+use hp_global::GlobalDb;
 
 use crate::manifest::parse_manifest;
 

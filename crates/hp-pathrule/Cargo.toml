@@ -1,0 +1,7 @@
+[package]
+name = "hp-pathrule"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# 纯规则：无 IO、无 SQLite、无序列化。见 docs/spec/module-boundaries.md（D187）

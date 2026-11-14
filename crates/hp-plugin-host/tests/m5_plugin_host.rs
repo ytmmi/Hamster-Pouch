@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use hp_core::{Capability, PluginId, PluginRegistryRow, RuntimeKind, SourceKind, TrustLevel};
+use hp_global::GlobalDb;
 use hp_plugin_host::PluginHost;
-use hp_store::GlobalDb;
 
 const REPO: &str = "repo-1";
 

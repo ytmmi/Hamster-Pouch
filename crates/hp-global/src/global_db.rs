@@ -9,15 +9,15 @@ use hp_core::{HpError, HpResult};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde_json::Value;
 
-use crate::util::{now_iso, require_nonempty, store_err, uuid};
+use hp_db::{now_iso, require_nonempty, store_err, uuid};
 
 /// 全局配置库迁移脚本（按版本升序）。
 const GLOBAL_MIGRATIONS: &[&str] = &[
-    include_str!("../../migrations/global/0001_init.sql"),
-    include_str!("../../migrations/global/0002_blueprint_templates.sql"),
-    include_str!("../../migrations/global/0003_layout_blueprints.sql"),
-    include_str!("../../migrations/global/0004_layout_layers.sql"),
-    include_str!("../../migrations/global/0005_layout_presets.sql"),
+    include_str!("../migrations/global/0001_init.sql"),
+    include_str!("../migrations/global/0002_blueprint_templates.sql"),
+    include_str!("../migrations/global/0003_layout_blueprints.sql"),
+    include_str!("../migrations/global/0004_layout_layers.sql"),
+    include_str!("../migrations/global/0005_layout_presets.sql"),
 ];
 
 /// 仓库注册表行。
@@ -87,9 +87,7 @@ impl GlobalDb {
         let mut conn = hp_db::Db::open(path.as_ref(), hp_db::PragmaSet::GLOBAL, "打开全局配置库")?;
         conn.apply_migrations(GLOBAL_MIGRATIONS)?;
         // 打开即把低版本蓝图模板一次性迁移到当前版本并回写（RFC 0007 / D52）。
-        crate::global::blueprint_template_repo::migrate_blueprint_template_documents(
-            conn.as_conn_mut(),
-        )?;
+        crate::blueprint_template_repo::migrate_blueprint_template_documents(conn.as_conn_mut())?;
         Ok(Self { conn })
     }
 

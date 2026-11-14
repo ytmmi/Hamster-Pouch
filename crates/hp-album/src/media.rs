@@ -3,7 +3,8 @@
 use std::collections::{HashMap, HashSet};
 
 use hp_core::{Album, AlbumMediaType, FileIndexRow, HpError, HpResult};
-use hp_store::{RepoDb, is_excluded_path};
+use hp_pathrule::is_excluded_path;
+use hp_store::RepoDb;
 
 /// 相册嵌套解析的最大深度，防止异常父子环导致死循环。
 pub(crate) const MAX_ALBUM_DEPTH: usize = 64;

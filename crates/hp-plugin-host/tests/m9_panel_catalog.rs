@@ -15,8 +15,8 @@
 use std::path::PathBuf;
 
 use hp_core::Capability;
+use hp_global::GlobalDb;
 use hp_plugin_host::{InstallSource, MANIFEST_FILE, PluginHost, PluginInstaller};
-use hp_store::GlobalDb;
 
 const REPO: &str = "repo-1";
 const INSTALLED_AT: &str = "2026-01-01T00:00:00Z";

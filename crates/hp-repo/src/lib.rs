@@ -26,9 +26,10 @@ pub use annotation_repo::NewAnnotation;
 pub use file_repo::{
     FILE_QUERY_MAX_LIMIT, FileQueryCursor, FileQueryFilter, ScanPrepareRow, SourceFileLocation,
 };
+pub use hp_pathrule::{is_excluded_path, retain_visible_paths};
 pub use ops_repo::OpsHistoryRow;
 pub use purge_repo::{PurgePhase, PurgeResult, SourceDataCounts};
 pub use repo_db::RepoDb;
-pub use source_exclusion_repo::{SourceExclusion, is_excluded_path, retain_visible_paths};
+pub use source_exclusion_repo::SourceExclusion;
 pub use source_tree::{SourceTree, TreeNode, build_source_tree};
 pub use tag_tree::{TagTree, TagTreeNode, build_tag_tree};

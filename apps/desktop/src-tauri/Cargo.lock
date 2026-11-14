@@ -1741,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "hamster-pouch-desktop"
-version = "0.1.39-Alpha"
+version = "0.1.40-Alpha"
 dependencies = [
  "hp-ai",
  "hp-album",
@@ -1926,6 +1926,7 @@ name = "hp-album"
 version = "0.1.0"
 dependencies = [
  "hp-core",
+ "hp-pathrule",
  "hp-store",
  "serde_json",
  "time",
@@ -1980,6 +1981,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hp-global"
+version = "0.1.0"
+dependencies = [
+ "hp-core",
+ "hp-db",
+ "rusqlite",
+ "serde_json",
+]
+
+[[package]]
 name = "hp-hash"
 version = "0.1.0"
 dependencies = [
@@ -2002,6 +2013,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hp-pathrule"
+version = "0.1.0"
+
+[[package]]
 name = "hp-pdf"
 version = "0.1.0"
 dependencies = [
@@ -2015,8 +2030,8 @@ name = "hp-plugin-host"
 version = "0.1.0"
 dependencies = [
  "hp-core",
+ "hp-global",
  "hp-plugin-signing",
- "hp-store",
  "serde",
  "serde_json",
  "time",
@@ -2038,6 +2053,7 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "hp-db",
+ "hp-pathrule",
  "rusqlite",
  "serde_json",
 ]
@@ -2049,6 +2065,7 @@ dependencies = [
  "hp-core",
  "hp-hash",
  "hp-media",
+ "hp-pathrule",
  "hp-store",
  "image",
  "notify",
@@ -2062,6 +2079,7 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "hp-db",
+ "hp-global",
  "hp-repo",
  "rusqlite",
  "serde_json",

@@ -59,12 +59,17 @@ crates/hp-repo/src/   # 仓库库（每仓库一个 SQLite 文件）：表结构
   source_tree.rs      source_exclusion_repo.rs   annotation_repo.rs
   purge_repo.rs       # 卸载源的逐表清理清单（`DERIVED_TABLES`：**新增引用 files(id) 的表必须登记**）
 crates/hp-repo/migrations/repo/  # 仓库库迁移 SQL（forward-only，0001_init … 0016_index_only.sql，当前版本 = 16）
-crates/hp-store/src/  # 全局库 + 词库（仓库库已拆到 hp-repo），并对 hp-repo 的公开项再导出
+crates/hp-global/src/ # 全局配置库（D187 从 hp-store 拆出）：仓库注册表、应用设置、面板布局、插件注册表
+  lib.rs              # 模块声明 + 公开项再导出（hp-store 原样再导出，`hp_store::GlobalDb` 等路径不变）
+  global_db.rs        # 连接 / 迁移 / 仓库注册表 / 设置 / 面板布局（GlobalDb）
+  plugin_repo.rs      # 插件注册表行
+  blueprint_template_repo.rs  # 应用级共享的蓝图模板
+crates/hp-global/migrations/global/  # 全局配置库迁移 SQL（0001_init … 0005_layout_presets.sql，当前版本 = 5）
+crates/hp-pathrule/src/  # 纯路径规则（D187）：无 IO、无 SQLite、无序列化
+  lib.rs              # is_excluded_path（前缀命中自己与全部后代）+ retain_visible_paths
+crates/hp-store/src/  # tag 词库（仓库库与全局库已分别拆到 hp-repo / hp-global），并对两者的公开项再导出
   lib.rs
   util.rs             # 再导出 hp-db 的四个工具（领域仓储的 `use crate::util::…` 零改动）
-  global/             # 全局配置库
-    global_db.rs      plugin_repo.rs
-    blueprint_template_repo.rs  # 应用级共享的蓝图模板
   dict/               # tag 词库（独立 SQLite 文件，应用级共享，RFC 0006）
     dict_db.rs        # 连接 / 迁移 / 多语言查询（TagDictDb）
     tag_lib_db.rs     # 四库**单库句柄**：打开 / 元信息 / 只读查询 / 行映射（TagLibDb）
@@ -72,10 +77,10 @@ crates/hp-store/src/  # 全局库 + 词库（仓库库已拆到 hp-repo），并
     tag_lib_set.rs    # 四库**聚合查询层**：用户库 > 扩展包 > 内置基底的统一视图（TagLibSet）
     tag_lib_merge.rs  # 多扩展包之间的**重复概念归并**（MergeIndex，D36.3）
   migrations/         # 迁移 SQL（forward-only，发布后禁止修改；权威文本在这些文件里）
-    global/           # 全局配置库：0001_init … 0005_layout_presets.sql（当前版本 = 5）
     dict/             # tag 词库：0001_init.sql
     dict_lib/         # 四库单库句柄（TagLibDb）：0001_init.sql
-                      # 仓库库的 migrations/repo/ 已随 D186 移入 hp-repo。
+                      # 迁移清单随 crate 走：仓库库在 hp-repo（D186）、全局库在 hp-global（D187），
+                      # 两侧目录里都不再有别的库的 SQL——`check:db-boundary` 断言版本号连续。
   tests/              # 集成测试 + 夹具（default_blueprint.json、blueprint_factory/）
 
   main.rs             # 入口装配 + AppState
@@ -778,7 +783,11 @@ HamsterPouch/
                               #   （信任等级·来源·运行形态·能力·宿主 API 版本）/ plugin_validate.rs 清单校验
                               #   （结构 / 贡献点完备性 / 取值域 / 声明）/ plugin_row.rs 存储行 /
                               #   plugin_tests.rs 测试夹具 / plugin_contribution.rs 贡献点取值域）
-    hp-store/                 # SQLite 访问、迁移、事务；内部按 repo/ 与 global/ 分层
+    hp-db/                    # SQLite 连接骨架：PragmaSet / 前向迁移执行器 / 关库检查点
+    hp-repo/                  # 仓库库（每仓库一个文件）：表结构、16 份迁移、领域仓储（D186）
+    hp-global/                # 全局配置库：仓库注册表、设置、面板布局、插件注册表（D187）
+    hp-pathrule/              # 纯路径规则：前缀排除判定与可见性过滤（无 IO / 无 SQLite，D187）
+    hp-store/                 # tag 词库（TagDictDb / TagLibDb）+ 对 hp-repo / hp-global 的再导出
     hp-scanner/               # 媒体源扫描、变更检测、索引任务
     hp-hash/                  # 内容哈希、感知哈希、哈希算法版本记录
     hp-album/                 # 相册领域：固定型成员、跟随源同步规则（`sync.rs`）、
@@ -1002,11 +1011,12 @@ HamsterPouch/
 apps/desktop -> packages/ui -> packages/shared-types
 apps/desktop -> src-tauri -> crates/*
 crates/hp-* -> hp-core
-hp-scanner/hp-album/hp-ai -> hp-store
+hp-scanner/hp-album/hp-ai -> hp-store（RepoDb 再导出）+ hp-pathrule（排除判定）
 hp-media -> hp-store（元数据/抽帧结果缓存）+ hp-core（媒体任务模型）
+hp-repo/hp-global/hp-store -> hp-db（开库 / 迁移 / 检查点）+ hp-pathrule（hp-repo 再导出）
 hp-book -> hp-core（只用 HpError/HpResult；纯文件格式解析，不碰数据库、不碰 Tauri）
 hp-pdf -> hp-core（同上；纯 PDF 栅格化与元数据，**不依赖 hp-book**——两者没有共用逻辑）
-hp-plugin-host -> hp-core + hp-store 的稳定接口
+hp-plugin-host -> hp-core + hp-global（只要全局配置库，D187）+ hp-store 的稳定接口
 hp-fsops -> hp-core + hp-store
 hp-dto -> hp-core（跨层 DTO；由 ts-rs 生成 packages/shared-types）
 ```

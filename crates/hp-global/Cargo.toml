@@ -1,0 +1,15 @@
+[package]
+name = "hp-global"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hp-core = { path = "../hp-core" }
+# 连接骨架（开库 pragma / 前向迁移 / 关库检查点 / 四个小工具）统一在 hp-db（D185）
+hp-db = { path = "../hp-db" }
+# bundled：SQLite 源码编译进 crate，不依赖系统 SQLite（D20 本地化）
+rusqlite = { version = "0.41", features = ["bundled"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

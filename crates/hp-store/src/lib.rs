@@ -2,12 +2,11 @@
 //! 自 D186 起拆到独立 crate `hp-repo`，这里只做再导出，`hp_store::RepoDb` 等路径保持不变。
 
 mod dict;
-mod global;
 mod util;
 
 pub use dict::{ConceptKey, MergeIndex, MergedConcept, TagDictDb, TagLibDb, TagLibSet};
-pub use global::{GlobalDb, LayoutPresetRow, RepoRow, SeedOutcome};
 pub use hp_core::HpError;
+pub use hp_global::{GlobalDb, LayoutPresetRow, RepoRow, SeedOutcome};
 pub use hp_repo::{
     ALBUM_MEMBERS_MAX_LIMIT, AlbumMemberCursor, AlbumSourceMembers, FILE_QUERY_MAX_LIMIT,
     FileQueryCursor, FileQueryFilter, NewAnnotation, OpsHistoryRow, PurgePhase, PurgeResult,

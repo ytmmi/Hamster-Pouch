@@ -19,12 +19,12 @@
 use std::path::{Path, PathBuf};
 
 use hp_core::RuntimeKind;
+use hp_global::GlobalDb;
 use hp_plugin_host::{
     InstallSource, MANIFEST_FILE, PYTHON_CORE_PLUGIN_ID, PanelSchemaParams, PluginHost,
     PluginInstaller, SCHEMA_MAX_BYTES, SCHEMA_QUERY_TIMEOUT, python_core_enabled,
     python_core_status, query_for_owner,
 };
-use hp_store::GlobalDb;
 
 const INSTALLED_AT: &str = "2026-01-01T00:00:00Z";
 /// 查询通道的仓库上下文（0039：Python 核心开关按仓库生效）。

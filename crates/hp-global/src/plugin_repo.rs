@@ -11,7 +11,7 @@ use hp_core::{
 use rusqlite::{OptionalExtension, Row, params};
 
 use super::global_db::GlobalDb;
-use crate::util::{now_iso, require_nonempty, store_err};
+use hp_db::{now_iso, require_nonempty, store_err};
 
 /// `plugin_registry` 表列清单（与迁移 0001 顺序一致）。
 const PLUGIN_COLUMNS: &str = "id, name, version, trust_level, source_kind, source_ref, runtime_kind, installed_at, manifest_json";

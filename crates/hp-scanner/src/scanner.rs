@@ -17,7 +17,8 @@ use hp_core::{
 };
 use hp_hash::{ContentHash, PerceptualHash};
 use hp_media::{ThumbnailCache, encode_palette_json, palette_is_locked};
-use hp_store::{RepoDb, ScanPrepareRow, is_excluded_path};
+use hp_pathrule::is_excluded_path;
+use hp_store::{RepoDb, ScanPrepareRow};
 use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
 

@@ -8,11 +8,11 @@
 use std::path::{Path, PathBuf};
 
 use hp_core::{Capability, HpError, SourceKind, TrustLevel};
+use hp_global::GlobalDb;
 use hp_plugin_host::{
     HostSourceKind, InstallSource, MANIFEST_FILE, PluginHost, PluginInstaller, effective_trust,
     read_package,
 };
-use hp_store::GlobalDb;
 
 const REPO: &str = "repo-1";
 const INSTALLED_AT: &str = "2026-01-01T00:00:00Z";

@@ -11,7 +11,7 @@ use hp_core::{BlueprintTemplateRow, HpError, HpResult};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use super::global_db::GlobalDb;
-use crate::util::{now_iso, require_nonempty, store_err, uuid};
+use hp_db::{now_iso, require_nonempty, store_err, uuid};
 
 /// `blueprint_templates` 表列清单（与全局迁移 0002 顺序一致）。
 const TEMPLATE_COLUMNS: &str =

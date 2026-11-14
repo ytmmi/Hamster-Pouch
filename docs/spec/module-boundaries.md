@@ -20,7 +20,9 @@ Rust 核心层
 - `hp-core`：纯领域模型与错误类型；不依赖 Tauri/SQLite/文件系统。
 - `hp-db`：SQLite 连接骨架——`PragmaSet` 组合（WAL / busy_timeout / 外键）、前向迁移执行器、关库检查点，以及 `store_err` / `now_iso` / `uuid` / `require_nonempty` 四个小工具。**只放骨架，不放 schema、SQL 与迁移清单**；不依赖任何领域 crate（`hp-store` 依赖它，反向禁止，`check:db-boundary` 断言）。
 - `hp-repo`：仓库库（每仓库一个 SQLite 文件）的表结构、SQL、迁移清单与领域仓储（`RepoDb` + 各 `*_repo`）；连接经 `hp-db` 打开；不依赖 `hp-store`（反向禁止，`check:db-boundary` 断言）。D186 从 `hp-store` 拆出，`hp-store` 原样再导出，调用方路径不变。
-- `hp-store`：全局库与 tag 词库（含四库 `TagLibDb`）的表结构、SQL、迁移清单与事务；连接一律经 `hp-db` 打开；对 `hp-repo` 的公开项再导出，向上暴露仓储接口（词库见 RFC 0006）。
+- `hp-global`：全局配置库（仓库注册表、应用设置、面板布局、插件注册表行）的表结构、SQL、5 份迁移清单与事务（`GlobalDb`）；连接经 `hp-db` 打开；**不依赖 `hp-store` / `hp-repo`**（反向禁止，`check:db-boundary` 断言）。D187 从 `hp-store` 拆出，`hp-store` 原样再导出，调用方路径不变；`hp-plugin-host` 是全仓唯一「只要全局库、不要仓库库」的 crate，已直接依赖本 crate。
+- `hp-pathrule`：媒体源内**相对路径的纯规则**——`is_excluded_path`（前缀命中自己与全部后代，不命中 `a/bc`）与 `retain_visible_paths`；**无 IO、无 SQLite、无序列化**，也不依赖任何库 crate（`check:db-boundary` 断言）。D187 从 `hp-repo` 摘出：`hp-album`（媒体库视图）与 `hp-scanner`（逐文件判定）都要用它，不该为一次 `&str` 比较而依赖整个仓储层。SQL 侧的同口径谓词仍在 `crates/hp-repo/src/source_exclusion_repo.rs`（`substr(...) = e.relative_path || '/'`），两侧必须逐字一致。
+- `hp-store`：tag 词库（`TagDictDb` + 四库 `TagLibDb`）的表结构、SQL、迁移清单与事务；连接一律经 `hp-db` 打开；对 `hp-repo` / `hp-global` 的公开项再导出，向上暴露仓储接口（词库见 RFC 0006）。D185→D187 三步拆分后，它已不含任何仓库库或全局库的表结构与迁移。
 - `hp-scanner`：扫描媒体源、监听变化、生成索引任务；媒体类型判定（扩展名优先 + 内容兜底）；不直接改 UI。
 - `hp-hash`：内容哈希与感知哈希；只输出哈希值与算法元数据。
 - `hp-album`：固定相册、跟随源同步规则、成员维护、相册查询。

@@ -152,7 +152,7 @@ fn static_data_extension_can_be_enabled_without_capabilities() {
     }
 
     let tmp = tempfile::tempdir().expect("临时目录");
-    let mut db = hp_store::GlobalDb::open(tmp.path().join("global.sqlite3")).expect("全局库");
+    let mut db = hp_global::GlobalDb::open(tmp.path().join("global.sqlite3")).expect("全局库");
     let installer = PluginInstaller::new(tmp.path().join("plugins"));
 
     for dir in &dirs {
@@ -215,7 +215,7 @@ fn real_tag_extension_is_catalogued_last_without_enable_state() {
     };
 
     let tmp = tempfile::tempdir().expect("临时目录");
-    let mut db = hp_store::GlobalDb::open(tmp.path().join("global.sqlite3")).expect("全局库");
+    let mut db = hp_global::GlobalDb::open(tmp.path().join("global.sqlite3")).expect("全局库");
     let installer = PluginInstaller::new(tmp.path().join("plugins"));
 
     // 带面板的插件（小体积）作为"面板在前"的对照。

@@ -5,7 +5,8 @@ edition.workspace = true
 
 [dependencies]
 hp-core = { path = "../hp-core" }
-hp-store = { path = "../hp-store" }
+# 只需要全局配置库；不再依赖整个 hp-store（D187）
+hp-global = { path = "../hp-global" }
 hp-plugin-signing = { path = "../hp-plugin-signing" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

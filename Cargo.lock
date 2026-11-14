@@ -894,6 +894,7 @@ name = "hp-album"
 version = "0.1.0"
 dependencies = [
  "hp-core",
+ "hp-pathrule",
  "hp-store",
  "serde_json",
  "tempfile",
@@ -952,6 +953,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hp-global"
+version = "0.1.0"
+dependencies = [
+ "hp-core",
+ "hp-db",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "hp-hash"
 version = "0.1.0"
 dependencies = [
@@ -976,6 +988,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hp-pathrule"
+version = "0.1.0"
+
+[[package]]
 name = "hp-pdf"
 version = "0.1.0"
 dependencies = [
@@ -990,8 +1006,8 @@ name = "hp-plugin-host"
 version = "0.1.0"
 dependencies = [
  "hp-core",
+ "hp-global",
  "hp-plugin-signing",
- "hp-store",
  "serde",
  "serde_json",
  "tempfile",
@@ -1015,6 +1031,7 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "hp-db",
+ "hp-pathrule",
  "rusqlite",
  "serde_json",
  "tempfile",
@@ -1027,6 +1044,7 @@ dependencies = [
  "hp-core",
  "hp-hash",
  "hp-media",
+ "hp-pathrule",
  "hp-store",
  "image",
  "notify",
@@ -1042,6 +1060,7 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "hp-db",
+ "hp-global",
  "hp-repo",
  "rusqlite",
  "serde_json",

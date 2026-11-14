@@ -23,7 +23,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use hp_core::{HpError, HpResult, PluginManifest, PluginRegistryRow, RuntimeKind};
-use hp_store::GlobalDb;
+use hp_global::GlobalDb;
 
 use crate::channel::ExternalProcessQuery;
 use crate::host::PanelOwner;
