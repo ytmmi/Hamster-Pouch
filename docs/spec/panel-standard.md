@@ -499,6 +499,28 @@
     ③`心臓（しんぞう）` → `<ruby>`+`<rt>`，含注音的行放开 `line-height`；④填充渐变两端各留 6%
     的过渡带；⑤样式 2 歌词字号整体收一档。门禁 `475 → 480`（新增 4 条：注音、柔边、键盘、
     三团纹理；改写 2 条：色晕合成层、样式 2 控制区）。
+    **2026-11-14 第十轮（D177，填充可见性 / 色晕雾化 / 双语主副）**：用户「阅读
+    `docs/issues/0048-player-lyrics-fill-and-haze-handover.md`，进行构建」——按交接件修四条。口径：
+    ①样式 1 活动行的 `text-shadow: 0 0 22px rgba(255,255,255,.4)` 在字形透明时摊成白雾，删掉，外发光
+    只留 `filter: drop-shadow`；②样式 2 的活动行 `color: var(--player-accent)` 特异度 (0,5,0) 盖掉了
+    `.is-filling` 的 `color: transparent`，改用压不住的 `-webkit-text-fill-color: transparent` 并点名
+    `text-shadow: none`；③色晕画布 420 → 640、`stdDeviation` 9–12 → 22–28、圆半径 250，每团拆**两层**
+    兄弟元素挂不同纹理反向 `alternate` 交叉淡入（19/26/31s），几何与漂移（53/71/89s、±14–20%、
+    `scale` 0.80–1.30、`rotate` ±12°）挪到 `.player-haze-cluster`，样式 2 的压暗也随之改挂 cluster；
+    ④`pairLrcLines` 按 `/[぀-ヿ]/` 定主副、噪声行（`//`、纯符号、`曲：` 等元信息）只在配对时
+    剔除，时间标签小数位放宽到 6 位（`[01:32.869995]` 原来整行丢字），副行不再跑注音；⑤验收时量出
+    填充百分比按**行盒宽**（494px）算而不是文字宽（240px），进度到 ~48% 就整行亮了，`.is-filling`
+    收成 `width: fit-content` + `max-width: 100%`。门禁 `480 → 484`（新增 4 条、改写 3 条）。
+    **2026-11-14 第十一轮（D178，填充的推进粒度）**：用户「歌词的颜色填充实际表演效果观感卡顿，
+    进行优化」。根因不在绘制而在**时钟粒度**：`positionMs` 只由 `<audio>` 的 `timeupdate` 推进，
+    浏览器给 ~4Hz（250ms 一跳），靠 `transition: --player-lyric-progress 0.2s linear` 补台阶时，
+    过渡**每来一个新值就重启**（200ms 过渡 + 250ms 更新）→ 边界"追上—停住—再追"，再叠上
+    `timeupdate` 自身的抖动，观感就是卡顿。改法：`MusicStage` 新增可选 `readPositionMs`
+    （面板传入读 `audio.currentTime` 的回调），`useLyricFill` 用 rAF **每帧**读真值算进度，直接
+    `style.setProperty` 写自定义属性——不触发 re-render（换句才 `setState`），值没变就不写；暂停 /
+    拖动 / 读不到实时读数时退回 props 的粗时钟并按需落一次，不跑循环。CSS 里那条 `transition`
+    随之删除（再叠过渡只会被反复重启）。门禁 `484 → 485`（新增 1 条：rAF 直驱 + 无 `transition`
+    + 面板传实时读数；改写 1 条：D173 不再要求内联 `style` 写进度）。
 
 
 - **`cargo test -p hp-core`**：面板声明的硬错误清单、命名空间规则、`settings.kind` 白名单、`has_class = false` 的类目拒绝、`mount.overlay_content = false` 的浮层拒绝。

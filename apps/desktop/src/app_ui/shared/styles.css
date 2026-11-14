@@ -5322,79 +5322,156 @@ button.danger {
 }
 
 /* 色团：形状来自**离线烘焙**的噪波纹理（见文件末尾的 `--player-haze-tex-*`），
-   自身只做 `transform` / `opacity` 动画 —— 合成器合成，不重绘、不算滤镜。 */
-.player-haze-blob {
+   自身只做 `transform` / `opacity` 动画 —— 合成器合成，不重绘、不算滤镜。
+
+   2026-11-14 D177（用户：「色晕雾化不够，能看出来还是原来那个形状」）：
+   一团拆成**两层**。
+   - 外层 `.player-haze-cluster` 管位置、大小、漂移（周期 53 / 71 / 89s，互质，
+     三个 transform 不会同时回到原点）；
+   - 里面两个**兄弟** `.player-haze-blob` 各挂**不同**的噪波纹理，按互补的
+     opacity 节奏交叉淡入（同周期 `alternate` + `alternate-reverse`，两层和恒为 1）。
+     单张纹理怎么转轮廓都是那张图；两层叠加时轮廓是两张图的和，才会一直在变。
+   - mask 是元素级的，做不成"子层"，所以第二层必须是兄弟元素而不是伪元素。
+   纹理也重烘过：画布 640、`stdDeviation` 22–28。旧版 420 画布上只有 9–12，
+   摊到 92% 的舞台上有效模糊不到 3px，看着是硬边。 */
+.player-haze-cluster {
   position: absolute;
   display: block;
-  opacity: 0.66;
-  background: var(--player-haze-a, #b9a4ff);
-  -webkit-mask-image: var(--player-haze-tex-a);
-  mask-image: var(--player-haze-tex-a);
+  color: var(--player-haze-a, #b9a4ff);
+  will-change: transform;
+}
+
+.player-haze-blob {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: currentColor;
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
-  will-change: transform;
-  animation: player-haze-drift-a 47s ease-in-out infinite alternate;
+  opacity: 0.9;
+  will-change: opacity;
+  animation: player-haze-fade-a 19s ease-in-out infinite alternate;
 }
 
+.player-haze-cluster-a {
+  width: 92%;
+  height: 108%;
+  left: -24%;
+  top: -34%;
+  opacity: 0.72;
+  animation: player-haze-drift-a 53s ease-in-out infinite alternate;
+}
+
+.player-haze-cluster-b {
+  width: 58%;
+  height: 70%;
+  right: -16%;
+  bottom: -22%;
+  opacity: 0.56;
+  color: var(--player-haze-b, #ffb3cd);
+  animation: player-haze-drift-b 71s ease-in-out infinite alternate;
+}
+
+.player-haze-cluster-c {
+  width: 50%;
+  height: 60%;
+  left: 22%;
+  top: 28%;
+  opacity: 0.46;
+  color: var(--player-haze-c, #9fc6ff);
+  animation: player-haze-drift-c 89s ease-in-out infinite alternate;
+}
+
+/* 纹理与淡入节奏按团各自写全：同一团的 -alt 层换**另一张**纹理、并反相淡入，
+   所以任何时刻都是"两张图按比例相加"，不是一张图单独定格。 */
 .player-haze-blob-a {
-  width: 86%;
-  height: 104%;
-  left: -22%;
-  top: -32%;
+  -webkit-mask-image: var(--player-haze-tex-a);
+  mask-image: var(--player-haze-tex-a);
+  animation: player-haze-fade-a 19s ease-in-out infinite alternate;
+}
+
+.player-haze-blob-a-alt {
+  -webkit-mask-image: var(--player-haze-tex-b);
+  mask-image: var(--player-haze-tex-b);
+  animation: player-haze-fade-a 19s ease-in-out infinite alternate-reverse;
 }
 
 .player-haze-blob-b {
-  width: 52%;
-  height: 64%;
-  right: -14%;
-  bottom: -20%;
-  opacity: 0.5;
-  background: var(--player-haze-b, #ffb3cd);
   -webkit-mask-image: var(--player-haze-tex-b);
   mask-image: var(--player-haze-tex-b);
-  animation: player-haze-drift-b 61s ease-in-out infinite alternate;
+  animation: player-haze-fade-b 26s ease-in-out infinite alternate;
+}
+
+.player-haze-blob-b-alt {
+  -webkit-mask-image: var(--player-haze-tex-c);
+  mask-image: var(--player-haze-tex-c);
+  animation: player-haze-fade-b 26s ease-in-out infinite alternate-reverse;
 }
 
 .player-haze-blob-c {
-  width: 46%;
-  height: 56%;
-  left: 24%;
-  top: 30%;
-  opacity: 0.42;
-  background: var(--player-haze-c, #9fc6ff);
   -webkit-mask-image: var(--player-haze-tex-c);
   mask-image: var(--player-haze-tex-c);
-  animation: player-haze-drift-c 79s ease-in-out infinite alternate;
+  animation: player-haze-fade-c 31s ease-in-out infinite alternate;
 }
 
-/* 位移 / 缩放 / 旋转三者周期互质（47s / 61s / 79s），叠起来不会同时回到原点。 */
+.player-haze-blob-c-alt {
+  -webkit-mask-image: var(--player-haze-tex-a);
+  mask-image: var(--player-haze-tex-a);
+  animation: player-haze-fade-c 31s ease-in-out infinite alternate-reverse;
+}
+
+/* 位移 / 缩放 / 旋转三者周期互质（53s / 71s / 89s），叠起来不会同时回到原点。
+   幅度按 0048 交接件的口径放大到 ±14–20% / 0.80–1.30 / ±12°：旧版 ±4–6%、scale
+   0.90–1.12，边界几乎不动，"像一张贴纸在抖"。 */
 @keyframes player-haze-drift-a {
-  0% { transform: translate3d(-4%, -3%, 0) scale(0.92) rotate(-4deg); opacity: 0.6; }
-  50% { transform: translate3d(6%, 2%, 0) scale(1.06) rotate(2deg); opacity: 0.74; }
-  100% { transform: translate3d(2%, 5%, 0) scale(0.98) rotate(6deg); opacity: 0.64; }
+  0% { transform: translate3d(-14%, -9%, 0) scale(0.86) rotate(-9deg); }
+  50% { transform: translate3d(18%, 7%, 0) scale(1.24) rotate(5deg); }
+  100% { transform: translate3d(6%, 16%, 0) scale(0.94) rotate(12deg); }
 }
 
 @keyframes player-haze-drift-b {
-  0% { transform: translate3d(4%, 3%, 0) scale(1.04) rotate(3deg); opacity: 0.44; }
-  50% { transform: translate3d(-6%, -4%, 0) scale(0.9) rotate(-6deg); opacity: 0.58; }
-  100% { transform: translate3d(-2%, 4%, 0) scale(1.08) rotate(-2deg); opacity: 0.48; }
+  0% { transform: translate3d(15%, 8%, 0) scale(1.18) rotate(6deg); }
+  50% { transform: translate3d(-20%, -12%, 0) scale(0.82) rotate(-12deg); }
+  100% { transform: translate3d(-8%, 14%, 0) scale(1.28) rotate(-4deg); }
 }
 
 @keyframes player-haze-drift-c {
-  0% { transform: translate3d(0, -3%, 0) scale(0.9) rotate(-6deg); opacity: 0.36; }
-  50% { transform: translate3d(-4%, 4%, 0) scale(1.12) rotate(7deg); opacity: 0.5; }
-  100% { transform: translate3d(4%, 1%, 0) scale(0.96) rotate(2deg); opacity: 0.4; }
+  0% { transform: translate3d(2%, -16%, 0) scale(0.8) rotate(-12deg); }
+  50% { transform: translate3d(-17%, 12%, 0) scale(1.3) rotate(12deg); }
+  100% { transform: translate3d(14%, 3%, 0) scale(0.9) rotate(3deg); }
+}
+
+/* 交叉淡入：两层同周期、反方向，和恒为 ~1（0.92 + 0.06 ≈ 0.98），所以整团的
+   亮度不跟着呼吸，变的只有**轮廓**。 */
+@keyframes player-haze-fade-a {
+  0% { opacity: 0.92; }
+  50% { opacity: 0.5; }
+  100% { opacity: 0.06; }
+}
+
+/* b / c 两团走各自的周期（26s / 31s），停点也稍稍错开 —— 三团同时"呼吸"会看出
+   节拍，错开之后画面里总有团在涨、有团在消。 */
+@keyframes player-haze-fade-b {
+  0% { opacity: 0.9; }
+  50% { opacity: 0.42; }
+  100% { opacity: 0.1; }
+}
+
+@keyframes player-haze-fade-c {
+  0% { opacity: 0.86; }
+  50% { opacity: 0.36; }
+  100% { opacity: 0.08; }
 }
 
 /* 噪波纹理：`feTurbulence` 撕边 + `feDisplacementMap` 形变 + `feGaussianBlur`
    软化，全部塞进 data-URI SVG 里 —— 浏览器只栅格化一次，之后当位图用。
    三团种子/频率/位移尺度各不相同，所以叠起来不会"像两个圆贴在一起"。 */
 .player-music {
-  --player-haze-tex-a: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc0MjAnIGhlaWdodD0nNDIwJyB2aWV3Qm94PScwIDAgNDIwIDQyMCc+PGRlZnM+PGZpbHRlciBpZD0nZicgeD0nLTYwJScgeT0nLTYwJScgd2lkdGg9JzIyMCUnIGhlaWdodD0nMjIwJSc+PGZlVHVyYnVsZW5jZSB0eXBlPSdmcmFjdGFsTm9pc2UnIGJhc2VGcmVxdWVuY3k9JzAuMDAzNSAwLjAwNTUnIG51bU9jdGF2ZXM9JzUnIHNlZWQ9JzExJyByZXN1bHQ9J24nLz48ZmVEaXNwbGFjZW1lbnRNYXAgaW49J1NvdXJjZUdyYXBoaWMnIGluMj0nbicgc2NhbGU9JzIxMCcgeENoYW5uZWxTZWxlY3Rvcj0nUicgeUNoYW5uZWxTZWxlY3Rvcj0nRycvPjxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249JzknLz48L2ZpbHRlcj48L2RlZnM+PGNpcmNsZSBjeD0nMjEwJyBjeT0nMjEwJyByPScxNzAnIGZpbGw9JyNmZmYnIGZpbHRlcj0ndXJsKCNmKScvPjwvc3ZnPg==");
-  --player-haze-tex-b: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc0MjAnIGhlaWdodD0nNDIwJyB2aWV3Qm94PScwIDAgNDIwIDQyMCc+PGRlZnM+PGZpbHRlciBpZD0nZicgeD0nLTYwJScgeT0nLTYwJScgd2lkdGg9JzIyMCUnIGhlaWdodD0nMjIwJSc+PGZlVHVyYnVsZW5jZSB0eXBlPSdmcmFjdGFsTm9pc2UnIGJhc2VGcmVxdWVuY3k9JzAuMDA1NSAwLjAwMzUnIG51bU9jdGF2ZXM9JzUnIHNlZWQ9JzIzJyByZXN1bHQ9J24nLz48ZmVEaXNwbGFjZW1lbnRNYXAgaW49J1NvdXJjZUdyYXBoaWMnIGluMj0nbicgc2NhbGU9JzE5MCcgeENoYW5uZWxTZWxlY3Rvcj0nUicgeUNoYW5uZWxTZWxlY3Rvcj0nRycvPjxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249JzExJy8+PC9maWx0ZXI+PC9kZWZzPjxjaXJjbGUgY3g9JzIxMCcgY3k9JzIxMCcgcj0nMTcwJyBmaWxsPScjZmZmJyBmaWx0ZXI9J3VybCgjZiknLz48L3N2Zz4=");
-  --player-haze-tex-c: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc0MjAnIGhlaWdodD0nNDIwJyB2aWV3Qm94PScwIDAgNDIwIDQyMCc+PGRlZnM+PGZpbHRlciBpZD0nZicgeD0nLTYwJScgeT0nLTYwJScgd2lkdGg9JzIyMCUnIGhlaWdodD0nMjIwJSc+PGZlVHVyYnVsZW5jZSB0eXBlPSdmcmFjdGFsTm9pc2UnIGJhc2VGcmVxdWVuY3k9JzAuMDA0NSAwLjAwNzAnIG51bU9jdGF2ZXM9JzUnIHNlZWQ9JzM3JyByZXN1bHQ9J24nLz48ZmVEaXNwbGFjZW1lbnRNYXAgaW49J1NvdXJjZUdyYXBoaWMnIGluMj0nbicgc2NhbGU9JzE3MCcgeENoYW5uZWxTZWxlY3Rvcj0nUicgeUNoYW5uZWxTZWxlY3Rvcj0nRycvPjxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249JzEyJy8+PC9maWx0ZXI+PC9kZWZzPjxjaXJjbGUgY3g9JzIxMCcgY3k9JzIxMCcgcj0nMTcwJyBmaWxsPScjZmZmJyBmaWx0ZXI9J3VybCgjZiknLz48L3N2Zz4=");
+  --player-haze-tex-a: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc2NDAnIGhlaWdodD0nNjQwJyB2aWV3Qm94PScwIDAgNjQwIDY0MCc+PGRlZnM+PGZpbHRlciBpZD0nZicgeD0nLTYwJScgeT0nLTYwJScgd2lkdGg9JzIyMCUnIGhlaWdodD0nMjIwJSc+PGZlVHVyYnVsZW5jZSB0eXBlPSdmcmFjdGFsTm9pc2UnIGJhc2VGcmVxdWVuY3k9JzAuMDAyMiAwLjAwMzUnIG51bU9jdGF2ZXM9JzUnIHNlZWQ9JzExJyByZXN1bHQ9J24nLz48ZmVEaXNwbGFjZW1lbnRNYXAgaW49J1NvdXJjZUdyYXBoaWMnIGluMj0nbicgc2NhbGU9JzIxMCcgeENoYW5uZWxTZWxlY3Rvcj0nUicgeUNoYW5uZWxTZWxlY3Rvcj0nRycvPjxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249JzIyJy8+PC9maWx0ZXI+PC9kZWZzPjxjaXJjbGUgY3g9JzMyMCcgY3k9JzMyMCcgcj0nMjUwJyBmaWxsPScjZmZmJyBmaWx0ZXI9J3VybCgjZiknLz48L3N2Zz4=");
+  --player-haze-tex-b: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc2NDAnIGhlaWdodD0nNjQwJyB2aWV3Qm94PScwIDAgNjQwIDY0MCc+PGRlZnM+PGZpbHRlciBpZD0nZicgeD0nLTYwJScgeT0nLTYwJScgd2lkdGg9JzIyMCUnIGhlaWdodD0nMjIwJSc+PGZlVHVyYnVsZW5jZSB0eXBlPSdmcmFjdGFsTm9pc2UnIGJhc2VGcmVxdWVuY3k9JzAuMDAzNSAwLjAwMjInIG51bU9jdGF2ZXM9JzUnIHNlZWQ9JzIzJyByZXN1bHQ9J24nLz48ZmVEaXNwbGFjZW1lbnRNYXAgaW49J1NvdXJjZUdyYXBoaWMnIGluMj0nbicgc2NhbGU9JzE5MCcgeENoYW5uZWxTZWxlY3Rvcj0nUicgeUNoYW5uZWxTZWxlY3Rvcj0nRycvPjxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249JzI1Jy8+PC9maWx0ZXI+PC9kZWZzPjxjaXJjbGUgY3g9JzMyMCcgY3k9JzMyMCcgcj0nMjUwJyBmaWxsPScjZmZmJyBmaWx0ZXI9J3VybCgjZiknLz48L3N2Zz4=");
+  --player-haze-tex-c: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc2NDAnIGhlaWdodD0nNjQwJyB2aWV3Qm94PScwIDAgNjQwIDY0MCc+PGRlZnM+PGZpbHRlciBpZD0nZicgeD0nLTYwJScgeT0nLTYwJScgd2lkdGg9JzIyMCUnIGhlaWdodD0nMjIwJSc+PGZlVHVyYnVsZW5jZSB0eXBlPSdmcmFjdGFsTm9pc2UnIGJhc2VGcmVxdWVuY3k9JzAuMDAyOCAwLjAwNDQnIG51bU9jdGF2ZXM9JzUnIHNlZWQ9JzM3JyByZXN1bHQ9J24nLz48ZmVEaXNwbGFjZW1lbnRNYXAgaW49J1NvdXJjZUdyYXBoaWMnIGluMj0nbicgc2NhbGU9JzE3MCcgeENoYW5uZWxTZWxlY3Rvcj0nUicgeUNoYW5uZWxTZWxlY3Rvcj0nRycvPjxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249JzI4Jy8+PC9maWx0ZXI+PC9kZWZzPjxjaXJjbGUgY3g9JzMyMCcgY3k9JzMyMCcgcj0nMjUwJyBmaWxsPScjZmZmJyBmaWx0ZXI9J3VybCgjZiknLz48L3N2Zz4=");
 }
 
 .player-layout {
@@ -5772,10 +5849,12 @@ button.danger {
   opacity: 1;
 }
 
+/* 这里**不要**写 `text-shadow`：当前句的字是 `transparent` + 渐变字形，而 `text-shadow`
+   是照字形轮廓画的、跟文字颜色无关 —— 字号一大就摊成一圈白雾，看着像一块白矩形
+   （用户 2026-11-14 报的第二个问题）。外发光由下面 `.is-filling` 的 `drop-shadow` 给。 */
 .player-lyrics[data-variant="haze"] .player-lyric.is-active .player-lyric-main {
   font-size: clamp(16px, 4.6cqh, 46px);
   font-weight: 600;
-  text-shadow: 0 0 22px rgba(255, 255, 255, 0.4);
 }
 
 .player-lyrics[data-variant="haze"] .player-lyric.is-active .player-lyric-sub {
@@ -5810,9 +5889,25 @@ button.danger {
   );
   -webkit-background-clip: text;
   background-clip: text;
+  /* 渐变的百分比是**按盒子宽**算的，行盒是 block（整列宽），短句只占左边一半，
+     于是进度到 ~48% 时文字就整行亮了、后半段在空白里空跑
+     （实测深海少女那句：盒 494px / 文字 240px）。收成 fit-content 让盒子=文字宽，
+     左边缘不动（父级 text-align: start），长句仍由 max-width: 100% 夹住照旧折行。 */
+  width: fit-content;
+  max-width: 100%;
+  /* 两个字都要写（用户 2026-11-14 报的"填充不显示 / 白色矩形"）：
+     - `-webkit-text-fill-color` 是字形填充色，**优先级高于** `color`：disc 样式的
+       `.player-lyric.is-active .player-lyric-main { color: var(--player-accent) }`
+       特异度比这条高，只写 `color: transparent` 会被它盖回去，进度就看不出来；
+     - `text-shadow` 照字形画、不看 `color`，渐变字形下会摊成一块白雾，这里点名关掉。
+     外发光不靠它 —— `.player-lyric.is-filling` 上的 `filter: drop-shadow()` 才是。 */
   color: transparent;
-  /* `timeupdate` 只有 ~4Hz，自定义属性可插值后靠过渡把台阶补成连续。 */
-  transition: --player-lyric-progress 0.2s linear;
+  -webkit-text-fill-color: transparent;
+  text-shadow: none;
+  /* 这里**不要**写 `transition: --player-lyric-progress`：进度现在由 `MusicStage` 的
+     rAF 循环每帧直接写（读 `audio.currentTime`），值本身是连续的；再叠一层过渡只会
+     让写入被过渡"追着跑"，而 `timeupdate` 每次新值都会重启过渡 → 一顿一顿
+     （用户 2026-11-14 D178「歌词的颜色填充观感卡顿」就是这条过渡造成的）。 */
 }
 
 /* 折行时换纵向渐变：横向渐变会让两行各自从中间截断，看起来像整块被平移着高亮
@@ -6050,8 +6145,13 @@ button.danger {
   display: none;
 }
 
+/* 两层 blob 的 opacity 现在由 `player-haze-fade-*` 动画逐帧给，静态写在这里也压不住
+   它（动画优先级更高），所以样式 2 的"淡"要落在 cluster 上。 */
+.player-music[data-style="disc"] .player-haze-cluster {
+  opacity: 0.2;
+}
+
 .player-music[data-style="disc"] .player-haze-blob {
-  opacity: 0.16;
   mix-blend-mode: normal;
 }
 
@@ -6295,6 +6395,7 @@ button.danger {
 
 @media (prefers-reduced-motion: reduce) {
   .player-haze,
+  .player-haze-cluster,
   .player-haze-blob,
   .player-disc {
     animation: none;

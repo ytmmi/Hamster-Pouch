@@ -453,6 +453,22 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
     }
   };
 
+  /**
+   * 播放头的**实时**读数（毫秒）——歌词填充每帧读它。
+   *
+   * `positionMs` 来自 `<audio>` 的 `timeupdate`，浏览器只给 ~4Hz（250ms 一跳）；拿这个
+   * 粒度去推填充，边界一次跳四分之一秒，观感就是卡顿（用户 2026-11-14 D178）。而
+   * `currentTime` 是**随时可读**的精确值，交给 `MusicStage` 的 rAF 每帧取一次；
+   * 读不到时（无源 / 元素已卸载）给 `null`，上层退回粗时钟。
+   */
+  const readPositionMs = useCallback((): number | null => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.currentTime)) {
+      return null;
+    }
+    return audio.currentTime * 1000;
+  }, []);
+
   /** 播放位置推进 → 进度条 / 歌词。 */
   const onTimeUpdate = () => {
     const audio = audioRef.current;
@@ -587,6 +603,7 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
             hazeColors={media.hazeColors}
             lyrics={media.lyrics}
             positionMs={positionMs}
+            readPositionMs={readPositionMs}
             durationMs={durationMs}
             playing={playing}
             volume={volume}

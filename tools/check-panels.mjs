@@ -7412,9 +7412,9 @@ check(
       hazeBlock.includes("background: var(--player-haze-base") &&
       // 兜底值仍写在 var() 里，但不许再出现"写死的紫黑背景"。
       !hazeBlock.includes("background: #241a3a") &&
-      width(".player-haze-blob-a") > width(".player-haze-blob-b") &&
-      width(".player-haze-blob-b") > width(".player-haze-blob-c") &&
-      width(".player-haze-blob-c") > 0
+      width(".player-haze-cluster-a") > width(".player-haze-cluster-b") &&
+      width(".player-haze-cluster-b") > width(".player-haze-cluster-c") &&
+      width(".player-haze-cluster-c") > 0
     );
   })(),
 );
@@ -7446,14 +7446,34 @@ check(
     musicStageMod.lyricFillPercent(0.5) === "50.00%" &&
     musicStageMod.lyricFillPercent(1) === "100%" &&
     /className="player-lyric-main is-filling"/.test(musicStageSrc) &&
-    /\["--player-lyric-progress" as string\]/.test(musicStageSrc) &&
+    !/\bstyle=\{\{ \[?"--player-lyric-progress/.test(musicStageSrc) &&
     !/player-lyric-(base|fill)/.test(musicStageSrc) &&
     !/player-lyric-(base|fill)/.test(stylesSource) &&
     /\.player-lyric-main\.is-filling \{/.test(stylesSource) &&
     /background-clip: text;/.test(stylesSource) &&
     /@property --player-lyric-progress \{/.test(stylesSource) &&
-    /syntax: "<percentage>";/.test(stylesSource) &&
-    /transition: --player-lyric-progress 0\.2s linear;/.test(stylesSource),
+    /syntax: "<percentage>";/.test(stylesSource),
+);
+
+check(
+  "D178：填充进度由 rAF 每帧读播放头直写，CSS 里不再有该属性的 `transition`",
+  // 用户 2026-11-14：「歌词的颜色填充实际表演效果观感卡顿」。
+  // 根因是 `positionMs` 只有 `timeupdate` 的 ~4Hz，靠 `transition: … 0.2s` 补台阶时
+  // **每来一个新值就重启过渡**（200ms 过渡 + 250ms 更新）→「追上—停住—再追」的锯齿。
+  // 现在每帧读 `audio.currentTime`（精确、与音频同源），只 setProperty，不碰 React。
+  /function useLyricFill\(/.test(musicStageSrc) &&
+    /requestAnimationFrame\(step\)/.test(musicStageSrc) &&
+    /node\.style\.setProperty\("--player-lyric-progress", pct\);/.test(musicStageSrc) &&
+    // 换句才 setState：填充本身不触发 re-render。
+    /const \[activeIndex, setActiveIndex\] = useState\(-1\);/.test(musicStageSrc) &&
+    // 值没变就不写，省掉一次重绘。
+    /if \(pct === paintedRef\.current\) return;/.test(musicStageSrc) &&
+    // 只匹配**声明行**（行首缩进 + `transition:`）：注释里提到这条属性名不算违规。
+    !/^\s*transition: --player-lyric-progress/m.test(stylesSource) &&
+    // 面板必须把「实时读数」交下来，否则上层只能退回 250ms 的粗时钟。
+    /readPositionMs=\{readPositionMs\}/.test(musicPanelSrc) &&
+    /const readPositionMs = useCallback\(\(\): number \| null => \{/.test(musicPanelSrc) &&
+    /return audio\.currentTime \* 1000;/.test(musicPanelSrc),
 );
 
 check(
@@ -7569,7 +7589,10 @@ check(
   })(),
 );
 check(
-  "D166：双语歌词按「同刻双时间标签」配对成主+副（间隔超过阈值不硬配，空行不配）",
+  "D166：双语歌词按「同刻双时间标签」配成原文 + 译文（含假名的那行在上，噪声行不占位）",
+  // 用户 2026-11-14：「深海少女日文在上中文在下，`//` 与 `曲：…` 不出现」。
+  // 双语 .lrc 的行序不统一（深海少女那份是"先译文后原文"），所以主副由**假名**判定；
+  // `//`、空行、`曲：/词：` 这类噪声行只在配对阶段剔除，`parseLrc` 不动数据。
   (() => {
     const paired = lrcMod.pairLrcLines([
       { timeMs: 1000, text: "原文" },
@@ -7578,20 +7601,38 @@ check(
       { timeMs: 8000, text: "隔太远" },
       { timeMs: 8010, text: "   " },
     ]);
+    // 真实语料的行序：译文在前、原文在后（含假名）。
+    const swapped = lrcMod.pairLrcLines([
+      { timeMs: 9940, text: "沉至悲伤海洋的我" },
+      { timeMs: 9940, text: "目を開けるのも億劫" },
+    ]);
+    // 噪声行如果留着，`词：ゆうゆ` 会跟版权声明配成一对，把版权声明顶到歌词区。
+    const noisy = lrcMod.pairLrcLines([
+      { timeMs: 2920, text: "腾讯享有本翻译作品的著作权" },
+      { timeMs: 2920, text: "词：ゆうゆ" },
+      { timeMs: 3890, text: "//" },
+      { timeMs: 4470, text: "曲：ゆうゆ" },
+      { timeMs: 5450, text: "//" },
+      { timeMs: 6600, text: "悲しみの海に沈んだ私" },
+    ]);
     return (
       lrcMod.LRC_PAIR_GAP_MS === 120 &&
-      paired.length === 4 &&
+      paired.length === 3 &&
       paired[0].main === "原文" &&
       paired[0].sub === "译文" &&
       paired[0].timeMs === 1000 &&
       paired[1].main === "下一句原文" &&
       paired[1].sub === null &&
-      // 下一行是空行 → 不把空白当译文。
+      // 下一行是空行 → 不把空白当译文，空行自己也不再成一项。
       paired[2].main === "隔太远" &&
       paired[2].sub === null &&
-      // 空行自己成一项（空行是分段用的，不是译文），不会被吞掉。
-      paired[3].main === "   " &&
-      paired[3].sub === null &&
+      swapped.length === 1 &&
+      swapped[0].main === "目を開けるのも億劫" &&
+      swapped[0].sub === "沉至悲伤海洋的我" &&
+      noisy.length === 1 &&
+      noisy[0].main === "悲しみの海に沈んだ私" &&
+      noisy[0].sub === null &&
+      noisy[0].timeMs === 6600 &&
       // 放宽阈值可以把 3 秒的间隔也配上（阈值是参数，不是写死的语义）。
       lrcMod.pairLrcLines(
         [
@@ -7963,18 +8004,149 @@ check(
 );
 
 check(
-  "D176：色晕仍是**三团互咬的噪波**（三张不同纹理，第三团补缝）",
+  "D176：色晕仍是**三团互咬的噪波**（三团各两层、第三团补缝）",
   // 用户 2026-11-13 D169：「像 2 个圆贴在一起高斯模糊了一下，改为更加类似噪波的形状」。
-  (musicStageSrc.match(/player-haze-blob player-haze-blob-/g) ?? []).length === 3 &&
+  // 2026-11-14 D177：每团拆两层（`.player-haze-blob-<k>` + `-alt`），纹理交叉淡入。
+  (musicStageSrc.match(/player-haze-blob player-haze-blob-/g) ?? []).length === 6 &&
     (stylesSource.match(/--player-haze-tex-[abc]: url\("data:image\/svg\+xml;base64,/g) ?? []).length === 3 &&
     (() => {
-      const start = stylesSource.indexOf(".player-haze-blob-c {");
-      const end = stylesSource.indexOf("}", start);
-      const body = start >= 0 && end > start ? stylesSource.slice(start, end) : "";
-      // 位置数值由 D170 的"面积按主导色排序"决定，这里只钉第三团确实存在且落在画面中部。
-      return /left: -?\d+%/.test(body) && /top: -?\d+%/.test(body) && /mask-image: var\(--player-haze-tex-c\)/.test(body);
+      const block = (selector) => {
+        const start = stylesSource.indexOf(`${selector} {`);
+        const end = start >= 0 ? stylesSource.indexOf("}", start) : -1;
+        return start >= 0 && end > start ? stylesSource.slice(start, end) : "";
+      };
+      // 位置数值由 D170 的"面积按主导色排序"决定，这里只钉第三团确实落在画面中部、
+      // 且第三团两层里有一层仍咬着 c 号纹理。
+      return (
+        /left: -?\d+%/.test(block(".player-haze-cluster-c")) &&
+        /top: -?\d+%/.test(block(".player-haze-cluster-c")) &&
+        /mask-image: var\(--player-haze-tex-c\)/.test(block(".player-haze-blob-c"))
+      );
     })(),
 );
+
+check(
+  "D177：当前句的填充在**两套样式里都看得见**，且不再有 `text-shadow` 白雾",
+  // 用户 2026-11-14：「样式 1 只有填充不显示（一直是满的）；样式 2 文字后面有一个
+  // 白色矩形，需要修掉」。样式 2 的活动行把 `color` 设回实色（特异度比 `.is-filling`
+  // 高，只写 `color: transparent` 会被盖回去）；`text-shadow` 又照字形画、跟文字颜色
+  // 无关，字号一大就摊成一块白雾。填充色必须走 `-webkit-text-fill-color`，阴影点名关掉。
+  (() => {
+    const block = (selector) => {
+      const at = stylesSource.indexOf(`${selector} {`);
+      if (at < 0) return "";
+      // 注释里也会出现 `}`（引用别的规则时），所以按"行首的 }"收尾，别在注释里截断。
+      const rest = stylesSource.slice(at);
+      const end = rest.search(/\n\}/);
+      return end > 0 ? rest.slice(0, end) : "";
+    };
+    const filling = block(".player-lyric-main.is-filling");
+    // 两套样式各有一条"活动行"规则（haze / disc），都不许再带 text-shadow。
+    const active = stylesSource.match(/\.player-lyric\.is-active \.player-lyric-main \{[^}]*\}/g) ?? [];
+    return (
+      /color: transparent/.test(filling) &&
+      /-webkit-text-fill-color: transparent/.test(filling) &&
+      /text-shadow: none/.test(filling) &&
+      active.length >= 2 &&
+      active.every((rule) => !/text-shadow/.test(rule))
+    );
+  })(),
+);
+
+check(
+  "D177：填充的边界按**文字宽**推进，不是按整列的行盒宽",
+  // 验收时量出来的真问题：`.player-lyric-main` 是 block，盒子吃满整列（深海少女那句
+  // 盒宽 494px、字宽只有 240px），而 `background-image` 的百分比是按**盒子**算的 →
+  // 进度到 ~48% 文字就整行亮了，后半段在空白里空跑。收成 fit-content 让盒子=文字宽，
+  // 左边缘不动，长句仍由 max-width 夹住照旧折行（data-wrapped 的检测也就不变）。
+  (() => {
+    const at = stylesSource.indexOf(".player-lyric-main.is-filling {");
+    if (at < 0) return false;
+    const rest = stylesSource.slice(at);
+    const end = rest.search(/\n\}/);
+    const filling = end > 0 ? rest.slice(0, end) : "";
+    return /width: fit-content/.test(filling) && /max-width: 100%/.test(filling);
+  })(),
+);
+
+check(
+  "D177：色晕每团**两层**不同纹理交叉淡入（雾状边缘，轮廓随时间变）",
+  // 用户 2026-11-14：「色晕雾化不够，能看出来还是原来那个形状」。单张静态纹理怎么转
+  // 轮廓都是那张图；两层各挂不同纹理、按互补节奏淡入，轮廓才会一直变。纹理同时重烘：
+  // 画布 640、`stdDeviation` 22–28（旧版 420 画布上 9–12，摊到大画布上看不出雾）。
+  (() => {
+    const block = (selector) => {
+      const at = stylesSource.indexOf(`${selector} {`);
+      if (at < 0) return "";
+      // 注释里也会出现 `}`（引用别的规则时），所以按"行首的 }"收尾，别在注释里截断。
+      const rest = stylesSource.slice(at);
+      const end = rest.search(/\n\}/);
+      return end > 0 ? rest.slice(0, end) : "";
+    };
+    const layer = (key) => {
+      const body = block(`.player-haze-blob-${key}`);
+      const altBody = block(`.player-haze-blob-${key}-alt`);
+      const read = (text) => ({
+        tex: (text.match(/mask-image: var\(--player-haze-tex-([abc])\)/) ?? [])[1],
+        fade: (text.match(
+          /animation: player-haze-fade-([abc]) (\d+)s ease-in-out infinite (alternate|alternate-reverse);/,
+        ) ?? []).slice(1),
+      });
+      const one = read(body);
+      const two = read(altBody);
+      return (
+        one.tex !== undefined && two.tex !== undefined && one.tex !== two.tex &&
+        one.fade.length === 3 && two.fade.length === 3 &&
+        // 同周期、反方向：两层 opacity 和恒为 ~1，亮度不跟着呼吸，变的只有轮廓。
+        one.fade[0] === two.fade[0] && one.fade[1] === two.fade[1] &&
+        one.fade[2] === "alternate" && two.fade[2] === "alternate-reverse"
+      );
+    };
+    const bake = ["a", "b", "c"].map((key) => {
+      const match = stylesSource.match(
+        new RegExp(`--player-haze-tex-${key}: url\\("data:image/svg\\+xml;base64,([^"]+)"\\);`),
+      );
+      const svg = match ? Buffer.from(match[1], "base64").toString("utf8") : "";
+      return {
+        size: Number((svg.match(/width='(\d+)'/) ?? [])[1]),
+        std: Number((svg.match(/stdDeviation='(\d+)'/) ?? [])[1]),
+        seed: (svg.match(/seed='(\d+)'/) ?? [])[1],
+      };
+    });
+    const drift = (key) =>
+      Number((block(`.player-haze-cluster-${key}`).match(/animation: player-haze-drift-[abc] (\d+)s/) ?? [])[1]);
+    return (
+      layer("a") && layer("b") && layer("c") &&
+      bake.every(({ size, std }) => size === 640 && std >= 22 && std <= 28) &&
+      new Set(bake.map(({ seed }) => seed)).size === 3 &&
+      // 三团的漂移周期互质，不会同时回到原点。
+      drift("a") === 53 && drift("b") === 71 && drift("c") === 89
+    );
+  })(),
+);
+
+check(
+  "D177：LRC 六位小数的时间标签不再丢行（`[01:32.869995]` → 92869ms）",
+  // 深海少女那份 `.flac` 里就有 6 位小数。旧正则只认 1–3 位，整条标签匹配失败，
+  // 那行既不进时间轴也不进 `plain`（synced 时被丢弃）——歌词凭空少一句。
+  (() => {
+    const doc = lrcMod.parseLrc(
+      "[01:32.869995]深海少女 特意沉落\n[01:32.869995]暗闇のさなかに赤い頬\n[02:22.95999]尾\n[00:01.5]头",
+    );
+    return (
+      doc.synced &&
+      doc.lines.length === 4 &&
+      doc.lines[0].timeMs === 1500 &&
+      doc.lines[1].timeMs === 92869 &&
+      doc.lines[1].text === "深海少女 特意沉落" &&
+      doc.lines[2].timeMs === 92869 &&
+      doc.lines[3].timeMs === 142959 &&
+      // 毫秒分隔符 `:` 的老写法仍然认（3 位小数）。
+      lrcMod.parseLrc("[00:12:345]old").lines[0].timeMs === 12345
+    );
+  })(),
+);
+
 
 check(
   "D176：当前句填充是**柔和过渡**（进度两侧各留一段渐变），不是竖直硬边",

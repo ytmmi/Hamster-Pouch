@@ -37,7 +37,15 @@
  * 这里刻意渲染成非交互的 `<span>`：禁用按钮仍会进 Tab 序并被读屏读成"不可用"。
  */
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 
 import type { TranslationKey } from "../../i18n";
 import { activeLrcIndex, lrcWindow, pairLrcLines, type LrcDoc, type LrcItem } from "./lrc";
@@ -64,8 +72,13 @@ export interface MusicStageProps {
   hazeColors: readonly string[];
   /** 解析后的歌词；`null` = 没有歌词文件（整块不渲染）。 */
   lyrics: LrcDoc | null;
-  /** 当前播放位置（歌词高亮 + 进度条）。 */
+  /** 当前播放位置（歌词高亮 + 进度条）。粒度是 `timeupdate` 的 ~4Hz，只够驱动"换句"。 */
   positionMs: number;
+  /**
+   * 播放头的**实时**读数（毫秒）；`null` = 读不到。给了就每帧读它推进填充——
+   * `timeupdate` 的 250ms 台阶撑不起连续填充（见 `useLyricFill` 的注释）。
+   */
+  readPositionMs?: () => number | null;
   /** 总时长（未知时 `0`，进度条禁用）。 */
   durationMs: number;
   /** 是否正在播放（唱片转动 + 按钮图标）。 */
@@ -91,17 +104,17 @@ export interface MusicStageProps {
 }
 
 export function MusicStage(props: MusicStageProps) {
-  const { style, lyrics, positionMs, playing, t } = props;
+  const { style, lyrics, positionMs, playing, t, readPositionMs } = props;
   const items = useMemo(() => (lyrics ? pairLrcLines(lyrics.lines) : null), [lyrics]);
   // 歌词的"当前时刻"只有一个：`positionMs + LYRIC_LEAD_MS`。行的淡入/放大过渡约 0.5s，
   // 提前一个过渡时长判定，动画收尾那一刻正好是新句开唱（用户 2026-11-13 D171）。
   // **填充进度必须用同一个时钟**——早先判定用提前量、填充用原始播放位置，两个钟差 480ms，
   // 于是高亮比声音慢半拍、末尾两个字还没亮就换句（用户 2026-11-13 D172 报的现象）。
   const clockMs = positionMs + LYRIC_LEAD_MS;
-  const activeIndex = useMemo(
-    () => (lyrics?.synced && items ? activeLrcIndex(items, clockMs) : -1),
-    [lyrics, items, clockMs],
-  );
+  // 当前行是 **state** 而不是 `useMemo`：推进它的是一次 rAF 循环（每帧读播放头真值），
+  // 不是每次 props 变化。换句那一下才重渲染，填充本身不碰 React（见 `useLyricFill`）。
+  const fill = useLyricFill(items, lyrics?.synced ?? false, clockMs, playing, readPositionMs);
+  const activeIndex = fill.activeIndex;
   const visible = useMemo(
     () => (items ? lrcWindow(items.length, activeIndex, LRC_RADIUS) : { start: 0, end: 0 }),
     [items, activeIndex],
@@ -123,11 +136,26 @@ export function MusicStage(props: MusicStageProps) {
         只做 transform / opacity 动画 —— 全部落在合成器上，不再每帧求值滤镜
         （2026-11-14 D175 性能重做：旧版每团一个 `feTurbulence` 滤镜 + 外层
         `hue-rotate` 动画，实测 51 fps / 峰值 265ms，现在是 107 fps / 峰值 247ms）。
+
+        2026-11-14 D177（用户：「色晕雾化不够，能看出来还是原来那个形状」）：
+        每团拆成**两层**——两个兄弟元素各挂一张**不同**的噪波纹理，各自按不同节奏
+        淡入淡出。单张静态纹理无论怎么转，轮廓都是那张图；两层交叉淡入时轮廓是
+        两张图的和，才会"看起来一直在变"。定位/漂移放在外层 `.player-haze-cluster`
+        上，两层只负责自己的透明度（mask 是元素级的，做不成子层）。
       */}
       <div className="player-haze" aria-hidden="true">
-        <span className="player-haze-blob player-haze-blob-a" />
-        <span className="player-haze-blob player-haze-blob-b" />
-        <span className="player-haze-blob player-haze-blob-c" />
+        <span className="player-haze-cluster player-haze-cluster-a">
+          <span className="player-haze-blob player-haze-blob-a" />
+          <span className="player-haze-blob player-haze-blob-a-alt" />
+        </span>
+        <span className="player-haze-cluster player-haze-cluster-b">
+          <span className="player-haze-blob player-haze-blob-b" />
+          <span className="player-haze-blob player-haze-blob-b-alt" />
+        </span>
+        <span className="player-haze-cluster player-haze-cluster-c">
+          <span className="player-haze-blob player-haze-blob-c" />
+          <span className="player-haze-blob player-haze-blob-c-alt" />
+        </span>
       </div>
 
       {style === "haze" ? (
@@ -164,6 +192,8 @@ export function MusicStage(props: MusicStageProps) {
             end={visible.end}
             active={activeIndex}
             clockMs={clockMs}
+            fillRef={fill.fillRef}
+            smooth={fill.smooth}
             variant="haze"
             t={t}
           />
@@ -188,6 +218,8 @@ export function MusicStage(props: MusicStageProps) {
             end={visible.end}
             active={activeIndex}
             clockMs={clockMs}
+            fillRef={fill.fillRef}
+            smooth={fill.smooth}
             variant="disc"
             t={t}
           />
@@ -514,6 +546,90 @@ function VolumeBar({
 
 
 /**
+ * 当前句的**填充推进器**：每帧读一次播放头真值，把进度写进 CSS 自定义属性。
+ *
+ * 为什么不是"`positionMs` 变一次就算一次"：`positionMs` 来自 `<audio>` 的 `timeupdate`，
+ * 浏览器只给 **~4Hz（250ms 一跳）**。早先靠 `transition: --player-lyric-progress 0.2s`
+ * 把台阶抹平，可过渡是**每来一个新值就重启**的：200ms 过渡 + 250ms 更新的节奏下，边界
+ * "追上—停住—再追"，再叠上 `timeupdate` 自身的抖动，观感就是卡顿（用户 2026-11-14 D178）。
+ *
+ * 现在 rAF 每帧读 `readPositionMs()`（`audio.currentTime`，精确且与音频同源）算进度，
+ * 只调一次 `style.setProperty` —— 不触发 re-render（**换句**才 setState），也没有被反复
+ * 重启的过渡。读不到实时读数时退回 `positionMs`（粗时钟），行为与旧版一致。
+ */
+function useLyricFill(
+  items: readonly LrcItem[] | null,
+  synced: boolean,
+  clockMs: number,
+  playing: boolean,
+  readPositionMs?: () => number | null,
+) {
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const fillRef = useRef<HTMLDivElement | null>(null);
+  /** 循环里用的当前行号（state 的快照：不把 `activeIndex` 放进 effect 的依赖）。 */
+  const indexRef = useRef(-1);
+  /** 上一次真正写进 CSS 的百分比：值没变就不碰样式，省掉一次重绘。 */
+  const paintedRef = useRef("");
+  /** 粗时钟（props 那份）：读不到实时读数时的兜底。 */
+  const coarseRef = useRef(clockMs);
+
+  useEffect(() => {
+    coarseRef.current = clockMs;
+  }, [clockMs]);
+
+  const sync = useCallback((index: number) => {
+    if (indexRef.current === index) return;
+    indexRef.current = index;
+    // 换行 → 活动行是**另一个元素**，首帧必须无条件重画。
+    paintedRef.current = "";
+    setActiveIndex(index);
+  }, []);
+
+  const paint = useCallback(
+    (clock: number) => {
+      const node = fillRef.current;
+      const item = items?.[indexRef.current];
+      if (!node || !item) return;
+      const next = items[indexRef.current + 1];
+      const pct = lyricFillPercent(lineProgress(item.timeMs, next ? next.timeMs : null, clock));
+      if (pct === paintedRef.current) return;
+      paintedRef.current = pct;
+      node.style.setProperty("--player-lyric-progress", pct);
+    },
+    [items],
+  );
+
+  // 播放中：每帧一次。
+  useEffect(() => {
+    if (!playing || !synced || !items || items.length === 0) return;
+    let raf = 0;
+    const step = () => {
+      const live = readPositionMs?.();
+      const base = typeof live === "number" && Number.isFinite(live) ? live : coarseRef.current;
+      const clock = base + LYRIC_LEAD_MS;
+      sync(activeLrcIndex(items, clock));
+      paint(clock);
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, synced, items, readPositionMs, sync, paint]);
+
+  // 暂停 / 拖动 / 没在播：按 props 的粗时钟落一次就够，不跑循环（静止画面不该烧 CPU）。
+  useEffect(() => {
+    if (playing) return;
+    if (!synced || !items || items.length === 0) {
+      sync(-1);
+      return;
+    }
+    sync(activeLrcIndex(items, clockMs));
+    paint(clockMs);
+  }, [playing, synced, items, clockMs, sync, paint]);
+
+  return { activeIndex, fillRef, smooth: playing };
+}
+
+/**
  * 一行歌词的文本节点：把「汉字（假名）」渲染成 `<ruby>`（用户 2026-11-14 要求）。
  * 没有注音时只输出纯文本，DOM 与以前保持一致。
  */
@@ -550,7 +666,17 @@ function LyricText({ text }: { text: string }) {
  * （`Range.getClientRects()` 对折行文本每行给一个矩形），折行就换成 `to bottom`，
  * 按行序先填满上一行、再填下一行。
  */
-function ActiveLyricLine({ text, progress }: { text: string; progress: number }) {
+function ActiveLyricLine({
+  text,
+  progress,
+  fillRef,
+  smooth,
+}: {
+  text: string;
+  progress: number;
+  fillRef: RefObject<HTMLDivElement | null>;
+  smooth: boolean;
+}) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [wrapped, setWrapped] = useState(false);
   useLayoutEffect(() => {
@@ -558,16 +684,30 @@ function ActiveLyricLine({ text, progress }: { text: string; progress: number })
     if (!node) return;
     const range = document.createRange();
     range.selectNodeContents(node);
-    // 只在"这句的文字或宽度变了"时重量：进度变化不改排版。
+    // 只在"这句的文字"变了时重量：进度变化不改排版。
     setWrapped(range.getClientRects().length > 1);
     range.detach?.();
+    // 首帧先给一个合理值：rAF 的第一次写要等下一帧，否则新句会闪一下 0%。
+    node.style.setProperty("--player-lyric-progress", lyricFillPercent(progress));
+    // 进度故意不进依赖：它在播放中由 rAF 每帧直接写，这里只负责"挂载时"那一次。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
+  // 暂停 / 拖动 / 没在播时没有 rAF 在写，值只能跟着 props 走。
+  // 播放中**不要**写：props 里的位置最多比真实落后 250ms，写一次就是一次回跳。
+  useLayoutEffect(() => {
+    if (smooth) return;
+    ref.current?.style.setProperty("--player-lyric-progress", lyricFillPercent(progress));
+  }, [progress, smooth]);
+  // 同一个元素要供两个使用者：本组件的排版量测、外层 rAF 的每帧填充。
+  const bind = (node: HTMLDivElement | null) => {
+    ref.current = node;
+    fillRef.current = node;
+  };
   return (
     <div
-      ref={ref}
+      ref={bind}
       className="player-lyric-main is-filling"
       data-wrapped={wrapped ? "true" : "false"}
-      style={{ ["--player-lyric-progress" as string]: lyricFillPercent(progress) }}
     >
       <LyricText text={text} />
     </div>
@@ -581,6 +721,8 @@ function Lyrics({
   end,
   active,
   clockMs,
+  fillRef,
+  smooth,
   variant,
   t,
 }: {
@@ -589,6 +731,8 @@ function Lyrics({
   end: number;
   active: number;
   clockMs: number;
+  fillRef: RefObject<HTMLDivElement | null>;
+  smooth: boolean;
   variant: MusicStyle;
   t: MusicStageProps["t"];
 }) {
@@ -615,16 +759,21 @@ function Lyrics({
             style={indent > 0 ? { marginLeft: `${indent}cqw` } : undefined}
           >
             {isActive ? (
-              <ActiveLyricLine text={item.main} progress={progress} />
+              <ActiveLyricLine
+                text={item.main}
+                progress={progress}
+                fillRef={fillRef}
+                smooth={smooth}
+              />
             ) : (
               <div className="player-lyric-main">
                 <LyricText text={item.main} />
               </div>
             )}
             {item.sub ? (
-              <div className="player-lyric-sub">
-                <LyricText text={item.sub} />
-              </div>
+              // 副行是译文，**不跑注音**：注音只属于日文原文那一行，译文里的全角括号
+              // 是排版（`（合）`、`（Cover）`）而不是假名，交给 ruby 会被拆成碎字。
+              <div className="player-lyric-sub">{item.sub}</div>
             ) : null}
           </div>
         );

@@ -261,6 +261,34 @@
     交给自己的内容容器（事件日志里 target 从 `VIDEO` 变成 `DIV.dv-content-container`），按下与抬起
     落在不同元素上，浏览器就不再合成 `click` —— 画面区一个点击都收不到，表现为"点击暂停/继续失效"。
     改成 `pointerdown` 记起点、`pointerup` 比位移（≤ `STAGE_TAP_SLOP_PX` 6px 才算单击），拖动时不触发。
+  - **填充色必须写在 `-webkit-text-fill-color`，不能只写 `color`**（2026-11-14 D177 真机取证）：
+    样式 2 的活动行规则 `.player-lyrics[data-variant="disc"] .player-lyric.is-active .player-lyric-main`
+    特异度 (0,5,0)，比 `.player-lyric-main.is-filling` 的 (0,2,0) 高，`color: transparent` 被它盖回去，
+    填充就一直"看不见"；字形填充色的优先级高于 `color`，所以写在 `.is-filling` 上才压得住。同一轮里
+    haze 活动行的 `text-shadow: 0 0 22px rgba(255,255,255,.4)` 被删掉——阴影照字形画、不看 `color`，
+    字形透明时它就是用户报的那块**白色矩形**，外发光只由 `filter: drop-shadow` 提供。
+  - **填充的百分比是相对行盒的，所以行盒必须收成文字宽**（2026-11-14 D177 验收时量出）：
+    `.player-lyric-main` 是 block、吃满整列（实测盒 494px / 文字 240px），渐变按盒子算 → 进度到 ~48%
+    文字就整行亮了、后半段在空白里空跑。`.is-filling` 收成 `width: fit-content` + `max-width: 100%`：
+    左边缘不动，长句仍按列宽折行（`data-wrapped` 的 `Range.getClientRects()` 判定不变）。
+  - **色晕每团两层不同纹理，几何挂在外层**（2026-11-14 D177）：遮罩是元素级的，伪元素做不了第二层，
+    所以每团是 `.player-haze-cluster` 里的两个兄弟 `span`，各挂一张纹理，按 `alternate` /
+    `alternate-reverse` 反向淡入（19 / 26 / 31s），轮廓才会一直变；画布 640、`stdDeviation` 22–28、
+    圆半径 250（原来 420 画布摊到 86% 舞台上只剩 ~2.4% 有效模糊）。漂移（53 / 71 / 89s、±14–20%、
+    `scale` 0.80–1.30、`rotate` ±12°）与几何都在 cluster 上，样式 2 的压暗也因此从 blob 移到 cluster
+    ——blob 上的 `opacity` 会被 fade 动画逐帧覆盖。
+  - **填充的推进粒度是每帧，不是每次 `timeupdate`**（2026-11-14 D178，用户「观感卡顿」）：
+    `<audio>` 的 `timeupdate` 只有 ~4Hz（250ms 一跳），早年用 `transition: --player-lyric-progress .2s`
+    补台阶，结果过渡**每来一个新值就重启**，边界"追上—停住—再追"——卡顿感正是这么来的。现在
+    `MusicStage` 收 `readPositionMs`（面板给 `audio.currentTime` 的回调），`useLyricFill` 用 rAF 每帧
+    算进度并直接 `style.setProperty`：填充不引发 re-render（换句才 `setState`），值没变不写；暂停 /
+    拖动 / 读不到读数时退回 props 的粗时钟。实测粒度 4.6 → 39.9 次/秒、行内相邻跳变 p95 6.25% → 0.79%，
+    帧率无回归（同一夹具 A/B 40.0 vs 40.9）。
+  - **双语歌词：含假名的是原文，噪声行只在配对时剔除**（2026-11-14 D177）：`pairLrcLines` 用
+    `/[぀-ヿ]/` 判断哪一行含假名并把它放 `main`（深海少女那份是先译文后原文，光按行序会把
+    中文顶到上面）；`//`、纯符号、`曲：/詞：/作曲：` 这类元信息与 `著作权` 声明只在配对阶段过滤，
+    `parseLrc` 仍如实保留它们在文件里的行。时间标签的小数位放宽到 1–6 位——`[01:32.869995]` 这种
+    六位微秒时间戳在旧正则下整条匹配失败，那一行文字会被直接丢掉。副行是译文，不跑注音。
   - **色晕是烘焙纹理，不是实时滤镜**（2026-11-14 D175 用户："优化渲染颜色晕的性能问题"）：三团光斑
     的形状用 `feTurbulence` + `feDisplacementMap` + `feGaussianBlur` **离线烘成三张 data-URI 纹理**
     （seed 11 / 23 / 37 各不相同，避免"同一张图转了个角度"），运行时只做 `mask-image` +
