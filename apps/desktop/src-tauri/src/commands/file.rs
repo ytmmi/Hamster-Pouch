@@ -16,8 +16,8 @@ use crate::AppState;
 use crate::commands::shared::EmitHp;
 use crate::commands::shared::diag_log;
 use crate::commands::shared::{
-    AlbumFileItem, ApiAsync, ApiResponse, api_async, api_from_hp, file_to_item, lock_repo,
-    open_repo, open_repo_mut, resolve_file_path,
+    AlbumFileItem, ApiAsync, ApiResponse, api_async, api_from_hp, ensure_repo_binding,
+    file_to_item, resolve_file_path, with_repo, with_repo_mut,
 };
 use crate::commands::source::{ScanCompletedEvent, ScanErrorEvent, ScanProgressEvent};
 use crate::tasks::{TaskControl, TaskKind};
@@ -236,10 +236,7 @@ pub(crate) fn file_metadata(
     file_id: String,
     state: State<AppState>,
 ) -> ApiResponse<FileMetadataResult> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<FileMetadataResult> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    let outcome = with_repo(&state, &repo_id, |db| {
         let file = db
             .get_file(&file_id)?
             .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
@@ -268,7 +265,7 @@ pub(crate) fn file_metadata(
             width: file.width,
             height: file.height,
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -335,21 +332,21 @@ pub(crate) fn file_query(
             None | Some("") => None,
             Some(raw) => Some(hp_repo::FileQueryCursor::decode(raw)?),
         };
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
-        let (rows, next) = db.query_files(
-            &repo_id,
-            &hp_repo::FileQueryFilter {
-                media_types: &media_types,
-                source_id: filter.source_id.as_deref(),
-                dir_prefix: filter.dir_prefix.as_deref(),
-            },
-            parsed_cursor.as_ref(),
-            limit.unwrap_or(500),
-        )?;
-        Ok(FileQueryPage {
-            items: rows.into_iter().map(file_to_item).collect(),
-            next_cursor: next.map(|c| c.encode()),
+        with_repo(&state, &repo_id, |db| {
+            let (rows, next) = db.query_files(
+                &repo_id,
+                &hp_repo::FileQueryFilter {
+                    media_types: &media_types,
+                    source_id: filter.source_id.as_deref(),
+                    dir_prefix: filter.dir_prefix.as_deref(),
+                },
+                parsed_cursor.as_ref(),
+                limit.unwrap_or(500),
+            )?;
+            Ok(FileQueryPage {
+                items: rows.into_iter().map(file_to_item).collect(),
+                next_cursor: next.map(|c| c.encode()),
+            })
         })
     })();
     api_from_hp(outcome)
@@ -362,16 +359,13 @@ pub(crate) fn file_path(
     file_id: String,
     state: State<AppState>,
 ) -> ApiResponse<String> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<String> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    let outcome = with_repo(&state, &repo_id, |db| {
         let file = db
             .get_file(&file_id)?
             .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
         let path = resolve_file_path(db, &file)?;
         Ok(path.to_string_lossy().to_string())
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -400,27 +394,24 @@ pub(crate) async fn thumb_get(
     size: Option<u32>,
     state: State<'_, AppState>,
 ) -> ApiAsync<Option<String>> {
-    let _ = repo_id;
-
     let outcome = async {
         // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard。
-        let (src_path, content_hash, media_type, cache, ffmpeg, dims, file_size) = {
-            let guard = lock_repo(&state)?;
-            let db = open_repo(&guard)?;
-            let file = db
-                .get_file(&file_id)?
-                .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
-            let src_path = resolve_file_path(db, &file)?;
-            (
-                src_path,
-                file.content_hash,
-                file.media_type,
-                (*state.thumb_cache).clone(),
-                (*state.ffmpeg_bin).clone(),
-                file.width.zip(file.height),
-                file.size,
-            )
-        };
+        let (src_path, content_hash, media_type, cache, ffmpeg, dims, file_size) =
+            with_repo(&state, &repo_id, |db| {
+                let file = db
+                    .get_file(&file_id)?
+                    .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
+                let src_path = resolve_file_path(db, &file)?;
+                Ok((
+                    src_path,
+                    file.content_hash,
+                    file.media_type,
+                    (*state.thumb_cache).clone(),
+                    (*state.ffmpeg_bin).clone(),
+                    file.width.zip(file.height),
+                    file.size,
+                ))
+            })?;
 
         let Some(hash) = content_hash else {
             return Ok(None);
@@ -498,25 +489,22 @@ pub(crate) async fn preview_get(
     file_id: String,
     state: State<'_, AppState>,
 ) -> ApiAsync<Option<String>> {
-    let _ = repo_id;
-
     let outcome = async {
         // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard。
-        let (src_path, content_hash, media_type, cache, ffmpeg) = {
-            let guard = lock_repo(&state)?;
-            let db = open_repo(&guard)?;
-            let file = db
-                .get_file(&file_id)?
-                .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
-            let src_path = resolve_file_path(db, &file)?;
-            (
-                src_path,
-                file.content_hash,
-                file.media_type,
-                (*state.thumb_cache).clone(),
-                (*state.ffmpeg_bin).clone(),
-            )
-        };
+        let (src_path, content_hash, media_type, cache, ffmpeg) =
+            with_repo(&state, &repo_id, |db| {
+                let file = db
+                    .get_file(&file_id)?
+                    .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
+                let src_path = resolve_file_path(db, &file)?;
+                Ok((
+                    src_path,
+                    file.content_hash,
+                    file.media_type,
+                    (*state.thumb_cache).clone(),
+                    (*state.ffmpeg_bin).clone(),
+                ))
+            })?;
 
         if media_type != MediaType::Image {
             return Ok(None);
@@ -565,8 +553,7 @@ pub(crate) fn file_rename(
     new_name: String,
     state: State<AppState>,
 ) -> ApiResponse<AlbumFileItem> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<AlbumFileItem> {
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let new_name = new_name.trim();
         if new_name.is_empty() {
             return Err(HpError::InvalidArgument("文件名不能为空".into()));
@@ -576,8 +563,6 @@ pub(crate) fn file_rename(
             return Err(HpError::InvalidArgument("文件名非法".into()));
         }
 
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
         let file = db
             .get_file(&file_id)?
             .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
@@ -603,7 +588,7 @@ pub(crate) fn file_rename(
             .get_file(&file_id)?
             .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
         Ok(file_to_item(updated))
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -614,11 +599,7 @@ pub(crate) fn file_trash(
     file_ids: Vec<String>,
     state: State<AppState>,
 ) -> ApiResponse<u32> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<u32> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
-
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let mut removed: Vec<String> = Vec::new();
         for id in &file_ids {
             let Some(file) = db.get_file(id)? else {
@@ -633,7 +614,7 @@ pub(crate) fn file_trash(
         }
         db.delete_files(&removed)?;
         Ok(removed.len() as u32)
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -655,8 +636,7 @@ pub(crate) fn file_set_marks(
     remove: Option<Vec<String>>,
     state: State<AppState>,
 ) -> ApiResponse<u32> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<u32> {
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let add = add.unwrap_or_default();
         let remove = remove.unwrap_or_default();
         // 标记 id 必须命名合法（不合规则的才拒绝；未注册的允许写入，见命令文档）。
@@ -667,8 +647,6 @@ pub(crate) fn file_set_marks(
                 )));
             }
         }
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
         // 只写**存在**的 id：不存在的静默跳过（与 trash 同口径）。
         let existing: Vec<String> = file_ids
             .into_iter()
@@ -676,7 +654,7 @@ pub(crate) fn file_set_marks(
             .collect();
         let changed = db.set_file_marks(&existing, &add, &remove)?;
         Ok(changed as u32)
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -698,46 +676,48 @@ pub(crate) async fn file_reanalyze(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> ApiAsync<String> {
-    let _ = repo_id;
     let st = state.inner().clone();
     let body_app = app.clone();
-    let outcome = crate::commands::task_shell::spawn_repo_task(
-        &state,
-        &app,
-        TaskKind::Analyze,
-        crate::commands::task_shell::BUSY_CANCELLABLE,
-        move |control, repo_path| run_reanalyze(&st, &body_app, &control, &file_id, &repo_path),
-        move |app_handle, task_id, result| match result {
-            Ok(Ok((source_id, outcome))) => app_handle.emit_hp(
-                "scan.completed",
-                ScanCompletedEvent {
-                    task_id: task_id.to_string(),
-                    source_id,
-                    indexed: outcome.indexed,
-                    changed: outcome.changed,
-                    missing: outcome.missing,
-                    skipped: outcome.skipped,
-                    cancelled: outcome.cancelled,
-                },
-            ),
-            Ok(Err((source_id, error))) => app_handle.emit_hp(
-                "scan.error",
-                ScanErrorEvent {
-                    task_id: task_id.to_string(),
-                    source_id,
-                    error: error.to_string(),
-                },
-            ),
-            Err(_) => app_handle.emit_hp(
-                "scan.error",
-                ScanErrorEvent {
-                    task_id: task_id.to_string(),
-                    source_id: String::new(),
-                    error: "分析线程异常终止".into(),
-                },
-            ),
-        },
-    );
+    // 起线程之前先把仓库绑定校验掉：旧 repoId 不该等到后台线程里才查空（D200）。
+    let outcome = ensure_repo_binding(&state, &repo_id).and_then(|()| {
+        crate::commands::task_shell::spawn_repo_task(
+            &state,
+            &app,
+            TaskKind::Analyze,
+            crate::commands::task_shell::BUSY_CANCELLABLE,
+            move |control, repo_path| run_reanalyze(&st, &body_app, &control, &file_id, &repo_path),
+            move |app_handle, task_id, result| match result {
+                Ok(Ok((source_id, outcome))) => app_handle.emit_hp(
+                    "scan.completed",
+                    ScanCompletedEvent {
+                        task_id: task_id.to_string(),
+                        source_id,
+                        indexed: outcome.indexed,
+                        changed: outcome.changed,
+                        missing: outcome.missing,
+                        skipped: outcome.skipped,
+                        cancelled: outcome.cancelled,
+                    },
+                ),
+                Ok(Err((source_id, error))) => app_handle.emit_hp(
+                    "scan.error",
+                    ScanErrorEvent {
+                        task_id: task_id.to_string(),
+                        source_id,
+                        error: error.to_string(),
+                    },
+                ),
+                Err(_) => app_handle.emit_hp(
+                    "scan.error",
+                    ScanErrorEvent {
+                        task_id: task_id.to_string(),
+                        source_id: String::new(),
+                        error: "分析线程异常终止".into(),
+                    },
+                ),
+            },
+        )
+    });
     api_async(api_from_hp(outcome))
 }
 
@@ -820,10 +800,7 @@ pub(crate) fn file_reverify(
     file_id: String,
     state: State<AppState>,
 ) -> ApiResponse<String> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<String> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let file = db
             .get_file(&file_id)?
             .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
@@ -846,7 +823,7 @@ pub(crate) fn file_reverify(
             .get_file(&file_id)?
             .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
         Ok(updated.verify_status.as_str().to_string())
-    })();
+    });
     api_from_hp(outcome)
 }
 

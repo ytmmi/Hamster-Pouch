@@ -379,5 +379,43 @@ report(
   repoHandleOffenders,
 );
 
+// ⑮ 仓库库取用只有一个入口（D200）
+//
+// 拆分前每个命令都手抄 `lock_repo(&state)? → open_repo(&guard)?` 两行，而签名上的 `repo_id`
+// 一律被 `let _ = repo_id;` 丢掉（file.rs 9 处、source.rs 6 处）：前端拿旧快照再来一次，
+// 要么查空（`list_mounted_sources(旧 id)` 静默返回空列表），要么把结果写进当前库。
+// 现在统一走 `with_repo` / `with_repo_mut`：id 与当前句柄不一致时返回 not_found，
+// 后台任务则在起线程之前用 `ensure_repo_binding` 校验掉。
+const REPO_ENTRY_FILES = ["file.rs", "source.rs"];
+const repoEntryOffenders = [];
+for (const needle of [
+  "pub(crate) fn with_repo<T>",
+  "pub(crate) fn with_repo_mut<T>",
+  "pub(crate) fn ensure_repo_binding",
+  "fn check_repo_id",
+]) {
+  if (!sharedBody.includes(needle)) repoEntryOffenders.push(`commands/shared.rs 缺少 ${needle}`);
+}
+let repoEntryFiles = 0;
+for (const name of REPO_ENTRY_FILES) {
+  const rel = `commands/${name}`;
+  const body = stripComments(readFileSync(join(BRIDGE_SRC, rel), "utf8"));
+  repoEntryFiles++;
+  const legacy = (body.match(/\b(lock_repo|open_repo|open_repo_mut)\s*\(/g) ?? []).length;
+  if (legacy > 0) {
+    repoEntryOffenders.push(`${rel}  仍手抄仓库取用（${legacy} 处，应走 with_repo*）`);
+  }
+  if (/let\s+_\s*=\s*repo_id\s*;/.test(body)) {
+    repoEntryOffenders.push(`${rel}  把 repo_id 丢掉（let _ = repo_id），应传给 with_repo* 校验`);
+  }
+  const calls = (body.match(/\b(with_repo|with_repo_mut|ensure_repo_binding)\s*\(&state/g) ?? []).length;
+  if (calls === 0) repoEntryOffenders.push(`${rel}  没有一处 with_repo* 调用`);
+}
+report(
+  repoEntryOffenders.length === 0,
+  `仓库库取用只经 with_repo*（${repoEntryFiles} 个命令文件）`,
+  repoEntryOffenders,
+);
+
 console.log(`\n[check-db-boundary] ${passed}/${total} 通过`);
 process.exit(passed === total ? 0 : 1);

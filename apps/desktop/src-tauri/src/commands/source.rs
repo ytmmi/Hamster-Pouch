@@ -17,7 +17,7 @@ use tauri::State;
 use crate::AppState;
 use crate::commands::shared::EmitHp;
 use crate::commands::shared::{
-    ApiAsync, ApiResponse, api_async, api_from_hp, lock_repo, open_repo, open_repo_mut,
+    ApiAsync, ApiResponse, api_async, api_from_hp, ensure_repo_binding, with_repo, with_repo_mut,
 };
 use crate::tasks::{RequestOutcome, TaskControl, TaskKind};
 
@@ -78,16 +78,16 @@ pub(crate) fn source_mount(
         if local_path.trim().is_empty() {
             return Err(HpError::InvalidArgument("媒体源路径不能为空".into()));
         }
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
-        let source = db.mount_source(
-            &repo_id,
-            &local_path,
-            alias.as_deref(),
-            parent_source_id.as_deref(),
-        )?;
-        started = Some((source.id.as_str().to_string(), source.local_path.clone()));
-        Ok(source_to_item(source))
+        with_repo_mut(&state, &repo_id, |db| {
+            let source = db.mount_source(
+                &repo_id,
+                &local_path,
+                alias.as_deref(),
+                parent_source_id.as_deref(),
+            )?;
+            started = Some((source.id.as_str().to_string(), source.local_path.clone()));
+            Ok(source_to_item(source))
+        })
     })();
     // 挂载成功即开始实时监听（失败则什么都不做——没挂上的源不该有线程）。
     if outcome.is_ok()
@@ -138,10 +138,7 @@ pub(crate) fn source_unmount_preview(
     source_id: String,
     state: State<AppState>,
 ) -> ApiResponse<UnmountPreview> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<UnmountPreview> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    let outcome = with_repo(&state, &repo_id, |db| {
         let counts = db.source_data_counts(&source_id)?;
         let albums = db.list_album_source_members(&source_id)?;
         let member_count = albums.iter().map(|a| a.members).sum();
@@ -163,7 +160,7 @@ pub(crate) fn source_unmount_preview(
             sync_album_count: counts.sync_albums as i64,
             child_source_count: counts.child_sources as i64,
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -185,7 +182,7 @@ pub(crate) async fn source_unmount(
         if source_id.trim().is_empty() {
             return Err(HpError::InvalidArgument("媒体源 ID 不能为空".into()));
         }
-        let _ = repo_id;
+        ensure_repo_binding(&state, &repo_id)?;
         let body_app = app.clone();
         let body_source_id = source_id.clone();
         let event_source_id = source_id.clone();
@@ -324,24 +321,17 @@ pub(crate) fn source_rename(
     alias: String,
     state: State<AppState>,
 ) -> ApiResponse<()> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<()> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
-        db.rename_source(&source_id, &alias)
-    })();
+    let outcome = with_repo_mut(&state, &repo_id, |db| db.rename_source(&source_id, &alias));
     api_from_hp(outcome)
 }
 
 /// source.list：列出仓库下**已添加（在线）**的媒体源。
 #[tauri::command]
 pub(crate) fn source_list(repo_id: String, state: State<AppState>) -> ApiResponse<Vec<SourceItem>> {
-    let outcome = (|| -> HpResult<Vec<SourceItem>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    let outcome = with_repo(&state, &repo_id, |db| {
         let sources = db.list_mounted_sources(&repo_id)?;
         Ok(sources.into_iter().map(source_to_item).collect())
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -357,9 +347,7 @@ pub(crate) fn source_tree(
     repo_id: String,
     state: State<AppState>,
 ) -> ApiResponse<Vec<SourceTreeNode>> {
-    let outcome = (|| -> HpResult<Vec<SourceTreeNode>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    let outcome = with_repo(&state, &repo_id, |db| {
         let sources = db.list_mounted_sources(&repo_id)?;
         let mut out = Vec::with_capacity(sources.len());
         for source in sources {
@@ -387,7 +375,7 @@ pub(crate) fn source_tree(
             });
         }
         Ok(out)
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -422,9 +410,7 @@ pub(crate) fn source_exclusions(
     source_id: Option<String>,
     state: State<AppState>,
 ) -> ApiResponse<SourceExclusionList> {
-    let outcome = (|| -> HpResult<SourceExclusionList> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    let outcome = with_repo(&state, &repo_id, |db| {
         let rows = match source_id.as_deref() {
             Some(id) => db.list_source_exclusions(id)?,
             None => db.list_repo_exclusions(&repo_id)?,
@@ -432,7 +418,7 @@ pub(crate) fn source_exclusions(
         Ok(SourceExclusionList {
             items: rows.into_iter().map(exclusion_to_item).collect(),
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -451,10 +437,7 @@ pub(crate) fn source_exclude(
 ) -> ApiResponse<SourceExclusionList> {
     // `repo_id` 不参与查询：`open_repo` 已经绑定当前仓库库，
     // 别的仓库的 source_id 在这里根本查不到（与 `source.scan` 等同口径）。
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<SourceExclusionList> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         db.exclude_source_dir(&source_id, &relative_path)?;
         // **衍生产物当场收干净**（2026-11-12 用户口径）：被排除的子树只保留索引，已经扫过的
         // 缩略图 / 预览 / 媒体信息 / 波形这些大文件立刻删掉，不等下一次扫描。
@@ -470,7 +453,7 @@ pub(crate) fn source_exclude(
                 .map(exclusion_to_item)
                 .collect(),
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -485,10 +468,7 @@ pub(crate) fn source_unexclude(
     relative_paths: Vec<String>,
     state: State<AppState>,
 ) -> ApiResponse<SourceUnexcludeResult> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<SourceUnexcludeResult> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let removed = db.unexclude_source_dirs(&source_id, &relative_paths)?;
         Ok(SourceUnexcludeResult {
             removed,
@@ -498,7 +478,7 @@ pub(crate) fn source_unexclude(
                 .map(exclusion_to_item)
                 .collect(),
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -557,8 +537,8 @@ pub(crate) async fn source_scan(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> ApiAsync<String> {
-    let _ = repo_id;
-    let outcome = start_source_scan(&state, &app, &source_id, full.unwrap_or(false));
+    let outcome = ensure_repo_binding(&state, &repo_id)
+        .and_then(|()| start_source_scan(&state, &app, &source_id, full.unwrap_or(false)));
     api_async(api_from_hp(outcome))
 }
 
@@ -573,8 +553,6 @@ pub(crate) fn start_source_scan(
     source_id: &str,
     full: bool,
 ) -> HpResult<String> {
-    // 线程闭包要 `'static`：监听侧传进来的是 `&str`，这里先持有所有权。
-    let source_id = source_id.to_string();
     // 线程闭包要 `'static`：监听侧传进来的是 `&str`，这里先持有所有权。
     let source_id = source_id.to_string();
     if source_id.trim().is_empty() {

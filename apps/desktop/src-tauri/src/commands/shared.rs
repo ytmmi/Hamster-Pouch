@@ -751,6 +751,59 @@ pub(crate) fn with_open_repo_mut<T>(
     }
 }
 
+/// 仓库 id 与当前句柄的一致性校验（D200）。
+///
+/// 前端把当前仓库 id 带在**每个**命令上，但桥接层过去一律 `let _ = repo_id;` 把它丢掉：
+/// 于是「另一个仓库的 id」会被当成当前仓库去查（静默拿到空列表）或直接落库。
+/// 这里至少校验一次——不一致说明前端拿的是旧快照，宁可让它重载，也不给语义模糊的结果。
+/// 空 id 视为「没带」，沿用当前句柄（兼容只关心「当前仓库」的旧调用）。
+fn check_repo_id(open_id: &str, repo_id: &str) -> HpResult<()> {
+    if repo_id.is_empty() || repo_id == open_id {
+        return Ok(());
+    }
+    Err(HpError::NotFound(format!(
+        "仓库已切换（请求 {repo_id}，当前 {open_id}），请重新加载后再试"
+    )))
+}
+
+/// 在**一次持锁内**跑完一段仓库库读操作（D200）：`lock_repo` + `open_repo`
+/// + id 校验三行合一。
+///
+/// 与 [`with_global`] 同理：借出的 `&RepoDb` 出闭包即随 guard 落回，
+/// 「拿着句柄跨 `await` / 在临界区里做慢 IO」在结构上就写不出来。
+pub(crate) fn with_repo<T>(
+    state: &AppState,
+    repo_id: &str,
+    body: impl FnOnce(&RepoDb) -> HpResult<T>,
+) -> HpResult<T> {
+    let guard = lock_repo(state)?;
+    if let Some(open) = guard.as_ref() {
+        check_repo_id(&open.id, repo_id)?;
+    }
+    let db = open_repo(&guard)?;
+    body(db)
+}
+
+/// 同 [`with_repo`]，可变借用（写操作）。
+pub(crate) fn with_repo_mut<T>(
+    state: &AppState,
+    repo_id: &str,
+    body: impl FnOnce(&mut RepoDb) -> HpResult<T>,
+) -> HpResult<T> {
+    let mut guard = lock_repo(state)?;
+    if let Some(open) = guard.as_ref() {
+        check_repo_id(&open.id, repo_id)?;
+    }
+    let db = open_repo_mut(&mut guard)?;
+    body(db)
+}
+
+/// 只校验仓库绑定、不取用句柄（D200）：后台任务把它提前到命令边界，
+/// 让「拿着旧 repoId 起任务」在起线程之前就失败，而不是在后台线程里查空。
+pub(crate) fn ensure_repo_binding(state: &AppState, repo_id: &str) -> HpResult<()> {
+    with_repo(state, repo_id, |_| Ok(()))
+}
+
 /// 当前仓库 ID 的快照（未打开 / 毒锁 → `None`：只读判断，不报错）。
 pub(crate) fn current_repo_id(state: &AppState) -> Option<String> {
     state
