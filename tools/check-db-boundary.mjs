@@ -13,6 +13,7 @@
 //   · hp-store 已经不存在了（D188 拆完删除），任何 crate 都不许再依赖它，也不许把目录加回来；
 //   · hp-pathrule 只放纯函数，不许沾 SQLite；
 //   · 每个句柄的定义与它的迁移清单只能在自己那个 crate 里，别的 crate 不许回填。
+//   · 桥接层的仓库句柄（id / 路径 / 连接）是一个值（D192），装卸只走 commands/shared.rs。
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -193,5 +194,47 @@ report(
   badMigrations,
 );
 
+// ⑩ 仓库句柄单真值（D192）：id / 库文件路径 / 连接在同一个 Option 里，装/卸只走 shared.rs 的助手
+//
+// 拆分前的写法是三个独立 Mutex（open_repo / current_repo_id / current_repo_path），开库要连加三次锁，
+// 且用 `if let Ok(mut cur) = ...` 吞掉毒化错误——于是"库开了但 id/路径还是旧仓库"可观察。这条断言
+// 同时钉住两头：不许把字段拆回去，也不许在助手之外直接 `.repo.lock()`（那样又能绕过装卸顺序）。
+const BRIDGE_SRC = join(ROOT, "apps", "desktop", "src-tauri", "src");
+const bridgeFiles = walk(BRIDGE_SRC, []);
+const handleOffenders = [];
+let repoFieldCount = 0;
+for (const file of bridgeFiles) {
+  const rel = relative(ROOT, file).replace(/\\/g, "/");
+  const body = stripComments(readFileSync(file, "utf8"));
+  if (/state\.current_repo_(id|path)\b/.test(body)) {
+    handleOffenders.push(`${rel}  仍在读拆分前的 current_repo_id / current_repo_path 字段`);
+  }
+  if (/current_repo_(id|path)\s*:\s*Arc</.test(body)) {
+    handleOffenders.push(`${rel}  又把仓库状态拆成了独立 Mutex`);
+  }
+  const direct = body.match(/\.repo\s*\.\s*lock\(\)/g) ?? [];
+  if (direct.length > 0 && !rel.endsWith("commands/shared.rs")) {
+    handleOffenders.push(`${rel}  绕过 shared.rs 直接锁 repo（${direct.length} 处）`);
+  }
+  if (rel.endsWith("/main.rs")) {
+    repoFieldCount += (body.match(/pub\(crate\)\s+repo\s*:/g) ?? []).length;
+  }
+}
+if (repoFieldCount !== 1) {
+  handleOffenders.push(`main.rs 的 AppState 里 repo 字段数量 = ${repoFieldCount}（应为 1）`);
+}
+const sharedBody = stripComments(readFileSync(join(BRIDGE_SRC, "commands", "shared.rs"), "utf8"));
+for (const needle of [
+  "pub(crate) struct OpenRepo",
+  "pub(crate) fn set_open_repo",
+  "pub(crate) fn take_open_repo",
+]) {
+  if (!sharedBody.includes(needle)) handleOffenders.push(`commands/shared.rs 缺少 ${needle}`);
+}
+report(
+  handleOffenders.length === 0,
+  `仓库句柄只在 commands/shared.rs 装卸（扫描 ${bridgeFiles.length} 个桥接 .rs）`,
+  handleOffenders,
+);
 console.log(`\n[check-db-boundary] ${passed}/${total} 通过`);
 process.exit(passed === total ? 0 : 1);

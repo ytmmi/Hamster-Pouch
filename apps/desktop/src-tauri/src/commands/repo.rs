@@ -15,8 +15,8 @@ use crate::AppState;
 use crate::commands::shared::EmitHp;
 use crate::commands::shared::diag_log;
 use crate::commands::shared::{
-    ApiResponse, api_from_hp, default_repo_dir, ensure_global, global, global_mut, lock_global,
-    lock_repo,
+    ApiResponse, OpenRepo, api_from_hp, current_repo_id, default_repo_dir, ensure_global, global,
+    global_mut, lock_global, lock_repo, set_open_repo, take_open_repo,
 };
 
 /// `app_settings` 的一行（`setting.list` 的 `items` 元素）。
@@ -287,14 +287,14 @@ pub(crate) fn repo_create(
         let opened = RepoDb::open(&repo_path)?;
         let version = opened.schema_version()?;
 
-        let mut open_guard = lock_repo(&state)?;
-        *open_guard = Some(opened);
-        if let Ok(mut cur) = state.current_repo_id.lock() {
-            *cur = Some(row.id.clone());
-        }
-        if let Ok(mut path) = state.current_repo_path.lock() {
-            *path = Some(PathBuf::from(&row.repo_db_path));
-        }
+        set_open_repo(
+            &state,
+            OpenRepo {
+                id: row.id.clone(),
+                path: PathBuf::from(&row.repo_db_path),
+                db: opened,
+            },
+        )?;
 
         Ok(RepoSummary {
             id: row.id,
@@ -330,14 +330,14 @@ pub(crate) fn repo_open(
             g.touch_repo(&repo_id)?;
         }
 
-        let mut open_guard = lock_repo(&state)?;
-        *open_guard = Some(repo);
-        if let Ok(mut cur) = state.current_repo_id.lock() {
-            *cur = Some(repo_id.clone());
-        }
-        if let Ok(mut path) = state.current_repo_path.lock() {
-            *path = Some(PathBuf::from(&row.repo_db_path));
-        }
+        set_open_repo(
+            &state,
+            OpenRepo {
+                id: repo_id.clone(),
+                path: PathBuf::from(&row.repo_db_path),
+                db: repo,
+            },
+        )?;
 
         // 实时监听（D9）：仓库一打开就把"已挂载源 → 文件变更事件"的线接上。
         crate::source_watch::service().sync(&app, Path::new(&row.repo_db_path), &repo_id);
@@ -366,15 +366,8 @@ pub(crate) fn repo_close(state: State<AppState>) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
         // 先停监听线程：它们各自持有仓库库连接，得在关库之前收手。
         crate::source_watch::service().stop_all();
-        let mut guard = lock_repo(&state)?;
-        if let Some(repo) = guard.take() {
-            repo.close()?;
-        }
-        if let Ok(mut cur) = state.current_repo_id.lock() {
-            *cur = None;
-        }
-        if let Ok(mut path) = state.current_repo_path.lock() {
-            *path = None;
+        if let Some(repo) = take_open_repo(&state)? {
+            repo.db.close()?;
         }
         Ok(())
     })();
@@ -603,15 +596,11 @@ pub(crate) fn repo_rename(
             let g = global_mut(&mut guard)?;
             g.rename_repo(&repo_id, trimmed)?;
         }
-        let is_current = state
-            .current_repo_id
-            .lock()
-            .map(|c| c.as_deref() == Some(repo_id.as_str()))
-            .unwrap_or(false);
+        let is_current = current_repo_id(&state).as_deref() == Some(repo_id.as_str());
         if is_current {
             let mut open = lock_repo(&state)?;
-            if let Some(db) = open.as_mut() {
-                db.set_repo_name(trimmed)?;
+            if let Some(handle) = open.as_mut() {
+                handle.db.set_repo_name(trimmed)?;
             }
         }
         Ok(())
@@ -630,22 +619,9 @@ pub(crate) fn repo_delete(
         ensure_global(&state, &app)?;
 
         // 若删除的是当前打开仓库，先关闭以释放文件句柄。
-        let is_current = state
-            .current_repo_id
-            .lock()
-            .map(|c| c.as_deref() == Some(repo_id.as_str()))
-            .unwrap_or(false);
-        if is_current {
-            let mut guard = lock_repo(&state)?;
-            if let Some(repo) = guard.take() {
-                repo.close()?;
-            }
-            if let Ok(mut cur) = state.current_repo_id.lock() {
-                *cur = None;
-            }
-            if let Ok(mut path) = state.current_repo_path.lock() {
-                *path = None;
-            }
+        let is_current = current_repo_id(&state).as_deref() == Some(repo_id.as_str());
+        if is_current && let Some(repo) = take_open_repo(&state)? {
+            repo.db.close()?;
         }
 
         let repo_path = {

@@ -687,7 +687,7 @@ pub(crate) fn file_set_marks(
 /// ——前端 `core/taskStore.ts` 只认事件、不认命令，因此"同款浮窗"就是"发同一族事件"。
 ///
 /// 三处与整源扫描一致的约束（都抄自 `source_scan`，理由相同）：
-/// - **独立仓库库连接**（`RepoDb::open`）：不持有 `open_repo` 锁，分析大视频时界面别的命令
+/// - **独立仓库库连接**（`RepoDb::open`）：不持有仓库句柄锁（D192 起是 `AppState::repo`），分析大视频时界面别的命令
 ///   不会排队（旧实现是同步命令 + 主连接，界面会卡住且没有任何进度）；
 /// - **单任务闸门**：已有长任务在跑时明确报错，而不是堆叠并行写；
 /// - **必定发一条终止事件**（completed / error，含 panic 收敛），否则前端浮窗永远停在原地。
@@ -709,17 +709,12 @@ pub(crate) async fn file_reanalyze(
                 HpError::AlreadyExists("已有任务正在进行中，请等待其结束或先取消。".into())
             })?;
 
-        let repo_path: std::path::PathBuf = match state.current_repo_path.lock() {
-            Ok(guard) => match guard.clone() {
-                Some(p) => p,
-                None => {
-                    state.tasks.finish(&task_id);
-                    return Err(HpError::NotFound("未打开仓库".into()));
-                }
-            },
-            Err(_) => {
+        let repo_path: std::path::PathBuf = match crate::commands::shared::require_repo_path(&state)
+        {
+            Ok(p) => p,
+            Err(e) => {
                 state.tasks.finish(&task_id);
-                return Err(HpError::Store("仓库锁中毒".into()));
+                return Err(e);
             }
         };
 
@@ -1092,13 +1087,7 @@ fn run_backfill(
 #[tauri::command]
 pub(crate) fn file_backfill(state: State<AppState>, app: tauri::AppHandle) -> ApiResponse<String> {
     let outcome = (|| -> HpResult<String> {
-        let repo_path = match state.current_repo_path.lock() {
-            Ok(guard) => match guard.clone() {
-                Some(p) => p,
-                None => return Err(HpError::NotFound("未打开仓库".into())),
-            },
-            Err(_) => return Err(HpError::Store("仓库锁中毒".into())),
-        };
+        let repo_path = crate::commands::shared::require_repo_path(&state)?;
         start_backfill(&app, &state, repo_path)
     })();
     api_from_hp(outcome)

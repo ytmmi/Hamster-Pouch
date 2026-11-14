@@ -445,11 +445,7 @@ fn err_result(message: &str) -> Value {
 
 /// 当前仓库 ID（未打开时为 `None`）。
 fn current_repo(state: &AppState) -> Option<String> {
-    state
-        .current_repo_id
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
+    crate::commands::shared::current_repo_id(state)
 }
 
 /// 执行一个工具。

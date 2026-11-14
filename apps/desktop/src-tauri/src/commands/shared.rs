@@ -554,7 +554,24 @@ pub(crate) fn resolve_file_path(db: &RepoDb, file: &FileIndexRow) -> HpResult<Pa
     Ok(PathBuf::from(source.local_path).join(&file.relative_path))
 }
 
-// ===== 打开的仓库库：批次迁移共用的取用/加锁助手（D76）=====
+// ===== 打开的仓库库：取用/加锁助手（D76），D192 起单真值 =====
+
+/// 当前打开的仓库句柄：id / 库文件路径 / 连接**同时存在或同时不存在**。
+///
+/// **为什么合成一个值（D192）**：这三项原先是三个独立 `Mutex`，开库要连加三次锁，
+/// 且赋值处用 `if let Ok(..)` 吞掉毒化错误——于是"库开了、id 还是旧仓库"这种中间态
+/// 在代码上完全可能，三把锁之间也没有约定顺序。合成一个 `Option<OpenRepo>` 后，
+/// 装/卸都是**一次** `*guard = ...`，没有中间态可观察。
+/// 字段 `path` 仍单独保留：后台任务要开**独立连接**（`RepoDb` 不可 `Clone`，
+/// 且大视频扫描不能长时间占着命令线程共用的那把锁）。
+pub(crate) struct OpenRepo {
+    /// 全局库 `repos` 行里的仓库 ID（`repo.delete` 判断"是否当前仓库"用）。
+    pub(crate) id: String,
+    /// 仓库库文件路径（后台任务据此另开连接）。
+    pub(crate) path: PathBuf,
+    /// 命令线程共用的仓库库连接。
+    pub(crate) db: RepoDb,
+}
 
 /// 未打开仓库 → `HpError::NotFound`（"目标上下文不存在"）。
 ///
@@ -562,30 +579,69 @@ pub(crate) fn resolve_file_path(db: &RepoDb, file: &FileIndexRow) -> HpResult<Pa
 /// 请求要作用的仓库上下文不存在。**不要**把它写成 `Store`/`Io`——那会把
 /// "用户还没打开仓库"误报成读写故障。
 pub(crate) fn open_repo<'g, 'a>(
-    guard: &'g std::sync::MutexGuard<'a, Option<RepoDb>>,
+    guard: &'g std::sync::MutexGuard<'a, Option<OpenRepo>>,
 ) -> HpResult<&'g RepoDb> {
     guard
         .as_ref()
+        .map(|repo| &repo.db)
         .ok_or_else(|| HpError::NotFound("未打开仓库".into()))
 }
 
 /// 同 [`open_repo`]，可变借用（写操作）。
 pub(crate) fn open_repo_mut<'g, 'a>(
-    guard: &'g mut std::sync::MutexGuard<'a, Option<RepoDb>>,
+    guard: &'g mut std::sync::MutexGuard<'a, Option<OpenRepo>>,
 ) -> HpResult<&'g mut RepoDb> {
     guard
         .as_mut()
+        .map(|repo| &mut repo.db)
         .ok_or_else(|| HpError::NotFound("未打开仓库".into()))
 }
 
-/// 锁住 `open_repo`（毒锁 → `Store`）。
-pub(crate) fn lock_repo(state: &AppState) -> HpResult<std::sync::MutexGuard<'_, Option<RepoDb>>> {
+/// 锁住当前仓库句柄（毒锁 → `Store`）。
+pub(crate) fn lock_repo(state: &AppState) -> HpResult<std::sync::MutexGuard<'_, Option<OpenRepo>>> {
     state
-        .open_repo
+        .repo
         .lock()
         .map_err(|_| HpError::Store("仓库锁中毒".into()))
 }
 
+/// 装入当前仓库句柄：**一次写入 id / 路径 / 连接**（毒锁 → `Store`）。
+pub(crate) fn set_open_repo(state: &AppState, repo: OpenRepo) -> HpResult<()> {
+    *lock_repo(state)? = Some(repo);
+    Ok(())
+}
+
+/// 卸下当前仓库句柄，返回被卸下的那一份（调用方负责 `close`；毒锁 → `Store`）。
+pub(crate) fn take_open_repo(state: &AppState) -> HpResult<Option<OpenRepo>> {
+    Ok(lock_repo(state)?.take())
+}
+
+/// 当前仓库 ID 的快照（未打开 / 毒锁 → `None`：只读判断，不报错）。
+pub(crate) fn current_repo_id(state: &AppState) -> Option<String> {
+    state
+        .repo
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|repo| repo.id.clone()))
+}
+
+/// 当前仓库库文件路径的快照（未打开 / 毒锁 → `None`）。
+pub(crate) fn current_repo_path(state: &AppState) -> Option<PathBuf> {
+    state
+        .repo
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|repo| repo.path.clone()))
+}
+
+/// 需要仓库库路径才能继续的任务：未打开 → `not_found`，毒锁 → `store`。
+pub(crate) fn require_repo_path(state: &AppState) -> HpResult<PathBuf> {
+    let guard = lock_repo(state)?;
+    guard
+        .as_ref()
+        .map(|repo| repo.path.clone())
+        .ok_or_else(|| HpError::NotFound("未打开仓库".into()))
+}
 /// 相册成员 / 文件查询返回项。
 #[derive(Serialize)]
 pub(crate) struct AlbumFileItem {

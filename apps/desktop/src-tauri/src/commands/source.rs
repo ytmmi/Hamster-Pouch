@@ -93,7 +93,7 @@ pub(crate) fn source_mount(
     // 挂载成功即开始实时监听（失败则什么都不做——没挂上的源不该有线程）。
     if outcome.is_ok()
         && let Some((source_id, path)) = started
-        && let Ok(Some(repo_path)) = state.current_repo_path.lock().map(|g| g.clone())
+        && let Some(repo_path) = crate::commands::shared::current_repo_path(&state)
     {
         crate::source_watch::service().start(&app, &repo_path, &repo_id, &source_id, &path);
     }
@@ -194,17 +194,11 @@ pub(crate) async fn source_unmount(
             .tasks
             .start(&task_id, TaskKind::Unmount)
             .ok_or_else(|| HpError::AlreadyExists("已有任务正在进行中，请等待其结束。".into()))?;
-        let repo_path: PathBuf = match state.current_repo_path.lock() {
-            Ok(guard) => match guard.clone() {
-                Some(p) => p,
-                None => {
-                    state.tasks.finish(&task_id);
-                    return Err(HpError::NotFound("未打开仓库".into()));
-                }
-            },
-            Err(_) => {
+        let repo_path: PathBuf = match crate::commands::shared::require_repo_path(&state) {
+            Ok(p) => p,
+            Err(e) => {
                 state.tasks.finish(&task_id);
-                return Err(HpError::Store("仓库锁中毒".into()));
+                return Err(e);
             }
         };
 
@@ -571,7 +565,7 @@ fn last_path_segment(path: &str) -> String {
 /// source.scan：扫描/索引媒体源，后台执行并通过事件报告进度。
 ///
 /// 关键约束：
-/// - 扫描线程使用**独立仓库库连接**（`RepoDb::open`），不持有 `open_repo` 锁。
+/// - 扫描线程使用**独立仓库库连接**（`RepoDb::open`），不持有仓库句柄锁（D192 起是 `AppState::repo`）。
 ///   旧实现整段扫描都握着主连接锁，大视频源扫起来后 UI 的每个读写命令都被堵住，
 ///   表现就是"界面无响应"。
 /// - 同一时刻只允许一个扫描任务（重复点击会返回明确错误，而不是堆叠并行写）。
@@ -615,17 +609,11 @@ pub(crate) fn start_source_scan(
         })?;
 
         // 扫描用的仓库库路径（缺失说明仓库未打开）
-        let repo_path: PathBuf = match state.current_repo_path.lock() {
-            Ok(guard) => match guard.clone() {
-                Some(p) => p,
-                None => {
-                    state.tasks.finish(&task_id);
-                    return Err(HpError::NotFound("未打开仓库".into()));
-                }
-            },
-            Err(_) => {
+        let repo_path: PathBuf = match crate::commands::shared::require_repo_path(state) {
+            Ok(p) => p,
+            Err(e) => {
                 state.tasks.finish(&task_id);
-                return Err(HpError::Store("仓库锁中毒".into()));
+                return Err(e);
             }
         };
 

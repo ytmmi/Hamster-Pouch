@@ -263,9 +263,7 @@ mod tests {
             global_db: Arc::new(Mutex::new(Some(
                 GlobalDb::open(":memory:").expect("测试用内存全局库"),
             ))),
-            open_repo: Arc::new(Mutex::new(None)),
-            current_repo_id: Arc::new(Mutex::new(None)),
-            current_repo_path: Arc::new(Mutex::new(None)),
+            repo: Arc::new(Mutex::new(None)),
             tasks: Arc::new(TaskRegistry::new()),
             scanner: Arc::new(Scanner::new()),
             ffmpeg_bin: Arc::new(None),

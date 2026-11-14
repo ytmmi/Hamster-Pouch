@@ -15,11 +15,10 @@ use hp_dict::TagLibSet;
 use hp_global::GlobalDb;
 use hp_media::ThumbnailCache;
 use hp_plugin_host::SupervisionRegistry;
-use hp_repo::RepoDb;
 use hp_scanner::Scanner;
 use tauri::Manager;
 
-use commands::shared::external_bin;
+use commands::shared::{OpenRepo, external_bin};
 use tasks::TaskRegistry;
 
 mod commands;
@@ -33,12 +32,8 @@ mod tasks;
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) global_db: Arc<Mutex<Option<GlobalDb>>>,
-    pub(crate) open_repo: Arc<Mutex<Option<RepoDb>>>,
-    /// 当前打开的仓库 ID（用于删除仓库时判断是否需先关闭）。
-    pub(crate) current_repo_id: Arc<Mutex<Option<String>>>,
-    /// 当前打开的仓库库文件路径：扫描线程据此开**独立连接**，
-    /// 不再长时间占用 `open_repo` 锁（否则大视频扫描会堵住整个 UI 的命令）。
-    pub(crate) current_repo_path: Arc<Mutex<Option<PathBuf>>>,
+    /// 当前打开的仓库句柄：id / 库文件路径 / 连接在**同一把锁的同一个值**里（D192）。
+    pub(crate) repo: Arc<Mutex<Option<OpenRepo>>>,
     /// 长任务控制块注册表（扫描 / 卸载）：**单任务闸门** + 按 `task_id` 定位的
     /// 取消/暂停/恢复（缺陷 0003）。取代了原来的全局 `scanning` + `task_cancel` 两个标志。
     pub(crate) tasks: Arc<TaskRegistry>,
@@ -93,9 +88,7 @@ fn make_state() -> AppState {
     let _ = std::fs::create_dir_all(&plugin_root);
     AppState {
         global_db: Arc::new(Mutex::new(None)),
-        open_repo: Arc::new(Mutex::new(None)),
-        current_repo_id: Arc::new(Mutex::new(None)),
-        current_repo_path: Arc::new(Mutex::new(None)),
+        repo: Arc::new(Mutex::new(None)),
         tasks: Arc::new(TaskRegistry::new()),
         scanner: Arc::new(Scanner::new()),
         ffmpeg_bin: Arc::new(external_bin("ffmpeg")),
