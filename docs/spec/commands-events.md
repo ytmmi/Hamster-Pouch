@@ -510,12 +510,12 @@ libmpv 播放路径 2026-09 起休眠（播放器面板改走 DOM `<video>`，�
 - **插件设置键强制加前缀**：`plugin.<plugin_id>.`，由宿主拼接，插件不能自定义前缀（`docs/spec/settings-standard.md` 第 7 节）。
 - **未知键**：`setting.set` 拒绝（`validation`），避免把 `app_settings` 当任意键值存储用。
 - **插件项不满能力**时 `setting.set` 返回 `permission`；界面按注册表的 `requires_capability` 置灰。
-- **✅ 四条规则于 2026-09 全部落地（宿主执行，不是前端自证）**。落点：`crates/hp-core/src/setting_registry.rs`（**注册表校验镜像** + `validate_setting_value` + `scoped_storage_key`，含单测）、`crates/hp-plugin-host/src/host.rs` 的 `PluginHost::find_setting_decl`（插件项按 manifest 反查）、`apps/desktop/src-tauri/src/commands/repo.rs` 的 `resolve_setting_target` / `ensure_setting_capability` / `prepare_setting_write`。
+- **✅ 四条规则于 2026-09 全部落地（宿主执行，不是前端自证）**。落点：`crates/hp-core/src/setting_registry.rs`（**宿主**校验镜像 + `validate_setting_value` + `scoped_storage_key`，含单测）、`crates/hp-core/src/panel_settings_generated.rs`（**面板**校验镜像，由 `tools/gen-panel-settings.mjs` 生成）、`crates/hp-plugin-host/src/host.rs` 的 `PluginHost::find_setting_decl`（插件项按 manifest 反查）、`apps/desktop/src-tauri/src/commands/repo.rs` 的 `resolve_setting_target` / `ensure_setting_capability` / `prepare_setting_write`。
   1. **未知键拒绝** → `resolve_setting_target`：宿主/面板项取镜像，插件项取 manifest 声明，都没有即 `validation`（"未知设置键"）；
   2. **按 `kind` 校验** → `validate_setting_value`：`switch`/`checkbox` 要布尔、`numberInput`/`slider` 要数值、`textInput` 要字符串、`select` 必须命中声明里的 `options`（**空 `options` 的 `select` 直接拒绝**——无法校验的枚举等于没有约束）；`null`/数组/对象一律拒绝（同 D32）；
   3. **插件项 `permission`** → `ensure_setting_capability` 用 `PluginHost::check_capability` 校验 `requires_capability`；**失败关闭**——拿不到 `repoId` 就无法判定该仓库的授权，同样返回 `permission`，不放行；
   4. **仅 `scope = "repo"` 项拼 `repoId`** → `scoped_storage_key`：`app` 项**忽略**传入的 `repoId`（原实现对任意键都拼，已删除），`repo` 项缺 `repoId` 即 `validation`（否则会静默写到应用级键上，跨仓库串值）。
-- **注册表的权威声明仍在 TS，Rust 只镜像"校验所需事实"**（id / owner / kind / scope / options / requires_capability，**不含文案**）：D80 已裁决注册表不做成命令，但上面四条必须由宿主执行；镜像与 TS 声明的一致性由 `pnpm check:settings` **逐项断言**（宿主项 ↔ `SYSTEM_SETTING_DECLS`、面板项 ↔ `panelSettingDecls()`、以及"无多余声明"的反向断言），漂移会被门禁当场拦下。
+- **注册表的权威声明仍在 TS，Rust 只镜像"校验所需事实"**（id / owner / kind / scope / options / requires_capability，**不含文案**）：D80 已裁决注册表不做成命令，但上面四条必须由宿主执行；宿主项与 TS 声明的一致性由 `pnpm check:settings` **逐项断言**（↔ `SYSTEM_SETTING_DECLS`，外加"注册表文件里无面板项残留"的反向断言）；面板项**不再是手抄**——由 `tools/gen-panel-settings.mjs` 生成、`pnpm check:panel-settings` **逐字节**比对（D180），漂移会被门禁当场拦下。
 - **两处**尚未落地**（如实记录，不属上面四条）**：
   1. 插件 `select` 设置项的 **`options` 尚未在 manifest 侧解析**（`PanelSettingDecl` 无该字段），因此宿主对插件 `select` 只能校验"是字符串"，**不假装**校验了枚举归属；TS 侧已按 D80 要求把 `select` 缺 `options` 判为硬错误。
   2. `setting.list` 仍返回**全部** `app_settings` 行（含 `repo.default` / `blueprint.currentLayer.*` 等宿主内部键）；界面按注册表挑选自己要用的行。

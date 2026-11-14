@@ -6147,10 +6147,10 @@ check(
     ) &&
     // Rust 侧设置镜像必须同步（否则 `setting.set` 直接拒写，面板上"改了没反应"）。
     /id: "viewMode"/.test(
-      readFileSync(join(ROOT, "crates/hp-core/src/setting_registry.rs"), "utf8"),
+      readFileSync(join(ROOT, "crates/hp-core/src/panel_settings_generated.rs"), "utf8"),
     ) &&
     /owner_id: Some\("bookreader"\)/.test(
-      readFileSync(join(ROOT, "crates/hp-core/src/setting_registry.rs"), "utf8"),
+      readFileSync(join(ROOT, "crates/hp-core/src/panel_settings_generated.rs"), "utf8"),
     ),
 );
 

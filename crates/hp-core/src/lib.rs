@@ -43,6 +43,7 @@ pub mod cover;
 pub mod error;
 pub mod file;
 pub mod namespace;
+mod panel_settings_generated;
 pub mod panel_types;
 pub mod plugin;
 pub mod plugin_contribution;

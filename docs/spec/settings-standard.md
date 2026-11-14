@@ -234,8 +234,9 @@
 **写入路径的宿主校验（2026-09 落地，`docs/spec/commands-events.md` 3.13 的四条规则）**：
 
 声明校验（上表）管的是"声明本身合不合法"；写入时还有一层**键与值的宿主校验**，
-由 `crates/hp-core/src/setting_registry.rs`（注册表**校验镜像** + `validate_setting_value` +
-`scoped_storage_key`）与 `apps/desktop/src-tauri/src/commands/repo.rs` 执行：
+由 `crates/hp-core/src/setting_registry.rs`（**宿主**校验镜像 `SYSTEM_SETTING_DECLS` +
+`validate_setting_value` + `scoped_storage_key`）、`crates/hp-core/src/panel_settings_generated.rs`
+（**面板**校验镜像，由 TS 生成，见下）与 `apps/desktop/src-tauri/src/commands/repo.rs` 执行：
 
 1. **未知键拒绝**：落库键必须命中某个声明（宿主 / 面板项取镜像，插件项按 manifest 反查），
    否则 `validation`——避免把 `app_settings` 当任意键值存储；
@@ -249,7 +250,11 @@
 
 > **注册表的权威声明在前端 TS**（第 1 节，D80 已裁决它不做成命令）。宿主侧只镜像
 > **校验所需的事实**（id / owner / kind / scope / options / requires_capability，**不含文案**），
-> 镜像与 TS 声明的一致性由 `pnpm check:settings` **逐项断言**（漂移即门禁失败）。
+> **宿主项**的镜像与 TS 声明的一致性由 `pnpm check:settings` **逐项断言**（漂移即门禁失败）；
+> **面板项不再手抄**：`panel_settings_generated.rs` 由 `tools/gen-panel-settings.mjs` 从
+> `panels.ts` 的 `BUILTIN_PANEL_SPECS` 生成，`pnpm check:panel-settings` 做**逐字节**比对，
+> `check:settings` 另断言注册表文件里**不得残留面板项**。这样护栏不再依赖解析被守护的源码本身
+> （旧做法用正则扫 `SettingDeclFact` 字面量，解析器一失效断言就静默通过）。
 > **已知缺口**：插件 `select` 设置项的 `options` 尚未在 manifest 侧解析，
 > 因此宿主对插件 `select` 只能校验"是字符串"，**不假装**校验了枚举归属。
 
@@ -263,7 +268,7 @@
   5. 「插件」二级列表覆盖全部已注册插件，未分类落 `other`。
   6. 落库键前缀规则（宿主 `ui.*` / `layout.*` / `mcp.*`；插件强制 `plugin.<plugin_id>.`）。
   7. 搜索：`title_key` 在所有语言资源里都存在（三套语言键集一致）。
-  8. **（2026-09 新增）** Rust 校验镜像 ↔ TS 权威声明**逐项一致**（宿主项 ↔ `SYSTEM_SETTING_DECLS`、面板项 ↔ `panelSettingDecls()`，比对落库键 / `kind` / `scope` / `options`），且**无多余声明**（反向断言）；以及写入路径四条规则与 D76 包装的落点断言。
+  8. **（2026-09 新增，2026-11 修订 D180）** Rust 校验镜像 ↔ TS 权威声明：**宿主项**（↔ `SYSTEM_SETTING_DECLS`）逐项比对落库键 / `kind` / `scope` / `options`，且注册表文件里**无面板项残留**；**面板项**改由 `pnpm check:panel-settings` 对生成物做**逐字节**比对（等价口径、更强的判据）；另含写入路径四条规则与 D76 包装的落点断言。
   9. **（2026-11 新增，D141）层级与指针隔离**（第 2 节规则 7）：从源码读出 dockview 侧的最高交互层（`OVERLAY_Z_BASE` + `OVERLAY_HEIGHT_MAX` + 100）与 `.settings-overlay` / `.context-menu` / `.task-overlay` 的 z-index，断言**设置层严格高于前者、严格低于后两者**；再断言 `.app-workspace` 绑定 `inert={settingsOpen}`、浮层根节点带 `aria-modal="true"`，以及源码注释里**不再残留「设置浮层 60」**的旧口径（口径必须与实现一致）。
 - **`node tools/settings-overlay-hittest-verify.mjs`**（**（2026-11 新增，D141）真机命中验证**）：上一项门禁只读**源码文本**、比较两个数字大小，证明不了"浏览器真的把点击判给了设置界面"（`calc()` 变量、主题根上的 `--dv-overlay-z-index`、`pointer-events` 的继承都可能让纸面推导在真实渲染里不成立——缺陷 0027 就是同类教训）。本验证器用无头 Edge 加载仓库**真实的** `styles.css` + dockview 的 `dockview.css`，拼与实现**同构**的 DOM，让 `document.elementFromPoint()`（**命中测试本身**）回答"这个点归谁"，跑三个夹具：`fixed`（z-index 1150 + 无 `inert`，中心点必须归 `.settings-overlay`）、`regress`（把设置层按回修复前的 60，中心点必须被浮动浮层抢走 = 本条缺陷的**回退即红对照**）、`inert`（层叠仍是旧的 60 但工作区带 `inert`，命中也**不得**进入 `.app-workspace`——证明两道防线各自独立有效）。实测 **6/6 通过**（2026-11-06）。
 

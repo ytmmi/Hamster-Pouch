@@ -34,6 +34,8 @@
     "check:controls": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/control-check.mjs",
     "check:panels": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/check-panels.mjs",
     "check:settings": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/check-settings.mjs",
+    "gen:panel-settings": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/gen-panel-settings.mjs",
+    "check:panel-settings": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/gen-panel-settings.mjs --check",
     "check:render": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/check-render.mjs",
     "check:render:visual": "node tools/viewer-render-verify.mjs",
     "probe:render": "node tools/render-probe.mjs",

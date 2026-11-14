@@ -47,6 +47,10 @@ const rustRegistry = readFileSync(
   join(ROOT, "crates/hp-core/src/setting_registry.rs"),
   "utf8",
 );
+const rustPanelRegistry = readFileSync(
+  join(ROOT, "crates/hp-core/src/panel_settings_generated.rs"),
+  "utf8",
+);
 
 const t = (key) => zhCN[key] ?? zhTW[key] ?? en[key] ?? key;
 
@@ -397,7 +401,12 @@ check(
 //
 // 注册表的**权威声明在 TS**（D80 已裁决它不做成命令）；但 `setting.set` 的
 // 「未知键拒绝 / 按 kind 校验 / 插件项 permission / 仅 repo 项带 repoId」必须由宿主执行，
-// 所以 Rust 侧镜像了**校验所需的事实**。这一组断言就是防漂移的那道锁。
+// 所以 Rust 侧镜像了**校验所需的事实**。
+//
+// 宿主项仍是手写常量（`SYSTEM_SETTING_DECLS`），这里逐项比对防漂移；
+// 面板项**不再手抄**：`panel_settings_generated.rs` 由 `tools/gen-panel-settings.mjs`
+// 从 `panels.ts` 生成，`pnpm check:panel-settings` 做逐字节比对（严格强于事实比对）。
+// 本节因此只守三件事：宿主项一致、生成物与 TS 语义一致、注册表文件里不残留面板项。
 
 /** 解析 `setting_registry.rs` 里的 `SettingDeclFact { … }` 字面量。 */
 function parseRustSettingMirror(src) {
@@ -433,6 +442,7 @@ const factKey = (d) =>
   JSON.stringify([storageKeyOfDecl(d), d.kind, d.scope, [...d.options].sort()]);
 
 const rustMirror = parseRustSettingMirror(rustRegistry);
+const rustPanelMirror = parseRustSettingMirror(rustPanelRegistry);
 const tsSystem = config.SYSTEM_SETTING_DECLS.map((d) => ({
   id: d.id,
   ownerKind: "system",
@@ -450,8 +460,7 @@ const tsPanel = config.panelSettingDecls().map((d) => ({
   options: (d.options ?? []).map((o) => o.value),
 }));
 
-const rustSystem = rustMirror.filter((d) => d.ownerKind === "system");
-const rustPanel = rustMirror.filter((d) => d.ownerKind === "panel");
+/** 两侧的对称差（便于一眼看出漂在哪一项）。 */
 
 /** 两侧的对称差（便于一眼看出漂在哪一项）。 */
 function mirrorDiff(rust, ts) {
@@ -465,18 +474,18 @@ function mirrorDiff(rust, ts) {
 
 check(
   "Rust 宿主设置镜像 ↔ TS `SYSTEM_SETTING_DECLS` 逐项一致（落库键 / kind / scope / options）",
-  eqList(rustSystem.map(factKey).sort(), tsSystem.map(factKey).sort()),
-  mirrorDiff(rustSystem, tsSystem),
+  eqList(rustMirror.map(factKey).sort(), tsSystem.map(factKey).sort()),
+  mirrorDiff(rustMirror, tsSystem),
 );
 check(
-  "Rust 面板设置镜像 ↔ TS `panelSettingDecls()` 逐项一致",
-  eqList(rustPanel.map(factKey).sort(), tsPanel.map(factKey).sort()),
-  mirrorDiff(rustPanel, tsPanel),
+  "面板设置生成物 ↔ TS `panelSettingDecls()` 逐项一致",
+  eqList(rustPanelMirror.map(factKey).sort(), tsPanel.map(factKey).sort()),
+  mirrorDiff(rustPanelMirror, tsPanel),
 );
 check(
-  "镜像里没有 TS 侧不存在的多余声明（反向也一致）",
-  rustMirror.length === tsSystem.length + tsPanel.length,
-  `rust=${rustMirror.length} ts=${tsSystem.length + tsPanel.length}`,
+  "设置注册表里不再手抄面板项（面板事实只由生成物提供）",
+  rustMirror.every((d) => d.ownerKind === "system"),
+  rustMirror.filter((d) => d.ownerKind !== "system").map((d) => d.id).join(", "),
 );
 
 const repoBridge = readFileSync(
