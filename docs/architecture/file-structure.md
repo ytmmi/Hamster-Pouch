@@ -92,12 +92,12 @@ crates/hp-dict/migrations/   # 迁移 SQL（forward-only，发布后禁止修改
                       #   两者取不到都写空串（`app_info.rs` 用 `option_env!` 读，界面显示「未知」）；
                       #   末行才是 `tauri_build::build()`。D140
   commands/           # Tauri 命令桥接（按领域拆分）
-    shared.rs         # 共享类型 + 宿主级状态的唯一加锁入口（全局库 / 仓库句柄 / schema 缓存 / 监督表 / AI 队列 / tag 库；全局库另走 `global_guard`，D195）
+    shared.rs         # 共享类型 + 宿主级状态的唯一加锁入口（全局库 / 仓库句柄 / schema 缓存 / 监督表 / AI 队列 / tag 库；全局库另走 `global_guard`，读写经 `with_global` / `with_global_mut` 在一次持锁内跑完，D195/D198）
     task_shell.rs     # 长任务外壳（D196）：登记 / 起线程 / panic 收敛 / 收尾只此一处，四个入口（scan /
                       #   unmount / reanalyze / backfill）只给出 body 与三态事件
     repo.rs  source.rs  album.rs
     tag.rs   rating.rs  color.rs  file.rs
-    layout.rs
+    layout.rs           # 布局预设与仓库绑定（RFC 0011）：12 个命令全走 `with_global` / `with_global_mut`，导出落盘在锁外（D198）
     plugin.rs           # 插件包：列出 / 发现 / 安装（本地与随包）/ 版本与回滚
     plugin_lifecycle.rs # 插件按仓库启用 / 禁用 / 状态 / 加载（含 plugin.changed|loaded 发射点）
     plugin_contributions.rs # 三张注册表的插件注册视图（plugin.contributions）

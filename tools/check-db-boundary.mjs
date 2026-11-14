@@ -306,5 +306,41 @@ report(
   globalOffenders,
 );
 
+// ⑬ 布局命令只在一次持锁内跑完（D198）
+//
+// 12 个 layout 命令原先各抄一遍「global_guard(&state)? → global/global_mut(&guard)?」再包一层
+// IIFE，读命令与写命令只靠 `mut` 二字区分；更隐蔽的是 `layout.export` 把 `std::fs::write`
+// 放在持锁的临界区里——写盘慢一点，整个全局库（其它所有命令）都被挡住。
+// 现在统一走 `with_global` / `with_global_mut`：闭包一出作用域 guard 就落，落盘留在锁外。
+const layoutPath = join(BRIDGE_SRC, "commands", "layout.rs");
+const layoutBody = stripComments(readFileSync(layoutPath, "utf8"));
+const layoutOffenders = [];
+for (const needle of ["pub(crate) fn with_global", "pub(crate) fn with_global_mut"]) {
+  if (!sharedBody.includes(needle)) layoutOffenders.push(`commands/shared.rs 缺少 ${needle}`);
+}
+for (const [re, label] of [
+  [/\bglobal_guard\s*\(/, "仍直接取 global_guard"],
+  [/\bglobal(_mut)?\s*\(&/, "仍直接调 global / global_mut"],
+]) {
+  const hits = (layoutBody.match(re) ?? []).length;
+  if (hits > 0) layoutOffenders.push(`commands/layout.rs  ${label}（${hits} 处，应走 with_global*）`);
+}
+const withGlobalCalls = (layoutBody.match(/\bwith_global(_mut)?\s*\(&state/g) ?? []).length;
+if (withGlobalCalls < 12) {
+  layoutOffenders.push(`commands/layout.rs  只有 ${withGlobalCalls} 处 with_global* 调用（12 个命令应各一处）`);
+}
+const writeAt = layoutBody.indexOf("std::fs::write");
+const lockAt = layoutBody.indexOf("with_global(&state");
+if (writeAt < 0) {
+  layoutOffenders.push("commands/layout.rs  找不到导出落盘的 std::fs::write");
+} else if (lockAt < 0 || writeAt < lockAt) {
+  layoutOffenders.push("commands/layout.rs  导出落盘仍在持锁临界区内（应在 with_global 之后）");
+}
+report(
+  layoutOffenders.length === 0,
+  `布局命令只在一次持锁内跑完（${withGlobalCalls} 处 with_global*，落盘在锁外）`,
+  layoutOffenders,
+);
+
 console.log(`\n[check-db-boundary] ${passed}/${total} 通过`);
 process.exit(passed === total ? 0 : 1);

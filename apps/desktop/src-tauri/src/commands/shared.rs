@@ -556,6 +556,30 @@ pub(crate) fn global_mut<'g, 'a>(
         .as_mut()
         .ok_or_else(|| HpError::NotFound("全局库未初始化".into()))
 }
+/// 在**一次持锁内**跑完一段全局库读操作（D198）：`global_guard` + `global` 两行合一。
+///
+/// 存在的理由不是省行数，是让「借出 `&GlobalDb` 之后忘了释放 / 在临界区里做慢 IO」
+/// 在结构上更难写出来：闭包一出作用域，guard 就落回。返回 `HpResult<T>` 而非
+/// `ApiResponse<T>`，好让调用方在成功之后再做**锁外**的后处理（例如 `layout.export`
+/// 的落盘）。
+pub(crate) fn with_global<T>(
+    state: &AppState,
+    body: impl FnOnce(&GlobalDb) -> HpResult<T>,
+) -> HpResult<T> {
+    let guard = global_guard(state)?;
+    let db = global(&guard)?;
+    body(db)
+}
+
+/// 同 [`with_global`]，可变借用（写操作）。
+pub(crate) fn with_global_mut<T>(
+    state: &AppState,
+    body: impl FnOnce(&mut GlobalDb) -> HpResult<T>,
+) -> HpResult<T> {
+    let mut guard = global_guard(state)?;
+    let db = global_mut(&mut guard)?;
+    body(db)
+}
 
 /// 其余宿主级状态的**唯一**加锁入口（D194）。
 ///

@@ -22,7 +22,7 @@ use serde_json::{Map, Value, json};
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::shared::{ApiResponse, api_from_hp, global, global_guard, global_mut};
+use crate::commands::shared::{ApiResponse, api_from_hp, with_global, with_global_mut};
 
 /// 布局预设列表项（返回前端）。
 #[derive(Serialize)]
@@ -222,10 +222,8 @@ pub fn layout_save(
     blueprint_ids: Option<Vec<String>>,
     state: State<AppState>,
 ) -> ApiResponse<LayoutItem> {
-    let outcome = (|| -> HpResult<LayoutItem> {
+    api_from_hp(with_global_mut(&state, |g| {
         let layer_key = layer_key.unwrap_or_default();
-        let mut guard = global_guard(&state)?;
-        let g = global_mut(&mut guard)?;
         g.save_layout_layer(&name, &layer_key, &layout_json)?;
         if let Some(ids) = blueprint_ids {
             g.set_layout_blueprints(&name, &ids)?;
@@ -234,19 +232,15 @@ pub fn layout_save(
             .get_layout_preset(&name)?
             .ok_or_else(|| HpError::NotFound(format!("布局不存在: {name}")))?;
         Ok(to_item(preset))
-    })();
-    api_from_hp(outcome)
+    }))
 }
 
 /// layout.list：列出全部应用级预设（最新在前）。
 #[tauri::command]
 pub fn layout_list(state: State<AppState>) -> ApiResponse<Vec<LayoutItem>> {
-    let outcome = (|| -> HpResult<Vec<LayoutItem>> {
-        let guard = global_guard(&state)?;
-        let g = global(&guard)?;
+    api_from_hp(with_global(&state, |g| {
         Ok(g.list_layout_presets()?.into_iter().map(to_item).collect())
-    })();
-    api_from_hp(outcome)
+    }))
 }
 
 /// layout.get：读取某预设内某一层的布局 JSON（当前层 → `""` → 无）。
@@ -258,50 +252,34 @@ pub fn layout_get(
     layer_key: Option<String>,
     state: State<AppState>,
 ) -> ApiResponse<Option<String>> {
-    let outcome = (|| -> HpResult<Option<String>> {
+    api_from_hp(with_global(&state, |g| {
         let layer_key = layer_key.unwrap_or_default();
-        let guard = global_guard(&state)?;
-        let g = global(&guard)?;
         g.get_layout_layer(&name, &layer_key)
-    })();
-    api_from_hp(outcome)
+    }))
 }
 
 /// layout.rename：重命名预设（默认指针与绑定按 id 存，自动跟随）。
 #[tauri::command]
 pub fn layout_rename(name: String, new_name: String, state: State<AppState>) -> ApiResponse<()> {
-    let outcome = (|| -> HpResult<()> {
+    api_from_hp(with_global_mut(&state, |g| {
         let new_name = new_name.trim();
         if new_name.is_empty() {
             return Err(invalid("布局名不能为空"));
         }
-        let mut guard = global_guard(&state)?;
-        let g = global_mut(&mut guard)?;
         g.rename_layout_preset(&name, new_name)
-    })();
-    api_from_hp(outcome)
+    }))
 }
 
 /// layout.delete：删除预设；命中应用级默认或任一仓库绑定时拒绝（决策 11）。
 #[tauri::command]
 pub fn layout_delete(name: String, state: State<AppState>) -> ApiResponse<()> {
-    let outcome = (|| -> HpResult<()> {
-        let mut guard = global_guard(&state)?;
-        let g = global_mut(&mut guard)?;
-        g.delete_layout_preset(&name)
-    })();
-    api_from_hp(outcome)
+    api_from_hp(with_global_mut(&state, |g| g.delete_layout_preset(&name)))
 }
 
 /// layout.setDefault：设为应用级默认。
 #[tauri::command]
 pub fn layout_set_default(name: String, state: State<AppState>) -> ApiResponse<()> {
-    let outcome = (|| -> HpResult<()> {
-        let mut guard = global_guard(&state)?;
-        let g = global_mut(&mut guard)?;
-        g.set_default_layout(&name)
-    })();
-    api_from_hp(outcome)
+    api_from_hp(with_global_mut(&state, |g| g.set_default_layout(&name)))
 }
 
 /// layout.getDefault：读取生效的预设名。
@@ -313,9 +291,7 @@ pub fn layout_get_default(
     repo_id: Option<String>,
     state: State<AppState>,
 ) -> ApiResponse<Option<String>> {
-    let outcome = (|| -> HpResult<Option<String>> {
-        let guard = global_guard(&state)?;
-        let g = global(&guard)?;
+    api_from_hp(with_global(&state, |g| {
         match repo_id
             .map(|id| id.trim().to_string())
             .filter(|id| !id.is_empty())
@@ -326,22 +302,18 @@ pub fn layout_get_default(
             },
             None => g.default_layout_name(),
         }
-    })();
-    api_from_hp(outcome)
+    }))
 }
 
 /// layout.blueprints：读取预设绑定的蓝图 ID 列表。
 #[tauri::command]
 pub fn layout_blueprints(name: String, state: State<AppState>) -> ApiResponse<Vec<String>> {
-    let outcome = (|| -> HpResult<Vec<String>> {
-        let guard = global_guard(&state)?;
-        let g = global(&guard)?;
+    api_from_hp(with_global(&state, |g| {
         let preset = g
             .get_layout_preset(&name)?
             .ok_or_else(|| HpError::NotFound(format!("布局不存在: {name}")))?;
         Ok(preset.blueprint_ids)
-    })();
-    api_from_hp(outcome)
+    }))
 }
 
 /// layout.bindRepo：设 / 清仓库覆盖（`name` 省略 = 清除，回到应用级默认）。
@@ -351,13 +323,10 @@ pub fn layout_bind_repo(
     name: Option<String>,
     state: State<AppState>,
 ) -> ApiResponse<()> {
-    let outcome = (|| -> HpResult<()> {
-        let mut guard = global_guard(&state)?;
-        let g = global_mut(&mut guard)?;
+    api_from_hp(with_global_mut(&state, |g| {
         let name = name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
         g.bind_layout_repo(&repo_id, name.as_deref())
-    })();
-    api_from_hp(outcome)
+    }))
 }
 
 /// layout.export：导出一份预设为 `hamster-pouch.layout` JSON。
@@ -370,20 +339,21 @@ pub fn layout_export(
     state: State<AppState>,
 ) -> ApiResponse<String> {
     let outcome = (|| -> HpResult<String> {
-        let guard = global_guard(&state)?;
-        let g = global(&guard)?;
-        let preset = g
-            .get_layout_preset(&name)?
-            .ok_or_else(|| HpError::NotFound(format!("布局不存在: {name}")))?;
-        let doc = json!({
-            "format": EXPORT_FORMAT,
-            "version": EXPORT_VERSION,
-            "name": preset.name,
-            "layers": preset.layers,
-            "blueprintIds": preset.blueprint_ids,
-        });
-        let text = serde_json::to_string_pretty(&doc)
-            .map_err(|e| HpError::Store(format!("序列化导出布局失败: {e}")))?;
+        // 读库与序列化在锁内，**落盘在锁外**：写文件是慢 IO，不该占着全局库锁。
+        let text = with_global(&state, |g| {
+            let preset = g
+                .get_layout_preset(&name)?
+                .ok_or_else(|| HpError::NotFound(format!("布局不存在: {name}")))?;
+            let doc = json!({
+                "format": EXPORT_FORMAT,
+                "version": EXPORT_VERSION,
+                "name": preset.name,
+                "layers": preset.layers,
+                "blueprintIds": preset.blueprint_ids,
+            });
+            serde_json::to_string_pretty(&doc)
+                .map_err(|e| HpError::Store(format!("序列化导出布局失败: {e}")))
+        })?;
         if let Some(path) = path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()) {
             std::fs::write(PathBuf::from(&path), text.as_bytes())
                 .map_err(|e| HpError::Io(format!("写入布局文件失败: {path}: {e}")))?;
@@ -442,16 +412,16 @@ pub fn layout_import(
             None => Vec::new(),
         };
 
-        let mut guard = global_guard(&state)?;
-        let g = global_mut(&mut guard)?;
-        let mut name = base_name.to_string();
-        let mut suffix = 2;
-        while g.get_layout_preset(&name)?.is_some() {
-            name = format!("{base_name}-{suffix}");
-            suffix += 1;
-        }
-        let preset = g.import_layout_preset(&name, layers, &blueprint_ids)?;
-        Ok(to_item(preset))
+        with_global_mut(&state, |g| {
+            let mut name = base_name.to_string();
+            let mut suffix = 2;
+            while g.get_layout_preset(&name)?.is_some() {
+                name = format!("{base_name}-{suffix}");
+                suffix += 1;
+            }
+            let preset = g.import_layout_preset(&name, layers, &blueprint_ids)?;
+            Ok(to_item(preset))
+        })
     })();
     api_from_hp(outcome)
 }
@@ -467,12 +437,9 @@ pub fn layout_ensure_seed(
     blueprint_ids: Option<Vec<String>>,
     state: State<AppState>,
 ) -> ApiResponse<SeedResult> {
-    let outcome = (|| -> HpResult<SeedResult> {
-        let mut guard = global_guard(&state)?;
-        let g = global_mut(&mut guard)?;
+    api_from_hp(with_global_mut(&state, |g| {
         let ids = blueprint_ids.unwrap_or_default();
         g.ensure_seeded_layout(&name, &layers_json, &ids)
             .map(SeedResult::from)
-    })();
-    api_from_hp(outcome)
+    }))
 }
