@@ -100,41 +100,15 @@ pub struct PanelFact {
     pub plugin: bool,
 }
 
-/// 宿主内置面板的事实（与 `packages/config/src/panels.ts` 的 `BUILTIN_PANEL_SPECS`
-/// 逐项对齐，由 `pnpm check:panels` 断言）。
+/// 宿主内置面板的事实（**生成物**：权威声明在 `packages/config/src/panels.ts`）。
 ///
-/// 有类目的内置面板：**媒体预览**（`media`，图像 / 视频 / 音频）、
-/// **图书预览**（`bookpreview`，文本类的 epub / txt / md 三个子类 + **PDF** +
-/// book 标记，2026-10-10 用户口径、2026-10-11 加入 PDF）、以及 2026-11-01（D135）
-/// 放开的**相册**（`albums`，类目类型 `album`）与**源**（`sources`，类目类型 `source`）
-/// ——这两个面板各自有"条目分类"，只是维度不是媒体类型。
-/// 其余 13 个没有条目分类（2026-10-16 新增的**图书阅读器** `bookreader` 同样没有：
-/// 它只读书，不分类；2026-11-13 新增的**音乐播放器** `music` 也不分类，它只播音频）。
-/// 内置面板都没收窄 `mount`（三项全开）。
-pub const BUILTIN_PANEL_FACTS: [(&str, bool); 17] = [
-    ("repo", false),
-    // 源面板：条目是源目录树里的一支 → 有类目（D135）。
-    ("sources", true),
-    // 相册面板：条目是相册 → 有类目（D135）。
-    ("albums", true),
-    ("media", true),
-    ("bookpreview", true),
-    ("viewer", false),
-    // 图书阅读器（2026-10-16）：完整阅读一本"书"（目录跳转 + 阅读选项）。
-    // **无类目**：它不按条目分类（与 `viewer` 同款），挑书在图书预览里做。
-    ("bookreader", false),
-    ("imageviewer", false),
-    ("metadata", false),
-    ("tags", false),
-    ("tagtable", false),
-    ("color", false),
-    ("player", false),
-    // 音乐播放器（2026-11-13 / D166）：只播音频，不按条目分类。
-    ("music", false),
-    ("tasks", false),
-    ("plugins", false),
-    ("blueprint", false),
-];
+/// 这里此前是手抄的 17 行，注释写着「由 `pnpm check:panels` 断言」——那条断言**从未存在**
+/// （该门禁只比对 TS 侧与 `panel_types.rs`），所以改 TS 的 `hasClass` 不会让任何门禁变红。
+/// 自 D183 起由 `tools/gen-panel-facts.mjs` 生成，`pnpm check:panel-facts` 逐字节比对。
+///
+/// 有类目的内置面板是 **media / bookpreview / albums / sources**（前两个自 D101、后两个自
+/// D135）；其余 13 个没有条目分类（`bookreader` 只读书、`music` 只播音频，都不按条目分类）。
+pub use crate::panel_facts_generated::{BUILTIN_PANEL_FACTS, BuiltinPanelFact};
 
 /// 节点类型注册表：宿主内置 10 种 + 宿主注入的插件注册项 + 面板事实（`has_class`）。
 ///
@@ -173,12 +147,14 @@ impl NodeRegistry {
 
     /// 该面板的事实（未注册返回 `None` = 未知，不做判定）。
     pub fn panel_fact(&self, panel_id: &str) -> Option<PanelFact> {
-        if let Some((_, has_class)) = BUILTIN_PANEL_FACTS.iter().find(|(id, _)| *id == panel_id) {
+        if let Some(&(_, has_class, overlay_content, multiple_per_interface)) =
+            BUILTIN_PANEL_FACTS.iter().find(|(id, ..)| *id == panel_id)
+        {
             return Some(PanelFact {
                 id: panel_id.to_string(),
-                has_class: *has_class,
-                overlay_content: true,
-                multiple_per_interface: true,
+                has_class,
+                overlay_content,
+                multiple_per_interface,
                 plugin: false,
             });
         }

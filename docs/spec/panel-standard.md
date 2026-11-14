@@ -166,8 +166,10 @@
 > （`crates/hp-core/src/blueprint_validate.rs`，与前者**同一份判据的两次落点**）对内置面板报
 > **硬错误**，用户看到的却是"连上了却读不回"。**根因是 `has_class` 而不是连线逻辑**
 > （`kindForEdge` / `connectPatch` 实测都正确）。
-> TS（`packages/config/src/panels.ts` 的 `BUILTIN_PANEL_SPECS`）与 Rust
-> （`crates/hp-core/src/blueprint_registry.rs` 的 `BUILTIN_PANEL_FACTS`）**两侧同步**改为 `true`；
+> TS（`packages/config/src/panels.ts` 的 `BUILTIN_PANEL_SPECS`）与 Rust 侧**同步**改为 `true`
+> （当时 Rust 是手抄表 `crates/hp-core/src/blueprint_registry.rs` 的 `BUILTIN_PANEL_FACTS`；
+> **D183 起该表是生成物** `crates/hp-core/src/panel_facts_generated.rs`，由 `panels.ts` 产出、
+> `pnpm check:panel-facts` 逐字节比对，`blueprint_registry.rs` 只再导出）；
 > 类目候选按面板分域（相册只能 `album`、源只能 `source`，见
 > `docs/spec/blueprint-node-standard.md` 第 2.0.2 节）。
 >
@@ -290,6 +292,7 @@
 
 - **`pnpm check:panels`**（新增门禁，与 `check:controls` / `check:blueprint-nodes` 同款）：
   1. 注册表 ↔ 声明列表 ↔ 本文档三方一致（`id` 清单、顺序、`category`、`has_class`、`blueprint_node`）。
+     Rust 侧的面板事实表是**生成物**（`crates/hp-core/src/panel_facts_generated.rs`，由 `panels.ts` 产出，`pnpm check:panel-facts` 逐字节比对），因此本门禁另有一条**反向**断言：`blueprint_registry.rs` 不得再手抄面板事实元组——否则手抄那份仍能与 TS 静默分叉（D183 之前正是如此：注释声称由本门禁断言，实际没有任何门禁读它）。
   2. `PANEL_IDS` ↔ `PANEL_DEFS` ↔ `PANEL_TITLES` 三方一致（现有约束，接入门禁）。
   3. 每个 `blueprint_node` 都命中已注册的蓝图节点类型；可承载面板的节点类型必须允许 `panel_id`。
   4. Rust `PanelCategory` / `PanelSpec` ↔ TS 注册表逐项对齐。

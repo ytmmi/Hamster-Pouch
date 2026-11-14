@@ -156,6 +156,25 @@ check(
   `has_class=true: ${hasClassTrue.join(",") || "（无）"}`,
 );
 
+// 面板事实的 Rust 侧自 D183 起是**生成物**（`crates/hp-core/src/panel_facts_generated.rs`，
+// 由 `pnpm gen:panel-facts` 从 `panels.ts` 产出、`check:panel-facts` 逐字节比对）。这条是
+// 反向断言：`blueprint_registry.rs` 里不得再出现手抄的面板事实元组——否则"生成物 + 逐字节
+// 比对"只管住了生成物那一半，手抄那份照样能与 TS 分叉（D183 之前正是如此：注释声称由
+// `check:panels` 断言，实际没有任何门禁读它）。
+const blueprintRegistrySrc = stripComments(
+  readFileSync(join(ROOT, "crates/hp-core/src/blueprint_registry.rs"), "utf8"),
+);
+const handCopiedFacts = [
+  ...blueprintRegistrySrc.matchAll(
+    /\(\s*"(repo|sources|albums|media|bookpreview|viewer|bookreader|imageviewer|metadata|tags|tagtable|color|player|music|tasks|plugins|blueprint)"\s*,\s*(?:true|false)/g,
+  ),
+].map((m) => m[1]);
+check(
+  "面板事实只在生成物里（blueprint_registry.rs 不再手抄 has_class / mount 事实）",
+  handCopiedFacts.length === 0,
+  `手抄残留: ${handCopiedFacts.join(", ") || "无"}`,
+);
+
 const badBlueprintNode = config.BUILTIN_PANEL_SPECS.filter(
   (s) => !config.hasNodeSpec(s.blueprintNode),
 );
