@@ -63,7 +63,7 @@ else
   for name in check:fmt check:clippy check:line-count check:encoding check:doc-status \
               check:status check:commands check:event-names check:bundled-runtime \
               check:hidden-console check:layouts check:settings check:setting-facts \
-              check:panel-facts check:db-boundary check:task-shell check:stores check:media-url check:tree-panels check:player-shared check:media-structure check:control-facts \
+              check:panel-facts check:db-boundary check:task-shell check:stores check:media-url check:tree-panels check:player-shared check:media-structure check:book-structure check:control-facts \
               check:controls check:panels check:types check:blueprint-runtime \
               check:blueprint-delete check:blueprint-engine check:blueprint-nodes \
               check:blueprint-connect check:blueprint-geometry check:blueprint-slots \

@@ -931,7 +931,10 @@ HamsterPouch/
                               #     ——pulldown 把 `<script>alert()</script>` 拆成 InlineHtml+Text+InlineHtml）、
                               #   text.rs 纯文本判编码与分页（BOM → UTF-8 合法性 → chardetng →
                               #     GBK 可解码性兜底；实测语料 14 本无一带 BOM、7 GBK + 7 UTF-8）、
-                              #   epub_text.rs 把章节 XHTML 过**受控白名单**转成类型化块、
+                              #   epub_text/ 把章节 XHTML 过**受控白名单**转成类型化块（D216 从 1190 行单文件拆出）：
+                              #     mod.rs 模块文档 + EpubSectionRead + read_epub_section（公开入口就这三个再导出）；
+                              #     blocks.rs 图片/图注抽取 + 行内状态机 + 逐标签主循环（blocks_from_xhtml）；
+                              #     spine.rs SpineRead / read_spine（OPF 只读一次，目录解析共用）；tests.rs 725 行用例。
                               #   markdown.rs 把 CommonMark + GFM 转成**同一套**块（pulldown-cmark 只产出
                               #     事件流，`html` 特性**刻意不开**；图片按文档目录解析并确认在盘）、
                               #   markdown_tests.rs 测试独立成文件（守 1200 行）；
