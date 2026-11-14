@@ -168,6 +168,8 @@ check(
 {
   const panelSrc = (rel) => stripComments(readFileSync(join(ROOT, rel), "utf8"));
   const albumSrc = panelSrc("apps/desktop/src/app_ui/panels/AlbumPanel.tsx");
+  // 相册树规则在 D210 搬到 panels/album/tree.ts：包含判定等断言读那个文件。
+  const albumTreeSrc = panelSrc("apps/desktop/src/app_ui/panels/album/tree.ts");
   const sourceSrc = panelSrc("apps/desktop/src/app_ui/panels/SourcePanel.tsx");
   const markMenuSrc = panelSrc("apps/desktop/src/app_ui/panels/markMenu.tsx");
   const marksMod = await import(
@@ -279,7 +281,7 @@ check(
   );
   check(
     "D139：`unlimited` 参与拖拽包含判定（与 `multimedia` 一样覆盖全部具体媒体）",
-    /outer === "unlimited"/.test(albumSrc),
+    /outer === "unlimited"/.test(albumTreeSrc),
   );
   check(
     "D139：相册属性菜单有「无限制」项，且新建相册默认 `unlimited`",

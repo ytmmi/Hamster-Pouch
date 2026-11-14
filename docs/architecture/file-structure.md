@@ -318,6 +318,14 @@ apps/desktop/src/app_ui/
                       #   `core/panelMarksStore.ts`：本文件不再持有模块级 store）。D139 起**自动标记与
                       #   用户标记行为完全一致**（可取消、落库），`autoMarks` 只用于把系统同步
                       #   来的那几项画成灰黑色；「不可取消」那套口径已整体作废
+    album/            # 相册树的纯逻辑（D210）：tree.ts —— 拖放协议（`ALBUM_DRAG_MIME`）、树组装
+                      #   （`buildAlbumTree`，同级 sort_order + 创建时间兜底，与后端读侧同口径）、
+                      #   有效媒体属性（`effectiveMediaType` 沿父链继承，顶层 multimedia）、包含与
+                      #   层级判定（`containsMedia` / `isDescendantOf`）、落点分派（`edgeFromEvent`：
+                      #   上/下 1/3 = 插入边、中间 = 成为子相册，D132）。零 JSX——AlbumPanel 只负责
+                      #   渲染与事件绑定（1096 → 948 行）
+    shared/           # 面板间共用的展示件（D210）：icons.tsx —— `ChevronIcon` / `FolderIcon`，
+                      #   原先相册树、媒体源树（SourcePanel）与打标菜单各复制一份同样的 SVG
     imageviewer/      # 图像查看器（多文件功能域：主面板 / 舞台 / 导航器 / 胶片栏 / 信息栏
                       #   + 纯逻辑模块 viewerZoom·viewerPlacement·viewerFormat·viewerKeymap·viewerPreload
                       #   + viewerFilmstripLayout（胶片栏窗口/定位纯几何 + 宽高比缓存按历史名字转出

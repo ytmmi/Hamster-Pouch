@@ -1335,6 +1335,13 @@ IPC。因此 `update.*` 命令**不接受任何 URL 或哈希参数**——manif
 | --- | --- | --- | --- |
 D209 | 图书正文分页状态机收成一份：新增 `apps/desktop/src/app_ui/shared/useBookPages.ts`（`useBookPages()` 返回 `pages / loading / error / hasMore / segmentStart / jumpTarget / loadMore / jumpTo / generation`；世代号 + 在途旗 + `fetchPage(from, generation, replace)`；空页不追加；`jumpTo` 起新世代、`loadMore` 幂等且不动 `setSegmentStart`）。① 阅读器 `useReaderBook.ts` 只剩目录取数（`api.bookToc` + 世代校验）与两游标对外形状（`cursor = jumpTarget`）；② 查看器 `useViewerBookContent.ts` 只挑五个 字段（接口不变）；③ 门禁 `check:panels` 的「按需取下一页」「切书即丢页」「段起点不被 loadMore 改动」三条改读共享钩子，并 反向断言两个消费方不再出现 `generationRef` / `api.bookContent(` / `setPages(`（`api.bookContent({ repoId, fileId, cursor: from })` 的实参形状变了，正则要跟着改，否则 487/488）。 | 已确认（**已实现**，2026-11-15） | ①②③ 全部落地；`tsc --noEmit` 通过、 `check:panels` 488/488、全量套件 37 条 `check:*` 全绿 + 桥接层 95 passed + workspace `-j 4` 无 FAILED。 |
 
+## 第 92 轮 · 树面板共享件各只有一份（D210，2026-11-15）
+
+| 编号 | 决策 | 状态 | 说明 |
+| --- | --- | --- | --- |
+D210 | 树面板的共享件各只有一份：① 折叠箭头三份（`AlbumPanel.tsx` / `SourcePanel.tsx` / `markMenu.tsx`）与文件夹图标两份 合成 `apps/desktop/src/app_ui/panels/shared/icons.tsx`（`ChevronIcon` / `FolderIcon`，只认 `currentColor`）；② 相册树规则 （`ALBUM_DRAG_MIME` / `buildAlbumTree` / `effectiveMediaType` / `sameMediaType` / `containsMedia` / `isDescendantOf` / `edgeFromEvent` / `EDGE_RATIO` / `EXTRACT_DROP_HINT` / 三个类型）从组件搬到 `apps/desktop/src/app_ui/panels/album/tree.ts` （零 JSX，`AlbumPanel.tsx` 1096 → 948 行）；③ 新门禁 `check:tree-panels`（7 条，`check:*` 37 → 38 条）钉住图标不在别处、 树规则不回流组件、三个面板必须从 `shared/icons` 取图标；④ `tools/panels/tagtable.mjs` 的「`unlimited` 参与包含判定」改读 `album/tree.ts`。 | 已确认（**已实现**，2026-11-15） | ①②③④ 全部落地；`tsc --noEmit` 通过、`check:panels` 488/488、 `check:tree-panels` 7/7（变异实测：往 `markMenu.tsx` 追加一份 `tree-chevron-icon` SVG → 6/7 并指名，删掉即 7/7）。 |
+
+
 
 
 

@@ -112,6 +112,12 @@ jumpTarget / loadMore / jumpTo / generation`，`jumpTo` 起新世代让在飞的
 是段起点，`jumpTo` 才改它，`loadMore` 不改）。阅读器只保留目录取数（`book.toc`）与两游标的对外形状，查看器只挑五个字段。
 门禁：`check:panels` 的「按需取下一页」「切书即丢页」「段起点不被 `loadMore` 改动」三条改读共享钩子，并反向断言两个消费方
 不再出现 `generationRef` / `api.bookContent(` / `setPages(`。
+**树面板的共享件各只有一份**（D210）：折叠箭头曾在 `AlbumPanel.tsx` / `SourcePanel.tsx` / `markMenu.tsx` 各写一遍
+（三份 `tree-chevron-icon`），文件夹图标两份；相册树规则（树组装、有效媒体属性、包含/层级判定、拖放落点分派）
+又与渲染、右键菜单、拖拽事件混在同一个 1096 行组件里。现在图标只在 `apps/desktop/src/app_ui/panels/shared/icons.tsx`
+（`ChevronIcon` / `FolderIcon`），相册规则只在 `apps/desktop/src/app_ui/panels/album/tree.ts`（零 JSX），
+`AlbumPanel.tsx` 1096 → 948 行。门禁 `check:tree-panels`（7 条）：图标不得在别处出现、树规则不得回流组件、
+三个树面板必须从 `shared/icons` 取图标、两棵树不得再内联 `<svg>`。
 原 `shared/imageUrl.ts` 已删除；`bookMetaCache` 也从手抄缓存迁到骨架。判据同样是位置：`check:media-url` 钉住
 「`convertFileSrc(` 只出现在 `assetUrl.ts`」「`imageUrl.ts` 不得复活」「`new Map<string, Promise<` 只出现在 `urlCache.ts`」
 「四个播放/查看器面板不得自己 `api.filePath(`」，`check:panels` 的查看器断言同步改指 `resolveMediaUrlOutcome`。

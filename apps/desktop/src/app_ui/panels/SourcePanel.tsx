@@ -17,6 +17,7 @@ import { usePanelMarks } from "../core/panelMarksStore";
 import { MarkMenuTree } from "./markMenu";
 import { marksOf } from "../shared/panelMarks";
 import type { SourceExclusionItem, SourceTreeNode } from "../shared/types";
+import { ChevronIcon, FolderIcon } from "./shared/icons";
 
 /** 取路径最后一段文件夹名。 */
 function baseName(path: string): string {
@@ -35,47 +36,6 @@ function samePath(a: string, b: string): boolean {
   }
   return na === nb;
 }
-
-/** 文件夹图标（内联 SVG，currentColor）。 */
-function FolderIcon(): JSX.Element {
-  return (
-    <svg
-      className="tree-folder-icon"
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M4 5a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5z" />
-    </svg>
-  );
-}
-
-/** 展开箭头（内联 SVG，currentColor；展开时旋转 90°）。 */
-function ChevronIcon(): JSX.Element {
-  return (
-    <svg
-      className="tree-chevron-icon"
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M9 6l6 6-6 6" />
-    </svg>
-  );
-}
-
 /** 路径文本：过长省略尾部；悬停时滚轮可水平滚动查看完整路径。 */
 function PathText({ path }: { path: string }): JSX.Element {
   const ref = useRef<HTMLSpanElement>(null);
