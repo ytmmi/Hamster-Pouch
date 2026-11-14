@@ -8,8 +8,6 @@ use hp_ai::AiTaggingProvider;
 use hp_core::{AiProviderConfig, AiTaggingInput, AiTaggingOutput, HpResult};
 use serde::Serialize;
 use tauri::State;
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
 use crate::AppState;
 use crate::commands::shared::{
@@ -63,9 +61,7 @@ impl AiTaggingProvider for PlaceholderProvider {
         Ok(AiTaggingOutput {
             tags: Vec::new(),
             source_model: self.model().to_string(),
-            generated_at: OffsetDateTime::now_utc()
-                .format(&Rfc3339)
-                .unwrap_or_else(|_| String::new()),
+            generated_at: hp_core::time::now_iso(),
         })
     }
 }

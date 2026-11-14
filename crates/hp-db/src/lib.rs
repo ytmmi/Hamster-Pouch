@@ -1,7 +1,8 @@
 //! hp-db：SQLite 连接的公共骨架。
 //!
 //! 只收「打开连接 → 设 pragma → 跑前向迁移 → 关库检查点」这条四个物理库共用的流程，
-//! 外加配套的四个小工具（`store_err` / `now_iso` / `uuid` / `require_nonempty`）。
+//! 外加配套的四个小工具（`store_err` / `now_iso` / `uuid` / `require_nonempty`）——其中 `now_iso`
+//! 只是 `hp_core::time::now_iso` 的转调（D214：时间戳文本只有一份实现）。
 //!
 //! 边界（D185 / S1）：**不含任何 schema、SQL 与迁移清单**——仓库库、全局配置库、tag 词库、
 //! tag 库的表结构与迁移仍各自留在 `hp-repo` / `hp-global` / `hp-dict` 的领域模块里。拆这一层的理由不是「文件太长」，

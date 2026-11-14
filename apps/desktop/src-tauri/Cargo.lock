@@ -1741,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "hamster-pouch-desktop"
-version = "0.1.66-Alpha"
+version = "0.1.67-Alpha"
 dependencies = [
  "hp-ai",
  "hp-album",
@@ -1919,7 +1919,6 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "hp-repo",
- "time",
  "uuid",
 ]
 
@@ -1931,7 +1930,6 @@ dependencies = [
  "hp-pathrule",
  "hp-repo",
  "serde_json",
- "time",
 ]
 
 [[package]]
@@ -1951,6 +1949,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "time",
  "uuid",
 ]
 
@@ -1960,7 +1959,6 @@ version = "0.1.0"
 dependencies = [
  "hp-core",
  "rusqlite",
- "time",
  "uuid",
 ]
 

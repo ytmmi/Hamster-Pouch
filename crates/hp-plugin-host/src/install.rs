@@ -7,8 +7,6 @@ use std::path::{Path, PathBuf};
 
 use hp_core::{HpError, HpResult, PluginRegistryRow, TrustLevel};
 use hp_plugin_signing::check_plugin_signature;
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
 use crate::manifest::{MANIFEST_FILE, PluginPackage, read_package};
 use crate::trust::{HostSourceKind, effective_trust};
@@ -284,9 +282,7 @@ impl PluginInstaller {
 
 /// 为 git 插件写入 LOCK 文件（URL + 锁定 ref + 获取时间）。
 fn write_lock(dir: &Path, url: &str, rev: &str) -> HpResult<()> {
-    let fetched_at = OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| String::new());
+    let fetched_at = hp_core::time::now_iso();
     let content = format!("url = {url}\nrev = {rev}\nfetched_at = {fetched_at}\n");
     std::fs::write(dir.join("LOCK"), content)
         .map_err(|e| HpError::Io(format!("写入 LOCK 失败: {e}")))?;

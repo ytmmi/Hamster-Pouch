@@ -13,13 +13,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use hp_core::{
-    FileId, FileIndexRow, FileMark, HpError, HpResult, MediaType, Source, ThumbStatus, VerifyStatus,
+    FileId, FileIndexRow, FileMark, HpError, HpResult, MediaType, Source, ThumbStatus,
+    VerifyStatus, time::now_iso,
 };
 use hp_hash::{ContentHash, PerceptualHash};
 use hp_media::{ThumbnailCache, encode_palette_json, palette_is_locked};
 use hp_pathrule::is_excluded_path;
 use hp_repo::{RepoDb, ScanPrepareRow};
-use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
 
 use crate::derivatives::purge_excluded_derivatives;
@@ -831,11 +831,4 @@ pub fn file_stat(path: &Path) -> Option<(i64, String)> {
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
     Some((size, nanos.to_string()))
-}
-
-/// 当前 UTC 时间的 ISO 8601 文本。
-fn now_iso() -> String {
-    time::OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_default()
 }

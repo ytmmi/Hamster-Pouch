@@ -20,7 +20,6 @@ use hp_core::{FileId, FileIndexRow, MediaType, ThumbStatus, VerifyStatus};
 use hp_media::ThumbnailCache;
 use hp_repo::RepoDb;
 use hp_scanner::{ScanOptions, Scanner, detect_media_type, file_stat};
-use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
 
 fn main() {
@@ -65,9 +64,7 @@ fn main() {
 
     if seed {
         let started = Instant::now();
-        let now = time::OffsetDateTime::now_utc()
-            .format(&Rfc3339)
-            .expect("格式化时间失败");
+        let now = hp_core::time::now_iso();
         let mut rows = Vec::new();
         for entry in WalkDir::new(&root).follow_links(false) {
             let Ok(entry) = entry else { continue };

@@ -60,6 +60,7 @@ mod system_settings_generated;
 pub mod tag;
 pub mod tag_dict;
 pub mod tag_lib;
+pub mod time;
 
 pub use ai::{
     AiProviderConfig, AiProviderConfigId, AiTagCandidate, AiTagUndo, AiTaggingInput,

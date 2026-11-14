@@ -1,14 +1,12 @@
 //! 通用工具（随 `Db` 一起下沉到本 crate：领域层直接 `use hp_db::{…}` 取用）。
 
 use hp_core::{HpError, HpResult};
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
-/// 当前 UTC 时间的 ISO 8601 文本。
+/// 当前 UTC 时间的 ISO 8601 文本（实现只有 `hp_core::time::now_iso` 一处，D214）。
+///
+/// 本函数保留是为了不动 `hp-global` / `hp-repo` / `hp-dict` 里已有的 `hp_db::now_iso` 调用点。
 pub fn now_iso() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| String::new())
+    hp_core::time::now_iso()
 }
 
 /// 把 rusqlite 错误统一映射为 HpError::Store。

@@ -10,14 +10,12 @@
 
 use std::path::{Path, PathBuf};
 
-use hp_core::{HpError, HpResult, PluginRegistryRow};
+use hp_core::{HpError, HpResult, PluginRegistryRow, time::now_iso};
 use hp_plugin_host::{
     InstallSource, MANIFEST_FILE, PluginHost, PluginInstaller, discover_packages, parse_manifest,
 };
 use serde::Serialize;
 use tauri::State;
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
 use crate::AppState;
 use crate::commands::shared::{
@@ -71,12 +69,6 @@ fn row_to_item(r: PluginRegistryRow) -> PluginItem {
         installed_at: r.installed_at,
         capabilities,
     }
-}
-
-fn now_iso() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| String::new())
 }
 
 /// plugin.list：列出已安装插件。

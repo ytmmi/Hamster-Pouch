@@ -885,7 +885,6 @@ dependencies = [
  "hp-core",
  "hp-repo",
  "tempfile",
- "time",
  "uuid",
 ]
 
@@ -898,7 +897,6 @@ dependencies = [
  "hp-repo",
  "serde_json",
  "tempfile",
- "time",
 ]
 
 [[package]]
@@ -919,6 +917,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "time",
  "uuid",
 ]
 
@@ -929,7 +928,6 @@ dependencies = [
  "hp-core",
  "rusqlite",
  "tempfile",
- "time",
  "uuid",
 ]
 

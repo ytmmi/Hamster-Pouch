@@ -147,6 +147,14 @@ jumpTarget / loadMore / jumpTo / generation`，`jumpTo` 起新世代让在飞的
 门禁：`check:db-boundary` 第十七条——两个命令文件必须同时出现两个入口，且不得再出现 `global_guard(` / `global(` / `global_mut(` / `fn ensure_repo_id`
 （17/17，变异：往 `panel_marks.rs` 追加一句 `global_guard(state)?` → 16/17 并指名该条）。
 
+**时间戳文本只有一份实现**（D214）：`created_at` / `updated_at` / `installed_at` / `fetched_at` 是同一批 `TEXT` 列上的字符串，
+由四张库的写入路径、插件安装的 `LOCK`、AI 输出与桥接层各自生成。此前有 8 处各写一遍 `OffsetDateTime::now_utc().format(&Rfc3339)`
+（`hp-ai` / `hp-album` / `hp-db` / `hp-plugin-host` / `hp-scanner` / 桥接 `commands/ai.rs` 与 `commands/plugin.rs` / 扫描基准示例），
+一旦有人换成 `YYYY-MM-DD HH:MM:SS`，跨表比较与按时间排序就出错，而且只在两个写入者写过同一行时才暴露。落点选
+`crates/hp-core/src/time.rs` 而不是 `hp-db`：`hp-db` 带 `rusqlite`，而 `hp-ai` / `hp-album` / `hp-scanner` / `hp-plugin-host` 与桥接层都不依赖 SQLite，
+却都要生成时间戳。`hp_db::now_iso` 保留为转调（既有调用方不动）。门禁：`check:db-boundary` 第十八条——全仓（除 `time.rs`）不得出现 `Rfc3339`、
+不得再定义 `fn now_iso`、不得直接 `OffsetDateTime::now`，且 `hp-db/src/util.rs` 必须转调（18/18，变异：往 `hp-album/src/sync.rs` 追加一份 `fn now_iso` → 17/18 并指名该文件）。
+
 ## 插件/AI 扩展点
 
 插件首期只能做：

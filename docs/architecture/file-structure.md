@@ -46,7 +46,7 @@
 crates/hp-db/src/     # SQLite 连接骨架（D185）：四个库共用，不含 schema / SQL / 迁移清单
   lib.rs              # PragmaSet（REPO / GLOBAL / DICT / TAGLIB_READONLY）+ Db（open / open_readonly / apply_migrations / user_version / checkpoint_close）
   migrate.rs          # 共享前向迁移执行器（PRAGMA user_version，每版一事务）
-  util.rs             # store_err / now_iso / uuid / require_nonempty
+  util.rs             # store_err / now_iso（转调 hp_core::time::now_iso，D214）/ uuid / require_nonempty
 crates/hp-repo/src/   # 仓库库（每仓库一个 SQLite 文件）：表结构、迁移清单与领域仓储（D186 从 hp-store 拆出）
   lib.rs              # 模块声明 + 公开项（`hp_repo::RepoDb` 等直接可见；D188 起没有中间门面）
   repo_db.rs          # 连接 / 迁移 / schema 版本
@@ -839,6 +839,8 @@ HamsterPouch/
                               #   （信任等级·来源·运行形态·能力·宿主 API 版本）/ plugin_validate.rs 清单校验
                               #   （结构 / 贡献点完备性 / 取值域 / 声明）/ plugin_row.rs 存储行 /
                               #   plugin_tests.rs 测试夹具 / plugin_contribution.rs 贡献点取值域）
+                              # （时间域：time.rs 是**时间戳文本的唯一实现** now_iso（D214）——四张库的写入路径、
+                              #   插件 LOCK、AI 输出与桥接层都调它；hp-db::now_iso 只是转调）
     hp-db/                    # SQLite 连接骨架：PragmaSet / 前向迁移执行器 / 关库检查点
     hp-repo/                  # 仓库库（每仓库一个文件）：表结构、16 份迁移、领域仓储（D186）
     hp-global/                # 全局配置库：仓库注册表、设置、面板布局、插件注册表（D187）

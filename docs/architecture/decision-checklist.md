@@ -1350,6 +1350,10 @@ D212 | 面板激活/可见性的订阅口与设置热加载的四条触发源各
 
 | 决定 | 做法 | 为什么 | 验证 |
 | --- | --- | --- | --- |D213 | 仓库级 UI 文本项只经 `shared/repo_blob`：① 新增 `apps/desktop/src-tauri/src/commands/shared/repo_blob.rs`——`get_repo_blob` / `set_repo_blob`（`:30` / `:42`），内部 `with_global`（D198 口径），键 `{prefix}.{repoId}`、空 repoId 报 `invalid_argument`、写入 `trim`、空白读回 `None`；② `commands/interface_pages.rs`（62 → 38 行）与 `commands/panel_marks.rs`（64 → 38 行）重写成薄壳，只声明 `PREFIX` 并转调；③ 门禁 `tools/check-db-boundary.mjs` 第十七条：shared.rs 必须给出两个入口，两个命令文件必须同时用上且不得再出现 `global_guard(` / `global(` / `global_mut(` / `fn ensure_repo_id`（16 → **17/17**） | 两份文件逐段同形：同一个「校验 → 取全局库 → 拼键 → 读写」仪式，且各自决定「空白算不算未设置」「写入要不要 trim」——同一份 JSON 在两个面板上会出现「存了却读回是空」；它们又是 D198 之后仅剩的手抄取库点 | `cargo check --all-targets` 零 error 零 warning；桥接层 `cargo test` 95 passed；`check:db-boundary` 17/17；变异：往 `panel_marks.rs` 追加 `global_guard(state)?` → 16/17 并指名该条，回退即 17/17 |
+### 第 96 轮 · D214：时间戳文本只有一份实现（2026-11-15）
+
+| 决定 | 做法 | 为什么 | 验证 |
+| --- | --- | --- | --- |D214 | 时间戳文本只经 `hp_core::time::now_iso`：① 新增 `crates/hp-core/src/time.rs`（`now_iso` 用 `OffsetDateTime::now_utc().format(&Rfc3339)`，附 1 条格式断言）；② `hp-db/src/util.rs` 的 `now_iso` 改成转调（既有 `hp_db::now_iso` 调用点不动），`hp-ai` / `hp-album` / `hp-scanner` / `hp-plugin-host/src/install.rs` / 桥接 `commands/{ai,plugin}.rs` / `hp-scanner/examples/scan_bench.rs` 的 7 处实现与内联格式化全部删掉改调；③ 顺手摘掉 `hp-ai` / `hp-album` / `hp-db` 已不再使用的 `time` 依赖；④ 门禁 `tools/check-db-boundary.mjs` 第十八条：除 `time.rs` 外不得出现 `Rfc3339`、不得再定义 `fn now_iso`、不得直接 `OffsetDateTime::now`，`hp-db/src/util.rs` 必须转调（17 → **18/18**） | 同一批 `TEXT` 列上的时间字符串若格式分叉（RFC 3339 vs `YYYY-MM-DD HH:MM:SS`），跨表比较与按时间排序就静默出错，只在两个写入者写过同一行时暴露；落点选 `hp-core` 是因为 `hp-db` 带 `rusqlite`，而需要时间戳的 5 个 crate 与桥接层都不依赖 SQLite | `cargo check --workspace --all-targets` 零 error 零 warning；`cargo test -p hp-core` 148 passed；`cargo test --workspace -j 4` 全绿；`check:clippy` 2/2；`check:db-boundary` 18/18；变异：往 `hp-album/src/sync.rs` 追加一份 `fn now_iso` → 17/18 并指名该文件，回退即 18/18 |
 
 
 

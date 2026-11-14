@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use hp_core::{AddedBy, AlbumKind, AlbumSyncState, HpError, HpResult, SyncMode};
+use hp_core::{AddedBy, AlbumKind, AlbumSyncState, HpError, HpResult, SyncMode, time::now_iso};
 use hp_repo::RepoDb;
 
 use crate::mirror::ensure_mirror_tree;
@@ -245,11 +245,4 @@ fn parse_dir_prefix(filter_json: Option<&str>) -> Option<String> {
     } else {
         Some(format!("{normalized}/"))
     }
-}
-
-/// 当前 UTC 时间的 ISO 8601 文本。
-fn now_iso() -> String {
-    time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default()
 }

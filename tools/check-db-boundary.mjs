@@ -506,5 +506,44 @@ report(
   repoBlobOffenders,
 );
 
+// ⑱ 时间戳文本只经 hp_core::time::now_iso（D214）
+//
+// `created_at` / `updated_at` / `installed_at` / `fetched_at` 是同一批 TEXT 列上的字符串，
+// 由四张库的写入路径、插件安装的 LOCK 文件、AI 输出与桥接层各自生成。此前有 8 处各自
+// `OffsetDateTime::now_utc().format(&Rfc3339)`（hp-ai / hp-album / hp-db / hp-plugin-host /
+// hp-scanner / 桥接 ai.rs 与 plugin.rs / 扫描基准示例）——一旦有人换成 `YYYY-MM-DD HH:MM:SS`，
+// 跨表比较与按时间排序就开始出错，而且只在两个写入者写过同一行时才暴露。
+const timestampOffenders = [];
+const coreTimeRel = "crates/hp-core/src/time.rs";
+const coreTimeBody = stripComments(readFileSync(join(ROOT, coreTimeRel), "utf8"));
+for (const needle of ["pub fn now_iso()", "OffsetDateTime::now_utc()", ".format(&Rfc3339)"]) {
+  if (!coreTimeBody.includes(needle)) timestampOffenders.push(`${coreTimeRel} 缺少 ${needle}`);
+}
+const rustFiles = [];
+for (const dir of SCAN_ROOTS) walk(dir, rustFiles);
+for (const file of rustFiles) {
+  const rel = relative(ROOT, file).replace(/\\/g, "/");
+  if (rel === coreTimeRel) continue;
+  const body = stripComments(readFileSync(file, "utf8"));
+  if (body.includes("Rfc3339")) {
+    timestampOffenders.push(`${rel}  仍在自行格式化 RFC 3339（应调 hp_core::time::now_iso）`);
+  }
+  const mayDeclare = rel === "crates/hp-db/src/util.rs"; // 只许转调，紧随其后的断言会核
+  if (!mayDeclare && /\bfn\s+now_iso\s*\(/.test(body)) {
+    timestampOffenders.push(`${rel}  又定义了一份 now_iso`);
+  }
+  if (body.includes("OffsetDateTime::now")) {
+    timestampOffenders.push(`${rel}  直接取当前时间（应调 hp_core::time::now_iso）`);
+  }
+}
+const dbUtilBody = stripComments(readFileSync(join(DB_SRC, "util.rs"), "utf8"));
+if (!dbUtilBody.includes("hp_core::time::now_iso()")) {
+  timestampOffenders.push("crates/hp-db/src/util.rs  now_iso 没有转调 hp_core::time::now_iso");
+}
+report(
+  timestampOffenders.length === 0,
+  "时间戳文本只经 hp_core::time::now_iso（hp-db 只转调，8 处实现收成 1 处）",
+  timestampOffenders,
+);
 console.log(`\n[check-db-boundary] ${passed}/${total} 通过`);
 process.exit(passed === total ? 0 : 1);

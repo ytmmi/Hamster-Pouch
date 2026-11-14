@@ -7,7 +7,6 @@ edition.workspace = true
 hp-core = { path = "../hp-core" }
 hp-repo = { path = "../hp-repo" }
 uuid = { version = "1", features = ["v4"] }
-time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
 tempfile = "3"
