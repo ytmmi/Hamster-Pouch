@@ -246,6 +246,8 @@ const fileBridgeSrc = readFileSync(
   "utf8",
 );
 const tasksSrc = readFileSync(join(ROOT, "apps/desktop/src-tauri/src/tasks.rs"), "utf8");
+// D196：登记 / panic 收敛 / 收尾搬进长任务外壳，断言跟着指向外壳。
+const taskShellSrc = readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/task_shell.rs"), "utf8");
 const scannerSrc = readFileSync(join(ROOT, "crates/hp-scanner/src/scanner.rs"), "utf8");
 const taskStoreSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/core/taskStore.ts"),
@@ -277,12 +279,13 @@ check(
   "file.reanalyze 是**后台任务**：登记 TaskKind::Analyze + 独立连接 + 必定发终止事件",
   /pub\(crate\) async fn file_reanalyze\(/.test(fileBridgeSrc) &&
     /ApiAsync<String>/.test(fileBridgeSrc) &&
-    /tasks\s*\.start\(&task_id, TaskKind::Analyze\)/.test(fileBridgeSrc) &&
+    // D196 起登记与收尾在外壳里：命令只声明任务类别与三态事件。
+    /spawn_repo_task\(\s*&state,\s*&app,\s*TaskKind::Analyze,/.test(fileBridgeSrc) &&
     // 独立仓库库连接：不持有 open_repo 锁（分析大视频时界面别的命令不排队）。
     /RepoDb::open\(repo_path\)/.test(fileBridgeSrc) &&
     // panic 也要收敛成终止事件，否则浮窗永远停在原地。
-    /catch_unwind\(std::panic::AssertUnwindSafe/.test(fileBridgeSrc) &&
-    /st\.tasks\.finish\(&emit_task_id\);/.test(fileBridgeSrc),
+    /catch_unwind\(\s*(?:std::panic::)?AssertUnwindSafe/.test(taskShellSrc) &&
+    /\.tasks\s*\.finish\(&emit_task_id\);/.test(taskShellSrc),
 );
 check(
   "分析任务复用 scan.* 事件族（= 与源全量同款浮窗），且进度帧标 `pausable: false`",

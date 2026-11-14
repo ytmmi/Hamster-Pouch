@@ -5,8 +5,7 @@
 //! `unwrapApi` 解包，界面按 `code` 走 i18n（D27）。
 //! 两个长任务命令（`source.scan` / `source.unmount`）是异步命令，用 `ApiAsync`。
 
-use std::panic::AssertUnwindSafe;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use hp_core::{HpError, HpResult, Source};
@@ -187,37 +186,23 @@ pub(crate) async fn source_unmount(
             return Err(HpError::InvalidArgument("媒体源 ID 不能为空".into()));
         }
         let _ = repo_id;
-
-        let task_id = uuid::Uuid::new_v4().to_string();
-        // 登记在启动线程**之前**：任务一旦被外部看见就已可按 `task_id` 定位（缺陷 0003）。
-        let control = state
-            .tasks
-            .start(&task_id, TaskKind::Unmount)
-            .ok_or_else(|| HpError::AlreadyExists("已有任务正在进行中，请等待其结束。".into()))?;
-        let repo_path: PathBuf = match crate::commands::shared::require_repo_path(&state) {
-            Ok(p) => p,
-            Err(e) => {
-                state.tasks.finish(&task_id);
-                return Err(e);
-            }
-        };
-
-        let st = state.inner().clone();
-        let app_handle = app.clone();
-        let emit_source_id = source_id.clone();
-
-        tauri::async_runtime::spawn_blocking(move || {
-            let emit_task_id = control.task_id().to_string();
-            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                run_unmount(&app_handle, &control, &source_id, &repo_path)
-            }));
-            match result {
-                Ok(Ok(outcome)) => {
-                    app_handle.emit_hp(
+        let body_app = app.clone();
+        let body_source_id = source_id.clone();
+        let event_source_id = source_id.clone();
+        crate::commands::task_shell::spawn_repo_task(
+            &state,
+            &app,
+            TaskKind::Unmount,
+            crate::commands::task_shell::BUSY_PLAIN,
+            move |control, repo_path| run_unmount(&body_app, &control, &body_source_id, &repo_path),
+            move |app_handle, task_id, result| {
+                let task_id = task_id.to_string();
+                match result {
+                    Ok(Ok(outcome)) => app_handle.emit_hp(
                         "source.unmount.completed",
                         UnmountCompletedEvent {
-                            task_id: emit_task_id.clone(),
-                            source_id: emit_source_id.clone(),
+                            task_id,
+                            source_id: event_source_id.clone(),
                             cancelled: outcome.cancelled,
                             members: outcome.counts.album_members,
                             files: outcome.counts.files,
@@ -227,35 +212,28 @@ pub(crate) async fn source_unmount(
                             sync_albums: outcome.counts.sync_albums,
                             child_sources: outcome.counts.child_sources,
                         },
-                    );
-                }
-                Ok(Err(e)) => {
-                    app_handle.emit_hp(
+                    ),
+                    Ok(Err(e)) => app_handle.emit_hp(
                         "source.unmount.error",
                         UnmountErrorEvent {
-                            task_id: emit_task_id.clone(),
-                            source_id: emit_source_id.clone(),
+                            task_id,
+                            source_id: event_source_id.clone(),
                             error: e.to_string(),
                         },
-                    );
-                }
-                Err(_) => {
-                    app_handle.emit_hp(
+                    ),
+                    Err(_) => app_handle.emit_hp(
                         "source.unmount.error",
                         UnmountErrorEvent {
-                            task_id: emit_task_id.clone(),
-                            source_id: emit_source_id.clone(),
+                            task_id,
+                            source_id: event_source_id.clone(),
                             error: "卸载线程异常终止".into(),
                         },
-                    );
+                    ),
                 }
-            }
-            st.tasks.finish(&emit_task_id);
-            // 源已经卸载：监听线程跟着收手（进程内的停止开关只在这里与 repo.close 置位）。
-            crate::source_watch::service().stop(&emit_source_id);
-        });
-
-        Ok(task_id)
+                // 源已经卸载：监听线程跟着收手（进程内的停止开关只在这里与 repo.close 置位）。
+                crate::source_watch::service().stop(&event_source_id);
+            },
+        )
     })();
     api_async(api_from_hp(outcome))
 }
@@ -597,77 +575,62 @@ pub(crate) fn start_source_scan(
 ) -> HpResult<String> {
     // 线程闭包要 `'static`：监听侧传进来的是 `&str`，这里先持有所有权。
     let source_id = source_id.to_string();
-    (|| -> HpResult<String> {
-        if source_id.trim().is_empty() {
-            return Err(HpError::InvalidArgument("媒体源 ID 不能为空".into()));
-        }
-
-        // 单任务闸门 + 按 `task_id` 登记控制块（登记在启动线程之前，缺陷 0003）
-        let task_id = uuid::Uuid::new_v4().to_string();
-        let control = state.tasks.start(&task_id, TaskKind::Scan).ok_or_else(|| {
-            HpError::AlreadyExists("已有任务正在进行中，请等待其结束或先取消。".into())
-        })?;
-
-        // 扫描用的仓库库路径（缺失说明仓库未打开）
-        let repo_path: PathBuf = match crate::commands::shared::require_repo_path(state) {
-            Ok(p) => p,
-            Err(e) => {
-                state.tasks.finish(&task_id);
-                return Err(e);
-            }
-        };
-
-        let st = state.clone();
-        let app_handle = app.clone();
-        let emit_source_id = source_id.clone();
-
-        tauri::async_runtime::spawn_blocking(move || {
-            let emit_task_id = control.task_id().to_string();
-            // panic 也要收敛成一次事件，避免前端浮窗永久停留
-            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                run_scan(&st, &app_handle, &control, &source_id, full, &repo_path)
-            }));
-            match result {
-                Ok(Ok(outcome)) => {
-                    app_handle.emit_hp(
-                        "scan.completed",
-                        ScanCompletedEvent {
-                            task_id: emit_task_id.clone(),
-                            source_id: emit_source_id.clone(),
-                            indexed: outcome.indexed,
-                            changed: outcome.changed,
-                            missing: outcome.missing,
-                            skipped: outcome.skipped,
-                            cancelled: outcome.cancelled,
-                        },
-                    );
-                }
-                Ok(Err(e)) => {
-                    app_handle.emit_hp(
-                        "scan.error",
-                        ScanErrorEvent {
-                            task_id: emit_task_id.clone(),
-                            source_id: emit_source_id.clone(),
-                            error: e.to_string(),
-                        },
-                    );
-                }
-                Err(_) => {
-                    app_handle.emit_hp(
-                        "scan.error",
-                        ScanErrorEvent {
-                            task_id: emit_task_id.clone(),
-                            source_id: emit_source_id.clone(),
-                            error: "扫描线程异常终止".into(),
-                        },
-                    );
-                }
-            }
-            st.tasks.finish(&emit_task_id);
-        });
-
-        Ok(task_id)
-    })()
+    // 线程闭包要 `'static`：监听侧传进来的是 `&str`，这里先持有所有权。
+    let source_id = source_id.to_string();
+    if source_id.trim().is_empty() {
+        return Err(HpError::InvalidArgument("媒体源 ID 不能为空".into()));
+    }
+    let body_state = state.clone();
+    let body_app = app.clone();
+    let body_source_id = source_id.clone();
+    let event_source_id = source_id;
+    // 单任务闸门 + 按 `task_id` 登记控制块（登记在启动线程之前，缺陷 0003）
+    crate::commands::task_shell::spawn_repo_task(
+        state,
+        app,
+        TaskKind::Scan,
+        crate::commands::task_shell::BUSY_CANCELLABLE,
+        move |control, repo_path| {
+            run_scan(
+                &body_state,
+                &body_app,
+                &control,
+                &body_source_id,
+                full,
+                &repo_path,
+            )
+        },
+        move |app_handle, task_id, result| match result {
+            Ok(Ok(outcome)) => app_handle.emit_hp(
+                "scan.completed",
+                ScanCompletedEvent {
+                    task_id: task_id.to_string(),
+                    source_id: event_source_id.clone(),
+                    indexed: outcome.indexed,
+                    changed: outcome.changed,
+                    missing: outcome.missing,
+                    skipped: outcome.skipped,
+                    cancelled: outcome.cancelled,
+                },
+            ),
+            Ok(Err(e)) => app_handle.emit_hp(
+                "scan.error",
+                ScanErrorEvent {
+                    task_id: task_id.to_string(),
+                    source_id: event_source_id.clone(),
+                    error: e.to_string(),
+                },
+            ),
+            Err(_) => app_handle.emit_hp(
+                "scan.error",
+                ScanErrorEvent {
+                    task_id: task_id.to_string(),
+                    source_id: event_source_id.clone(),
+                    error: "扫描线程异常终止".into(),
+                },
+            ),
+        },
+    )
 }
 
 /// 在后台线程执行扫描（独立连接，不占用主连接锁）。

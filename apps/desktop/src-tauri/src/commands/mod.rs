@@ -46,5 +46,7 @@ pub(crate) mod reader;
 pub(crate) mod repo;
 pub(crate) mod shared;
 pub(crate) mod source;
+// 长任务外壳（D196）：登记 / 起线程 / panic 收敛 / 收尾只有一份实现。
 pub(crate) mod tag;
 pub(crate) mod tagdict;
+pub(crate) mod task_shell;

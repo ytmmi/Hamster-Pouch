@@ -698,75 +698,46 @@ pub(crate) async fn file_reanalyze(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> ApiAsync<String> {
-    let outcome = (|| -> HpResult<String> {
-        let _ = repo_id;
-        let task_id = uuid::Uuid::new_v4().to_string();
-        // 登记在启动线程**之前**：任务一被外部看见就已可定位（缺陷 0003 的口径）。
-        let control = state
-            .tasks
-            .start(&task_id, TaskKind::Analyze)
-            .ok_or_else(|| {
-                HpError::AlreadyExists("已有任务正在进行中，请等待其结束或先取消。".into())
-            })?;
-
-        let repo_path: std::path::PathBuf = match crate::commands::shared::require_repo_path(&state)
-        {
-            Ok(p) => p,
-            Err(e) => {
-                state.tasks.finish(&task_id);
-                return Err(e);
-            }
-        };
-
-        let st = state.inner().clone();
-        let app_handle = app.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            let emit_task_id = control.task_id().to_string();
-            // panic 也要收敛成一次事件，避免前端浮窗永久停留。
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_reanalyze(&st, &app_handle, &control, &file_id, &repo_path)
-            }));
-            match result {
-                Ok(Ok((source_id, outcome))) => {
-                    app_handle.emit_hp(
-                        "scan.completed",
-                        ScanCompletedEvent {
-                            task_id: emit_task_id.clone(),
-                            source_id,
-                            indexed: outcome.indexed,
-                            changed: outcome.changed,
-                            missing: outcome.missing,
-                            skipped: outcome.skipped,
-                            cancelled: outcome.cancelled,
-                        },
-                    );
-                }
-                Ok(Err((source_id, error))) => {
-                    app_handle.emit_hp(
-                        "scan.error",
-                        ScanErrorEvent {
-                            task_id: emit_task_id.clone(),
-                            source_id,
-                            error: error.to_string(),
-                        },
-                    );
-                }
-                Err(_) => {
-                    app_handle.emit_hp(
-                        "scan.error",
-                        ScanErrorEvent {
-                            task_id: emit_task_id.clone(),
-                            source_id: String::new(),
-                            error: "分析线程异常终止".into(),
-                        },
-                    );
-                }
-            }
-            st.tasks.finish(&emit_task_id);
-        });
-
-        Ok(task_id)
-    })();
+    let _ = repo_id;
+    let st = state.inner().clone();
+    let body_app = app.clone();
+    let outcome = crate::commands::task_shell::spawn_repo_task(
+        &state,
+        &app,
+        TaskKind::Analyze,
+        crate::commands::task_shell::BUSY_CANCELLABLE,
+        move |control, repo_path| run_reanalyze(&st, &body_app, &control, &file_id, &repo_path),
+        move |app_handle, task_id, result| match result {
+            Ok(Ok((source_id, outcome))) => app_handle.emit_hp(
+                "scan.completed",
+                ScanCompletedEvent {
+                    task_id: task_id.to_string(),
+                    source_id,
+                    indexed: outcome.indexed,
+                    changed: outcome.changed,
+                    missing: outcome.missing,
+                    skipped: outcome.skipped,
+                    cancelled: outcome.cancelled,
+                },
+            ),
+            Ok(Err((source_id, error))) => app_handle.emit_hp(
+                "scan.error",
+                ScanErrorEvent {
+                    task_id: task_id.to_string(),
+                    source_id,
+                    error: error.to_string(),
+                },
+            ),
+            Err(_) => app_handle.emit_hp(
+                "scan.error",
+                ScanErrorEvent {
+                    task_id: task_id.to_string(),
+                    source_id: String::new(),
+                    error: "分析线程异常终止".into(),
+                },
+            ),
+        },
+    );
     api_async(api_from_hp(outcome))
 }
 
@@ -935,26 +906,19 @@ pub(crate) fn start_backfill(
     state: &AppState,
     repo_path: std::path::PathBuf,
 ) -> HpResult<String> {
-    let task_id = uuid::Uuid::new_v4().to_string();
-    let control = state
-        .tasks
-        .start(&task_id, TaskKind::Backfill)
-        .ok_or_else(|| {
-            HpError::AlreadyExists("已有任务正在进行中，请等待其结束或先取消。".into())
-        })?;
-
-    let st = state.clone();
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let emit_task_id = control.task_id().to_string();
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_backfill(&app_handle, &control, &repo_path)
-        }));
-        match result {
+    let body_app = app.clone();
+    crate::commands::task_shell::spawn_task_at(
+        state,
+        app,
+        TaskKind::Backfill,
+        crate::commands::task_shell::BUSY_CANCELLABLE,
+        repo_path,
+        move |control, repo_path| run_backfill(&body_app, &control, &repo_path),
+        move |app_handle, task_id, result| match result {
             Ok(Ok(outcome)) => app_handle.emit_hp(
                 "file.backfill.completed",
                 FileBackfillCompletedPayload {
-                    task_id: emit_task_id.clone(),
+                    task_id: task_id.to_string(),
                     filled: outcome.filled,
                     failed: outcome.failed,
                     cancelled: outcome.cancelled,
@@ -966,7 +930,7 @@ pub(crate) fn start_backfill(
                 app_handle.emit_hp(
                     "file.backfill.completed",
                     FileBackfillCompletedPayload {
-                        task_id: emit_task_id.clone(),
+                        task_id: task_id.to_string(),
                         filled: 0,
                         failed: 0,
                         cancelled: false,
@@ -979,7 +943,7 @@ pub(crate) fn start_backfill(
                 app_handle.emit_hp(
                     "file.backfill.completed",
                     FileBackfillCompletedPayload {
-                        task_id: emit_task_id.clone(),
+                        task_id: task_id.to_string(),
                         filled: 0,
                         failed: 0,
                         cancelled: false,
@@ -987,11 +951,8 @@ pub(crate) fn start_backfill(
                     },
                 );
             }
-        }
-        st.tasks.finish(&emit_task_id);
-    });
-
-    Ok(task_id)
+        },
+    )
 }
 
 /// 回填主体：**键集分页**遍历 `width IS NULL` 的图片行，逐行读头写显示尺寸。
