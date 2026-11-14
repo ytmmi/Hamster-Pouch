@@ -542,7 +542,7 @@ pub(crate) fn call(
             req_str(&args, "fileId")?,
             state,
         )),
-        "book_toc" => block_on_book(crate::commands::book_reader::book_toc(
+        "book_toc" => block_on_book(crate::commands::book::book_toc(
             repo_id,
             req_str(&args, "fileId")?,
             state,

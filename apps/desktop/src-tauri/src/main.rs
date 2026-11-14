@@ -247,7 +247,7 @@ fn main() {
             commands::book::book_content,
             // 图书阅读器的目录取数（EPUB nav/NCX；txt 内置小说章节规则；md 顶层标题；
             // pdf 无目录）。游标与 `book_content` 同语义，因此"跳章"就是换一个 cursor。
-            commands::book_reader::book_toc,
+            commands::book::book_toc,
             // 封面覆盖（用户口径"txt 右键可以更换封面颜色或自定义图片"）：
             // 批量读（面板一页一次）/ 单读 / 设（颜色或图片）/ 清除（回默认封面）。
             commands::book::book_covers,

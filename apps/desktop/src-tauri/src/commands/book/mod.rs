@@ -41,16 +41,14 @@ mod prelude {
     pub(super) use hp_core::{HpError, HpResult, MediaType};
     pub(super) use hp_dto::{
         BookBlockItem, BookContentResult, BookCoverItem, BookCoverResult, BookDefinitionItem,
-        BookListItem, BookSpanItem, BookTableRowItem,
+        BookListItem, BookSpanItem, BookTableRowItem, BookTocItem, BookTocResult,
     };
     pub(super) use serde::{Deserialize, Serialize};
     pub(super) use tauri::State;
 
+    pub(super) use super::toc::ReaderCtx;
     pub(super) use crate::AppState;
-    pub(super) use crate::commands::book_reader::ReaderCtx;
-    pub(super) use crate::commands::shared::{
-        ApiAsync, api_async, api_from_hp, resolve_file_path, with_repo,
-    };
+    pub(super) use crate::commands::shared::{ApiAsync, api_async, api_from_hp, resolve_file_path};
 }
 
 use prelude::*;
@@ -58,10 +56,14 @@ use prelude::*;
 mod cache;
 mod cover;
 mod paging;
+mod source;
+mod toc;
 
 pub(crate) use cache::*;
 pub(crate) use cover::*;
 pub(crate) use paging::*;
+pub(crate) use source::*;
+pub(crate) use toc::*;
 
 /// `book.meta`：按 `file_id` 返回作者 / 简介 / 封面路径（带磁盘缓存）。
 ///
@@ -74,41 +76,21 @@ pub(crate) async fn book_meta(
     state: State<'_, AppState>,
 ) -> ApiAsync<BookMetaResult> {
     let outcome = async {
-        // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard（与 `thumb.get` 同款）。
-        let (src_path, media_type, content_hash, cache) = with_repo(&state, &repo_id, |db| {
-            let file = db
-                .get_file(&file_id)?
-                .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
-            let src_path = resolve_file_path(db, &file)?;
-            Ok((
-                src_path,
-                file.media_type,
-                file.content_hash,
-                (*state.thumb_cache).clone(),
-            ))
-        })?;
-
-        // 只有"书"（文本类 + PDF）可能带元数据；其余类型直接空结果（不是错误）。
-        //
-        // 判据用 `MediaType::is_book()` 而不是 `== Text`：PDF 是**独立类目**，
-        // 但它与文本类在这一处的行为完全一致（都要作者 / 简介 / 封面）。
-        // 分成两个条件写会让下次新增"书"类型时漏掉一个。
-        if !media_type.is_book() {
-            return Ok(BookMetaResult {
-                author: None,
-                description: None,
-                cover_path: None,
-            });
-        }
-        // 无内容哈希 = 索引里还没有可用的内容身份（例如不可读占位行）：
-        // 没有稳定的缓存键，就不缓存、也不解析。
-        let Some(hash) = content_hash else {
+        // 取数前置（文件不存在 / 非书 / 无内容哈希三条口径）只在 `book/source.rs` 一处。
+        let Some(source) = resolve_book_source(&state, &repo_id, &file_id)? else {
             return Ok(BookMetaResult {
                 author: None,
                 description: None,
                 cover_path: None,
             });
         };
+        let BookSource {
+            hash,
+            media_type,
+            src_path,
+            cache,
+            ..
+        } = source;
 
         // 缓存命中：封面文件也必须在盘上（否则退回重新解析）。
         if let Some(record) = read_cache(&cache.path_for_book_meta(&hash))
@@ -121,14 +103,13 @@ pub(crate) async fn book_meta(
         let hash_for_task = hash.clone();
         let cache_for_task = cache.clone();
         let src_for_task = src_path.clone();
-        let record = tauri::async_runtime::spawn_blocking(move || match media_type {
+        let record = run_book_io("图书解析", move || match media_type {
             // PDF：封面 = 第一页栅格化（`hp-pdf`）。
             MediaType::Pdf => parse_pdf_and_cache(&src_for_task, &cache_for_task, &hash_for_task),
             // 文本类：EPUB 解 OPF 取内嵌封面；txt / md 本来就没有元数据。
             _ => parse_and_cache(&src_for_task, &cache_for_task, &hash_for_task),
         })
-        .await
-        .map_err(|e| HpError::Io(format!("图书解析线程异常: {e}")))??;
+        .await?;
 
         Ok(record.into_result(&cache, &hash))
     }
@@ -153,51 +134,34 @@ pub(crate) async fn book_content(
     state: State<'_, AppState>,
 ) -> ApiAsync<BookContentResult> {
     let outcome = async {
-        // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard。
-        let (src_path, media_type, content_hash, cache) = with_repo(&state, &repo_id, |db| {
-            let file = db
-                .get_file(&file_id)?
-                .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
-            let src_path = resolve_file_path(db, &file)?;
-            Ok((
-                src_path,
-                file.media_type,
-                file.content_hash,
-                (*state.thumb_cache).clone(),
-            ))
-        })?;
-
-        // 非"书"（文本类 + PDF）没有"正文"可看：空结果（不是错误）。
-        if !media_type.is_book() {
-            return Ok(empty_content());
-        }
-        let Some(hash) = content_hash else {
+        // 取数前置（含"非书"与"无内容哈希"两条降级口径）只在 `book/source.rs` 一处。
+        let Some(source) = resolve_book_source(&state, &repo_id, &file_id)? else {
             return Ok(empty_content());
         };
-
         let offset = parse_cursor(cursor.as_deref());
-        let ext = src_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
+        let BookSource {
+            src_path,
+            media_type,
+            hash,
+            ext,
+            cache,
+        } = source;
 
         // 读盘 / 解压 / 栅格化放在阻塞线程（大 epub 与 24 MB 的 txt 都不能占着 IPC 线程；
         // PDF 还要真的把一页画出来，实测 25–156 ms，更不能占 IPC 线程）。
         //
         // **纯文本这一轮不再需要"整本缓存"**（需求 2）：`read_text_page` 每次只读
         // 一页所需的字节窗口，因此这里没有要跨请求保持的状态——`ReaderCtx` 只剩
-        // "插图缓存 + 内容哈希"两个字段（见 `book_reader.rs`），构造它的理由与
+        // "插图缓存 + 内容哈希"两个字段（见 `book/toc.rs`），构造它的理由与
         // `book_toc` 的同款注释一致（闭包按 `'static` 要求把借用移进去）。
-        let read = tauri::async_runtime::spawn_blocking(move || {
+        let read = run_book_io("正文读取", move || {
             let ctx = ReaderCtx {
                 cache: &cache,
                 hash: &hash,
             };
             read_page_by_media_type(media_type, &src_path, &ext, offset, &ctx)
         })
-        .await
-        .map_err(|e| HpError::Io(format!("正文读取线程异常: {e}")))??;
+        .await?;
 
         Ok(read)
     }

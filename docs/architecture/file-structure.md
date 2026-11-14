@@ -123,18 +123,19 @@ crates/hp-dict/migrations/   # 迁移 SQL（forward-only，发布后禁止修改
                         #   的对象可以是相册 id 或源目录 key，不是文件。语义（自定义标记
                         #   `custom:<名称>`、目标键、版本闸门）全在前端 `shared/panelMarks.ts`，
                         #   桥接层不解析内容
-    book/               # 图书桥接（2026-11-14 拆分，D181）：mod.rs（book.meta / book.content 两个
-                        #   命令 + 共享导入）、cache.rs（元数据磁盘缓存 + 原子写）、paging.rs（txt/md/
-                        #   epub/pdf 正文分页与块转换）、cover.rs（book.cover* 封面覆盖 + 图片落盘清理）
-    book_reader.rs      # 图书阅读器一侧的取数（2026-10-16，D113）：book.toc 目录
-                        #   （EPUB nav/NCX、txt 小说章节规则、md 标题；PDF 无目录）。
-                        #   **目录结果按内容哈希落盘缓存**（2026-10-19 / D116-R4）：
-                        #   `<hash>.booktoc.json`，记录自带 `TOC_CACHE_RULE` 版本号，
-                        #   标题识别规则一变旧缓存自动作废；只缓存"有内容"的结果
-                        #   （空目录 + 无总字数更像读取失败，落盘会把偶发失败固化）。
-                        #   **不再有"整本正文解码 + 单本缓存"**——D116-R3 已删除该路径
-                        #   （用户实测内存 5 GB+ 卡死），正文改走 hp-book 的流式窗口读。
-                        #   拆出来是因为 book/ 下的桥接已越过 1200 行红线
+    book/               # 图书桥接（2026-11-14 拆分 D181，2026-11-15 收轮 D203）：mod.rs（book.meta /
+                        #   book.content 两个命令 + 共享导入）、cache.rs（元数据磁盘缓存 + 原子写）、
+                        #   paging.rs（txt/md/epub/pdf 正文分页与块转换）、cover.rs（book.cover* 封面覆盖 +
+                        #   图片落盘清理）、source.rs（三个图书命令共用的取数前置：resolve_book_source 的
+                        #   "文件不存在 / 非书 / 无内容哈希"三条口径 + run_book_io 的线程异常形状）、
+                        #   toc.rs（图书阅读器一侧的 book.toc 目录，2026-10-16 D113：EPUB nav/NCX、txt
+                        #   小说章节规则、md 标题；PDF 无目录。**目录结果按内容哈希落盘缓存**
+                        #   （2026-10-19 / D116-R4）：`<hash>.booktoc.json`，记录自带 `TOC_CACHE_RULE`
+                        #   版本号，标题识别规则一变旧缓存自动作废；只缓存"有内容"的结果（空目录 +
+                        #   无总字数更像读取失败，落盘会把偶发失败固化）。**不再有"整本正文解码 +
+                        #   单本缓存"**——D116-R3 已删除该路径（用户实测内存 5 GB+ 卡死），正文改走
+                        #   hp-book 的流式窗口读。D203 从 commands/ 顶层收进 book/：它在外面却反过来被
+                        #   book/mod.rs 依赖（ReaderCtx），且三个命令各抄一份取数口径）
     reader.rs           # 阅读批注桥接（reader.annotations / addAnnotation / deleteAnnotation，
                         #   2026-10-16，D113）。**与 book.* 分开命名**：book.* 是"从**文件**里读出
                         #   内容属性"（只认 file_id、不写任何东西），批注是"**读者**留下的东西"

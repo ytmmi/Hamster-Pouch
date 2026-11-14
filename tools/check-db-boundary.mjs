@@ -428,7 +428,7 @@ for (const file of commandSources()) {
   }
   // `commands/repo.rs` 装卸句柄本身（open/close/delete/rename），不取库；其余一律要有一个取用口。
   if (file.rel !== "commands/repo.rs") {
-    const calls = (body.match(/\b(with_repo|with_repo_mut|ensure_repo_binding)\s*\(&state/g) ?? []).length;
+    const calls = (body.match(/\b(with_repo|with_repo_mut|ensure_repo_binding)\s*\(&?state/g) ?? []).length;
     if (calls === 0) repoEntryOffenders.push(`${file.rel}  没有一处 with_repo* 调用`);
   }
 }
@@ -436,6 +436,39 @@ report(
   repoEntryOffenders.length === 0,
   `仓库库取用只经 with_repo*（${repoEntryFiles} 个命令文件）`,
   repoEntryOffenders,
+);
+
+// ⑯ 图书命令族的取数前置只有一处（D203）
+//
+// `book.meta` / `book.content` / `book.toc` 曾各抄一遍「with_repo 取四元组 → 非书即空 →
+// 无内容哈希即空 → 扩展名归一 → spawn_blocking + 线程异常映射」。五条都是**口径**：新增一种
+// 「书」要同时改三处，漏改不会编译失败，只会让某个命令的行为悄悄和另外两个不一致。
+// 现在只有 `commands/book/source.rs` 一份，三个命令各自只剩「空结果长什么样」。
+const bookDir = join(BRIDGE_SRC, "commands", "book");
+const bookFamilyOffenders = [];
+const bookSourceBody = stripComments(readFileSync(join(bookDir, "source.rs"), "utf8"));
+for (const needle of ["pub(crate) fn resolve_book_source", "pub(crate) async fn run_book_io"]) {
+  if (!bookSourceBody.includes(needle)) bookFamilyOffenders.push(`commands/book/source.rs 缺少 ${needle}`);
+}
+for (const name of ["mod.rs", "toc.rs"]) {
+  const body = stripComments(readFileSync(join(bookDir, name), "utf8"));
+  if (!/\bresolve_book_source\s*\(/.test(body)) {
+    bookFamilyOffenders.push(`commands/book/${name}  没有走 resolve_book_source`);
+  }
+  if (/\bget_file\s*\(\s*&?file_id/.test(body)) {
+    bookFamilyOffenders.push(`commands/book/${name}  又手抄了取文件行（get_file(file_id)）`);
+  }
+  if (/\.extension\(\)[\s\S]{0,120}?to_ascii_lowercase\(\)/.test(body)) {
+    bookFamilyOffenders.push(`commands/book/${name}  又手抄了扩展名归一`);
+  }
+}
+if (existsSync(join(BRIDGE_SRC, "commands", "book_reader.rs"))) {
+  bookFamilyOffenders.push("commands/book_reader.rs 仍在（D203 起应并入 commands/book/toc.rs）");
+}
+report(
+  bookFamilyOffenders.length === 0,
+  "图书命令族的取数前置只有一处（book/source.rs）",
+  bookFamilyOffenders,
 );
 
 console.log(`\n[check-db-boundary] ${passed}/${total} 通过`);

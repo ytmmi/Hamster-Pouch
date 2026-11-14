@@ -1,17 +1,13 @@
 //! 图书阅读器的**桥接侧取数**：`book.toc`（目录）。
 //!
-//! ## 为什么与 `book/` 分开
+//! ## 为什么在 `book/` 里（D203）
 //!
-//! `book/` 下的子模块已经承担三件事（元数据缓存 / 正文分页 / 封面覆盖），再加目录就超过项目
-//! "单文件 ≤ 1200 行"的红线。按**职责**切而不是按行数切：
-//!
-//! | 文件 | 职责 | 消费者 |
-//! | --- | --- | --- |
-//! | `book/{mod,cache,paging,cover}.rs` | 元数据缓存 / 正文分页 / 封面覆盖 | 图书预览 + **查看器** + 阅读器 |
-//! | 本文件 | **目录** | **图书阅读器** |
-//!
-//! 依赖方向单向：`book/ → book_reader.rs`（`book_content` 复用这里的
-//! [`ReaderCtx`]），反向没有引用。
+//! 目录读取（2026-10-16 引入）一度放在 `commands/book_reader.rs`：那时 `book/` 的子模块已经
+//! 承担三件事（元数据缓存 / 正文分页 / 封面覆盖），再加目录会挤到"单文件 ≤ 1200 行"红线。
+//! 但把它留在外面意味着 `book/` 反过来**依赖**它（`book_content` 要用这里的 [`ReaderCtx`]），
+//! 而两个模块又共用 `read_json_cache` / `write_atomic`——一次「图书族的取数口径」改动要跨
+//! 目录边界来回看两个地方。D203 把它收进 `book/toc.rs`，族内依赖单向（`mod → toc`），
+//! 取数前置统一由 `book/source.rs` 提供。
 //!
 //! ## 整本解码与缓存**已删除**（2026-10-18，用户需求 2）
 //!
@@ -38,16 +34,9 @@
 //! 缓存在持锁期间解码，同一本书的并发请求被串行化；现在每个请求各开自己的 `File`，
 //! 并发只受锚点表的短暂锁影响（见 `text_stream` 的"并发"一节）。
 
-use std::path::Path;
-
-use hp_core::{HpError, HpResult, MediaType};
-use hp_dto::{BookTocItem, BookTocResult};
-use serde::{Deserialize, Serialize};
-use tauri::State;
-
-use crate::AppState;
-use crate::commands::book::{read_json_cache, write_atomic};
-use crate::commands::shared::{ApiAsync, api_async, api_from_hp, resolve_file_path, with_repo};
+use super::cache::{read_json_cache, write_atomic};
+use super::prelude::*;
+use super::source::{BookSource, resolve_book_source, run_book_io};
 
 /// 一本"书"在读目录时的**全部外部依赖**。
 ///
@@ -294,44 +283,24 @@ pub(crate) async fn book_toc(
     state: State<'_, AppState>,
 ) -> ApiAsync<BookTocResult> {
     let outcome = async {
-        let (src_path, media_type, content_hash, cache) = with_repo(&state, &repo_id, |db| {
-            let file = db
-                .get_file(&file_id)?
-                .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
-            let src_path = resolve_file_path(db, &file)?;
-            Ok((
-                src_path,
-                file.media_type,
-                file.content_hash,
-                (*state.thumb_cache).clone(),
-            ))
-        })?;
-
-        if !media_type.is_book() {
-            return Ok(empty_toc());
-        }
-        // 无内容哈希 = 索引里还没有可用的内容身份（例如不可读占位行）：
-        // 目录不值得为一个身份不稳定的文件去扫（与 `book.meta` / `book.content`
-        // 同一条"没有稳定缓存键就不解析"的口径）。
-        //
-        // 注意：这也意味着**目录缓存只对有内容哈希的书生效**——缓存键就是它。
-        let Some(hash) = content_hash else {
+        // 取数前置（含"非书"与"无内容哈希"两条降级口径）只在 `book/source.rs` 一处。
+        let Some(source) = resolve_book_source(&state, &repo_id, &file_id)? else {
             return Ok(empty_toc());
         };
-
-        let ext = src_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
+        let BookSource {
+            src_path,
+            media_type,
+            hash,
+            ext,
+            cache,
+        } = source;
 
         // 与 `book.content` 一样放在阻塞线程：纯文本的流式扫描（每 256 KiB 一块）、
         // EPUB 解包、以及目录缓存的读写都不能占着 IPC 线程。
-        let read = tauri::async_runtime::spawn_blocking(move || {
+        let read = run_book_io("目录读取", move || {
             read_toc_with_cache(media_type, &src_path, &ext, &cache, &hash)
         })
-        .await
-        .map_err(|e| HpError::Io(format!("目录读取线程异常: {e}")))??;
+        .await?;
 
         Ok(read)
     }

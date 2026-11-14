@@ -5,16 +5,14 @@
 #[cfg(test)]
 mod tests {
     use crate::commands::book::{
-        BookMetaCache, MARKDOWN_PAGE_BLOCKS, copy_cover_image, cover_to_result, parse_and_cache,
-        parse_cursor, prune_other_cover_images, read_cache, read_epub_page, read_markdown_page,
-        read_text_page, write_atomic,
+        BookMetaCache, MARKDOWN_PAGE_BLOCKS, TOC_CACHE_RULE, copy_cover_image, cover_to_result,
+        parse_and_cache, parse_cursor, prune_other_cover_images, read_cache, read_epub_page,
+        read_markdown_page, read_text_page, read_toc_by_media_type, read_toc_cache,
+        read_toc_with_cache, write_atomic,
     };
-    // 阅读器一侧的取数拆在 `book_reader.rs`（目录）：测试仍集中在本文件。
+    // 阅读器一侧的取数拆在 `book/toc.rs`（目录）：测试仍集中在本文件。
     // 注：`ReaderCtx` 已不再被测试需要（目录读取现在是纯函数，见 2026-10-18 的
     // 渐进加载改造）。
-    use crate::commands::book_reader::{
-        TOC_CACHE_RULE, read_toc_by_media_type, read_toc_cache, read_toc_with_cache,
-    };
     use hp_core::{HpError, MediaType};
     use hp_dto::BookSpanItem;
     use std::path::{Path, PathBuf};

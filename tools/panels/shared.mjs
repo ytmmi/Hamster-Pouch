@@ -10,7 +10,7 @@ export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
 // 图书桥接自 D181 起按职责拆成 `book/{mod,cache,paging,cover}.rs`。下面这些断言校验的是
 // **桥接层整体**的行为（媒体类型分流 / 命令形态 / 封面落盘 / 渐进读取），拆文件不该让任何一条
 // 静默失效，所以统一拼成一份源码再匹配——正则看到的内容与拆分前逐字相同。
-export const BOOK_BRIDGE_SRC = ["mod", "cache", "paging", "cover"]
+export const BOOK_BRIDGE_SRC = ["mod", "cache", "paging", "cover", "source"]
   .map((name) =>
     readFileSync(join(ROOT, `apps/desktop/src-tauri/src/commands/book/${name}.rs`), "utf8"),
   )

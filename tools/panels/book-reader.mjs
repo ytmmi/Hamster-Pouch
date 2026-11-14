@@ -49,7 +49,7 @@ const moreMenuSrc = readFileSync(
   "utf8",
 );
 const bookReaderRust = readFileSync(
-  join(ROOT, "apps/desktop/src-tauri/src/commands/book_reader.rs"),
+  join(ROOT, "apps/desktop/src-tauri/src/commands/book/toc.rs"),
   "utf8",
 );
 
