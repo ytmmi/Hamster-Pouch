@@ -251,7 +251,7 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 
 `file.rename` / `file.trash` 是**真实磁盘操作**，当前**不留操作记录**（无 `opRecordId`），与第 3.6 节 `fsops.*`「真实文件操作必须返回操作记录 ID」的口径不一致；缺口如实记录，是否补记录属另议（见 `docs/architecture/command-event-drift.md`）。`file.trash` 只删除索引行，不连带清理 tag/评分/相册成员。
 
-**`file.query` 分页形态（D78，2026-09）**：按本表实现 **`cursor` / `nextCursor`**（`limit` 为页大小），**不**改用 `limit`/`offset`。理由：`offset` 分页在库内容变动时会漏项/重复，而前端列表、蓝图对象作用域与元数据面板都依赖该查询。代码现状是扁平过滤参数 + 裸数组、无游标（见 `docs/issues/0005`），属**能力级缺口**，需 `hp-store` 查询层配合。
+**`file.query` 分页形态（D78，2026-09；2026-11-14 复核已落地）**：按本表实现 **`cursor` / `nextCursor`**（`limit` 为页大小），**不**改用 `limit`/`offset`。理由：`offset` 分页在库内容变动时会漏项/重复，而前端列表、蓝图对象作用域与元数据面板都依赖该查询。键集游标落在 `crates/hp-repo/src/file_repo.rs:526`（`query_files`，游标类型 `FileQueryCursor` 在 `:73`、编码在 `:82`），命令层 `apps/desktop/src-tauri/src/commands/file.rs:340` 透传并在 `:303` 把 `next_cursor` 序列化成 `nextCursor`（缺陷 0042 的回归钉子），回归用例 `crates/hp-repo/tests/m2_source_file.rs:264` 的 `cursor_pagination_is_stable_under_inserts`（`docs/issues/0005` 已修复）。
 
 ### 3.3.1 `book.*`（图书元数据；2026-10 新增）
 
