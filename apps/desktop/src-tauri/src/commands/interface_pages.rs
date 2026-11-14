@@ -14,7 +14,7 @@ use hp_core::{HpError, HpResult};
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::shared::{ApiResponse, api_from_hp, ensure_global, global, lock_global};
+use crate::commands::shared::{ApiResponse, api_from_hp, global, global_guard};
 
 /// 某仓库"界面页分组"的设置键（D124）。
 fn interface_pages_key(repo_id: &str) -> String {
@@ -34,12 +34,10 @@ fn ensure_repo_id(repo_id: &str) -> HpResult<()> {
 pub(crate) fn interface_pages_get(
     repo_id: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<Option<String>> {
     let outcome = (|| -> HpResult<Option<String>> {
         ensure_repo_id(&repo_id)?;
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         let value = g.get_setting(&interface_pages_key(repo_id.trim()))?;
         Ok(value.filter(|v| !v.trim().is_empty()))
@@ -53,12 +51,10 @@ pub(crate) fn interface_pages_set(
     repo_id: String,
     pages_json: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
         ensure_repo_id(&repo_id)?;
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         g.set_setting(&interface_pages_key(repo_id.trim()), pages_json.trim())
     })();

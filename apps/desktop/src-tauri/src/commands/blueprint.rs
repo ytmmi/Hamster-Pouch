@@ -22,7 +22,7 @@ use tauri::State;
 use crate::AppState;
 use crate::commands::shared::EmitHp;
 use crate::commands::shared::{
-    ApiResponse, api_from_hp, ensure_global, global, lock_global, lock_repo, open_repo,
+    ApiResponse, api_from_hp, ensure_global, global, global_guard, lock_repo, open_repo,
     open_repo_mut,
 };
 
@@ -69,16 +69,12 @@ fn parse_valid(json: &str, registry: &hp_core::NodeRegistry) -> HpResult<Bluepri
 /// 任何一步失败都退化为 `builtin_only()`（含宿主内置 14 个面板的 `has_class` 事实）：
 /// 注册表不可用**不应该**阻断用户的保存 —— 最坏情况是插件节点被标为「未接通」
 /// （软告警、允许保存、插件恢复后自动恢复，RFC 0010 决策 6）。
-fn blueprint_registry(
-    state: &State<AppState>,
-    app: &tauri::AppHandle,
-    repo_id: &str,
-) -> hp_core::NodeRegistry {
+fn blueprint_registry(state: &State<AppState>, repo_id: &str) -> hp_core::NodeRegistry {
     let fallback = hp_core::NodeRegistry::builtin_only();
-    if ensure_global(state, app).is_err() {
+    if ensure_global(state).is_err() {
         return fallback;
     }
-    let Ok(guard) = lock_global(state) else {
+    let Ok(guard) = global_guard(state) else {
         return fallback;
     };
     let Some(g) = guard.as_ref() else {
@@ -177,14 +173,13 @@ pub(crate) fn blueprint_create(
         if name.trim().is_empty() {
             return Err(HpError::InvalidArgument("蓝图名不能为空".into()));
         }
-        ensure_global(&state, &app)?;
 
         // 模板来源：全局配置库读取模板 JSON（一次性复制语义）。
         let template_json = match blueprint_json {
             Some(doc) => doc,
             None => match from_template_id {
                 Some(tpl_id) if !tpl_id.trim().is_empty() => {
-                    let guard = lock_global(&state)?;
+                    let guard = global_guard(&state)?;
                     let g = global(&guard)?;
                     let tpl = g
                         .get_blueprint_template(&tpl_id)?
@@ -205,7 +200,7 @@ pub(crate) fn blueprint_create(
                 }
             },
         };
-        parse_valid(&template_json, &blueprint_registry(&state, &app, &repo_id))?;
+        parse_valid(&template_json, &blueprint_registry(&state, &repo_id))?;
 
         let mut guard = lock_repo(&state)?;
         let db = open_repo_mut(&mut guard)?;
@@ -230,7 +225,7 @@ pub(crate) fn blueprint_save(
     app: tauri::AppHandle,
 ) -> ApiResponse<BlueprintItem> {
     let outcome = (|| -> HpResult<BlueprintItem> {
-        parse_valid(&blueprint_json, &blueprint_registry(&state, &app, &repo_id))?;
+        parse_valid(&blueprint_json, &blueprint_registry(&state, &repo_id))?;
         let mut guard = lock_repo(&state)?;
         let db = open_repo_mut(&mut guard)?;
         let name = match name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()) {
@@ -302,10 +297,9 @@ pub(crate) fn blueprint_validate(
     repo_id: String,
     blueprint_json: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<BlueprintValidateResult> {
     let outcome = (|| -> HpResult<BlueprintValidateResult> {
-        let registry = blueprint_registry(&state, &app, &repo_id);
+        let registry = blueprint_registry(&state, &repo_id);
         let (json, _version) =
             hp_core::normalize_document(&blueprint_json).map_err(HpError::InvalidArgument)?;
         let errors = match BlueprintGraph::from_json(&json) {
@@ -331,11 +325,9 @@ fn current_layer_key(repo_id: &str) -> String {
 pub(crate) fn blueprint_current_layer_get(
     repo_id: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<Option<String>> {
     let outcome = (|| -> HpResult<Option<String>> {
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         let value = g.get_setting(&current_layer_key(&repo_id))?;
         Ok(value.filter(|v| !v.trim().is_empty()))
@@ -349,11 +341,9 @@ pub(crate) fn blueprint_current_layer_set(
     repo_id: String,
     layer_key: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         g.set_setting(&current_layer_key(&repo_id), layer_key.trim())
     })();
@@ -364,11 +354,9 @@ pub(crate) fn blueprint_current_layer_set(
 #[tauri::command]
 pub(crate) fn blueprint_template_list(
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<Vec<BlueprintTemplateItem>> {
     let outcome = (|| -> HpResult<Vec<BlueprintTemplateItem>> {
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         let rows = g.list_blueprint_templates()?;
         Ok(rows
@@ -394,17 +382,15 @@ pub(crate) fn blueprint_template_install(
     app: tauri::AppHandle,
 ) -> ApiResponse<BlueprintItem> {
     let outcome = (|| -> HpResult<BlueprintItem> {
-        ensure_global(&state, &app)?;
-
         let template_json = {
-            let guard = lock_global(&state)?;
+            let guard = global_guard(&state)?;
             let g = global(&guard)?;
             let tpl = g
                 .get_blueprint_template(&template_id)?
                 .ok_or_else(|| HpError::NotFound(format!("蓝图模板不存在: {template_id}")))?;
             tpl.blueprint_json
         };
-        parse_valid(&template_json, &blueprint_registry(&state, &app, &repo_id))?;
+        parse_valid(&template_json, &blueprint_registry(&state, &repo_id))?;
 
         let mut guard = lock_repo(&state)?;
         let db = open_repo_mut(&mut guard)?;

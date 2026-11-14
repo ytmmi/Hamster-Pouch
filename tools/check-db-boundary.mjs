@@ -270,5 +270,41 @@ report(
   `宿主级状态只在 commands/shared.rs 加锁（${HOST_STATE_FIELDS.length} 个互斥量）`,
   stateOffenders,
 );
+// ⑫ 全局库句柄只有一个入口（D195）：先 ensure 再 lock 的顺序写死在 global_guard 里
+//
+// 拆分前每个命令都手抄三行（ensure_global → lock_global → global），顺序是**记出来的**：
+// 先锁后 ensure 会得到「全局库未初始化」的 not_found，而 repo.rs 的六处又把它写成 Store
+// （同一前提、两种错误分类）。D195 把三行合成一次调用，并顺手删掉 ensure_global 的僵尸
+// `AppHandle` 参数（它从未被用到，却让 43 个命令白拿一个句柄）。
+const globalOffenders = [];
+let globalGuardFiles = 0;
+for (const file of bridgeFiles) {
+  const rel = relative(ROOT, file).replace(/\\/g, "/");
+  if (rel.endsWith("commands/shared.rs")) continue;
+  const body = stripComments(readFileSync(file, "utf8"));
+  if (/\block_global\s*\(/.test(body)) {
+    globalOffenders.push(`${rel}  绕过 global_guard 直接加锁`);
+  }
+  if (/HpError::(Store|NotFound)\("全局库未初始化"/.test(body)) {
+    globalOffenders.push(`${rel}  手抄「全局库未初始化」的错误映射（应走 global()）`);
+  }
+  const reads = (body.match(/\bglobal(_mut)?\s*\(&/g) ?? []).length;
+  if (reads > 0 && !/\bglobal_guard\s*\(/.test(body)) {
+    globalOffenders.push(`${rel}  取了全局库句柄却没用 global_guard（${reads} 处 global 调用）`);
+  }
+  if (/\bglobal_guard\s*\(/.test(body)) globalGuardFiles++;
+}
+for (const needle of [
+  "pub(crate) fn global_guard",
+  "pub(crate) fn ensure_global(state: &AppState)",
+]) {
+  if (!sharedBody.includes(needle)) globalOffenders.push(`commands/shared.rs 缺少 ${needle}`);
+}
+report(
+  globalOffenders.length === 0,
+  `全局库句柄只经 global_guard 取（${globalGuardFiles} 个文件）`,
+  globalOffenders,
+);
+
 console.log(`\n[check-db-boundary] ${passed}/${total} 通过`);
 process.exit(passed === total ? 0 : 1);

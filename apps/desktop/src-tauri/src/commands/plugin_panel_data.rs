@@ -172,7 +172,7 @@ pub(crate) fn plugin_panel_data(
     app: tauri::AppHandle,
 ) -> ApiResponse<PanelDataItem> {
     let outcome = (|| -> HpResult<PanelDataItem> {
-        ensure_global(&state, &app)?;
+        ensure_global(&state)?;
         let owner = panel_owner_enabled(&state, &repo_id, &panel_id)?;
         let result = fetch_panel_data(
             &state,

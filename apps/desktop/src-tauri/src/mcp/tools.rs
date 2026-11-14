@@ -481,9 +481,7 @@ pub(crate) fn call(
 
     // 各工具共用同一个错误收敛点：`Result<Value, String>` → 工具结果。
     let outcome: Result<Value, String> = match name {
-        "repo_list" => {
-            flatten(crate::commands::repo::repo_list(state, app.clone())).and_then(to_json)
-        }
+        "repo_list" => flatten(crate::commands::repo::repo_list(state)).and_then(to_json),
         "repo_current" => {
             let repo_id = current_repo(&state);
             Ok(json!({ "repo_id": repo_id }))
@@ -555,9 +553,7 @@ pub(crate) fn call(
             opt_str(&args, "cursor"),
             state,
         )),
-        "setting_list" => {
-            flatten(crate::commands::repo::setting_list(state, app.clone())).and_then(to_json)
-        }
+        "setting_list" => flatten(crate::commands::repo::setting_list(state)).and_then(to_json),
         "file_rename" => flatten(crate::commands::file::file_rename(
             repo_id,
             req_str(&args, "fileId")?,
@@ -650,7 +646,6 @@ pub(crate) fn call(
             crate::commands::python_runtime::plugin_python_runtime_status(
                 repo_id,
                 app.state::<AppState>(),
-                app.clone(),
             ),
         )
         .and_then(to_json),
@@ -658,7 +653,6 @@ pub(crate) fn call(
             crate::commands::python_runtime::plugin_python_runtime_selftest(
                 repo_id,
                 app.state::<AppState>(),
-                app.clone(),
             ),
         )
         .and_then(to_json),

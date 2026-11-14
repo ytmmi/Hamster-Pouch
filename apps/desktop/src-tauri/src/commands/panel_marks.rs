@@ -15,7 +15,7 @@ use hp_core::{HpError, HpResult};
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::shared::{ApiResponse, api_from_hp, ensure_global, global, lock_global};
+use crate::commands::shared::{ApiResponse, api_from_hp, global, global_guard};
 
 /// 某仓库"面板标记"的设置键（D134）。
 fn panel_marks_key(repo_id: &str) -> String {
@@ -35,12 +35,10 @@ fn ensure_repo_id(repo_id: &str) -> HpResult<()> {
 pub(crate) fn panel_marks_get(
     repo_id: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<Option<String>> {
     let outcome = (|| -> HpResult<Option<String>> {
         ensure_repo_id(&repo_id)?;
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         let value = g.get_setting(&panel_marks_key(repo_id.trim()))?;
         // 空白值与"未设置"同义：前端解析空串本来就会落回空状态。
@@ -55,12 +53,10 @@ pub(crate) fn panel_marks_set(
     repo_id: String,
     marks_json: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
         ensure_repo_id(&repo_id)?;
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         g.set_setting(&panel_marks_key(repo_id.trim()), marks_json.trim())
     })();

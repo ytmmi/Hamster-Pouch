@@ -21,7 +21,7 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::AppState;
 use crate::commands::shared::{
-    ApiResponse, api_from_hp, bundled_plugins_dir, ensure_global, global, global_mut, lock_global,
+    ApiResponse, api_from_hp, bundled_plugins_dir, ensure_global, global, global_guard, global_mut,
 };
 
 #[derive(Serialize)]
@@ -81,13 +81,9 @@ fn now_iso() -> String {
 
 /// plugin.list：列出已安装插件。
 #[tauri::command]
-pub(crate) fn plugin_list(
-    state: State<AppState>,
-    app: tauri::AppHandle,
-) -> ApiResponse<Vec<PluginItem>> {
+pub(crate) fn plugin_list(state: State<AppState>) -> ApiResponse<Vec<PluginItem>> {
     let outcome = (|| -> HpResult<Vec<PluginItem>> {
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         let rows = g.list_plugins()?;
         Ok(rows.into_iter().map(row_to_item).collect())
@@ -121,7 +117,6 @@ pub(crate) fn plugin_discover(dir: String) -> ApiResponse<Vec<DiscoveredPlugin>>
 pub(crate) fn plugin_install_local(
     path: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<PluginItem> {
     let outcome = (|| -> HpResult<PluginItem> {
         let installer = PluginInstaller::new(state.plugin_root.as_ref().clone());
@@ -130,8 +125,7 @@ pub(crate) fn plugin_install_local(
             now_iso(),
         )?;
 
-        ensure_global(&state, &app)?;
-        let mut guard = lock_global(&state)?;
+        let mut guard = global_guard(&state)?;
         let g = global_mut(&mut guard)?;
         PluginHost.register(g, &row)?;
         drop(guard);
@@ -273,12 +267,9 @@ fn install_bundled_candidate(
 /// 安装本身**不广播** `plugin.changed`：刚装上的插件尚未按仓库启用，其注册项本就缺席
 /// （与 `plugin.installLocal` 同口径，见 `docs/spec/commands-events.md` §4）。
 #[tauri::command]
-pub(crate) fn plugin_install_bundled(
-    state: State<AppState>,
-    app: tauri::AppHandle,
-) -> ApiResponse<BundledInstallReport> {
+pub(crate) fn plugin_install_bundled(state: State<AppState>) -> ApiResponse<BundledInstallReport> {
     let outcome = (|| -> HpResult<BundledInstallReport> {
-        ensure_global(&state, &app)?;
+        ensure_global(&state)?;
         install_all_bundled(&state)
     })();
     api_from_hp(outcome)
@@ -317,7 +308,7 @@ pub(crate) fn install_all_bundled(state: &AppState) -> HpResult<BundledInstallRe
     // 系统插件行的 `source_ref` 前缀替换成包内相对路径，编译机绝对路径可能残留，因此
     // 每次进程启动都重新登记一次，把它改写成**本机**包内版本目录。
     if !pending.is_empty() {
-        let mut guard = lock_global(state)?;
+        let mut guard = global_guard(state)?;
         let g = global_mut(&mut guard)?;
         for (idx, row) in &pending {
             if let Err(e) = PluginHost.register(g, row) {

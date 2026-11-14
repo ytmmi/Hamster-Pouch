@@ -18,7 +18,7 @@ use tauri::State;
 
 use crate::AppState;
 use crate::commands::shared::{
-    ApiResponse, EmitHp, api_from_hp, diag_log, ensure_global, global, lock_global,
+    ApiResponse, EmitHp, api_from_hp, diag_log, ensure_global, global, global_guard,
     lock_panel_schema, lock_supervision,
 };
 
@@ -69,10 +69,8 @@ pub(crate) fn panel_owner_enabled(
     repo_id: &str,
     panel_id: &str,
 ) -> HpResult<PanelOwner> {
-    let guard = lock_global(state)?;
-    let db = guard
-        .as_ref()
-        .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+    let guard = global_guard(state)?;
+    let db = global(&guard)?;
     // 归属由**注册表反查**决定，不靠 panel_id 字符串切分（plugin_id 自身含点）。
     let owner = PluginHost
         .find_panel_owner(db, panel_id)?
@@ -154,7 +152,7 @@ pub(crate) fn resolve_plugin_query(
     owner: &PanelOwner,
     repo_id: &str,
 ) -> HpResult<ExternalProcessQuery> {
-    let guard = lock_global(state)?;
+    let guard = global_guard(state)?;
     let db = global(&guard)?;
     hp_plugin_host::query_for_owner(db, owner, repo_id)
 }
@@ -236,7 +234,7 @@ pub(crate) fn plugin_panel_schema(
     app: tauri::AppHandle,
 ) -> ApiResponse<PanelSchemaItem> {
     let outcome = (|| -> HpResult<PanelSchemaItem> {
-        ensure_global(&state, &app)?;
+        ensure_global(&state)?;
         let owner = panel_owner_enabled(&state, &repo_id, &panel_id)?;
         let result = fetch_panel_schema(&state, &owner, &panel_id, &repo_id);
         if let Err(e) = &result {
@@ -258,15 +256,11 @@ pub(crate) fn plugin_validate_control(
     panel_id: String,
     schema_json: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<ControlValidateResult> {
     let outcome = (|| -> HpResult<ControlValidateResult> {
-        ensure_global(&state, &app)?;
         let (declared_queries, declared_events) = {
-            let guard = lock_global(&state)?;
-            let db = guard
-                .as_ref()
-                .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+            let guard = global_guard(&state)?;
+            let db = global(&guard)?;
             match PluginHost.find_panel_owner(db, &panel_id)? {
                 Some(owner) => (owner.declared_queries, owner.declared_events),
                 None => (Vec::new(), Vec::new()),

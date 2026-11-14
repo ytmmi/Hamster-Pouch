@@ -79,10 +79,9 @@ pub(crate) fn plugin_control_event(
     value: Option<serde_json::Value>,
     target: Option<String>,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<ControlEventAck> {
     let outcome = (|| -> HpResult<ControlEventAck> {
-        ensure_global(&state, &app)?;
+        ensure_global(&state)?;
 
         // 事件名：宿主谓词表（闭集六项）。
         let parsed = ControlEvent::from_str(&event)

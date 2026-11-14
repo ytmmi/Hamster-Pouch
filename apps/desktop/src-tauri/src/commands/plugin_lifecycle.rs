@@ -11,9 +11,7 @@ use tauri::State;
 
 use crate::AppState;
 use crate::commands::shared::EmitHp;
-use crate::commands::shared::{
-    ApiResponse, api_from_hp, ensure_global, global, global_mut, lock_global,
-};
+use crate::commands::shared::{ApiResponse, api_from_hp, global, global_guard, global_mut};
 
 #[derive(Serialize)]
 pub(crate) struct PluginStateItem {
@@ -89,9 +87,8 @@ pub(crate) fn plugin_enable(
 ) -> ApiResponse<PluginStateItem> {
     let outcome = (|| -> HpResult<PluginStateItem> {
         let requested = parse_grants(&grants)?;
-        ensure_global(&state, &app)?;
         let st = {
-            let mut guard = lock_global(&state)?;
+            let mut guard = global_guard(&state)?;
             let g = global_mut(&mut guard)?;
             PluginHost.enable_for_repo(g, &plugin_id, &repo_id, &requested)?
         };
@@ -111,9 +108,8 @@ pub(crate) fn plugin_disable(
     app: tauri::AppHandle,
 ) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
-        ensure_global(&state, &app)?;
         {
-            let mut guard = lock_global(&state)?;
+            let mut guard = global_guard(&state)?;
             let g = global_mut(&mut guard)?;
             PluginHost.disable_for_repo(g, &plugin_id, &repo_id)?;
         }
@@ -130,11 +126,9 @@ pub(crate) fn plugin_state(
     repo_id: String,
     plugin_id: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<Option<PluginStateItem>> {
     let outcome = (|| -> HpResult<Option<PluginStateItem>> {
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         let st = g.get_plugin_repo_state(&plugin_id, &repo_id)?;
         Ok(st.map(state_to_item))
@@ -151,8 +145,7 @@ pub(crate) fn plugin_load(
     app: tauri::AppHandle,
 ) -> ApiResponse<PluginLoadItem> {
     let outcome = (|| -> HpResult<PluginLoadItem> {
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         let outcome = PluginHost.load(g, &plugin_id, &repo_id)?;
         Ok(PluginLoadItem {

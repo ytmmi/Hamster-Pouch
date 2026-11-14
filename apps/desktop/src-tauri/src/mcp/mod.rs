@@ -93,7 +93,7 @@ pub(crate) fn parse_config(
 pub(crate) fn read_config(app: &tauri::AppHandle) -> ServerConfig {
     let state = app.state::<AppState>();
     let read = |key: &str| -> Option<String> {
-        ensure_global(&state, app).ok()?;
+        ensure_global(&state).ok()?;
         try_global(&state, |g| g.get_setting(key).ok().flatten()).flatten()
     };
     let enabled = read("mcp.enabled");

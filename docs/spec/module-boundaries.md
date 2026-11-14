@@ -101,7 +101,7 @@ AI 打标接口首期只抽象（仅图片，D17）：
 ## 实现注意
 
 - Tauri 命令命名采用混合风格：核心域 `domain.action`，插件命令 `plugin.{pluginId}.{action}`。
-- **宿主级状态只有一个加锁入口**（D194）：`AppState` 上的六个互斥量（`global_db` / `repo` / `panel_schema_cache` / `supervision` / `ai` / `tag_lib`）只在 `apps/desktop/src-tauri/src/commands/shared.rs` 里 `.lock()`。锁序固定为「`state` 级先取、仓库句柄锁后取，`state` 级之间不嵌套」；毒锁一律映射成 `HpError::Store("…锁中毒")`，只有 MCP 的配置读取走 `try_global`（读不到按缺省、记一条日志）。`pnpm check:db-boundary` 有反向断言守着这条（shared.rs 之外直接 `.lock()` 即红）。
+- **宿主级状态只有一个加锁入口**（D194）：`AppState` 上的六个互斥量（`global_db` / `repo` / `panel_schema_cache` / `supervision` / `ai` / `tag_lib`）只在 `apps/desktop/src-tauri/src/commands/shared.rs` 里 `.lock()`。锁序固定为「`state` 级先取、仓库句柄锁后取，`state` 级之间不嵌套」；毒锁一律映射成 `HpError::Store("…锁中毒")`，只有 MCP 的配置读取走 `try_global`（读不到按缺省、记一条日志）。`pnpm check:db-boundary` 有反向断言守着这条（shared.rs 之外直接 `.lock()` 即红）。全局库还多一道门：**「先 ensure 再 lock」只有 `global_guard(state)` 一处**，`lock_global` 只留给 shared.rs 内部（D195）。
 - WASM 运行时为 `wasmi`（D42）；插件只允许受控查询宿主函数，且输出必须是可序列化数据。
 - 系统/受信动态库插件使用 C ABI + 版本化结构体；`community`/`local-dev` 不允许动态库。
 - 插件分发通道、签名与 Python 核心见 `docs/rfc/0009-plugin-distribution.md`；控件标准见 `docs/spec/control-standard.md`（**「浮动控件」已于 2026-09 取消**，浮层由蓝图 `overlay` 容器承载，其显隐由蓝图规则决定）。

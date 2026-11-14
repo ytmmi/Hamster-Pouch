@@ -11,7 +11,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::shared::{ApiResponse, api_from_hp, ensure_global, global, lock_global};
+use crate::commands::shared::{ApiResponse, api_from_hp, global, global_guard};
 
 /// 面板贡献项（前端登记进面板注册表）。
 #[derive(Serialize)]
@@ -70,12 +70,10 @@ pub(crate) struct PluginContributions {
 pub(crate) fn plugin_contributions(
     repo_id: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<PluginContributions> {
     let outcome = (|| -> HpResult<PluginContributions> {
-        ensure_global(&state, &app)?;
         let entries = {
-            let guard = lock_global(&state)?;
+            let guard = global_guard(&state)?;
             let g = global(&guard)?;
             PluginHost.repo_contributions(g, &repo_id)?
         };

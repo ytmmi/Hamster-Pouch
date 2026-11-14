@@ -505,13 +505,10 @@ pub(crate) fn external_bin(name: &str) -> Option<PathBuf> {
     external_bin_path(env_key, &format!("external-cli/ffmpeg/bin/{name}.exe"))
 }
 
-/// 懒加载全局配置库。
-pub(crate) fn ensure_global(state: &AppState, _app: &tauri::AppHandle) -> HpResult<()> {
+/// 懒加载全局配置库（幂等；**不碰 `AppHandle`**——D195 之前这个参数是死的）。
+pub(crate) fn ensure_global(state: &AppState) -> HpResult<()> {
     {
-        let mut guard = state
-            .global_db
-            .lock()
-            .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+        let mut guard = lock_global(state)?;
         if guard.is_none() {
             let path = global_db_path().map_err(HpError::Io)?;
             *guard = Some(GlobalDb::open(&path)?);
@@ -521,7 +518,18 @@ pub(crate) fn ensure_global(state: &AppState, _app: &tauri::AppHandle) -> HpResu
     Ok(())
 }
 
-/// 锁住全局库（毒锁 → `Store`）。调用前先 `ensure_global`。
+/// 取全局库句柄的**唯一入口**（D195）：先确保已初始化，再取锁。
+///
+/// 顺序是结构性的——调用方不可能先锁后初始化，也就不需要记住这条规矩。
+/// 其余模块不得直接 `lock_global`（`pnpm check:db-boundary` 有一条反向断言守着）。
+pub(crate) fn global_guard(
+    state: &AppState,
+) -> HpResult<std::sync::MutexGuard<'_, Option<GlobalDb>>> {
+    ensure_global(state)?;
+    lock_global(state)
+}
+
+/// 锁住全局库（毒锁 → `Store`）。只允许 [`global_guard`] 与 `shared.rs` 内部使用。
 pub(crate) fn lock_global(
     state: &AppState,
 ) -> HpResult<std::sync::MutexGuard<'_, Option<GlobalDb>>> {

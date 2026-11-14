@@ -17,7 +17,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::shared::{ApiResponse, api_from_hp, ensure_global, global, lock_global};
+use crate::commands::shared::{ApiResponse, api_from_hp, global, global_guard};
 
 /// `plugin.pythonRuntimeStatus` 的返回体（camelCase，与 D77 一致）。
 #[derive(Serialize)]
@@ -58,11 +58,9 @@ fn disabled_error() -> HpError {
 pub(crate) fn plugin_python_runtime_status(
     repo_id: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<PythonRuntimeStatusItem> {
     let outcome = (|| -> HpResult<PythonRuntimeStatusItem> {
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let db = global(&guard)?;
         let status = python_core_status(db, &repo_id)?;
         Ok(PythonRuntimeStatusItem {
@@ -88,12 +86,10 @@ pub(crate) fn plugin_python_runtime_status(
 pub(crate) fn plugin_python_runtime_selftest(
     repo_id: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<PythonRuntimeSelftestItem> {
     let outcome = (|| -> HpResult<PythonRuntimeSelftestItem> {
-        ensure_global(&state, &app)?;
         let (enabled, launcher) = {
-            let guard = lock_global(&state)?;
+            let guard = global_guard(&state)?;
             let db = global(&guard)?;
             let enabled = python_core_enabled(db, &repo_id)?;
             if !enabled {

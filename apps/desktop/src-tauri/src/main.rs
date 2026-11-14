@@ -153,7 +153,7 @@ fn main() {
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
                     let state = handle.state::<AppState>();
-                    if let Err(e) = commands::shared::ensure_global(&state, &handle) {
+                    if let Err(e) = commands::shared::ensure_global(&state) {
                         eprintln!("[plugin] 启动播种随包系统插件失败（不影响启动）: {e}");
                     }
                 });

@@ -13,8 +13,8 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::AppState;
 use crate::commands::shared::{
-    ApiResponse, api_from_hp, ensure_global, global, global_mut, lock_ai, lock_global, lock_repo,
-    open_repo, open_repo_mut,
+    ApiResponse, api_from_hp, global, global_guard, global_mut, lock_ai, lock_repo, open_repo,
+    open_repo_mut,
 };
 
 #[derive(Serialize)]
@@ -78,11 +78,9 @@ pub(crate) fn ai_config_create(
     model: Option<String>,
     config_json: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<AiConfigItem> {
     let outcome = (|| -> HpResult<AiConfigItem> {
-        ensure_global(&state, &app)?;
-        let mut guard = lock_global(&state)?;
+        let mut guard = global_guard(&state)?;
         let g = global_mut(&mut guard)?;
         let cfg = g.create_ai_provider_config(&provider, model.as_deref(), &config_json)?;
         Ok(config_to_item(cfg))
@@ -92,13 +90,9 @@ pub(crate) fn ai_config_create(
 
 /// ai.config.list：列出 AI 提供方配置。
 #[tauri::command]
-pub(crate) fn ai_config_list(
-    state: State<AppState>,
-    app: tauri::AppHandle,
-) -> ApiResponse<Vec<AiConfigItem>> {
+pub(crate) fn ai_config_list(state: State<AppState>) -> ApiResponse<Vec<AiConfigItem>> {
     let outcome = (|| -> HpResult<Vec<AiConfigItem>> {
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         let rows = g.list_ai_provider_configs()?;
         Ok(rows.into_iter().map(config_to_item).collect())
@@ -108,14 +102,9 @@ pub(crate) fn ai_config_list(
 
 /// ai.config.remove：删除 AI 提供方配置。
 #[tauri::command]
-pub(crate) fn ai_config_remove(
-    config_id: String,
-    state: State<AppState>,
-    app: tauri::AppHandle,
-) -> ApiResponse<()> {
+pub(crate) fn ai_config_remove(config_id: String, state: State<AppState>) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
-        ensure_global(&state, &app)?;
-        let mut guard = lock_global(&state)?;
+        let mut guard = global_guard(&state)?;
         let g = global_mut(&mut guard)?;
         g.remove_ai_provider_config(&config_id)
     })();

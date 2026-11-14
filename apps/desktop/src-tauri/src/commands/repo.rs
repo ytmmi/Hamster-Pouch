@@ -15,8 +15,8 @@ use crate::AppState;
 use crate::commands::shared::EmitHp;
 use crate::commands::shared::diag_log;
 use crate::commands::shared::{
-    ApiResponse, OpenRepo, api_from_hp, current_repo_id, default_repo_dir, ensure_global, global,
-    global_mut, lock_global, lock_repo, set_open_repo, take_open_repo,
+    ApiResponse, OpenRepo, api_from_hp, current_repo_id, default_repo_dir, global, global_guard,
+    global_mut, lock_repo, set_open_repo, take_open_repo,
 };
 
 /// `app_settings` 的一行（`setting.list` 的 `items` 元素）。
@@ -146,10 +146,8 @@ fn resolve_setting_target(state: &AppState, key: &str) -> HpResult<SettingTarget
         return Ok(SettingTarget::Mirror(fact));
     }
     // 宿主内部键（不经注册表、也不允许经 `setting.*` 读写）：明确报错，避免被当成"任意键值存储"。
-    let guard = lock_global(state)?;
-    let db = guard
-        .as_ref()
-        .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+    let guard = global_guard(state)?;
+    let db = global(&guard)?;
     if let Some((plugin_id, decl)) = PluginHost.find_setting_decl(db, key)? {
         return Ok(SettingTarget::Plugin {
             plugin_id,
@@ -190,10 +188,8 @@ fn ensure_setting_capability(
                 "设置项需要能力 {raw}：必须带 repoId 才能校验插件在该仓库的授权"
             ))
         })?;
-    let guard = lock_global(state)?;
-    let db = guard
-        .as_ref()
-        .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+    let guard = global_guard(state)?;
+    let db = global(&guard)?;
     PluginHost.check_capability(db, plugin_id, repo, capability)
 }
 
@@ -251,7 +247,6 @@ pub(crate) fn repo_create(
     name: String,
     db_path: Option<String>,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<RepoSummary> {
     let outcome = (|| -> HpResult<RepoSummary> {
         if name.trim().is_empty() {
@@ -268,9 +263,8 @@ pub(crate) fn repo_create(
         let repo = RepoDb::create(&repo_path, &name)?;
         repo.close()?;
 
-        ensure_global(&state, &app)?;
         let row = {
-            let mut guard = lock_global(&state)?;
+            let mut guard = global_guard(&state)?;
             let g = global_mut(&mut guard)?;
             let path_str = repo_path
                 .to_str()
@@ -307,9 +301,8 @@ pub(crate) fn repo_open(
     app: tauri::AppHandle,
 ) -> ApiResponse<RepoSummary> {
     let outcome = (|| -> HpResult<RepoSummary> {
-        ensure_global(&state, &app)?;
         let row = {
-            let guard = lock_global(&state)?;
+            let guard = global_guard(&state)?;
             let g = global(&guard)?;
             g.get_repo(&repo_id)?
                 .ok_or_else(|| HpError::NotFound(format!("仓库不存在: {repo_id}")))?
@@ -319,7 +312,7 @@ pub(crate) fn repo_open(
         let version = repo.schema_version()?;
 
         {
-            let mut guard = lock_global(&state)?;
+            let mut guard = global_guard(&state)?;
             let g = global_mut(&mut guard)?;
             g.touch_repo(&repo_id)?;
         }
@@ -370,13 +363,9 @@ pub(crate) fn repo_close(state: State<AppState>) -> ApiResponse<()> {
 
 /// repo.list：列出全部已注册仓库。
 #[tauri::command]
-pub(crate) fn repo_list(
-    state: State<AppState>,
-    app: tauri::AppHandle,
-) -> ApiResponse<Vec<RepoListItem>> {
+pub(crate) fn repo_list(state: State<AppState>) -> ApiResponse<Vec<RepoListItem>> {
     let outcome = (|| -> HpResult<Vec<RepoListItem>> {
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         let rows = g.list_repos()?;
         Ok(rows
@@ -403,19 +392,15 @@ pub(crate) fn setting_get(
     key: String,
     repo_id: Option<String>,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<SettingValueResult> {
     let outcome = (|| -> HpResult<SettingValueResult> {
-        ensure_global(&state, &app)?;
         let target = resolve_setting_target(&state, &key)?;
         ensure_setting_capability(&state, &target, repo_id.as_deref())?;
         let storage_key =
             scoped_storage_key(&target.base_key(), target.scope(), repo_id.as_deref())
                 .map_err(HpError::InvalidArgument)?;
-        let guard = lock_global(&state)?;
-        let g = guard
-            .as_ref()
-            .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+        let guard = global_guard(&state)?;
+        let g = global(&guard)?;
         let stored = g.get_setting(&storage_key)?;
         Ok(SettingValueResult {
             value: stored.as_deref().map(decode_setting_value),
@@ -438,14 +423,11 @@ pub(crate) fn setting_set(
     app: tauri::AppHandle,
 ) -> ApiResponse<SettingOkResult> {
     let outcome = (|| -> HpResult<SettingOkResult> {
-        ensure_global(&state, &app)?;
         let storage_key = prepare_setting_write(&state, &key, &value, repo_id.as_deref())?;
         let encoded = encode_setting_value(&value).map_err(HpError::InvalidArgument)?;
         {
-            let guard = lock_global(&state)?;
-            let g = guard
-                .as_ref()
-                .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+            let guard = global_guard(&state)?;
+            let g = global(&guard)?;
             g.set_setting(&storage_key, &encoded)?;
         }
         emit_setting_changed(&app, &key);
@@ -466,16 +448,10 @@ pub(crate) fn setting_set(
 /// 界面按注册表挑选自己要用的行，过滤反而会让"未设置 vs 设成缺省"无法区分。
 /// 形状遵循 **D76**。
 #[tauri::command]
-pub(crate) fn setting_list(
-    state: State<AppState>,
-    app: tauri::AppHandle,
-) -> ApiResponse<SettingListResult> {
+pub(crate) fn setting_list(state: State<AppState>) -> ApiResponse<SettingListResult> {
     let outcome = (|| -> HpResult<SettingListResult> {
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
-        let g = guard
-            .as_ref()
-            .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+        let guard = global_guard(&state)?;
+        let g = global(&guard)?;
         let rows = g.list_settings()?;
         Ok(SettingListResult {
             items: rows
@@ -503,17 +479,14 @@ pub(crate) fn setting_reset(
     app: tauri::AppHandle,
 ) -> ApiResponse<SettingOkResult> {
     let outcome = (|| -> HpResult<SettingOkResult> {
-        ensure_global(&state, &app)?;
         let target = resolve_setting_target(&state, &key)?;
         ensure_setting_capability(&state, &target, repo_id.as_deref())?;
         let storage_key =
             scoped_storage_key(&target.base_key(), target.scope(), repo_id.as_deref())
                 .map_err(HpError::InvalidArgument)?;
         {
-            let guard = lock_global(&state)?;
-            let g = guard
-                .as_ref()
-                .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
+            let guard = global_guard(&state)?;
+            let g = global(&guard)?;
             g.delete_setting(&storage_key)?;
         }
         emit_setting_changed(&app, &key);
@@ -533,15 +506,13 @@ pub(crate) fn repo_backup(
     repo_id: String,
     dest_path: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<String> {
     let outcome = (|| -> HpResult<String> {
         if dest_path.trim().is_empty() {
             return Err(HpError::InvalidArgument("备份目标路径不能为空".into()));
         }
-        ensure_global(&state, &app)?;
         let row = {
-            let guard = lock_global(&state)?;
+            let guard = global_guard(&state)?;
             let g = global(&guard)?;
             g.get_repo(&repo_id)?
                 .ok_or_else(|| HpError::NotFound(format!("仓库不存在: {repo_id}")))?
@@ -565,16 +536,14 @@ pub(crate) fn repo_rename(
     repo_id: String,
     name: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
             return Err(HpError::InvalidArgument("仓库名不能为空".into()));
         }
-        ensure_global(&state, &app)?;
         {
-            let mut guard = lock_global(&state)?;
+            let mut guard = global_guard(&state)?;
             let g = global_mut(&mut guard)?;
             g.rename_repo(&repo_id, trimmed)?;
         }
@@ -592,14 +561,8 @@ pub(crate) fn repo_rename(
 
 /// repo.delete：删除仓库（注册行 + 仓库库文件；不删除真实媒体源文件）。
 #[tauri::command]
-pub(crate) fn repo_delete(
-    repo_id: String,
-    state: State<AppState>,
-    app: tauri::AppHandle,
-) -> ApiResponse<()> {
+pub(crate) fn repo_delete(repo_id: String, state: State<AppState>) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
-        ensure_global(&state, &app)?;
-
         // 若删除的是当前打开仓库，先关闭以释放文件句柄。
         let is_current = current_repo_id(&state).as_deref() == Some(repo_id.as_str());
         if is_current && let Some(repo) = take_open_repo(&state)? {
@@ -607,7 +570,7 @@ pub(crate) fn repo_delete(
         }
 
         let repo_path = {
-            let guard = lock_global(&state)?;
+            let guard = global_guard(&state)?;
             let g = global(&guard)?;
             g.get_repo(&repo_id)?
                 .ok_or_else(|| HpError::NotFound(format!("仓库不存在: {repo_id}")))?
@@ -615,7 +578,7 @@ pub(crate) fn repo_delete(
         };
 
         {
-            let mut guard = lock_global(&state)?;
+            let mut guard = global_guard(&state)?;
             let g = global_mut(&mut guard)?;
             g.delete_repo(&repo_id)?;
             // 清理默认仓库标记。
@@ -635,14 +598,9 @@ pub(crate) fn repo_delete(
 
 /// repo.setDefault：把某仓库设为默认仓库（启动时自动打开）。
 #[tauri::command]
-pub(crate) fn repo_set_default(
-    repo_id: String,
-    state: State<AppState>,
-    app: tauri::AppHandle,
-) -> ApiResponse<()> {
+pub(crate) fn repo_set_default(repo_id: String, state: State<AppState>) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         g.set_setting("repo.default", &repo_id)
     })();
@@ -651,13 +609,9 @@ pub(crate) fn repo_set_default(
 
 /// repo.getDefault：读取默认仓库 ID；未设置返回 `None`。
 #[tauri::command]
-pub(crate) fn repo_get_default(
-    state: State<AppState>,
-    app: tauri::AppHandle,
-) -> ApiResponse<Option<String>> {
+pub(crate) fn repo_get_default(state: State<AppState>) -> ApiResponse<Option<String>> {
     let outcome = (|| -> HpResult<Option<String>> {
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let g = global(&guard)?;
         let value = g.get_setting("repo.default")?;
         Ok(value.filter(|v| !v.is_empty()))

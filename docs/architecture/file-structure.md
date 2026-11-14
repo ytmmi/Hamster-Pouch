@@ -92,7 +92,7 @@ crates/hp-dict/migrations/   # 迁移 SQL（forward-only，发布后禁止修改
                       #   两者取不到都写空串（`app_info.rs` 用 `option_env!` 读，界面显示「未知」）；
                       #   末行才是 `tauri_build::build()`。D140
   commands/           # Tauri 命令桥接（按领域拆分）
-    shared.rs         # 共享类型 + 宿主级状态的唯一加锁入口（全局库 / 仓库句柄 / schema 缓存 / 监督表 / AI 队列 / tag 库）
+    shared.rs         # 共享类型 + 宿主级状态的唯一加锁入口（全局库 / 仓库句柄 / schema 缓存 / 监督表 / AI 队列 / tag 库；全局库另走 `global_guard`，D195）
     repo.rs  source.rs  album.rs
     tag.rs   rating.rs  color.rs  file.rs
     layout.rs

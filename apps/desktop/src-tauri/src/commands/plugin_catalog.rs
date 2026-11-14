@@ -22,7 +22,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::shared::{ApiResponse, api_from_hp, ensure_global, global, lock_global};
+use crate::commands::shared::{ApiResponse, api_from_hp, global, global_guard};
 
 /// 「扩展」菜单用的一行：**一个已安装插件**（均含**未启用**的）。
 ///
@@ -76,11 +76,9 @@ pub(crate) struct PluginCatalogPanelItem {
 pub(crate) fn plugin_catalog(
     repo_id: String,
     state: State<AppState>,
-    app: tauri::AppHandle,
 ) -> ApiResponse<Vec<PluginCatalogItem>> {
     let outcome = (|| -> HpResult<Vec<PluginCatalogItem>> {
-        ensure_global(&state, &app)?;
-        let guard = lock_global(&state)?;
+        let guard = global_guard(&state)?;
         let db = global(&guard)?;
         Ok(PluginHost
             .plugin_catalog(db, &repo_id)?
