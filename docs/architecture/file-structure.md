@@ -267,6 +267,9 @@ apps/desktop/src/app_ui/
                            #   resolveMediaUrlOutcome（图片需要内嵌预览时走 preview.get，其余走原图；
                            #   返回 `{ url, error }`）——取代原 shared/imageUrl.ts；thumbUrl / previewUrl /
                            #   bookMetaCache 共用 urlCache 骨架，转换一律 assetUrl*
+      useBookPages.ts       # 正文分页状态机的**唯一**实现（D209）：世代号 + 在途旗 + fetchPage / loadMore
+                           #   jumpTo（跳转 = 新世代，在飞的旧响应作废）；两个游标字段 segmentStart（段起点）与
+                           #   jumpTarget（跳转目标）都在这里——阅读器与查看器只是薄壳，不再各写一份
     interfacePages.ts     # 垂直「界面页」的**纯逻辑**（D124 / D124-R3 / D124-R4 / D124-R5）：页面组模型 + 容错解析（任何
                           #   脏数据都落回可用状态，不抛异常）+ 序列化 + 增删改（删组无损，界面回到
                           #   未分组）；另有**导航顺序** `order`（orderedPages 收敛：order 认识的排前面、
@@ -358,7 +361,7 @@ apps/desktop/src/app_ui/
                       #     因此渲染器一行都不用改；容器块递归 + 深度护栏；
                       #     行内样式按 STYLE_ORDER 固定顺序套元素；行内 code 的类名是
                       #     vr-code-inline 而不是 vr-code——后者是代码**块**的类名）
-                      #   useViewerBookContent.ts 分页取数（滚动到底部附近才取下一页；
+                      #   useViewerBookContent.ts 分页取数的薄壳（D209 起状态机在 shared/useBookPages.ts；
                       #     切书即丢页——用户口径"字符缓存不需要大、滚动时按需缓存"）
                       #   viewerReaderView.ts 纯逻辑（分栏阈值/字号/是否该取下一页；零依赖，
                       #     门禁直接 import。**注意**：不能叫 viewerReader.ts——与
@@ -416,7 +419,8 @@ apps/desktop/src/app_ui/
                       #   ReaderFooter.tsx 底部进度（当前进度 00.00% / **本章进度 00.0%** /
                       #     章节数 1 / 14；算不出来显示 —，本章进度在无目录时整项不显示；
                       #     **页数一格已删除**——纯文本的页数只是按 2 万字符折算的估算值）
-                      #   useReaderBook.ts 目录 + 正文取数（跳转 = 新世代，丢弃在飞的旧响应）
+                      #   useReaderBook.ts 目录取数 + 正文薄壳（正文状态机在 shared/useBookPages.ts，D209；
+                      #     跳转 = 新世代，丢弃在飞的旧响应）
                       #     **两个游标字段不可合并**：cursor = 跳转目标（只喂阅读区 key，
                       #     首屏与 loadMore 都不改）；segmentStart = 段起点（首屏 "0" /
                       #     跳转目标 / **loadMore 不变**）。用 cursor 当段起点会让读完整本书

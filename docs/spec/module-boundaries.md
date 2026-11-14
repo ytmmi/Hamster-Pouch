@@ -105,6 +105,13 @@ store（`storeSnapshot` + 自建 `Set` 订阅表 + `ensureMarksLoaded` / `commit
 `shared/urlCache.ts` 的 `createUrlResolver(keyOf, load)` 是结果缓存 + in-flight 去重的**唯一**骨架（`load` 抛错不写缓存，
 下次重试），`shared/mediaUrl.ts` 是媒体 URL 的**唯一**解析口（`resolveSourceUrl` 给原图/音视频；
 `resolveMediaUrlOutcome` 给「图片且需要内嵌预览」时走 `preview.get`、其余走原图，返回 `{ url, error }` 而不是抛错）。
+**正文分页状态机只有一份**（D209）：`panels/bookreader/useReaderBook.ts` 与 `panels/viewer/useViewerBookContent.ts` 曾各写一遍
+同一份状态机（世代号、在途旗、空页不追加、失败翻译、`hasMore` 判定、`loadMore` 幂等、换书重置）。现在状态机只在
+`apps/desktop/src/app_ui/shared/useBookPages.ts`：`useBookPages()` 返回 `pages / loading / error / hasMore / segmentStart /
+jumpTarget / loadMore / jumpTo / generation`，`jumpTo` 起新世代让在飞的旧响应作废；两个游标字段不可合并（`segmentStart`
+是段起点，`jumpTo` 才改它，`loadMore` 不改）。阅读器只保留目录取数（`book.toc`）与两游标的对外形状，查看器只挑五个字段。
+门禁：`check:panels` 的「按需取下一页」「切书即丢页」「段起点不被 `loadMore` 改动」三条改读共享钩子，并反向断言两个消费方
+不再出现 `generationRef` / `api.bookContent(` / `setPages(`。
 原 `shared/imageUrl.ts` 已删除；`bookMetaCache` 也从手抄缓存迁到骨架。判据同样是位置：`check:media-url` 钉住
 「`convertFileSrc(` 只出现在 `assetUrl.ts`」「`imageUrl.ts` 不得复活」「`new Map<string, Promise<` 只出现在 `urlCache.ts`」
 「四个播放/查看器面板不得自己 `api.filePath(`」，`check:panels` 的查看器断言同步改指 `resolveMediaUrlOutcome`。

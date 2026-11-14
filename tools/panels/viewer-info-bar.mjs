@@ -97,6 +97,11 @@ const viewerContentSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/viewer/useViewerBookContent.ts"),
   "utf8",
 );
+// 分页状态机在共享钩子里（D209）：查看器与阅读器共用一份，内部断言读它。
+const bookPagesSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/useBookPages.ts"),
+  "utf8",
+);
 const viewerReaderView = await import(
   pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/viewer/viewerReaderView.ts")).href
 );
@@ -199,17 +204,19 @@ check(
   /shouldLoadMore\(/.test(viewerReaderSrc) &&
     /loadMore\(\)/.test(viewerReaderSrc) &&
     // 取数走 book.content，且游标是**返回值里的 next_cursor**（不是前端自己算）。
-    /api\.bookContent\(\{ repoId, fileId, cursor \}\)/.test(viewerContentSrc) &&
-    /last\.next_cursor/.test(viewerContentSrc) &&
+    /api\.bookContent\(\{ repoId, fileId, cursor: from \}\)/.test(bookPagesSrc) &&
+    /last\.next_cursor/.test(bookPagesSrc) &&
     // 首屏只取第一页（`null` 游标）。
-    /void fetchPage\(null, generation\)/.test(viewerContentSrc) &&
+    /void fetchPage\(null,/.test(bookPagesSrc) &&
     // 反向：不得"打开就全取回来"（那正是用户明确否掉的形态）。
-    !/while\s*\(.*next_cursor/.test(viewerContentSrc),
+    !/while\s*\(.*next_cursor/.test(bookPagesSrc) &&
+    // 反向：查看器自己不再持有这份状态机（D209 收成一份）。
+    !/generationRef|api\.bookContent\(|setPages\(/.test(viewerContentSrc),
 );
 check(
   "切书即丢掉已取的页（否则会把上一本的正文显示在下一本上）",
-  /generationRef\.current \+= 1/.test(viewerContentSrc) &&
-    /setPages\(\[\]\)/.test(viewerContentSrc),
+  /generationRef\.current \+= 1/.test(bookPagesSrc) &&
+    /setPages\(\[\]\)/.test(bookPagesSrc),
 );
 
 // ---- 安全边界：正文不是 HTML ----

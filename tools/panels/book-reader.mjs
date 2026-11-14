@@ -1346,11 +1346,14 @@ check(
 check(
   "段起点 `segmentStart`：`loadMore` **不**改动它（改了会让已读位置往后退，章节数回 1）",
   (() => {
-    const hook = readFileSync(
-      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/useReaderBook.ts"),
-      "utf8",
+    // D209 起分页状态机在共享钩子里：两个面板共用一份，断言跟着搬过去；
+    // 同时反向钉住"阅读器自己不再持有世代号 / 取数 / 页表"。
+    const code = stripComments(
+      readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/useBookPages.ts"), "utf8"),
     );
-    const code = stripComments(hook);
+    const readerHook = stripComments(
+      readFileSync(join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/useReaderBook.ts"), "utf8"),
+    );
     const loadMoreBlock = code.match(/const loadMore = useCallback\(\(\) => \{[\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ?? "";
     const fetchPageBlock = code.match(/const fetchPage = useCallback\([\s\S]*?\n  \);/)?.[0] ?? "";
     return (
@@ -1373,7 +1376,8 @@ check(
       // 消费方必须把 `book.segmentStart` 交给页游标表（不是 `book.cursor`——
       // 后者只是跳转目标，首屏与 loadMore 都不更新）。
       /readerPageCursors\(book\.pages, book\.segmentStart\)/.test(stripComments(readerPanelSrc)) &&
-      !/readerPageCursors\(book\.pages, book\.cursor\)/.test(stripComments(readerPanelSrc))
+      !/readerPageCursors\(book\.pages, book\.cursor\)/.test(stripComments(readerPanelSrc)) &&
+      !/generationRef|api\.bookContent\(|setPages\(/.test(readerHook)
     );
   })(),
 );
