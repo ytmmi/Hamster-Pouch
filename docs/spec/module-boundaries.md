@@ -118,6 +118,13 @@ jumpTarget / loadMore / jumpTo / generation`，`jumpTo` 起新世代让在飞的
 （`ChevronIcon` / `FolderIcon`），相册规则只在 `apps/desktop/src/app_ui/panels/album/tree.ts`（零 JSX），
 `AlbumPanel.tsx` 1096 → 948 行。门禁 `check:tree-panels`（7 条）：图标不得在别处出现、树规则不得回流组件、
 三个树面板必须从 `shared/icons` 取图标、两棵树不得再内联 `<svg>`。
+
+**播放器公共件各只有一份**（D211）：时间格式曾在 `panels/music/time.ts` 与 `MediaPlayerPanel.tsx` 各写一遍（逐字相同），
+`clampVolume` 在两个播放面板各一份（只差兜底常量），喇叭图标两套几何，音乐字形 160 行塞在 1016 行的 `MusicStage.tsx` 里。
+现在 `apps/desktop/src/app_ui/panels/shared/time.ts` 是时间格式的唯一实现（`formatMs` / `formatClock` / `formatRemaining`），
+`panels/shared/volume.ts` 的 `clampVolume(value, fallback)` 是音量夹紧的唯一实现（兜底默认值由调用方传：视频 100、音乐各自常量），
+`panels/shared/icons.tsx` 的 `VolumeIcon({ volume, size, muteMark })` 是喇叭的唯一实现，音乐字形只在 `panels/music/icons.tsx`。
+门禁 `check:player-shared`（4 条）：三类公共件不得在别处定义、两个播放面板必须从 `shared/` 取、`MusicStage` 不得再内联 `<svg>`。
 原 `shared/imageUrl.ts` 已删除；`bookMetaCache` 也从手抄缓存迁到骨架。判据同样是位置：`check:media-url` 钉住
 「`convertFileSrc(` 只出现在 `assetUrl.ts`」「`imageUrl.ts` 不得复活」「`new Map<string, Promise<` 只出现在 `urlCache.ts`」
 「四个播放/查看器面板不得自己 `api.filePath(`」，`check:panels` 的查看器断言同步改指 `resolveMediaUrlOutcome`。

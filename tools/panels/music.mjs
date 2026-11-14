@@ -52,6 +52,11 @@ const musicStageSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/music/MusicStage.tsx"),
   "utf8",
 );
+// 字形在 D211 搬到 panels/music/icons.tsx：按字形断言的那两条读这个文件。
+const musicIconsSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/music/icons.tsx"),
+  "utf8",
+);
 const waveformSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/shared/AudioWaveform.tsx"),
   "utf8",
@@ -774,9 +779,9 @@ check(
 check(
   "D166：收藏只是图标（非交互 `span`，不是 disabled 按钮——禁用会暗示「现在不能用」）",
   (() => {
-    const start = musicStageSrc.indexOf("function FavoriteIcon");
-    const end = musicStageSrc.indexOf("function PlayIcon");
-    const body = start >= 0 && end > start ? musicStageSrc.slice(start, end) : "";
+    const start = musicIconsSrc.indexOf("function FavoriteIcon");
+    const end = musicIconsSrc.indexOf("function PlayIcon");
+    const body = start >= 0 && end > start ? musicIconsSrc.slice(start, end) : "";
     return body.includes("<span") && body.includes('role="img"') && !body.includes("<button");
   })(),
 );
@@ -796,9 +801,8 @@ check(
 check(
   "D168：收藏爱心是空心描边（实心红留给「已收藏」，而收藏功能尚未实装）",
   (() => {
-    const start = musicStageSrc.indexOf("function HeartIcon");
-    const end = musicStageSrc.indexOf("function SpeakerIcon");
-    const body = start >= 0 && end > start ? musicStageSrc.slice(start, end) : "";
+    const start = musicIconsSrc.indexOf("function HeartIcon");
+    const body = start >= 0 ? musicIconsSrc.slice(start) : "";
     return body.includes('fill="none"') && body.includes('stroke="currentColor"');
   })(),
 );

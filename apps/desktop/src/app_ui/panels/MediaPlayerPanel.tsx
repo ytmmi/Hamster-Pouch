@@ -59,6 +59,9 @@ import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { AudioWaveform } from "../shared/AudioWaveform";
 import { resolveSourceUrl } from "../shared/mediaUrl";
+import { VolumeIcon } from "./shared/icons";
+import { formatMs } from "./shared/time";
+import { clampVolume } from "./shared/volume";
 import { usePanelSettingValue } from "../shared/settingValue";
 import { publishSettingChanged } from "../core/settingChangeStore";
 import { useApp } from "../core/AppContext";
@@ -94,18 +97,6 @@ const PLAYER_VOLUME_DEFAULT = 100;
  */
 const STAGE_TAP_SLOP_PX = 6;
 
-/**
- * 音量夹紧到 0–100 的整数。
- *
- * 设置声明里**没有** min/max（见 `docs/spec/panel-standard.md` 第 5.3 节），范围由
- * 面板自己保证：落库值可能来自旧版本、手改的 `app_settings` 或宿主控件的边界。
- */
-function clampVolume(value: number): number {
-  if (!Number.isFinite(value)) {
-    return PLAYER_VOLUME_DEFAULT;
-  }
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
 
 export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.Element {
   const app = useApp();
@@ -157,7 +148,9 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   const volumeBoxRef = useRef<HTMLDivElement>(null);
   const volume =
     draftVolume ??
-    (typeof storedVolume === "number" ? clampVolume(storedVolume) : PLAYER_VOLUME_DEFAULT);
+    (typeof storedVolume === "number"
+      ? clampVolume(storedVolume, PLAYER_VOLUME_DEFAULT)
+      : PLAYER_VOLUME_DEFAULT);
 
   /** 读取「切换标签时自动暂停」设置（未设置 = 默认开）。 */
   const reloadAutoPauseSetting = useCallback(async () => {
@@ -469,7 +462,7 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
    * 落库失败不影响本次播放（内存里的值仍然生效，下次读取会纠正）。
    */
   const commitVolume = useCallback((value: number) => {
-    const next = clampVolume(value);
+    const next = clampVolume(value, PLAYER_VOLUME_DEFAULT);
     setDraftVolume(null);
     void api
       .settingSet({ key: PLAYER_VOLUME_SETTING_KEY, value: next })
@@ -481,7 +474,7 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
 
   /** 音量条拖动中：只更新本地显示值（出声即时，落库等松手）。 */
   const onVolumeInput = (value: number) => {
-    setDraftVolume(clampVolume(value));
+    setDraftVolume(clampVolume(value, PLAYER_VOLUME_DEFAULT));
   };
 
   /**
@@ -688,61 +681,4 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
       </div>
     </div>
   );
-}
-
-/**
- * 音量图标（内联 SVG，颜色随按钮的 `currentColor`）。
- *
- * 三态正是"图标本身就是状态显示"：静音（喇叭 + 叉）、有声（一道声波）、过半
- * （两道声波）。图标不给悬停提示——与画面区同一条规矩（面板内不出提示文字）。
- */
-function VolumeIcon({ volume }: { volume: number }): JSX.Element {
-  const muted = volume === 0;
-  const loud = volume >= 50;
-  return (
-    <svg viewBox="0 0 24 24" width={18} height={18} aria-hidden="true" focusable="false">
-      <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" />
-      {!muted && (
-        <path
-          d="M16 8.5a4.5 4.5 0 0 1 0 7"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-        />
-      )}
-      {!muted && loud && (
-        <path
-          d="M18.5 6.5a7.5 7.5 0 0 1 0 11"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-        />
-      )}
-      {muted && (
-        <path
-          d="M16 9.5l5 5M21 9.5l-5 5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-        />
-      )}
-    </svg>
-  );
-}
-
-/** 毫秒 → `m:ss` / `h:mm:ss`；非正值显示 `--:--`。 */
-function formatMs(ms: number | null | undefined): string {
-  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms <= 0) {
-    return "--:--";
-  }
-  const total = Math.floor(ms / 1000);
-  const s = total % 60;
-  const m = Math.floor(total / 60) % 60;
-  const h = Math.floor(total / 3600);
-  const mm = h > 0 ? String(m).padStart(2, "0") : String(m);
-  const ss = String(s).padStart(2, "0");
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }

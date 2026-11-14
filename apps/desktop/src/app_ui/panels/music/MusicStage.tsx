@@ -53,7 +53,20 @@ import { stageVars } from "./haze";
 import { hasRuby, parseRuby, type RubySegment } from "./ruby";
 import type { MusicStyle } from "./musicStyle";
 import type { RepeatMode } from "./queueView";
-import { formatClock, formatMs, formatRemaining } from "./time";
+import { formatClock, formatMs, formatRemaining } from "../shared/time";
+import { VolumeIcon } from "../shared/icons";
+import {
+  FavoriteIcon,
+  HeartIcon,
+  NextIcon,
+  PauseIcon,
+  PlayIcon,
+  PrevIcon,
+  RepeatIcon,
+  RepeatOneIcon,
+  ShuffleIcon,
+  StarIcon,
+} from "./icons";
 import {
   LYRIC_LEAD_MS,
   lineProgress,
@@ -531,7 +544,7 @@ function VolumeBar({
   return (
     <div className="player-volume-row">
       <span className="player-volume-icon" aria-hidden="true">
-        <SpeakerIcon volume={volume} />
+        <VolumeIcon volume={volume} size={15} muteMark={false} />
       </span>
       <input
         className="player-volume-bar"
@@ -852,165 +865,5 @@ function Lyrics({
         );
       })}
     </div>
-  );
-}
-
-/** 收藏图标（**仅显示**，功能后续做；非交互元素，见文件头注释）。 */
-function FavoriteIcon({ shape, t }: { shape: "star" | "heart"; t: MusicStageProps["t"] }) {
-  return (
-    <span
-      className="player-fav"
-      data-shape={shape}
-      aria-label={t("music.favorite")}
-      role="img"
-    >
-      {shape === "star" ? <StarIcon /> : <HeartIcon />}
-    </span>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-      <path d="M8 5.5v13l11-6.5z" fill="currentColor" />
-    </svg>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-      <rect x="7" y="5" width="3.5" height="14" rx="1" fill="currentColor" />
-      <rect x="13.5" y="5" width="3.5" height="14" rx="1" fill="currentColor" />
-    </svg>
-  );
-}
-
-function PrevIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-      <path d="M19 5.5v13L8.5 12z" fill="currentColor" />
-      <rect x="5" y="5.5" width="2.6" height="13" rx="1" fill="currentColor" />
-    </svg>
-  );
-}
-
-function NextIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-      <path d="M5 5.5v13L15.5 12z" fill="currentColor" />
-      <rect x="16.4" y="5.5" width="2.6" height="13" rx="1" fill="currentColor" />
-    </svg>
-  );
-}
-
-function ShuffleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-      <path
-        d="M4 7h3.2l8 10H20M4 17h3.2l3.1-3.9M15.4 7H20M20 7l-2.6-2.4M20 7l-2.6 2.4M20 17l-2.6-2.4M20 17l-2.6 2.4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function RepeatIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-      <path
-        d="M7 6h9a3.5 3.5 0 0 1 3.5 3.5V12M17 18H8a3.5 3.5 0 0 1-3.5-3.5V12M7 6L9.6 3.6M7 6l2.6 2.4M17 18l-2.6 2.4M17 18l-2.6-2.4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function RepeatOneIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-      <path
-        d="M7 6h9a3.5 3.5 0 0 1 3.5 3.5V12M17 18H8a3.5 3.5 0 0 1-3.5-3.5V12M7 6L9.6 3.6M7 6l2.6 2.4M17 18l-2.6 2.4M17 18l-2.6-2.4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <text x="12" y="15.4" textAnchor="middle" fontSize="8.5" fill="currentColor">
-        1
-      </text>
-    </svg>
-  );
-}
-
-function StarIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
-      <path
-        d="M12 3.6l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.8l5.9-.9z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-/**
- * 收藏爱心：**空心描边**。
- *
- * 实心红心是"已收藏"的语义，而收藏功能尚未实装（用户 2026-11-13 D168：
- * "默认应该是空心的，红色实心表示已收藏"）——所以这里只画轮廓，不留任何
- * "已经收藏了"的误导。
- */
-function HeartIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-      <path
-        d="M12 20.5s-7.6-4.7-7.6-9.7A4.3 4.3 0 0 1 12 7.9a4.3 4.3 0 0 1 7.6 2.9c0 5-7.6 9.7-7.6 9.7z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function SpeakerIcon({ volume }: { volume: number }) {
-  const muted = volume === 0;
-  const loud = volume >= 50;
-  return (
-    <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
-      <path d="M4 9.5v5h3.4l4.4 3.5V6L7.4 9.5H4z" fill="currentColor" />
-      {!muted && (
-        <path
-          d="M15.4 9a4 4 0 0 1 0 6"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-      )}
-      {!muted && loud && (
-        <path
-          d="M18 6.8a7.4 7.4 0 0 1 0 10.4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-      )}
-    </svg>
   );
 }

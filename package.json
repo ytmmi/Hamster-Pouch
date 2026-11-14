@@ -56,6 +56,7 @@
     "check:stores": "node tools/check-stores.mjs",
     "check:media-url": "node tools/check-media-url.mjs",
     "check:tree-panels": "node tools/check-tree-panels.mjs",
+    "check:player-shared": "node tools/check-player-shared.mjs",
     "check:hidden-console": "node tools/check-hidden-console.mjs",
     "check:bundled-runtime": "node tools/check-bundled-runtime.mjs",
     "check:event-names": "node tools/check-event-names.mjs",

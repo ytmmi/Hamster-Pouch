@@ -45,6 +45,7 @@ import { errorTextOf } from "../shared/api/response";
 import { assetUrlOrNull } from "../shared/assetUrl";
 import { resolveSourceUrl } from "../shared/mediaUrl";
 import { usePanelSettingValue } from "../shared/settingValue";
+import { clampVolume } from "./shared/volume";
 import { publishSettingChanged } from "../core/settingChangeStore";
 import { useApp } from "../core/AppContext";
 import { getMusicPlayRequest, subscribeMusicPlay } from "../core/musicPlayStore";
@@ -100,18 +101,6 @@ interface PanelMedia {
   tagArtist: string | null;
 }
 
-/**
- * 音量夹紧到 0–100 的整数。
- *
- * 设置声明里**没有** min/max（见 `docs/spec/panel-standard.md` 第 5.3 节），范围由
- * 面板自己保证：落库值可能来自旧版本、手改的 `app_settings` 或宿主控件的边界。
- */
-function clampVolume(value: number): number {
-  if (!Number.isFinite(value)) {
-    return MUSIC_VOLUME_DEFAULT;
-  }
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
 
 export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.Element {
   const app = useApp();
@@ -173,7 +162,7 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
   const [draftVolume, setDraftVolume] = useState<number | null>(null);
   const volume =
     draftVolume ??
-    (typeof storedVolume === "number" ? clampVolume(storedVolume) : MUSIC_VOLUME_DEFAULT);
+    (typeof storedVolume === "number" ? clampVolume(storedVolume, MUSIC_VOLUME_DEFAULT) : MUSIC_VOLUME_DEFAULT);
 
   /** 取料（封面 / 歌词 / 色晕）。 */
   const [media, setMedia] = useState<PanelMedia>(EMPTY_MEDIA);
@@ -416,7 +405,7 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
 
   /** 音量写回（松手 / 键盘调整后）。落库失败不影响本次播放。 */
   const commitVolume = useCallback((value: number) => {
-    const next = clampVolume(value);
+    const next = clampVolume(value, MUSIC_VOLUME_DEFAULT);
     setDraftVolume(null);
     void api
       .settingSet({ key: MUSIC_VOLUME_SETTING_KEY, value: next })
@@ -428,7 +417,7 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
 
   /** 音量条拖动中：只更新本地显示值（出声即时，落库等松手）。 */
   const onVolumeInput = (value: number) => {
-    setDraftVolume(clampVolume(value));
+    setDraftVolume(clampVolume(value, MUSIC_VOLUME_DEFAULT));
   };
 
   /**

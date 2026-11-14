@@ -324,8 +324,12 @@ apps/desktop/src/app_ui/
                       #   层级判定（`containsMedia` / `isDescendantOf`）、落点分派（`edgeFromEvent`：
                       #   上/下 1/3 = 插入边、中间 = 成为子相册，D132）。零 JSX——AlbumPanel 只负责
                       #   渲染与事件绑定（1096 → 948 行）
-    shared/           # 面板间共用的展示件（D210）：icons.tsx —— `ChevronIcon` / `FolderIcon`，
-                      #   原先相册树、媒体源树（SourcePanel）与打标菜单各复制一份同样的 SVG
+    shared/           # 面板间共用的展示件（D210/D211）：icons.tsx —— `ChevronIcon` / `FolderIcon` /
+                      #   `VolumeIcon`（三态喇叭，`size` 与 `muteMark` 由调用方定），原先相册树、
+                      #   媒体源树（SourcePanel）与打标菜单各复制一份同样的 SVG，两个播放面板也各有一套喇叭；
+                      #   time.ts —— 播放器时间格式（`formatMs` / `formatClock` / `formatRemaining`，
+                      #   D211 从 `music/` 搬来，视频面板删掉自己那份逐字相同的副本）；
+                      #   volume.ts —— `clampVolume(value, fallback)`（两个面板各自传兜底默认值）
     imageviewer/      # 图像查看器（多文件功能域：主面板 / 舞台 / 导航器 / 胶片栏 / 信息栏
                       #   + 纯逻辑模块 viewerZoom·viewerPlacement·viewerFormat·viewerKeymap·viewerPreload
                       #   + viewerFilmstripLayout（胶片栏窗口/定位纯几何 + 宽高比缓存按历史名字转出
@@ -692,7 +696,9 @@ apps/desktop/src/app_ui/
                             #     feDisplacementMap + feGaussianBlur，seed 11/23/37）做 mask，
                             #     运行时只跑 transform/opacity（51.3 → 158.5 fps）。
                             #     互不近似），而不是 8 色频率色板的前三个）
-                            #   time.ts 时间格式（`formatMs` = 已播时长、`≤ 0` 记作"未知"，
+                            #   icons.tsx 音乐字形（D211：传输控件、随机/循环、星标/爱心、收藏，
+                            #     只认 `currentColor`；原先 160 行 SVG 塞在 MusicStage 里）
+                            #   （时间格式已搬到 `panels/shared/time.ts`，D211）`formatMs` = 已播时长、`≤ 0` 记作"未知"，
                             #     `formatClock` = 同一口径但**允许 0**（进度条起点必须是
                             #     `0:00`，它是合法位置），`formatRemaining` = 倒计时 `-3:24`：
                             #     样式 1 的进度条右端是"还剩多久"）
