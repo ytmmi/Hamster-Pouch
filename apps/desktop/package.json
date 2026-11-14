@@ -1,6 +1,6 @@
 {
   "name": "@hamster-pouch/desktop",
-  "version": "0.1.33-Alpha",
+  "version": "0.1.34-Alpha",
   "private": true,
   "type": "module",
   "scripts": {

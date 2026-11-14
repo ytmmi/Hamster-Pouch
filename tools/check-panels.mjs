@@ -26,6 +26,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+// 图书桥接自 D181 起按职责拆成 `book/{mod,cache,paging,cover}.rs`。下面这些断言校验的是
+// **桥接层整体**的行为（媒体类型分流 / 命令形态 / 封面落盘 / 渐进读取），拆文件不该让任何一条
+// 静默失效，所以统一拼成一份源码再匹配——正则看到的内容与拆分前逐字相同。
+const BOOK_BRIDGE_SRC = ["mod", "cache", "paging", "cover"]
+  .map((name) =>
+    readFileSync(join(ROOT, `apps/desktop/src-tauri/src/commands/book/${name}.rs`), "utf8"),
+  )
+  .join("\n");
+
 const config = await import(pathToFileURL(join(ROOT, "packages/config/src/index.ts")).href);
 // `.tsx` 不能直接被 Node 的 TS 剥离加载（JSX 不是可剥离语法），因此组件表用**源码解析**
 // 断言（与 `tools/control-check.mjs` 对 `ControlRenderer.tsx` 的做法一致）。
@@ -591,10 +600,7 @@ check(
 check(
   "桥接层按扩展名分流到 Markdown 渲染，且游标是**块序号**（不是字符偏移）",
   (() => {
-    const bridge = readFileSync(
-      join(ROOT, "apps/desktop/src-tauri/src/commands/book.rs"),
-      "utf8",
-    );
+    const bridge = BOOK_BRIDGE_SRC;
     return (
       /"md" \| "markdown" => read_markdown_page/.test(bridge) &&
         /format: "markdown"/.test(bridge) &&
@@ -3804,10 +3810,7 @@ const coverMenuSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/bookpreview/BookCoverMenu.tsx"),
   "utf8",
 );
-const coverStoreExts = rustStrArray(
-  readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands/book.rs"), "utf8"),
-  "COVER_IMAGE_EXTS",
-);
+const coverStoreExts = rustStrArray(BOOK_BRIDGE_SRC, "COVER_IMAGE_EXTS");
 const coverFilterExts = (() => {
   const m = /extensions:\s*\[([^\]]*)\]/.exec(coverMenuSrc);
   if (!m) return null;
@@ -5252,10 +5255,7 @@ check(
 );
 
 // 桥接层：命令形态、坏书降级、封面落盘路径。
-const bookBridgeSrc = readFileSync(
-  join(ROOT, "apps/desktop/src-tauri/src/commands/book.rs"),
-  "utf8",
-);
+const bookBridgeSrc = BOOK_BRIDGE_SRC;
 check(
   "book.meta 是已包装命令，解析在阻塞线程里跑，坏书降级为「没有元数据」而不是错误",
   /pub\(crate\) async fn book_meta\(/.test(bookBridgeSrc) &&
@@ -5449,10 +5449,7 @@ check(
 check(
   "Rust：桥接层按**媒体类型**分流到 PDF 解析器（不是按扩展名猜），且封面落盘复用同一条路径",
   (() => {
-    const bridge = readFileSync(
-      join(ROOT, "apps/desktop/src-tauri/src/commands/book.rs"),
-      "utf8",
-    );
+    const bridge = BOOK_BRIDGE_SRC;
     return (
       // book.meta：PDF → `hp_pdf` 栅格化第一页；文本类 → `hp_book` 解 OPF。
       /MediaType::Pdf => parse_pdf_and_cache/.test(bridge) &&
@@ -5467,10 +5464,7 @@ check(
 check(
   "Rust：`book.content` 的 PDF 分支**逐页栅格化**，游标是**页码**（与 epub 同形）",
   (() => {
-    const bridge = readFileSync(
-      join(ROOT, "apps/desktop/src-tauri/src/commands/book.rs"),
-      "utf8",
-    );
+    const bridge = BOOK_BRIDGE_SRC;
     return (
       // **按媒体类型分流，不按扩展名**：扫描器对 PDF 做了 `%PDF-` 内容兜底，
       // 因此扩展名被改掉的 PDF（`a.dat`）也会入库为 `media_type = pdf`；
@@ -6197,10 +6191,7 @@ check(
   "Rust：纯文本**渐进读取**（需求 2）——按窗口取页 + 有界锚点表，且不含「整本解码」路径",
   (() => {
     const stream = readFileSync(join(ROOT, "crates/hp-book/src/text_stream.rs"), "utf8");
-    const bookSrc = readFileSync(
-      join(ROOT, "apps/desktop/src-tauri/src/commands/book.rs"),
-      "utf8",
-    );
+    const bookSrc = BOOK_BRIDGE_SRC;
     // 反面断言只看**代码**（注释里解释旧机制是正当的，见上一条的说明）。
     const code = (src) =>
       src

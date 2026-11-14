@@ -13,7 +13,7 @@
 //! `cursor` 与 `book.content` 的游标**同语义**（epub = 章节序号、纯文本 = 字符偏移、
 //! md = 顶层块序号），由**前端**原样带来（它来自 `book.toc` 或当前页的 `next_cursor`）。
 //! 桥接层**不做数值校验**：越界游标由 `book.content` 按"回落第一页 / 最后一页"兜底，
-//! 这是既有的"翻页游标不该成为新的错误来源"口径（见 `book.rs` 的 `parse_cursor`）。
+//! 这是既有的"翻页游标不该成为新的错误来源"口径（见 `book/paging.rs` 的 `parse_cursor`）。
 //!
 //! ## `progress` 由前端给
 //!

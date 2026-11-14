@@ -65,10 +65,21 @@ for (const line of docLines) {
   contracted.push({ name, status, struck: rawName.startsWith("~~") });
 }
 
-// 桥接层源码（按文件聚合，便于定位）。
-const bridgeFiles = readdirSync(BRIDGE_DIR)
-  .filter((f) => f.endsWith(".rs"))
-  .map((f) => ({ file: f, src: readFileSync(join(BRIDGE_DIR, f), "utf8") }));
+// 桥接层源码（按文件聚合，便于定位）。**子目录要下钻**：D181 起图书命令搬进
+// `commands/book/`，只扫平铺目录会让"已包装"清单里六个 book.* 全部误报"找不到桥接函数"。
+const bridgeFiles = readdirSync(BRIDGE_DIR, { withFileTypes: true }).flatMap((entry) => {
+  if (entry.isDirectory()) {
+    return readdirSync(join(BRIDGE_DIR, entry.name), { withFileTypes: true })
+      .filter((f) => f.isFile() && f.name.endsWith(".rs"))
+      .map((f) => ({
+        file: `${entry.name}/${f.name}`,
+        src: readFileSync(join(BRIDGE_DIR, entry.name, f.name), "utf8"),
+      }));
+  }
+  return entry.name.endsWith(".rs")
+    ? [{ file: entry.name, src: readFileSync(join(BRIDGE_DIR, entry.name), "utf8") }]
+    : [];
+});
 
 /**
  * 命令名 → Rust 桥接函数名（Tauri 的 `domain.action` ↔ `domain_action` 口径）。

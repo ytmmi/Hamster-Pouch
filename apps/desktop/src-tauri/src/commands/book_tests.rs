@@ -1,6 +1,6 @@
-//! `commands/book.rs` 的**测试模块**（独立成文件：`book.rs` 要守住"单文件 ≤ 1200 行"）。
+//! `commands/book/` 的**测试模块**（独立成文件：各文件要守住"单文件 ≤ 1200 行"）。
 //!
-//! 内容由 `book.rs` 的 `#[cfg(test)] mod tests` 与测试夹具整体搬来，断言逐条不变。
+//! 内容由原 `book.rs`（现 `commands/book/`）的 `#[cfg(test)] mod tests` 与测试夹具整体搬来，断言逐条不变。
 
 #[cfg(test)]
 mod tests {
