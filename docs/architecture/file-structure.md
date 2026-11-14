@@ -522,8 +522,15 @@ apps/desktop/src/app_ui/
                             #   MusicStage.tsx 音乐舞台（两套样式是**两套排版**而不是一套 DOM
                             #   2026-11-14 D176 起歌词正文走 `<LyricText text>`（有注音就出
                             #   `<ruby>`+`<rt>`），当前句是**单层字形蒙版**（`background-clip:
-                            #   text` + 两端留 6% 过渡带的渐变；折行时渐变转纵向），
-                            #   `player-lyric-(base|fill)` 两层结构已删。
+                            #   text` + 两端留 6% 过渡带的渐变），`player-lyric-(base|fill)`
+                            #   两层结构已删。2026-11-14 D177–D179 三修：填充色写在
+                            #   `-webkit-text-fill-color`（`color` 被样式 2 活动行的 (0,5,0)
+                            #   规则盖回）、行盒收成 `width: fit-content`（否则百分比按整列
+                            #   算、~48% 就整行亮）、**填充每帧由 rAF 直写**而不是靠 CSS
+                            #   过渡（`timeupdate` 只有 ~4Hz，过渡会被反复重启成"追上—停住"）；
+                            #   一句折成多行时**按阅读顺序逐行填**（每行一层 `to right`
+                            #   渐变由 `lyricBandFill` 写成多层 `background-image`），不再是
+                            #   一条纵向渐变自上而下盖住两行。
                             #     换配色：haze = 左列封面卡 + 进度/传输/音量 + 右侧大号歌词；
                             #     disc = 左侧曲名/歌词 + 进度/传输 + 右上按封面上色的大唱片。
                             #     共用的是数据与规则（歌词窗口、队列、配色函数、传输行为）。
@@ -531,7 +538,7 @@ apps/desktop/src/app_ui/
                             #     模糊半径按**字号**算 ≈ 8%：行高 19px 配 1.6px，与参考图
                             #     40px 字配 4px 同量级），disc 不模糊不错位、靠透明度分层；
                             #     disc 的唱片不是黑胶黑，盘体取主色提亮、盘外两道独立细环；
-                            #     歌词窗口 `LRC_RADIUS = 2`（可见 5 行）；
+                            #     歌词窗口 `LRC_RADIUS = 3`（可见 7 行，D172）；
                             #     收藏是**非交互 `<span role="img">`**，不是 disabled 按钮——
                             #     按钮会暗示"点了会有反应"；无歌词整块 `Lyrics` 直接 return null；
                             #     disc 的控制区（进度/传输/音量/收藏）从 2026-11-13 D168 起固定在
@@ -539,19 +546,23 @@ apps/desktop/src/app_ui/
                             #     网格（`minmax(0, 1fr) auto`），`.player-bar` 占 `grid-column: 1;
                             #     grid-row: 2`——不再用"给歌词块加 min-height"把控制条顶下去；
                             #     收藏爱心是**空心描边**（实心红留给"已收藏"，功能未实装）；
-                            #     色晕是**噪波**：根节点注入 `--player-haze-noise` 指向 `useId()`
-                            #     生成的内联 SVG 滤镜（feTurbulence + `<animate baseFrequency>`
-                            #     + feDisplacementMap），那个 `<svg>` 必须 `position: absolute;
-                            #     width: 0; height: 0`，否则按内联 SVG 默认 300×150 占位、
-                            #     把整块舞台往下推；
+                            #     色晕是**离线烘焙的噪波纹理**（2026-11-14 D175 起，
+                            #     运行时不再跑 SVG 滤镜）：三张 640×640 的 data-URI 纹理
+                            #     挂在 CSS 变量上（`--player-haze-tex-a/b/c`，feTurbulence
+                            #     `numOctaves=5` + feDisplacementMap 210/190/170 +
+                            #     feGaussianBlur 22/25/28），每团是 `.player-haze-cluster`
+                            #     里的**两个兄弟 `span`**（遮罩是元素级的，伪元素做不了第二层）
+                            #     按 `alternate` / `alternate-reverse` 交叉淡入，轮廓一直变；
                             #     无封面**不省略那一块**：`CoverVisual` 用曲名渲染占位封面
                             #     （同一块画布、同样的圆角与投影），**唱片圆心例外**（不写字，
                             #     无封面就是唱片的正常部分）；`data-has-lyrics` 让"没有歌词"
                             #     时用 `margin-top` 补出同样的空白，控制条始终在歌词底下；
                             #     disc 的唱片钉在右上（`top:-32%` / `right:-18%`）并被裁切）；
-                            #     2026-11-13 D169：色晕回到**三团**（`blob-a/b/c`，第三团压在中间
-                            #     补缝——只有两团时中间是一道直边，看上去就是"两个圆贴在一起"），
-                            #     `feDisplacementMap` 的 `scale` = 140、`numOctaves` = 4；
+                            #     色晕仍是**三团互咬**（`cluster-a/b/c`，第三团压在中间补缝——
+                            #     只有两团时中间是一道直边，看上去就是"两个圆贴在一起"）；
+                            #     几何与漂移在 cluster 上（53 / 71 / 89s、`translate3d` ±14–20%、
+                            #     `scale` 0.80–1.30、`rotate` ±12°），样式 2 的压暗也在 cluster
+                            #     上——blob 的 fade 动画会逐帧盖掉普通声明；
                             #     传输行在 disc 下拆成**三段网格**（`.player-transport-side` /
                             #     `.player-transport-main` / `.player-transport-side-end`），
                             #     随机+循环贴左端、上一首+播放+下一首居中、收藏贴右端——两端与
@@ -561,8 +572,13 @@ apps/desktop/src/app_ui/
                             #     无时间轴退化成 `synced:false` 的整块文本；`activeLrcIndex`
                             #     二分找当前行、`lrcWindow` 取上下文窗口并两端夹紧；
                             #     `pairLrcLines` 把"同一时刻两个时间标签"的相邻两行配成
-                            #     主 + 副，得到双语歌词——**不猜语言**，也不要求额外的
-                            #     翻译文件约定；阈值 `LRC_PAIR_GAP_MS` = 120ms 是参数）
+                            #     主 + 副，得到双语歌词——**按假名定主副**（`KANA_PATTERN`
+                            #     `/[぀-ヿ]/` 命中者当 `main`，深海少女那份是"先译文
+                            #     后原文"，光按行序会把中文顶上去）；`//`、纯符号、`曲：/詞：/
+                            #     作曲：` 这类元信息与 `著作权` 声明**只在配对阶段**剔除
+                            #     （`isNoiseLrcLine`，`parseLrc` 仍保留这些行）；阈值
+                            #     `LRC_PAIR_GAP_MS` = 120ms 是参数；时间标签小数位 1–6 位
+                            #     （素材里的 `[01:32.869995]` 是 6 位，早年只认 1–3 位会整行丢字））
                             #   lyricView.ts 歌词排版纯函数（`lyricIndent(distance)` 返回
                             #     **cqw** 数值：固定像素在宽面板上看不出错位、窄面板上会把
                             #     行推出可视区；阶梯 5 行封顶 + 按行号取的小抖动，避免等距
@@ -575,6 +591,12 @@ apps/desktop/src/app_ui/
                             #     `lyricFillPercent`（换成 CSS 百分比，0 / 1 两个边界有唯一出处）。
                             #     D171 的逐字方案（`lyricChars` / `sungCharCount`）已删除——D172
                             #     改成进度条式填充，不再按字跳格）
+                            #     2026-11-14 D179 加**分行填充**三件套：`lyricBands(rects)`
+                            #     把 `Range.getClientRects()` 按纵向重叠归并成行箱（同行的多个
+                            #     文本节点并成一行）、`lyricBandProgress(bands, p)` 按**行宽**
+                            #     （∝ 字数）切分整句进度、`lyricBandFill(bands, p)` 给每行生成
+                            #     一层 `to right` 渐变并给出 `size` / `position`；`LYRIC_BAND_SOFT`
+                            #     = 6 是行内柔边百分比（与 CSS 里单行 ±6% 同口径）
                             #   ruby.ts 假名注音纯函数（2026-11-14 D176：`心臓（しんぞう）`
                             #     这种「汉字 + 全角括号假名」渲染成 `<ruby>`+`<rt>`——
                             #     `parseRuby(text)` 切成 `{text, ruby?}` 段，`hasRuby(text)`

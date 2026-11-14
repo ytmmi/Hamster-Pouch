@@ -244,8 +244,8 @@
     边界**；歌词一旦折行，横向裁剪又让两行各自从中间截断，看起来像"整块被平移"。现在只有一层
     文字：`background-image: linear-gradient(to right, 已唱 0%, 已唱 var(--player-lyric-progress),
     未唱 …)` 配 `background-clip: text; color: transparent`，字形本身就是边界，光晕改用
-    `filter: drop-shadow` 重新挂上；折行时（`Range.getClientRects().length > 1`）渐变改 `to bottom`，
-    逐行从上往下推。
+    `filter: drop-shadow` 重新挂上。（折行时**不再**换成 `to bottom` 的纵向渐变——那会让两行被
+    同一道水平分界线切开，2026-11-14 D179 改成按文本行逐行推进，见下面那条。）
   - **填充边界是渐变的，不是刀切**（2026-11-14 D176 用户："不使用进度条式竖直的僵硬边界，而是加
     一个 1-0 的透明度柔和过渡"）：渐变两端各留 6%（`calc(var(--player-lyric-progress) - 6%)` /
     `+ 6%`），扫过时是一条软边在移动，而不是一条竖线。
