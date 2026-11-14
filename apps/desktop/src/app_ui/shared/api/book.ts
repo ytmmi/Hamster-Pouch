@@ -1,7 +1,7 @@
 /**
  * 图书命令封装（`book.meta` 元数据 / `book.content` 查看器正文）。
  *
- * **D76 迁移状态：已包装**：命令返回 `{ ok, data?, error? }`，这里经 [`unwrapApi`] 解包。
+ * **D76 迁移状态：已包装**：命令返回 `{ ok, data?, error? }`，这里经 [`invokeApi`] 解包。
  *
  * - `bookMeta` 的调用方是**图书预览面板**（`panels/bookpreview/`）。只有带 **book 标记**
  *   的条目需要调用它——`epub` 取内嵌封面、**`pdf` 取第一页栅格化**；
@@ -11,7 +11,7 @@
  * - `bookToc` 的调用方是**图书阅读器面板**，取章节清单（游标与 `bookContent` 同语义）。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invokeApi } from "./call";
 
 import type {
   BookContentArgs,
@@ -26,7 +26,6 @@ import type {
   ReaderAddAnnotationArgs,
   ReaderAnnotationItem,
 } from "../types";
-import { unwrapApi, type ApiResponse } from "./response";
 
 /**
  * 读取一本书的作者 / 简介 / 封面路径（后端带磁盘缓存，按内容哈希失效）。
@@ -35,10 +34,10 @@ import { unwrapApi, type ApiResponse } from "./response";
  * 因此这条缓存不是可选项——没有它，卡片网格每滚动一次就要重画一遍。
  */
 export function bookMeta(args: BookMetaArgs): Promise<BookMetaResult> {
-  return invoke<ApiResponse<BookMetaResult>>("book_meta", {
+  return invokeApi<BookMetaResult>("book_meta", {
     repoId: args.repoId,
     fileId: args.fileId,
-  }).then(unwrapApi);
+  });
 }
 
 /**
@@ -52,11 +51,11 @@ export function bookMeta(args: BookMetaArgs): Promise<BookMetaResult> {
  * 与 epub 的章节序号同形，因此前端的分页与进度提示只有一套。
  */
 export function bookContent(args: BookContentArgs): Promise<BookContentResult> {
-  return invoke<ApiResponse<BookContentResult>>("book_content", {
+  return invokeApi<BookContentResult>("book_content", {
     repoId: args.repoId,
     fileId: args.fileId,
     cursor: args.cursor ?? null,
-  }).then(unwrapApi);
+  });
 }
 
 /**
@@ -71,10 +70,10 @@ export function bookContent(args: BookContentArgs): Promise<BookContentResult> {
  * 空目录**不是错误**（PDF / 损坏的书）：调用方给空态即可。
  */
 export function bookToc(args: BookTocArgs): Promise<BookTocResult> {
-  return invoke<ApiResponse<BookTocResult>>("book_toc", {
+  return invokeApi<BookTocResult>("book_toc", {
     repoId: args.repoId,
     fileId: args.fileId,
-  }).then(unwrapApi);
+  });
 }
 
 /**
@@ -86,10 +85,10 @@ export function readerAnnotations(
   repoId: string,
   fileId: string,
 ): Promise<ReaderAnnotationItem[]> {
-  return invoke<ApiResponse<ReaderAnnotationItem[]>>("reader_annotations", {
+  return invokeApi<ReaderAnnotationItem[]>("reader_annotations", {
     repoId,
     fileId,
-  }).then(unwrapApi);
+  });
 }
 
 /**
@@ -101,7 +100,7 @@ export function readerAnnotations(
 export function readerAddAnnotation(
   args: ReaderAddAnnotationArgs,
 ): Promise<ReaderAnnotationItem> {
-  return invoke<ApiResponse<ReaderAnnotationItem>>("reader_add_annotation", {
+  return invokeApi<ReaderAnnotationItem>("reader_add_annotation", {
     repoId: args.repoId,
     fileId: args.fileId,
     kind: args.kind,
@@ -110,15 +109,15 @@ export function readerAddAnnotation(
     title: args.title,
     excerpt: args.excerpt,
     note: args.note,
-  }).then(unwrapApi);
+  });
 }
 
 /** 删除一条阅读批注（**幂等**：删不存在的 id 也成功）。 */
 export function readerDeleteAnnotation(repoId: string, annotationId: string): Promise<void> {
-  return invoke<ApiResponse<void>>("reader_delete_annotation", {
+  return invokeApi<void>("reader_delete_annotation", {
     repoId,
     annotationId,
-  }).then(unwrapApi);
+  });
 }
 
 /**
@@ -128,15 +127,15 @@ export function readerDeleteAnnotation(repoId: string, annotationId: string): Pr
  * 面板按一页传 id，因此不会退化成"每本书一次 IPC"。
  */
 export function bookCovers(repoId: string, fileIds: string[]): Promise<BookCoverItem[]> {
-  return invoke<ApiResponse<BookCoverItem[]>>("book_covers", {
+  return invokeApi<BookCoverItem[]>("book_covers", {
     repoId,
     fileIds,
-  }).then(unwrapApi);
+  });
 }
 
 /** 读取**单个**文件的封面覆盖（两个字段为 `null` = 没有覆盖）。 */
 export function bookCover(repoId: string, fileId: string): Promise<BookCoverResult> {
-  return invoke<ApiResponse<BookCoverResult>>("book_cover", { repoId, fileId }).then(unwrapApi);
+  return invokeApi<BookCoverResult>("book_cover", { repoId, fileId });
 }
 
 /**
@@ -146,17 +145,15 @@ export function bookCover(repoId: string, fileId: string): Promise<BookCoverResu
  * 绝对路径**（用户在系统对话框里挑的那张），桥接层会把它拷进 `data\user\covers\`。
  */
 export function bookSetCover(args: BookSetCoverArgs): Promise<BookCoverResult> {
-  return invoke<ApiResponse<BookCoverResult>>("book_set_cover", {
+  return invokeApi<BookCoverResult>("book_set_cover", {
     repoId: args.repoId,
     fileId: args.fileId,
     kind: args.kind,
     value: args.value,
-  }).then(unwrapApi);
+  });
 }
 
 /** 清除封面覆盖，回到默认封面（内嵌封面或文字封面）。 */
 export function bookClearCover(repoId: string, fileId: string): Promise<BookCoverResult> {
-  return invoke<ApiResponse<BookCoverResult>>("book_clear_cover", { repoId, fileId }).then(
-    unwrapApi,
-  );
+  return invokeApi<BookCoverResult>("book_clear_cover", { repoId, fileId });
 }

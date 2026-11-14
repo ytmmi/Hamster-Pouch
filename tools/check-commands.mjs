@@ -11,8 +11,9 @@
  *    `迁移状态 = 已包装` 的命令，桥接层的 `fn <domain>_<action>` 必须返回
  *    `ApiResponse<…>` 或 `ApiAsync<…>`；
  * 2. **文档 → 代码（裸返回）**：标 `裸返回` 的命令**不得**已经包装（防"代码先行、文档没跟"）；
- * 3. **前端封装口径**：已包装的命令在 `api/*.ts` 里必须经 `unwrapApi` 解包
- *    （否则调用方会把 `{ ok, data }` 当领域值用）；
+ * 3. **前端封装口径**：已包装的命令在 `api/*.ts` 里必须经 `invokeApi`（`call.ts`）解包，
+ *    且 `call.ts` 之外不得手抄 `invoke<ApiResponse<…>>().then(unwrapApi)`（否则调用方会把
+ *    `{ ok, data }` 当领域值用，D204）；
  * 4. **D79**：6 条 tag 关系/摘挂命令的前端封装都在（见
  *    `docs/architecture/implementation-status.md` §2.7 #16）。
  *
@@ -141,7 +142,7 @@ check(
   wronglyWrapped.length ? `已包装但文档没跟: ${wronglyWrapped.join(" | ")}` : `共 ${bare.length} 条`,
 );
 
-// 前端封装口径：已包装的命令必须在 api/*.ts 里解包。
+// 前端封装口径：已包装的命令必须在 api/*.ts 里经 `invokeApi` 取（D204 起解包只有一处）。
 const apiSrc = readdirSync(API_DIR)
   .filter((f) => f.endsWith(".ts"))
   .map((f) => readFileSync(join(API_DIR, f), "utf8"))
@@ -152,14 +153,49 @@ for (const c of wrapped) {
   const snake = fnNameOf(c.name);
   const idx = apiSrc.indexOf(`"${snake}"`);
   if (idx < 0) continue; // 没有前端封装：属于另一类缺口，不算解包缺失
-  if (!apiSrc.slice(idx, idx + 400).includes("unwrapApi")) {
+  // `invokeApi` 在命令名**之前**（`return invokeApi<T>("cmd", …)`），窗口要往前也留出余量。
+  if (!apiSrc.slice(Math.max(0, idx - 200), idx + 400).includes("invokeApi")) {
     unwrappedCallers.push(`${c.name}（${snake}）`);
   }
 }
 check(
-  "已包装命令的前端封装经 unwrapApi 解包",
+  "已包装命令的前端封装经 invokeApi 统一解包",
   unwrappedCallers.length === 0,
   unwrappedCallers.length ? `缺解包: ${unwrappedCallers.join(" | ")}` : "",
+);
+
+// D204：解包只有一处。`invoke<ApiResponse<…>>(...).then(unwrapApi)` 曾在 25 个 API 文件里
+// 手抄 163 处——泛型少写一层或漏掉 `.then` 都不报错，只会在运行期把信封当领域值。
+// 现在唯一出口是 `call.ts` 的 `invokeApi`，其余 API 文件一律不得直接 invoke。
+const API_DIRS = [API_DIR, join(ROOT, "apps/desktop/src/test_ui/api")];
+const apiFiles = API_DIRS.flatMap((dir) =>
+  readdirSync(dir)
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => ({ name: f, src: readFileSync(join(dir, f), "utf8") })),
+);
+const handRolled = apiFiles
+  .filter((f) => f.name !== "call.ts")
+  .filter((f) => /\.then\(\s*unwrapApi\b/.test(f.src) || f.src.includes("invoke<ApiResponse<"))
+  .map((f) => f.name);
+const rawInvoke = apiFiles
+  // 只认真的调用（`return invoke<…>(` / `void invoke(…`）；注释里的行文提到 `invoke<T>` 不算。
+  .filter((f) => f.name !== "call.ts" && /(?:return|void|=)\s*invoke[<(]/.test(f.src))
+  .map((f) => f.name);
+check(
+  "API 层的解包只有一处（call.ts 的 invokeApi），其余文件不得手抄 invoke + unwrapApi",
+  handRolled.length === 0 && rawInvoke.length === 0,
+  handRolled.length || rawInvoke.length
+    ? `越界: ${[...new Set([...handRolled, ...rawInvoke])].join(" | ")}`
+    : `共 ${apiFiles.length} 个文件`
+);
+
+const callSrc = readFileSync(join(API_DIR, "call.ts"), "utf8");
+check(
+  "call.ts 是 invokeApi 的唯一实现（invoke<ApiResponse<T>> + unwrapApi）",
+  /export function invokeApi<T>/.test(callSrc) &&
+    callSrc.includes("invoke<ApiResponse<T>>") &&
+    callSrc.includes(".then(unwrapApi)"),
+  "",
 );
 
 // D79：tag 关系/摘挂命令的前端封装。

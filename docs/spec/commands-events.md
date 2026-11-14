@@ -36,9 +36,10 @@ interface HpError {
 `apps/desktop/src-tauri/src/commands/shared/response.rs` 提供 `ApiResponse<T>` / `ApiError` / `api_from_hp`，
 `crates/hp-core/src/error.rs` 的 `HpError::code()` 给出 D76 的**闭集错误码**，
 前端 `apps/desktop/src/app_ui/shared/api/response.ts` 提供统一解包层 `unwrapApi` 与
-`code → i18n` 文案映射（三套语言都有 `error.code.*` 键）。
+`code → i18n` 文案映射（三套语言都有 `error.code.*` 键）；**调用侧的唯一出口**是
+`apps/desktop/src/app_ui/shared/api/call.ts` 的 `invokeApi<T>(command, args?)`（D204）。
 **已按新口径落地**：`setting.get/set/list/reset`（见 3.13）与 `plugin.panelSchema` / `plugin.validateControl`（见 3.11）。
-**D76 已收尾（2026-11-14 复核）**：桥接层 144 条 `#[tauri::command]` **全部**返回 `ApiResponse<T>`（126 条）或 `ApiAsync<T>`（18 条），**0 条裸返回**，`hp_err_to_string` 只剩 `ApiAsync` 的内部通道；前端 `test_ui` 的 22 处裸 `invoke` 也已在 D182 改成 `invoke<ApiResponse<T>>(...).then(unwrapApi)`。逐条差异见 `docs/architecture/command-event-drift.md` 与第 3 节各表的「迁移状态」列。
+**D76 已收尾（2026-11-14 复核）**：桥接层 144 条 `#[tauri::command]` **全部**返回 `ApiResponse<T>`（126 条）或 `ApiAsync<T>`（18 条），**0 条裸返回**，`hp_err_to_string` 只剩 `ApiAsync` 的内部通道；前端 `test_ui` 的 22 处裸 `invoke` 也在 D182 改成 `invoke<ApiResponse<T>>(...).then(unwrapApi)`；**D204 起这批手抄全部收进 `call.ts`**——`app_ui/shared/api/*.ts` 与 `test_ui/api/*.ts` 的 163 处统一写成 `invokeApi<T>(...)`，`unwrapApi` 的调用点只剩 `call.ts` 一处。逐条差异见 `docs/architecture/command-event-drift.md` 与第 3 节各表的「迁移状态」列。
 
 **两处**有意的**排序调整**（不改 D76 的批次口径，只说明实际执行顺序）：
 
@@ -239,7 +240,7 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 > 磁盘/回收站/父目录失败 → `io`。`thumb.get` 是**异步命令**：Tauri 的
 > `#[tauri::command]` 对含引用的 async 命令强制要求返回 `Result`，因此它用
 > `ApiAsync<T>`（`commands/shared/response.rs`）——包装仍落在**成功值**里（恒 `Ok`），
-> 前端只需一套 `unwrapApi`。界面侧的错误显示改为 `errorTextOf(t, e)`：
+> 前端只需一套 `invokeApi`（内部调 `unwrapApi`）。界面侧的错误显示改为 `errorTextOf(t, e)`：
 > 已迁移域按 `code` 走 i18n，**未迁移域仍是裸串**时原样显示（不丢信息），
 > 该域迁移后自动收敛。
 

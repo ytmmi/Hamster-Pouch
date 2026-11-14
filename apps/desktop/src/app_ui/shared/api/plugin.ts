@@ -2,11 +2,11 @@
  * M5：插件命令封装（plugin.*，RFC 0004）。
  *
  * **D76 迁移状态：已包装**（批次 `plugin`，2026-09）。本域全部命令（含两条控件通道命令）
- * 均返回 `{ ok, data?, error? }`，这里经 [`unwrapApi`] 解包：调用方拿到的仍是原来的
+ * 均返回 `{ ok, data?, error? }`，这里经 [`invokeApi`] 解包：调用方拿到的仍是原来的
  * 领域值，失败时抛带 `code` 的 `HpApiFailure`，界面按 `code` 走 i18n（D27）。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invokeApi } from "./call";
 
 import type {
   DiscoveredPlugin,
@@ -20,21 +20,20 @@ import type { ControlValidateResult } from "@hamster-pouch/config";
 import type { ControlBindRequest } from "../control/controlBinds";
 import type { ControlQueryResult } from "../control/controlData";
 import type { PluginContributions } from "../types";
-import { unwrapApi, type ApiResponse } from "./response";
 
 /** 列出已安装插件 */
 export function pluginList(): Promise<PluginItem[]> {
-  return invoke<ApiResponse<PluginItem[]>>("plugin_list").then(unwrapApi);
+  return invokeApi<PluginItem[]>("plugin_list");
 }
 
 /** 扫描目录下的插件包（不安装） */
 export function pluginDiscover(dir: string): Promise<DiscoveredPlugin[]> {
-  return invoke<ApiResponse<DiscoveredPlugin[]>>("plugin_discover", { dir }).then(unwrapApi);
+  return invokeApi<DiscoveredPlugin[]>("plugin_discover", { dir });
 }
 
 /** 安装本地路径插件包并注册 */
 export function pluginInstallLocal(path: string): Promise<PluginItem> {
-  return invoke<ApiResponse<PluginItem>>("plugin_install_local", { path }).then(unwrapApi);
+  return invokeApi<PluginItem>("plugin_install_local", { path });
 }
 
 /**
@@ -69,7 +68,7 @@ export interface BundledInstallReport {
  * **幂等**：同版本目录已存在 → 该项 `alreadyInstalled`，不覆盖、不报错。
  */
 export function pluginInstallBundled(): Promise<BundledInstallReport> {
-  return invoke<ApiResponse<BundledInstallReport>>("plugin_install_bundled").then(unwrapApi);
+  return invokeApi<BundledInstallReport>("plugin_install_bundled");
 }
 
 /** 按仓库启用并授权能力 */
@@ -78,12 +77,12 @@ export function pluginEnable(
   pluginId: string,
   grants: string[],
 ): Promise<PluginStateItem> {
-  return invoke<ApiResponse<PluginStateItem>>("plugin_enable", { repoId, pluginId, grants }).then(unwrapApi);
+  return invokeApi<PluginStateItem>("plugin_enable", { repoId, pluginId, grants });
 }
 
 /** 按仓库禁用插件 */
 export function pluginDisable(repoId: string, pluginId: string): Promise<void> {
-  return invoke<ApiResponse<void>>("plugin_disable", { repoId, pluginId }).then(unwrapApi);
+  return invokeApi<void>("plugin_disable", { repoId, pluginId });
 }
 
 /** 查询插件在某仓库的启用与授权状态 */
@@ -91,22 +90,22 @@ export function pluginState(
   repoId: string,
   pluginId: string,
 ): Promise<PluginStateItem | null> {
-  return invoke<ApiResponse<PluginStateItem | null>>("plugin_state", { repoId, pluginId }).then(unwrapApi);
+  return invokeApi<PluginStateItem | null>("plugin_state", { repoId, pluginId });
 }
 
 /** 加载插件（生命周期骨架） */
 export function pluginLoad(repoId: string, pluginId: string): Promise<PluginLoadItem> {
-  return invoke<ApiResponse<PluginLoadItem>>("plugin_load", { repoId, pluginId }).then(unwrapApi);
+  return invokeApi<PluginLoadItem>("plugin_load", { repoId, pluginId });
 }
 
 /** 列出某插件已安装版本 */
 export function pluginVersions(pluginId: string): Promise<string[]> {
-  return invoke<ApiResponse<string[]>>("plugin_versions", { pluginId }).then(unwrapApi);
+  return invokeApi<string[]>("plugin_versions", { pluginId });
 }
 
 /** 回滚到指定已安装版本 */
 export function pluginRollback(pluginId: string, version: string): Promise<string> {
-  return invoke<ApiResponse<string>>("plugin_rollback", { pluginId, version }).then(unwrapApi);
+  return invokeApi<string>("plugin_rollback", { pluginId, version });
 }
 
 /**
@@ -116,7 +115,7 @@ export function pluginRollback(pluginId: string, version: string): Promise<strin
  * 不兼容时其注册项缺席 —— 蓝图侧按「未接通」处理（软告警、允许保存、恢复后自动恢复）。
  */
 export function pluginContributions(repoId: string): Promise<PluginContributions> {
-  return invoke<ApiResponse<PluginContributions>>("plugin_contributions", { repoId }).then(unwrapApi);
+  return invokeApi<PluginContributions>("plugin_contributions", { repoId });
 }
 
 /** 「扩展」菜单里插件贡献的一个面板声明。 */
@@ -166,7 +165,7 @@ export interface PluginCatalogItem {
  * 目录照常返回，只是所有 `enabled` 均为 false）。
  */
 export function pluginCatalog(repoId: string): Promise<PluginCatalogItem[]> {
-  return invoke<ApiResponse<PluginCatalogItem[]>>("plugin_catalog", { repoId }).then(unwrapApi);
+  return invokeApi<PluginCatalogItem[]>("plugin_catalog", { repoId });
 }
 
 /**
@@ -186,9 +185,7 @@ export interface PythonRuntimeStatusItem {
 }
 
 export function pluginPythonRuntimeStatus(repoId: string): Promise<PythonRuntimeStatusItem> {
-  return invoke<ApiResponse<PythonRuntimeStatusItem>>("plugin_python_runtime_status", { repoId }).then(
-    unwrapApi,
-  );
+  return invokeApi<PythonRuntimeStatusItem>("plugin_python_runtime_status", { repoId });
 }
 
 /**
@@ -201,10 +198,10 @@ export interface PythonRuntimeSelftestItem {
 }
 
 export function pluginPythonRuntimeSelftest(repoId: string): Promise<PythonRuntimeSelftestItem> {
-  return invoke<ApiResponse<PythonRuntimeSelftestItem>>(
+  return invokeApi<PythonRuntimeSelftestItem>(
     "plugin_python_runtime_selftest",
     { repoId },
-  ).then(unwrapApi);
+  );
 }
 
 /** `plugin.panelSchema` 的返回项（D76 已包装）。 */
@@ -229,10 +226,10 @@ export function pluginPanelSchema(
   repoId: string,
   panelId: string,
 ): Promise<PanelSchemaItem> {
-  return invoke<ApiResponse<PanelSchemaItem>>("plugin_panel_schema", {
+  return invokeApi<PanelSchemaItem>("plugin_panel_schema", {
     repoId,
     panelId,
-  }).then(unwrapApi);
+  });
 }
 
 /**
@@ -245,10 +242,10 @@ export function pluginValidateControl(
   panelId: string,
   schemaJson: string,
 ): Promise<ControlValidateResult> {
-  return invoke<ApiResponse<ControlValidateResult>>("plugin_validate_control", {
+  return invokeApi<ControlValidateResult>("plugin_validate_control", {
     panelId,
     schemaJson,
-  }).then(unwrapApi);
+  });
 }
 
 /**
@@ -290,7 +287,7 @@ export function pluginPanelData(args: {
     binds: args.binds,
   };
   if (args.selectedFileId) payload.selectedFileId = args.selectedFileId;
-  return invoke<ApiResponse<PanelDataItem>>("plugin_panel_data", payload).then(unwrapApi);
+  return invokeApi<PanelDataItem>("plugin_panel_data", payload);
 }
 
 /** `plugin.controlEvent` 的确认载荷（字段为蛇形，与本域管理命令同口径）。 */
@@ -339,5 +336,5 @@ export function pluginControlEvent(args: ControlEventArgs): Promise<ControlEvent
   };
   if (args.value !== undefined) payload.value = args.value;
   if (args.target !== undefined) payload.target = args.target;
-  return invoke<ApiResponse<ControlEventAck>>("plugin_control_event", payload).then(unwrapApi);
+  return invokeApi<ControlEventAck>("plugin_control_event", payload);
 }

@@ -3,8 +3,9 @@
  * （`docs/spec/commands-events.md` 第 2 节、`docs/architecture/decision-checklist.md` D76/D27）。
  *
  * 后端新命令一律返回 `{ ok, data?, error? }`；旧命令按 D76 的批次顺序分批迁移，
- * 迁移完成前仍直接返回领域值。两者的差别**只在本文件里**：调用方拿到的
- * 永远是"成功值"或一个带 `code` 的 [`HpApiError`]。
+ * 迁移完成前仍直接返回领域值。两者的差别**只在解包这一层**：调用方拿到的
+ * 永远是"成功值"或一个带 `code` 的 [`HpApiError`]。D204 起解包的**调用点只有**
+ * `./call.ts` 的 `invokeApi` 一处，其余模块不再直接 `invoke`。
  *
  * **`HpError.message` 仅作诊断，前端不得直接显示**：界面文案必须按 `code` 走 i18n 键
  * （D27：三套语言）。`apiErrorMessageKey()` 给出该键，`apiErrorMessage()` 负责翻译。

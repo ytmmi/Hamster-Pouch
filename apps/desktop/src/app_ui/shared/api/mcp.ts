@@ -7,17 +7,16 @@
  * `setting.set` 写入后后端自动应用，不给命令开第二个开关。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invokeApi } from "./call";
 
 import type { McpStatus } from "../types/mcp";
-import { unwrapApi, type ApiResponse } from "./response";
 
 /** 查询内置 MCP 服务的运行状态与客户端接入信息。 */
 export function mcpStatus(): Promise<McpStatus> {
-  return invoke<ApiResponse<McpStatus>>("mcp_status").then(unwrapApi);
+  return invokeApi<McpStatus>("mcp_status");
 }
 
 /** 按当前设置项重新应用服务（供"端口被占、改完再试"）。 */
 export function mcpReload(): Promise<McpStatus> {
-  return invoke<ApiResponse<McpStatus>>("mcp_reload").then(unwrapApi);
+  return invokeApi<McpStatus>("mcp_reload");
 }

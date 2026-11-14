@@ -451,7 +451,8 @@ check(
   "setting.* 已按 D76 包装（{ ok, data?, error? }），前端对应解包",
   /ApiResponse<SettingValueResult>/.test(repoBridge) &&
     /ApiResponse<SettingOkResult>/.test(repoBridge) &&
-    /unwrapApi/.test(
+    // D204 起前端的解包只在 `call.ts` 的 `invokeApi` 里做，命令模块只经它取数。
+    /invokeApi/.test(
       readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/api/repo.ts"), "utf8"),
     ),
 );
