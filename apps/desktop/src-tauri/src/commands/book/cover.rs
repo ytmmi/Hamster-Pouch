@@ -2,6 +2,8 @@
 
 use super::prelude::*;
 
+use crate::commands::shared::{with_repo, with_repo_mut};
+
 /// 封面图片允许的扩展名（按 magic bytes 判定，不信任用户文件的后缀名）。
 pub(crate) const COVER_IMAGE_EXTS: [&str; 6] = ["jpg", "png", "gif", "webp", "bmp", "svg"];
 
@@ -54,10 +56,7 @@ pub(crate) async fn book_covers(
     file_ids: Vec<String>,
     state: State<'_, AppState>,
 ) -> ApiAsync<Vec<BookCoverItem>> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<Vec<BookCoverItem>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    let outcome = with_repo(&state, &repo_id, |db| {
         let covers = db.covers_for_files(&file_ids)?;
         let mut out: Vec<BookCoverItem> = covers
             .into_values()
@@ -76,7 +75,7 @@ pub(crate) async fn book_covers(
         // 顺序稳定（便于断言与 diff）：按 `file_id` 升序。
         out.sort_by(|a, b| a.file_id.cmp(&b.file_id));
         Ok(out)
-    })();
+    });
     api_async(api_from_hp(outcome))
 }
 
@@ -90,12 +89,9 @@ pub(crate) async fn book_cover(
     file_id: String,
     state: State<'_, AppState>,
 ) -> ApiAsync<BookCoverResult> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<BookCoverResult> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    let outcome = with_repo(&state, &repo_id, |db| {
         Ok(cover_to_result(db.get_file_cover(&file_id)?))
-    })();
+    });
     api_async(api_from_hp(outcome))
 }
 
@@ -115,8 +111,7 @@ pub(crate) async fn book_set_cover(
     value: String,
     state: State<'_, AppState>,
 ) -> ApiAsync<BookCoverResult> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<BookCoverResult> {
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let cover_kind = hp_core::CoverKind::from_str(&kind)
             .ok_or_else(|| HpError::InvalidArgument(format!("未知的封面种类: {kind}")))?;
 
@@ -126,8 +121,6 @@ pub(crate) async fn book_set_cover(
             hp_core::CoverKind::Image => copy_cover_image(&file_id, &value)?,
         };
 
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
         // 文件必须存在（外键也要求）：给不存在的 file_id 设封面是调用方的错。
         if db.get_file(&file_id)?.is_none() {
             return Err(HpError::NotFound(format!("文件不存在: {file_id}")));
@@ -138,7 +131,7 @@ pub(crate) async fn book_set_cover(
             prune_other_cover_images(&file_id, &cover.value);
         }
         Ok(cover_to_result(Some(cover)))
-    })();
+    });
     api_async(api_from_hp(outcome))
 }
 
@@ -151,10 +144,7 @@ pub(crate) async fn book_clear_cover(
     file_id: String,
     state: State<'_, AppState>,
 ) -> ApiAsync<BookCoverResult> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<BookCoverResult> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         // 先取旧值：删除之后才知道该删哪个文件。
         let previous = db.get_file_cover(&file_id)?;
         db.delete_file_cover(&file_id)?;
@@ -171,7 +161,7 @@ pub(crate) async fn book_clear_cover(
             kind: None,
             value: None,
         })
-    })();
+    });
     api_async(api_from_hp(outcome))
 }
 

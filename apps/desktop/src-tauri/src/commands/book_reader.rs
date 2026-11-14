@@ -47,9 +47,7 @@ use tauri::State;
 
 use crate::AppState;
 use crate::commands::book::{read_json_cache, write_atomic};
-use crate::commands::shared::{
-    ApiAsync, api_async, api_from_hp, lock_repo, open_repo, resolve_file_path,
-};
+use crate::commands::shared::{ApiAsync, api_async, api_from_hp, resolve_file_path, with_repo};
 
 /// 一本"书"在读目录时的**全部外部依赖**。
 ///
@@ -295,23 +293,19 @@ pub(crate) async fn book_toc(
     file_id: String,
     state: State<'_, AppState>,
 ) -> ApiAsync<BookTocResult> {
-    let _ = repo_id;
-
     let outcome = async {
-        let (src_path, media_type, content_hash, cache) = {
-            let guard = lock_repo(&state)?;
-            let db = open_repo(&guard)?;
+        let (src_path, media_type, content_hash, cache) = with_repo(&state, &repo_id, |db| {
             let file = db
                 .get_file(&file_id)?
                 .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
             let src_path = resolve_file_path(db, &file)?;
-            (
+            Ok((
                 src_path,
                 file.media_type,
                 file.content_hash,
                 (*state.thumb_cache).clone(),
-            )
-        };
+            ))
+        })?;
 
         if !media_type.is_book() {
             return Ok(empty_toc());

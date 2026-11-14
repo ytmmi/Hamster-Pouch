@@ -205,6 +205,12 @@ const BRIDGE_SRC = join(ROOT, "apps", "desktop", "src-tauri", "src");
 const SHARED_DIR = join(BRIDGE_SRC, "commands", "shared");
 const isSharedSource = (rel) =>
   rel.endsWith("commands/shared.rs") || rel.includes("commands/shared/");
+// 命令层源码（含子目录）：rel 以 `commands/` 开头，供「取用面」类断言逐个文件扫。
+const commandSources = () =>
+  walk(join(BRIDGE_SRC, "commands"), []).map((abs) => ({
+    abs,
+    rel: relative(BRIDGE_SRC, abs).replace(/\\/g, "/"),
+  }));
 const bridgeFiles = walk(BRIDGE_SRC, []);
 const handleOffenders = [];
 let repoFieldCount = 0;
@@ -397,7 +403,6 @@ report(
 // 要么查空（`list_mounted_sources(旧 id)` 静默返回空列表），要么把结果写进当前库。
 // 现在统一走 `with_repo` / `with_repo_mut`：id 与当前句柄不一致时返回 not_found，
 // 后台任务则在起线程之前用 `ensure_repo_binding` 校验掉。
-const REPO_ENTRY_FILES = ["file.rs", "source.rs"];
 const repoEntryOffenders = [];
 for (const needle of [
   "pub(crate) fn with_repo<T>",
@@ -408,19 +413,24 @@ for (const needle of [
   if (!sharedBody.includes(needle)) repoEntryOffenders.push(`commands/shared.rs 缺少 ${needle}`);
 }
 let repoEntryFiles = 0;
-for (const name of REPO_ENTRY_FILES) {
-  const rel = `commands/${name}`;
-  const body = stripComments(readFileSync(join(BRIDGE_SRC, rel), "utf8"));
+for (const file of commandSources()) {
+  if (isSharedSource(file.rel)) continue;
+  const body = stripComments(readFileSync(file.abs, "utf8"));
+  const usesRepo = /\bwith_repo(_mut)?\s*\(/.test(body) || /\bRepoDb\b/.test(body);
+  if (!usesRepo) continue;
   repoEntryFiles++;
   const legacy = (body.match(/\b(lock_repo|open_repo|open_repo_mut)\s*\(/g) ?? []).length;
   if (legacy > 0) {
-    repoEntryOffenders.push(`${rel}  仍手抄仓库取用（${legacy} 处，应走 with_repo*）`);
+    repoEntryOffenders.push(`${file.rel}  仍手抄仓库取用（${legacy} 处，应走 with_repo*）`);
   }
   if (/let\s+_\s*=\s*repo_id\s*;/.test(body)) {
-    repoEntryOffenders.push(`${rel}  把 repo_id 丢掉（let _ = repo_id），应传给 with_repo* 校验`);
+    repoEntryOffenders.push(`${file.rel}  把 repo_id 丢掉（let _ = repo_id），应传给 with_repo* 校验`);
   }
-  const calls = (body.match(/\b(with_repo|with_repo_mut|ensure_repo_binding)\s*\(&state/g) ?? []).length;
-  if (calls === 0) repoEntryOffenders.push(`${rel}  没有一处 with_repo* 调用`);
+  // `commands/repo.rs` 装卸句柄本身（open/close/delete/rename），不取库；其余一律要有一个取用口。
+  if (file.rel !== "commands/repo.rs") {
+    const calls = (body.match(/\b(with_repo|with_repo_mut|ensure_repo_binding)\s*\(&state/g) ?? []).length;
+    if (calls === 0) repoEntryOffenders.push(`${file.rel}  没有一处 with_repo* 调用`);
+  }
 }
 report(
   repoEntryOffenders.length === 0,

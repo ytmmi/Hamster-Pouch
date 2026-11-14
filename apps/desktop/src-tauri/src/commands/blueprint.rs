@@ -22,8 +22,7 @@ use tauri::State;
 use crate::AppState;
 use crate::commands::shared::EmitHp;
 use crate::commands::shared::{
-    ApiResponse, api_from_hp, ensure_global, global, global_guard, lock_repo, open_repo,
-    open_repo_mut,
+    ApiResponse, api_from_hp, ensure_global, global, global_guard, with_repo, with_repo_mut,
 };
 
 /// 广播蓝图变更：前端重载当前生效蓝图并重新对账布局（失败不影响命令结果）。
@@ -112,12 +111,10 @@ pub(crate) fn blueprint_list(
     repo_id: String,
     state: State<AppState>,
 ) -> ApiResponse<Vec<BlueprintItem>> {
-    let outcome = (|| -> HpResult<Vec<BlueprintItem>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    let outcome = with_repo(&state, &repo_id, |db| {
         let rows = db.list_blueprints(&repo_id)?;
         Ok(rows.into_iter().map(to_item).collect())
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -131,14 +128,12 @@ pub(crate) fn blueprint_get(
     blueprint_id: String,
     state: State<AppState>,
 ) -> ApiResponse<Option<String>> {
-    let outcome = (|| -> HpResult<Option<String>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    let outcome = with_repo(&state, &repo_id, |db| {
         let row = db.get_blueprint(&blueprint_id)?;
         Ok(row
             .filter(|r| r.repo_id == repo_id)
             .map(|r| r.blueprint_json))
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -149,12 +144,10 @@ pub(crate) fn blueprint_get_default(
     repo_id: String,
     state: State<AppState>,
 ) -> ApiResponse<Option<String>> {
-    let outcome = (|| -> HpResult<Option<String>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    let outcome = with_repo(&state, &repo_id, |db| {
         let row = db.get_default_blueprint(&repo_id)?;
         Ok(row.map(|r| r.blueprint_json))
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -169,7 +162,7 @@ pub(crate) fn blueprint_create(
     state: State<AppState>,
     app: tauri::AppHandle,
 ) -> ApiResponse<BlueprintItem> {
-    let outcome = (|| -> HpResult<BlueprintItem> {
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         if name.trim().is_empty() {
             return Err(HpError::InvalidArgument("蓝图名不能为空".into()));
         }
@@ -202,12 +195,10 @@ pub(crate) fn blueprint_create(
         };
         parse_valid(&template_json, &blueprint_registry(&state, &repo_id))?;
 
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
         let row = db.create_blueprint(&repo_id, name.trim(), &template_json)?;
         emit_changed(&app, &repo_id, Some(&row.id));
         Ok(to_item(row))
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -224,10 +215,8 @@ pub(crate) fn blueprint_save(
     state: State<AppState>,
     app: tauri::AppHandle,
 ) -> ApiResponse<BlueprintItem> {
-    let outcome = (|| -> HpResult<BlueprintItem> {
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         parse_valid(&blueprint_json, &blueprint_registry(&state, &repo_id))?;
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
         let name = match name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()) {
             Some(n) => n,
             None => {
@@ -240,7 +229,7 @@ pub(crate) fn blueprint_save(
         let row = db.save_blueprint(&repo_id, &blueprint_id, &name, &blueprint_json)?;
         emit_changed(&app, &repo_id, Some(&blueprint_id));
         Ok(to_item(row))
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -254,9 +243,7 @@ pub(crate) fn blueprint_delete(
     state: State<AppState>,
     app: tauri::AppHandle,
 ) -> ApiResponse<()> {
-    let outcome = (|| -> HpResult<()> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let owned = db
             .get_blueprint(&blueprint_id)?
             .map(|r| r.repo_id == repo_id)
@@ -267,7 +254,7 @@ pub(crate) fn blueprint_delete(
         db.delete_blueprint(&blueprint_id)?;
         emit_changed(&app, &repo_id, Some(&blueprint_id));
         Ok(())
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -279,15 +266,13 @@ pub(crate) fn blueprint_set_default(
     state: State<AppState>,
     app: tauri::AppHandle,
 ) -> ApiResponse<()> {
-    let outcome = (|| -> HpResult<()> {
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         {
-            let mut guard = lock_repo(&state)?;
-            let db = open_repo_mut(&mut guard)?;
             db.set_default_blueprint(&repo_id, &blueprint_id)?;
         }
         emit_changed(&app, &repo_id, Some(&blueprint_id));
         Ok(())
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -381,7 +366,7 @@ pub(crate) fn blueprint_template_install(
     state: State<AppState>,
     app: tauri::AppHandle,
 ) -> ApiResponse<BlueprintItem> {
-    let outcome = (|| -> HpResult<BlueprintItem> {
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let template_json = {
             let guard = global_guard(&state)?;
             let g = global(&guard)?;
@@ -392,8 +377,6 @@ pub(crate) fn blueprint_template_install(
         };
         parse_valid(&template_json, &blueprint_registry(&state, &repo_id))?;
 
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
         let row = db.create_blueprint(
             &repo_id,
             name.unwrap_or_else(|| template_id.clone()).trim(),
@@ -401,7 +384,7 @@ pub(crate) fn blueprint_template_install(
         )?;
         emit_changed(&app, &repo_id, Some(&row.id));
         Ok(to_item(row))
-    })();
+    });
     api_from_hp(outcome)
 }
 

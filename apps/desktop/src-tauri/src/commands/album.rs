@@ -12,8 +12,8 @@ use tauri::State;
 use crate::AppState;
 use crate::commands::shared::EmitHp;
 use crate::commands::shared::{
-    AlbumFileItem, ApiAsync, ApiResponse, api_async, api_from_hp, file_to_item, lock_repo,
-    open_repo, open_repo_mut,
+    AlbumFileItem, ApiAsync, ApiResponse, api_async, api_from_hp, file_to_item, with_repo,
+    with_repo_mut,
 };
 
 #[derive(Serialize)]
@@ -113,16 +113,13 @@ pub(crate) fn album_create(
     file_ids: Option<Vec<String>>,
     state: State<AppState>,
 ) -> ApiResponse<AlbumCreateResult> {
-    let outcome = (|| -> HpResult<AlbumCreateResult> {
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         if name.trim().is_empty() {
             return Err(HpError::InvalidArgument("相册名不能为空".into()));
         }
         let kind = AlbumKind::from_str(&kind)
             .ok_or_else(|| HpError::InvalidArgument(format!("未知相册类型: {kind}")))?;
         let media_type = parse_album_media_type(media_type.as_deref())?;
-
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
 
         let album = match kind {
             AlbumKind::Fixed => {
@@ -159,7 +156,7 @@ pub(crate) fn album_create(
         Ok(AlbumCreateResult {
             album_id: album.id.as_str().to_string(),
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -179,7 +176,7 @@ pub(crate) fn album_create_snapshot(
     include_subsources: Option<bool>,
     state: State<AppState>,
 ) -> ApiResponse<AlbumCreateResult> {
-    let outcome = (|| -> HpResult<AlbumCreateResult> {
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let name = name.trim();
         if name.is_empty() {
             return Err(HpError::InvalidArgument("相册名不能为空".into()));
@@ -188,8 +185,6 @@ pub(crate) fn album_create_snapshot(
             return Err(HpError::InvalidArgument("创建相册必须提供 sourceId".into()));
         }
         let media_type = parse_album_media_type(media_type.as_deref())?;
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
         let album = AlbumService::create_snapshot(
             db,
             &repo_id,
@@ -203,7 +198,7 @@ pub(crate) fn album_create_snapshot(
         Ok(AlbumCreateResult {
             album_id: album.id.as_str().to_string(),
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -220,7 +215,7 @@ pub(crate) fn album_create_sync(
     relative_path: Option<String>,
     state: State<AppState>,
 ) -> ApiResponse<AlbumCreateResult> {
-    let outcome = (|| -> HpResult<AlbumCreateResult> {
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let name = name.trim();
         if name.is_empty() {
             return Err(HpError::InvalidArgument("相册名不能为空".into()));
@@ -229,8 +224,6 @@ pub(crate) fn album_create_sync(
             return Err(HpError::InvalidArgument("同步相册必须提供 sourceId".into()));
         }
         let media_type = parse_album_media_type(media_type.as_deref())?;
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
         let album = AlbumService::create_sync_album(
             db,
             &repo_id,
@@ -243,7 +236,7 @@ pub(crate) fn album_create_sync(
         Ok(AlbumCreateResult {
             album_id: album.id.as_str().to_string(),
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -260,10 +253,7 @@ pub(crate) fn album_move(
     before_album_id: Option<String>,
     state: State<AppState>,
 ) -> ApiResponse<AlbumMoveResult> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<AlbumMoveResult> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let outcome = AlbumService::move_album_ordered(
             db,
             &album_id,
@@ -275,7 +265,7 @@ pub(crate) fn album_move(
             parent_album_id: outcome.parent_album_id,
             order_changed: outcome.order_changed,
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -286,15 +276,12 @@ pub(crate) fn album_unsync(
     album_id: String,
     state: State<AppState>,
 ) -> ApiResponse<AlbumUnsyncResult> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<AlbumUnsyncResult> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let outcome = AlbumService::unsync_album(db, &album_id)?;
         Ok(AlbumUnsyncResult {
             released_children: outcome.released_children,
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -306,16 +293,14 @@ pub(crate) fn album_set_media_type(
     media_type: Option<String>,
     state: State<AppState>,
 ) -> ApiResponse<AlbumSetMediaTypeResult> {
-    let outcome = (|| -> HpResult<AlbumSetMediaTypeResult> {
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let media_type = parse_album_media_type(media_type.as_deref())?;
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
         let outcome = AlbumService::set_media_type(db, &repo_id, &album_id, media_type)?;
         Ok(AlbumSetMediaTypeResult {
             removed_count: outcome.removed_count,
             op_record_id: outcome.op_record_id,
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -327,15 +312,12 @@ pub(crate) fn album_add_member(
     file_ids: Vec<String>,
     state: State<AppState>,
 ) -> ApiResponse<AlbumMemberResult> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<AlbumMemberResult> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let outcome = AlbumService::add_members(db, &album_id, &file_ids)?;
         Ok(AlbumMemberResult {
             added: outcome.added,
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -347,22 +329,17 @@ pub(crate) fn album_remove_member(
     file_ids: Vec<String>,
     state: State<AppState>,
 ) -> ApiResponse<AlbumRemoveResult> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<AlbumRemoveResult> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let removed = AlbumService::remove_members(db, &album_id, &file_ids)?;
         Ok(AlbumRemoveResult { removed })
-    })();
+    });
     api_from_hp(outcome)
 }
 
 /// album.list：列出仓库下全部相册。
 #[tauri::command]
 pub(crate) fn album_list(repo_id: String, state: State<AppState>) -> ApiResponse<Vec<AlbumItem>> {
-    let outcome = (|| -> HpResult<Vec<AlbumItem>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    let outcome = with_repo(&state, &repo_id, |db| {
         let albums = db.list_albums(&repo_id)?;
         let mut items = Vec::with_capacity(albums.len());
         for a in albums {
@@ -370,7 +347,7 @@ pub(crate) fn album_list(repo_id: String, state: State<AppState>) -> ApiResponse
             items.push(album_to_item(a, count));
         }
         Ok(items)
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -405,14 +382,11 @@ pub(crate) fn album_members(
     limit: Option<i64>,
     state: State<AppState>,
 ) -> ApiResponse<AlbumMembersPage> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<AlbumMembersPage> {
+    let outcome = with_repo(&state, &repo_id, |db| {
         let parsed_cursor = match cursor.as_deref().map(str::trim) {
             None | Some("") => None,
             Some(raw) => Some(hp_repo::AlbumMemberCursor::decode(raw)?),
         };
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
         // 有效媒体属性（含嵌套继承）→ 展开成三个布尔标志，交给 SQL 过滤。
         let media_type = AlbumService::effective_media_type(db, &album_id)?;
         let (want_image, want_video, want_audio) = match media_type {
@@ -435,7 +409,7 @@ pub(crate) fn album_members(
             items: rows.into_iter().map(file_to_item).collect(),
             next_cursor: next.map(|c| c.encode()),
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -517,9 +491,9 @@ fn run_album_sync(
     repo_id: &str,
     album_id: &str,
 ) -> HpResult<hp_album::SyncOutcome> {
-    let mut guard = lock_repo(state)?;
-    let db = open_repo_mut(&mut guard)?;
-    AlbumService::sync(db, repo_id, album_id)
+    with_repo_mut(state, repo_id, |db| {
+        AlbumService::sync(db, repo_id, album_id)
+    })
 }
 
 /// album.rename：重命名相册。
@@ -530,16 +504,13 @@ pub(crate) fn album_rename(
     name: String,
     state: State<AppState>,
 ) -> ApiResponse<()> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<()> {
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let name = name.trim();
         if name.is_empty() {
             return Err(HpError::InvalidArgument("相册名不能为空".into()));
         }
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
         db.update_album_name(&album_id, name)
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -550,12 +521,7 @@ pub(crate) fn album_delete(
     album_id: String,
     state: State<AppState>,
 ) -> ApiResponse<()> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<()> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
-        db.delete_album(&album_id)
-    })();
+    let outcome = with_repo_mut(&state, &repo_id, |db| db.delete_album(&album_id));
     api_from_hp(outcome)
 }
 

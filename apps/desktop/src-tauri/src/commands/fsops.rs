@@ -8,7 +8,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::shared::{ApiResponse, api_from_hp, lock_repo, open_repo_mut};
+use crate::commands::shared::{ApiResponse, api_from_hp, with_repo_mut};
 
 #[derive(Serialize)]
 pub(crate) struct FsOpsResult {
@@ -27,9 +27,7 @@ pub(crate) fn fsops_copy(
     target_path: Option<String>,
     state: State<AppState>,
 ) -> ApiResponse<FsOpsResult> {
-    let outcome = (|| -> hp_core::HpResult<FsOpsResult> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let out = FsOpsService.copy_files(
             db,
             &repo_id,
@@ -45,7 +43,7 @@ pub(crate) fn fsops_copy(
                 .map(|f| f.as_str().to_string())
                 .collect(),
         })
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -58,9 +56,7 @@ pub(crate) fn fsops_move(
     target_path: Option<String>,
     state: State<AppState>,
 ) -> ApiResponse<FsOpsResult> {
-    let outcome = (|| -> hp_core::HpResult<FsOpsResult> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let out = FsOpsService.move_files(
             db,
             &repo_id,
@@ -76,6 +72,6 @@ pub(crate) fn fsops_move(
                 .map(|f| f.as_str().to_string())
                 .collect(),
         })
-    })();
+    });
     api_from_hp(outcome)
 }

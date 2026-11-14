@@ -7,7 +7,7 @@
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::shared::{ApiResponse, api_from_hp, lock_repo, open_repo, open_repo_mut};
+use crate::commands::shared::{ApiResponse, api_from_hp, with_repo, with_repo_mut};
 
 /// rating.set：设置文件评分（0-5）。
 #[tauri::command]
@@ -17,13 +17,10 @@ pub(crate) fn rating_set(
     rating: i64,
     state: State<AppState>,
 ) -> ApiResponse<()> {
-    let _ = repo_id;
-    api_from_hp((|| -> hp_core::HpResult<()> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    api_from_hp(with_repo_mut(&state, &repo_id, |db| {
         db.upsert_rating(&file_id, rating)?;
         Ok(())
-    })())
+    }))
 }
 
 /// rating.get：读取文件评分。
@@ -33,10 +30,7 @@ pub(crate) fn rating_get(
     file_id: String,
     state: State<AppState>,
 ) -> ApiResponse<Option<i64>> {
-    let _ = repo_id;
-    api_from_hp((|| -> hp_core::HpResult<Option<i64>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    api_from_hp(with_repo(&state, &repo_id, |db| {
         Ok(db.get_rating(&file_id)?.map(|r| r.rating))
-    })())
+    }))
 }

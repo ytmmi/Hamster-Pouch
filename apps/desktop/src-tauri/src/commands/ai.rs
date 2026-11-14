@@ -13,8 +13,7 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::AppState;
 use crate::commands::shared::{
-    ApiResponse, api_from_hp, global, global_guard, global_mut, lock_ai, lock_repo, open_repo,
-    open_repo_mut,
+    ApiResponse, api_from_hp, global, global_guard, global_mut, lock_ai, with_repo, with_repo_mut,
 };
 
 #[derive(Serialize)]
@@ -120,13 +119,11 @@ pub(crate) fn ai_tagging_submit(
     options: Option<String>,
     state: State<AppState>,
 ) -> ApiResponse<Vec<String>> {
-    let outcome = (|| -> HpResult<Vec<String>> {
+    let outcome = with_repo(&state, &repo_id, |db| {
         let options = options.unwrap_or_else(|| "{}".to_string());
         let mut ai = lock_ai(&state)?;
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
         ai.submit(db, &repo_id, &file_ids, &provider_config_id, &options)
-    })();
+    });
     api_from_hp(outcome)
 }
 
@@ -149,10 +146,8 @@ pub(crate) fn ai_tagging_status(
 /// ai.tagging.run：执行队列中的打标任务（骨架阶段用占位提供方，不产生候选 tag）。
 #[tauri::command]
 pub(crate) fn ai_tagging_run(state: State<AppState>) -> ApiResponse<AiRunSummary> {
-    let outcome = (|| -> HpResult<AiRunSummary> {
+    let outcome = with_repo_mut(&state, "", |db| {
         let mut ai = lock_ai(&state)?;
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
 
         let runs = ai.run_all(db, &PlaceholderProvider)?;
         let mut summary = AiRunSummary {
@@ -167,6 +162,6 @@ pub(crate) fn ai_tagging_run(state: State<AppState>) -> ApiResponse<AiRunSummary
             summary.undo_ids.extend(run.writeback.undo_ids);
         }
         Ok(summary)
-    })();
+    });
     api_from_hp(outcome)
 }

@@ -98,7 +98,7 @@ crates/hp-dict/migrations/   # 迁移 SQL（forward-only，发布后禁止修改
       paths.rs        #   数据目录、内置资源与外部二进制的定位（find_upwards 一族、app_data_root / debug_log）
       taglib.rs       #   tag 词库装配与插件扩展挂载（build_tag_lib_set / attach_tag_lib_extensions）
       locks.rs        #   宿主级状态的唯一加锁入口（全局库 / schema 缓存 / 监督表 / AI 队列 / tag 库；全局库另走 `global_guard`，读写经 `with_global` / `with_global_mut` 在一次持锁内跑完，D195/D198）
-      repo.rs         #   仓库句柄按 id 装卸 `take_open_repo_if` / `with_open_repo_mut`，取用经 `with_repo` / `with_repo_mut` 并在同一次持锁内校验 repoId（D199/D200）
+      repo.rs         #   仓库句柄按 id 装卸 `take_open_repo_if` / `with_open_repo_mut`，取用经 `with_repo` / `with_repo_mut` 并在同一次持锁内校验 repoId（命令层 15 个文件全走这条路，D199/D200/D202）
       files.rs        #   FileIndexRow → 前端列表项
       prelude.rs  mod.rs
     task_shell.rs     # 长任务外壳（D196）：登记 / 起线程 / panic 收敛 / 收尾只此一处，四个入口（scan /

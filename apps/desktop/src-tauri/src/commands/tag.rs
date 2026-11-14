@@ -4,12 +4,12 @@
 //! `{ ok, data?, error? }`，错误为结构化 `HpError`；前端 `api/tag.ts` 经
 //! `unwrapApi` 解包，界面按 `code` 走 i18n（D27）。
 
-use hp_core::{HpError, HpResult, Tag, TagRelationKind};
+use hp_core::{HpError, Tag, TagRelationKind};
 use serde::Serialize;
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::shared::{ApiResponse, api_from_hp, lock_repo, open_repo, open_repo_mut};
+use crate::commands::shared::{ApiResponse, api_from_hp, with_repo, with_repo_mut};
 
 #[derive(Serialize)]
 pub(crate) struct TagItem {
@@ -74,18 +74,16 @@ pub(crate) fn tag_add(
     tag_name: String,
     state: State<AppState>,
 ) -> ApiResponse<()> {
-    api_from_hp((|| -> HpResult<()> {
+    api_from_hp(with_repo_mut(&state, &repo_id, |db| {
         if tag_name.trim().is_empty() {
             return Err(HpError::InvalidArgument("tag 名不能为空".into()));
         }
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
         let tag = db.create_tag(&repo_id, &tag_name, None)?;
         for file_id in &file_ids {
             db.add_file_tag(file_id, tag.id.as_str())?;
         }
         Ok(())
-    })())
+    }))
 }
 
 /// tag.remove：从文件批量移除人工 tag（不影响自动 tag）。
@@ -96,27 +94,23 @@ pub(crate) fn tag_remove(
     tag_name: String,
     state: State<AppState>,
 ) -> ApiResponse<()> {
-    api_from_hp((|| -> HpResult<()> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    api_from_hp(with_repo_mut(&state, &repo_id, |db| {
         if let Some(tag) = db.find_tag_by_name(&repo_id, &tag_name)? {
             for file_id in &file_ids {
                 db.remove_file_tag(file_id, tag.id.as_str())?;
             }
         }
         Ok(())
-    })())
+    }))
 }
 
 /// tag.list：列出仓库内全部 tag 实体。
 #[tauri::command]
 pub(crate) fn tag_list(repo_id: String, state: State<AppState>) -> ApiResponse<Vec<TagItem>> {
-    api_from_hp((|| -> HpResult<Vec<TagItem>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    api_from_hp(with_repo(&state, &repo_id, |db| {
         let tags = db.list_tags(&repo_id)?;
         Ok(tags.into_iter().map(tag_to_item).collect())
-    })())
+    }))
 }
 
 /// tag.forFile：列出文件的人工 tag 与自动 tag 两组（D21）。
@@ -126,11 +120,7 @@ pub(crate) fn tag_for_file(
     file_id: String,
     state: State<AppState>,
 ) -> ApiResponse<FileTagsResult> {
-    let _ = repo_id;
-    api_from_hp((|| -> HpResult<FileTagsResult> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
-
+    api_from_hp(with_repo(&state, &repo_id, |db| {
         let manual = db
             .list_tags_for_file(&file_id)?
             .into_iter()
@@ -151,7 +141,7 @@ pub(crate) fn tag_for_file(
         }
 
         Ok(FileTagsResult { manual, auto })
-    })())
+    }))
 }
 
 fn relation_to_item(r: hp_core::TagRelation) -> TagRelationItem {
@@ -174,25 +164,21 @@ pub(crate) fn tag_relation_add(
     relation_kind: String,
     state: State<AppState>,
 ) -> ApiResponse<TagRelationItem> {
-    api_from_hp((|| -> HpResult<TagRelationItem> {
+    api_from_hp(with_repo_mut(&state, &repo_id, |db| {
         let kind = TagRelationKind::from_str(&relation_kind).ok_or_else(|| {
             HpError::InvalidArgument(format!("未知 tag 关系类型: {relation_kind}"))
         })?;
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
         let relation = db.add_tag_relation(&repo_id, &from_tag_id, &to_tag_id, kind)?;
         Ok(relation_to_item(relation))
-    })())
+    }))
 }
 
 /// tag.relation.remove：按 ID 删除 tag 关系。
 #[tauri::command]
 pub(crate) fn tag_relation_remove(relation_id: String, state: State<AppState>) -> ApiResponse<()> {
-    api_from_hp((|| -> HpResult<()> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    api_from_hp(with_repo_mut(&state, "", |db| {
         db.remove_tag_relation(&relation_id)
-    })())
+    }))
 }
 
 /// tag.relation.list：列出仓库全部 tag 关系（关系图谱数据源）。
@@ -201,12 +187,10 @@ pub(crate) fn tag_relation_list(
     repo_id: String,
     state: State<AppState>,
 ) -> ApiResponse<Vec<TagRelationItem>> {
-    api_from_hp((|| -> HpResult<Vec<TagRelationItem>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    api_from_hp(with_repo(&state, &repo_id, |db| {
         let rows = db.list_tag_relations(&repo_id)?;
         Ok(rows.into_iter().map(relation_to_item).collect())
-    })())
+    }))
 }
 
 /// tag.relation.parents：列出某 tag 的直接上级（层级）。
@@ -215,12 +199,10 @@ pub(crate) fn tag_relation_parents(
     tag_id: String,
     state: State<AppState>,
 ) -> ApiResponse<Vec<TagItem>> {
-    api_from_hp((|| -> HpResult<Vec<TagItem>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    api_from_hp(with_repo(&state, "", |db| {
         let tags = db.list_parent_tags(&tag_id)?;
         Ok(tags.into_iter().map(tag_to_item).collect())
-    })())
+    }))
 }
 
 /// tag.relation.children：列出某 tag 的直接下级（层级）。
@@ -229,12 +211,10 @@ pub(crate) fn tag_relation_children(
     tag_id: String,
     state: State<AppState>,
 ) -> ApiResponse<Vec<TagItem>> {
-    api_from_hp((|| -> HpResult<Vec<TagItem>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    api_from_hp(with_repo(&state, "", |db| {
         let tags = db.list_child_tags(&tag_id)?;
         Ok(tags.into_iter().map(tag_to_item).collect())
-    })())
+    }))
 }
 
 /// tag 树节点（前端树视图；`is_cross` 为交叉 tag，D22）。
@@ -265,10 +245,7 @@ pub(crate) fn tag_tree(
     repo_id: String,
     state: State<AppState>,
 ) -> ApiResponse<Vec<TagTreeNodeItem>> {
-    api_from_hp((|| -> HpResult<Vec<TagTreeNodeItem>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
-
+    api_from_hp(with_repo(&state, &repo_id, |db| {
         let tags = db.list_tags(&repo_id)?;
         let relations = db.list_tag_relations(&repo_id)?;
         let mut counts = std::collections::HashMap::new();
@@ -278,17 +255,15 @@ pub(crate) fn tag_tree(
         }
         let tree = hp_repo::build_tag_tree(&tags, &relations, &counts);
         Ok(tree.roots.into_iter().map(tree_node_to_item).collect())
-    })())
+    }))
 }
 
 /// tag.rename：重命名 tag 实体。
 #[tauri::command]
 pub(crate) fn tag_rename(tag_id: String, name: String, state: State<AppState>) -> ApiResponse<()> {
-    api_from_hp((|| -> HpResult<()> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    api_from_hp(with_repo_mut(&state, "", |db| {
         db.rename_tag(&tag_id, &name)
-    })())
+    }))
 }
 
 /// tag.createRoot：新建根 tag（同名已存在则复用，不重复创建）。
@@ -298,15 +273,13 @@ pub(crate) fn tag_create_root(
     name: String,
     state: State<AppState>,
 ) -> ApiResponse<TagItem> {
-    api_from_hp((|| -> HpResult<TagItem> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    api_from_hp(with_repo_mut(&state, &repo_id, |db| {
         let tag = match db.find_tag_by_name(&repo_id, &name)? {
             Some(existing) => existing,
             None => db.create_tag(&repo_id, &name, None)?,
         };
         Ok(tag_to_item(tag))
-    })())
+    }))
 }
 
 /// tag.createChild：在父 tag 下新建子 tag。
@@ -319,9 +292,7 @@ pub(crate) fn tag_create_child(
     name: String,
     state: State<AppState>,
 ) -> ApiResponse<TagItem> {
-    api_from_hp((|| -> HpResult<TagItem> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    api_from_hp(with_repo_mut(&state, &repo_id, |db| {
         let tag = match db.find_tag_by_name(&repo_id, &name)? {
             Some(existing) => existing,
             None => db.create_tag(&repo_id, &name, None)?,
@@ -333,7 +304,7 @@ pub(crate) fn tag_create_child(
             TagRelationKind::Hierarchy,
         )?;
         Ok(tag_to_item(tag))
-    })())
+    }))
 }
 
 /// tag.createSibling：新建与参照 tag 同级的 tag（共享其全部层级上级；无上级则为根）。
@@ -346,9 +317,7 @@ pub(crate) fn tag_create_sibling(
     name: String,
     state: State<AppState>,
 ) -> ApiResponse<TagItem> {
-    api_from_hp((|| -> HpResult<TagItem> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    api_from_hp(with_repo_mut(&state, &repo_id, |db| {
         let parents = db.list_parent_tags(&ref_tag_id)?;
         let tag = match db.find_tag_by_name(&repo_id, &name)? {
             Some(existing) => existing,
@@ -363,7 +332,7 @@ pub(crate) fn tag_create_sibling(
             )?;
         }
         Ok(tag_to_item(tag))
-    })())
+    }))
 }
 
 /// tag.move：移动 tag（拖拽 = 移动）；`newParentId` 为空表示移到根。
@@ -373,19 +342,13 @@ pub(crate) fn tag_move(
     new_parent_id: Option<String>,
     state: State<AppState>,
 ) -> ApiResponse<()> {
-    api_from_hp((|| -> HpResult<()> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    api_from_hp(with_repo_mut(&state, "", |db| {
         db.move_tag(&tag_id, new_parent_id.as_deref())
-    })())
+    }))
 }
 
 /// tag.detach：解除某 tag 的全部层级上级（拖到根区域 → 成为根）。
 #[tauri::command]
 pub(crate) fn tag_detach(tag_id: String, state: State<AppState>) -> ApiResponse<()> {
-    api_from_hp((|| -> HpResult<()> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
-        db.detach_tag(&tag_id)
-    })())
+    api_from_hp(with_repo_mut(&state, "", |db| db.detach_tag(&tag_id)))
 }

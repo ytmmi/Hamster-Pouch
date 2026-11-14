@@ -49,7 +49,7 @@ mod prelude {
     pub(super) use crate::AppState;
     pub(super) use crate::commands::book_reader::ReaderCtx;
     pub(super) use crate::commands::shared::{
-        ApiAsync, api_async, api_from_hp, lock_repo, open_repo, open_repo_mut, resolve_file_path,
+        ApiAsync, api_async, api_from_hp, resolve_file_path, with_repo,
     };
 }
 
@@ -73,24 +73,20 @@ pub(crate) async fn book_meta(
     file_id: String,
     state: State<'_, AppState>,
 ) -> ApiAsync<BookMetaResult> {
-    let _ = repo_id;
-
     let outcome = async {
         // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard（与 `thumb.get` 同款）。
-        let (src_path, media_type, content_hash, cache) = {
-            let guard = lock_repo(&state)?;
-            let db = open_repo(&guard)?;
+        let (src_path, media_type, content_hash, cache) = with_repo(&state, &repo_id, |db| {
             let file = db
                 .get_file(&file_id)?
                 .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
             let src_path = resolve_file_path(db, &file)?;
-            (
+            Ok((
                 src_path,
                 file.media_type,
                 file.content_hash,
                 (*state.thumb_cache).clone(),
-            )
-        };
+            ))
+        })?;
 
         // 只有"书"（文本类 + PDF）可能带元数据；其余类型直接空结果（不是错误）。
         //
@@ -156,25 +152,20 @@ pub(crate) async fn book_content(
     cursor: Option<String>,
     state: State<'_, AppState>,
 ) -> ApiAsync<BookContentResult> {
-    let _ = repo_id;
-
     let outcome = async {
-        let _ = repo_id;
         // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard。
-        let (src_path, media_type, content_hash, cache) = {
-            let guard = lock_repo(&state)?;
-            let db = open_repo(&guard)?;
+        let (src_path, media_type, content_hash, cache) = with_repo(&state, &repo_id, |db| {
             let file = db
                 .get_file(&file_id)?
                 .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
             let src_path = resolve_file_path(db, &file)?;
-            (
+            Ok((
                 src_path,
                 file.media_type,
                 file.content_hash,
                 (*state.thumb_cache).clone(),
-            )
-        };
+            ))
+        })?;
 
         // 非"书"（文本类 + PDF）没有"正文"可看：空结果（不是错误）。
         if !media_type.is_book() {

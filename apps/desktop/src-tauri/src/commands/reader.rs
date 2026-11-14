@@ -21,15 +21,13 @@
 //! 后端再算一遍就要重读目录（`book.toc`），那是白白多一次解包 / 整本解码。
 //! 越界值在仓储侧夹紧（`row_to_annotation`），因此坏值不会让整行读不出来。
 
-use hp_core::{AnnotationKind, HpError, HpResult};
+use hp_core::{AnnotationKind, HpError};
 use hp_dto::ReaderAnnotationItem;
 use hp_repo::NewAnnotation;
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::shared::{
-    ApiAsync, api_async, api_from_hp, lock_repo, open_repo, open_repo_mut,
-};
+use crate::commands::shared::{ApiAsync, api_async, api_from_hp, with_repo, with_repo_mut};
 
 /// 把领域记录转成 DTO（字段一一对应，无换算）。
 fn to_item(record: hp_core::ReaderAnnotation) -> ReaderAnnotationItem {
@@ -57,10 +55,7 @@ pub(crate) async fn reader_annotations(
     file_id: String,
     state: State<'_, AppState>,
 ) -> ApiAsync<Vec<ReaderAnnotationItem>> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<Vec<ReaderAnnotationItem>> {
-        let guard = lock_repo(&state)?;
-        let db = open_repo(&guard)?;
+    let outcome = with_repo(&state, &repo_id, |db| {
         // 文件必须存在：给不存在的 file_id 列批注是调用方的错（外键也会拒）。
         if db.get_file(&file_id)?.is_none() {
             return Err(HpError::NotFound(format!("文件不存在: {file_id}")));
@@ -70,7 +65,7 @@ pub(crate) async fn reader_annotations(
             .into_iter()
             .map(to_item)
             .collect())
-    })();
+    });
     api_async(api_from_hp(outcome))
 }
 
@@ -92,12 +87,9 @@ pub(crate) async fn reader_add_annotation(
     note: String,
     state: State<'_, AppState>,
 ) -> ApiAsync<ReaderAnnotationItem> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<ReaderAnnotationItem> {
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         let kind = AnnotationKind::from_str(&kind)
             .ok_or_else(|| HpError::InvalidArgument(format!("未知的批注种类: {kind}")))?;
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
         if db.get_file(&file_id)?.is_none() {
             return Err(HpError::NotFound(format!("文件不存在: {file_id}")));
         }
@@ -111,7 +103,7 @@ pub(crate) async fn reader_add_annotation(
             note: &note,
         })?;
         Ok(to_item(record))
-    })();
+    });
     api_async(api_from_hp(outcome))
 }
 
@@ -125,12 +117,9 @@ pub(crate) async fn reader_delete_annotation(
     annotation_id: String,
     state: State<'_, AppState>,
 ) -> ApiAsync<()> {
-    let _ = repo_id;
-    let outcome = (|| -> HpResult<()> {
-        let mut guard = lock_repo(&state)?;
-        let db = open_repo_mut(&mut guard)?;
+    let outcome = with_repo_mut(&state, &repo_id, |db| {
         db.delete_annotation(&annotation_id)?;
         Ok(())
-    })();
+    });
     api_async(api_from_hp(outcome))
 }

@@ -24,9 +24,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::shared::{
-    ApiAsync, api_async, api_from_hp, lock_repo, open_repo, resolve_file_path,
-};
+use crate::commands::shared::{ApiAsync, api_async, api_from_hp, resolve_file_path, with_repo};
 
 /// 解内嵌封面的超时。单曲通常 40–90 ms（实测 1600×1586 的 flac 封面），
 /// 30 s 是"容器异常巨大也不至于卡死面板"的上限，与缩略图/波形同档。
@@ -180,26 +178,23 @@ pub(crate) async fn player_media(
     file_id: String,
     state: State<'_, AppState>,
 ) -> ApiAsync<PlayerMediaResult> {
-    let _ = repo_id;
-
     let outcome = async {
         // 同步取出所需数据后立即释放锁，避免跨 await 持有 MutexGuard（与 `thumb.get` 同款）。
-        let (src_path, media_type, content_hash, cache, ffmpeg, ffprobe) = {
-            let guard = lock_repo(&state)?;
-            let db = open_repo(&guard)?;
-            let file = db
-                .get_file(&file_id)?
-                .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
-            let src_path = resolve_file_path(db, &file)?;
-            (
-                src_path,
-                file.media_type,
-                file.content_hash,
-                (*state.thumb_cache).clone(),
-                (*state.ffmpeg_bin).clone(),
-                (*state.ffprobe_bin).clone(),
-            )
-        };
+        let (src_path, media_type, content_hash, cache, ffmpeg, ffprobe) =
+            with_repo(&state, &repo_id, |db| {
+                let file = db
+                    .get_file(&file_id)?
+                    .ok_or_else(|| HpError::NotFound(format!("文件不存在: {file_id}")))?;
+                let src_path = resolve_file_path(db, &file)?;
+                Ok((
+                    src_path,
+                    file.media_type,
+                    file.content_hash,
+                    (*state.thumb_cache).clone(),
+                    (*state.ffmpeg_bin).clone(),
+                    (*state.ffprobe_bin).clone(),
+                ))
+            })?;
 
         if media_type != MediaType::Audio {
             return Ok(PlayerMediaResult::empty());
