@@ -200,6 +200,11 @@ report(
 // 且用 `if let Ok(mut cur) = ...` 吞掉毒化错误——于是"库开了但 id/路径还是旧仓库"可观察。这条断言
 // 同时钉住两头：不许把字段拆回去，也不许在助手之外直接 `.repo.lock()`（那样又能绕过装卸顺序）。
 const BRIDGE_SRC = join(ROOT, "apps", "desktop", "src-tauri", "src");
+// D201 起 commands/shared.rs 拆成 commands/shared/*.rs，断言对**整个 shared 目录**求并集：
+// 语义不变（「只在这个模块里」），而不是「只在同一个文件里」。
+const SHARED_DIR = join(BRIDGE_SRC, "commands", "shared");
+const isSharedSource = (rel) =>
+  rel.endsWith("commands/shared.rs") || rel.includes("commands/shared/");
 const bridgeFiles = walk(BRIDGE_SRC, []);
 const handleOffenders = [];
 let repoFieldCount = 0;
@@ -213,7 +218,7 @@ for (const file of bridgeFiles) {
     handleOffenders.push(`${rel}  又把仓库状态拆成了独立 Mutex`);
   }
   const direct = body.match(/\.repo\s*\.\s*lock\(\)/g) ?? [];
-  if (direct.length > 0 && !rel.endsWith("commands/shared.rs")) {
+  if (direct.length > 0 && !isSharedSource(rel)) {
     handleOffenders.push(`${rel}  绕过 shared.rs 直接锁 repo（${direct.length} 处）`);
   }
   if (rel.endsWith("/main.rs")) {
@@ -223,7 +228,13 @@ for (const file of bridgeFiles) {
 if (repoFieldCount !== 1) {
   handleOffenders.push(`main.rs 的 AppState 里 repo 字段数量 = ${repoFieldCount}（应为 1）`);
 }
-const sharedBody = stripComments(readFileSync(join(BRIDGE_SRC, "commands", "shared.rs"), "utf8"));
+const sharedBody = stripComments(
+  readdirSync(SHARED_DIR)
+    .filter((n) => n.endsWith(".rs"))
+    .sort()
+    .map((n) => readFileSync(join(SHARED_DIR, n), "utf8"))
+    .join("\n"),
+);
 for (const needle of [
   "pub(crate) struct OpenRepo",
   "pub(crate) fn set_open_repo",
@@ -255,7 +266,7 @@ const stateOffenders = [];
 const hostLockRe = new RegExp("\\.(" + HOST_STATE_FIELDS.join("|") + ")\\s*\\.\\s*lock\\s*\\(", "g");
 for (const file of bridgeFiles) {
   const rel = relative(ROOT, file).replace(/\\/g, "/");
-  if (rel.endsWith("commands/shared.rs")) continue;
+  if (isSharedSource(rel)) continue;
   const body = stripComments(readFileSync(file, "utf8"));
   const hits = body.match(hostLockRe) ?? [];
   if (hits.length > 0) {
@@ -280,7 +291,7 @@ const globalOffenders = [];
 let globalGuardFiles = 0;
 for (const file of bridgeFiles) {
   const rel = relative(ROOT, file).replace(/\\/g, "/");
-  if (rel.endsWith("commands/shared.rs")) continue;
+  if (isSharedSource(rel)) continue;
   const body = stripComments(readFileSync(file, "utf8"));
   if (/\block_global\s*\(/.test(body)) {
     globalOffenders.push(`${rel}  绕过 global_guard 直接加锁`);

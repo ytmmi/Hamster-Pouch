@@ -189,7 +189,7 @@ class Cdp {
 /**
  * 页面内订阅三条事件。前端不消费它们，所以这里直接走 `plugin:event|listen`。
  *
- * 注意线上名：`emit_hp` 会把逻辑名里的 `.` 换成 `:`（`commands/shared.rs:21` 的 `wire_event`），
+ * 注意线上名：`emit_hp` 会把逻辑名里的 `.` 换成 `:`（`commands/shared/events.rs` 的 `wire_event`，D201 前在 `commands/shared.rs`），
  * Tauri 的 `listen` 同样只接受 `-` `/` `:` `_` 与字母数字（点分名会被拒，缺陷 0022 的根因）。
  * 所以订阅 `file:changed` / `file:missing` / `file:restored`，报告里仍写逻辑名。
  */

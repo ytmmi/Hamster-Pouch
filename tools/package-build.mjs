@@ -26,7 +26,7 @@
  *
  * **随包分发的运行时资产（D14 / 契约 §3.11）**：`external-cli\`（ffmpeg 运行时子集 +
  * 可选 mpv）与 `plugins\system\`（`plugin.installBundled` 的来源）都放在 **exe 同级**，
- * 与仓库内布局同构——这样 `commands/shared.rs` 的 `find_upwards` / `find_upwards_dir`
+ * 与仓库内布局同构——这样 `commands/shared/paths.rs` 的 `find_upwards` / `find_upwards_dir`
  * 从 exe 目录起步的第一跳就能命中，**包整夹搬走也仍然可用**（这正是此前"伪捆绑"的缺口：
  * 产物里没有这些资产，只靠包还躺在仓库树里才凑巧向上找到）。
  *

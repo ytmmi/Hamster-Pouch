@@ -9,7 +9,7 @@
  * 调色板面板的刷新也全部无声无息。**这类失败不会有任何报错，只有门禁能提前拦住。**
  *
  * 断言：
- * 1. 后端**唯一发送口**：桥接层裸 `.emit(` 只允许出现在 `commands/shared.rs`（`EmitHp` 实现体）；
+ * 1. 后端**唯一发送口**：桥接层裸 `.emit(` 只允许出现在 `commands/shared/`（`EmitHp` 实现体，D201 起拆成目录）；
  * 2. 后端映射表：`shared.rs` 的 `wire_event` 把 `.` 映射为 `:`；
  * 3. 前端**唯一收发口**：除 `app_ui/shared/events.ts` 外，任何文件不得从
  *    `@tauri-apps/api/event` 值导入 `listen` / `emit`（类型导入可以）；
@@ -28,7 +28,10 @@ const RUST_ROOT = join(ROOT, "apps/desktop/src-tauri/src");
 const TS_ROOTS = ["apps/desktop/src/app_ui", "apps/desktop/src/test_ui", "apps/desktop/src/dev_ui"].map(
   (p) => join(ROOT, p),
 );
+// D201 起 shared.rs 拆成 commands/shared/*.rs：唯一发送口是**整个目录**。
 const SHARED_RS = join(RUST_ROOT, "commands/shared.rs");
+const SHARED_DIR = join(RUST_ROOT, "commands/shared");
+const isSharedSource = (p) => p === SHARED_RS || p.startsWith(SHARED_DIR);
 const EVENTS_TS = join(ROOT, "apps/desktop/src/app_ui/shared/events.ts");
 
 /** 逻辑名 → 线上名（与两侧实现同规则）。 */
@@ -69,26 +72,30 @@ function walk(dir, exts, out = []) {
 const rustFiles = walk(RUST_ROOT, [".rs"]);
 const rustBareEmit = [];
 for (const file of rustFiles) {
-  if (file === SHARED_RS) continue; // 唯一发送口的实现体
+  if (isSharedSource(file)) continue; // 唯一发送口的实现体
   const lines = read(file).split("\n");
   lines.forEach((line, i) => {
     if (line.includes(".emit(")) rustBareEmit.push(`${rel(file)}:${i + 1}`);
   });
 }
 check(
-  "后端裸 `.emit(` 只出现在唯一发送口 commands/shared.rs",
+  "后端裸 `.emit(` 只出现在唯一发送口 commands/shared/（D201 起是目录）",
   rustBareEmit.length === 0,
   rustBareEmit.length ? rustBareEmit.join(", ") : `扫描 ${rustFiles.length} 个 Rust 源文件`,
 );
 
 // ───────── 2. 后端映射表 ─────────
-const sharedSrc = read(SHARED_RS);
+const sharedSrc = readdirSync(SHARED_DIR)
+  .filter((n) => n.endsWith(".rs"))
+  .sort()
+  .map((n) => read(join(SHARED_DIR, n)))
+  .join("\n");
 check(
-  "shared.rs 的 wire_event 把逻辑名 `.` 映射为线上名 `:`",
+  "shared/ 的 wire_event 把逻辑名 `.` 映射为线上名 `:`",
   /logical\.replace\('\.', ":"\)/.test(sharedSrc),
 );
 check(
-  "shared.rs 的 EmitHp::emit_hp 失败时留痕（不再静默）",
+  "shared/ 的 EmitHp::emit_hp 失败时留痕（不再静默）",
   /diag_log\(/.test(sharedSrc) && /\[event\] 发送失败/.test(sharedSrc),
 );
 

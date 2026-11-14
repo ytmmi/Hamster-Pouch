@@ -85,14 +85,22 @@ crates/hp-dict/migrations/   # 迁移 SQL（forward-only，发布后禁止修改
 # default_blueprint.json 与 blueprint_factory/）、全局库侧在 crates/hp-global/tests/、词库侧在
 # crates/hp-dict/tests/。
 
-  main.rs             # 入口装配 + AppState（六个宿主级互斥量只经 commands/shared.rs 的助手加锁，D194）
+  main.rs             # 入口装配 + AppState（六个宿主级互斥量只经 commands/shared/ 的助手加锁，D194）
   build.rs            # 构建脚本：经 `cargo:rustc-env` 注入 `HP_BUILD_TIME`（本地时间 `YYYY/MM/DD HH:MM:SS`，
                       #   先读同名环境变量以便 CI 固定时间戳，否则调 `powershell.exe Get-Date -Format`；
                       #   不用 `cmd` 的 `%DATE%`——随 locale 变形）与 `HP_BUILD_COMMIT`（`git rev-parse --short HEAD`），
                       #   两者取不到都写空串（`app_info.rs` 用 `option_env!` 读，界面显示「未知」）；
                       #   末行才是 `tauri_build::build()`。D140
   commands/           # Tauri 命令桥接（按领域拆分）
-    shared.rs         # 共享类型 + 宿主级状态的唯一加锁入口（全局库 / 仓库句柄 / schema 缓存 / 监督表 / AI 队列 / tag 库；全局库另走 `global_guard`，读写经 `with_global` / `with_global_mut` 在一次持锁内跑完；仓库句柄按 id 装卸 `take_open_repo_if` / `with_open_repo_mut`，取用经 `with_repo` / `with_repo_mut` 并在同一次持锁内校验 repoId，D195/D198/D199/D200）
+    shared/           # 共享类型与宿主级入口（D201 从单文件拆开，名字照旧从 commands::shared 再导出）
+      events.rs       #   事件唯一发送口 EmitHp + 逻辑名→线上名 wire_event + 诊断日志 diag_log
+      response.rs     #   D76 统一响应包装 ApiResponse / ApiError / api_from_hp / api_async
+      paths.rs        #   数据目录、内置资源与外部二进制的定位（find_upwards 一族、app_data_root / debug_log）
+      taglib.rs       #   tag 词库装配与插件扩展挂载（build_tag_lib_set / attach_tag_lib_extensions）
+      locks.rs        #   宿主级状态的唯一加锁入口（全局库 / schema 缓存 / 监督表 / AI 队列 / tag 库；全局库另走 `global_guard`，读写经 `with_global` / `with_global_mut` 在一次持锁内跑完，D195/D198）
+      repo.rs         #   仓库句柄按 id 装卸 `take_open_repo_if` / `with_open_repo_mut`，取用经 `with_repo` / `with_repo_mut` 并在同一次持锁内校验 repoId（D199/D200）
+      files.rs        #   FileIndexRow → 前端列表项
+      prelude.rs  mod.rs
     task_shell.rs     # 长任务外壳（D196）：登记 / 起线程 / panic 收敛 / 收尾只此一处，四个入口（scan /
                       #   unmount / reanalyze / backfill）只给出 body 与三态事件
     repo.rs  source.rs  album.rs

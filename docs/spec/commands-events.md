@@ -10,7 +10,7 @@
 - Tauri 桥接层只做参数校验、权限检查、调用 crate、转发事件；不承载业务规则。
 - **事件名**：契约里沿用点分（如 `scan.progress`），但 **Tauri 2 的线上事件名不允许点号**
   （只允许 `[A-Za-z0-9\-/:_]`）。因此两侧都在**唯一入口**把 `.` 映射为 `:`
-  （`scan.progress` → `scan:progress`）：后端 `commands/shared.rs` 的 `wire_event` /
+  （`scan.progress` → `scan:progress`）：后端 `commands/shared/events.rs`（D201 前是单文件 `commands/shared.rs`）的 `wire_event` /
   `EmitHp::emit_hp`，前端 `app_ui/shared/events.ts` 的 `listenHp` / `emitHp`。
   与命令侧 `domain.action` ↔ `domain_action` 是**同一条口径**。由 `pnpm check:event-names` 守护。
   （缺陷 0022：事件侧此前漏了这层映射，且发送失败被 `let _ =` 吞掉，整族事件静默失效。）
@@ -33,7 +33,7 @@ interface HpError {
 ### 2.1 迁移状态与推进方式（D76，2026-09）
 
 **现状（2026-09 更新）**：**基础设施与第一批命令已落地**——
-`apps/desktop/src-tauri/src/commands/shared.rs` 提供 `ApiResponse<T>` / `ApiError` / `api_from_hp`，
+`apps/desktop/src-tauri/src/commands/shared/response.rs` 提供 `ApiResponse<T>` / `ApiError` / `api_from_hp`，
 `crates/hp-core/src/error.rs` 的 `HpError::code()` 给出 D76 的**闭集错误码**，
 前端 `apps/desktop/src/app_ui/shared/api/response.ts` 提供统一解包层 `unwrapApi` 与
 `code → i18n` 文案映射（三套语言都有 `error.code.*` 键）。
@@ -238,7 +238,7 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 > 未知媒体类型 / 名字非法 → `validation`、目标已存在 → `conflict`、
 > 磁盘/回收站/父目录失败 → `io`。`thumb.get` 是**异步命令**：Tauri 的
 > `#[tauri::command]` 对含引用的 async 命令强制要求返回 `Result`，因此它用
-> `ApiAsync<T>`（`commands/shared.rs`）——包装仍落在**成功值**里（恒 `Ok`），
+> `ApiAsync<T>`（`commands/shared/response.rs`）——包装仍落在**成功值**里（恒 `Ok`），
 > 前端只需一套 `unwrapApi`。界面侧的错误显示改为 `errorTextOf(t, e)`：
 > 已迁移域按 `code` 走 i18n，**未迁移域仍是裸串**时原样显示（不丢信息），
 > 该域迁移后自动收敛。
