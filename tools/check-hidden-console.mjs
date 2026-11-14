@@ -30,8 +30,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PROCESS_RS = join(ROOT, "crates/hp-media/src/process.rs");
 const MAIN_RS = join(ROOT, "apps/desktop/src-tauri/src/main.rs");
-const HP_MEDIA_ENTRY_POINTS = ["probe", "decode", "thumbnail"].map((n) =>
-  join(ROOT, `crates/hp-media/src/${n}.rs`),
+const HP_MEDIA_ENTRY_POINTS = ["probe", "decode", "thumbnail/image_pipeline", "thumbnail/video"].map(
+  (n) => join(ROOT, `crates/hp-media/src/${n}.rs`),
 );
 
 // 允许出现裸 `Command::new(` 的文件：**只**允许 helper 的定义处。
@@ -142,7 +142,7 @@ check(
 // ───────── 4. hp-media 三个接入口都走 helper ─────────
 const missing = HP_MEDIA_ENTRY_POINTS.filter((p) => !read(p).includes("hidden_command("));
 check(
-  "hp-media 接入口 probe / decode / thumbnail 均出现 hidden_command(",
+  "hp-media 接入口 probe / decode / thumbnail（image_pipeline、video）均出现 hidden_command(", 
   missing.length === 0,
   missing.length ? missing.map(rel).join(", ") : "",
 );

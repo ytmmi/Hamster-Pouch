@@ -305,7 +305,7 @@ check(
 check(
   "档梯两端同源：Rust `IMAGE_THUMB_DIM_LADDER` ↔ 前端 `THUMB_DIM_LADDER`；320 档沿用旧缓存名 `<hash>.webp`",
   (() => {
-    const thumbRs = readFileSync(join(ROOT, "crates/hp-media/src/thumbnail.rs"), "utf8");
+    const thumbRs = readFileSync(join(ROOT, "crates/hp-media/src/thumbnail/image_pipeline.rs"), "utf8");
     const cacheRs = readFileSync(join(ROOT, "crates/hp-media/src/cache.rs"), "utf8");
     const base = /pub const IMAGE_THUMB_MAX_DIM: u32 = (\d+);/.exec(thumbRs);
     const ladder = /pub const IMAGE_THUMB_DIM_LADDER: &\[u32\] = &\[([^\]]+)\];/.exec(thumbRs);

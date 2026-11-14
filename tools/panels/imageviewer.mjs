@@ -921,8 +921,9 @@ check(
 // 外加依赖侧：`resvg` 必须仍是**纯 Rust + 不开系统字体**（D20 的"不把用户环境
 // 变成运行期前提"，与 D110 不引 pdfium 同一条判据）。
 const svgSrcForFormats = readFileSync(join(ROOT, "crates/hp-media/src/svg.rs"), "utf8");
+// D215：缩略图生成已拆成 thumbnail/ 目录，图片管线（含 SVG 分流与 ffmpeg-only 表）在 image_pipeline.rs。
 const thumbnailSrcForFormats = readFileSync(
-  join(ROOT, "crates/hp-media/src/thumbnail.rs"),
+  join(ROOT, "crates/hp-media/src/thumbnail/image_pipeline.rs"),
   "utf8",
 );
 const hpMediaCargoSrc = readFileSync(join(ROOT, "crates/hp-media/Cargo.toml"), "utf8");

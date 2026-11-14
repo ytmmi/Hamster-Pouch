@@ -258,7 +258,7 @@ apps/desktop/src/app_ui/
                       #   styles、api/（按域）、types/（按域）、thumbUrl（取图结果缓存 + in-flight 去重）、
                      #   thumbSize（**缩略图档梯**：`THUMB_DIM_LADDER` = 320/480/640/960/1280、
                      #     `thumbBucket` 向上吸附、`thumbCacheKey` = `fileId@bucket`；D159，
-                     #     与 `crates/hp-media/src/thumbnail.rs` 的 `IMAGE_THUMB_DIM_LADDER` 同源，门禁对账）
+                     #     与 `crates/hp-media/src/thumbnail/image_pipeline.rs` 的 `IMAGE_THUMB_DIM_LADDER` 同源，门禁对账）
                       #   ratioCache（`fileId → 宽/高` 的唯一缓存与通知口，D206：媒体预览的平铺/自适应/
                       #   瀑布流与图像查看器的胶片栏**共用同一份**——同一张图不再在两个面板各解码一次；
                       #   写入只有 setCachedRatio，批量播种静默，通知不合并（消费方各自合帧））
@@ -873,7 +873,12 @@ HamsterPouch/
                               #     解码源文件 / 解码失败兜底——只关心"文件 → 像素或字节"，
                               #     不含"走 lowres 还是全解码"的策略（策略在 thumbnail / lowres）
                               #     与落盘原子性仍复用 `thumbnail::{temp_sibling, commit}`
-                              #   thumbnail.rs 图片缩略图（WebP 三级降级）+ 视频首帧（JPEG）；
+                              #   thumbnail/ 缩略图生成（D215：1142 行的单文件拆成目录，外部 crate::thumbnail::… 路径不变）
+                              #     mod.rs 只做模块文档与再导出；atomic.rs 同目录临时文件 + rename 的唯一实现；
+                              #     video.rs 视频首帧与抽帧过滤链（VIDEO_BLACK_SKIP_WINDOW）；image_pipeline.rs 图片档梯 +
+                              #     全分辨率预览 + WebP 编码（不叫 image.rs：子模块名会遮蔽 image crate，use super::* 之后
+                              #     image::RgbImage 直接失配）；tests.rs 700 行用例原样搬出。check:media-structure 5 条钉住划分。
+                              #     图片缩略图（WebP 三级降级）+ 视频首帧（JPEG）；
                               #     视频**跳过片头黑屏**（D143）：一条 `blackframe` + `metadata`
                               #     过滤链在一次 ffmpeg 内完成，输入侧 `-t` 限窗 5 s；窗口内全黑
                               #     则回退到原首帧命令（判据是临时文件是否存在，不是退出码）；
