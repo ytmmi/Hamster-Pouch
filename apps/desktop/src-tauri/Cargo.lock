@@ -1741,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "hamster-pouch-desktop"
-version = "0.1.41-Alpha"
+version = "0.1.42-Alpha"
 dependencies = [
  "hp-ai",
  "hp-album",

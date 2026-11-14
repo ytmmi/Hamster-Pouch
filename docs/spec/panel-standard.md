@@ -290,7 +290,7 @@
 
 ## 8. 验证
 
-- **`pnpm check:panels`**（新增门禁，与 `check:controls` / `check:blueprint-nodes` 同款）：
+- **`pnpm check:panels`**（新增门禁，与 `check:controls` / `check:blueprint-nodes` 同款；**D189 起实现按面板域拆到 `tools/panels/*.mjs`**，`tools/check-panels.mjs` 只剩按原顺序执行与汇总，共享真值在 `tools/panels/shared.mjs`、断言框架在 `tools/panels/harness.mjs`）：
   1. 注册表 ↔ 声明列表 ↔ 本文档三方一致（`id` 清单、顺序、`category`、`has_class`、`blueprint_node`）。
      Rust 侧的面板事实表是**生成物**（`crates/hp-core/src/panel_facts_generated.rs`，由 `panels.ts` 产出，`pnpm check:panel-facts` 逐字节比对），因此本门禁另有一条**反向**断言：`blueprint_registry.rs` 不得再手抄面板事实元组——否则手抄那份仍能与 TS 静默分叉（D183 之前正是如此：注释声称由本门禁断言，实际没有任何门禁读它）。
   2. `PANEL_IDS` ↔ `PANEL_DEFS` ↔ `PANEL_TITLES` 一致。**`PANEL_DEFS` 自 D184 起由 `BUILTIN_PANEL_SPECS` 派生**（`id` / `titleKey` 只在注册表存一份），因此门禁改断言两件事：派生写法仍在且**没有退回手抄字面量**（反向断言），以及渲染表 `RENDERERS` 的键集**恰好覆盖**全部内置面板（无遗漏、无多余）；标题键一致性由「注册表 ↔ `PANEL_TITLES`」那条承担。
