@@ -47,10 +47,6 @@ const rustRegistry = readFileSync(
   join(ROOT, "crates/hp-core/src/setting_registry.rs"),
   "utf8",
 );
-const rustPanelRegistry = readFileSync(
-  join(ROOT, "crates/hp-core/src/panel_settings_generated.rs"),
-  "utf8",
-);
 
 const t = (key) => zhCN[key] ?? zhTW[key] ?? en[key] ?? key;
 
@@ -397,95 +393,34 @@ check(
     .some((e) => e.includes("落库键冲突")),
 );
 
-// ============== Rust 校验镜像 ↔ TS 权威声明（D76 / 契约 3.13 四条规则）==============
+// ============== Rust 校验镜像 ↔ TS 权威声明（D76 / 契约 3.13 / D180·D193）==============
 //
 // 注册表的**权威声明在 TS**（D80 已裁决它不做成命令）；但 `setting.set` 的
 // 「未知键拒绝 / 按 kind 校验 / 插件项 permission / 仅 repo 项带 repoId」必须由宿主执行，
-// 所以 Rust 侧镜像了**校验所需的事实**。
+// 所以 Rust 侧需要**校验所需的事实**（id / owner / kind / scope / options / requires_capability）。
 //
-// 宿主项仍是手写常量（`SYSTEM_SETTING_DECLS`），这里逐项比对防漂移；
-// 面板项**不再手抄**：`panel_settings_generated.rs` 由 `tools/gen-panel-settings.mjs`
-// 从 `panels.ts` 生成，`pnpm check:panel-settings` 做逐字节比对（严格强于事实比对）。
-// 本节因此只守三件事：宿主项一致、生成物与 TS 语义一致、注册表文件里不残留面板项。
+// 这些事实**全部是生成物**：`crates/hp-core/src/panel_settings_generated.rs`（D180，来自
+// `panels.ts`）与 `crates/hp-core/src/system_settings_generated.rs`（D193，来自 `settings.ts`），
+// 都由 `tools/gen-setting-facts.mjs` 生成，`pnpm check:setting-facts` 做**逐字节**比对
+// （严格强于逐项事实比对）。本节因此只守两件事：注册表文件**不再手抄**任何设置项、
+// 两类事实都从生成物再导出——护栏不再解析被守护的源码（解析器坏了断言会静默通过）。
 
-/** 解析 `setting_registry.rs` 里的 `SettingDeclFact { … }` 字面量。 */
-function parseRustSettingMirror(src) {
-  const out = [];
-  const re = /SettingDeclFact\s*\{([\s\S]*?)\n\s*\}/g;
-  let m;
-  while ((m = re.exec(src)) !== null) {
-    const body = m[1];
-    // `\b` 前缀不可省：否则 `kind:` 会命中 `owner_kind:`（下划线不是词边界）。
-    const str = (k) => (body.match(new RegExp(`\\b${k}:\\s*"([^"]*)"`)) || [])[1];
-    const ownerId = body.match(/owner_id:\s*Some\("([^"]*)"\)/);
-    const scope = (body.match(/scope:\s*SettingScope::(\w+)/) || [])[1];
-    const optionsRaw = (body.match(/options:\s*&\[([^\]]*)\]/) || [])[1] ?? "";
-    const entry = {
-      id: str("id"),
-      ownerKind: str("owner_kind"),
-      ownerId: ownerId ? ownerId[1] : null,
-      kind: str("kind"),
-      scope: scope === "Repo" ? "repo" : "app",
-      options: [...optionsRaw.matchAll(/"([^"]*)"/g)].map((x) => x[1]),
-    };
-    // 结构体定义 / impl 里的其它 `SettingDeclFact {` 没有这些字段，跳过。
-    if (entry.id && entry.ownerKind && entry.kind) out.push(entry);
-  }
-  return out;
-}
-
-const storageKeyOfDecl = (d) =>
-  d.ownerKind === "panel" || d.ownerKind === "plugin"
-    ? `${d.ownerKind}.${d.ownerId}.${d.id}`
-    : d.id;
-const factKey = (d) =>
-  JSON.stringify([storageKeyOfDecl(d), d.kind, d.scope, [...d.options].sort()]);
-
-const rustMirror = parseRustSettingMirror(rustRegistry);
-const rustPanelMirror = parseRustSettingMirror(rustPanelRegistry);
-const tsSystem = config.SYSTEM_SETTING_DECLS.map((d) => ({
-  id: d.id,
-  ownerKind: "system",
-  ownerId: null,
-  kind: d.kind,
-  scope: d.scope ?? "app",
-  options: (d.options ?? []).map((o) => o.value),
-}));
-const tsPanel = config.panelSettingDecls().map((d) => ({
-  id: d.id,
-  ownerKind: "panel",
-  ownerId: d.owner.id,
-  kind: d.kind,
-  scope: d.scope ?? "app",
-  options: (d.options ?? []).map((o) => o.value),
-}));
-
-/** 两侧的对称差（便于一眼看出漂在哪一项）。 */
-
-/** 两侧的对称差（便于一眼看出漂在哪一项）。 */
-function mirrorDiff(rust, ts) {
-  const r = new Set(rust.map(factKey));
-  const s = new Set(ts.map(factKey));
-  return [
-    ...[...r].filter((k) => !s.has(k)).map((k) => `rust-only ${k}`),
-    ...[...s].filter((k) => !r.has(k)).map((k) => `ts-only   ${k}`),
-  ].join(" | ");
-}
-
+const usesSystemFacts = /pub use crate::system_settings_generated::SYSTEM_SETTING_DECLS;/.test(
+  rustRegistry,
+);
+const usesPanelFacts = /pub use crate::panel_settings_generated::PANEL_SETTING_DECLS;/.test(
+  rustRegistry,
+);
+const handCopiedFacts = [...rustRegistry.matchAll(/^\s+SettingDeclFact \{/gm)];
 check(
-  "Rust 宿主设置镜像 ↔ TS `SYSTEM_SETTING_DECLS` 逐项一致（落库键 / kind / scope / options）",
-  eqList(rustMirror.map(factKey).sort(), tsSystem.map(factKey).sort()),
-  mirrorDiff(rustMirror, tsSystem),
+  "设置注册表里不再手抄设置项（宿主项与面板项都只由生成物提供）",
+  handCopiedFacts.length === 0,
+  `手抄 ${handCopiedFacts.length} 处（应改 TS → pnpm gen:setting-facts）`,
 );
 check(
-  "面板设置生成物 ↔ TS `panelSettingDecls()` 逐项一致",
-  eqList(rustPanelMirror.map(factKey).sort(), tsPanel.map(factKey).sort()),
-  mirrorDiff(rustPanelMirror, tsPanel),
-);
-check(
-  "设置注册表里不再手抄面板项（面板事实只由生成物提供）",
-  rustMirror.every((d) => d.ownerKind === "system"),
-  rustMirror.filter((d) => d.ownerKind !== "system").map((d) => d.id).join(", "),
+  "设置注册表从生成物再导出宿主项与面板项（system_settings_generated / panel_settings_generated）",
+  usesSystemFacts && usesPanelFacts,
+  `${usesSystemFacts ? "" : "缺 SYSTEM_SETTING_DECLS 再导出 "}${usesPanelFacts ? "" : "缺 PANEL_SETTING_DECLS 再导出"}`,
 );
 
 const repoBridge = readFileSync(

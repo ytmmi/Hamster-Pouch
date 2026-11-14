@@ -1,15 +1,12 @@
-//! 面板设置声明（**由 `tools/gen-panel-settings.mjs` 生成，不要手改**）。
+//! 面板设置声明（**由 `tools/gen-setting-facts.mjs` 生成，不要手改**）。
 //!
-//! 权威声明在 TS：`packages/config/src/panels.ts` 各面板的 `settings`；
+//! 权威声明在 TS：`packages/config/src/panels.ts` 的 `BUILTIN_PANEL_SPECS` 各面板 `settings`；
 //! 宿主 `setting.set` 需要这些事实做「未知键拒绝 / kind 校验 / select 候选校验 /
-//! 仅 repo 项带 repoId」，所以生成成静态表。改动流程：改 TS → `pnpm gen:panel-settings`
-//! → 生成物与代码同一次提交；`pnpm check:panel-settings` 逐字节比对防漂移。
+//! 仅 repo 项带 repoId」，所以生成成静态表。改动流程：改 TS → `pnpm gen:setting-facts`
+//! → 生成物与代码同一次提交；`pnpm check:setting-facts` 逐字节比对防漂移。
 //!
-//! `select` 的候选必须逐项列出：`validate_setting_value` 对**空 `options` 的 `select`**
-//! 直接拒绝（失败关闭），漏写候选会让该项在真机上完全无法写入。
+//! `select` 的候选必须逐项列出：空 `options` 的 `select` 会被 `validate_setting_value` 拒绝（失败关闭）。插件面板不在本表：其声明随 manifest 走宿主注册。
 //!
-//! 插件面板**不在**此列：它们的声明随 manifest 走宿主注册流程。
-
 use crate::setting_registry::SettingDeclFact;
 use crate::setting_types::SettingScope;
 

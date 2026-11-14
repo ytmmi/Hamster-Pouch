@@ -56,6 +56,7 @@ pub mod repo;
 pub mod setting_registry;
 pub mod setting_types;
 pub mod source;
+mod system_settings_generated;
 pub mod tag;
 pub mod tag_dict;
 pub mod tag_lib;
