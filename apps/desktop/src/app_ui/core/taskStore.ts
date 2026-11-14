@@ -16,6 +16,8 @@ import { useSyncExternalStore } from "react";
 
 import { listenHp } from "../shared/events";
 
+import { createStore } from "./createStore";
+
 import type { Translate, TranslationKey } from "../i18n";
 import type {
   FileBackfillCompletedPayload,
@@ -36,35 +38,26 @@ interface TaskActions {
   t: Translate;
 }
 
-let current: TaskProgress | null = null;
+const store = createStore<TaskProgress | null>(null);
 let actions: TaskActions | null = null;
 let started = false;
-const listeners = new Set<() => void>();
 
-function emitChange() {
-  for (const l of listeners) {
-    l();
-  }
-}
-
-/** 更新任务进度（`null` = 无任务）。 */
+/** 更新任务进度（`null` = 无任务）。同一对象重复写入不再触发重渲染（D205）。 */
 export function setTask(next: TaskProgress | null) {
-  current = next;
-  emitChange();
+  store.set(next);
 }
 
 export function getTask(): TaskProgress | null {
-  return current;
+  return store.get();
 }
 
 export function subscribeTask(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+  return store.subscribe(listener);
 }
 
 /** 订阅任务进度（仅订阅者重渲染）。 */
 export function useTask(): TaskProgress | null {
-  return useSyncExternalStore(subscribeTask, getTask, getTask);
+  return useSyncExternalStore(store.subscribe, store.get, store.get);
 }
 
 /** 宿主每次渲染后绑定最新的 status / refresh / t（不是订阅，不会触发重渲染）。 */
@@ -91,7 +84,8 @@ export function startTaskEvents(): () => void {
         titleKey: "scan.title",
         taskId: p.taskId,
         sourceId: p.sourceId,
-        subtitle: current?.sourceId === p.sourceId ? (current?.subtitle ?? null) : null,
+        subtitle:
+          getTask()?.sourceId === p.sourceId ? (getTask()?.subtitle ?? null) : null,
         messageKey: walking ? "scan.walking" : "scan.indexing",
         messageParams: walking
           ? { count: p.processed }
@@ -198,7 +192,7 @@ export function startTaskEvents(): () => void {
         titleKey: "unmount.title",
         taskId: p.taskId,
         sourceId: p.sourceId,
-        subtitle: current?.sourceId === p.sourceId ? (current?.subtitle ?? null) : null,
+        subtitle: getTask()?.sourceId === p.sourceId ? (getTask()?.subtitle ?? null) : null,
         messageKey,
         messageParams: p.total > 0 ? { processed: p.processed, total: p.total } : {},
         processed: p.processed,

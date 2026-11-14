@@ -8,28 +8,30 @@
  *
  * 模块级 store（同 `taskStore` 口径）：不进 React context；
  * 订阅者在挂载时先读当前值（可能面板后挂载、请求先到），再订阅后续请求。
+ * 订阅表本身来自 `./createStore`（D205），本文件只留「播放请求」这条事实。
  */
 
-let current: { fileId: string; seq: number } | null = null;
-const listeners = new Set<() => void>();
+import { createStore } from "./createStore";
+
+/** 一条播放请求：`seq` 每次递增，同文件重播也能触发（`null` = 从未请求过）。 */
+export interface PlayRequest {
+  fileId: string;
+  seq: number;
+}
+
+const store = createStore<PlayRequest | null>(null);
 
 /** 请求播放器面板播放指定文件（每次调用递增序号，同文件重播也能触发）。 */
 export function requestPlayerPlay(fileId: string): void {
-  current = { fileId, seq: (current?.seq ?? 0) + 1 };
-  for (const listener of [...listeners]) {
-    listener();
-  }
+  store.set({ fileId, seq: (store.get()?.seq ?? 0) + 1 });
 }
 
 /** 最近一次播放请求（`null` = 从未请求过）。 */
-export function getPlayerPlayRequest(): { fileId: string; seq: number } | null {
-  return current;
+export function getPlayerPlayRequest(): PlayRequest | null {
+  return store.get();
 }
 
 /** 订阅播放请求；返回退订函数。 */
 export function subscribePlayerPlay(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
+  return store.subscribe(listener);
 }

@@ -21,12 +21,14 @@
  *   那会在面板重建时把用户刚选的排序抹掉）。
  *
  * 与 `core/settingChangeStore` / `core/panelStore` 同款：模块级订阅表 + 纯函数，
- * 不进 React context、不落库、不参与蓝图求值；通知只在值真的变化时发。
+ * 不进 React context、不落库、不参与蓝图求值；通知只在值真的变化时发
+ * （订阅表与「未变化不通知」都由 `./createStore` 提供，D205）。
  * 本模块无 React / Tauri 依赖（`pnpm check:panels` 直接 import 断言）。
  */
 
 import { panelSettingStorageKey } from "@hamster-pouch/config";
 
+import { createStore } from "./createStore";
 import { subscribeSettingChanged } from "./settingChangeStore";
 import {
   isMediaSortKey,
@@ -46,46 +48,37 @@ export interface MediaSortSession {
   dir: SortDirection | null;
 }
 
-let sessionSnapshot: MediaSortSession = { key: null, dir: null };
-
-type Listener = () => void;
-const listeners = new Set<Listener>();
-
-function publish(next: MediaSortSession): void {
-  sessionSnapshot = next;
-  for (const listener of [...listeners]) listener();
-}
+const store = createStore<MediaSortSession>({ key: null, dir: null });
 
 /** 订阅排序覆盖变化；返回退订函数。 */
-export function subscribeMediaSort(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+export function subscribeMediaSort(listener: () => void): () => void {
+  return store.subscribe(listener);
 }
 
-/** 当前会话覆盖快照（引用只在变化时更换）。 */
+/** 当前会话覆盖快照（引用只在变化时更换，可直接交给 `useSyncExternalStore`）。 */
 export function getMediaSortSession(): MediaSortSession {
-  return sessionSnapshot;
+  return store.get();
 }
 
 /** 面板内选排序（键或方向；非法取值忽略）。本会话内记住，并通知其它消费方。 */
 export function chooseMediaSort(next: string): void {
   if (isMediaSortKey(next)) {
-    if (sessionSnapshot.key === next) return;
-    publish({ ...sessionSnapshot, key: next });
+    if (store.get().key === next) return;
+    store.set({ ...store.get(), key: next });
   } else if (isSortDirection(next)) {
-    if (sessionSnapshot.dir === next) return;
-    publish({ ...sessionSnapshot, dir: next });
+    if (store.get().dir === next) return;
+    store.set({ ...store.get(), dir: next });
   }
 }
 
 /** 「全部设置」显式写入对应键 → 放弃该项会话覆盖（否则＝改了设置没反应）。 */
 function onSettingChanged(key: string): void {
   if (key === MEDIA_SORT_KEY_STORAGE_KEY) {
-    if (sessionSnapshot.key === null) return;
-    publish({ ...sessionSnapshot, key: null });
+    if (store.get().key === null) return;
+    store.set({ ...store.get(), key: null });
   } else if (key === MEDIA_SORT_DIR_STORAGE_KEY) {
-    if (sessionSnapshot.dir === null) return;
-    publish({ ...sessionSnapshot, dir: null });
+    if (store.get().dir === null) return;
+    store.set({ ...store.get(), dir: null });
   }
 }
 

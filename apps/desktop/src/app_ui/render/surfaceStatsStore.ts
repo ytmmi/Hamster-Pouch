@@ -7,9 +7,14 @@
  *
  * 这里**不写库**：后端是运行时决定的，不是用户设置值——把它写进 `app_settings` 会让
  * "我明明是自动档，怎么被记成了 dom"这种假象出现在下一次启动。
+ *
+ * 订阅表与「未变化不通知」来自 `../../core/createStore`（D205）；**哪些字段算变化**留在本文件，
+ * 因为那取决于 `SurfaceStatsSnapshot` 的字段集——加字段时 `sameStats` 必须同步加比较，
+ * 否则就是「后端换了、设置页不动」。
  */
 
 import { useSyncExternalStore } from "react";
+import { createStore } from "../core/createStore";
 import type { Backend, SurfaceStats } from "./surface";
 
 export interface SurfaceStatsSnapshot {
@@ -20,54 +25,48 @@ export interface SurfaceStatsSnapshot {
   residentTiles: number;
 }
 
-let snapshot: SurfaceStatsSnapshot | null = null;
-const listeners = new Set<() => void>();
-
-function emit(): void {
-  for (const listener of listeners) listener();
-}
-
-/** 表面的 stats 是可变对象，这里拷一份快照：React 只比较引用，不能让它看到原地变化。 */
-export function publishSurfaceStats(stats: SurfaceStats | null): void {
-  if (!stats) {
-    if (snapshot === null) return;
-    snapshot = null;
-    emit();
-    return;
+/** 五个字段逐个比较：`SurfaceStats` 是可变对象，React 只比较引用，不能让它看到原地变化。 */
+function sameStats(
+  previous: SurfaceStatsSnapshot | null,
+  next: SurfaceStatsSnapshot | null,
+): boolean {
+  if (previous === null || next === null) {
+    return previous === next;
   }
-  const next: SurfaceStatsSnapshot = {
-    backend: stats.backend,
-    uploads: stats.uploads,
-    uploadedBytes: stats.uploadedBytes,
-    lastFrameMs: stats.lastFrameMs,
-    residentTiles: stats.residentTiles,
-  };
-  const previous = snapshot;
-  if (
-    previous &&
+  return (
     previous.backend === next.backend &&
     previous.uploads === next.uploads &&
     previous.uploadedBytes === next.uploadedBytes &&
     previous.lastFrameMs === next.lastFrameMs &&
     previous.residentTiles === next.residentTiles
-  ) {
+  );
+}
+
+const store = createStore<SurfaceStatsSnapshot | null>(null, sameStats);
+
+/** 拷一份快照再发布：值没变时 store 不换引用、不通知。 */
+export function publishSurfaceStats(stats: SurfaceStats | null): void {
+  if (!stats) {
+    store.set(null);
     return;
   }
-  snapshot = next;
-  emit();
+  store.set({
+    backend: stats.backend,
+    uploads: stats.uploads,
+    uploadedBytes: stats.uploadedBytes,
+    lastFrameMs: stats.lastFrameMs,
+    residentTiles: stats.residentTiles,
+  });
 }
 
 export function readSurfaceStatsSnapshot(): SurfaceStatsSnapshot | null {
-  return snapshot;
+  return store.get();
 }
 
 export function subscribeSurfaceStats(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
+  return store.subscribe(listener);
 }
 
 export function useSurfaceStats(): SurfaceStatsSnapshot | null {
-  return useSyncExternalStore(subscribeSurfaceStats, readSurfaceStatsSnapshot, () => null);
+  return useSyncExternalStore(store.subscribe, store.get, () => null);
 }

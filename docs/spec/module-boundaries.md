@@ -75,6 +75,12 @@ Rust 核心层
 浮窗另有两条稳健性约定：① 长时间无进度时用 `task.status` 与后端**对账**，后端已空闲就自行收起并刷新（防止终止事件丢失后永远转圈）；
 ② 可取消任务提供取消、卡住时提供手动关闭，界面不会被任务锁死。
 
+**模块级 store 的订阅表只有一份骨架**（D205）：`apps/desktop/src/app_ui/core/createStore.ts` 的 `createStore<T>(initial, equals)`
+（值型：判等不通过才换引用、才通知）与 `createEventChannel<Args>()`（事件型：只广播当次载荷）。六个 store 模块
+（`playerPlayStore` / `musicPlayStore` / `taskStore` / `mediaSortStore` / `settingChangeStore` / `render/surfaceStatsStore`）
+只留各自的领域语义与 `useSyncExternalStore` 接线；「哪些字段算变化」仍留在知道字段集的模块里。`check:stores` 三条断言守
+「不再自建订阅表 / 判等后提前返回 / 遍历订阅者快照」，并钉住视频与音乐是**两个独立实例**（D166）。
+
 ## 插件/AI 扩展点
 
 插件首期只能做：

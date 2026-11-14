@@ -6,13 +6,13 @@
  * 「全部设置」浮层与面板之间再走一次 IPC 往返是**多余的一跳**：写完即本地广播，
  * 面板同步生效，不依赖事件是否及时到达、也不怕订阅时机晚于用户操作。
  *
- * 与本项目其它 store 同款（`panelStore` / `playerPlayStore` / `blueprintRevision`）：
- * 模块级订阅表 + 纯函数，不进 React context、不落库、不参与蓝图求值。
+ * 事件型而非值型：载荷只对当时在座的订阅者有意义，没有「当前值」可言
+ * （后来者不该收到历史变更）。骨架在 `./createStore` 的 `createEventChannel`（D205）。
  */
 
-type Listener = (key: string) => void;
+import { createEventChannel } from "./createStore";
 
-const listeners = new Set<Listener>();
+const channel = createEventChannel<[string]>();
 
 /**
  * 广播一次设置变更。
@@ -21,11 +21,10 @@ const listeners = new Set<Listener>();
  * 监听方自己决定是否关心该键（面板设置按面板命名空间过滤）。
  */
 export function publishSettingChanged(key: string): void {
-  for (const listener of [...listeners]) listener(key);
+  channel.emit(key);
 }
 
 /** 订阅设置变更；返回退订函数。 */
-export function subscribeSettingChanged(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+export function subscribeSettingChanged(listener: (key: string) => void): () => void {
+  return channel.subscribe(listener);
 }
