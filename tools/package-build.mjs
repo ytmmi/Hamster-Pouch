@@ -427,14 +427,32 @@ if (dataStat?.isDirectory()) {
 
   // 自包含：把包内全局库注册表从「暂存路径」改写为「包内路径」，
   // 使开发包可整体带走（仓库库路径 / 插件 source_ref 都指向包内 data\）。
+  //
+  // **先归一化 `\.\` 再替换**：活动库里可能残留 `<exe>\src-tauri\.\target\release\data\…`
+  // 这种带 `.` 段的路径（某次启动写进去的）。`replace()` 是纯前缀匹配，多出的 `\.\`
+  // 会让前缀对不上、**静默不改写**——包于是不自包含，却仍然打印"打包成功"
+  // （实测：`plugin_registry.source_ref` 留在活动 data 里）。改完再复核一遍并报警。
   const gdb = join(devDir, "data", "system", "hamster-pouch-global.sqlite3");
   if (await stat(gdb).catch(() => null)) {
     const pkgData = join(devDir, "data");
+    const norm = (col) => `replace(${col}, '\\.\\', '\\')`;
     const sql =
-      `UPDATE repos SET repo_db_path = replace(repo_db_path, '${DATA}', '${pkgData}');` +
-      `UPDATE plugin_registry SET source_ref = replace(source_ref, '${DATA}', '${pkgData}');`;
+      `UPDATE repos SET repo_db_path = replace(${norm("repo_db_path")}, '${DATA}', '${pkgData}');` +
+      `UPDATE plugin_registry SET source_ref = replace(${norm("source_ref")}, '${DATA}', '${pkgData}');`;
     try {
       execFileSync("sqlite3", [gdb, sql], { stdio: "ignore" });
+      const q =
+        `SELECT count(*) FROM repos WHERE repo_db_path LIKE '${DATA}%' OR repo_db_path LIKE '${pkgData}%';` +
+        `SELECT count(*) FROM plugin_registry WHERE source_ref LIKE '${DATA}%';`;
+      const [inside, stale] = execFileSync("sqlite3", [gdb, q], { encoding: "utf8" })
+        .trim()
+        .split(/\r?\n/)
+        .map((n) => Number(n.trim()));
+      if (inside === 0 || stale !== 0) {
+        console.warn(
+          `[package-build] 注册表自包含复核未通过：仓库库落在包内 ${inside} 行、插件仍指向活动数据 ${stale} 行`,
+        );
+      }
     } catch (e) {
       console.error(`[package-build] 改写包内全局库注册表失败（${e.message}），包内数据可能不自包含`);
       process.exit(1);
