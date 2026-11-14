@@ -10,9 +10,8 @@ use hp_core::{
     DictCategory, DictLang, DictSource, HpError, HpResult, TagDictAlias, TagDictEntry,
     TagDictLookup, TagDictSuggestion, TagDictTranslation, TranslationKind,
 };
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{OptionalExtension, Row, params};
 
-use crate::migrate;
 use crate::util::{require_nonempty, store_err};
 
 /// 词库迁移脚本（按版本升序）。
@@ -20,7 +19,7 @@ const DICT_MIGRATIONS: &[&str] = &[include_str!("../../migrations/dict/0001_init
 
 /// tag 词库句柄（独立 SQLite 文件，应用级共享；RFC 0006 决策 1）。
 pub struct TagDictDb {
-    conn: Connection,
+    conn: hp_db::Db,
 }
 
 impl TagDictDb {
@@ -34,12 +33,8 @@ impl TagDictDb {
             std::fs::create_dir_all(parent)
                 .map_err(|e| HpError::Store(format!("创建词库目录失败: {e}")))?;
         }
-        let mut conn = Connection::open(path).map_err(|e| store_err("打开 tag 词库", e))?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| store_err("设置 WAL", e))?;
-        conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|e| store_err("开启外键", e))?;
-        migrate::apply(&mut conn, DICT_MIGRATIONS)?;
+        let mut conn = hp_db::Db::open(path, hp_db::PragmaSet::DICT, "打开 tag 词库")?;
+        conn.apply_migrations(DICT_MIGRATIONS)?;
         Ok(Self { conn })
     }
 
@@ -239,10 +234,7 @@ impl TagDictDb {
 
     /// 关闭词库：WAL 检查点后释放连接。
     pub fn close(self) -> HpResult<()> {
-        self.conn
-            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
-            .map_err(|e| store_err("关闭词库检查点", e))?;
-        Ok(())
+        self.conn.checkpoint_close("关闭词库检查点")
     }
 
     // ---------- 内部查询 ----------

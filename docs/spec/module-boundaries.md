@@ -18,7 +18,8 @@ Rust 核心层
 ## Rust crate 边界
 
 - `hp-core`：纯领域模型与错误类型；不依赖 Tauri/SQLite/文件系统。
-- `hp-store`：全局库、仓库库与 tag 词库连接、迁移、事务；向上暴露仓储接口（词库见 RFC 0006，`TagDictDb`）。
+- `hp-db`：SQLite 连接骨架——`PragmaSet` 组合（WAL / busy_timeout / 外键）、前向迁移执行器、关库检查点，以及 `store_err` / `now_iso` / `uuid` / `require_nonempty` 四个小工具。**只放骨架，不放 schema、SQL 与迁移清单**；不依赖任何领域 crate（`hp-store` 依赖它，反向禁止，`check:db-boundary` 断言）。
+- `hp-store`：全局库、仓库库与 tag 词库的表结构、SQL、迁移清单与事务；连接一律经 `hp-db` 打开；向上暴露仓储接口（词库见 RFC 0006，`TagDictDb`）。
 - `hp-scanner`：扫描媒体源、监听变化、生成索引任务；媒体类型判定（扩展名优先 + 内容兜底）；不直接改 UI。
 - `hp-hash`：内容哈希与感知哈希；只输出哈希值与算法元数据。
 - `hp-album`：固定相册、跟随源同步规则、成员维护、相册查询。

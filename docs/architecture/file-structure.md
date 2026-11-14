@@ -43,10 +43,13 @@
 ### 3. 落地下限（当前结构示例）
 
 ```text
+crates/hp-db/src/     # SQLite 连接骨架（D185）：四个库共用，不含 schema / SQL / 迁移清单
+  lib.rs              # PragmaSet（REPO / GLOBAL / DICT / TAGLIB_READONLY）+ Db（open / open_readonly / apply_migrations / user_version / checkpoint_close）
+  migrate.rs          # 共享前向迁移执行器（PRAGMA user_version，每版一事务）
+  util.rs             # store_err / now_iso / uuid / require_nonempty
 crates/hp-store/src/
   lib.rs
-  migrate.rs          # 共享迁移执行器
-  util.rs             # 共享工具
+  util.rs             # 再导出 hp-db 的四个工具（领域仓储的 `use crate::util::…` 零改动）
   repo/               # 仓库库（每仓库一个 SQLite 文件）
     repo_db.rs        # 连接 / 迁移 / schema 版本
     source_repo.rs    file_repo.rs   album_repo.rs

@@ -2,7 +2,6 @@
 
 mod dict;
 mod global;
-mod migrate;
 mod repo;
 mod util;
 

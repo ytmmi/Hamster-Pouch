@@ -5,12 +5,13 @@ edition.workspace = true
 
 [dependencies]
 hp-core = { path = "../hp-core" }
+hp-db = { path = "../hp-db" }
 # bundled：SQLite 源码编译进 crate，不依赖系统 SQLite（D20 本地化）
 rusqlite = { version = "0.41", features = ["bundled"] }
-uuid = { version = "1", features = ["v4"] }
-time = { version = "0.3", features = ["formatting"] }
 serde_json = "1"
 
 [dev-dependencies]
 tempfile = "3"
+# 测试直接造 uuid 主键（lib 侧已改用 hp-db::uuid）
+uuid = { version = "1", features = ["v4"] }
 serde_json = "1"

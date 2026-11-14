@@ -18,7 +18,6 @@ use hp_core::{
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
-use crate::migrate;
 use crate::util::{require_nonempty, store_err};
 
 /// 四库迁移脚本（按版本升序）。
@@ -28,7 +27,7 @@ const TAGLIB_MIGRATIONS: &[&str] = &[include_str!("../../migrations/dict_lib/000
 ///
 /// 只读层（内置基底 / 扩展包）用 [`TagLibDb::open_readonly`]；用户库用 [`TagLibDb::open`]。
 pub struct TagLibDb {
-    conn: Connection,
+    conn: hp_db::Db,
     /// 该句柄所属的交付层（D36）。
     layer: LibLayer,
     /// 文件路径（聚合层诊断与 lib_meta 汇总用）。
@@ -38,7 +37,7 @@ pub struct TagLibDb {
 impl TagLibDb {
     /// 内部连接访问器（供 `tag_lib_write` / `tag_lib_set` 等同域模块的扩展方法使用）。
     pub(crate) fn conn(&self) -> &Connection {
-        &self.conn
+        self.conn.as_conn()
     }
 
     /// 以**读写**方式打开用户库；不存在则建表（跑四库迁移）。
@@ -51,12 +50,8 @@ impl TagLibDb {
             std::fs::create_dir_all(parent)
                 .map_err(|e| HpError::Store(format!("创建 tag 库目录失败: {e}")))?;
         }
-        let mut conn = Connection::open(&path).map_err(|e| store_err("打开 tag 库", e))?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| store_err("设置 WAL", e))?;
-        conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|e| store_err("开启外键", e))?;
-        migrate::apply(&mut conn, TAGLIB_MIGRATIONS)?;
+        let mut conn = hp_db::Db::open(&path, hp_db::PragmaSet::DICT, "打开 tag 库")?;
+        conn.apply_migrations(TAGLIB_MIGRATIONS)?;
         Ok(Self {
             conn,
             layer: LibLayer::User,
@@ -76,13 +71,8 @@ impl TagLibDb {
                 path.display()
             )));
         }
-        let conn = Connection::open_with_flags(
-            &path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-        )
-        .map_err(|e| store_err("以只读方式打开 tag 库", e))?;
-        conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|e| store_err("开启外键", e))?;
+        // 只读资产只开外键、不切 WAL（`PragmaSet::TAGLIB_READONLY`，hp-db）。
+        let conn = hp_db::Db::open_readonly(&path, "以只读方式打开 tag 库")?;
         Ok(Self { conn, layer, path })
     }
 

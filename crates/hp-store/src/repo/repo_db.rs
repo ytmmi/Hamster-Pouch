@@ -5,7 +5,6 @@ use std::path::Path;
 use hp_core::{HpError, HpResult};
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::migrate;
 use crate::util::{now_iso, require_nonempty, store_err};
 
 /// 仓库库迁移脚本（按版本升序）。
@@ -36,13 +35,13 @@ const REPO_MIGRATIONS: &[&str] = &[
 
 /// 仓库库句柄。
 pub struct RepoDb {
-    conn: Connection,
+    conn: hp_db::Db,
 }
 
 impl RepoDb {
     /// 内部连接访问器（供 `source_repo` / `file_repo` 等仓储扩展方法使用）。
     pub(crate) fn conn(&self) -> &Connection {
-        &self.conn
+        self.conn.as_conn()
     }
 
     /// 在指定路径创建新仓库库；路径已存在则报错（不覆盖）。
@@ -74,22 +73,17 @@ impl RepoDb {
     }
 
     fn open_inner(path: &Path) -> HpResult<Self> {
-        let mut conn = Connection::open(path).map_err(|e| store_err("打开仓库库", e))?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| store_err("设置 WAL", e))?;
         // 扫描线程持有**独立连接**（不占用主连接的锁以免整个 UI 被长扫描堵住），
         // 因此同一仓库库可能存在两个连接；给写冲突留出等待窗口，避免直接 SQLITE_BUSY。
-        conn.busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(|e| store_err("设置 busy_timeout", e))?;
-        conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|e| store_err("开启外键", e))?;
-        migrate::apply(&mut conn, REPO_MIGRATIONS)?;
+        // WAL / busy_timeout / 外键三件套由 `PragmaSet::REPO` 一处声明（hp-db，D185）。
+        let mut conn = hp_db::Db::open(path, hp_db::PragmaSet::REPO, "打开仓库库")?;
+        conn.apply_migrations(REPO_MIGRATIONS)?;
         // 打开即把低版本蓝图文档一次性迁移到当前版本并回写（RFC 0007 / D52）。
-        crate::repo::blueprint_repo::migrate_blueprint_documents(&mut conn)?;
+        crate::repo::blueprint_repo::migrate_blueprint_documents(conn.as_conn_mut())?;
         // 版本的**唯一权威**是 `PRAGMA user_version`（database-schema.md 第 5 节）；
         // `repo_meta.schema_version` 只是镜像键，必须在**新建与打开两条路径的唯一汇合点**回写，
-        // 否则升级过的库会与权威值分叉（缺陷 0006）。此处不能下沉到 `migrate::apply`：
-        // 那个执行器由仓库库/全局库/词库共用，且只有全局库与词库没有 `repo_meta`。
+        // 否则升级过的库会与权威值分叉（缺陷 0006）。此处不能下沉到 `hp_db::Db::apply_migrations`：
+        // 那个执行器由四个库共用，且只有仓库库有 `repo_meta`。
         let db = Self { conn };
         db.sync_schema_version_meta()?;
         Ok(db)
@@ -175,10 +169,7 @@ impl RepoDb {
 
     /// 关闭仓库库：WAL 检查点后释放连接。
     pub fn close(self) -> HpResult<()> {
-        self.conn
-            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
-            .map_err(|e| store_err("关闭仓库库检查点", e))?;
-        Ok(())
+        self.conn.checkpoint_close("关闭仓库库检查点")
     }
 }
 

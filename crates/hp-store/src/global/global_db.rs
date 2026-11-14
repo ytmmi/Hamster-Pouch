@@ -9,7 +9,6 @@ use hp_core::{HpError, HpResult};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde_json::Value;
 
-use crate::migrate;
 use crate::util::{now_iso, require_nonempty, store_err, uuid};
 
 /// 全局配置库迁移脚本（按版本升序）。
@@ -74,26 +73,23 @@ pub struct SeedOutcome {
 
 /// 全局配置库句柄。
 pub struct GlobalDb {
-    conn: Connection,
+    conn: hp_db::Db,
 }
 
 impl GlobalDb {
     /// 内部连接访问器（供 `plugin_repo` 等仓储扩展方法使用）。
     pub(crate) fn conn(&self) -> &Connection {
-        &self.conn
+        self.conn.as_conn()
     }
 
     /// 打开（不存在则创建）全局配置库并应用迁移。
     pub fn open(path: impl AsRef<Path>) -> HpResult<Self> {
-        let mut conn =
-            Connection::open(path.as_ref()).map_err(|e| store_err("打开全局配置库", e))?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| store_err("设置 WAL", e))?;
-        conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|e| store_err("开启外键", e))?;
-        migrate::apply(&mut conn, GLOBAL_MIGRATIONS)?;
+        let mut conn = hp_db::Db::open(path.as_ref(), hp_db::PragmaSet::GLOBAL, "打开全局配置库")?;
+        conn.apply_migrations(GLOBAL_MIGRATIONS)?;
         // 打开即把低版本蓝图模板一次性迁移到当前版本并回写（RFC 0007 / D52）。
-        crate::global::blueprint_template_repo::migrate_blueprint_template_documents(&mut conn)?;
+        crate::global::blueprint_template_repo::migrate_blueprint_template_documents(
+            conn.as_conn_mut(),
+        )?;
         Ok(Self { conn })
     }
 

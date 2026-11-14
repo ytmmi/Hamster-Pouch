@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/hp-core",
+  "crates/hp-db",
   "crates/hp-store",
   "crates/hp-scanner",
   "crates/hp-hash",
