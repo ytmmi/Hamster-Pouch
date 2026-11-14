@@ -136,8 +136,8 @@ fn main() {
                             set.len()
                         );
                     }
-                    if let Ok(mut guard) = app.state::<AppState>().tag_lib.lock() {
-                        *guard = Some(set);
+                    if !commands::shared::set_tag_lib(&app.state::<AppState>(), set) {
+                        eprintln!("[taglib] 装配失败：tag 库锁中毒");
                     }
                 }
             }

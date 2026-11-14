@@ -236,5 +236,39 @@ report(
   `仓库句柄只在 commands/shared.rs 装卸（扫描 ${bridgeFiles.length} 个桥接 .rs）`,
   handleOffenders,
 );
+// ⑪ 其它宿主级状态（D194）：五个互斥量的加锁入口只在 commands/shared.rs
+//
+// D194 之前，这五个字段的加锁策略散在 4 个文件里、写法有四种：`.ok()?` 静默降级、
+// `let Ok(..) else { fallback }`、`if let Ok(..)` 静默跳过、`match ... Err => eprintln!`。
+// 最后两种最伤：schema 缓存写不进去、tag 库装配失败，界面看起来「什么都没发生」。
+// 统一收进 shared.rs 之后，毒锁文案与锁序（state 级先、repo 后、state 级不嵌套）只有一处定义。
+const HOST_STATE_FIELDS = ["global_db", "panel_schema_cache", "supervision", "ai", "tag_lib"];
+const HOST_STATE_HELPERS = [
+  "pub(crate) fn lock_panel_schema",
+  "pub(crate) fn lock_supervision",
+  "pub(crate) fn lock_ai",
+  "pub(crate) fn lock_tag_lib",
+  "pub(crate) fn set_tag_lib",
+  "pub(crate) fn try_global",
+];
+const stateOffenders = [];
+const hostLockRe = new RegExp("\\.(" + HOST_STATE_FIELDS.join("|") + ")\\s*\\.\\s*lock\\s*\\(", "g");
+for (const file of bridgeFiles) {
+  const rel = relative(ROOT, file).replace(/\\/g, "/");
+  if (rel.endsWith("commands/shared.rs")) continue;
+  const body = stripComments(readFileSync(file, "utf8"));
+  const hits = body.match(hostLockRe) ?? [];
+  if (hits.length > 0) {
+    stateOffenders.push(`${rel}  绕过 shared.rs 直接加锁（${hits.join(" / ")}）`);
+  }
+}
+for (const needle of HOST_STATE_HELPERS) {
+  if (!sharedBody.includes(needle)) stateOffenders.push(`commands/shared.rs 缺少 ${needle}`);
+}
+report(
+  stateOffenders.length === 0,
+  `宿主级状态只在 commands/shared.rs 加锁（${HOST_STATE_FIELDS.length} 个互斥量）`,
+  stateOffenders,
+);
 console.log(`\n[check-db-boundary] ${passed}/${total} 通过`);
 process.exit(passed === total ? 0 : 1);

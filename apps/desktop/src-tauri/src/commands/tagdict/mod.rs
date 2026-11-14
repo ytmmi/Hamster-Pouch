@@ -8,7 +8,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::AppState;
-use crate::commands::shared::{ApiResponse, api_from_hp};
+use crate::commands::shared::{ApiResponse, api_from_hp, lock_tag_lib, set_tag_lib};
 
 /// `tag_dict.suggest`：按关键词搜索词库，返回候选列表。
 ///
@@ -21,10 +21,7 @@ pub(crate) fn tag_dict_suggest(
 ) -> ApiResponse<Vec<hp_core::TagConceptDetail>> {
     let outcome = (|| -> HpResult<Vec<hp_core::TagConceptDetail>> {
         let limit = limit.unwrap_or(20).min(100);
-        let guard = state
-            .tag_lib
-            .lock()
-            .map_err(|_| hp_core::HpError::Store("tag 库锁中毒".into()))?;
+        let guard = lock_tag_lib(&state)?;
         match guard.as_ref() {
             Some(set) => set.suggest(&query, limit),
             None => Ok(Vec::new()), // 词库未装配时返回空
@@ -41,11 +38,10 @@ pub(crate) fn tag_dict_suggest(
 /// 无内置基底库时保持原状（首次运行尚未分发基底库的场景）。
 pub(crate) fn reload(state: &State<AppState>) {
     let root = state.plugin_root.as_ref().clone();
-    if let Some(set) = crate::commands::shared::build_tag_lib_set(&root) {
-        match state.tag_lib.lock() {
-            Ok(mut guard) => *guard = Some(set),
-            Err(_) => eprintln!("[taglib] 重装配失败：tag 库锁中毒"),
-        }
+    if let Some(set) = crate::commands::shared::build_tag_lib_set(&root)
+        && !set_tag_lib(state, set)
+    {
+        eprintln!("[taglib] 重装配失败：tag 库锁中毒");
     }
 }
 
@@ -69,10 +65,7 @@ pub(crate) struct TagLibStatusItem {
 #[tauri::command]
 pub(crate) fn taglib_status(state: State<AppState>) -> ApiResponse<TagLibStatusItem> {
     let outcome = (|| -> HpResult<TagLibStatusItem> {
-        let guard = state
-            .tag_lib
-            .lock()
-            .map_err(|_| hp_core::HpError::Store("tag 库锁中毒".into()))?;
+        let guard = lock_tag_lib(&state)?;
         Ok(match guard.as_ref() {
             Some(set) => {
                 let (concept_count, duplicate_count) = set.duplicate_stats().unwrap_or((0, 0));

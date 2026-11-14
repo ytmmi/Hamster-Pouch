@@ -146,10 +146,7 @@ fn resolve_setting_target(state: &AppState, key: &str) -> HpResult<SettingTarget
         return Ok(SettingTarget::Mirror(fact));
     }
     // 宿主内部键（不经注册表、也不允许经 `setting.*` 读写）：明确报错，避免被当成"任意键值存储"。
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+    let guard = lock_global(state)?;
     let db = guard
         .as_ref()
         .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
@@ -193,10 +190,7 @@ fn ensure_setting_capability(
                 "设置项需要能力 {raw}：必须带 repoId 才能校验插件在该仓库的授权"
             ))
         })?;
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+    let guard = lock_global(state)?;
     let db = guard
         .as_ref()
         .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
@@ -418,10 +412,7 @@ pub(crate) fn setting_get(
         let storage_key =
             scoped_storage_key(&target.base_key(), target.scope(), repo_id.as_deref())
                 .map_err(HpError::InvalidArgument)?;
-        let guard = state
-            .global_db
-            .lock()
-            .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+        let guard = lock_global(&state)?;
         let g = guard
             .as_ref()
             .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
@@ -451,10 +442,7 @@ pub(crate) fn setting_set(
         let storage_key = prepare_setting_write(&state, &key, &value, repo_id.as_deref())?;
         let encoded = encode_setting_value(&value).map_err(HpError::InvalidArgument)?;
         {
-            let guard = state
-                .global_db
-                .lock()
-                .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+            let guard = lock_global(&state)?;
             let g = guard
                 .as_ref()
                 .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
@@ -484,10 +472,7 @@ pub(crate) fn setting_list(
 ) -> ApiResponse<SettingListResult> {
     let outcome = (|| -> HpResult<SettingListResult> {
         ensure_global(&state, &app)?;
-        let guard = state
-            .global_db
-            .lock()
-            .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+        let guard = lock_global(&state)?;
         let g = guard
             .as_ref()
             .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
@@ -525,10 +510,7 @@ pub(crate) fn setting_reset(
             scoped_storage_key(&target.base_key(), target.scope(), repo_id.as_deref())
                 .map_err(HpError::InvalidArgument)?;
         {
-            let guard = state
-                .global_db
-                .lock()
-                .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+            let guard = lock_global(&state)?;
             let g = guard
                 .as_ref()
                 .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;

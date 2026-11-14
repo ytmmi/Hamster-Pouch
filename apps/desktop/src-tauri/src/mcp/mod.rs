@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use tauri::Manager;
 
 use crate::AppState;
-use crate::commands::shared::{app_data_root, diag_log, ensure_global};
+use crate::commands::shared::{app_data_root, diag_log, ensure_global, try_global};
 
 /// 默认监听端口（与 `packages/config/src/settings.ts` 的 `DEFAULT_MCP_PORT` 一致）。
 pub(crate) const DEFAULT_PORT: u16 = 57321;
@@ -94,9 +94,7 @@ pub(crate) fn read_config(app: &tauri::AppHandle) -> ServerConfig {
     let state = app.state::<AppState>();
     let read = |key: &str| -> Option<String> {
         ensure_global(&state, app).ok()?;
-        let guard = state.global_db.lock().ok()?;
-        let g = guard.as_ref()?;
-        g.get_setting(key).ok().flatten()
+        try_global(&state, |g| g.get_setting(key).ok().flatten()).flatten()
     };
     let enabled = read("mcp.enabled");
     let port = read("mcp.port");

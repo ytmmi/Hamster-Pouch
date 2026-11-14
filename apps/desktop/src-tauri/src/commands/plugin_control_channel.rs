@@ -18,7 +18,8 @@ use tauri::State;
 
 use crate::AppState;
 use crate::commands::shared::{
-    ApiResponse, EmitHp, api_from_hp, ensure_global, global, lock_global,
+    ApiResponse, EmitHp, api_from_hp, diag_log, ensure_global, global, lock_global,
+    lock_panel_schema, lock_supervision,
 };
 
 /// 广播 `plugin.error`：某个面板的 schema 查询失败。
@@ -68,10 +69,7 @@ pub(crate) fn panel_owner_enabled(
     repo_id: &str,
     panel_id: &str,
 ) -> HpResult<PanelOwner> {
-    let guard = state
-        .global_db
-        .lock()
-        .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+    let guard = lock_global(state)?;
     let db = guard
         .as_ref()
         .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;
@@ -96,10 +94,7 @@ pub(crate) fn supervised_call(
 ) -> HpResult<String> {
     // 步骤 1：监督检查
     {
-        let mut guard = state
-            .supervision
-            .lock()
-            .map_err(|_| HpError::Store("监督注册表锁中毒".into()))?;
+        let mut guard = lock_supervision(state)?;
         // 自动注册监督器（首次调用某插件时）
         if guard.get_mut(&plugin_id).is_none() {
             guard.register(&plugin_id);
@@ -129,10 +124,7 @@ pub(crate) fn supervised_call(
 
     // 步骤 3：记录结果
     {
-        let mut guard = state
-            .supervision
-            .lock()
-            .map_err(|_| HpError::Store("监督注册表锁中毒".into()))?;
+        let mut guard = lock_supervision(state)?;
         if let Some(s) = guard.get_mut(&plugin_id) {
             match &result {
                 Ok(_) => s.on_success(),
@@ -176,10 +168,7 @@ fn fetch_panel_schema(
 ) -> HpResult<PanelSchemaItem> {
     let key = PanelSchemaKey::new(&owner.plugin_id, panel_id, &owner.plugin_version);
     {
-        let cache = state
-            .panel_schema_cache
-            .lock()
-            .map_err(|_| HpError::Store("schema 缓存锁中毒".into()))?;
+        let cache = lock_panel_schema(state)?;
         if let Some(schema_json) = cache.get(&key) {
             return Ok(PanelSchemaItem {
                 panel_id: panel_id.to_string(),
@@ -220,8 +209,10 @@ fn fetch_panel_schema(
     })?;
 
     // 只缓存成功结果：失败必须能在下次重开面板时重试。
-    if let Ok(mut cache) = state.panel_schema_cache.lock() {
-        cache.put(key, schema_json.clone());
+    match lock_panel_schema(state) {
+        Ok(mut cache) => cache.put(key, schema_json.clone()),
+        // 毒锁时缓存写不进去：面板仍能拿到本次结果，只是下次要重新查询。
+        Err(err) => diag_log(&format!("[panel-schema] 缓存写入跳过：{err}")),
     }
     Ok(PanelSchemaItem {
         panel_id: panel_id.to_string(),
@@ -272,10 +263,7 @@ pub(crate) fn plugin_validate_control(
     let outcome = (|| -> HpResult<ControlValidateResult> {
         ensure_global(&state, &app)?;
         let (declared_queries, declared_events) = {
-            let guard = state
-                .global_db
-                .lock()
-                .map_err(|_| HpError::Store("全局库锁中毒".into()))?;
+            let guard = lock_global(&state)?;
             let db = guard
                 .as_ref()
                 .ok_or_else(|| HpError::Store("全局库未初始化".into()))?;

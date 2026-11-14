@@ -78,7 +78,7 @@ fn blueprint_registry(
     if ensure_global(state, app).is_err() {
         return fallback;
     }
-    let Ok(guard) = state.global_db.lock() else {
+    let Ok(guard) = lock_global(state) else {
         return fallback;
     };
     let Some(g) = guard.as_ref() else {

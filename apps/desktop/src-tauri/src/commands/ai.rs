@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use hp_ai::AiTaggingProvider;
-use hp_core::{AiProviderConfig, AiTaggingInput, AiTaggingOutput, HpError, HpResult};
+use hp_core::{AiProviderConfig, AiTaggingInput, AiTaggingOutput, HpResult};
 use serde::Serialize;
 use tauri::State;
 use time::OffsetDateTime;
@@ -13,8 +13,8 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::AppState;
 use crate::commands::shared::{
-    ApiResponse, api_from_hp, ensure_global, global, global_mut, lock_global, lock_repo, open_repo,
-    open_repo_mut,
+    ApiResponse, api_from_hp, ensure_global, global, global_mut, lock_ai, lock_global, lock_repo,
+    open_repo, open_repo_mut,
 };
 
 #[derive(Serialize)]
@@ -133,10 +133,7 @@ pub(crate) fn ai_tagging_submit(
 ) -> ApiResponse<Vec<String>> {
     let outcome = (|| -> HpResult<Vec<String>> {
         let options = options.unwrap_or_else(|| "{}".to_string());
-        let mut ai = state
-            .ai
-            .lock()
-            .map_err(|_| HpError::Store("AI 队列锁中毒".into()))?;
+        let mut ai = lock_ai(&state)?;
         let guard = lock_repo(&state)?;
         let db = open_repo(&guard)?;
         ai.submit(db, &repo_id, &file_ids, &provider_config_id, &options)
@@ -151,10 +148,7 @@ pub(crate) fn ai_tagging_status(
     state: State<AppState>,
 ) -> ApiResponse<Option<AiTaskItem>> {
     let outcome = (|| -> HpResult<Option<AiTaskItem>> {
-        let ai = state
-            .ai
-            .lock()
-            .map_err(|_| HpError::Store("AI 队列锁中毒".into()))?;
+        let ai = lock_ai(&state)?;
         Ok(ai.queue().get(&task_id).map(|t| AiTaskItem {
             task_id: t.id.clone(),
             status: t.status.as_str().to_string(),
@@ -167,10 +161,7 @@ pub(crate) fn ai_tagging_status(
 #[tauri::command]
 pub(crate) fn ai_tagging_run(state: State<AppState>) -> ApiResponse<AiRunSummary> {
     let outcome = (|| -> HpResult<AiRunSummary> {
-        let mut ai = state
-            .ai
-            .lock()
-            .map_err(|_| HpError::Store("AI 队列锁中毒".into()))?;
+        let mut ai = lock_ai(&state)?;
         let mut guard = lock_repo(&state)?;
         let db = open_repo_mut(&mut guard)?;
 

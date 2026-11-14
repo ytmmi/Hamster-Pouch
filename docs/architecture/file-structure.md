@@ -85,14 +85,14 @@ crates/hp-dict/migrations/   # 迁移 SQL（forward-only，发布后禁止修改
 # default_blueprint.json 与 blueprint_factory/）、全局库侧在 crates/hp-global/tests/、词库侧在
 # crates/hp-dict/tests/。
 
-  main.rs             # 入口装配 + AppState
+  main.rs             # 入口装配 + AppState（六个宿主级互斥量只经 commands/shared.rs 的助手加锁，D194）
   build.rs            # 构建脚本：经 `cargo:rustc-env` 注入 `HP_BUILD_TIME`（本地时间 `YYYY/MM/DD HH:MM:SS`，
                       #   先读同名环境变量以便 CI 固定时间戳，否则调 `powershell.exe Get-Date -Format`；
                       #   不用 `cmd` 的 `%DATE%`——随 locale 变形）与 `HP_BUILD_COMMIT`（`git rev-parse --short HEAD`），
                       #   两者取不到都写空串（`app_info.rs` 用 `option_env!` 读，界面显示「未知」）；
                       #   末行才是 `tauri_build::build()`。D140
   commands/           # Tauri 命令桥接（按领域拆分）
-    shared.rs
+    shared.rs         # 共享类型 + 宿主级状态的唯一加锁入口（全局库 / 仓库句柄 / schema 缓存 / 监督表 / AI 队列 / tag 库）
     repo.rs  source.rs  album.rs
     tag.rs   rating.rs  color.rs  file.rs
     layout.rs

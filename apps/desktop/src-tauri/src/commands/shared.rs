@@ -2,8 +2,11 @@
 
 use std::path::PathBuf;
 
+use hp_ai::AiTaggingService;
 use hp_core::{FileIndexRow, HpError, HpResult};
+use hp_dict::TagLibSet;
 use hp_global::GlobalDb;
+use hp_plugin_host::{PanelSchemaCache, SupervisionRegistry};
 use hp_repo::RepoDb;
 use serde::Serialize;
 use tauri::Emitter;
@@ -544,6 +547,79 @@ pub(crate) fn global_mut<'g, 'a>(
     guard
         .as_mut()
         .ok_or_else(|| HpError::NotFound("全局库未初始化".into()))
+}
+
+/// 其余宿主级状态的**唯一**加锁入口（D194）。
+///
+/// 锁序约定（全文只在这里写一次）：`state` 级互斥量先取、仓库句柄锁后取；
+/// `state` 级之间不嵌套。各命令模块不得直接 `state.xxx.lock()`——否则毒锁策略
+/// 会重新散开（`pnpm check:db-boundary` 有一条反向断言守着）。
+///
+/// 毒锁一律映射成 `HpError::Store("…锁中毒")`：宁可让这条命令明确失败，
+/// 也不要在"锁已中毒"时假装成功（毒锁通常意味着持锁线程 panic 过，状态已不可信）。
+pub(crate) fn lock_panel_schema(
+    state: &AppState,
+) -> HpResult<std::sync::MutexGuard<'_, PanelSchemaCache>> {
+    state
+        .panel_schema_cache
+        .lock()
+        .map_err(|_| HpError::Store("面板 schema 缓存锁中毒".into()))
+}
+
+/// external-process 进程监督注册表（D40）：重启退避 + 不健康标记。
+pub(crate) fn lock_supervision(
+    state: &AppState,
+) -> HpResult<std::sync::MutexGuard<'_, SupervisionRegistry>> {
+    state
+        .supervision
+        .lock()
+        .map_err(|_| HpError::Store("监督注册表锁中毒".into()))
+}
+
+/// AI 打标队列（D6/D17，内存队列）。
+pub(crate) fn lock_ai(state: &AppState) -> HpResult<std::sync::MutexGuard<'_, AiTaggingService>> {
+    state
+        .ai
+        .lock()
+        .map_err(|_| HpError::Store("AI 队列锁中毒".into()))
+}
+
+/// 内置 tag 基底库（RFC 0008 四库，延迟加载；未装配时是 `None`）。
+pub(crate) fn lock_tag_lib(
+    state: &AppState,
+) -> HpResult<std::sync::MutexGuard<'_, Option<TagLibSet>>> {
+    state
+        .tag_lib
+        .lock()
+        .map_err(|_| HpError::Store("tag 库锁中毒".into()))
+}
+
+/// 替换已装配的 tag 库（启动装配 / tag 扩展变更后重装配）。
+///
+/// 返回 `false` = 毒锁；调用方自己决定是否记日志（启动路径不该因此起不来）。
+pub(crate) fn set_tag_lib(state: &AppState, set: TagLibSet) -> bool {
+    match state.tag_lib.lock() {
+        Ok(mut guard) => {
+            *guard = Some(set);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// 全局库的**降级**读取口：未初始化或毒锁时返回 `None`（并记一条日志）。
+///
+/// 只给"读不到就按缺省"的路径用（MCP 配置读取：缺省关闭，失败不会误开服务）；
+/// 其余命令一律用 [`lock_global`]，把毒锁变成明确错误。
+pub(crate) fn try_global<T>(state: &AppState, read: impl FnOnce(&GlobalDb) -> T) -> Option<T> {
+    let guard = match state.global_db.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            diag_log("全局库锁中毒：本次读按缺省处理");
+            return None;
+        }
+    };
+    guard.as_ref().map(read)
 }
 
 /// 解析文件绝对路径：源本地路径 + 相对路径。
