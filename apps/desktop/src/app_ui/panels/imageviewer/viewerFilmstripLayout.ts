@@ -19,6 +19,15 @@
  * （旧实现要求当前项已挂载才能 `querySelector`，窗口有界后深处当前项
  * 根本不在 DOM 里），直接按几何算出滚动目标。
  */
+import {
+  clearCachedRatios,
+  getCachedRatio,
+  RATIO_CACHE_MAX,
+  seedCachedRatios,
+  setCachedRatio,
+  subscribeRatioChange,
+  touchCachedRatio,
+} from "../../shared/ratioCache";
 
 /** 胶片栏单元间距（px，几何公式的单元间留白；由绝对定位的偏移承担）。 */
 export const FILMSTRIP_GAP = 4;
@@ -41,8 +50,12 @@ export const FILMSTRIP_WINDOW_MARGIN = 3;
  * 正常量级：400px 厚度 + 1:1 占位 ≈ 十几个单元，远够不到它。
  */
 export const FILMSTRIP_WINDOW_MAX = 200;
-/** 宽高比缓存上限（LRU 淘汰；5 万条 × 一个 number 也只有几 MB，这是防御性的）。 */
-export const FILMSTRIP_RATIO_CACHE_MAX = 20000;
+/**
+ * 宽高比缓存上限（LRU 淘汰；5 万条 × 一个 number 也只有几 MB，这是防御性的）。
+ *
+ * 口径与共享缓存同一份（D206）：上限值在 `shared/ratioCache` 里定义，这里只是历史名字。
+ */
+export const FILMSTRIP_RATIO_CACHE_MAX = RATIO_CACHE_MAX;
 
 /** 渲染窗口（半开区间 `[start, end)`，已夹紧到 `[0, total]`）。 */
 export interface FilmstripWindow {
@@ -283,78 +296,15 @@ export function filmstripCenterScroll(
   return offset + extent / 2 - viewport / 2;
 }
 
-/* ---- 宽高比共享缓存（模块级；单元卸载不丢，滚回来免重量） ---- */
+/* ---- 宽高比缓存（D206：本体、LRU 与通知都在 `shared/ratioCache`，与媒体预览共用一份） ---- */
 
-const ratioCache = new Map<string, number>();
-/** 订阅表：写入即通知（消费方按帧合并，见 ViewerFilmstrip），携带写入的 fileId。 */
-const ratioListeners = new Set<(fileId: string) => void>();
-
-/** 订阅宽高比写入（返回退订函数）。通知可能高频，消费方必须自行合帧。 */
-export function subscribeFilmstripRatios(listener: (fileId: string) => void): () => void {
-  ratioListeners.add(listener);
-  return () => {
-    ratioListeners.delete(listener);
-  };
-}
-
-/**
- * 读缓存（**只读，不动 LRU 热度**）：读路径必须免写——早期版本读也刷新
- * 热度（delete+set），窗口几何高频取比例时那是实测数毫秒/帧的纯浪费。
- * 热度由写入与单元挂载时的显式 touch 维护。
- */
-export function getCachedFilmstripRatio(fileId: string): number | undefined {
-  return ratioCache.get(fileId);
-}
-
-/** 刷新热度（单元挂载时调用一次，标记"最近在用"；不通知订阅者）。 */
-export function touchCachedFilmstripRatio(fileId: string): void {
-  const ratio = ratioCache.get(fileId);
-  if (ratio === undefined) return;
-  ratioCache.delete(fileId);
-  ratioCache.set(fileId, ratio);
-}
-
-/** 写入缓存（唯一入口）：非法值/同值忽略；超上限淘汰最旧；有效写入即通知。 */
-export function setCachedFilmstripRatio(fileId: string, ratio: number): void {
-  if (!Number.isFinite(ratio) || ratio <= 0) return;
-  if (ratioCache.get(fileId) === ratio) return;
-  ratioCache.delete(fileId);
-  ratioCache.set(fileId, ratio);
-  while (ratioCache.size > FILMSTRIP_RATIO_CACHE_MAX) {
-    const oldest = ratioCache.keys().next().value;
-    if (oldest === undefined) break;
-    ratioCache.delete(oldest);
-  }
-  for (const listener of ratioListeners) listener(fileId);
-}
-
-/**
- * 批量播种（**静默**，不通知订阅者）：把索引里已知的宽高比一次性写进缓存。
- *
- * 用于缺陷 0043 阶段 3：`files.width`/`files.height` 在首帧就有，胶片栏不必先按
- * 1:1 占位再等 `<img>` 解码——滚动条总长与窗口位置首帧即终值。
- *
- * 三条纪律：①**已有值不覆盖**（解码后量到的是这一张的真值，索引只是近似）；
- * ②不通知（一次 2 万条会打出 2 万条通知，调用方自己 `setState` 触发一次重算）：
- * ③仍走同一个 LRU 上限，避免批量写入把缓存撑爆。
- */
-export function seedFilmstripRatios(entries: Iterable<readonly [string, number]>): number {
-  let seeded = 0;
-  for (const [fileId, ratio] of entries) {
-    if (!Number.isFinite(ratio) || ratio <= 0) continue;
-    if (ratioCache.has(fileId)) continue;
-    ratioCache.set(fileId, ratio);
-    seeded += 1;
-  }
-  while (ratioCache.size > FILMSTRIP_RATIO_CACHE_MAX) {
-    const oldest = ratioCache.keys().next().value;
-    if (oldest === undefined) break;
-    ratioCache.delete(oldest);
-  }
-  return seeded;
-}
-
-/** 清空缓存（仓库切换后旧 fileId 恒失效；与 thumbUrl 缓存同一口径）。 */
-export function clearFilmstripRatioCache(): void {
-  ratioCache.clear();
-}
+// 胶片栏与媒体预览量的是**同一个事实**（`fileId → 宽 / 高`）。此前各存一份，于是同一张图
+// 在两个面板各解码一次、切过去还要再等一次。这里把共享模块的入口按本模块的历史名字
+// 转出去（用 const 别名而不是 re-export 列表：本文件内部的几何函数也要用它们），
+// 调用方（`ViewerFilmstrip`、几何门禁）无需改动。
+export const clearFilmstripRatioCache = clearCachedRatios;
+export const getCachedFilmstripRatio = getCachedRatio;
+export const seedFilmstripRatios = seedCachedRatios;
+export const setCachedFilmstripRatio = setCachedRatio;
+export const subscribeFilmstripRatios = subscribeRatioChange;
+export const touchCachedFilmstripRatio = touchCachedRatio;

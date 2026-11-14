@@ -49,7 +49,7 @@ const warmedThumbs = new Set<string>();
  * 三种媒体类型走完全同一条"挂载即预热"路径——这才是对称窗口该有的样子。
  *
  * 缩略图 URL 走 `shared/thumbUrl.ts` 的**共享**缓存与请求去重（图像查看器胶片栏、
- * 查看器音频舞台、播放器波形同源）；宽高比走本文件的 `ratioCache`（同款口径）。
+ * 查看器音频舞台、播放器波形同源）；宽高比走共享的 `shared/ratioCache`（两个面板同一份）。
  *
  * 三种视图的差异**只在容器与样式表上**（`.mp-view-tile` / `.mp-view-adaptive` /
  * `.mp-masonry`）：本组件只额外下发一个宽高比变量 `--mp-cell-ratio`——**只有自适应会消费它**
@@ -63,6 +63,7 @@ import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent } from "re
 import { AudioWaveform } from "../shared/AudioWaveform";
 import { resolveThumbUrl } from "../shared/thumbUrl";
 import { thumbBucket } from "../shared/thumbSize";
+import { getCachedRatio, ratioCacheVersion, setCachedRatio, subscribeRatioChange as subscribeRatioWrites } from "../shared/ratioCache";
 import type { Translate } from "../i18n";
 import type { FileItem } from "../shared/types";
 import {
@@ -74,68 +75,46 @@ import {
 import { masonryCellHeight } from "./mediaPreviewVirtual";
 
 /**
- * 图片宽高比缓存（`fileId → 宽 / 高`）——**自适应**视图的"逐行两端对齐"要用它。
+ * 宽高比的**写入与合并通知**（缓存本体在 `../shared/ratioCache`，D206）。
  *
- * 索引里没有图片尺寸（`media_info_json` 只覆盖视频），宽高比只能等 `<img>` 解码后量一次。
- * 缓存放在**模块级**（与 `thumbUrlCache` 同款）：面板重建、来回滚动都不必重量，
- * 也就不会每次先把整行按 1:1 排一遍、解码完再重排一次。
+ * 为什么这里还有一层：自适应视图的"逐行两端对齐"与瀑布流的行高都由宽高比推出，
+ * 而宽高比是**异步**到来的（`<img>` 解码后）。一次滚动会同时解码几十张，5 万张的库
+ * 整个浏览过程会解码上万张——若每次写入都通知，面板就要重算上万次布局（每次
+ * O(条目数)），把虚拟化省下的成本又花回去。因此**同一帧内的多次写入只通知一次**。
+ *
+ * 缓存本体与写入纪律在共享模块里：同一张图的宽高比不再由两个面板各量一次、各存一份
+ *（图像查看器的胶片栏读的就是这一份）。
  */
-export const ratioCache = new Map<string, number>();
+const mergedListeners = new Set<() => void>();
+let ratioNotifyScheduled = false;
 
-/**
- * `ratioCache` 的**版本号**：每写入一个新量到的宽高比就自增。
- *
- * 为什么需要它：**瀑布流/自适应的行高由宽高比推出**，而宽高比是**异步**到来的
- * （`<img>` 解码后）。按列/按行虚拟化必须先知道"每项多高"才能算窗口，因此面板要把
- * 这个版本号放进 `useMemo` 依赖——量到新宽高比就重算布局。
- *
- * 没有它的话：首次渲染全部按 `DEFAULT_CELL_RATIO`（或索引宽高比）估高，之后解码完虽然单元自己
- * `setRatio` 重渲了，但**列偏移/行偏移**仍停在旧值 → 单元与占位层错位。
- *
- * 用**计数器**而不是"订阅回调"：订阅要管注册/退订与内存泄漏，而面板本来就要重渲
- * （它是唯一消费方），一个数字足够，且能被门禁按行为断言。
- */
-let ratioCacheVersion = 0;
+// 订阅**共享缓存的写入**，合并成每帧一次通知。用微任务而不是 rAF：布局重算本身不依赖
+// 绘制时机，越早合并完越好；且 rAF 在后台标签会暂停，导致面板切回前台时布局仍是旧的。
+subscribeRatioWrites(() => {
+  if (ratioNotifyScheduled) return;
+  ratioNotifyScheduled = true;
+  queueMicrotask(() => {
+    ratioNotifyScheduled = false;
+    for (const listener of [...mergedListeners]) listener();
+  });
+});
 
 /** 当前版本号（面板放进依赖数组用）。 */
 export function getRatioCacheVersion(): number {
-  return ratioCacheVersion;
+  return ratioCacheVersion();
 }
 
-/**
- * 宽高比变化的订阅者（面板注册一个，用来重算行/列偏移）。
- *
- * **为什么必须合并通知**：一次滚动会同时解码几十张图，5 万张的库在整个浏览过程中
- * 会解码上万张。若每次写入都通知，面板就要重算上万次布局（每次都是 O(条目数)），
- * 把虚拟化省下的成本又花回去。因此**同一帧内的多次写入只通知一次**。
- */
-const ratioListeners = new Set<() => void>();
-let ratioNotifyScheduled = false;
-
-function scheduleRatioNotify(): void {
-  if (ratioNotifyScheduled) return;
-  ratioNotifyScheduled = true;
-  // 用微任务而不是 rAF：布局重算本身不依赖绘制时机，越早合并完越好；
-  // 且 rAF 在后台标签会暂停，导致面板切回前台时布局仍是旧的。
-  queueMicrotask(() => {
-    ratioNotifyScheduled = false;
-    for (const listener of [...ratioListeners]) listener();
-  });
-}
-
-/** 订阅宽高比变化；返回退订函数。 */
+/** 订阅宽高比变化（**已按帧合并**）；返回退订函数。 */
 export function subscribeRatioChange(listener: () => void): () => void {
-  ratioListeners.add(listener);
-  return () => ratioListeners.delete(listener);
+  mergedListeners.add(listener);
+  return () => {
+    mergedListeners.delete(listener);
+  };
 }
 
-/** 写入一个量到的宽高比并推进版本号（**唯一**的写入口）。 */
+/** 写入一个量到的宽高比（**唯一的写入口**；校验 / 版本号 / 通知都在共享模块里）。 */
 export function setRatioCache(fileId: string, ratio: number): void {
-  // 同值不写：解码同一张图多次（虚拟化来回滚）不该推进版本号。
-  if (ratioCache.get(fileId) === ratio) return;
-  ratioCache.set(fileId, ratio);
-  ratioCacheVersion += 1;
-  scheduleRatioNotify();
+  setCachedRatio(fileId, ratio);
 }
 
 /**
@@ -205,7 +184,7 @@ export const ThumbCell = memo(function ThumbCell({
   const [ratio, setRatio] = useState<number>(() =>
     file.media_type === "audio"
       ? AUDIO_CARD_RATIO
-      : resolveRatio(file, ratioCache.get(file.id)),
+      : resolveRatio(file, getCachedRatio(file.id)),
   );
 
   /**

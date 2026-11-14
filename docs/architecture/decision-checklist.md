@@ -1317,3 +1317,9 @@ IPC。因此 `update.*` 命令**不接受任何 URL 或哈希参数**——manif
 | 编号 | 决策 | 状态 | 说明 |
 | --- | --- | --- | --- |
 | D205 | 六个模块级 store 的订阅表收进 `apps/desktop/src/app_ui/core/createStore.ts`（`createStore<T>` / `createEventChannel`），`check:stores` 三条反向断言钉住「判等后提前返回 / 遍历订阅者快照 / 退订」与「视频、音乐各持独立实例」（脚本 35 → 36 条） | 已落地 | ①**问题**：`playerPlayStore` / `musicPlayStore` / `taskStore` / `mediaSortStore` / `settingChangeStore` / `render/surfaceStatsStore` 六处各抄一遍「`Set` 订阅表 + 遍历通知」，而抄出来的语义并不一致——`surfaceStatsStore` 手写五个字段逐个比较（`SurfaceStatsSnapshot` 加字段时忘了加比较，就是「后端换了、设置页不动」，**静默**），`taskStore` 无条件通知（同一 `TaskProgress` 也换引用重渲染），两个播放 store 逐字同构却各自维护。更要紧的是两条 `useSyncExternalStore` 的硬要求只写在注释里：「`getSnapshot` 必须返回稳定引用」（换了引用就无限重渲染）与「通知要遍历订阅者快照」（回调里退订会跳过后面的监听方），每个文件都要靠作者记得。②**改法**：`core/createStore.ts` 导出 `createStore<T>(initial, equals = Object.is)`（`get` / `set` / `subscribe`，`equals` 判为未变化即不换引用、不通知）与 `createEventChannel<Args>()`（只广播当次载荷、不留快照——`settingChangeStore` 这种「写完即通知」的通道没有「当前值」可言）。六个模块改成薄壳：对外函数名、`useSyncExternalStore` 的接线、模块加载即订阅的时序全部不变，只把订阅表与通知循环让给骨架。③**为什么 `sameStats` 仍留在 `surfaceStatsStore`**：「哪些字段算变化」取决于该文件的快照类型，放进通用骨架反而要把字段名泄漏给 helper；骨架只负责「按你给的判等执行」，判等本身留在知道字段集的地方。④**为什么两个播放 store 不合并**：D166 已定音乐是独立面板，共用一条 store 会让「双击视频」把音乐面板也吵醒——所以断言要求两份源码里**各自**出现一次 `createStore<PlayRequest \| null>(null)`，且 `musicPlayStore` 除类型外不从 `playerPlayStore` 取值。**验证**：`cd apps/desktop && node node_modules/typescript/bin/tsc --noEmit` 通过；`check:panels` 488/488（该门禁运行时直接 import `mediaSortStore`，实测「同值不通知 / 非法取值忽略 / 设置变更清覆盖」三条行为未变）；`check:commands` 18/18；全量 `check:*` 36 条 SUITE_FAIL=0。**门禁**：脚本条数 35 → **36 条**（新增 `check:stores`，3 条断言）；变异实测：往 `apps/desktop/src/app_ui/core/musicPlayStore.ts` 插一行 `const listeners = new Set<() => void>();` → 第 ② 条 FAIL 并指名该文件「仍自建订阅表」，删掉即 3/3。 |
+## 第 88 轮 · 宽高比缓存只有一份（D206，2026-11-15）
+
+| 编号 | 决策 | 状态 | 说明 |
+| --- | --- | --- | --- |
+undefined
+

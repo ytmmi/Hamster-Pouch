@@ -55,7 +55,8 @@ import { THUMB_DIM_BASE } from "../shared/thumbSize";
 import { useApp } from "../core/AppContext";
 import type { PanelRenderCtx } from "../core/panelRegistry";
 import type { FileItem } from "../shared/types";
-import { ThumbCell, getRatioCacheVersion, ratioCache, subscribeRatioChange } from "./mediaPreviewCell";
+import { ThumbCell, getRatioCacheVersion, subscribeRatioChange } from "./mediaPreviewCell";
+import { getCachedRatio } from "../shared/ratioCache";
 import { useMediaFileActions } from "./mediaPreviewActions";
 import { useMediaPreviewData, type MediaTypeFilter } from "./mediaPreviewData";
 import { MediaContextMenu, useMediaContextMenu } from "./mediaPreviewMenu";
@@ -340,7 +341,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
         imageSize,
         item.file.media_type === "audio"
           ? AUDIO_CARD_RATIO
-          : resolveRatio(item.file, ratioCache.get(item.file.id)),
+          : resolveRatio(item.file, getCachedRatio(item.file.id)),
         // 瀑布流是**逐格**行高：每个文件按自己的媒体类型判定要不要文件名行。
         showFileNameFor(item.file.media_type),
       ),
@@ -395,7 +396,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
     const ratios = items.map((item) =>
       item.file.media_type === "audio"
         ? AUDIO_CARD_RATIO
-        : resolveRatio(item.file, ratioCache.get(item.file.id)),
+        : resolveRatio(item.file, getCachedRatio(item.file.id)),
     );
     const layout = adaptiveRowLayout(
       ratios,
@@ -491,7 +492,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
       const showName = showFileNameFor(file.media_type);
       if (view === "adaptive") return adaptiveCellIntrinsicHeight(imageSize, showName);
       if (view === "masonry") {
-        const ratio = resolveRatio(file, ratioCache.get(file.id));
+        const ratio = resolveRatio(file, getCachedRatio(file.id));
         return masonryCellHeight(imageSize, ratio, showName);
       }
       return undefined;
@@ -514,7 +515,7 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
     (file: FileItem): number => {
       void ratioVersion;
       if (file.media_type !== "image") return THUMB_DIM_BASE;
-      const ratio = resolveRatio(file, ratioCache.get(file.id));
+      const ratio = resolveRatio(file, getCachedRatio(file.id));
       return thumbPixelSize(view, imageSize, ratio, dpr);
     },
     [view, imageSize, dpr, ratioVersion],

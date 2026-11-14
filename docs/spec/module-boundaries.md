@@ -81,6 +81,16 @@ Rust 核心层
 只留各自的领域语义与 `useSyncExternalStore` 接线；「哪些字段算变化」仍留在知道字段集的模块里。`check:stores` 三条断言守
 「不再自建订阅表 / 判等后提前返回 / 遍历订阅者快照」，并钉住视频与音乐是**两个独立实例**（D166）。
 
+**同一个事实只有一份缓存：宽高比**（D206）：`apps/desktop/src/app_ui/shared/ratioCache.ts` 是 `fileId → 宽 / 高` 的唯
+一缓存与通知口（`getCachedRatio` / `touchCachedRatio` / `setCachedRatio` / `seedCachedRatios` / `clearCachedRatios` /
+`ratioCacheVersion` / `subscribeRatioChange`）。媒体预览（`panels/mediaPreviewCell.tsx`）与图像查看器的胶片栏
+（`panels/imageviewer/viewerFilmstripLayout.ts`）此前各存一份，同一张图在两个面板各解码一次；现在谁先量到另一边立刻受益。
+三条纪律写进模块文档：写入只经 `setCachedRatio`（校验 + 同值不写 + LRU + 版本号 + 通知）、批量播种静默（`seedCachedRatios`
+不通知）、通知不合并（消费方成本口径不同：媒体预览按帧合并，胶片栏逐条更新自己那一格）。胶片栏保留历史函数名，用
+`export const 历史名 = 共享名;` 转出（`export { a as b }` 不产生本地绑定，文件内部几何函数还要用）。`check:stores` 第 ④ 条
+钉住「`shared/ratioCache.ts` 是唯一缓存」与「两个面板不得再出现 `const ratioCache = new Map<...>` / `const ratioListeners =`」——
+判据只看这两个旧符号，否则同文件里 `idToIndex` 那种普通 Map 会被误伤。
+
 ## 插件/AI 扩展点
 
 插件首期只能做：

@@ -114,5 +114,66 @@ if (/from "\.\/playerPlayStore"/.test(musicSrc) && !/import type \{ PlayRequest 
 }
 report(playProblems.length === 0, "视频 / 音乐播放请求各持一个独立 store 实例", playProblems);
 
+// ④ 宽高比缓存只有一份（D206：媒体预览与胶片栏共用 `shared/ratioCache`）
+//
+// 同一张图的宽高比原本由两个面板各量一次、各存一份：媒体预览的单元（`mediaPreviewCell`）
+// 与图像查看器的胶片栏（`viewerFilmstripLayout`）。两处都是「解码后量一次，模块级存起来」，
+// 于是切面板要重新解码、口径（校验 / LRU / 通知）还各写一套。现在本体与纪律只在
+// `shared/ratioCache.ts` 一处，胶片栏把自己的历史名字转出去给调用方。
+const ratioProblems = [];
+const RATIO_MODULE = "apps/desktop/src/app_ui/shared/ratioCache.ts";
+const ratioSrc = read(RATIO_MODULE);
+if (ratioSrc === null) {
+  ratioProblems.push(`${RATIO_MODULE}  不存在`);
+} else {
+  const body = stripComments(ratioSrc);
+  for (const needle of [
+    "const ratios = new Map<string, number>();",
+    "export const RATIO_CACHE_MAX",
+    "export function getCachedRatio(",
+    "export function touchCachedRatio(",
+    "export function setCachedRatio(",
+    "export function seedCachedRatios(",
+    "export function clearCachedRatios(",
+    "export function ratioCacheVersion(",
+    "export function subscribeRatioChange(",
+    "while (ratios.size > RATIO_CACHE_MAX)",
+  ]) {
+    if (!body.includes(needle)) ratioProblems.push(`${RATIO_MODULE} 缺少 ${needle}`);
+  }
+}
+for (const [rel, why] of [
+  ["apps/desktop/src/app_ui/panels/mediaPreviewCell.tsx", "媒体预览单元"],
+  ["apps/desktop/src/app_ui/panels/imageviewer/viewerFilmstripLayout.ts", "胶片栏几何"],
+]) {
+  const src = read(rel);
+  if (src === null) {
+    ratioProblems.push(`${rel}  文件不存在`);
+    continue;
+  }
+  const body = stripComments(src);
+  // 只钉「宽高比缓存」本身的两个旧形状（`idToIndex` 之类的普通 Map 不在此列）。
+  if (/const ratioCache = new Map<string, number>\(\)/.test(body)) {
+    ratioProblems.push(`${rel}  仍自建宽高比缓存（${why}）`);
+  }
+  if (/const ratioListeners = new Set</.test(body)) {
+    ratioProblems.push(`${rel}  仍自建宽高比通知表（${why}）`);
+  }
+}
+const filmstripSrc = stripComments(read("apps/desktop/src/app_ui/panels/imageviewer/viewerFilmstripLayout.ts") ?? "");
+for (const alias of [
+  "export const clearFilmstripRatioCache = clearCachedRatios;",
+  "export const getCachedFilmstripRatio = getCachedRatio;",
+  "export const seedFilmstripRatios = seedCachedRatios;",
+  "export const setCachedFilmstripRatio = setCachedRatio;",
+  "export const subscribeFilmstripRatios = subscribeRatioChange;",
+  "export const touchCachedFilmstripRatio = touchCachedRatio;",
+]) {
+  if (!filmstripSrc.includes(alias)) {
+    ratioProblems.push(`viewerFilmstripLayout.ts 没有转出 ${alias}（调用方会拿不到缓存）`);
+  }
+}
+report(ratioProblems.length === 0, "宽高比缓存只有一份（媒体预览与胶片栏共用 shared/ratioCache）", ratioProblems);
+
 console.log(`\n[check-stores] ${passed}/${total} 通过`);
 process.exit(passed === total ? 0 : 1);

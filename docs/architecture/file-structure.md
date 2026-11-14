@@ -251,6 +251,9 @@ apps/desktop/src/app_ui/
                      #   thumbSize（**缩略图档梯**：`THUMB_DIM_LADDER` = 320/480/640/960/1280、
                      #     `thumbBucket` 向上吸附、`thumbCacheKey` = `fileId@bucket`；D159，
                      #     与 `crates/hp-media/src/thumbnail.rs` 的 `IMAGE_THUMB_DIM_LADDER` 同源，门禁对账）
+                      #   ratioCache（`fileId → 宽/高` 的唯一缓存与通知口，D206：媒体预览的平铺/自适应/
+                      #   瀑布流与图像查看器的胶片栏**共用同一份**——同一张图不再在两个面板各解码一次；
+                      #   写入只有 setCachedRatio，批量播种静默，通知不合并（消费方各自合帧））
     interfacePages.ts     # 垂直「界面页」的**纯逻辑**（D124 / D124-R3 / D124-R4 / D124-R5）：页面组模型 + 容错解析（任何
                           #   脏数据都落回可用状态，不抛异常）+ 序列化 + 增删改（删组无损，界面回到
                           #   未分组）；另有**导航顺序** `order`（orderedPages 收敛：order 认识的排前面、
@@ -301,7 +304,8 @@ apps/desktop/src/app_ui/
                       #   来的那几项画成灰黑色；「不可取消」那套口径已整体作废
     imageviewer/      # 图像查看器（多文件功能域：主面板 / 舞台 / 导航器 / 胶片栏 / 信息栏
                       #   + 纯逻辑模块 viewerZoom·viewerPlacement·viewerFormat·viewerKeymap·viewerPreload
-                      #   + viewerFilmstripLayout（胶片栏窗口/定位纯几何 + 宽高比共享缓存 +
+                      #   + viewerFilmstripLayout（胶片栏窗口/定位纯几何 + 宽高比缓存按历史名字转出
+                      #   共享模块（D206，`shared/ratioCache.ts`）+ 
                       #   Fenwick 前缀索引 FilmstripDeltaIndex；5 万项窗口重算 0.012 ms/帧，D146；
                       #   D147 / 缺陷 0041 起几何对齐 76e073a 原视图：外框比例横栏 ×r / 竖栏 ÷r，
                       #   交叉轴 = 容器实测客户区 − padding×2（滚动条/贴边边框天然算进去），
@@ -481,7 +485,8 @@ apps/desktop/src/app_ui/
     mediaPreviewSelection.ts # 选中集与 `selection_change` / `click` / `double_click` 上报
                             #   （令牌防过期 + 运行期 context）；三处 target 均带 `marks: file.marks`
                             #   （D137/D138：缺 marks 则经标记节点的链永不命中；零额外 IPC）
-    mediaPreviewCell.tsx    # 缩略图单元 + 宽高比测量 + ratioCache 版本号
+    mediaPreviewCell.tsx    # 缩略图单元 + 宽高比测量（缓存与通知在 `shared/ratioCache.ts`，D206：
+                            #   本文件只把多次写入合并成每帧一次重算，再转出 getRatioCacheVersion）
                             #   缩略图**挂载即预热**（窗口即对称预加载带；`warmedThumbs` + `new Image()`
                             #   把取图与 `content-visibility` 的跳过渲染解耦，D89）
                             #   **音频走同一条路**（D115）：波形图由后端出，前端只显示，

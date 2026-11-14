@@ -34,6 +34,11 @@ const mediaCellSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewCell.tsx"),
   "utf8",
 );
+// 宽高比缓存的**本体**（D206 起与图像查看器的胶片栏共用一份，断言跟着代码走）。
+const ratioCacheSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/ratioCache.ts"),
+  "utf8",
+);
 const mediaDropdownSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/mediaPreviewDropdown.tsx"),
   "utf8",
@@ -561,7 +566,7 @@ check(
     /const showName = showFileNameFor\(file\.media_type\);/.test(mediaPanelSrc) &&
     // 宽高比取自 `resolveRatio`：解码后量到的优先，其次索引里的 `files.width/height`
     //（缺陷 0043 阶段 3——首帧即按真实比例估高，不再从 1:1 跳一次）。
-    /resolveRatio\(file, ratioCache\.get\(file\.id\)\)/.test(mediaPanelSrc) &&
+    /resolveRatio\(file, getCachedRatio\(file\.id\)\)/.test(mediaPanelSrc) &&
     /export function indexedRatio\(/.test(mediaViewSrc) &&
     /export function resolveRatio\(/.test(mediaViewSrc),
 );
@@ -616,8 +621,11 @@ check(
   /export function getRatioCacheVersion\(\)/.test(mediaCellSrc) &&
     /export function subscribeRatioChange\(/.test(mediaCellSrc) &&
     /export function setRatioCache\(/.test(mediaCellSrc) &&
-    // 写入口只有一处：`ratioCache.set` 不得再被直接调用（否则绕过版本号）。
-    (mediaCellSrc.match(/ratioCache\.set\(/g) ?? []).length === 1 &&
+    // 缓存本体只有一份（D206）：单元文件不得再自建 Map，写入 / 版本号 / 通知都在
+    // 共享模块里，胶片栏读的就是这一份（否则同一张图两个面板各量一次）。
+    !/new Map<string, number>\(\)/.test(mediaCellSrc) &&
+    /const ratios = new Map<string, number>\(\);/.test(ratioCacheSrc) &&
+    /export function setCachedRatio\(/.test(ratioCacheSrc) &&
     // 通知必须**合并**：一次滚动会解码几十张，5 万张的库会解码上万张，
     // 每次写入都通知就是上万次 O(条目数) 的布局重算。
     /queueMicrotask\(/.test(mediaCellSrc) &&
@@ -1386,10 +1394,12 @@ check(
     // 写入口是 `setRatioCache`（**不是**直接 `ratioCache.set`）：它同时推进版本号，
     // 让面板重算瀑布流/自适应的行高——见上面那条"宽高比异步到达"的断言。
     /setRatioCache\(file\.id, next\);/.test(mediaCellSrc) &&
-    /export const ratioCache = new Map<string, number>\(\);/.test(mediaCellSrc) &&
+    /const ratios = new Map<string, number>\(\);/.test(ratioCacheSrc) &&
+    !/new Map<string, number>\(\)/.test(mediaCellSrc) &&
     /file\.media_type === "audio"\s*\?\s*AUDIO_CARD_RATIO/.test(mediaCellSrc) &&
     // 面板必须真的用它渲染条目（不是留着两条渲染路径）。
-    /import \{ ThumbCell, getRatioCacheVersion, ratioCache, subscribeRatioChange \} from "\.\/mediaPreviewCell";/.test(mediaPanelSrc) &&
+    /import \{ ThumbCell, getRatioCacheVersion, subscribeRatioChange \} from "\.\/mediaPreviewCell";/.test(mediaPanelSrc) &&
+    /import \{ getCachedRatio \} from "\.\.\/shared\/ratioCache";/.test(mediaPanelSrc) &&
     /<ThumbCell/.test(mediaPanelSrc),
 );
 check(
