@@ -54,7 +54,16 @@ import { hasRuby, parseRuby, type RubySegment } from "./ruby";
 import type { MusicStyle } from "./musicStyle";
 import type { RepeatMode } from "./queueView";
 import { formatClock, formatMs, formatRemaining } from "./time";
-import { LYRIC_LEAD_MS, lineProgress, lyricFillPercent, lyricIndent } from "./lyricView";
+import {
+  LYRIC_LEAD_MS,
+  lineProgress,
+  lyricBandFill,
+  lyricBands,
+  lyricFillPercent,
+  lyricIndent,
+  type BoxRect,
+  type LyricBand,
+} from "./lyricView";
 
 /** 当前行前后各渲染几行（2 行 ≈ 5 行可见：与参考图的歌词窗口一致，也够看）。 */
 const LRC_RADIUS = 3;
@@ -191,9 +200,8 @@ export function MusicStage(props: MusicStageProps) {
             start={visible.start}
             end={visible.end}
             active={activeIndex}
-            clockMs={clockMs}
             fillRef={fill.fillRef}
-            smooth={fill.smooth}
+            onBands={fill.onBands}
             variant="haze"
             t={t}
           />
@@ -217,9 +225,8 @@ export function MusicStage(props: MusicStageProps) {
             start={visible.start}
             end={visible.end}
             active={activeIndex}
-            clockMs={clockMs}
             fillRef={fill.fillRef}
-            smooth={fill.smooth}
+            onBands={fill.onBands}
             variant="disc"
             t={t}
           />
@@ -572,6 +579,10 @@ function useLyricFill(
   const paintedRef = useRef("");
   /** 粗时钟（props 那份）：读不到实时读数时的兜底。 */
   const coarseRef = useRef(clockMs);
+  /** 当前句折行后每一行的矩形：由活动行量好交上来（单行时是 `null`）。 */
+  const bandsRef = useRef<LyricBand[] | null>(null);
+  /** 当前元素上是不是已经写过分行填充：切回单行时要把它撤掉。 */
+  const bandedRef = useRef(false);
 
   useEffect(() => {
     coarseRef.current = clockMs;
@@ -580,8 +591,10 @@ function useLyricFill(
   const sync = useCallback((index: number) => {
     if (indexRef.current === index) return;
     indexRef.current = index;
-    // 换行 → 活动行是**另一个元素**，首帧必须无条件重画。
+    // 换行 → 活动行是**另一个元素**，首帧必须无条件重画；上一句量到的行数也不再作数。
     paintedRef.current = "";
+    bandsRef.current = null;
+    bandedRef.current = false;
     setActiveIndex(index);
   }, []);
 
@@ -591,12 +604,64 @@ function useLyricFill(
       const item = items?.[indexRef.current];
       if (!node || !item) return;
       const next = items[indexRef.current + 1];
-      const pct = lyricFillPercent(lineProgress(item.timeMs, next ? next.timeMs : null, clock));
+      const progress = lineProgress(item.timeMs, next ? next.timeMs : null, clock);
+      const bands = bandsRef.current;
+
+      // 折行：一行一层渐变，边界是"每行自己的竖边"，填充顺序 = 阅读顺序
+      // （用户 2026-11-14：「遇到一句歌词但是换行时，填充顺序变为了从上到下」）。
+      if (bands && bands.length > 1) {
+        const fill = lyricBandFill(bands, progress);
+        if (fill.image === paintedRef.current) return;
+        paintedRef.current = fill.image;
+        bandedRef.current = true;
+        node.style.setProperty("background-repeat", "no-repeat");
+        node.style.setProperty("background-image", fill.image);
+        node.style.setProperty("background-size", fill.size);
+        node.style.setProperty("background-position", fill.position);
+        return;
+      }
+
+      // 单行：回到 CSS 里那条静态渐变，每帧只写一个自定义属性。
+      if (bandedRef.current) {
+        bandedRef.current = false;
+        for (const name of ["background-repeat", "background-image", "background-size", "background-position"]) {
+          node.style.removeProperty(name);
+        }
+      }
+      const pct = lyricFillPercent(progress);
       if (pct === paintedRef.current) return;
       paintedRef.current = pct;
       node.style.setProperty("--player-lyric-progress", pct);
     },
     [items],
+  );
+
+  /**
+   * 活动行量完行数后回调：行数变了（换行位置随面板宽度变）就重画一次。
+   * 用粗时钟先落一帧，下一帧 rAF 会用真值覆盖——只差一帧，看不见。
+   */
+  const onBands = useCallback(
+    (bands: LyricBand[] | null) => {
+      const same =
+        (bands === null && bandsRef.current === null) ||
+        (bands !== null &&
+          bandsRef.current !== null &&
+          bands.length === bandsRef.current.length &&
+          bands.every((band, index) => {
+            const other = bandsRef.current?.[index];
+            return (
+              !!other &&
+              Math.abs(other.width - band.width) < 0.5 &&
+              Math.abs(other.top - band.top) < 0.5 &&
+              Math.abs(other.height - band.height) < 0.5
+            );
+          }));
+      if (same && paintedRef.current !== "") return;
+      bandsRef.current = bands;
+      paintedRef.current = "";
+      paint(coarseRef.current);
+    },
+    [paint],
   );
 
   // 播放中：每帧一次。
@@ -626,7 +691,7 @@ function useLyricFill(
     paint(clockMs);
   }, [playing, synced, items, clockMs, sync, paint]);
 
-  return { activeIndex, fillRef, smooth: playing };
+  return { activeIndex, fillRef, onBands };
 }
 
 /**
@@ -661,43 +726,63 @@ function LyricText({ text }: { text: string }) {
  * 现在只画一份字形：`background-image` 的渐变乘 `background-clip: text`，染色只落在字形
  * 像素上，盒子没有边——自然不会有矩形。
  *
- * 换行的处理：渐变默认 `to right`，只对**单行**成立；一旦这句被折行，横向渐变会让两行
- * 各自从中间截断（看起来像"整块被平移着高亮"）。所以这里量一下这句实际占几行
- * （`Range.getClientRects()` 对折行文本每行给一个矩形），折行就换成 `to bottom`，
- * 按行序先填满上一行、再填下一行。
+ * 换行的处理：单行时 CSS 里那条横向渐变就够（一次 `setProperty`）。折行时**一行一层**
+ * 渐变、每层的位置与尺寸就是这一行的矩形，于是"先刷满第一行、再刷第二行"是按行序推的。
+ * 早先折行改用的纵向渐变是把两行当一整块自上而下盖住（用户 2026-11-14：「遇到一句歌词
+ * 但是换行时，填充顺序变为了从上到下」），字是在行内被垂直切开的，不是"读"的顺序。
  */
 function ActiveLyricLine({
   text,
-  progress,
   fillRef,
-  smooth,
+  onBands,
 }: {
   text: string;
-  progress: number;
   fillRef: RefObject<HTMLDivElement | null>;
-  smooth: boolean;
+  onBands: (bands: LyricBand[] | null) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [wrapped, setWrapped] = useState(false);
-  useLayoutEffect(() => {
+
+  /** 量这句实际占几行、每行在元素里的矩形（相对元素左上角，px）。 */
+  const measure = useCallback(() => {
     const node = ref.current;
     if (!node) return;
-    const range = document.createRange();
-    range.selectNodeContents(node);
-    // 只在"这句的文字"变了时重量：进度变化不改排版。
-    setWrapped(range.getClientRects().length > 1);
-    range.detach?.();
-    // 首帧先给一个合理值：rAF 的第一次写要等下一帧，否则新句会闪一下 0%。
-    node.style.setProperty("--player-lyric-progress", lyricFillPercent(progress));
-    // 进度故意不进依赖：它在播放中由 rAF 每帧直接写，这里只负责"挂载时"那一次。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text]);
-  // 暂停 / 拖动 / 没在播时没有 rAF 在写，值只能跟着 props 走。
-  // 播放中**不要**写：props 里的位置最多比真实落后 250ms，写一次就是一次回跳。
+    const base = node.getBoundingClientRect();
+    const rects: BoxRect[] = [];
+    // 按**文本节点**逐个量，而不是整块 `Range`：注音（`<rt>`）也是文本节点，整块量会把
+    // 它算成额外的一行。注音是贴着底字画的小字，不该参与"读到哪儿"。
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (let current = walker.nextNode(); current; current = walker.nextNode()) {
+      const element = (current as Text).parentElement;
+      if (!element || element.closest("rt")) continue;
+      const range = document.createRange();
+      range.selectNodeContents(current);
+      for (const rect of range.getClientRects()) {
+        rects.push({
+          left: rect.left - base.left,
+          top: rect.top - base.top,
+          right: rect.right - base.left,
+          bottom: rect.bottom - base.top,
+        });
+      }
+      range.detach?.();
+    }
+    const bands = lyricBands(rects);
+    setWrapped(bands.length > 1);
+    onBands(bands.length > 1 ? bands : null);
+  }, [onBands]);
+
   useLayoutEffect(() => {
-    if (smooth) return;
-    ref.current?.style.setProperty("--player-lyric-progress", lyricFillPercent(progress));
-  }, [progress, smooth]);
+    measure();
+    // 面板宽一点/窄一点都会改变这句折在哪：跟着量。观察父级（这行本身是 `fit-content`，
+    // 换行时它的宽度可能不变、只有高度变，观察自己不够稳）。
+    const target = ref.current?.parentElement ?? ref.current;
+    if (!target) return;
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [measure, text]);
+
   // 同一个元素要供两个使用者：本组件的排版量测、外层 rAF 的每帧填充。
   const bind = (node: HTMLDivElement | null) => {
     ref.current = node;
@@ -720,9 +805,8 @@ function Lyrics({
   start,
   end,
   active,
-  clockMs,
   fillRef,
-  smooth,
+  onBands,
   variant,
   t,
 }: {
@@ -730,9 +814,8 @@ function Lyrics({
   start: number;
   end: number;
   active: number;
-  clockMs: number;
   fillRef: RefObject<HTMLDivElement | null>;
-  smooth: boolean;
+  onBands: (bands: LyricBand[] | null) => void;
   variant: MusicStyle;
   t: MusicStageProps["t"];
 }) {
@@ -744,13 +827,8 @@ function Lyrics({
         const distance = active < 0 ? index + 1 : index - active;
         const isActive = index === active;
         const indent = variant === "haze" && !isActive ? lyricIndent(distance) : 0;
-        // 当前句按**进度条**推进（用户 2026-11-13 D172：不要逐字跳格）：同一行文字渲两层，
-        // 上层是"已唱"色、用 `clip-path` 从左往右揭开，边界连续移动；`clockMs` 与判定当前行
-        // 用的是同一个时钟，所以进度条在换句的瞬间正好走满。
-        const next = items[index + 1];
-        const progress = isActive
-          ? lineProgress(item.timeMs, next ? next.timeMs : null, clockMs)
-          : 0;
+        // 当前句的填充由 `useLyricFill` 每帧直接写进那个元素的样式（不经过 React）：
+        // 这里只负责把元素挂上去，并把它量到的行数报回去。
         return (
           <div
             key={`${item.timeMs}-${index}`}
@@ -759,12 +837,7 @@ function Lyrics({
             style={indent > 0 ? { marginLeft: `${indent}cqw` } : undefined}
           >
             {isActive ? (
-              <ActiveLyricLine
-                text={item.main}
-                progress={progress}
-                fillRef={fillRef}
-                smooth={smooth}
-              />
+              <ActiveLyricLine text={item.main} fillRef={fillRef} onBands={onBands} />
             ) : (
               <div className="player-lyric-main">
                 <LyricText text={item.main} />

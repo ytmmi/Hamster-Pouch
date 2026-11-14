@@ -5910,17 +5910,10 @@ button.danger {
      （用户 2026-11-14 D178「歌词的颜色填充观感卡顿」就是这条过渡造成的）。 */
 }
 
-/* 折行时换纵向渐变：横向渐变会让两行各自从中间截断，看起来像整块被平移着高亮
-   （用户 2026-11-13 D173 的第二个问题）；纵向按行序先填满上一行再填下一行。 */
-.player-lyric-main.is-filling[data-wrapped="true"] {
-  background-image: linear-gradient(
-    to bottom,
-    var(--player-lyric-sung) 0%,
-    var(--player-lyric-sung) max(0%, calc(var(--player-lyric-progress, 0%) - 6%)),
-    var(--player-lyric-unsung) min(100%, calc(var(--player-lyric-progress, 0%) + 6%)),
-    var(--player-lyric-unsung) 100%
-  );
-}
+/* 折行的当前句**不再换纵向渐变**：纵向渐变的等值线是水平线，两行是被同一道帘子自上而下
+   盖住的，字形在行内被垂直切开——用户 2026-11-14 报的就是这个（「遇到一句歌词但是换行时，
+   填充顺序变为了从上到下」）。现在由 `MusicStage` 的 `useLyricFill` 按**每行一层**横向渐变
+   推进（`lyricBandFill`：层的位置/尺寸就是那一行的矩形），填充顺序 = 阅读顺序。 */
 
 /* 注音（振り仮名）：汉字上方一行小号假名，颜色跟着这句走（用户 2026-11-14 D176）。 */
 /*
@@ -6002,8 +5995,11 @@ button.danger {
 }
 
 .player-lyrics[data-variant="disc"] {
-  --player-lyric-sung: var(--player-ink, #232840);
-  --player-lyric-unsung: color-mix(in srgb, var(--player-accent, #5b46c9) 62%, transparent);
+  /* 极性跟样式 1 一致：**已唱**用强调色（这句本来就是紫色，唱过的部分实心），**未唱**是
+     同色的淡档。此前写反了——已唱画成深墨、未唱才是饱和度更高的紫，于是"浅的那半边"
+     才是已经唱过的（用户 2026-11-14：「样式2的颜色填充颜色反了」）。 */
+  --player-lyric-sung: var(--player-accent, #5b46c9);
+  --player-lyric-unsung: color-mix(in srgb, var(--player-accent, #5b46c9) 34%, transparent);
 }
 
 .player-lyrics[data-variant="disc"] .player-lyric.is-active .player-lyric-main.is-filling {

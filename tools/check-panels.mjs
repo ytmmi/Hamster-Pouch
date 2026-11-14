@@ -7500,14 +7500,83 @@ check(
 );
 
 check(
-  "D173：折行的当前句按行序填（纵向渐变），不把两行当一整块横着切",
-  // 用户 2026-11-13：「如果歌词换行也被当成一个整体进行平移高亮」——横向渐变会让折行后的
-  // 两行各自从中间截断；折行时换成 `to bottom`，并用量到的行数（`data-wrapped`）驱动。
-  /const range = document\.createRange\(\);/.test(musicStageSrc) &&
-    /range\.getClientRects\(\)\.length > 1/.test(musicStageSrc) &&
+  "D179：折行的当前句按**阅读顺序**填（每行一层横向渐变），不是从上到下盖帘子",
+  // 用户 2026-11-14：「颜色填充在遇到一句歌词但是换行时，填充顺序变为了从上到下，修复」。
+  // 纵向渐变的等值线是水平线：两行被同一道帘子自上而下盖住，字形在行内被垂直切开。
+  // 现在按文本节点量出每行的矩形（跳过 `<rt>`，注音是贴底字的小字），一行一层横向渐变。
+  /const bands = lyricBands\(rects\);/.test(musicStageSrc) &&
+    /lyricBands,/.test(musicStageSrc) &&
+    /const fill = lyricBandFill\(bands, progress\);/.test(musicStageSrc) &&
+    /node\.style\.setProperty\("background-image", fill\.image\);/.test(musicStageSrc) &&
+    // 量测必须**跳过注音**：`<rt>` 也是文本节点，整块量会多出一条假的行。
+    /element\.closest\("rt"\)/.test(musicStageSrc) &&
+    /NodeFilter\.SHOW_TEXT/.test(musicStageSrc) &&
+    // 面板宽度变化会改变折行位置：要跟着重算。
+    /new ResizeObserver\(\(\) => measure\(\)\)/.test(musicStageSrc) &&
     /data-wrapped=\{wrapped \? "true" : "false"\}/.test(musicStageSrc) &&
-    /\.player-lyric-main\.is-filling\[data-wrapped="true"\] \{/.test(stylesSource) &&
-    /to bottom,/.test(stylesSource),
+    // CSS 里不许再留那条"从上到下"的**歌词填充**渐变（它会盖掉分行的横向渐变）。
+    // 注意 `to bottom` 本身在别处是合法的（`mask-image` 的渐隐、色晕的暗角）。
+    !/linear-gradient\(\s*to bottom,\s*var\(--player-lyric-sung\)/.test(stylesSource) &&
+    !/\.player-lyric-main\.is-filling\[data-wrapped="true"\] \{/.test(stylesSource),
+);
+
+check(
+  "D179：分行填充的顺序与速度（按行宽切分：读满一行再下一行，行内速度恒定）",
+  // 用户 2026-11-14：「遇到一句歌词但是换行时，填充顺序变为了从上到下」——
+  // 顺序必须是阅读顺序：第一行从左刷到右之后才轮到第二行。按行宽切分（行宽 ∝ 字数），
+  // 于是整句的推进速度恒定；同一行里相邻文本节点的矩形纵向重叠，归并成一条。
+  (() => {
+    const bands = [
+      { left: 0, top: 0, width: 300, height: 20 },
+      { left: 0, top: 20, width: 100, height: 20 },
+    ];
+    const at = (progress) =>
+      musicStageMod.lyricBandProgress(bands, progress).map((value) => Math.round(value * 100));
+    const merged = musicStageMod.lyricBands([
+      { left: 0, top: 0, right: 120, bottom: 20 },
+      { left: 120, top: 1, right: 300, bottom: 21 },
+      { left: 0, top: 20, right: 100, bottom: 40 },
+    ]);
+    return (
+      JSON.stringify(at(0)) === JSON.stringify([0, 0]) &&
+      // 300 / 400 = 0.75 正好把第一行读满，第二行一点没动。
+      JSON.stringify(at(0.75)) === JSON.stringify([100, 0]) &&
+      JSON.stringify(at(0.375)) === JSON.stringify([50, 0]) &&
+      JSON.stringify(at(1)) === JSON.stringify([100, 100]) &&
+      merged.length === 2 &&
+      Math.round(merged[0].width) === 300 &&
+      Math.round(merged[1].top) === 20 &&
+      // 退化的量测（宽度为 0 / NaN）不能让填充炸掉：退回整句进度。
+      musicStageMod.lyricBands([{ left: 0, top: 0, right: 0, bottom: 20 }]).length === 0 &&
+      JSON.stringify(musicStageMod.lyricBandProgress([], 0.5)) === JSON.stringify([])
+    );
+  })(),
+);
+
+check(
+  "D179：样式 2 的填充极性跟样式 1 一致（已唱用强调色，未唱是同色淡档）",
+  // 用户 2026-11-14：「样式2的颜色填充颜色反了」——此前已唱画成深墨（`--player-ink`）、
+  // 未唱才是饱和度更高的紫，屏幕上看"浅的那半边"才是唱过的。两套样式取同一个方向：
+  // 已唱更实（样式 1 = 纯白，样式 2 = 强调色），未唱是同色的淡档。
+  (() => {
+    const at = stylesSource.indexOf("--player-lyric-sung: var(--player-accent");
+    const discBody =
+      at < 0 ? "" : stylesSource.slice(Math.max(0, at - 260), Math.min(stylesSource.length, at + 320));
+    const hazeAt = stylesSource.indexOf("--player-lyric-sung: #fff;");
+    const hazeBody =
+      hazeAt < 0
+        ? ""
+        : stylesSource.slice(Math.max(0, hazeAt - 120), Math.min(stylesSource.length, hazeAt + 220));
+    return (
+      /--player-lyric-sung: var\(--player-accent, #5b46c9\);/.test(discBody) &&
+      /--player-lyric-unsung: color-mix\(in srgb, var\(--player-accent, #5b46c9\) 34%, transparent\);/.test(
+        discBody,
+      ) &&
+      !/--player-lyric-sung: var\(--player-ink/.test(stylesSource) &&
+      /--player-lyric-sung: #fff;/.test(hazeBody) &&
+      /--player-lyric-unsung: rgba\(255, 255, 255, 0\.55\);/.test(hazeBody)
+    );
+  })(),
 );
 
 check(
@@ -7516,9 +7585,10 @@ check(
   // 根因是判行用 `positionMs + LYRIC_LEAD_MS`、填充用 `positionMs`，两个钟差 480ms。
   /const clockMs = positionMs \+ LYRIC_LEAD_MS;/.test(musicStageSrc) &&
     /activeLrcIndex\(items, clockMs\)/.test(musicStageSrc) &&
-    /lineProgress\(item\.timeMs, next \? next\.timeMs : null, clockMs\)/.test(musicStageSrc) &&
-    !/lineProgress\(item\.timeMs, next \? next\.timeMs : null, positionMs\)/.test(musicStageSrc) &&
-    (musicStageSrc.match(/clockMs=\{clockMs\}/g) ?? []).length === 2,
+    // 填充那一支（rAF 里）也要走同一个提前量：`clock = base + LYRIC_LEAD_MS`。
+    /const clock = base \+ LYRIC_LEAD_MS;/.test(musicStageSrc) &&
+    /lineProgress\(item\.timeMs, next \? next\.timeMs : null, clock\)/.test(musicStageSrc) &&
+    !/lineProgress\(item\.timeMs, next \? next\.timeMs : null, positionMs\)/.test(musicStageSrc),
 );
 
 check(
@@ -8153,11 +8223,21 @@ check(
   // 用户 2026-11-14：「不使用进度条式竖直的僵硬边界，而是加一个 1-0 的透明度柔和过渡」。
   /calc\(var\(--player-lyric-progress, 0%\) - 6%\)/.test(stylesSource) &&
     /calc\(var\(--player-lyric-progress, 0%\) \+ 6%\)/.test(stylesSource) &&
-    // 折行时同样的柔和边界换到纵向。
+    // 折行时同样是柔边：每行那层渐变在进度两侧各留 `LYRIC_BAND_SOFT`%。
     (() => {
-      const at = stylesSource.indexOf('.player-lyric-main.is-filling[data-wrapped="true"] {');
-      const body = at >= 0 ? stylesSource.slice(at, stylesSource.indexOf("}", at)) : "";
-      return /to bottom/.test(body) && /- 6%/.test(body) && /\+ 6%/.test(body);
+      const bands = [
+        { left: 0, top: 0, width: 200, height: 20 },
+        { left: 0, top: 20, width: 100, height: 20 },
+      ];
+      // 总进度 1/3 → 第一行正好读到一半（300 × 1/3 = 100 = 200/2）。
+      const fill = musicStageMod.lyricBandFill(bands, 1 / 3);
+      return (
+        musicStageMod.LYRIC_BAND_SOFT === 6 &&
+        fill.image.includes("linear-gradient(to right") &&
+        fill.image.includes("44.00%") &&
+        fill.image.includes("56.00%") &&
+        fill.image.includes("var(--player-lyric-unsung) 0%, var(--player-lyric-unsung) 100%)")
+      );
     })(),
 );
 

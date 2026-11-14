@@ -521,6 +521,16 @@
     拖动 / 读不到实时读数时退回 props 的粗时钟并按需落一次，不跑循环。CSS 里那条 `transition`
     随之删除（再叠过渡只会被反复重启）。门禁 `484 → 485`（新增 1 条：rAF 直驱 + 无 `transition`
     + 面板传实时读数；改写 1 条：D173 不再要求内联 `style` 写进度）。
+    **2026-11-14 第十二轮（D179，折行按阅读顺序填 / 样式 2 的极性）**：用户「样式2的颜色填充颜色反了」
+    +「颜色填充在遇到一句歌词但是换行时，填充顺序变为了从上到下」。①折行：原来给 `[data-wrapped="true"]`
+    换一条 `linear-gradient(to bottom, …)`，等值线是水平线——两行被**同一道帘子自上而下盖住**，字形在行内
+    被垂直切开。改成按**文本行**逐行推进：`lyricBands()` 把 `Range.getClientRects()` 按纵向重叠归并成行箱，
+    `lyricBandProgress()` 按**行宽**切分整句进度（行宽 ∝ 字数），`lyricBandFill()` 给每行生成一层
+    `to right` 渐变，用 `background-image` 的多层语法一次写进元素（`background-size` / `-position` 按行定位），
+    层间 ±6% 柔边不变；CSS 里那条纵向渐变整条删除。②样式 2 的 `--player-lyric-sung` 用的是墨色
+    `--player-ink`、`--player-lyric-unsung` 才是高饱和紫，屏幕上"浅的那半边"反而是唱过的；改成
+    `sung = var(--player-accent)`、`unsung = color-mix(in srgb, var(--player-accent) 34%, transparent)`，
+    极性对齐样式 1（已唱更实）。门禁 `485 → 487`（新增 2 条、改写 3 条）。
 
 
 - **`cargo test -p hp-core`**：面板声明的硬错误清单、命名空间规则、`settings.kind` 白名单、`has_class = false` 的类目拒绝、`mount.overlay_content = false` 的浮层拒绝。
