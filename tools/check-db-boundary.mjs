@@ -471,5 +471,40 @@ report(
   bookFamilyOffenders,
 );
 
+// ⑰ 仓库级 UI 文本项只经 shared/repo_blob（D213）
+//
+// `interfacePages.*`（D124）与 `panelMarks.*`（D134）是同一件事：按仓库存一份不透明 JSON 到
+// 全局库的 `app_settings`，空白与「未设置」同义。此前两个命令文件各 62 / 64 行、逐段同形，
+// 「空串算清空还是算值」「写入要不要 trim」「空白读回算不算未设置」三条口径靠两份实现各自记着
+// ——分叉后前端会拿到两套语义。现在键拼装与读写只有 `commands/shared/repo_blob.rs` 一份，
+// 命令文件只声明自己的前缀，并统一走 `with_global`。
+const repoBlobBody = stripComments(readFileSync(join(SHARED_DIR, "repo_blob.rs"), "utf8"));
+const repoBlobOffenders = [];
+for (const needle of [
+  "pub(crate) fn get_repo_blob",
+  "pub(crate) fn set_repo_blob",
+  'HpError::InvalidArgument("repoId 不能为空"',
+  "with_global(",
+]) {
+  if (!repoBlobBody.includes(needle)) repoBlobOffenders.push(`commands/shared/repo_blob.rs 缺少 ${needle}`);
+}
+for (const name of ["interface_pages.rs", "panel_marks.rs"]) {
+  const body = stripComments(readFileSync(join(BRIDGE_SRC, "commands", name), "utf8"));
+  if (!/\bget_repo_blob\s*\(&state/.test(body) || !/\bset_repo_blob\s*\(&state/.test(body)) {
+    repoBlobOffenders.push(`commands/${name}  没有同时走 get_repo_blob / set_repo_blob`);
+  }
+  if (/\b(global_guard|global|global_mut)\s*\(/.test(body)) {
+    repoBlobOffenders.push(`commands/${name}  仍自己取全局库（应交给 repo_blob）`);
+  }
+  if (/\bfn\s+ensure_repo_id\b/.test(body)) {
+    repoBlobOffenders.push(`commands/${name}  又手抄了 repoId 校验（ensure_repo_id）`);
+  }
+}
+report(
+  repoBlobOffenders.length === 0,
+  "仓库级 UI 文本项只经 shared/repo_blob（interface_pages / panel_marks）",
+  repoBlobOffenders,
+);
+
 console.log(`\n[check-db-boundary] ${passed}/${total} 通过`);
 process.exit(passed === total ? 0 : 1);

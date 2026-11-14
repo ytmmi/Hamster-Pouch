@@ -99,6 +99,7 @@ crates/hp-dict/migrations/   # 迁移 SQL（forward-only，发布后禁止修改
       taglib.rs       #   tag 词库装配与插件扩展挂载（build_tag_lib_set / attach_tag_lib_extensions）
       locks.rs        #   宿主级状态的唯一加锁入口（全局库 / schema 缓存 / 监督表 / AI 队列 / tag 库；全局库另走 `global_guard`，读写经 `with_global` / `with_global_mut` 在一次持锁内跑完，D195/D198）
       repo.rs         #   仓库句柄按 id 装卸 `take_open_repo_if` / `with_open_repo_mut`，取用经 `with_repo` / `with_repo_mut` 并在同一次持锁内校验 repoId（命令层 15 个文件全走这条路，D199/D200/D202）
+      repo_blob.rs    #   仓库级 UI 文本项的唯一存放口（D213）：get_repo_blob / set_repo_blob 把 `{prefix}.{repoId}` 落进 `app_settings`，空白读回算未设置、写入 trim；interface_pages / panel_marks 只声明前缀，不再各自 ensure + 加锁
       files.rs        #   FileIndexRow → 前端列表项
       prelude.rs  mod.rs
     task_shell.rs     # 长任务外壳（D196）：登记 / 起线程 / panic 收敛 / 收尾只此一处，四个入口（scan /
@@ -116,13 +117,14 @@ crates/hp-dict/migrations/   # 迁移 SQL（forward-only，发布后禁止修改
     blueprint.rs        # 蓝图命令桥接（含 blueprint.changed 广播）
     interface_pages.rs  # 界面页分组结构桥接（2026-10-26，D124）：只有 interfacePages.get / .set
                         #   两条，整包 JSON 字符串存 `app_settings` 的 `interfacePages.<repoId>`；
-                        #   **不新增库表**——分组是用户导航状态，不参与蓝图校验
+                        #   **不新增库表**——分组是用户导航状态，不参与蓝图校验；取库只经
+                        #   `shared/repo_blob.rs`（D213，空串/trim/空白三条口径只在那里定）
     panel_marks.rs      # 源 / 相册面板「添加标记」的状态桥接（2026-11-01，D134）：只有
                         #   panelMarks.get / .set 两条，整包 JSON 字符串存 `app_settings` 的
                         #   `panelMarks.<repoId>`；**不新增库表、也不写 `file_marks`**——面板标记
                         #   的对象可以是相册 id 或源目录 key，不是文件。语义（自定义标记
                         #   `custom:<名称>`、目标键、版本闸门）全在前端 `shared/panelMarks.ts`，
-                        #   桥接层不解析内容
+                        #   桥接层不解析内容；取库只经 `shared/repo_blob.rs`（D213）
     book/               # 图书桥接（2026-11-14 拆分 D181，2026-11-15 收轮 D203）：mod.rs（book.meta /
                         #   book.content 两个命令 + 共享导入）、cache.rs（元数据磁盘缓存 + 原子写）、
                         #   paging.rs（txt/md/epub/pdf 正文分页与块转换）、cover.rs（book.cover* 封面覆盖 +

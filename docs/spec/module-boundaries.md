@@ -140,6 +140,13 @@ jumpTarget / loadMore / jumpTo / generation`，`jumpTo` 起新世代让在飞的
 `onDidVisibilityChange(` 只许出现在 `panelActivity.ts`；`useSettingReload` 必须同时含四条触发源，查看器不得再出现 `listenHp("setting.changed"`
 或 `addEventListener("focus"`（56/56，变异：往 `ColorPanel.tsx` 插一句 `p.onDidActiveChange(() => {})` → 55/56 并指名该文件）。
 
+**仓库级 UI 文本项的存放口径只有一处**（D213）：`commands/interface_pages.rs`（D124）与 `commands/panel_marks.rs`（D134）原本各写一遍
+「校验 repoId → `global_guard` → `global` → `get_setting` / `set_setting` 拼 `{prefix}.{repoId}`」，也各自决定「空白读回算不算未设置」「写入要不要 trim」——
+这类口径一旦分叉，同一份 JSON 在两个面板上会出现「存了但读回是空」。现在两处都只声明前缀，取库、拼键、空值判定全部经
+`apps/desktop/src-tauri/src/commands/shared/repo_blob.rs` 的 `get_repo_blob` / `set_repo_blob`（内部 `with_global`，D198 口径）。
+门禁：`check:db-boundary` 第十七条——两个命令文件必须同时出现两个入口，且不得再出现 `global_guard(` / `global(` / `global_mut(` / `fn ensure_repo_id`
+（17/17，变异：往 `panel_marks.rs` 追加一句 `global_guard(state)?` → 16/17 并指名该条）。
+
 ## 插件/AI 扩展点
 
 插件首期只能做：

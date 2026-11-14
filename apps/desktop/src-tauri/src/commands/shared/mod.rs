@@ -11,6 +11,7 @@ mod files;
 mod locks;
 mod paths;
 mod repo;
+mod repo_blob;
 mod response;
 mod taglib;
 
@@ -21,6 +22,7 @@ pub(crate) use files::*;
 pub(crate) use locks::*;
 pub(crate) use paths::*;
 pub(crate) use repo::*;
+pub(crate) use repo_blob::*;
 pub(crate) use response::*;
 pub(crate) use taglib::*;
 
