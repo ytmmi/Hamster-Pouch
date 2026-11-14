@@ -33,9 +33,10 @@
  * 重新渲染只是重建 DOM），滚动位置由各面板自己的模块级变量恢复。
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import type { PanelRenderCtx } from "../core/panelRegistry";
+import { usePanelActivity } from "./panelActivity";
 
 export function usePanelForeground(panelApi?: PanelRenderCtx["api"]): boolean {
   /**
@@ -49,15 +50,9 @@ export function usePanelForeground(panelApi?: PanelRenderCtx["api"]): boolean {
    */
   const [foreground, setForeground] = useState(true);
 
-  useEffect(() => {
-    if (!panelApi) return;
-    const sync = () => setForeground(Boolean(panelApi.isVisible));
-    const disposables = [panelApi.onDidVisibilityChange(sync)];
-    sync();
-    return () => {
-      for (const disposable of disposables) disposable.dispose();
-    };
-  }, [panelApi]);
+  // 订阅口只有一处（D212）：激活与可见两个维度都回调，本钩子只取 `isVisible`——
+  // 判据里出现 `isActive` 就是上面那个坑，`pnpm check:panels` 断言它不出现。
+  usePanelActivity(panelApi, ({ isVisible }) => setForeground(isVisible));
 
   return foreground;
 }

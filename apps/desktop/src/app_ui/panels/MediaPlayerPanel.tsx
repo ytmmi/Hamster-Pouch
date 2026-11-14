@@ -62,6 +62,7 @@ import { resolveSourceUrl } from "../shared/mediaUrl";
 import { VolumeIcon } from "./shared/icons";
 import { formatMs } from "./shared/time";
 import { clampVolume } from "./shared/volume";
+import { usePanelActivity } from "../shared/panelActivity";
 import { usePanelSettingValue } from "../shared/settingValue";
 import { publishSettingChanged } from "../core/settingChangeStore";
 import { useApp } from "../core/AppContext";
@@ -388,37 +389,28 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
 
   // 面板可见性 → 切标签自动暂停。隐藏用 DOM 元素的 `pause()`（视频在后台标签
   // 保持加载与进度，切回即暂停帧，单击继续）。
+  //
+  // 订阅口全仓唯一（`shared/panelActivity.ts`，D212）；判据只看「面板是否显示」——
+  // 失焦不算隐藏（用户 2026-11-13 D171，与音乐面板同口径）。
   useEffect(() => {
     void reloadAutoPauseSetting();
-    const sync = () => {
-      // 判据只看「面板是否显示」：失焦不算隐藏（用户 2026-11-13 D171，与音乐面板同口径）。
-      const visible = Boolean(panelApi.isVisible);
-      const prevVisible = wasVisibleRef.current;
-      wasVisibleRef.current = visible;
-      if (visible) {
-        // 回到前台：刷新「切换标签时自动暂停」设置值，使设置修改无需重启即生效。
-        void reloadAutoPauseSetting();
-      } else if (
-        // 只在"可见 → 隐藏"的**转换**时自动暂停：面板挂载即为隐藏态（如布局恢复时
-        // 落在后台标签）不算切走，避免把刚播放的视频误暂停。
-        prevVisible &&
-        autoPauseLoadedRef.current &&
-        autoPauseRef.current
-      ) {
-        videoRef.current?.pause();
-      }
-    };
-    sync();
-    const disposables = [
-      panelApi.onDidActiveChange(sync),
-      panelApi.onDidVisibilityChange(sync),
-    ];
-    return () => {
-      for (const d of disposables) {
-        d.dispose();
-      }
-    };
-  }, [panelApi, reloadAutoPauseSetting]);
+  }, [reloadAutoPauseSetting]);
+  usePanelActivity(panelApi, ({ isVisible }) => {
+    const prevVisible = wasVisibleRef.current;
+    wasVisibleRef.current = isVisible;
+    if (isVisible) {
+      // 回到前台：刷新「切换标签时自动暂停」设置值，使设置修改无需重启即生效。
+      void reloadAutoPauseSetting();
+    } else if (
+      // 只在"可见 → 隐藏"的**转换**时自动暂停：面板挂载即为隐藏态（如布局恢复时
+      // 落在后台标签）不算切走，避免把刚播放的视频误暂停。
+      prevVisible &&
+      autoPauseLoadedRef.current &&
+      autoPauseRef.current
+    ) {
+      videoRef.current?.pause();
+    }
+  });
 
   // 音量落到元素上：`<video>` 是 `videoUrl` 就绪后才挂载的，所以两个依赖都要看
   // （换源 = 新元素，必须重新应用；音量变化 = 当前元素即时生效）。

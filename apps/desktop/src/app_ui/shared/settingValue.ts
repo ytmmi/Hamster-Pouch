@@ -18,8 +18,9 @@
  * | 面板被激活 / 变为可见 | 后台标签期间改的设置，切回来即生效 |
  *
  * 面板设置与宿主设置**只有落库键与归一化入口不同**，订阅逻辑同一份，因此共用一个内核
- * （`useStoredSetting`）；`panels/imageviewer/useViewerSettings.ts` 是该面板多项设置的
- * 专用读取（一次读全部键）。
+ * （`useStoredSetting`），四条触发源本身也只有一份（`useSettingReload`，D212）；
+ * `panels/imageviewer/useViewerSettings.ts` 是该面板多项设置的专用读取（一次读全部键），
+ * 触发源同样复用 `useSettingReload`。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -36,6 +37,7 @@ import {
 import * as api from "./api";
 import type { PanelRenderCtx } from "../core/panelRegistry";
 import { subscribeSettingChanged } from "../core/settingChangeStore";
+import { usePanelActivity } from "./panelActivity";
 
 /**
  * 通用内核：读取并订阅**一项**设置（按落库键），返回归一化后的值。
@@ -65,6 +67,31 @@ export function useStoredSetting<T>(
     }
   }, [storageKey]);
 
+  useSettingReload(reload, panelApi);
+
+  return value;
+}
+
+/**
+ * 设置热加载的**四条触发源**——全仓唯一实现（D212）。
+ *
+ * 只有一条通路是**不够**的：事件是本进程外的一次往返（订阅时机、运行时环境都可能让它不达），
+ * 而设置是「用户当下就要看到结果」的交互，必须有本地兜底。四条互相独立，任一条可用即可生效：
+ *
+ * | 触发源 | 覆盖的场景 |
+ * | --- | --- |
+ * | 同窗口本地广播（`settingChangeStore`） | 「全部设置」浮层就在本窗口：写完即生效，不等 IPC |
+ * | `setting.changed` 事件 | 跨窗口（独立面板窗口）与后端其它写入方 |
+ * | 窗口重新获得焦点 | 关掉「全部设置」浮层后回到面板 |
+ * | 面板被激活 / 变为可见 | 后台标签期间改的设置，切回来即生效 |
+ *
+ * `reload` 必须是**幂等**的：一次切换可能触发多次（激活与可见各一次），它只该「读最新值 →
+ * 覆盖本地状态」，不该做有副作用的推进。`panelApi` 缺省时少一条触发源（测试 / 非 dockview 宿主）。
+ */
+export function useSettingReload(
+  reload: () => void | Promise<void>,
+  panelApi?: PanelRenderCtx["api"],
+): void {
   // 初次读取。
   useEffect(() => {
     void reload();
@@ -100,18 +127,12 @@ export function useStoredSetting<T>(
   }, [reload]);
 
   // 触发源 4：面板从后台标签回到前台（后台期间改的设置此时补齐）。
-  useEffect(() => {
-    if (!panelApi) return;
-    const sync = () => {
-      if (panelApi.isVisible && panelApi.isActive) void reload();
-    };
-    const disposables = [panelApi.onDidActiveChange(sync), panelApi.onDidVisibilityChange(sync)];
-    return () => {
-      for (const disposable of disposables) disposable.dispose();
-    };
-  }, [panelApi, reload]);
-
-  return value;
+  // 订阅口只有一处（`shared/panelActivity.ts`）：激活与可见两个维度都算「回到前台」，
+  // 但判据必须同时成立——只看 `isVisible` 会在「点了别的组」时也重读，只看 `isActive`
+  // 则会在用户明明看着本面板时漏读（dockview 的语义见 `panelForeground.ts`）。
+  usePanelActivity(panelApi, ({ isVisible, isActive }) => {
+    if (isVisible && isActive) void reload();
+  });
 }
 
 // ============================== 面板设置 ==============================

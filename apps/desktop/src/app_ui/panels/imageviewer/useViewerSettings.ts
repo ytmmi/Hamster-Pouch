@@ -8,7 +8,8 @@
  * 2. 从注册表里读**声明缺省值**（不在面板代码里重写第二份缺省值——两处默认值是漂移源）；
  * 3. 把 `app_settings` 里的原始值**归一化**：未知/非法取值一律回落缺省（失败关闭）。
  *
- * **刷新走四条独立触发源**（任一条可用即可生效，缺一条也不会"改了设置没反应"）：
+ * **刷新走四条独立触发源**（任一条可用即可生效，缺一条也不会"改了设置没反应"；
+ * 四条本身只有一份实现 `useSettingReload`，D212——本文件不再自己抄一遍）：
  *
  * | 触发源 | 覆盖的场景 |
  * | --- | --- |
@@ -21,14 +22,13 @@
  * 而设置是"用户当下就要看到结果"的交互，必须有本地兜底。
  */
 
-import { useCallback, useEffect, useState } from "react";
-import { listenHp } from "../../shared/events";
+import { useCallback, useState } from "react";
 
 import { panelSettingStorageKey, panelSpec, type PanelSettingValue } from "@hamster-pouch/config";
 
 import * as api from "../../shared/api";
 import type { PanelRenderCtx } from "../../core/panelRegistry";
-import { subscribeSettingChanged } from "../../core/settingChangeStore";
+import { useSettingReload } from "../../shared/settingValue";
 import {
   clampFilmstripSize,
   isFilmstripEdge,
@@ -179,51 +179,9 @@ export function useViewerSettings(panelApi?: PanelRenderCtx["api"]): ViewerSetti
     }
   }, []);
 
-  // 初次读取。
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  // 触发源 1：同窗口写入（「全部设置」浮层就在本窗口，写完即生效）。
-  useEffect(() => subscribeSettingChanged(() => void reload()), [reload]);
-
-  // 触发源 2：后端广播（跨窗口与其它写入方）。
-  useEffect(() => {
-    let dispose: (() => void) | undefined;
-    let cancelled = false;
-    void listenHp("setting.changed", () => {
-      void reload();
-    })
-      .then((unlisten) => {
-        // 注册期间组件已卸载：立刻退订，避免监听器泄漏（设置面板开关频繁）。
-        if (cancelled) unlisten();
-        else dispose = unlisten;
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-      dispose?.();
-    };
-  }, [reload]);
-
-  // 触发源 3：窗口重新获得焦点（关掉设置浮层后必然发生）。
-  useEffect(() => {
-    const onFocus = () => void reload();
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [reload]);
-
-  // 触发源 4：面板从后台标签回到前台（后台期间改的设置此时补齐）。
-  useEffect(() => {
-    if (!panelApi) return;
-    const sync = () => {
-      if (panelApi.isVisible && panelApi.isActive) void reload();
-    };
-    const disposables = [panelApi.onDidActiveChange(sync), panelApi.onDidVisibilityChange(sync)];
-    return () => {
-      for (const disposable of disposables) disposable.dispose();
-    };
-  }, [panelApi, reload]);
+  // 四条触发源只有一份（`shared/settingValue.ts` 的 `useSettingReload`，D212）：本面板的
+  // 「一次读全部键」只替换取数，通路与「一项一条」的通用内核共用，新增触发源不会只加一处。
+  useSettingReload(reload, panelApi);
 
   return settings;
 }

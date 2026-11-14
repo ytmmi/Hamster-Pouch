@@ -218,12 +218,13 @@ check(
 // 设置热加载：面板不能只依赖 `setting.changed` 事件（订阅时机/运行时环境都可能让它不达），
 // 同窗口本地广播 + 窗口焦点 + 面板激活都必须订阅（缺一条就会出现"改了设置没反应"）。
 check(
-  "设置热加载走多条独立触发源（本地广播 + 后端事件 + 焦点 + 面板激活）",
-  /subscribeSettingChanged\(/.test(viewerSettingsSrc) &&
-    /listenHp\("setting\.changed"/.test(viewerSettingsSrc) &&
-    /window\.addEventListener\("focus"/.test(viewerSettingsSrc) &&
-    /onDidActiveChange/.test(viewerSettingsSrc) &&
-    /onDidVisibilityChange/.test(viewerSettingsSrc),
+  "设置热加载走多条独立触发源（四条只有一份实现，查看器只消费）",
+  // D212：四条触发源收进 `shared/settingValue.ts` 的 `useSettingReload`——查看器只传自己的取数，
+  // 不再自己抄一遍订阅（新增触发源只加一处，漏改另一处的漂移面消失）。
+  /useSettingReload\(reload, panelApi\)/.test(viewerSettingsSrc) &&
+    !/listenHp\("setting\.changed"/.test(viewerSettingsSrc) &&
+    !/addEventListener\("focus"/.test(viewerSettingsSrc) &&
+    !/onDidActiveChange|onDidVisibilityChange/.test(viewerSettingsSrc),
 );
 check(
   "「全部设置」写入/恢复后广播本地变更（同窗口即时生效，不等 IPC 往返）",

@@ -630,6 +630,46 @@ check(
   staleZ60Refs.join(", ") || "0 处",
 );
 
+// 「面板激活 / 可见性」的订阅口只有一个（D212）：dockview 的两条事件只许在 panelActivity.ts 里订阅。
+// 递归扫描 + 整文件比对（与上面原生复选框同一手法）——新增面板若自己接事件会立刻红。
+const panelActivityRel = "apps/desktop/src/app_ui/shared/panelActivity.ts";
+const panelActivitySrc = readFileSync(join(ROOT, panelActivityRel), "utf8");
+/** 与 `tsxFilesUnder` 的绝对路径对齐再比（Windows 下 `readdirSync` 给的是反斜杠）。 */
+const relativeTo = (file) => file.slice(ROOT.length + 1).replace(/\\/g, "/");
+const manualPanelSubscribers = tsxFilesUnder(join(ROOT, "apps/desktop/src/app_ui"))
+  .filter((file) => relativeTo(file) !== panelActivityRel)
+  .filter((file) =>
+    /onDidActiveChange\(|onDidVisibilityChange\(/.test(stripComments(readFileSync(file, "utf8"))),
+  )
+  .map(relativeTo);
+check(
+  "面板激活 / 可见性的订阅口只有一个（`shared/panelActivity.ts`，面板不得自己接 dockview 事件）",
+  /export function usePanelActivity\(/.test(panelActivitySrc) &&
+    /onDidActiveChange\(sync\)/.test(panelActivitySrc) &&
+    /onDidVisibilityChange\(sync\)/.test(panelActivitySrc) &&
+    manualPanelSubscribers.length === 0,
+  manualPanelSubscribers.join(", ") || "0 处自接事件",
+);
+// 设置热加载的四条触发源（本地广播 / 后端事件 / 焦点 / 面板激活）也只有一份实现。
+const settingHookSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/shared/settingValue.ts"),
+  "utf8",
+);
+const viewerSettingsHookSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/useViewerSettings.ts"),
+  "utf8",
+);
+check(
+  "设置热加载的四条触发源只有一份实现（`shared/settingValue.ts` 的 useSettingReload）",
+  /export function useSettingReload\(/.test(settingHookSrc) &&
+    /usePanelActivity\(panelApi, \(\{ isVisible, isActive \}\)/.test(settingHookSrc) &&
+    /listenHp\("setting\.changed"/.test(settingHookSrc) &&
+    /addEventListener\("focus"/.test(settingHookSrc) &&
+    /useSettingReload\(reload, panelApi\)/.test(viewerSettingsHookSrc) &&
+    !/listenHp\("setting\.changed"|addEventListener\("focus"/.test(viewerSettingsHookSrc),
+  "useSettingReload 一处实现，查看器只消费",
+);
+
 // ============================== 汇总 ==============================
 
 const passed = results.filter((r) => r.ok).length;

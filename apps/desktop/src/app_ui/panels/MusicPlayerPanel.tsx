@@ -44,6 +44,7 @@ import * as api from "../shared/api";
 import { errorTextOf } from "../shared/api/response";
 import { assetUrlOrNull } from "../shared/assetUrl";
 import { resolveSourceUrl } from "../shared/mediaUrl";
+import { usePanelActivity } from "../shared/panelActivity";
 import { usePanelSettingValue } from "../shared/settingValue";
 import { clampVolume } from "./shared/volume";
 import { publishSettingChanged } from "../core/settingChangeStore";
@@ -364,32 +365,23 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
 
   // 面板可见性 → 切标签自动暂停。隐藏用 DOM 元素的 `pause()`（媒体在后台标签
   // 保持加载与进度，切回即暂停，点播放键继续）。
+  //
+  // 订阅口全仓唯一（`shared/panelActivity.ts`，D212）；判据只看「面板是否显示」：
+  // 切标签会隐藏面板，而**失去焦点不算隐藏**（用户 2026-11-13 D171：音乐要在失焦后
+  // 继续放，点到别处就静音是不能接受的）。
   useEffect(() => {
     void reloadAutoPauseSetting();
-    const sync = () => {
-      // 判据只看「面板是否显示」：切标签会隐藏面板，而**失去焦点不算隐藏**
-      // （用户 2026-11-13 D171：音乐要在失焦后继续放，点到别处就静音是不能接受的）。
-      const visible = Boolean(panelApi.isVisible);
-      const prevVisible = wasVisibleRef.current;
-      wasVisibleRef.current = visible;
-      if (visible) {
-        // 回到前台：刷新设置值，使设置修改无需重启即生效。
-        void reloadAutoPauseSetting();
-      } else if (prevVisible && autoPauseLoadedRef.current && autoPauseRef.current) {
-        audioRef.current?.pause();
-      }
-    };
-    sync();
-    const disposables = [
-      panelApi.onDidActiveChange(sync),
-      panelApi.onDidVisibilityChange(sync),
-    ];
-    return () => {
-      for (const d of disposables) {
-        d.dispose();
-      }
-    };
-  }, [panelApi, reloadAutoPauseSetting]);
+  }, [reloadAutoPauseSetting]);
+  usePanelActivity(panelApi, ({ isVisible }) => {
+    const prevVisible = wasVisibleRef.current;
+    wasVisibleRef.current = isVisible;
+    if (isVisible) {
+      // 回到前台：刷新设置值，使设置修改无需重启即生效。
+      void reloadAutoPauseSetting();
+    } else if (prevVisible && autoPauseLoadedRef.current && autoPauseRef.current) {
+      audioRef.current?.pause();
+    }
+  });
 
   // 音量落到元素上：元素是 `sourceUrl` 就绪后才挂载的，所以两个依赖都要看
   // （换源 = 新元素，必须重新应用；音量变化 = 当前元素即时生效）。

@@ -26,6 +26,7 @@ import { errorTextOf } from "../shared/api/response";
 import { parsePaletteJson } from "../shared/paletteJson";
 import { useApp } from "../core/AppContext";
 import type { PanelRenderCtx } from "../core/panelRegistry";
+import { usePanelActivity } from "../shared/panelActivity";
 import { usePanelSettingValue } from "../shared/settingValue";
 import type { ColorExtractedPayload } from "../shared/types";
 import { formatColorValue, resolveColorValueFormat } from "./colorValue";
@@ -90,17 +91,13 @@ export function ColorPanel({ api: panelApi }: ColorPanelProps = {}): JSX.Element
   /**
    * 面板回到前台时补读一次：源级**全量重扫**是长任务，期间选中项不变，
    * 靠 `refreshKey` 未必会走到本面板；切回来看时应当是新的调色板。
+   *
+   * 判据用 `isVisible && isActive`：只有「用户真的看着本面板」才值得重扫一次。
+   * 订阅口全仓唯一（`shared/panelActivity.ts`，D212），不再自己接 dockview 事件。
    */
-  useEffect(() => {
-    if (!panelApi) return;
-    const sync = () => {
-      if (panelApi.isVisible && panelApi.isActive) void load();
-    };
-    const disposables = [panelApi.onDidActiveChange(sync), panelApi.onDidVisibilityChange(sync)];
-    return () => {
-      for (const disposable of disposables) disposable.dispose();
-    };
-  }, [panelApi, load]);
+  usePanelActivity(panelApi, ({ isVisible, isActive }) => {
+    if (isVisible && isActive) void load();
+  });
 
   // 色块集合变化（换文件 / 重新提取）时丢弃已失效的选中色。
   useEffect(() => {

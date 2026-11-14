@@ -249,6 +249,7 @@ apps/desktop/src/app_ui/
                       #     纯几何在 waveformView：waveDrawnBox/waveCursorPercent/waveSeekSeconds）、
                       #   TagInput、SwitchToggle（胶囊开关：**所有**勾选框的唯一实现）、
                       #   panelLayout（布局 JSON 规范化）、settingValue（设置值读取 + 四条触发源热加载：宿主项与面板项共用）、
+                      #     四条本身的**唯一实现**是 useSettingReload（D212：查看器只传取数函数）
                       #   stableCallback（恒定引用回调：让条目单元的 memo 真正生效；
                       #     媒体预览与图书预览共用一份）、
                       #   format（显示格式纯函数：体积自适应 KiB/KB、日期三格式、时长/码率/帧率）、
@@ -259,6 +260,9 @@ apps/desktop/src/app_ui/
                       #   ratioCache（`fileId → 宽/高` 的唯一缓存与通知口，D206：媒体预览的平铺/自适应/
                       #   瀑布流与图像查看器的胶片栏**共用同一份**——同一张图不再在两个面板各解码一次；
                       #   写入只有 setCachedRatio，批量播种静默，通知不合并（消费方各自合帧））
+      panelActivity.ts       # 面板激活/可见性的**唯一**订阅口（D212）：usePanelActivity(panelApi, onChange)
+                            #   接 dockview 的 onDidActiveChange / onDidVisibilityChange（全仓只此一处），
+                            #   回调给 { isVisible, isActive } 两个维度、判据留给调用方；一次切换可能触发两次，回调需幂等
      assetUrl.ts            # `convertFileSrc` 的**唯一**调用点（D208）：assetUrl / assetUrlOrNull /
                            #   assetUrlOrEmpty 三种空值口径；面板不再直接 import convertFileSrc
      urlCache.ts           # 结果缓存 + in-flight 去重的骨架（D208）：createUrlResolver(keyOf, load)

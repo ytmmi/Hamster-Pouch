@@ -61,8 +61,9 @@ import {
 import { errorTextOf } from "../../shared/api/response";
 import { useApp } from "../../core/AppContext";
 import type { PanelRenderCtx } from "../../core/panelRegistry";
-import { resolveImageUrlOutcome } from "../../shared/imageUrl";
+import { resolveMediaUrlOutcome } from "../../shared/mediaUrl";
 import { needsPreview, resolvePreviewUrl } from "../../shared/previewUrl";
+import { usePanelActivity } from "../../shared/panelActivity";
 import { usePanelForeground } from "../../shared/panelForeground";
 import { useHostSettingValue } from "../../shared/settingValue";
 import { resolveThumbUrl } from "../../shared/thumbUrl";
@@ -321,7 +322,7 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
 
   // 选中项变化 → 解析图像源：Chromium 可解的格式加载**原图**（全分辨率）；
   // HEIC/HEIF 走后端**全分辨率预览**（`preview.get`，缺陷 0019）。旧请求用令牌丢弃
-  // （快速切换不会串图）。取图策略收敛在 `shared/imageUrl.ts`——预加载走**同一份**
+  // （快速切换不会串图）。取图策略收敛在 `shared/mediaUrl.ts`——预加载走**同一份**
   // 缓存，因此预加载过的邻居在这里是**同步命中**，不再有 IPC 往返。
   //
   // **换图不再"先换 URL、等 onLoad"**（缺陷 0028）：现在**解码完成后才把 url 与尺寸一起换**
@@ -338,7 +339,7 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
     let cancelled = false;
     void (async () => {
       const ctx = appRef.current;
-      const outcome = await resolveImageUrlOutcome(repoId, file.id, file.relative_path);
+      const outcome = await resolveMediaUrlOutcome(repoId, file.id, file.relative_path);
       if (cancelled || wantRef.current !== file.id) return;
       if (outcome.url) {
         await showImage(outcome.url, file.id);
@@ -488,30 +489,25 @@ export function ImageViewerPanel({ api: panelApi }: ImageViewerPanelProps = {}):
    *    "点进来了、方向键还是不动"。等默认动作走完再取，面板根节点才真正拿到键盘。
    *    延后期间**不重复判据**——否则又会读到刚被聚焦的标签而放弃。
    */
-  useEffect(() => {
-    if (!panelApi) return;
-    const sync = () => {
-      const active = Boolean(panelApi.isVisible && panelApi.isActive);
-      const entered = active && !enteredRef.current;
-      enteredRef.current = active;
-      if (!entered) return;
-      if (!shouldTakeViewerFocus(document.activeElement)) return;
-      // 连续快速切换标签时只保留最后一次待执行的取焦点（不因重渲染丢掉它——
-      // 独立单面板窗口的 `panelApi` 每次渲染都换身份，本 effect 会随之重跑）。
-      cancelAnimationFrame(focusFrameRef.current);
-      focusFrameRef.current = requestAnimationFrame(() => {
-        // 帧内**重读激活态**：这一帧里用户可能已经切走了，此时不能再抢焦点。
-        // （只重读激活态，不重读焦点判据——那时浏览器已把焦点给到标签元素。）
-        if (!panelApi.isVisible || !panelApi.isActive) return;
-        rootRef.current?.focus({ preventScroll: true });
-      });
-    };
-    sync();
-    const disposables = [panelApi.onDidActiveChange(sync), panelApi.onDidVisibilityChange(sync)];
-    return () => {
-      for (const disposable of disposables) disposable.dispose();
-    };
-  }, [panelApi]);
+  usePanelActivity(panelApi, ({ isVisible, isActive }) => {
+    // 闭包里再取一次：参数是可重赋值的绑定，收窄不会跨进 `requestAnimationFrame` 的回调。
+    const api = panelApi;
+    if (!api) return;
+    const active = isVisible && isActive;
+    const entered = active && !enteredRef.current;
+    enteredRef.current = active;
+    if (!entered) return;
+    if (!shouldTakeViewerFocus(document.activeElement)) return;
+    // 连续快速切换标签时只保留最后一次待执行的取焦点（不因重渲染丢掉它——
+    // 独立单面板窗口的 `panelApi` 每次渲染都换身份，回调本身也随之重跑）。
+    cancelAnimationFrame(focusFrameRef.current);
+    focusFrameRef.current = requestAnimationFrame(() => {
+      // 帧内**重读激活态**：这一帧里用户可能已经切走了，此时不能再抢焦点。
+      // （只重读激活态，不重读焦点判据——那时浏览器已把焦点给到标签元素。）
+      if (!api.isVisible || !api.isActive) return;
+      rootRef.current?.focus({ preventScroll: true });
+    });
+  });
 
   // 卸载时撤掉尚未执行的取焦点（组件已不在，聚焦无处可去）。
   useEffect(() => () => cancelAnimationFrame(focusFrameRef.current), []);

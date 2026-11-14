@@ -70,16 +70,17 @@ check(
 //      `focus()` 会被覆盖，表现为"进来了却按不动"）。
 check(
   "从其他面板进入（程序激活）时面板把键盘焦点拿到根节点",
-  /panelApi\.onDidActiveChange\(sync\)/.test(imageViewerPanelSrc) &&
-    /panelApi\.onDidVisibilityChange\(sync\)/.test(imageViewerPanelSrc) &&
-    /const active = Boolean\(panelApi\.isVisible && panelApi\.isActive\);/.test(imageViewerPanelSrc) &&
+  // 订阅口全仓唯一（`shared/panelActivity.ts`，D212）：面板不再自己接 dockview 事件。
+  /usePanelActivity\(panelApi, \(\{ isVisible, isActive \}\)/.test(imageViewerPanelSrc) &&
+    !/panelApi\.onDidActiveChange\(|panelApi\.onDidVisibilityChange\(/.test(imageViewerPanelSrc) &&
+    /const active = isVisible && isActive;/.test(imageViewerPanelSrc) &&
     /const entered = active && !enteredRef\.current;/.test(imageViewerPanelSrc) &&
     /enteredRef\.current = active;/.test(imageViewerPanelSrc) &&
     /if \(!entered\) return;/.test(imageViewerPanelSrc) &&
     /shouldTakeViewerFocus\(document\.activeElement\)/.test(imageViewerPanelSrc) &&
     // 取焦点延后一帧（否则被浏览器"点击即聚焦标签"的默认动作覆盖）；
     // 帧内重读激活态——这一帧里用户可能已经切走，此时不能再抢焦点。
-    /requestAnimationFrame\(\(\) => \{[\s\S]{0,220}?if \(!panelApi\.isVisible \|\| !panelApi\.isActive\) return;[\s\S]{0,80}?rootRef\.current\?\.focus\(\{ preventScroll: true \}\);/.test(
+    /requestAnimationFrame\(\(\) => \{[\s\S]{0,260}?if \(!api\.isVisible \|\| !api\.isActive\) return;[\s\S]{0,80}?rootRef\.current\?\.focus\(\{ preventScroll: true \}\);/.test(
       imageViewerPanelSrc,
     ) &&
     /cancelAnimationFrame\(focusFrameRef\.current\)/.test(imageViewerPanelSrc),

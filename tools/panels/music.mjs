@@ -232,10 +232,13 @@ check(
   "D171：失焦不暂停——两个面板都只在「面板隐藏」时暂停（判据不得掺 `isActive`）",
   // 用户 2026-11-13：「音乐播放器在失去焦点后继续播放……只在面板隐藏、切换时暂停，
   // 媒体播放器也同（样修改）」。
-  /const visible = Boolean\(panelApi\.isVisible\);/.test(musicPanelSrc) &&
-    /const visible = Boolean\(panelApi\.isVisible\);/.test(videoPanelSrc) &&
-    !/panelApi\.isVisible && panelApi\.isActive/.test(musicPanelSrc) &&
-    !/panelApi\.isVisible && panelApi\.isActive/.test(videoPanelSrc),
+  // D212：两个面板都不再自己订阅 dockview 事件，改为传一个只看 `isVisible` 的回调。
+  /usePanelActivity\(panelApi, \(\{ isVisible \}\) => \{/.test(musicPanelSrc) &&
+    /usePanelActivity\(panelApi, \(\{ isVisible \}\) => \{/.test(videoPanelSrc) &&
+    /wasVisibleRef\.current = isVisible;/.test(musicPanelSrc) &&
+    /wasVisibleRef\.current = isVisible;/.test(videoPanelSrc) &&
+    !/\.isActive/.test(musicPanelSrc) &&
+    !/\.isActive/.test(videoPanelSrc),
 );
 
 check(

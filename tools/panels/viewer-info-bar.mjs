@@ -43,12 +43,13 @@ check(
     config.normalizePanelSettingValue("ghost", "infoBarEnabled", true) === undefined,
 );
 check(
-  "面板设置热加载走多条独立触发源（共享钩子：本地广播 + 后端事件 + 焦点 + 面板激活）",
-  /subscribeSettingChanged\(/.test(settingValueSrc) &&
+  "面板设置热加载走多条独立触发源（唯一实现 useSettingReload：本地广播 + 后端事件 + 焦点 + 面板激活）",
+  /export function useSettingReload\(/.test(settingValueSrc) &&
+    /useSettingReload\(reload, panelApi\)/.test(settingValueSrc) &&
+    /subscribeSettingChanged\(/.test(settingValueSrc) &&
     /listenHp\("setting\.changed"/.test(settingValueSrc) &&
     /window\.addEventListener\("focus"/.test(settingValueSrc) &&
-    /onDidActiveChange/.test(settingValueSrc) &&
-    /onDidVisibilityChange/.test(settingValueSrc),
+    /usePanelActivity\(panelApi, \(\{ isVisible, isActive \}\)/.test(settingValueSrc),
 );
 check(
   "查看器面板真的按该设置条件渲染顶部基础信息栏",

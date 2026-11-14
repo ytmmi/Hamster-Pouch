@@ -1139,15 +1139,14 @@ check(
   "冻结判据只用 `isVisible`（不得掺 `isActive`：那会让「点别的面板就冻住」复发），且失败方向选「先渲染」",
   // `isActive` 表示"本组也是当前聚焦组"：用户点媒体源/相册时它会变 false，
   // 而本面板仍在显示——用 `isVisible && isActive` 当判据就会出现"点源不刷新、点一下才显示"。
-  /const sync = \(\) => setForeground\(Boolean\(panelApi\.isVisible\)\);/.test(
+  // D212：订阅口收进 `shared/panelActivity.ts`，本文件只取 `isVisible` 一个维度。
+  /usePanelActivity\(panelApi, \(\{ isVisible \}\) => setForeground\(isVisible\)\)/.test(
     panelForegroundSrc,
   ) &&
-    !/isVisible\s*&&\s*panelApi\.isActive/.test(panelForegroundSrc) &&
-    !/onDidActiveChange/.test(panelForegroundSrc) &&
-    /panelApi\.onDidVisibilityChange\(sync\)/.test(panelForegroundSrc) &&
-    // 首帧乐观 + 无 API 不冻结：判断"不在显示"而误会让面板空白，宁可多渲染一次。
-    /const \[foreground, setForeground\] = useState\(true\);/.test(panelForegroundSrc) &&
-    /if \(!panelApi\) return;/.test(panelForegroundSrc),
+    !/panelApi\.isActive/.test(panelForegroundSrc) &&
+    !/onDidActiveChange|onDidVisibilityChange/.test(panelForegroundSrc) &&
+    // 首帧乐观：判断"不在显示"而误会让面板空白，宁可多渲染一次。
+    /const \[foreground, setForeground\] = useState\(true\);/.test(panelForegroundSrc),
 );
 // `renderCell` 的实现块：`ThumbCell` 的 props 必须全是稳定引用（列表视图的行走另一条路径，
 // 那几行不是 memo 的受益者，不在此约束内）。

@@ -129,6 +129,17 @@ jumpTarget / loadMore / jumpTo / generation`，`jumpTo` 起新世代让在飞的
 「`convertFileSrc(` 只出现在 `assetUrl.ts`」「`imageUrl.ts` 不得复活」「`new Map<string, Promise<` 只出现在 `urlCache.ts`」
 「四个播放/查看器面板不得自己 `api.filePath(`」，`check:panels` 的查看器断言同步改指 `resolveMediaUrlOutcome`。
 
+**面板订阅口与设置热加载各只有一份**（D212）：dockview 的 `onDidActiveChange` / `onDidVisibilityChange` 曾在
+`shared/panelForeground.ts`、`shared/settingValue.ts`、`panels/imageviewer/useViewerSettings.ts`、`panels/ColorPanel.tsx`、
+两个播放面板、`panels/imageviewer/ImageViewerPanel.tsx` 各订阅一遍（6 处手抄：各自接线、各自 dispose、各自决定「激活且可见」还是
+「可见即可」），而「四条触发源」（同窗口广播 / 后端 `setting.changed` / 窗口 `focus` / 面板重新激活）在 `settingValue.ts` 与
+`useViewerSettings.ts` 是**逐字相同**的 18 行。现在 `apps/desktop/src/app_ui/shared/panelActivity.ts` 的
+`usePanelActivity(panelApi, onChange)` 是唯一订阅口（回调给 `{ isVisible, isActive }` 两个维度，判据仍由调用方定：媒体预览冻结只看
+`isVisible`，设置热加载要 `isVisible && isActive`），`shared/settingValue.ts` 的 `useSettingReload(reload, panelApi)` 是四条触发源的
+唯一实现（查看器只传自己的取数函数）。门禁：`check:settings` 新增两条——递归扫描 `app_ui` 后 `onDidActiveChange(` /
+`onDidVisibilityChange(` 只许出现在 `panelActivity.ts`；`useSettingReload` 必须同时含四条触发源，查看器不得再出现 `listenHp("setting.changed"`
+或 `addEventListener("focus"`（56/56，变异：往 `ColorPanel.tsx` 插一句 `p.onDidActiveChange(() => {})` → 55/56 并指名该文件）。
+
 ## 插件/AI 扩展点
 
 插件首期只能做：
