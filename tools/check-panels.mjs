@@ -4,7 +4,8 @@
  * 断言：
  * 1. **注册表 ↔ 声明列表 ↔ 本文档**三方一致（id 清单、顺序、`category`、`has_class`、
  *    `blueprint_node`）；
- * 2. `PANEL_IDS` ↔ `PANEL_DEFS` ↔ `PANEL_TITLES` 三方一致（含顺序）；
+ * 2. `PANEL_IDS` ↔ `PANEL_DEFS` ↔ `PANEL_TITLES` 一致（`PANEL_DEFS` 由注册表派生，
+ *    断言其派生写法与 `RENDERERS` 的键集——渲染体必须覆盖每个内置面板且无多余键）；
  * 3. 每个 `blueprint_node` 都命中**已注册**的蓝图节点类型；可承载面板的节点类型必须
  *    允许 `panel_id` 字段（面板标准第 5.2 节）；
  * 4. Rust `PanelCategory` / 设置项输入类白名单 ↔ TS 注册表逐项对齐；
@@ -42,9 +43,22 @@ const registrySource = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/core/panelRegistry.tsx"),
   "utf8",
 );
-const panelDefPairs = [
-  ...registrySource.matchAll(/\{ id: "([^"]+)", titleKey: "([^"]+)", render:/g),
-].map((m) => [m[1], m[2]]);
+// 内置面板的渲染表 `RENDERERS`：只按 id 给出渲染体（id / titleKey 的唯一真值在
+// `packages/config/src/panels.ts`）。这里解析它的**键集**，用来断言"注册表里的每个内置面板
+// 都有渲染体、且没有多余键"。
+const renderersStart = registrySource.indexOf("const RENDERERS");
+const renderersEnd = registrySource.indexOf("\n};", renderersStart);
+const rendererKeys =
+  renderersStart < 0 || renderersEnd < 0
+    ? []
+    : [...registrySource.slice(renderersStart, renderersEnd).matchAll(/^ {2}([a-z]+):/gm)].map(
+        (m) => m[1],
+      );
+// 反向断言用：旧写法是每条 `{ id: "…", titleKey: "…", render: … }` 字面量。
+const handCopiedPanelDefs = [
+  ...registrySource.matchAll(/\{ id: "[^"]+", titleKey: "[^"]+", render:/g),
+].map((m) => m[0]);
+const panelDefsDerived = registrySource.includes("BUILTIN_PANEL_SPECS.map((spec) => ({");
 
 const results = [];
 const check = (label, ok, detail = "") => {
@@ -107,18 +121,20 @@ check(
   eqList(builtinIds, [...config.PANEL_IDS]),
   `registry=${builtinIds.join(",")} PANEL_IDS=${[...config.PANEL_IDS].join(",")}`,
 );
+// `PANEL_DEFS` 自 D184 起由 `BUILTIN_PANEL_SPECS.map(…)` 派生：id / titleKey 不再抄第二份，
+// 因此"三方一致（含顺序）"退化成一条**结构性**断言——派生写法还在、且没有退回字面量；
+// 标题键一致性由下面那条「注册表 ↔ PANEL_TITLES」承担。
 check(
-  "注册表 ↔ PANEL_DEFS 的 id 与顺序一致",
-  eqList(builtinIds, panelDefPairs.map((p) => p[0])),
-  `defs=${panelDefPairs.map((p) => p[0]).join(",")}`,
-);
-const defTitleMismatch = panelDefPairs.filter(
-  ([id, titleKey]) => config.PANEL_TITLES[id] !== titleKey,
+  "PANEL_DEFS 由注册表派生（不再手抄 id / titleKey 字面量）",
+  panelDefsDerived && handCopiedPanelDefs.length === 0,
+  handCopiedPanelDefs.length === 0
+    ? "缺少 BUILTIN_PANEL_SPECS.map(…) 派生写法"
+    : `手抄残留: ${handCopiedPanelDefs.length} 条`,
 );
 check(
-  "PANEL_DEFS ↔ PANEL_TITLES 的标题键一致",
-  defTitleMismatch.length === 0,
-  defTitleMismatch.map(([id, key]) => `${id}: ${key}`).join(" | "),
+  "渲染表 RENDERERS 的内置面板集合与注册表一致（无遗漏 / 无多余）",
+  eqList([...rendererKeys].sort(), [...builtinIds].sort()),
+  `renderers=${[...rendererKeys].sort().join(",")} registry=${[...builtinIds].sort().join(",")}`,
 );
 const titleMismatch = config.BUILTIN_PANEL_SPECS.filter(
   (spec) => config.PANEL_TITLES[spec.id] !== spec.titleKey,
@@ -366,7 +382,7 @@ check(
 );
 check(
   "viewer 面板拿到 dockview 面板 API（第 4 条触发源「面板激活」才可达）",
-  /\{ id: "viewer", titleKey: "panel\.viewer", render: \(ctx\) => <ViewerPanel api=\{ctx\.api\} \/> \}/.test(
+  /^ {2}viewer: \(ctx\) => <ViewerPanel api=\{ctx\.api\} \/>,$/m.test(
     registrySource,
   ),
 );
@@ -717,7 +733,7 @@ check(
 );
 check(
   "color 面板拿到 dockview 面板 API（第 4 条触发源「面板激活」才可达）",
-  /\{ id: "color", titleKey: "panel\.color", render: \(ctx\) => <ColorPanel api=\{ctx\.api\} \/> \}/.test(
+  /^ {2}color: \(ctx\) => <ColorPanel api=\{ctx\.api\} \/>,$/m.test(
     registrySource,
   ),
 );
@@ -2068,7 +2084,7 @@ check(
 );
 check(
   "media 面板拿到 dockview 面板 API（第 4 条触发源「面板激活」才可达）",
-  /\{ id: "media", titleKey: "panel\.media", render: \(ctx\) => <MediaPreviewPanel api=\{ctx\.api\} \/> \}/.test(
+  /^ {2}media: \(ctx\) => <MediaPreviewPanel api=\{ctx\.api\} \/>,$/m.test(
     registrySource,
   ),
 );
@@ -2863,7 +2879,7 @@ check(
 );
 check(
   "元数据面板拿到 dockview 面板 API（宿主设置热加载第 4 条触发源）",
-  /\{ id: "metadata", titleKey: "panel\.metadata", render: \(ctx\) => <MetadataPanel api=\{ctx\.api\} \/> \}/.test(
+  /^ {2}metadata: \(ctx\) => <MetadataPanel api=\{ctx\.api\} \/>,$/m.test(
     registrySource,
   ),
 );
@@ -6125,7 +6141,7 @@ check(
   "面板接线：走 useReaderSettings / useReaderBook，并把 dockview API 传下去（设置热加载）",
   /useReaderSettings\(panelApi\)/.test(readerPanelSrc) &&
     /useReaderBook\(\)/.test(readerPanelSrc) &&
-    /\{ id: "bookreader", titleKey: "panel\.bookreader", render: \(ctx\) => <BookReaderPanel api=\{ctx\.api\} \/> \}/.test(
+    /^ {2}bookreader: \(ctx\) => <BookReaderPanel api=\{ctx\.api\} \/>,$/m.test(
       registrySource,
     ) &&
     // 反向：用户 2026-10-18 口径"**删除退出阅读按钮**"——面板里不再有那条关闭逻辑。

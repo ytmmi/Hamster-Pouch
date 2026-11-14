@@ -11,9 +11,11 @@ import { useMemo, useSyncExternalStore, type FC, type JSX } from "react";
 import type { IDockviewPanelProps } from "dockview-react";
 
 import {
+  BUILTIN_PANEL_SPECS,
   panelsRevision,
   pluginRegisteredPanels,
   subscribePanels,
+  type BuiltinPanelId,
   type PanelSpec,
 } from "@hamster-pouch/config";
 
@@ -55,38 +57,61 @@ export interface PanelDef {
   render: (ctx: PanelRenderCtx) => JSX.Element;
 }
 
-/** 宿主内置 17 个面板（顺序与 `PANEL_IDS` 一致）。 */
-export const PANEL_DEFS: PanelDef[] = [
-  { id: "repo", titleKey: "panel.repo", render: () => <RepoPanel /> },
-  { id: "sources", titleKey: "panel.sources", render: () => <SourcePanel /> },
-  { id: "albums", titleKey: "panel.albums", render: () => <AlbumPanel /> },
+/**
+ * 内置面板的**渲染函数表**：键是面板 id，值是"怎么渲染"。
+ *
+ * 面板的 **id / titleKey 不在这里抄**——它们只由 `packages/config/src/panels.ts` 的
+ * `BUILTIN_PANEL_SPECS` 提供（唯一真值），本表只补"渲染体是什么"。`Record<BuiltinPanelId, …>`
+ * 是**穷尽**的：注册表新增一个内置面板而这里忘了补渲染体，`tsc` 直接报缺键。
+ *
+ * 需要 dockview 面板 API 的面板多传 `ctx.api`（用于"自己是不是当前激活标签"，
+ * 面板设置热加载的第 4 条触发源，以及"退出阅读"这类要关闭自己的动作）。
+ */
+const RENDERERS: Record<BuiltinPanelId, (ctx: PanelRenderCtx) => JSX.Element> = {
+  repo: () => <RepoPanel />,
+  sources: () => <SourcePanel />,
+  albums: () => <AlbumPanel />,
   // 媒体预览需要 dockview 面板 API：面板设置（缺省视图/排序）的第 4 条热加载触发源
   // 「面板从后台标签回到前台时补读一次」靠它可达（与 `viewer` 同款）。
-  { id: "media", titleKey: "panel.media", render: (ctx) => <MediaPreviewPanel api={ctx.api} /> },
+  media: (ctx) => <MediaPreviewPanel api={ctx.api} />,
   // 图书预览持有面板设置（`bookpreview.view` / `coverSize`），需要激活状态凑齐四条热加载触发源；
   // 同时它是"后台标签冻结"的使用者（不显示就不为看不见的书取封面）。
-  { id: "bookpreview", titleKey: "panel.bookpreview", render: (ctx) => <BookPreviewPanel api={ctx.api} /> },
+  bookpreview: (ctx) => <BookPreviewPanel api={ctx.api} />,
   // 查看器持有面板设置（`viewer.infoBarEnabled`），需要激活状态才凑齐四条热加载触发源。
-  { id: "viewer", titleKey: "panel.viewer", render: (ctx) => <ViewerPanel api={ctx.api} /> },
+  viewer: (ctx) => <ViewerPanel api={ctx.api} />,
   // 图书阅读器持有面板设置（`bookreader.*` 的 12 项阅读选项）：既需要激活状态凑齐
   // 四条热加载触发源，也需要面板 API 实现「退出阅读」（关闭本面板）。
-  { id: "bookreader", titleKey: "panel.bookreader", render: (ctx) => <BookReaderPanel api={ctx.api} /> },
-  { id: "imageviewer", titleKey: "panel.imageviewer", render: (ctx) => <ImageViewerPanel api={ctx.api} /> },
+  bookreader: (ctx) => <BookReaderPanel api={ctx.api} />,
+  imageviewer: (ctx) => <ImageViewerPanel api={ctx.api} />,
   // 元数据面板消费宿主设置（体积单位 / 日期格式），同样需要激活状态凑齐四条热加载触发源。
-  { id: "metadata", titleKey: "panel.metadata", render: (ctx) => <MetadataPanel api={ctx.api} /> },
-  { id: "tags", titleKey: "panel.tags", render: () => <TagRatingPanel /> },
-  { id: "tagtable", titleKey: "panel.tagtable", render: () => <TagTablePanel /> },
+  metadata: (ctx) => <MetadataPanel api={ctx.api} />,
+  tags: () => <TagRatingPanel />,
+  tagtable: () => <TagTablePanel />,
   // 色彩参考持有面板设置（`color.valueFormat`），同样需要激活状态才凑齐四条热加载触发源。
-  { id: "color", titleKey: "panel.color", render: (ctx) => <ColorPanel api={ctx.api} /> },
+  color: (ctx) => <ColorPanel api={ctx.api} />,
   // 媒体播放器（视频）持有面板设置（`player.volume` / `autoPauseOnTabSwitch`），
   // 需要激活状态凑齐四条热加载触发源。
-  { id: "player", titleKey: "panel.player", render: (ctx) => <MediaPlayerPanel api={ctx.api} /> },
+  player: (ctx) => <MediaPlayerPanel api={ctx.api} />,
   // 音乐播放器（D166）：**独立面板**，同样持有自己的面板设置（样式 / 音量 / 自动暂停）。
-  { id: "music", titleKey: "panel.music", render: (ctx) => <MusicPlayerPanel api={ctx.api} /> },
-  { id: "tasks", titleKey: "panel.tasks", render: () => <TaskPanel /> },
-  { id: "plugins", titleKey: "panel.plugins", render: () => <PluginPanel /> },
-  { id: "blueprint", titleKey: "panel.blueprint", render: () => <BlueprintPanel /> },
-];
+  music: (ctx) => <MusicPlayerPanel api={ctx.api} />,
+  tasks: () => <TaskPanel />,
+  plugins: () => <PluginPanel />,
+  blueprint: () => <BlueprintPanel />,
+};
+
+/**
+ * 宿主内置 17 个面板（顺序与 `PANEL_IDS` 一致）。
+ *
+ * 由注册表 `map` 出来，而不是 17 条字面量——否则 `id` / `titleKey` 会在
+ * `panels.ts` 与本文件各存一份，改一边不会有任何门禁变红（D184）。
+ */
+export const PANEL_DEFS: PanelDef[] = BUILTIN_PANEL_SPECS.map((spec) => ({
+  id: spec.id,
+  titleKey: spec.titleKey as TranslationKey,
+  // `BUILTIN_PANEL_SPECS` 的元素类型是 `PanelSpec`（id 为 string），而渲染表按切片的
+  // `BuiltinPanelId` 建键——这里靠注册表自身的完整性（id ∈ PANEL_IDS，见 check:panels）收口。
+  render: RENDERERS[spec.id as BuiltinPanelId],
+}));
 
 /**
  * 插件面板 → 面板项：渲染体是宿主侧的**受控宿主组件**（不是插件代码）。
