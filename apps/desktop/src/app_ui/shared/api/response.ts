@@ -53,7 +53,7 @@ export class HpApiFailure extends Error {
 const FALLBACK_CODE: HpErrorCode = "plugin";
 
 /** 把任意码收敛到闭集内（后端演进/旧值不应让界面失去文案）。 */
-function normalizeCode(code: string | undefined): HpErrorCode {
+export function normalizeCode(code: string | undefined): HpErrorCode {
   switch (code) {
     case "validation":
     case "not_found":

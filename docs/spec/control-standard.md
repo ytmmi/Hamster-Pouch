@@ -205,7 +205,7 @@
   - `python`：**同一条协议、同一次一问一答**，区别只在拉起方式——宿主执行**随包 Python 核心**插件的 `bin/python-core.exe --run <版本目录>/<entry>`，解释器解析（`runtime/python.exe`）、隔离与进程收尾都归 Python 核心，宿主不直连解释器（RFC 0009 决策 2；`crates/hp-plugin-host/src/python_core.rs`）。因此 Python 插件可以源码分发；
   - `wasm`：宿主经受控导入函数取回（同一请求名，参数以线性内存中的 JSON 传递）；
   - `dynamic-library`：宿主经版本化结构体 ABI 调用。
-- 宿主侧约束：单次查询**超时**（默认 2s）、**输出字节上限**（默认 256 KiB）、失败即该面板渲染为**错误态控件**（`empty` 的 `reason` 变体）并广播 `plugin.error`，不得阻塞其它面板。
+- 宿主侧约束：单次查询**超时**（默认 2s）、**输出字节上限**（默认 256 KiB）、失败即该面板渲染为**错误态控件**（`empty` 的 `reason` 变体）并广播 `plugin.error`，不得阻塞其它面板。广播载荷带 `panel_id`（归位）与 `code`（D76 闭集，文案按码走 i18n）；**归属解析失败也算失败**（未启用 → `permission`、无归属 → `not_found`），D197 起与调用失败共用同一个入口 `run_panel_call`。
 - 查询结果按 `(plugin_id, panel_id, plugin_version)` 缓存；插件重载或版本变化即失效。
 - **取数通道（第 5 节 `bind` 的数据来源）是**与 schema **并列**的第二条调用，请求名
   **`ui.panel.query`**，参数 `{ panel_id, api_version, selection?, queries }`：
@@ -227,7 +227,7 @@
 > `crates/hp-plugin-host/src/channel.rs`（请求名常量 `PANEL_SCHEMA_REQUEST`、超时
 > `SCHEMA_QUERY_TIMEOUT` = 2s、上限 `SCHEMA_MAX_BYTES` = 256 KiB、缓存
 > `PanelSchemaCache`）。桥接命令是 `plugin.panelSchema`（`apps/desktop/src-tauri/src/commands/plugin_control_channel.rs`），
-> 失败时发射 `plugin.error`。两条**已定口径的实现取舍**：
+> 失败时发射 `plugin.error`（唯一入口 `run_panel_call`，D197）。两条**已定口径的实现取舍**：
 >
 > 1. **一次一问一答**：每次查询起一个子进程，读到第一行非空输出后立即收尾（杀掉并回收），
 >    不做跨查询的常驻进程——因此没有"上次 play 之后才重建"这类时序状态，也不会因面板多开
@@ -346,9 +346,10 @@
 >    渲染错误态，白起一次插件进程没有意义）；收集逻辑在
 >    `apps/desktop/src/app_ui/shared/control/controlBinds.ts`，**`bind` 与 `visible_when`
 >    都收**（谓词也要数据，否则永远按"结果缺失"求值）。
-> 4. **失败降级**：取数失败**不**把整面板打成错误态——schema 是好的、只是这一次没数据，
->    按本节的"绑定为空即渲染空态"处理，原因留在控制台；命令级失败（未启用/无归属/入口
->    缺失/超时/超限）仍走 `plugin.error` + 错误态。
+> 4. **失败降级**：区分两件事——**结果缺失**（插件没返回某个 `key`，即响应里的 `missing`）
+>    按本节的"绑定为空即渲染空态"处理；**命令级失败**（未启用/无归属/入口缺失/超时/超限）
+>    走 `plugin.error` + 该面板**错误态**（D197 起前端两条路径都接：命令响应 `code` 与
+>    事件里的 `panelId`/`code`，任一先到即降级）。
 > 5. **范围边界**：**不做**单条结果与 manifest `returns`（rows/object/scalar）的匹配校验
 >    ——`PanelOwner` 目前只带查询**名**，扩它属于另一处改动；留待需要时一并做。
 
@@ -443,7 +444,7 @@
 - **Rust 单测**（`cargo test -p hp-core`）：控件类型注册表完整性（26 种、无重复、容器集合）、事件谓词表往返、schema 解析（未知 `kind` 拒绝）、字段归属、id 规则、绑定/事件/版本/数值范围/文本必填等硬错误与软告警，共 15 项控件相关用例。
 - **`cargo test -p hp-plugin-host`**：运行时通道的边界用例（`tests/m6_control_channel.rs`，**真子进程**，夹具是 `src/bin/fake_panel_plugin.rs`）——请求名/超时/上限常量与规范一致、`result` 为对象与字符串两种合法形态、请求带 `method` 与 `params`、JSON-RPC `error` 与垃圾输出被拒、>256 KiB 输出被拒、慢插件按时超时且不卡住、无输出被拒、缓存键含版本与插件级失效。夹具模式经 `HP_SCHEMA_FIXTURE_MODE` 选择。
 - **`pnpm check:control-facts`**：`dump-control-facts` 重新生成 `packages/config/src/controlFacts.generated.ts` 后 `git diff --exit-code`，逐字节钉住「Rust 注册表 = 前端 facts」（同 `check:types` 手法）。
-- **`pnpm check:controls`**（**38** 项，`tools/control-check.mjs`）：TS 侧没有第二份手抄表（`controlRegistry.ts` 只 `= CONTROL_FACTS`）、取值域只剩 bind/谓词两个前端约定、渲染覆盖清单与 `CONTROL_RENDER_MAP` 一致、文档列出全部 `kind` 与事件、端到端解析与校验拒绝；**运行时通道与接线 10 项**：请求名 / 2s 超时 / 256 KiB 上限 / 缓存键三元组、两条命令已实现并注册、业务级校验复用 `ControlSchema::validate`、失败降级 + `plugin.error`、`ControlPanelView` 已接进 `PluginPanelHost` 且走通道命令、占位文案不再是唯一内容、新命令走 D76 包装、`HpError` 有闭集错误码、前端解包层与三套语言错误码文案齐备；**事件回传 5 项（2026-09 新增）**：事件映射按控件 id 收集、事件名 → 事件 id 解析（未声明返回 `undefined` 而非报错）、插件侧方法名是契约的字面名、`plugin.controlEvent` 已实现并注册且事件 id 必须在 manifest 声明过、前端 `emit` 不再是空实现。
+- **`pnpm check:controls`**（**43** 项，`tools/control-check.mjs`）：TS 侧没有第二份手抄表（`controlRegistry.ts` 只 `= CONTROL_FACTS`）、取值域只剩 bind/谓词两个前端约定、渲染覆盖清单与 `CONTROL_RENDER_MAP` 一致、文档列出全部 `kind` 与事件、端到端解析与校验拒绝；**运行时通道与接线 10 项**：请求名 / 2s 超时 / 256 KiB 上限 / 缓存键三元组、两条命令已实现并注册、业务级校验复用 `ControlSchema::validate`、失败降级 + `plugin.error`、`ControlPanelView` 已接进 `PluginPanelHost` 且走通道命令、占位文案不再是唯一内容、新命令走 D76 包装、`HpError` 有闭集错误码、前端解包层与三套语言错误码文案齐备；**事件回传 5 项（2026-09 新增）**：事件映射按控件 id 收集、事件名 → 事件 id 解析（未声明返回 `undefined` 而非报错）、插件侧方法名是契约的字面名、`plugin.controlEvent` 已实现并注册且事件 id 必须在 manifest 声明过、前端 `emit` 不再是空实现。
 - **`pnpm typecheck` / `pnpm build` / `check-line-count` / `check-doc-status`** 通过。
 
 ## 落地顺序（强制）

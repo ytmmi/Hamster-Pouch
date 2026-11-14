@@ -11,9 +11,9 @@ use tauri::State;
 
 use crate::AppState;
 use crate::commands::plugin_control_channel::{
-    panel_owner_enabled, resolve_plugin_query, supervised_call,
+    resolve_plugin_query, run_panel_call, supervised_call,
 };
-use crate::commands::shared::{ApiResponse, api_from_hp, ensure_global};
+use crate::commands::shared::{ApiResponse, api_from_hp};
 
 /// `plugin.controlEvent` 的确认载荷（诊断用）。
 #[derive(Serialize)]
@@ -79,10 +79,9 @@ pub(crate) fn plugin_control_event(
     value: Option<serde_json::Value>,
     target: Option<String>,
     state: State<AppState>,
+    app: tauri::AppHandle,
 ) -> ApiResponse<ControlEventAck> {
     let outcome = (|| -> HpResult<ControlEventAck> {
-        ensure_global(&state)?;
-
         // 事件名：宿主谓词表（闭集六项）。
         let parsed = ControlEvent::from_str(&event)
             .ok_or_else(|| HpError::InvalidArgument(format!("未知控件事件: {event}")))?;
@@ -94,50 +93,50 @@ pub(crate) fn plugin_control_event(
             ));
         }
 
-        let owner = panel_owner_enabled(&state, &repo_id, &panel_id)?;
-        if !owner.declared_events.iter().any(|e| e == &event_id) {
-            return Err(HpError::InvalidArgument(format!(
-                "插件 {} 未声明事件 id: {event_id}",
-                owner.plugin_id
-            )));
-        }
-        let mut query = resolve_plugin_query(&state, &owner, &repo_id)?;
+        run_panel_call(&state, &app, &repo_id, &panel_id, |owner| {
+            if !owner.declared_events.iter().any(|e| e == &event_id) {
+                return Err(HpError::InvalidArgument(format!(
+                    "插件 {} 未声明事件 id: {event_id}",
+                    owner.plugin_id
+                )));
+            }
+            let mut query = resolve_plugin_query(&state, owner, &repo_id)?;
 
-        // 交付期间**不持任何锁**：这里可能阻塞到超时（D61 默认 2s）。
-        let pid_sup = owner.plugin_id.clone();
-        let pid_for_closure = owner.plugin_id.clone();
-        let panel_id_clone = panel_id.clone();
-        let control_id_clone = control_id.clone();
-        let event_str = parsed.as_str().to_string();
-        let value_clone = value.clone();
-        let target_clone = target.clone();
-        let event_id_clone = event_id.clone();
-        supervised_call(&state, pid_sup, move || {
-            let params = ControlEventParams {
-                panel_id: &panel_id_clone,
-                control_id: &control_id_clone,
-                event: &event_str,
-                value: value_clone.as_ref(),
-                target: target_clone.as_deref(),
-            };
-            query
-                .call(
-                    &control_event_method(&pid_for_closure, &event_id_clone),
-                    &params,
-                    SCHEMA_QUERY_TIMEOUT,
-                    SCHEMA_MAX_BYTES,
-                )
-                .map(|_| String::new())
-        })?;
+            // 交付期间**不持任何锁**：这里可能阻塞到超时（D61 默认 2s）。
+            let pid_sup = owner.plugin_id.clone();
+            let pid_for_closure = owner.plugin_id.clone();
+            let panel_id_clone = panel_id.clone();
+            let control_id_clone = control_id.clone();
+            let event_str = parsed.as_str().to_string();
+            let value_clone = value.clone();
+            let target_clone = target.clone();
+            let event_id_clone = event_id.clone();
+            supervised_call(&state, pid_sup, move || {
+                let params = ControlEventParams {
+                    panel_id: &panel_id_clone,
+                    control_id: &control_id_clone,
+                    event: &event_str,
+                    value: value_clone.as_ref(),
+                    target: target_clone.as_deref(),
+                };
+                query
+                    .call(
+                        &control_event_method(&pid_for_closure, &event_id_clone),
+                        &params,
+                        SCHEMA_QUERY_TIMEOUT,
+                        SCHEMA_MAX_BYTES,
+                    )
+                    .map(|_| String::new())
+            })?;
 
-        let ack_method = control_event_method(&owner.plugin_id, &event_id);
-        Ok(ControlEventAck {
-            panel_id,
-            plugin_id: owner.plugin_id,
-            control_id,
-            event,
-            event_id,
-            method: ack_method,
+            Ok(ControlEventAck {
+                panel_id: panel_id.clone(),
+                plugin_id: owner.plugin_id.clone(),
+                control_id: control_id.clone(),
+                event: event.clone(),
+                event_id: event_id.clone(),
+                method: control_event_method(&owner.plugin_id, &event_id),
+            })
         })
     })();
     api_from_hp(outcome)

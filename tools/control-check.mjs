@@ -14,7 +14,7 @@
  * 用法：pnpm check:controls
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -453,6 +453,69 @@ check(
 check(
   "取数结果**不缓存**（数据陈旧风险与 schema 不同：无 PanelDataCache 一类结构）",
   !/PanelDataCache/.test(channelSrc) && !/panel_data_cache/.test(mainSrc),
+);
+
+// ==================== 面板通道的失败降级（D197）====================
+//
+// 这一节防「命令级失败被静默」。三条命令（schema / data / controlEvent）原先各自手抄
+// 「ensure → 反查归属 → 调用 → 失败广播」，于是规范化写的降级在三处落空：归属解析失败
+// （`permission` / `not_found` 的来源）不广播、控件事件整条路径不广播、`plugin.error`
+// 载荷既没有 `panel_id`（一个插件可有多个面板，无法定位）也没有 `code`（界面只能直显
+// 诊断串），而且前端**没有任何监听者**。现在降级只有一个入口、载荷可归位、前端订阅它。
+
+// `channelSrc` 是**插件宿主**的 `channel.rs`；桥接命令的这份源码要单读。
+const pluginChannelCmdSrc = readFileSync(
+  join(ROOT, "apps/desktop/src-tauri/src/commands/plugin_control_channel.rs"),
+  "utf8",
+);
+// `controlEventSrc` 在控件事件回传那一节已读过（同一份文件），这里直接复用。
+check(
+  "面板通道的失败降级只有一个入口（三条命令都经 run_panel_call）",
+  /pub\(crate\) fn run_panel_call</.test(pluginChannelCmdSrc) &&
+    /run_panel_call\(&state, &app, &repo_id, &panel_id, \|owner\| \{\s*fetch_panel_schema\(/.test(
+      pluginChannelCmdSrc,
+    ) &&
+    /run_panel_call\(&state, &app, &repo_id, &panel_id, \|owner\| \{\s*fetch_panel_data\(/.test(
+      panelDataSrc,
+    ) &&
+    /run_panel_call\(&state, &app, &repo_id, &panel_id, \|owner\| \{/.test(controlEventSrc),
+);
+
+// 广播点只有一处：别的命令若自己 emit，就又回到「某条路径忘了报」的老样子。
+const strayEmit = readdirSync(join(ROOT, "apps/desktop/src-tauri/src/commands"), {
+  withFileTypes: true,
+})
+  .filter((e) => e.isFile() && e.name.endsWith(".rs") && e.name !== "plugin_control_channel.rs")
+  .filter((e) =>
+    readFileSync(join(ROOT, "apps/desktop/src-tauri/src/commands", e.name), "utf8").includes(
+      "emit_plugin_error(",
+    ),
+  )
+  .map((e) => e.name);
+check(
+  "plugin.error 只在 plugin_control_channel.rs 广播（别的命令不得自己 emit）",
+  strayEmit.length === 0,
+  strayEmit.join(","),
+);
+
+check(
+  "plugin.error 载荷带 panel_id 与 code（否则前端无法归位、也无法按码取文案）",
+  /struct PluginError \{[\s\S]{0,320}?panel_id: String,[\s\S]{0,160}?code: String,/.test(
+    pluginChannelCmdSrc,
+  ),
+);
+
+check(
+  "前端订阅 plugin.error 并按 panelId 归位（事件不再无人接收）",
+  /listenHp<PluginErrorPayload>\("plugin\.error"/.test(hostSrc) &&
+    /payload\.panelId !== panelId/.test(hostSrc) &&
+    /normalizeCode\(payload\.code\)/.test(hostSrc),
+);
+
+check(
+  "取数的命令级失败降级为错误态（结果缺失仍按空态渲染）",
+  /catch \(e\) \{[\s\S]{0,320}?setState\(\{ kind: "failed", code: errorCodeOf\(e\) \}\);/.test(hostSrc) &&
+    /makeControlDataSnapshot\(\{\}\)/.test(hostSrc),
 );
 
 // ============================== 汇总 ==============================

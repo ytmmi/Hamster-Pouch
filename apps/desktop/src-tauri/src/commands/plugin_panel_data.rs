@@ -17,9 +17,9 @@ use tauri::State;
 
 use crate::AppState;
 use crate::commands::plugin_control_channel::{
-    emit_plugin_error, panel_owner_enabled, resolve_plugin_query, supervised_call,
+    resolve_plugin_query, run_panel_call, supervised_call,
 };
-use crate::commands::shared::{ApiResponse, api_from_hp, ensure_global};
+use crate::commands::shared::{ApiResponse, api_from_hp};
 
 // ===== 控件受控取数通道（`docs/spec/control-standard.md` 第 5 节 / 第 4 轮）=====
 
@@ -171,22 +171,16 @@ pub(crate) fn plugin_panel_data(
     state: State<AppState>,
     app: tauri::AppHandle,
 ) -> ApiResponse<PanelDataItem> {
-    let outcome = (|| -> HpResult<PanelDataItem> {
-        ensure_global(&state)?;
-        let owner = panel_owner_enabled(&state, &repo_id, &panel_id)?;
-        let result = fetch_panel_data(
+    let outcome = run_panel_call(&state, &app, &repo_id, &panel_id, |owner| {
+        fetch_panel_data(
             &state,
-            &owner,
+            owner,
             &panel_id,
             selected_file_id.as_deref(),
             &binds,
             &repo_id,
-        );
-        if let Err(e) = &result {
-            emit_plugin_error(&app, &repo_id, &owner.plugin_id, &e.to_string());
-        }
-        result
-    })();
+        )
+    });
     api_from_hp(outcome)
 }
 

@@ -24,6 +24,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
   BlueprintTrigger,
@@ -33,7 +34,13 @@ import type {
 import { BLUEPRINT_TRIGGERS, panelSpec, parseControlSchema } from "@hamster-pouch/config";
 
 import * as api from "../shared/api";
-import { apiErrorMessage, errorCodeOf, type HpErrorCode } from "../shared/api/response";
+import {
+  apiErrorMessage,
+  errorCodeOf,
+  normalizeCode,
+  type HpErrorCode,
+} from "../shared/api/response";
+import { listenHp } from "../shared/events";
 import { collectControlBinds } from "../shared/control/controlBinds";
 import {
   makeControlDataSnapshot,
@@ -47,6 +54,17 @@ import {
 import { ControlPanelView } from "../shared/control/ControlPanelView";
 import type { ControlRenderContext } from "../shared/control/controlTypes";
 import { useApp } from "../core/AppContext";
+
+/** `plugin.error` 的载荷（与 Rust 侧 `PluginError` 逐字一致）。 */
+interface PluginErrorPayload {
+  panelId: string;
+  pluginId: string;
+  repoId: string;
+  /** 闭集错误码（同 D76 / D27），界面按它取 i18n 文案。 */
+  code: string;
+  /** 诊断串，**不得**直显。 */
+  error: string;
+}
 
 /** 面板 schema 的装载状态。 */
 type PanelSchemaState =
@@ -95,9 +113,12 @@ export function PluginPanelHost({ panelId }: { panelId: string }): JSX.Element {
             });
             data = makeControlDataSnapshot(panelData.results);
           } catch (e) {
-            // 取数失败：**不**把整面板打成错误态（schema 是好的、只是这一次没数据），
-            // 按规范"绑定为空即渲染空态"处理，并把原因留在控制台便于诊断。
-            console.warn("[plugin-panel] 取数失败，按空态渲染", panelId, e);
+            // 命令级失败（未启用/无归属/入口缺失/超时/超限）按控件标准第 5 节第 4 点
+            // 降级为错误态。**结果缺失**（`missing`）不走这里——那按"绑定为空即渲染
+            // 空态"处理，是数据问题、不是调用失败。
+            console.warn("[plugin-panel] 取数失败", panelId, e);
+            if (!cancelled) setState({ kind: "failed", code: errorCodeOf(e) });
+            return;
           }
         }
         if (!cancelled) {
@@ -113,6 +134,38 @@ export function PluginPanelHost({ panelId }: { panelId: string }): JSX.Element {
     // `selectedFileId` 变化必须重查：`selection` 绑定的数据源就是当前选中文件。
     // 取数**不跨挂载缓存**——数据的陈旧风险与 schema 不同。
   }, [isPluginPanel, repoId, panelId, app.refreshKey, selectedFileId]);
+
+  // 失败降级（控件标准第 2 节 / D197）：插件侧调用失败时宿主广播 `plugin.error`，
+  // 这里按 `panelId` 归位到**本面板**——一个插件可以有多个面板，只按 `pluginId` 会误伤。
+  // 文案仍按 `code` 走 i18n（D27），诊断串只进控制台。
+  useEffect(() => {
+    if (!isPluginPanel) return;
+    let disposed = false;
+    let unlisten: UnlistenFn | undefined;
+    void listenHp<PluginErrorPayload>("plugin.error", (event) => {
+      if (disposed) return;
+      const payload = event.payload;
+      if (!payload || payload.panelId !== panelId) return;
+      if (repoId && payload.repoId !== repoId) return;
+      console.warn("[plugin-panel] 插件侧调用失败", panelId, payload.pluginId, payload.error);
+      setState({ kind: "failed", code: normalizeCode(payload.code) });
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* 非 Tauri 运行时忽略 */
+      });
+    return () => {
+      disposed = true;
+      try {
+        unlisten?.();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [isPluginPanel, panelId, repoId]);
 
   // schema 的 `on` 映射（事件名 → 插件声明的事件 id）：回传前必须先解析出事件 id，
   // 因为插件侧方法名是 `plugin.{pluginId}.{eventId}`，载荷里不含 id。

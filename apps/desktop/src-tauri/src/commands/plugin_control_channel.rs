@@ -18,32 +18,39 @@ use tauri::State;
 
 use crate::AppState;
 use crate::commands::shared::{
-    ApiResponse, EmitHp, api_from_hp, diag_log, ensure_global, global, global_guard,
-    lock_panel_schema, lock_supervision,
+    ApiResponse, EmitHp, api_from_hp, diag_log, global, global_guard, lock_panel_schema,
+    lock_supervision,
 };
 
-/// 广播 `plugin.error`：某个面板的 schema 查询失败。
+/// 广播 `plugin.error`：**该面板**的一次调用失败。
 ///
-/// 语义（控件标准第 2 节）：**该面板**渲染错误态，**不阻塞其它面板**。
-/// `error` 是诊断串（不面向用户显示）；界面文案由前端按结构化 `code` 走 i18n（D27）。
+/// 语义（控件标准第 2 节）：只把**该面板**渲染成错误态，**不阻塞其它面板**。因此载荷
+/// 必须带 `panel_id`（一个插件可以声明多个面板，只凭 `plugin_id` 定位不到），并带
+/// `code`（闭集，同 D76/D27）——界面文案按 `code` 走 i18n；`error` 只是诊断串，
+/// **不面向用户显示**。
 pub(crate) fn emit_plugin_error(
     app: &tauri::AppHandle,
     repo_id: &str,
+    panel_id: &str,
     plugin_id: &str,
-    error: &str,
+    error: &HpError,
 ) {
     #[derive(Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     struct PluginError {
+        panel_id: String,
         plugin_id: String,
         repo_id: String,
+        code: String,
         error: String,
     }
     app.emit_hp(
         "plugin.error",
         PluginError {
+            panel_id: panel_id.to_string(),
             plugin_id: plugin_id.to_string(),
             repo_id: repo_id.to_string(),
+            code: error.code().to_string(),
             error: error.to_string(),
         },
     );
@@ -78,6 +85,37 @@ pub(crate) fn panel_owner_enabled(
     // 可用性：插件必须在该仓库已启用且已获 `ui.panel`（RFC 0004；panel-standard 第 6 节）。
     PluginHost.check_capability(db, &owner.plugin_id, repo_id, hp_core::Capability::UiPanel)?;
     Ok(owner)
+}
+
+/// 面板通道的**唯一失败降级入口**：反查归属 → 执行 → 失败广播。
+///
+/// 为什么必须收成一处（D197）：三条命令（`plugin.panelSchema` / `plugin.panelData` /
+/// `plugin.controlEvent`）此前各自手抄「ensure → 反查归属 → 调用 → 失败广播」，于是
+/// 出现两个洞——(a) 归属解析失败时**不广播**，而 `permission`（未启用/未授权）与
+/// `not_found`（无归属）恰恰是这一步的产物，规范却写「失败即广播」；(b) 控件事件
+/// 整条路径**从不广播**。收进这里后，降级覆盖`反查失败`与`调用失败`两个分支。
+///
+/// 归属解析失败时 `plugin_id` 只能留空：前端按 `panel_id` 归位，不依赖它。
+pub(crate) fn run_panel_call<T>(
+    state: &AppState,
+    app: &tauri::AppHandle,
+    repo_id: &str,
+    panel_id: &str,
+    body: impl FnOnce(&PanelOwner) -> HpResult<T>,
+) -> HpResult<T> {
+    match panel_owner_enabled(state, repo_id, panel_id) {
+        Ok(owner) => {
+            let result = body(&owner);
+            if let Err(error) = &result {
+                emit_plugin_error(app, repo_id, panel_id, &owner.plugin_id, error);
+            }
+            result
+        }
+        Err(error) => {
+            emit_plugin_error(app, repo_id, panel_id, "", &error);
+            Err(error)
+        }
+    }
 }
 
 /// 执行一次受监督的插件外部进程查询。
@@ -233,15 +271,9 @@ pub(crate) fn plugin_panel_schema(
     state: State<AppState>,
     app: tauri::AppHandle,
 ) -> ApiResponse<PanelSchemaItem> {
-    let outcome = (|| -> HpResult<PanelSchemaItem> {
-        ensure_global(&state)?;
-        let owner = panel_owner_enabled(&state, &repo_id, &panel_id)?;
-        let result = fetch_panel_schema(&state, &owner, &panel_id, &repo_id);
-        if let Err(e) = &result {
-            emit_plugin_error(&app, &repo_id, &owner.plugin_id, &e.to_string());
-        }
-        result
-    })();
+    let outcome = run_panel_call(&state, &app, &repo_id, &panel_id, |owner| {
+        fetch_panel_schema(&state, owner, &panel_id, &repo_id)
+    });
     api_from_hp(outcome)
 }
 
