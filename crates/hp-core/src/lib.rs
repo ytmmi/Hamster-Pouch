@@ -38,7 +38,7 @@ mod blueprint_validate;
 mod blueprint_warnings;
 pub mod color;
 pub mod control;
-mod control_types;
+pub mod control_types;
 pub mod cover;
 pub mod error;
 pub mod file;

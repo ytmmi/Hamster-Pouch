@@ -64,7 +64,7 @@
 | **层（Layer）** | 蓝图内部的画布：**一个层 = 一张画布 = 一个界面（页面）**；层名可自定义且即界面显示名 | 是（蓝图文档内 `layers[]`，**已实现**） | RFC 0007「分层（Layer）」 |
 | **界面（Interface）** | **顶层容器**，也是**页面**：一个界面 = 一个页面；界面是**后续多页面的基础**，行为可做**界面跳转**。以**同级**方式持有**布局块**与**浮层** | 是（蓝图节点，按仓库） | 蓝图 `interface` 节点（RFC 0007） |
 | **面板（Panel）** | dockview 承载单元：标签页、可拖拽停靠、可浮动、可独立窗口；蓝图节点枚举 `control`（**显示名已由「面板控件」退回「面板」**，RFC 0010 决策 1） | 是（`panel_layouts`，按仓库） | `packages/config/src/panels.ts`、`apps/desktop/src/app_ui/core/panelRegistry.tsx`、`docs/spec/panel-standard.md` |
-| **控件（Control）** | 宿主提供的标准 UI 单元（26 种），插件在**自己的面板内**按 schema 创建实例；**本文规范对象**，**不可由插件注册**（D62） | schema 是渲染期输入（**不落库**，D61） | `packages/config/src/controlRegistry.ts`、`crates/hp-core/src/control_types.rs` |
+| **控件（Control）** | 宿主提供的标准 UI 单元（26 种），插件在**自己的面板内**按 schema 创建实例；**本文规范对象**，**不可由插件注册**（D62） | schema 是渲染期输入（**不落库**，D61） | `packages/config/src/controlRegistry.ts`（表由 `controlFacts.generated.ts` 生成）、`crates/hp-core/src/control_types.rs` |
 | **类目（Category）** | 蓝图里的**节点类型**（`class`，显示名原为「类」）：面板内部条目分类（image/video/audio），受面板 `has_class` 约束 | 是（蓝图节点） | `docs/spec/blueprint-node-standard.md`、`docs/spec/panel-standard.md` 第 5.1 节 |
 | **浮层（Overlay）** | 蓝图里的**节点类型**（`overlay`，D50，**已实现**）：与布局块同级、是**容器**（contains 面板/标签组），承载显隐、相对定位、框体尺寸与外观档位 | 是（蓝图节点） | RFC 0007「浮层节点」 |
 | ~~**浮动控件（Floating Control）**~~ | **已取消（2026-09，D44/D56）**：该插件控件类别不再存在；原"与布局块同级、显示在布局块之上"的结论**原样适用于蓝图 `overlay` 浮层容器** | — | 由 `overlay` 承载 |
@@ -189,7 +189,7 @@
 
 ## 控件 schema 规范（第一版·已定稿）
 
-> 本节是「落地顺序」第 4–5 步的落地文本：**schema 传输格式、宿主组件白名单、校验分级**。文档是权威描述，代码里的权威实现是 `crates/hp-core/src/control_types.rs`（取值域与类型注册表）+ `control.rs`（结构、解析与校验）；前端 `packages/config/src/controlKinds.ts`（取值域）+ `controlRegistry.ts`（同一份注册表）+ `control.ts`（类型、解析层校验、事件载荷）与之逐项对齐，由 `pnpm check:controls` 守住一致性。
+> 本节是「落地顺序」第 4–5 步的落地文本：**schema 传输格式、宿主组件白名单、校验分级**。文档是权威描述，代码里的权威实现是 `crates/hp-core/src/control_types.rs`（取值域与类型注册表）+ `control.rs`（结构、解析与校验）；前端 `packages/config/src/controlKinds.ts`（取值域）+ `controlRegistry.ts`（同一份注册表）+ `control.ts`（类型、解析层校验、事件载荷）与之对齐——**D191 起前端两份表都是生成物**：`controlFacts.generated.ts` 由 `cargo run -p hp-core --bin dump-control-facts` 从 Rust 注册表产出、`pnpm check:control-facts` 逐字节比对，`controlRegistry.ts`/`controlKinds.ts` 只再导出（不再手抄），`pnpm check:controls` 反向断言 TS 侧没有第二份表。
 
 ### 1. 定位与版本
 
@@ -317,7 +317,7 @@
 - **`icon`** 只接受宿主图标集里的名字，白名单外即拒绝（避免插件塞任意资源）。
 - 一版**不提供**：模态确认框、右键菜单定义、拖拽排序、自定义渲染钩子、任意 CSS/像素（与本节开头"明确不做"一致）。
 - **「有无类目」不是控件的字段**：控件**不声明**"能否挂类目""对应哪个蓝图节点"——这两项是**面板**的声明参数（`has_class` / `blueprint_node`，见 `docs/spec/panel-standard.md` 第 5.1、5.2 节）。控件与蓝图的关系是**间接**的：蓝图管的是**面板**（`control` 节点）与**类目**（`class` 节点），控件只在面板**内部**渲染（RFC 0010 决策 1/4）。
-- **本章是封闭白名单**：26 种 `kind` 全部由宿主实现与渲染；插件**不能**注册新 `kind`（RFC 0010 决策 2）。新增 `kind` 必须同时改 Rust 注册表、前端注册表、渲染映射、覆盖清单、本文档与 `pnpm check:controls`（见「验证」）。
+- **本章是封闭白名单**：26 种 `kind` 全部由宿主实现与渲染；插件**不能**注册新 `kind`（RFC 0010 决策 2）。新增 `kind` 必须同时改 Rust 注册表（真值）、`pnpm gen:control-facts` 重新生成前端 facts、渲染映射、覆盖清单、本文档与 `pnpm check:controls`（见「验证」）。
 
 ### 5. 数据绑定（`bind`）
 
@@ -442,7 +442,8 @@
 
 - **Rust 单测**（`cargo test -p hp-core`）：控件类型注册表完整性（26 种、无重复、容器集合）、事件谓词表往返、schema 解析（未知 `kind` 拒绝）、字段归属、id 规则、绑定/事件/版本/数值范围/文本必填等硬错误与软告警，共 15 项控件相关用例。
 - **`cargo test -p hp-plugin-host`**：运行时通道的边界用例（`tests/m6_control_channel.rs`，**真子进程**，夹具是 `src/bin/fake_panel_plugin.rs`）——请求名/超时/上限常量与规范一致、`result` 为对象与字符串两种合法形态、请求带 `method` 与 `params`、JSON-RPC `error` 与垃圾输出被拒、>256 KiB 输出被拒、慢插件按时超时且不卡住、无输出被拒、缓存键含版本与插件级失效。夹具模式经 `HP_SCHEMA_FIXTURE_MODE` 选择。
-- **`pnpm check:controls`**（**42** 项，`tools/control-check.mjs`）：Rust 注册表 ↔ TS 注册表（`kind` 清单与顺序、容器标记、专属字段、可声明事件）、事件谓词表、渲染覆盖清单与 `CONTROL_RENDER_MAP` 一致、文档列出全部 `kind` 与事件、端到端解析与校验拒绝；**运行时通道与接线 10 项**：请求名 / 2s 超时 / 256 KiB 上限 / 缓存键三元组、两条命令已实现并注册、业务级校验复用 `ControlSchema::validate`、失败降级 + `plugin.error`、`ControlPanelView` 已接进 `PluginPanelHost` 且走通道命令、占位文案不再是唯一内容、新命令走 D76 包装、`HpError` 有闭集错误码、前端解包层与三套语言错误码文案齐备；**事件回传 5 项（2026-09 新增）**：事件映射按控件 id 收集、事件名 → 事件 id 解析（未声明返回 `undefined` 而非报错）、插件侧方法名是契约的字面名、`plugin.controlEvent` 已实现并注册且事件 id 必须在 manifest 声明过、前端 `emit` 不再是空实现。
+- **`pnpm check:control-facts`**：`dump-control-facts` 重新生成 `packages/config/src/controlFacts.generated.ts` 后 `git diff --exit-code`，逐字节钉住「Rust 注册表 = 前端 facts」（同 `check:types` 手法）。
+- **`pnpm check:controls`**（**38** 项，`tools/control-check.mjs`）：TS 侧没有第二份手抄表（`controlRegistry.ts` 只 `= CONTROL_FACTS`）、取值域只剩 bind/谓词两个前端约定、渲染覆盖清单与 `CONTROL_RENDER_MAP` 一致、文档列出全部 `kind` 与事件、端到端解析与校验拒绝；**运行时通道与接线 10 项**：请求名 / 2s 超时 / 256 KiB 上限 / 缓存键三元组、两条命令已实现并注册、业务级校验复用 `ControlSchema::validate`、失败降级 + `plugin.error`、`ControlPanelView` 已接进 `PluginPanelHost` 且走通道命令、占位文案不再是唯一内容、新命令走 D76 包装、`HpError` 有闭集错误码、前端解包层与三套语言错误码文案齐备；**事件回传 5 项（2026-09 新增）**：事件映射按控件 id 收集、事件名 → 事件 id 解析（未声明返回 `undefined` 而非报错）、插件侧方法名是契约的字面名、`plugin.controlEvent` 已实现并注册且事件 id 必须在 manifest 声明过、前端 `emit` 不再是空实现。
 - **`pnpm typecheck` / `pnpm build` / `check-line-count` / `check-doc-status`** 通过。
 
 ## 落地顺序（强制）

@@ -2,10 +2,11 @@
  * 控件标准一致性自检（开发期验证，不参与打包）。
  *
  * 断言四件事：
- * 1. **Rust 注册表 ↔ TS 注册表**：`kind` 清单与顺序、每种类型的 `container` 标记、
- *    专属字段名集合、可声明事件集合完全一致（`crates/hp-core/src/control_types.rs`
- *    ↔ `packages/config/src/controlRegistry.ts`）；
- * 2. **事件谓词表**：Rust `CONTROL_EVENTS` ↔ TS `CONTROL_EVENTS`；
+ * 1. **注册表只有一处真值**：Rust `crates/hp-core/src/control_types.rs` 的 `CONTROL_REGISTRY`
+ *    是真值；前端 facts 由 `cargo run -p hp-core --bin dump-control-facts` 生成、
+ *    `pnpm check:control-facts` 逐字节比对。本脚本只**反向**断言 TS 侧没有第二份手抄表
+ *    （D191 删掉了旧的 Rust 正则解析——解析器本身才是最脆的环节）；
+ * 2. **TS 取值域来自生成物**：`controlKinds.ts` 只剩 bind 来源与显隐谓词两个前端约定；
  * 3. **渲染骨架完整性**：`CONTROL_RENDER_MAP` 覆盖全部 `kind`（少一种即宿主渲染缺口）；
  * 4. **文档一致性**：`docs/spec/control-standard.md` 的类型表列出全部 26 个 `kind`
  *    （文档与代码不脱节）。
@@ -26,187 +27,40 @@ const check = (label, ok, detail = "") => {
   results.push({ label, ok });
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
-const eqSets = (a, b) =>
-  a.length === b.length && [...a].sort().join("\u0000") === [...b].sort().join("\u0000");
+
 const eqList = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 
-/**
- * 截取一段字面量块：从 `startPattern` 匹配处起，按**括号配对**找到对应的 `]` / `}`。
- * （纯文本解析，不依赖 Rust/TS 工具链；不会误取块内嵌套数组的 `];`。）
- */
-function sliceLiteral(source, startPattern, label) {
-  const match = startPattern.exec(source);
-  if (!match) throw new Error(`未能在源码中定位 ${label}`);
-  const start = match.index + match[0].length;
-  const open = source[start - 1];
-  const close = open === "{" ? "}" : "]";
-  const other = open === "{" ? "{" : "[";
-  let depth = 1;
-  for (let i = start; i < source.length; i += 1) {
-    const c = source[i];
-    if (c === open || c === other) depth += 1;
-    else if (c === close) {
-      depth -= 1;
-      if (depth === 0) return source.slice(start, i);
-    } else if (c === "[" || c === "{") depth += 1;
-    else if (c === "]" || c === "}") depth -= 1;
-  }
-  throw new Error(`未能找到 ${label} 的结束标记`);
-}
+// ============================== 1. 注册表来自生成物 ==============================
 
-const sliceBlock = sliceLiteral;
+// D191：26 条控件定义的真值在 Rust（`crates/hp-core/src/control_types.rs` 的
+// `CONTROL_REGISTRY`）。前端 `packages/config/src/controlFacts.generated.ts` 由
+// `cargo run -p hp-core --bin dump-control-facts` 产出，`pnpm check:control-facts`
+// 逐字节比对，所以这里**不再解析 Rust 源码**：正则解析器本身就是脆弱点（旧 §1/§1b
+// 已删）。留下的是两条反向断言，防有人把表抄回 TS、或重新引入第二份真值。
 
-/** PascalCase → snake_case（`KeyValue` → `key_value`，`AiInfer` → `ai_infer`）。 */
-const toSnake = (name) =>
-  name
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .toLowerCase();
+const stripJsComments = (text) =>
+  text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-/** 从 `as_str` 的 match 臂里读出「枚举名 → JSON 取值」的权威映射。 */
-function asStrMap(source, enumName) {
-  const block = sliceLiteral(
-    source,
-    new RegExp(`impl\\s+${enumName}\\s*\\{[\\s\\S]*?fn\\s+as_str[\\s\\S]*?match\\s+self\\s*\\{`),
-    `${enumName}::as_str`,
-  );
-  const map = new Map();
-  for (const m of block.matchAll(new RegExp(`${enumName}::(\\w+)\\s*=>\\s*"([^"]+)"`, "g"))) {
-    map.set(m[1], m[2]);
-  }
-  if (map.size === 0) throw new Error(`未能解析 ${enumName}::as_str`);
-  return map;
-}
-
-// ============================== 1. Rust 注册表 ==============================
-
-const rustTypes = readFileSync(join(ROOT, "crates/hp-core/src/control_types.rs"), "utf8");
-
-/** JSON 取值（而非 Rust 命名）是权威：`KeyValue` → `keyValue`，`DoubleClick` → `double_click`。 */
-const KIND_JSON = asStrMap(rustTypes, "ControlKind");
-const EVENT_JSON = asStrMap(rustTypes, "ControlEvent");
-
-const rustKindBlock = sliceBlock(rustTypes, /ControlKind;\s*\d+\]\s*=\s*\[/, "ControlKind::ALL");
-/** Rust `ControlKind::ALL` 的顺序（按 `as_str` 翻译成 JSON 取值）。 */
-const rustKindNames = [...rustKindBlock.matchAll(/ControlKind::(\w+)/g)].map(
-  (m) => KIND_JSON.get(m[1]) ?? `?${m[1]}`,
+const controlRegistrySrc = stripJsComments(
+  readFileSync(join(ROOT, "packages/config/src/controlRegistry.ts"), "utf8"),
 );
-
-const rustEventBlock = sliceBlock(rustTypes, /CONTROL_EVENTS:\s*\[ControlEvent;\s*\d+\]\s*=\s*\[/, "CONTROL_EVENTS");
-const rustEvents = [...rustEventBlock.matchAll(/ControlEvent::(\w+)/g)].map(
-  (m) => EVENT_JSON.get(m[1]) ?? `?${m[1]}`,
-);
-
-const rustRegistryBlock = sliceBlock(
-  rustTypes,
-  /CONTROL_REGISTRY:\s*\[ControlKindSpec;\s*\d+\]\s*=\s*\[/,
-  "CONTROL_REGISTRY",
-);
-
-/** 把 Rust 注册表按 `ControlKindSpec {` 切成一条条记录。 */
-function rustSpecEntries(block) {
-  const entries = [];
-  let depth = 0;
-  let start = -1;
-  for (let i = 0; i < block.length; i += 1) {
-    if (block.startsWith("ControlKindSpec {", i) && depth === 0) {
-      start = i;
-    }
-    if (block[i] === "{") depth += 1;
-    else if (block[i] === "}") {
-      depth -= 1;
-      if (depth === 0 && start >= 0) {
-        entries.push(block.slice(start, i + 1));
-        start = -1;
-      }
-    }
-  }
-  return entries;
-}
-
-/** Rust 注册表解析结果：`kind 的 JSON 取值 → { raw, container, events, props }`。 */
-const rustSpecMap = new Map(
-  rustSpecEntries(rustRegistryBlock).map((text) => {
-    const enumName = /ControlKind::(\w+)/.exec(text)?.[1] ?? "";
-    const kind = KIND_JSON.get(enumName) ?? `?${enumName}`;
-    const container = /container:\s*(true|false)/.exec(text)?.[1] === "true";
-    const eventsBlock = /events:\s*&\[([\s\S]*?)\]/.exec(text)?.[1] ?? "";
-    const events = [...eventsBlock.matchAll(/ControlEvent::(\w+)/g)].map(
-      (m) => EVENT_JSON.get(m[1]) ?? `?${m[1]}`,
-    );
-    // 专属字段：既支持内联数组 `&[ControlProp::new(...)]`，也支持共用常量组 `&GAP_ALIGN` / `&NO_PROPS`。
-    const propsMatch = /props:\s*&(\[|(?:\w+))/.exec(text);
-    const inline = propsMatch?.[1] === "[";
-    const propsSource = inline
-      ? text.slice(text.indexOf("&[", propsMatch.index) + 2, text.indexOf("]\n", propsMatch.index))
-      : sliceLiteral(
-          rustTypes,
-          new RegExp(`(?:const|static)\\s+${propsMatch?.[1] ?? ""}\\s*:\\s*[^=]*=\\s*\\[`),
-          propsMatch?.[1] ?? "props",
-        );
-    const props = [...propsSource.matchAll(/ControlProp::new\("([^"]+)"/g)].map((m) => m[1]);
-    return [kind, { raw: enumName, kind, container, events, props }];
-  }),
-);
-
-/** 供自检脚本与 TS 比对：Rust 侧每个 kind 的 PascalCase 名。 */
-const rustRawByKind = new Map([...rustSpecMap.values()].map((s) => [s.kind, s.raw]));
-
-// ============================== 1b. 与 TS 注册表逐项比对 ==============================
-
-const tsSpecs = config.CONTROL_REGISTRY.map((spec) => ({
-  kind: spec.kind,
-  container: spec.container,
-  events: [...spec.events],
-  props: spec.props.map((p) => p.name),
-}));
-
+const handCopiedKind = /\bkind:\s*"/.test(controlRegistrySrc);
 check(
-  "Rust 与 TS 的 kind 清单及顺序一致",
-  eqList(rustKindNames, config.CONTROL_KIND_NAMES),
-  `rust=${rustKindNames.length} ts=${config.CONTROL_KIND_NAMES.length}`,
+  "controlRegistry.ts 只从生成物派生（不再手抄 26 条类型表）",
+  controlRegistrySrc.includes("CONTROL_FACTS") && !handCopiedKind,
+  handCopiedKind ? "检测到手抄的 kind 字面量" : "CONTROL_FACTS",
 );
 
-check(
-  "Rust 注册表覆盖全部 kind（无重复/无遗漏）",
-  eqSets([...rustSpecMap.keys()], config.CONTROL_KIND_NAMES),
-  `rust=${rustSpecMap.size} ts=${config.CONTROL_KIND_NAMES.length}`,
+const controlKindsSrc = stripJsComments(
+  readFileSync(join(ROOT, "packages/config/src/controlKinds.ts"), "utf8"),
 );
-
-const containerMismatch = tsSpecs.filter((spec) => {
-  const rust = rustSpecMap.get(spec.kind);
-  return !rust || rust.container !== spec.container;
-});
+// 手抄的取值域会写成 `export const CONTROL_TEXT_VARIANTS = [`；生成物里只留 bind
+// 来源与显隐谓词（Rust 侧不声明这两个取值域）。
+const handWrittenDomains = [...controlKindsSrc.matchAll(/export const (\w+) = \[/g)].map((m) => m[1]);
 check(
-  "容器/叶子标记一致（row/column/panel/section/notice 为容器）",
-  containerMismatch.length === 0,
-  containerMismatch.map((s) => s.kind).join(", "),
-);
-
-const eventMismatch = tsSpecs.filter((spec) => {
-  const rust = rustSpecMap.get(spec.kind);
-  return !rust || !eqSets(rust.events, spec.events);
-});
-check(
-  "每种类型的可声明事件一致",
-  eventMismatch.length === 0,
-  eventMismatch.map((s) => s.kind).join(", "),
-);
-
-const propMismatch = tsSpecs.filter((spec) => {
-  const rust = rustSpecMap.get(spec.kind);
-  return !rust || !eqSets(rust.props, spec.props);
-});
-check(
-  "每种类型的专属字段名一致",
-  propMismatch.length === 0,
-  propMismatch.map((s) => `${s.kind}: rust=[${rustSpecMap.get(s.kind)?.props}] ts=[${s.props}]`).join(" | "),
-);
-
-check(
-  "事件谓词表一致（6 个）",
-  eqList(rustEvents, [...config.CONTROL_EVENT_NAMES]),
-  `rust=${rustEvents.join("/")} ts=${config.CONTROL_EVENT_NAMES.join("/")}`,
+  "controlKinds.ts 的取值域全部来自生成物（只剩 bind / 谓词两个前端约定）",
+  eqList(handWrittenDomains, ["CONTROL_BIND_KINDS", "CONTROL_PREDICATE_TESTS"]),
+  handWrittenDomains.join(", "),
 );
 
 // ============================== 2. 渲染骨架 ==============================

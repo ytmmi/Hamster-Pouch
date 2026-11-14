@@ -32,6 +32,8 @@
     "check:blueprint-fixture": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/generate-blueprint-fixture.mjs --check",
     "check:blueprint-pair": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/check-blueprint-pair.mjs",
     "check:controls": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/control-check.mjs",
+    "gen:control-facts": "cargo run -q -p hp-core --bin dump-control-facts",
+    "check:control-facts": "cargo run -q -p hp-core --bin dump-control-facts && git diff --exit-code -- packages/config/src/controlFacts.generated.ts",
     "check:panels": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/check-panels.mjs",
     "check:settings": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/check-settings.mjs",
     "gen:panel-settings": "node --no-warnings --import ./tools/blueprint-check-register.mjs tools/gen-panel-settings.mjs",

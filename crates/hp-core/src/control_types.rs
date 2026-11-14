@@ -44,6 +44,15 @@ impl ControlCategory {
             ControlCategory::Feedback => "feedback",
         }
     }
+
+    /// 全部类别（顺序与文档第 4 节的分组一致）。
+    pub const ALL: [ControlCategory; 5] = [
+        ControlCategory::Layout,
+        ControlCategory::Display,
+        ControlCategory::Input,
+        ControlCategory::Collection,
+        ControlCategory::Feedback,
+    ];
 }
 
 /// 控件类型白名单（第一版 26 种，宿主内置；插件不得扩展）。
@@ -332,15 +341,15 @@ impl ControlKindSpec {
 }
 
 // 专用枚举取值表（与文档第 4 节表格逐项对齐）。
-const TEXT_VARIANTS: [&str; 4] = ["body", "dim", "heading", "code"];
-const BUTTON_VARIANTS: [&str; 3] = ["default", "primary", "danger"];
-const FIT_VALUES: [&str; 2] = ["contain", "cover"];
-const OPTIONS_KINDS: [&str; 2] = ["static", "bound"];
-const ITEM_TEXTS: [&str; 3] = ["none", "name", "hex"];
-const STATUS_VARIANTS: [&str; 4] = ["info", "ok", "warn", "error"];
-const EMPTY_VARIANTS: [&str; 3] = ["empty", "loading", "error"];
-const GAP_VALUES: [&str; 4] = ["none", "sm", "md", "lg"];
-const ALIGN_VALUES: [&str; 4] = ["start", "center", "end", "stretch"];
+pub const TEXT_VARIANTS: [&str; 4] = ["body", "dim", "heading", "code"];
+pub const BUTTON_VARIANTS: [&str; 3] = ["default", "primary", "danger"];
+pub const FIT_VALUES: [&str; 2] = ["contain", "cover"];
+pub const OPTIONS_KINDS: [&str; 2] = ["static", "bound"];
+pub const ITEM_TEXTS: [&str; 3] = ["none", "name", "hex"];
+pub const STATUS_VARIANTS: [&str; 4] = ["info", "ok", "warn", "error"];
+pub const EMPTY_VARIANTS: [&str; 3] = ["empty", "loading", "error"];
+pub const GAP_VALUES: [&str; 4] = ["none", "sm", "md", "lg"];
+pub const ALIGN_VALUES: [&str; 4] = ["start", "center", "end", "stretch"];
 
 // 常用属性组合（避免每行重复书写）。
 const GAP_ALIGN: [ControlProp; 2] = [
