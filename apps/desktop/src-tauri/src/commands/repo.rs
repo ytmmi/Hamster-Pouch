@@ -15,8 +15,8 @@ use crate::AppState;
 use crate::commands::shared::EmitHp;
 use crate::commands::shared::diag_log;
 use crate::commands::shared::{
-    ApiResponse, OpenRepo, api_from_hp, current_repo_id, default_repo_dir, global, global_guard,
-    global_mut, lock_repo, set_open_repo, take_open_repo,
+    ApiResponse, OpenRepo, api_from_hp, default_repo_dir, global, global_guard, global_mut,
+    set_open_repo, take_open_repo, take_open_repo_if, with_open_repo_mut,
 };
 
 /// `app_settings` 的一行（`setting.list` 的 `items` 元素）。
@@ -547,13 +547,8 @@ pub(crate) fn repo_rename(
             let g = global_mut(&mut guard)?;
             g.rename_repo(&repo_id, trimmed)?;
         }
-        let is_current = current_repo_id(&state).as_deref() == Some(repo_id.as_str());
-        if is_current {
-            let mut open = lock_repo(&state)?;
-            if let Some(handle) = open.as_mut() {
-                handle.db.set_repo_name(trimmed)?;
-            }
-        }
+        // 同步仓库库 meta：按 id 匹配后再改，避免「标记为当前 → 换库 → 改错库」。
+        with_open_repo_mut(&state, &repo_id, |repo| repo.db.set_repo_name(trimmed))?;
         Ok(())
     })();
     api_from_hp(outcome)
@@ -563,9 +558,10 @@ pub(crate) fn repo_rename(
 #[tauri::command]
 pub(crate) fn repo_delete(repo_id: String, state: State<AppState>) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
-        // 若删除的是当前打开仓库，先关闭以释放文件句柄。
-        let is_current = current_repo_id(&state).as_deref() == Some(repo_id.as_str());
-        if is_current && let Some(repo) = take_open_repo(&state)? {
+        // 若删除的是当前打开仓库：先停监听线程（它们各自持有仓库库连接），再按 id 卸句柄。
+        // 判断与卸下在同一次持锁内完成——分成两步的话，中间被别的命令换库就会关错库。
+        if let Some(repo) = take_open_repo_if(&state, &repo_id)? {
+            crate::source_watch::service().stop_all();
             repo.db.close()?;
         }
 
@@ -587,9 +583,16 @@ pub(crate) fn repo_delete(repo_id: String, state: State<AppState>) -> ApiRespons
             }
         }
 
-        // 删除仓库库文件（含 WAL / SHM 附属文件）。
+        // 删除仓库库文件（含 WAL / SHM 附属文件）。只有「文件本来就不在」可以忽略：
+        // 别的失败（占用 / 权限）必须报出来，否则库文件留在盘上、注册行却已删除，
+        // 用户会以为删干净了（Windows 上句柄没释放完就是这种表现）。
         for suffix in ["", "-wal", "-shm"] {
-            let _ = std::fs::remove_file(format!("{repo_path}{suffix}"));
+            let path = format!("{repo_path}{suffix}");
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(HpError::Io(format!("删除仓库库文件失败: {path}: {e}"))),
+            }
         }
         Ok(())
     })();

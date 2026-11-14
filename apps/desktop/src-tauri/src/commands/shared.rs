@@ -723,6 +723,33 @@ pub(crate) fn set_open_repo(state: &AppState, repo: OpenRepo) -> HpResult<()> {
 pub(crate) fn take_open_repo(state: &AppState) -> HpResult<Option<OpenRepo>> {
     Ok(lock_repo(state)?.take())
 }
+/// 只在**句柄 id 匹配**时卸下当前仓库句柄（D199）：判断与卸下在同一次持锁内。
+///
+/// 分开写会有一个窗口：先读 `current_repo_id` 判断，再 `take_open_repo`——两步之间
+/// 别的命令换成另一个库，这一刀就切在别人身上（repo.delete 会关错库、还可能删错文件）。
+pub(crate) fn take_open_repo_if(state: &AppState, repo_id: &str) -> HpResult<Option<OpenRepo>> {
+    let mut guard = lock_repo(state)?;
+    if guard.as_ref().is_some_and(|repo| repo.id == repo_id) {
+        return Ok(guard.take());
+    }
+    Ok(None)
+}
+
+/// 只在**句柄 id 匹配**时对当前仓库句柄做一次可变操作（D199）。
+///
+/// 返回 `None` 表示「当前打开的不是这个仓库」，调用方据此决定要不要做后续动作；
+/// 与 [`take_open_repo_if`] 一样，匹配判断与动作用的是同一次持锁。
+pub(crate) fn with_open_repo_mut<T>(
+    state: &AppState,
+    repo_id: &str,
+    body: impl FnOnce(&mut OpenRepo) -> HpResult<T>,
+) -> HpResult<Option<T>> {
+    let mut guard = lock_repo(state)?;
+    match guard.as_mut() {
+        Some(repo) if repo.id == repo_id => Ok(Some(body(repo)?)),
+        _ => Ok(None),
+    }
+}
 
 /// 当前仓库 ID 的快照（未打开 / 毒锁 → `None`：只读判断，不报错）。
 pub(crate) fn current_repo_id(state: &AppState) -> Option<String> {

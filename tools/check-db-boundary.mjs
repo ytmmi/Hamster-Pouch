@@ -342,5 +342,42 @@ report(
   layoutOffenders,
 );
 
+// ⑭ 装卸仓库句柄按 id 匹配（D199）
+//
+// `repo.delete` 与 `repo.rename` 原先都是「先读 `current_repo_id` 判断，再单独持锁装卸」。
+// 两步之间被别的命令换库，这一刀就切在别人身上：delete 会关掉另一个库（并把它的文件删掉），
+// rename 会把名字写进另一个库的 meta。现在判断与动作在同一次持锁内（`take_open_repo_if` /
+// `with_open_repo_mut`），且只有 `repo_close`（关的是「当前」这个语义）还能用无条件 `take_open_repo`。
+// 同一条断言顺手钉住「删除库文件不许静默失败」：`let _ = std::fs::remove_file` 会把
+// 占用 / 权限失败吞掉，注册行删了、库文件还留在盘上。
+const repoCmdPath = join(BRIDGE_SRC, "commands", "repo.rs");
+const repoCmdBody = stripComments(readFileSync(repoCmdPath, "utf8"));
+const repoHandleOffenders = [];
+for (const needle of ["pub(crate) fn take_open_repo_if", "pub(crate) fn with_open_repo_mut"]) {
+  if (!sharedBody.includes(needle)) repoHandleOffenders.push(`commands/shared.rs 缺少 ${needle}`);
+}
+const unconditionalTakes = (repoCmdBody.match(/\btake_open_repo\s*\(/g) ?? []).length;
+if (unconditionalTakes > 1) {
+  repoHandleOffenders.push(`commands/repo.rs  仍有 ${unconditionalTakes} 处无条件 take_open_repo（只允许 repo.close 一处）`);
+}
+if (!/\btake_open_repo_if\s*\(/.test(repoCmdBody)) {
+  repoHandleOffenders.push("commands/repo.rs  repo.delete 没有按 id 卸句柄（take_open_repo_if）");
+}
+if (!/\bwith_open_repo_mut\s*\(/.test(repoCmdBody)) {
+  repoHandleOffenders.push("commands/repo.rs  repo.rename 没有按 id 改句柄（with_open_repo_mut）");
+}
+// 只钉 `repo.delete`：封面清理（`commands/book/cover.rs`）是 best-effort 的孤儿文件回收，
+// 删不掉不影响正确性；而仓库库文件删不掉会让「已删除的仓库」继续占着磁盘。
+if (/let\s+_\s*=\s*std::fs::remove_file/.test(repoCmdBody)) {
+  repoHandleOffenders.push(
+    "commands/repo.rs  静默忽略 remove_file 失败（只允许忽略 NotFound）",
+  );
+}
+report(
+  repoHandleOffenders.length === 0,
+  "仓库句柄的装卸按 id 匹配，删除失败不静默（repo.delete / repo.rename）",
+  repoHandleOffenders,
+);
+
 console.log(`\n[check-db-boundary] ${passed}/${total} 通过`);
 process.exit(passed === total ? 0 : 1);
