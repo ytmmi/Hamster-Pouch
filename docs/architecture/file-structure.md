@@ -416,6 +416,8 @@ apps/desktop/src/app_ui/
                       #   ReaderMoreMenu.tsx **四方块矢量图标 + 内置面板菜单**
                       #     （目录 / 书签 / 笔记 / 高亮 / 阅读选项；再点 / 点外面 / Esc 三种关闭）
                       #   ReaderStage.tsx 阅读区（scroll / page / spread 三种翻页方式；
+                      #     **阅读位置一律问几何**（分页 D222、滚动 D227）：量每项矩形后交给
+                      #     readerView 的纯函数取舍，阅读区里不取点；
                       #     分页用 CSS **column-count** 多栏 + translateX；跳章由面板的 key 重挂载重置；
                       #     **分页纸张（D116）**：.br-paper（居中）→ .br-face-layer（N 张纸页，
                       #     在正文之下、pointer-events none）→ .br-flow（正文栏四周内缩一个

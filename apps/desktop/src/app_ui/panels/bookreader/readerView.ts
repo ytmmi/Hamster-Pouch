@@ -750,55 +750,67 @@ export function isInteractiveTarget(
  */
 const INTERACTIVE_SELECTOR = "button, a, input, textarea, select, label";
 
-// ============================== 阅读位置探测点 ==============================
+// ============================== 阅读位置几何 ==============================
 
 /**
- * **阅读位置探测点**——`elementFromPoint(x, y)` 的坐标（见 `ReaderStage.reportPosition`）。
+ * **滚动模式下正在读的是哪一项**——问几何，不取点（2026-11-15 真机实测后的收口）。
  *
- * **只用于滚动模式**：分页模式已改为量几何（{@link readerVisiblePageIndex}）。
+ * ## 为什么滚动模式也放弃取点
  *
- * 探测点要落在**正文**上：`elementFromPoint` 返回的元素再用 `closest("[data-page-index]")`
- * 认页号。点落在纸边/内边距/舞台留白上时拿到 `.br-paper` / `.br-stage` 自身，
- * `closest` 得到 `null` → `visibleIndex = -1` → 章节数退回第 1 章、进度恒 0%。
+ * 分页模式在 D222 已改成量几何（{@link readerVisiblePageIndex}），滚动模式当时仍留着
+ * `elementFromPoint`：以内容框 `.br-flow` 为基准，x 取"中间或 40px"较小者（≈ `flow.left + 40`），
+ * y 取内容框上缘 +2。真机（面板 809 宽）量到探测点 ≈ `(297, 97)`，而
+ * **左栏 `.br-rail-left` 的矩形是 `[233, 95, 260, 644]`**——探测点整个被左栏盖住，
+ * `elementFromPoint` 返回 `br-book-head`，`closest("[data-page-index]")` 得到 `null`，
+ * `visibleIndex = -1`：页脚在**任意 scrollTop** 下都恒显
+ * `当前进度 0.00% 本章进度 0.0% 章节数 1 / 13`（实测扫 0 / 2000 / 5000 / 8000 / 12000 / 18000，
+ * 全是 `0.00%`）。
  *
- * ## 两轴必须用**同一个原点**（2026-11-15 真机实测修的就是这条）
+ * 收起两栏后能读出变化，但同一个点仍会落到 `vr-content`（无页号）、首行留白或 `br-page`
+ * 之间的空隙上——与分页模式栽的三次是同一族问题：**点的命中面取决于排版留白与遮挡，
+ * 而"正在读哪一项"是几何问题**。
  *
- * 分页模式的基准是纸张 `.br-paper`（它不参与 `translateX` 平移，是"视口"）。
- * 但**纸张自己也有 `padding: var(--br-page-margin)`**：纸张左上角往里不足一个
- * 页边距的位置仍在纸边里，不是正文。只给 x 加页边距、y 用 `+2` 的那版在真机上
- * 量到探测点 `(269, 105.33)`（= `paper.top + 2`）命中 `.br-paper`，
- * 页脚因此恒为 `当前进度 0.00% 本章进度 0.0% 章节数 1 / 13`——翻页也不动。
- * 纵向细扫同一张纸：`dy = 2 / 22` 命中 `br-paper`，`dy >= 24` 才命中正文段落。
+ * ## 口径
  *
- * 因此两轴都以**纸张内容盒原点**（纸张左上角 + 一个页边距）再加 4px 内缩；
- * 滚动模式没有纸张，基准是随滚动上移的内容框，原点即内容框上缘（+2 避开边框）。
+ * 滚动模式没有平移，各项在内容框里**纵向排列**：视口上缘（阅读区 `.br-stage` 的上边，
+ * 即正文可见区的顶线）落在哪一项的纵向区间里，那一项就是正在读的项。
  *
- * 夹取保留：纸张比可视区高时（面板很矮）下缘要留 2px，避免落到纸张之外。
+ * - 取**上缘不超过 `vpTop` 的项里 `top` 最大的那一项**（项之间有间隔时它仍是"跨过顶线"
+ *   的那一项，语义与"区间包含 `vpTop`"一致，且不会因间隔返回 `-1`）；
+ * - `vpTop` 在所有项之上（顶部留白 / 还没进正文）取**最靠上**的项（序号小者）；
+ * - 同一 `top` 平局取**序号较小**者（先读到的是前者）；
+ * - 一项都没有（正文还没渲染）返回 `-1`，由调用方保持既有回落口径。
+ *
+ * 页内比例仍由调用方按 `(vpTop - page.top) / page.height` 算——分母是该项高度，
+ * 与 `readerPositionFromPage` 的"项内百分比"同源。
  */
-export function readerProbePoint(input: {
-  /** 是否分页模式（`page` / `spread`）。 */
-  paged: boolean;
-  /** 页边距（`--br-page-margin`，像素）——分页模式下**纸张的内边距**。 */
-  margin: number;
-  /** 阅读区（`.br-stage`）的上/下边，用于夹取到可见范围内。 */
-  hostTop: number;
-  hostBottom: number;
-  /** 探测基准的左/上/下与宽度：分页 = 纸张，滚动 = 内容框。 */
-  basisLeft: number;
-  basisTop: number;
-  basisBottom: number;
-  basisWidth: number;
-}): { x: number; y: number } {
-  const x = input.paged
-    ? input.basisLeft + input.margin + 4
-    : input.basisLeft + Math.min(input.basisWidth / 2, 40);
-  // 分页：纸张的内边距也要跨过（漏掉这一步就落回纸边，见上面的实测）。
-  const topEdge = input.basisTop + (input.paged ? input.margin + 4 : 2);
-  const y = Math.min(
-    Math.max(input.hostTop + 2, topEdge),
-    Math.min(input.hostBottom, input.basisBottom) - 2,
-  );
-  return { x, y };
+export function readerScrollVisiblePageIndex(input: {
+  /** 视口上缘（阅读区 `.br-stage` 的上边）。 */
+  vpTop: number;
+  pages: ReaderPageBox[];
+}): number {
+  let straddling: ReaderPageBox | null = null;
+  let topmost: ReaderPageBox | null = null;
+  for (const page of input.pages) {
+    if (
+      !topmost ||
+      page.top < topmost.top ||
+      (page.top === topmost.top && page.index < topmost.index)
+    ) {
+      topmost = page;
+    }
+    // 只看"已经越过视口顶线"的项；还没到的项不算正在读。
+    if (page.top > input.vpTop) continue;
+    if (
+      !straddling ||
+      page.top > straddling.top ||
+      (page.top === straddling.top && page.index < straddling.index)
+    ) {
+      straddling = page;
+    }
+  }
+  const chosen = straddling ?? topmost;
+  return chosen ? chosen.index : -1;
 }
 
 /** 一个 `[data-page-index]` 块的**并集盒**（跨栏项 = 全部碎片的外接矩形）。 */

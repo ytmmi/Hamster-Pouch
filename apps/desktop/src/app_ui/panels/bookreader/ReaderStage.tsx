@@ -74,7 +74,7 @@ import {
   readerColumnsPerScreen,
   readerPagedLayout,
   readerPagination,
-  readerProbePoint,
+  readerScrollVisiblePageIndex,
   readerVisiblePageIndex,
   shouldLoadMorePages,
   READER_DESK_PADDING,
@@ -291,7 +291,8 @@ export function ReaderStage({
    * 正确基准是**纸张 `.br-paper`**：它是**视口**、不参与平移（平移后的内容被它的
    * `overflow: hidden` 裁掉），因此取点是"视口内一个固定位置"，三屏实测都稳定命中。
    * 纸张左缘再往里一个纸边（`--br-page-inset`）即正文可见区，且不受页边距影响
-   * （页边距在纸张**之外**）。**滚动模式**没有平移，仍用内容框（它随滚动上移，语义正确）。
+   * （页边距在纸张**之外**）。
+    * 这段取点史现在只剩教训价值：D222 起分页、D227 起滚动都不再取点。
    */
   const reportPosition = useCallback(() => {
     if (!onPositionChange) return;
@@ -300,7 +301,6 @@ export function ReaderStage({
     if (!host || !flow) return;
 
     const hostRect = host.getBoundingClientRect();
-    const flowRect = flow.getBoundingClientRect();
 
     /*
      * 探测点：**分页模式必须以纸张（视口）为基准，不能以内容框 `.br-flow` 为基准**。
@@ -318,7 +318,7 @@ export function ReaderStage({
      * 因此以它取点是**视口内一个固定位置**：实测三屏都稳定命中同一项。
      * 纸张左缘再往里一个**页边距**（`--br-page-margin`）就落在正文可见区内；
      * 页边距在纸张**内部**（`padding`），因此这个点必然落在正文栏里。
-     * 滚动模式没有平移，仍用内容框（它随滚动上移，语义正确）。
+     * （滚动模式当时仍用内容框——那一路在 D227 也被真机证明不可靠，见第三段。）
      */
     /*
      * **分页模式不取点，直接量几何**（2026-11-15 真机实测后的第二次修正）。
@@ -331,51 +331,42 @@ export function ReaderStage({
      * `visibleIndex` 于是恒为 -1，页脚恒显 `0.00% / 0.0% / 1 / 13`。
      *
      * 现在的口径是**问几何**：视口内容左缘落在哪一项的并集盒里，那一项就是正在读的
-     * 项（`readerVisiblePageIndex`，纯函数，喂进去的是每项的矩形数字）。滚动模式没有
-     * 平移、内容框随滚动上移，仍用取点（探测点由 `readerProbePoint` 算）。
+     * 项（`readerVisiblePageIndex`，纯函数，喂进去的是每项的矩形数字）。
+     *
+     * **滚动模式同样问几何**（2026-11-15 真机实测后的收口，D227）：它原先仍用
+     * `elementFromPoint` 取点，而探测点被左栏整块盖住（左栏矩形 `[233, 95, 260, 644]`，
+     * 探测点 ≈ `(297, 97)`）——`closest("[data-page-index]")` 恒为 `null`，
+     * 页脚于是在任意 `scrollTop` 下都恒显 `0.00% / 0.0% / 1 / 13`。
+     * 滚动没有平移，各项在内容框里纵向排列，因此改问**视口上缘落在哪一项的纵向区间里**
+     * （`readerScrollVisiblePageIndex`）。
+     *
+     * 两个分支量的是**同一组矩形**（每项只取一次 `getBoundingClientRect()`），
+     * 只是取哪个轴：分页 = 横向并集盒 vs 视口左缘；滚动 = 纵向区间 vs 视口上缘。
      */
     const paperRect = paperRef.current?.getBoundingClientRect() ?? null;
     const viewportLeft = (paperRect?.left ?? 0) + pagedLayout.margin;
-    let visibleIndex = -1;
-    let pageEl: HTMLElement | null = null;
-    if (paged) {
-      const elements = Array.from(
-        flowRef.current?.querySelectorAll<HTMLElement>("[data-page-index]") ?? [],
-      );
-      const pages = elements.map((element) => {
-        const rect = element.getBoundingClientRect();
-        return {
-          index: Number(element.dataset.pageIndex ?? "-1"),
-          left: rect.left,
-          right: rect.right,
-          top: rect.top,
-          bottom: rect.bottom,
-        };
-      });
-      visibleIndex = readerVisiblePageIndex({
-        vpLeft: viewportLeft,
-        vpTop: hostRect.top,
-        vpBottom: hostRect.bottom,
-        pages,
-      });
-      pageEl =
-        elements.find((element) => Number(element.dataset.pageIndex ?? "-1") === visibleIndex) ??
-        null;
-    } else {
-      const { x: probeX, y: probeY } = readerProbePoint({
-        paged: false,
-        margin: pagedLayout.margin,
-        hostTop: hostRect.top,
-        hostBottom: hostRect.bottom,
-        basisLeft: flowRect.left,
-        basisTop: flowRect.top,
-        basisBottom: flowRect.bottom,
-        basisWidth: flowRect.width,
-      });
-      const probe = document.elementFromPoint(probeX, probeY);
-      pageEl = (probe?.closest?.("[data-page-index]") as HTMLElement | null) ?? null;
-      visibleIndex = pageEl ? Number(pageEl.dataset.pageIndex ?? "-1") : -1;
-    }
+    const elements = Array.from(flow.querySelectorAll<HTMLElement>("[data-page-index]"));
+    const pages = elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        index: Number(element.dataset.pageIndex ?? "-1"),
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+      };
+    });
+    const visibleIndex = paged
+      ? readerVisiblePageIndex({
+          vpLeft: viewportLeft,
+          vpTop: hostRect.top,
+          vpBottom: hostRect.bottom,
+          pages,
+        })
+      : readerScrollVisiblePageIndex({ vpTop: hostRect.top, pages });
+    const pageEl =
+      elements.find((element) => Number(element.dataset.pageIndex ?? "-1") === visibleIndex) ??
+      null;
 
     let offsetInPage = 0;
     if (pageEl) {

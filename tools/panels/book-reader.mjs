@@ -325,17 +325,23 @@ check(
       vpBottom: 739,
       pages: [box(6, 265, 29162, 127, 707), box(5, 265, 29162, 127, 707)],
     });
-    // 滚动模式仍用取点：基准是内容框上缘（+2 避开边框），x 取「中间或 40px」较小者。
-    const scroll = readerView.readerProbePoint({
-      paged: false,
-      margin: 24,
-      hostTop: 10,
-      hostBottom: 600,
-      basisLeft: 100,
-      basisTop: 300,
-      basisBottom: 900,
-      basisWidth: 800,
+    // 滚动模式同样问几何（D227）：视口上缘落在哪一项的纵向区间里，那一项就是正在读的。
+    // 真机页脚恒 0.00% 的直接原因就是取点被左栏盖住，所以这里连"取点"本身都钉死。
+    const scrollStraddle = readerView.readerScrollVisiblePageIndex({
+      vpTop: 300,
+      pages: [box(0, 0, 800, 100, 250), box(1, 0, 800, 300, 600), box(2, 0, 800, 700, 900)],
     });
+    // 视口顶线在正文之上（顶部留白）→ 取最靠上的那一项。
+    const scrollAboveAll = readerView.readerScrollVisiblePageIndex({
+      vpTop: 60,
+      pages: [box(4, 0, 800, 300, 600), box(0, 0, 800, 100, 250)],
+    });
+    // 同一上缘平局 → 序号较小者；纵向区间之间的空隙不返回 -1（跨过顶线的那项仍在读）。
+    const scrollTie = readerView.readerScrollVisiblePageIndex({
+      vpTop: 400,
+      pages: [box(7, 0, 800, 300, 350), box(3, 0, 800, 300, 350)],
+    });
+    const scrollEmpty = readerView.readerScrollVisiblePageIndex({ vpTop: 400, pages: [] });
     const stage = readFileSync(
       join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderStage.tsx"),
       "utf8",
@@ -347,14 +353,19 @@ check(
       allBehind === -1 &&
       offScreenVertically === -1 &&
       tieBreak === 5 &&
-      scroll.y === 302 &&
-      scroll.x === 140 &&
-      // 接线：分页分支必须调纯函数、且喂的是每项的矩形（不是取点）。
+      scrollStraddle === 1 &&
+      scrollAboveAll === 0 &&
+      scrollTie === 3 &&
+      scrollEmpty === -1 &&
+      // 接线：两个分支都必须调纯函数、且喂的是每项的矩形（不是取点）。
       /readerVisiblePageIndex\(\{/.test(stageCode) &&
+      /readerScrollVisiblePageIndex\(\{ vpTop: hostRect\.top, pages \}\)/.test(stageCode) &&
       /querySelectorAll<HTMLElement>\("\[data-page-index\]"\)/.test(stageCode) &&
-      // 反向：分页分支不得再取点；`paged: true` 的探测点算式已无调用方。
+      // 反向：两种模式都不得再取点——`elementFromPoint` 在阅读器里已无调用方。
       !/paged: true,/.test(stageCode) &&
-      !/basis\.top \+ 2/.test(stageCode)
+      !/basis\.top \+ 2/.test(stageCode) &&
+      !/document\.elementFromPoint\(/.test(stageCode) &&
+      !/readerProbePoint\(/.test(stageCode)
     );
   })(),
   `span=${readerView.readerVisiblePageIndex({ vpLeft: 265, vpTop: 95, vpBottom: 739, pages: [{ index: 12, left: 265, right: 29162, top: 127, bottom: 707 }] })}`,
@@ -1265,31 +1276,34 @@ check(
     );
     const code = stripComments(stage);
     return (
-      // 每页必须有可命中的标记（否则 elementFromPoint 找不到页边界）。
+      // 每页仍必须带页号标记（几何判定要靠它认项；`closest` 早已不用，见下面的反向断言）。
       /data-page-index=\{index\}/.test(code) &&
-      /closest\?\.\("\[data-page-index\]"\)/.test(code) &&
       // 上报的是"第几页 + 页内比例"。
       /onPositionChange\(\{ visibleIndex, offsetInPage \}\)/.test(code) &&
-      // **探测点的基准**：分页模式必须以**纸张 `paperRef`**为基准，不能以内容框
-      // `flowRef` 为基准——分页的平移就挂在 `.br-flow` 自己身上，`flowRect.left`
-      // 随翻页一直往左跑，第 1 屏起探测点就**跑出视口**（实测 -812px），
-      // `elementFromPoint` 返回 null → `closest` 得到 null → 章号退回第 1 章。
-      // 纸张是**视口**、不参与平移，因此取点是稳定的固定位置。
+      // **两个分支量的是同一组矩形**（D227）：每项只取一次 `getBoundingClientRect()`，
+      // 分页拿横向并集盒比视口左缘、滚动拿纵向区间比视口上缘。
       //
       // 钉**取值来源**，不只钉变量名（项目记过教训：把一行换成 `host.getBoundingClientRect()`
       // 时，只检查变量名字面写法的断言仍然全绿——变量名没变、变的是它装了什么）。
-      /const flowRect = flow\.getBoundingClientRect\(\);/.test(code) &&
+      /const elements = Array\.from\(flow\.querySelectorAll<HTMLElement>\("\[data-page-index\]"\)\);/.test(
+        code,
+      ) &&
+      // **反向**：两种模式都不得再向"被平移的内容框"要基准。
+      !/const flowRect = flow\.getBoundingClientRect\(\);/.test(code) &&
       !/const flowRect = host\.getBoundingClientRect\(\);/.test(code) &&
-      // **分页模式的上报基准是纸张**（视口，不随 `translateX` 平移），滚动模式是内容框。
+      // **分页模式的上报基准是纸张**（视口，不随 `translateX` 平移）。
       // 2026-11-15 真机实测后分页改成"量几何"：视口内容左缘 = 纸张左缘 + 纸内页边距，
       // 它落在哪一项的并集盒里，那一项就是正在读的项（单点取点会落进首行留白）。
       // 反向断言钉住旧算式与旧取点（`basis.top + 2` / `paged: true` 的探测点）。
       /const paperRect = paperRef\.current\?\.getBoundingClientRect\(\) \?\? null;/.test(code) &&
       /const viewportLeft = \(paperRect\?\.left \?\? 0\) \+ pagedLayout\.margin;/.test(code) &&
       /readerVisiblePageIndex\(\{/.test(code) &&
-      /readerProbePoint\(\{/.test(code) &&
+      /readerScrollVisiblePageIndex\(\{ vpTop: hostRect\.top, pages \}\)/.test(code) &&
       !/basis\.top \+ 2/.test(code) &&
       !/paged: true,/.test(code) &&
+      // **反向**：阅读器里不得再有任何取点（D227 之后 `elementFromPoint` 归零）。
+      !/document\.elementFromPoint\(/.test(code) &&
+      !/closest\?\.\("\[data-page-index\]"\)/.test(code) &&
       // 纸张必须真的挂上了 ref（否则 `paperRef.current` 恒为 null、退回被平移的内容框）。
       /className="br-paper"\s+ref=\{paperRef\}/.test(code) &&
       // **页内比例的分母必须是"这一项的宽"**（`.br-page` 的并集盒 = 该项总内容宽）：

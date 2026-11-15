@@ -1411,6 +1411,12 @@ D212 | 面板激活/可见性的订阅口与设置热加载的四条触发源各
 | --- | --- | --- | --- |
 | D226 | **缺陷修复（真机实测发现）**：① `apps/desktop/src/app_ui/shared/styles.css` 的 `.bp-panel`（`:4194`）加 `container-type: inline-size`，成为画布/检查器排布的查询容器；② 新增 `@container (max-width: 560px)`（`:4324`）：`.bp-main` 改纵向且不吃剩余高度（`:4325`）、`.bp-canvas` 拿 `min-height: 360px`（`:4331`）、`.bp-main > .bp-inspector` 整宽（`:4340`）。 | 真机实测：蓝图面板停进 213px 宽的停靠组后 `.bp-main` 仍是 `row`、检查器固定 `232px`，画布被压到 **1px 宽**、检查器溢出面板——画布是这个面板的主工作面，不能用固定宽的检查器把它挤没；窄了就上下排，面板纵向滚动。阈值由算术定：`560 − 内边距 16 − 间隙 6 − 检查器 232 ≈ 306px`。 | 门禁 `tools/panels/blueprint-layout.mjs` 三条断言（查询容器在面板自己身上；窄面板真纵向、画布最小高度 ≥300px、检查器整宽且选择器特异度 ≥2 段；阈值算术 `limit − 2×panelPad − gap − inspectorWidth ≥ 300`），`check:panels` **493 → 496** 条全绿。真机复测（重编 debug 包）：213px 面板下 `.bp-canvas` **191×360**、检查器 191 宽落在画布下方、无横向溢出；把 sash 拖到 748px 后恢复并排（`main` 是 `row`、画布 494、检查器 232）。变异实测：删掉 `.bp-panel` 的 `container-type` ⇒ ① 立即 FAIL（495/496）。 |
 
+### 第 108 轮 · D227：阅读器滚动模式的阅读位置改按几何判定（2026-11-15）
+
+| 决定 | 做法 | 为什么 | 验证 |
+| --- | --- | --- | --- |
+| D227 | **缺陷修复（真机实测发现）**：① 真机滚动模式下页脚恒显 `当前进度 0.00% 本章进度 0.0% 章节数 1 / 13`，扫 0 / 2000 / 5000 / 8000 / 12000 / 18000 七档 scrollTop 全不变——滚动分支的探测点（`.br-flow` 左边 + 40、上缘 +2 ≈ `(297, 97)`）整个落在左栏 `.br-rail-left`（`[233, 95, 260, 644]`）底下，命中 `br-book-head`，`closest("[data-page-index]")` 得 `null`；收起两栏后同一个点又会落到 `vr-content` / 首行留白 / 纸页间隙上，与分页模式（D222）栽的三次同族。② 删掉 `readerProbePoint`，`apps/desktop/src/app_ui/panels/bookreader/readerView.ts:787` 新增 `readerScrollVisiblePageIndex({ vpTop, pages })`：取上缘不超过视口顶线的项里 `top` 最大者（项间有间隔时它就是跨过顶线的那一项），顶线在所有项之上时取最靠上者，同 `top` 平局取序号小者，空数组返回 `-1`。③ `ReaderStage.tsx:348` 只量一次 `flow.querySelectorAll("[data-page-index]")` 的矩形，`:360` / `:366` 分别喂给分页与滚动两个纯函数，页内比例仍按 `(hostRect.top - pageRect.top) / pageRect.height`（`:408` 起）；阅读器里不再出现 `document.elementFromPoint`。④ 门禁 `tools/panels/book-reader.mjs:281` 补四个滚动用例与两条反向断言。 | 分页模式已经证明「点的命中面取决于排版留白与遮挡，而『正在读哪一项』是几何问题」；滚动模式只是把这条结论再走一遍，让两条分支共用同一组矩形、同一句 `elements.find`，避免再出现「实验量 y 加了 margin、实现里只加 2」那种两处各写一份的偏差。 | `tsc --noEmit` 0；`check:panels` 496/496；真机复测栏收着 0 / 5000 / 60000 / 160000 ⇒ `0.00% / 47.64% / 66.00% / 78.75%`（章节 1 / 5 / 8 / 11），栏摊开（260 + 240）读数一致。 |
+
 
 
 
