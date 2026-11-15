@@ -785,12 +785,12 @@ apps/desktop/src/test_ui/
 > 单文件接近/超过 1000 行时**必须**检查是否该拆，且**不得**靠 `include!`/内部 `mod` 把职责藏起来绕过拆分。
 > 已有四轮这种检查，结论都写在文件头里：
 > - `crates/hp-core/src/blueprint.rs`（曾 996 行：图文档 + 枚举 + 节点结构 + 校验 + 软告警 + 存储行）→ **拆**成
->   `blueprint.rs` / `blueprint_types.rs` / `blueprint_node.rs` / `blueprint_row.rs` / `blueprint_validate.rs` /
+>   `blueprint.rs` / `blueprint_types.rs` / `blueprint_node.rs` / `blueprint_row.rs` / `blueprint_validate/`（D218 按规则族分文件）/
 >   `blueprint_warnings.rs`（各自一句话职责，互相不重叠）；
 > - `crates/hp-core/src/blueprint_tests.rs`：**第一版结论是"不拆"**（只服务"蓝图"一个功能域）；
 >   但随规则增长它涨到 **1217 行、越过 1200 硬上限**，于是改为：`blueprint_tests.rs` 只作为
 >   `mod tests` 外壳（12 行），测试项按"视图/结构类"与"校验/规则类"分到
->   `blueprint_tests_structure.rs`（~620 行）与 `blueprint_tests_rules.rs`（~460 行），
+>   `blueprint_tests_structure.rs`（~620 行）与 `blueprint_tests_rules/`（按规则族四分片：`overlay_and_marks.rs` / `edges_and_graph.rs` / `panels_and_classes.rs` / `layers_and_builtins.rs`；D219 之前是单份 1182 行、距上限只差 18 行），
 >   用 `include!` 展开进同一个测试模块——**拆的是文件，不是模块**，私有项照旧可测。
 > - 2026-09 第四轮（**按"900 行左右"逐个体检**，结论：七个文件都拆）：见下节「本轮拆分记录」。
 

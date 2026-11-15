@@ -86,6 +86,33 @@ report(
   tooBig.map((x) => `${x.f}=${x.n}`).join(", "),
 );
 
+// ---- 规则测试分片（D219）：原 1182 行单文件距 1200 行上限只差 18 行，新增规则用例会立刻撞门禁。
+const RULES = ["overlay_and_marks.rs", "edges_and_graph.rs", "panels_and_classes.rs", "layers_and_builtins.rs"];
+const rulesDir = join(SRC, "blueprint_tests_rules");
+const rulesLegacy = join(SRC, "blueprint_tests_rules.rs");
+report(
+  "蓝图规则测试按规则族分片（原单文件 blueprint_tests_rules.rs 不得复活）",
+  !existsSync(rulesLegacy) && RULES.every((f) => existsSync(join(rulesDir, f))),
+  existsSync(rulesLegacy) ? "crates/hp-core/src/blueprint_tests_rules.rs 又出现了" : RULES.filter((f) => !existsSync(join(rulesDir, f))).join(", "),
+);
+
+const harness = readFileSync(join(SRC, "blueprint_tests.rs"), "utf8");
+const missingIncludes = RULES.filter((f) => !harness.includes(`include!("blueprint_tests_rules/${f}");`));
+report(
+  "blueprint_tests.rs 仍把四个分片全部 include 进来",
+  missingIncludes.length === 0,
+  missingIncludes.join(", "),
+);
+
+const shards = RULES.map((f) => ({ f, text: readFileSync(join(rulesDir, f), "utf8") }));
+const testCount = shards.reduce((n, s) => n + (s.text.match(/^\s*#\[test\]/gm) || []).length, 0);
+const oversizedShards = shards.filter((s) => s.text.split("\n").length - 1 > LIMIT);
+report(
+  `规则测试用例不少于 26 个且每片不超过 ${LIMIT} 行` ,
+  testCount >= 26 && oversizedShards.length === 0,
+  [testCount < 26 ? `用例数=${testCount}` : "", oversizedShards.map((s) => s.f).join(",")].filter(Boolean).join(" "),
+);
+
 const failed = results.filter((r) => !r.ok);
 console.log(`\n[check-core-structure] ${results.length - failed.length}/${results.length} 通过`);
 process.exit(failed.length === 0 ? 0 : 1);

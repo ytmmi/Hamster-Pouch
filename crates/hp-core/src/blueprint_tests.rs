@@ -4,7 +4,8 @@
 // （`file-structure.md`），按"职责是否杂乱"拆成三份**测试项清单**，
 // 仍由本文件统一定义同一个 `mod tests`（私有项照旧可测）：
 // - `blueprint_tests_structure.rs`：视图/结构类（枚举往返、浮层档位与几何、层兜底）；
-// - `blueprint_tests_rules.rs`：校验/规则类（图级硬错误、未接通软告警、状态冲突 D66、主界面 D67）；
+// - `blueprint_tests_rules/`：校验/规则类（图级硬错误、未接通软告警、状态冲突 D66、主界面 D67），
+//   按规则族分成四个分片：`overlay_and_marks.rs` / `edges_and_graph.rs` / `panels_and_classes.rs` / `layers_and_builtins.rs`（D219）；
 // - `blueprint_tests_migrate.rs`：迁移类（v1→v2 单界面分层、v2→v3 标记归位 D137）。
 //
 // 注：三份清单用 `include!` 内联展开，故不使用内层文档注释（`//!`）。
@@ -16,6 +17,9 @@ mod tests {
     use crate::blueprint_registry::{NodeRegistry, PanelFact};
 
 include!("blueprint_tests_structure.rs");
-include!("blueprint_tests_rules.rs");
+include!("blueprint_tests_rules/overlay_and_marks.rs");
+include!("blueprint_tests_rules/edges_and_graph.rs");
+include!("blueprint_tests_rules/panels_and_classes.rs");
+include!("blueprint_tests_rules/layers_and_builtins.rs");
 include!("blueprint_tests_migrate.rs");
 }
