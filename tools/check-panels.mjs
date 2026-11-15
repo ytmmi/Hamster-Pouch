@@ -37,6 +37,7 @@ import runBookPreview from "./panels/book-preview.mjs";
 import runBookReader from "./panels/book-reader.mjs";
 import runTagtable from "./panels/tagtable.mjs";
 import runMusic from "./panels/music.mjs";
+import runBlueprintLayout from "./panels/blueprint-layout.mjs";
 
 await runRegistry();
 await runViewerInfoBar();
@@ -49,5 +50,6 @@ await runBookPreview();
 await runBookReader();
 await runTagtable();
 await runMusic();
+await runBlueprintLayout();
 
 summarize();

@@ -736,6 +736,8 @@ apps/desktop/src/app_ui/
                             #     title/artist，读标签未排期，D115 ⑫）
     BlueprintPanel.tsx      # 蓝图编辑器主面板（**入口装配**：状态 + 文档命令 + 层工具 + 图编辑动作；
                             #   界面拼给下面四个区块组件；含当前层状态）
+                            #   画布与检查器的排布随面板宽度变（D226）：`.bp-panel` 是 inline-size 查询容器，
+                            #   窄于 560px 时改成上下排（画布先拿 360px 高、检查器整宽在下面）
     BlueprintDocList.tsx    # 蓝图文档列表（新建/带结构创建开关/选中/设为默认/模板下拉）
     BlueprintToolbar.tsx    # 编辑器工具条（名称/保存/一键整理/**同步布局**/**刷新**/恢复内置默认/删除/视图切换）
     BlueprintPalette.tsx    # 节点添加面板（**所有类型都可随意创建**，无置灰；层级约束体现在连线上）

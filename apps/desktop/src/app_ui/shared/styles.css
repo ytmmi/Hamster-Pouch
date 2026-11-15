@@ -4190,6 +4190,8 @@ button.danger {
   flex-direction: column;
   gap: 6px;
   overflow: auto;
+  /* 画布/检查器的排布随面板宽度变（见 .bp-main 之后的容器查询）：查询量的是本元素。 */
+  container-type: inline-size;
 }
 
 .bp-list {
@@ -4311,6 +4313,35 @@ button.danger {
   gap: 6px;
   flex: 1;
   min-height: 260px;
+}
+
+/* 窄面板（D226）：检查器固定 232px、画布 flex:1，面板一旦窄到装不下两者，画布就被挤成
+   一条线。真机实测 213px 宽的面板：main 191、canvas 1px、inspector 232 直接溢出面板——
+   画布是这个面板的**主工作面**，不能给固定宽的检查器让路。所以窄了就改成上下排：
+   画布先拿一块固定高度，检查器整宽排在下面，面板纵向滚动。
+   判据用容器查询，量的是面板自己的宽度（.bp-panel 被声明为查询容器）。
+   阈值 560px：再窄画布就跌破 300px（560 − 面板内边距 16 − 间隙 6 − 检查器 232 ≈ 306）。 */
+@container (max-width: 560px) {
+  .bp-main {
+    flex: 0 0 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .bp-canvas {
+    flex: 0 0 auto;
+    min-height: 360px;
+  }
+
+  /* 两条坑都要躲：① 只写 width:auto 不够——检查器是 flex item（min-width:auto），
+     内容的 min-content 宽度会把它撑回 232px（实测窄面板 191 里塞了 232）；
+     ② 基础规则 `.bp-inspector { width: 232px }` 在文件里排在本块**之后**，同特异度
+     下后来居上，改写会被整条盖掉。所以选择器写成后代形态（两段类，特异度更高）。 */
+  .bp-main > .bp-inspector {
+    width: 100%;
+    min-width: 0;
+    max-height: 50vh;
+  }
 }
 
 /* 层工具条（D51）：切换/新增/重命名/删除/排序 + 无根层标记 */

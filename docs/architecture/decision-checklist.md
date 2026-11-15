@@ -1405,6 +1405,12 @@ D212 | 面板激活/可见性的订阅口与设置热加载的四条触发源各
 | --- | --- | --- | --- |
 | D225 | **缺陷修复（真机实测发现）**：① `crates/hp-repo/src/tag_repo.rs:77` 的 `delete_tag` 早已是完整删除（事务内清 `file_tags` / `file_auto_tags` / `tag_relations` 再 `DELETE FROM tags`，删不到行报 `tag 不存在`）且有两个用例在跑，但桥接层**零调用方**——tag 表只能新建/重命名/移动/摘挂，**不能删除**；② 新增 `apps/desktop/src-tauri/src/commands/tag.rs:363` 的 `tag_delete`，**一行转调** `db.delete_tag(&tag_id)`，级联顺序不在桥接层重写；③ `apps/desktop/src-tauri/src/main.rs:223` 注册；④ 前端 `apps/desktop/src/app_ui/shared/api/tag.ts:77` 的 `tagDelete`；⑤ `apps/desktop/src/app_ui/panels/TagTablePanel.tsx:213` 的 `deleteNode` 先 `window.confirm` 再调命令，菜单项在「重命名」之后（`:485`）；⑥ 三语各补 `tagtable.delete` / `deleteConfirm` / `deleteFailed` / `deleted`；⑦ `docs/spec/commands-events.md` §3.5 补 `tag.delete` 行。 | 删除语义已经在领域层写对了一次，桥接层再编排一遍就是第二份实现，两处必然走偏；不可撤销操作的风险点不在事务而在**误点**，所以确认框必须挡在请求之前。 | 门禁 `tools/panels/tagtable.mjs` 新增 3 条：菜单文案 + `api.tagDelete` 接线 + 确认框在删除请求之前；四个落点（菜单 → `tagDelete` → `tag_delete` → `delete_tag` → `main.rs` 注册）齐备；四条文案三语齐备。`check:panels` **490 → 493** 条；变异实测：删掉 `main.rs` 的 `commands::tag::tag_delete,` ⇒ 立刻 FAIL（492/493），改回即 493/493。 |
 
+### 第 107 轮 · D226：蓝图面板窄停靠时画布不被挤没（2026-11-15）
+
+| 决定 | 做法 | 为什么 | 验证 |
+| --- | --- | --- | --- |
+| D226 | **缺陷修复（真机实测发现）**：① `apps/desktop/src/app_ui/shared/styles.css` 的 `.bp-panel`（`:4194`）加 `container-type: inline-size`，成为画布/检查器排布的查询容器；② 新增 `@container (max-width: 560px)`（`:4324`）：`.bp-main` 改纵向且不吃剩余高度（`:4325`）、`.bp-canvas` 拿 `min-height: 360px`（`:4331`）、`.bp-main > .bp-inspector` 整宽（`:4340`）。 | 真机实测：蓝图面板停进 213px 宽的停靠组后 `.bp-main` 仍是 `row`、检查器固定 `232px`，画布被压到 **1px 宽**、检查器溢出面板——画布是这个面板的主工作面，不能用固定宽的检查器把它挤没；窄了就上下排，面板纵向滚动。阈值由算术定：`560 − 内边距 16 − 间隙 6 − 检查器 232 ≈ 306px`。 | 门禁 `tools/panels/blueprint-layout.mjs` 三条断言（查询容器在面板自己身上；窄面板真纵向、画布最小高度 ≥300px、检查器整宽且选择器特异度 ≥2 段；阈值算术 `limit − 2×panelPad − gap − inspectorWidth ≥ 300`），`check:panels` **493 → 496** 条全绿。真机复测（重编 debug 包）：213px 面板下 `.bp-canvas` **191×360**、检查器 191 宽落在画布下方、无横向溢出；把 sash 拖到 748px 后恢复并排（`main` 是 `row`、画布 494、检查器 232）。变异实测：删掉 `.bp-panel` 的 `container-type` ⇒ ① 立即 FAIL（495/496）。 |
+
 
 
 
