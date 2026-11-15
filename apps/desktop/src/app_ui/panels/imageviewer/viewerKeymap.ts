@@ -50,36 +50,14 @@ export function viewerKeyAction(key: string): ViewerKeyAction | null {
 }
 
 /**
- * 焦点判据看得见的**最小形状**：`document.activeElement`（`Element | null`）
- * 结构性满足它，因此判据不必依赖 DOM 类型即可被门禁驱动。
+ * 焦点判据（"面板激活时该不该抢键盘焦点"）的唯一实现在 `shared/focusTarget.ts`（D220）——
+ * 媒体播放器 / 音乐播放器 / 图像查看器共用同一条判据。这里按**历史名字**转出，
+ * 既有的 `shouldTakeViewerFocus(...)` 调用与门禁 import 都不必改。
+ *
+ * 本文件**不得**引入 React / Tauri：它被门禁 `pathToFileURL` 直接 import 来驱动
+ * 键位与判据表，只有纯逻辑才能这么测（判据本身也因此在 `shared/focusTarget.ts` 里）。
  */
-export interface ViewerFocusTarget {
-  tagName?: string;
-  isContentEditable?: boolean;
-  closest?: (selector: string) => unknown;
-}
-
-/**
- * 面板被激活时**该不该**把键盘焦点拿到面板根节点。
- *
- * 为什么需要这条判据：面板被**程序激活**（蓝图双击图像 → `focusPanel` →
- * `panel.api.setActive()`）时，DOM 焦点还留在原面板上，根节点的 `onKeyDown`
- * 根本收不到方向键——表现为"进来了却按方向键没反应"。取焦点是修法，但**不能无条件抢**。
- *
- * 判据（失败方向刻意选"**不抢**"——抢错的代价是把用户正在打的字打到别处）：
- *
- * | 焦点当前在 | 取？ | 理由 |
- * | --- | --- | --- |
- * | 无 / `<body>` / 普通元素 | ✅ | 这正是"从别的面板进来"的形态 |
- * | `input` / `textarea` / `select` / `contenteditable` | ❌ | 用户正在输入 |
- * | 模态浮层内（`[role="dialog"]`） | ❌ | 全部设置 / 确认弹窗 / 任务浮窗盖在布局之上，键盘属于浮层 |
- * | 标签条内（`[role="tablist"]`） | ❌ | dockview 用方向键在标签间移动焦点（roving tabindex）；抢走即把标签键盘导航废掉 |
- */
-export function shouldTakeViewerFocus(target: ViewerFocusTarget | null | undefined): boolean {
-  if (!target) return true;
-  const tag = (target.tagName ?? "").toUpperCase();
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return false;
-  if (target.isContentEditable) return false;
-  if (typeof target.closest !== "function") return true;
-  return !target.closest('[role="dialog"]') && !target.closest('[role="tablist"]');
-}
+export {
+  shouldTakePanelFocus as shouldTakeViewerFocus,
+  type FocusTarget as ViewerFocusTarget,
+} from "../../shared/focusTarget";

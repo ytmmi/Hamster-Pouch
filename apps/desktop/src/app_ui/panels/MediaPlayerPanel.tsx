@@ -60,9 +60,10 @@ import { errorTextOf } from "../shared/api/response";
 import { AudioWaveform } from "../shared/AudioWaveform";
 import { resolveSourceUrl } from "../shared/mediaUrl";
 import { VolumeIcon } from "./shared/icons";
-import { formatMs } from "./shared/time";
+import { formatClock, formatMs } from "./shared/time";
 import { clampVolume } from "./shared/volume";
 import { usePanelActivity } from "../shared/panelActivity";
+import { usePanelFocusOnActivate } from "../shared/panelFocus";
 import { usePanelSettingValue } from "../shared/settingValue";
 import { publishSettingChanged } from "../core/settingChangeStore";
 import { useApp } from "../core/AppContext";
@@ -106,6 +107,8 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
   /** 当前源的 URL（与 `videoUrl` 同步保存在 ref 里，供异步回调比较"源有没有换"）。 */
   const videoUrlRef = useRef<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  /** 面板根节点：键盘焦点落在这里，方向键/空格才可达（见 usePanelFocusOnActivate）。 */
+  const rootRef = useRef<HTMLDivElement>(null);
   /** 拖动进度条中：此时以本地值为准，不被 timeupdate 覆盖。 */
   const scrubbingRef = useRef(false);
   const [scrubMs, setScrubMs] = useState<number | null>(null);
@@ -412,6 +415,10 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
     }
   });
 
+  // 激活即取焦点（D220 前靠根节点的 onPointerDown 调 setActive()，那行会让
+  // pointerdown 之后的原生 range 拖拽永不启动——进度条"按住拖、值不动"）。
+  usePanelFocusOnActivate(panelApi, rootRef);
+
   // 音量落到元素上：`<video>` 是 `videoUrl` 就绪后才挂载的，所以两个依赖都要看
   // （换源 = 新元素，必须重新应用；音量变化 = 当前元素即时生效）。
   useEffect(() => {
@@ -558,11 +565,18 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
 
   return (
     <div
+      ref={rootRef}
       className="panel"
       tabIndex={0}
       onKeyDown={onKeyDown}
-      // 面板可聚焦才能收方向键：点一下就聚焦，不必先按 Tab。
-      onPointerDown={() => panelApi?.setActive?.()}
+      // 面板可聚焦才能收方向键：点一下就聚焦，不必先按 Tab。**不能**在这里调
+      // panel.api.setActive()：在 pointerdown 里同步激活面板会让面板 DOM 重新挂载/
+      // 重排，浏览器随即取消 mousedown 兼容事件，原生 range（进度条/音量）的拖拽
+      // 从此永不启动（D220 修的就是这句）。控件自己不抢焦点，避免抢掉滑块的拖拽。
+      onPointerDown={(event) => {
+        if ((event.target as HTMLElement).closest("button, input, select, textarea")) return;
+        rootRef.current?.focus({ preventScroll: true });
+      }}
     >
       <div className="viewer-info">
         <span>{app.selectedFile?.relative_path ?? app.t("common.noSelection")}</span>
@@ -618,7 +632,7 @@ export function MediaPlayerPanel({ api: panelApi }: MediaPlayerPanelProps): JSX.
 
       {/* 进度条：画面下方，拖动定位，实时同步播放进度 */}
       <div className="player-progress">
-        <span className="player-time mono">{formatMs(displayPosition)}</span>
+        <span className="player-time mono">{formatClock(displayPosition)}</span>
         <input
           className="player-progress-bar"
           type="range"

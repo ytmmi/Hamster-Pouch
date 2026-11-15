@@ -45,6 +45,7 @@ import { errorTextOf } from "../shared/api/response";
 import { assetUrlOrNull } from "../shared/assetUrl";
 import { resolveSourceUrl } from "../shared/mediaUrl";
 import { usePanelActivity } from "../shared/panelActivity";
+import { usePanelFocusOnActivate } from "../shared/panelFocus";
 import { usePanelSettingValue } from "../shared/settingValue";
 import { clampVolume } from "./shared/volume";
 import { publishSettingChanged } from "../core/settingChangeStore";
@@ -383,6 +384,10 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
     }
   });
 
+  // 激活即把键盘焦点交给面板：点标签切进来后方向键/空格要能直接用（D220 前只有
+  // 「点面板内容」这条路能聚焦，点标签进来看起来就是"键盘不响应"）。
+  usePanelFocusOnActivate(panelApi, rootRef);
+
   // 音量落到元素上：元素是 `sourceUrl` 就绪后才挂载的，所以两个依赖都要看
   // （换源 = 新元素，必须重新应用；音量变化 = 当前元素即时生效）。
   useEffect(() => {
@@ -545,7 +550,7 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
       onPointerDown={(event) => {
         // 点击舞台即把键盘焦点交给面板（`<div>` 不会因子元素被点击而自动获得焦点）；
         // 控件是 `<button>`，点它们时不抢焦点。`preventScroll` 防止聚焦引起跳动。
-        if ((event.target as HTMLElement).closest("button")) return;
+        if ((event.target as HTMLElement).closest("button, input, select, textarea")) return;
         rootRef.current?.focus({ preventScroll: true });
       }}
     >

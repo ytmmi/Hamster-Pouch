@@ -272,6 +272,12 @@ apps/desktop/src/app_ui/
       panelActivity.ts       # 面板激活/可见性的**唯一**订阅口（D212）：usePanelActivity(panelApi, onChange)
                             #   接 dockview 的 onDidActiveChange / onDidVisibilityChange（全仓只此一处），
                             #   回调给 { isVisible, isActive } 两个维度、判据留给调用方；一次切换可能触发两次，回调需幂等
+      panelFocus.ts          # 「面板激活即取键盘焦点」的**唯一**实现（D220）：usePanelFocusOnActivate(panelApi, rootRef)
+                            #   三道收敛（只在进入转换取一次 / 判据当帧读 / 延后一帧且帧内重读激活态）；
+                            #   鼠标点标签与键盘按标签靠 pointerdown 时间戳区分——点标签时焦点还在上一个
+                            #   标签（tablist 内），只靠判据表会永远拦下（用户报的「键盘不响应」正是这条）
+      focusTarget.ts         # 焦点判据的纯逻辑（D220）：shouldTakePanelFocus —— input/textarea/select/
+                            #   contenteditable、[role=dialog]、[role=tablist] 内不抢；无焦点与普通元素要抢
      assetUrl.ts            # `convertFileSrc` 的**唯一**调用点（D208）：assetUrl / assetUrlOrNull /
                            #   assetUrlOrEmpty 三种空值口径；面板不再直接 import convertFileSrc
      urlCache.ts           # 结果缓存 + in-flight 去重的骨架（D208）：createUrlResolver(keyOf, load)

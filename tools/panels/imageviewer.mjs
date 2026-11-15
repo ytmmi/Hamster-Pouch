@@ -24,6 +24,17 @@ export default async function run() {
 const keymap = await import(
   pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerKeymap.ts")).href
 );
+// D220：焦点判据（"激活时该不该抢键盘焦点"）搬到 `shared/focusTarget.ts`，取焦点的三道收敛
+// 搬到 `shared/panelFocus.ts`——图像查看器 / 媒体播放器 / 音乐播放器共用同一份。
+const focusTarget = await import(
+  pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/focusTarget.ts")).href
+);
+const focusTargetSrc = readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/focusTarget.ts"), "utf8");
+const panelFocusSrc = readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/panelFocus.ts"), "utf8");
+const viewerKeymapSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerKeymap.ts"),
+  "utf8",
+);
 
 check(
   "图像查看器按键映射：左方向键 = 上一张、右方向键 = 下一张（顺序即胶片栏序列）",
@@ -71,19 +82,20 @@ check(
 check(
   "从其他面板进入（程序激活）时面板把键盘焦点拿到根节点",
   // 订阅口全仓唯一（`shared/panelActivity.ts`，D212）：面板不再自己接 dockview 事件。
-  /usePanelActivity\(panelApi, \(\{ isVisible, isActive \}\)/.test(imageViewerPanelSrc) &&
+  /usePanelFocusOnActivate\(panelApi, rootRef\)/.test(imageViewerPanelSrc) &&
     !/panelApi\.onDidActiveChange\(|panelApi\.onDidVisibilityChange\(/.test(imageViewerPanelSrc) &&
-    /const active = isVisible && isActive;/.test(imageViewerPanelSrc) &&
-    /const entered = active && !enteredRef\.current;/.test(imageViewerPanelSrc) &&
-    /enteredRef\.current = active;/.test(imageViewerPanelSrc) &&
-    /if \(!entered\) return;/.test(imageViewerPanelSrc) &&
-    /shouldTakeViewerFocus\(document\.activeElement\)/.test(imageViewerPanelSrc) &&
-    // 取焦点延后一帧（否则被浏览器"点击即聚焦标签"的默认动作覆盖）；
-    // 帧内重读激活态——这一帧里用户可能已经切走，此时不能再抢焦点。
-    /requestAnimationFrame\(\(\) => \{[\s\S]{0,260}?if \(!api\.isVisible \|\| !api\.isActive\) return;[\s\S]{0,80}?rootRef\.current\?\.focus\(\{ preventScroll: true \}\);/.test(
-      imageViewerPanelSrc,
-    ) &&
-    /cancelAnimationFrame\(focusFrameRef\.current\)/.test(imageViewerPanelSrc),
+    // 三道收敛（只在进入转换取一次 / 判据当帧读 / 延后一帧且帧内重读激活态）在共享钩子里，
+    // 面板不再自带：同一件事三份实现里只会有一份被修（D220）。
+    panelFocusSrc.includes("const entered = active && !enteredRef.current;") &&
+    panelFocusSrc.includes("enteredRef.current = active;") &&
+    panelFocusSrc.includes("if (!entered) return;") &&
+    panelFocusSrc.includes("shouldTakePanelFocus(document.activeElement)") &&
+    // 鼠标点标签进来要算数：那一刻焦点还在上一个标签（tablist 内），只靠判据表会永远拦下。
+    panelFocusSrc.includes("const byPointer = Date.now() - pointerRef.current < 600;") &&
+    panelFocusSrc.includes("if (!api.isVisible || !api.isActive) return;") &&
+    panelFocusSrc.includes("rootRef.current?.focus({ preventScroll: true })") &&
+    panelFocusSrc.includes("cancelAnimationFrame(frameRef.current)") &&
+    !/enteredRef|focusFrameRef/.test(imageViewerPanelSrc),
 );
 // 取焦点**不能无条件抢**：正在输入 / 模态浮层 / 标签条键盘导航都必须让路。
 check(
@@ -119,17 +131,14 @@ check(
 );
 check(
   "按键映射与焦点判据是**纯逻辑模块**（无 React / Tauri 依赖，门禁可直接 import）",
-  !/from "react"/.test(
-    readFileSync(
-      join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerKeymap.ts"),
-      "utf8",
-    ),
-  ) && !/@tauri-apps/.test(
-    readFileSync(
-      join(ROOT, "apps/desktop/src/app_ui/panels/imageviewer/viewerKeymap.ts"),
-      "utf8",
-    ),
-  ),
+  // 判据本身在 D220 搬到 `shared/focusTarget.ts`（三个面板共用一条），键位模块按历史名字转出。
+  !/from "react"/.test(viewerKeymapSrc) &&
+    !/@tauri-apps/.test(viewerKeymapSrc) &&
+    /shouldTakePanelFocus as shouldTakeViewerFocus/.test(viewerKeymapSrc) &&
+    !/from "react"/.test(focusTargetSrc) &&
+    !/@tauri-apps/.test(focusTargetSrc) &&
+    // 行为驱动：纯逻辑模块可直接 import 驱动判据表（上面三条 check 已这么用）。
+    focusTarget.shouldTakePanelFocus(null) === true,
 );
 
 // ==================== 图像查看器：胶片栏排序与媒体预览一致（缺陷 0039 / D144） ====================

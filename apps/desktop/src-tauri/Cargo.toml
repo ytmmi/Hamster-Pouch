@@ -1,6 +1,6 @@
 [package]
 name = "hamster-pouch-desktop"
-version = "0.1.72-Alpha"
+version = "0.1.73-Alpha"
 edition = "2024"
 description = "仓鼠颊桌面应用壳（Tauri 桥接层）"
 

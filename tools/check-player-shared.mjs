@@ -104,5 +104,58 @@ report(
     !read(MUSIC_STAGE).includes("<svg"),
 );
 
+// ==================== D220：面板激活即取键盘焦点 ====================
+//
+// 两条用户报障（进度条拖不动 / 音乐面板方向键与空格不响应）是同一个毛病的两面：
+// ① 媒体播放器根节点的 `onPointerDown` 在 pointerdown 里同步调 `panel.api.setActive()`，
+//    面板 DOM 因此重新挂载/重排，浏览器随即取消 `mousedown` 兼容事件——原生 range 的
+//    拖拽永不启动（进度条、音量条都拖不动）；② 点标签切面板后焦点留在标签元素上，
+//    面板根的 `onKeyDown` 收不到键（方向键被 dockview 拿去移动标签）。
+// 修法：激活即取焦点只留一份实现（`shared/panelFocus.ts`），根节点点击**只聚焦**。
+const FOCUS_TARGET = "shared/focusTarget.ts";
+const PANEL_FOCUS = "shared/panelFocus.ts";
+const VIEWER_PANEL = "panels/imageviewer/ImageViewerPanel.tsx";
+
+function stripComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+const HOOK = "usePanelFocusOnActivate(panelApi, rootRef)";
+const panelsWithFocus = [VIDEO_PANEL, MUSIC_PANEL, VIEWER_PANEL];
+report(
+  "面板激活即取键盘焦点只有一份实现（shared/panelFocus.ts，三个面板共用）",
+  read(PANEL_FOCUS).includes("export function usePanelFocusOnActivate(") &&
+    read(PANEL_FOCUS).includes("requestAnimationFrame(") &&
+    read(PANEL_FOCUS).includes("enteredRef.current = active;") &&
+    read(PANEL_FOCUS).includes("shouldTakePanelFocus(document.activeElement)") &&
+    read(PANEL_FOCUS).includes("pointerRef.current = Date.now();") &&
+    read(PANEL_FOCUS).includes("const byPointer = Date.now() - pointerRef.current < 600;") &&
+    read(PANEL_FOCUS).includes("cancelAnimationFrame(frameRef.current)") &&
+    read(FOCUS_TARGET).includes("export function shouldTakePanelFocus(") &&
+    files.every((f) => f.rel === PANEL_FOCUS || !/function usePanelFocusOnActivate\s*\(/.test(f.text)) &&
+    panelsWithFocus.every((rel) => read(rel).includes(HOOK) && read(rel).includes("shared/panelFocus")) &&
+    // 查看器不再自带那段内联实现（曾只有它有，另外两个面板根本没有）。
+    !/enteredRef|focusFrameRef/.test(read(VIEWER_PANEL)),
+);
+
+report(
+  "面板根不得用 setActive() 抢激活（pointerdown 里同步激活会打断原生 range 拖拽）",
+  files.every(
+    (f) =>
+      !/panelApi\??\.setActive\??\(/.test(stripComments(f.text)) &&
+      !/setActive\??\(\)\s*;\s*\/\/.*pointerdown/.test(f.text),
+  ) &&
+    /closest\("button, input, select, textarea"\)/.test(read(VIDEO_PANEL)) &&
+    /rootRef\.current\?\.focus\(\{ preventScroll: true \}\)/.test(read(VIDEO_PANEL)) &&
+    /ref=\{rootRef\}/.test(read(VIDEO_PANEL)),
+);
+
+report(
+  "进度条左端按已播时间显示 0:00（formatClock）而不是 --:--（formatMs 对 0 的占位）",
+  /formatClock\(displayPosition\)/.test(read(VIDEO_PANEL)) &&
+    /formatMs\(durationMs\)/.test(read(VIDEO_PANEL)) &&
+    !/formatMs\(displayPosition\)/.test(read(VIDEO_PANEL)),
+);
+
 console.log(`\n[check-player-shared] ${passed}/${total} 通过`);
 process.exit(passed === total ? 0 : 1);
