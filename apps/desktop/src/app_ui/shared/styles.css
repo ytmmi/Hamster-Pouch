@@ -2968,6 +2968,10 @@ button.danger {
   position: relative;
   display: flex;
   align-items: stretch;
+  /* 两栏宽度是**面板宽度的比例**（见下方容器查询），所以这里必须是查询容器：
+     绝对定位子元素的百分比按包含块解析，容器查询也按它来量。inline-size 只量宽度，
+     不影响纵向布局。 */
+  container-type: inline-size;
 }
 
 .br-rail {
@@ -2987,18 +2991,40 @@ button.danger {
 .br-rail-left {
   left: 0;
   border-right: 1px solid var(--border);
-  /* 参考图里左栏是"封面 + 书名 + 作者 + 已读"再往下四个标签，
-     比右栏（只有若干行滑条）需要更多横向空间；仍然远窄于正文。
-     `min(…, 70%)` 是窄面板下的兜底：260px 在 300px 宽的面板里会把正文整块盖住，
-     而浮层**不该**让阅读区完全消失（用户开目录是为了看着书名跳，不是遮住正文）。
-     百分比在绝对定位元素上按包含块（`.br-body`）解析，随面板宽度自动收窄。 */
-  width: min(260px, 70%);
+  /* 参考图里左栏是"封面 + 书名 + 作者 + 已读"再往下四个标签，比右栏（只有若干行滑条）
+     需要更多横向空间；仍然远窄于正文。百分比按包含块解析，随面板宽度自动收窄。
+     两栏之和必须 ≤ 100%：右栏贴着右边、宽度固定时，左栏一旦占到 70% 就会压到右栏
+     上面（D224 实测：面板 205px 时两栏重叠 183px，四个标签页被压成 27px 且点击落到
+     右栏标题上）。58% + 42% 是两栏同时展开、两侧都还剩一点正文可见时的分界。 */
+  width: min(260px, 58%);
 }
 
 .br-rail-right {
   right: 0;
   border-left: 1px solid var(--border);
-  width: 240px;
+  width: min(240px, 42%);
+}
+
+/* 窄面板：两栏改成**上下分栏**，不再并排。
+   并排在 300px 以下每栏只剩百来像素（书名与选项行全成省略号），而两栏本来就是
+   "目录"与"选项"两条互不依赖的阅读路径——上下分栏后各拿整宽才读得全。
+   阈值取自实测：189px 面板下上下分栏零重叠，379px 面板下并排零重叠。 */
+@container (max-width: 300px) {
+  .br-rail-left {
+    right: 0;
+    bottom: 52%;
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .br-rail-right {
+    left: 0;
+    top: 48%;
+    width: 100%;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
 }
 
 .br-rail-tabs {

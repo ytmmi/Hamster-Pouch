@@ -442,6 +442,9 @@ apps/desktop/src/app_ui/
                       #     book.toc 的游标；书签 / 笔记 / 高亮三个标签页共用一份批注列表
                       #     ——顶部"在当前位置留一条"，高亮的原文取浏览器选区、划不到用
                       #     当前页开头兜底
+                      #     两栏宽度是**面板宽度的比例**（D224）：.br-body 是 inline-size
+                      #     容器，左 58% / 右 42%（都封顶 260/240px）⇒ 永不横向交叠；
+                      #     @container (max-width: 300px) 里改成上下分栏（各占整宽）
                       #   ReaderBookHeader.tsx 左栏栏头（D114）：**复用 bookpreview 的
                       #     BookCoverArt**（同一本书两个面板一张封面）+ bookDisplayName
                       #     书名 + book.authorLabel 作者（缺值 —）+ 「已读 N min」

@@ -146,6 +146,36 @@ check(
     );
   })(),
 );
+check(
+  "①b 窄面板下两栏**不互相覆盖**：宽度按面板比例分配，且窄到并排放不下时改成上下分栏",
+  (() => {
+    // 真机实测（D224）：面板拖到 205px 宽时，左栏 `min(260px, 70%)` 占 132px、右栏固定
+    // 240px 贴右，两栏重叠 183px，四个标签页被压成 27px 且点击落到右栏标题上——目录
+    // 直接不可用。判据分两层：① 两栏百分比之和 ≤ 100（永远不会横向交叠）；
+    // ② 窄到每栏只剩百来像素时上下分栏（`@container` 块里两条都改 width: 100%）。
+    const body = stylesSource.match(/\.br-body\s*\{[^}]*\}/)?.[0] ?? "";
+    const left = stylesSource.match(/\.br-rail-left\s*\{[^}]*\}/)?.[0] ?? "";
+    const right = stylesSource.match(/\.br-rail-right\s*\{[^}]*\}/)?.[0] ?? "";
+    const pct = (rule) => {
+      const m = rule.match(/width:\s*min\(\s*\d+px\s*,\s*(\d+)%\s*\)/);
+      return m ? Number(m[1]) : null;
+    };
+    const leftPct = pct(left);
+    const rightPct = pct(right);
+    // 窄面板那一段必须是容器查询（拿 `.br-body` 的宽度量），且两栏都占满整宽、纵向分层。
+    const narrow = stylesSource.match(/@container\s*\(max-width:\s*300px\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
+    return (
+      /container-type:\s*inline-size/.test(body) &&
+      leftPct !== null &&
+      rightPct !== null &&
+      leftPct + rightPct <= 100 &&
+      /width:\s*100%/.test(narrow) &&
+      // 上下分栏的判据：一侧贴底、一侧贴顶（不再靠 left/right 并排）。
+      /bottom:\s*\d+%/.test(narrow) &&
+      /top:\s*\d+%/.test(narrow)
+    );
+  })(),
+);
 
 check(
   "② 目录当前章 / ⑤ 选中档位**不得**用 `color: var(--accent)`（浅色主题下是白色 → 白字白底）",
