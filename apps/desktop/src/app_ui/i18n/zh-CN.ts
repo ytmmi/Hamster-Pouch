@@ -200,6 +200,8 @@ export const zhCN = {
   "tagtable.newSibling": "新增同级标签",
   "tagtable.newChild": "新增子标签",
   "tagtable.rename": "重命名",
+  "tagtable.delete": "删除",
+  "tagtable.deleteConfirm": "删除标签「{name}」？它在全部媒体上的打标会一起移除，无法撤销。",
   "tagtable.createHint": "输入标签名，回车确认",
   "tagtable.crossOnly": "只看交叉标签",
 
@@ -642,6 +644,8 @@ export const zhCN = {
   "tagtable.loadFailed": "tag表加载失败：{err}",
   "tagtable.createFailed": "新建标签失败：{err}",
   "tagtable.renameFailed": "重命名失败：{err}",
+  "tagtable.deleteFailed": "删除失败：{err}",
+  "tagtable.deleted": "已删除标签「{name}」",
   "tagtable.moveFailed": "移动失败：{err}",
   "tagtable.dropAdded": "已把 {count} 项媒体加入「{name}」",
   "tagtable.dropFailed": "打标签失败：{err}",

@@ -197,6 +197,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "tagtable.newSibling": "New sibling tag",
   "tagtable.newChild": "New child tag",
   "tagtable.rename": "Rename",
+  "tagtable.delete": "Delete",
+  "tagtable.deleteConfirm": "Delete tag \"{name}\"? It will be removed from every media item and cannot be undone.",
   "tagtable.createHint": "Type a name, press Enter",
   "tagtable.crossOnly": "Cross tags only",
 
@@ -623,6 +625,8 @@ export const en: Record<keyof DictZhCN, string> = {
   "tagtable.loadFailed": "Failed to load tag table: {err}",
   "tagtable.createFailed": "Failed to create tag: {err}",
   "tagtable.renameFailed": "Rename failed: {err}",
+  "tagtable.deleteFailed": "Delete failed: {err}",
+  "tagtable.deleted": "Deleted tag \"{name}\"",
   "tagtable.moveFailed": "Move failed: {err}",
   "tagtable.dropAdded": "Added {count} item(s) to \"{name}\"",
   "tagtable.dropFailed": "Failed to tag media: {err}",

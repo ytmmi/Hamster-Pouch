@@ -3,7 +3,7 @@
  *
  * - 层级树：展开/折叠、缩进、tag 图标、右侧文件计数；
  * - 交叉关联：多父级 tag 在每个上级下各出现一次，名称以浅蓝色标示；
- * - 右键菜单：新增同级标签 / 新增子标签 / 重命名；
+ * - 右键菜单：新增同级标签 / 新增子标签 / 重命名 / 删除（D225）；
  * - 新增：先插入空白临时标签行并聚焦输入，回车确认；不命名则丢弃临时行；
  * - 拖拽 = 移动（拖到 tag 上成为其子级，拖到空白移到根）；
  * - **媒体拖放打标（D117）**：从媒体预览拖来单选/多选的文件（载荷
@@ -199,6 +199,26 @@ export function TagTablePanel(): JSX.Element {
       app.refresh();
     } catch (e) {
       app.status(app.t("tagtable.renameFailed", { err: errorTextOf(app.t, e) }), "error");
+    }
+  };
+
+  /**
+   * 删除 tag 实体（D225）。
+   *
+   * 领域层的 delete_tag 本来就是完整删除（事务内清人工 tag、自动 tag、tag 关系），
+   * 但界面上一直没有入口——建错的 tag 只能改名、不能消失。这里只补一条菜单项，
+   * 删除语义全部留给领域层，不在前端重复编排级联顺序。
+   * 不可撤销，所以先 window.confirm（与 AlbumPanel 的删除相册同款）。
+   */
+  const deleteNode = async (node: TagTreeNode) => {
+    setMenu(null);
+    if (!window.confirm(app.t("tagtable.deleteConfirm", { name: node.name }))) return;
+    try {
+      await api.tagDelete(node.id);
+      app.status(app.t("tagtable.deleted", { name: node.name }), "ok");
+      app.refresh();
+    } catch (e) {
+      app.status(app.t("tagtable.deleteFailed", { err: errorTextOf(app.t, e) }), "error");
     }
   };
 
@@ -460,6 +480,9 @@ export function TagTablePanel(): JSX.Element {
                 }}
               >
                 {app.t("tagtable.rename")}
+              </button>
+              <button className="menu-item" onClick={() => void deleteNode(menu.node)}>
+                {app.t("tagtable.delete")}
               </button>
             </ContextMenu>
           )}

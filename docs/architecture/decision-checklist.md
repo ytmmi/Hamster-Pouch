@@ -1399,6 +1399,12 @@ D212 | 面板激活/可见性的订阅口与设置热加载的四条触发源各
 | --- | --- | --- | --- |
 | D224 | **缺陷修复（真机实测发现）**：① `apps/desktop/src/app_ui/shared/styles.css` 的 `.br-body` 加 `container-type: inline-size`（`:2974`），成为两栏的查询容器；② 左栏 `width: min(260px, 70%)` → `min(260px, 58%)`（`:2999`）、右栏 `width: 240px` → `min(240px, 42%)`（`:3005`），两栏之和恒 ≤ 100% ⇒ 任何宽度下都不会横向交叠；③ 新增 `@container (max-width: 300px)` 块（`:3012`）：两栏各 `width: 100%`，左栏 `right: 0; bottom: 52%`、右栏 `left: 0; top: 48%`，即**上下分栏**，接缝各留 1px 边框；④ `tools/panels/book-reader.mjs` 新增 check ①b（`:150`）：「宽度按面板比例分配（`min(Npx, P%)` 且两栏百分比之和 ≤ 100）+ `br-body` 是 `inline-size` 容器 + 300px 以下块里两栏都 `width: 100%` 且一侧 `top` 一侧 `bottom`」；⑤ 注释里写明实测数字（205px 面板重叠 183px、标签页压成 27px）与阈值出处（189px 分栏零重叠、379px 并排零重叠）。 | 真机把左侧竖 sash 拖到 x=430（面板 205px）后，左栏按 70% 占 132px、右栏固定 240px 贴右，**两栏重叠 183px**，`z-index` 同为 20 ⇒ 右侧「阅读选项」压在四个标签页上，标签只剩 27px 宽且 `elementFromPoint` 命中的是右栏标题，目录点不动。根因不是某一栏太宽，而是**两栏没有共同的宽度预算**：左栏的 70% 兜底只保证「不盖正文」，右栏的 `240px` 根本不随面板收窄。百分比之和 ≤ 100 是把预算显式化；300px 以下再并排每栏只剩百来像素（书名与选项行全是省略号），而两栏本来是「目录」与「选项」两条互不依赖的路径，上下分栏各拿整宽才读得全。 | 真机实测（重编 debug 包 + CDP）：面板 379px → 左 220 / 右 159、横向重叠 0、四个标签各 49px、命中全是 `br-rail-tab`；面板 189px → 上下分栏（左 `[233,95,189,309]`、右 `[233,404,189,335]`）、标签各 42px、点「书签」真的切页（`active:["书签"]`）。门禁 `check:panels` **489 → 490** 条全绿；变异实测：把右栏改回 `width: 240px` ⇒ ①b 立即 FAIL（489/490），改回即 490/490。 |
 
+### 第 106 轮 · D225：tag 删除入口（2026-11-15）
+
+| 决定 | 做法 | 为什么 | 验证 |
+| --- | --- | --- | --- |
+| D225 | **缺陷修复（真机实测发现）**：① `crates/hp-repo/src/tag_repo.rs:77` 的 `delete_tag` 早已是完整删除（事务内清 `file_tags` / `file_auto_tags` / `tag_relations` 再 `DELETE FROM tags`，删不到行报 `tag 不存在`）且有两个用例在跑，但桥接层**零调用方**——tag 表只能新建/重命名/移动/摘挂，**不能删除**；② 新增 `apps/desktop/src-tauri/src/commands/tag.rs:363` 的 `tag_delete`，**一行转调** `db.delete_tag(&tag_id)`，级联顺序不在桥接层重写；③ `apps/desktop/src-tauri/src/main.rs:223` 注册；④ 前端 `apps/desktop/src/app_ui/shared/api/tag.ts:77` 的 `tagDelete`；⑤ `apps/desktop/src/app_ui/panels/TagTablePanel.tsx:213` 的 `deleteNode` 先 `window.confirm` 再调命令，菜单项在「重命名」之后（`:485`）；⑥ 三语各补 `tagtable.delete` / `deleteConfirm` / `deleteFailed` / `deleted`；⑦ `docs/spec/commands-events.md` §3.5 补 `tag.delete` 行。 | 删除语义已经在领域层写对了一次，桥接层再编排一遍就是第二份实现，两处必然走偏；不可撤销操作的风险点不在事务而在**误点**，所以确认框必须挡在请求之前。 | 门禁 `tools/panels/tagtable.mjs` 新增 3 条：菜单文案 + `api.tagDelete` 接线 + 确认框在删除请求之前；四个落点（菜单 → `tagDelete` → `tag_delete` → `delete_tag` → `main.rs` 注册）齐备；四条文案三语齐备。`check:panels` **490 → 493** 条；变异实测：删掉 `main.rs` 的 `commands::tag::tag_delete,` ⇒ 立刻 FAIL（492/493），改回即 493/493。 |
+
 
 
 

@@ -68,6 +68,15 @@ export function tagTree(repoId: string): Promise<TagTreeNode[]> {
 export function tagRename(tagId: string, name: string): Promise<void> {
   return invokeApi<void>("tag_rename", { tagId, name });
 }
+/**
+ * 删除 tag 实体（连同它的人工/自动关联与 tag 关系）。
+ *
+ * 领域层本来就是完整删除；此前没有命令入口，界面只能改名不能删（D225）。
+ * 不可撤销：删除后该 tag 在媒体上的打标一起消失，调用方必须先让用户确认。
+ */
+export function tagDelete(tagId: string): Promise<void> {
+  return invokeApi<void>("tag_delete", { tagId });
+}
 
 /** 新建根 tag */
 export function tagCreateRoot(repoId: string, name: string): Promise<TagItem> {

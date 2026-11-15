@@ -195,6 +195,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "tagtable.newSibling": "新增同級標籤",
   "tagtable.newChild": "新增子標籤",
   "tagtable.rename": "重新命名",
+  "tagtable.delete": "刪除",
+  "tagtable.deleteConfirm": "刪除標籤「{name}」？它在全部媒體上的標記會一起移除，無法復原。",
   "tagtable.createHint": "輸入標籤名，Enter 確認",
   "tagtable.crossOnly": "只看交叉標籤",
 
@@ -619,6 +621,8 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "tagtable.loadFailed": "tag表載入失敗：{err}",
   "tagtable.createFailed": "新增標籤失敗：{err}",
   "tagtable.renameFailed": "重新命名失敗：{err}",
+  "tagtable.deleteFailed": "刪除失敗：{err}",
+  "tagtable.deleted": "已刪除標籤「{name}」",
   "tagtable.moveFailed": "移動失敗：{err}",
   "tagtable.dropAdded": "已把 {count} 項媒體加入「{name}」",
   "tagtable.dropFailed": "加標籤失敗：{err}",

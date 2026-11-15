@@ -352,3 +352,14 @@ pub(crate) fn tag_move(
 pub(crate) fn tag_detach(tag_id: String, state: State<AppState>) -> ApiResponse<()> {
     api_from_hp(with_repo_mut(&state, "", |db| db.detach_tag(&tag_id)))
 }
+
+/// tag.delete：删除 tag 实体及其人工/自动关联与 tag 关系（D225）。
+///
+/// 领域层 delete_tag 早已是完整语义（事务内清 file_tags / file_auto_tags /
+/// tag_relations 再删 tags，只有真正删到行才提交），但此前**没有任何调用方**：
+/// 界面只能改名、不能删除，建错的 tag 永久残留。本命令只做转调，不在这里
+/// 重复编排删除顺序——顺序是领域层的事，两处各写一遍必然走偏。
+#[tauri::command]
+pub(crate) fn tag_delete(tag_id: String, state: State<AppState>) -> ApiResponse<()> {
+    api_from_hp(with_repo_mut(&state, "", |db| db.delete_tag(&tag_id)))
+}

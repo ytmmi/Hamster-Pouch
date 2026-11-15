@@ -338,6 +338,7 @@ ratingCount, colorCount, aiUndoCount, syncAlbumCount, childSourceCount }`。
 | `tag.rename` | 重命名 tag | `{ tagId, name }` | `{ ok, data: { ok: true } }` | **已包装** | 线上 `data` 是 `()` |
 | `tag.move` | 移动 tag（拖拽 = 移动） | `{ tagId, newParentId? }` | `{ ok, data: { ok: true } }` | **已包装** | 线上 `data` 是 `()`；跨仓库/成环由领域层拒绝 |
 | `tag.detach` | 解除全部层级上级（移到根） | `{ tagId }` | `{ ok, data: { ok: true } }` | **已包装** | 线上 `data` 是 `()`；前端 `tagDetach` |
+| `tag.delete` | 删除 tag 实体（连同人工/自动关联与 tag 关系） | `{ tagId }` | `{ ok, data: { ok: true } }` | **已包装** | **D225**：领域层 `delete_tag` 早已是完整删除，此前无命令/无界面入口；线上 `data` 是 `()`；前端 `tagDelete`，界面先 `window.confirm` |
 | `tag.list` | 列出仓库内**全部 tag 实体**（D23 按仓库隔离） | `{ repoId }` | `{ ok, data: { items } }` | **已包装** | 线上 `data` 是裸数组；元素 `TagItem` 为蛇形：`id` / `repo_id` / `name` / `color`（无层级信息，层级走 `tag.tree` / `tag.relation.*`）；前端 `api/tag.ts` |
 | `rating.set` | 设置评分 | `{ repoId, fileId, rating }` | `{ ok, data: { ok: true } }` | **已包装** | 线上 `data` 是 `()`；越界评分 → `validation` |
 | `rating.get` | 读取文件评分 | `{ repoId, fileId }` | `{ ok, data: { rating \| null } }` | **已包装** | 线上 `data` 是 `i64 \| null`；`null` = 该文件无评分行（**不是** 0 分）；前端 `api/rating.ts` |

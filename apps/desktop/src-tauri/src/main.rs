@@ -220,6 +220,7 @@ fn main() {
             commands::tag::tag_create_sibling,
             commands::tag::tag_move,
             commands::tag::tag_detach,
+            commands::tag::tag_delete,
             commands::rating::rating_set,
             commands::rating::rating_get,
             commands::color::color_get,

@@ -312,4 +312,53 @@ check(
   );
 }
 
+// ---- D225：tag 表的删除入口 ----
+//
+// 立论：领域层 delete_tag 早就是完整删除（事务内清人工 tag / 自动 tag / tag 关系），
+// 但桥接层没有任何调用方、界面上也没有入口 —— 建错的 tag 只能改名，永远留在库里。
+// 本组断言钉住整条链的四个落点：漏任何一处，要么"菜单在但没有命令"，要么"删了但没真删"。
+{
+  const panelSrc = stripComments(
+    readFileSync(join(ROOT, "apps/desktop/src/app_ui/panels/TagTablePanel.tsx"), "utf8"),
+  );
+  const tagApiSrc = readFileSync(join(ROOT, "apps/desktop/src/app_ui/shared/api/tag.ts"), "utf8");
+  const tagCmdSrc = readFileSync(
+    join(ROOT, "apps/desktop/src-tauri/src/commands/tag.rs"),
+    "utf8",
+  );
+  const bridgeMainSrc = readFileSync(join(ROOT, "apps/desktop/src-tauri/src/main.rs"), "utf8");
+  const i18nSrc = (f) => readFileSync(join(ROOT, "apps/desktop/src/app_ui/i18n/" + f), "utf8");
+
+  check(
+    "D225：tag 表右键菜单有「删除」，先 window.confirm 再调 tagDelete（不可撤销）",
+    /t\("tagtable\.delete"\)/.test(panelSrc) &&
+      /const deleteNode = async \(node: TagTreeNode\)/.test(panelSrc) &&
+      /window\.confirm\(app\.t\("tagtable\.deleteConfirm", \{ name: node\.name \}\)\)/.test(
+        panelSrc,
+      ) &&
+      /api\.tagDelete\(node\.id\)/.test(panelSrc) &&
+      /app\.t\("tagtable\.deleted", \{ name: node\.name \}\)/.test(panelSrc) &&
+      // 反面：确认框必须在删除请求**之前**（顺序反了就是"问完已经删完了"）。
+      panelSrc.indexOf("window.confirm(") < panelSrc.indexOf("api.tagDelete("),
+  );
+  check(
+    "D225：删除链路四个落点齐备（菜单 → tagDelete → tag_delete → 领域层 delete_tag）",
+    /export function tagDelete\(tagId: string\): Promise<void>/.test(tagApiSrc) &&
+      /invokeApi<void>\("tag_delete", \{ tagId \}\)/.test(tagApiSrc) &&
+      /pub\(crate\) fn tag_delete\(tag_id: String, state: State<AppState>\) -> ApiResponse<\(\)>/.test(
+        tagCmdSrc,
+      ) &&
+      /db\.delete_tag\(&tag_id\)/.test(tagCmdSrc) &&
+      /commands::tag::tag_delete,/.test(bridgeMainSrc),
+  );
+  check(
+    "D225：四条删除文案三语齐备（键集一致性由类型强制，这里钉住键真的存在）",
+    ["tagtable.delete", "tagtable.deleteConfirm", "tagtable.deleteFailed", "tagtable.deleted"].every(
+      (key) =>
+        ["zh-CN.ts", "zh-TW.ts", "en.ts"].every((f) =>
+          new RegExp('"' + key + '":').test(i18nSrc(f)),
+        ),
+    ),
+  );
+}
 }
