@@ -38,7 +38,7 @@
  * - `mediaPreviewCell.tsx`：缩略图单元；`mediaPreviewView.ts`：取值域与纯函数。
  */
 
-import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -48,6 +48,7 @@ import type {
 import { resolveSizeUnit, SETTING_KEYS } from "@hamster-pouch/config";
 
 import { formatByteSize } from "../shared/format";
+import { usePanelFocusOnActivate } from "../shared/panelFocus";
 import { usePanelForeground } from "../shared/panelForeground";
 import { useHostSettingValue } from "../shared/settingValue";
 import { useStableCallback } from "../shared/stableCallback";
@@ -134,6 +135,14 @@ export interface MediaPreviewPanelProps {
 
 export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}): JSX.Element {
   const app = useApp();
+  /**
+   * 面板根：**键盘焦点的落点**（D228）。
+   *
+   * 条目容器的快捷键（Ctrl+A / Esc / Delete）挂在根节点上，从容器或缩略图冒泡上来——
+   * 容器是条件渲染的（随视图切换卸载），把监听器挂在那里等于"换了视图快捷键就换了个地方"，
+   * 而 dockview 复用的是面板根。根节点另需 `tabIndex={0}`，否则激活时的 `focus()` 无处可去。
+   */
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [viewMode, setViewMode] = useState<MediaPreviewMode>("thumb");
   const [typeFilter, setTypeFilter] = useState<MediaTypeFilter>("all");
   // 网格容器（平铺 / 自适应 / 瀑布流共用）：虚拟化要拿到**滚动容器元素**，
@@ -189,6 +198,9 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
    * **不**自带同名面板设置——两套单位解析必然漂移（`docs/spec/panel-standard.md` 第 5.3 节）。
    */
   const sizeUnit = resolveSizeUnit(useHostSettingValue(SETTING_KEYS.sizeUnit, panelApi));
+
+  // 点标签切进本面板时把焦点交给根节点（唯一实现见 `shared/panelFocus.ts`，D220/D228）。
+  usePanelFocusOnActivate(panelApi, rootRef);
 
   // 选中集与蓝图事件上报（`mediaPreviewSelection.ts`）：按拆分前的名字解构，
   // 好让条目容器与缩略图单元拿到的回调和原来一致。
@@ -534,10 +546,12 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
   );
 
   /**
-   * 容器级快捷键（网格 / 瀑布流 / 列表共用）：
-   * Ctrl+A 全选、Esc 取消、Delete 删除选中。
+   * 面板级快捷键（网格 / 瀑布流 / 列表共用）：Ctrl+A 全选、Esc 取消、Delete 删除选中。
+   *
+   * 挂在**面板根**而不是三个条目容器上：容器随视图切换卸载，根不会；而事件从条目冒泡上来，
+   * 三个视图因此共用同一份处理器（挂两处会双触发——根与容器都在同一条冒泡路径上）。
    */
-  const handleContainerKeyDown = useCallback(
+  const handlePanelKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         e.preventDefault();
@@ -605,7 +619,12 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
   );
 
   return (
-    <div className="panel mp-panel">
+    <div
+      className="panel mp-panel"
+      ref={rootRef}
+      tabIndex={0}
+      onKeyDown={handlePanelKeyDown}
+    >
       <MediaPreviewToolbar
         viewMode={viewMode}
         onViewModeChange={setViewMode}
@@ -632,8 +651,6 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
           className="mp-masonry"
           ref={gridContainerRef}
           style={containerStyle}
-          tabIndex={0}
-          onKeyDown={handleContainerKeyDown}
           onClick={handleContainerClick}
         >
           {items.length === 0 ? (
@@ -688,8 +705,6 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
           className={`mp-grid ${mediaViewClass(view)}`}
           ref={gridContainerRef}
           style={containerStyle}
-          tabIndex={0}
-          onKeyDown={handleContainerKeyDown}
           onClick={handleContainerClick}
         >
           {items.length === 0 ? (
@@ -738,8 +753,6 @@ export function MediaPreviewPanel({ api: panelApi }: MediaPreviewPanelProps = {}
         <div
           className="mp-list"
           ref={listContainerRef}
-          tabIndex={0}
-          onKeyDown={handleContainerKeyDown}
         >
           {items.length === 0 ? (
             <span className="placeholder">{app.t("media.noFiles")}</span>

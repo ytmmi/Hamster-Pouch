@@ -59,7 +59,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent, UIEvent } from "react";
 
+import type { PanelRenderCtx } from "../../core/panelRegistry";
 import type { Translate } from "../../i18n";
+import { usePanelFocusOnActivate } from "../../shared/panelFocus";
 import type { BookContentResult } from "../../shared/types";
 import { BookBlocks } from "../viewer/BookBlocks";
 import { collectBlockText } from "./bookText";
@@ -123,6 +125,13 @@ export interface ReaderStageProps {
    * 跨页位置由页序号精确给出，因此章节号与目录逐项对得上。
    */
   onPositionChange?: (position: { visibleIndex: number; offsetInPage: number }) => void;
+  /**
+   * 面板句柄：**只为键盘焦点**而来（D228）。
+   *
+   * 阅读区的方向键翻页挂在`.br-stage`上，而"点标签切进面板"这条路径上焦点留在
+   * dockview 的标签上，按键根本到不了这里。可选是为了独立窗口 / 测试渲染时能省掉。
+   */
+  api?: PanelRenderCtx["api"];
   t: Translate;
 }
 
@@ -137,10 +146,13 @@ export function ReaderStage({
   fullscreen = false,
   onBodyClick,
   onPositionChange,
+  api,
   t,
 }: ReaderStageProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const flowRef = useRef<HTMLDivElement | null>(null);
+  // 点标签切进本面板时把焦点交给阅读区（唯一实现见 `shared/panelFocus.ts`，D220/D228）。
+  usePanelFocusOnActivate(api, hostRef);
   /** 纸张（分页模式的**视口**，不参与平移）：位置探测的基准，见 `reportPosition`。 */
   const paperRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });

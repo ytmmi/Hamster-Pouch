@@ -18,6 +18,7 @@
 import { useMemo, type JSX } from "react";
 
 import { useApp } from "../core/AppContext";
+import type { PanelRenderCtx } from "../core/panelRegistry";
 import { BlueprintCanvas } from "./BlueprintCanvas";
 import { BlueprintDocList } from "./BlueprintDocList";
 import { BlueprintJsonView } from "./BlueprintJsonView";
@@ -31,7 +32,12 @@ import { useBlueprintGraphEdits } from "./useBlueprintGraphEdits";
 import { useBlueprintLayerTools } from "./useBlueprintLayerTools";
 import { useBlueprintUnlinked } from "./useBlueprintUnlinked";
 
-export function BlueprintPanel(): JSX.Element {
+export interface BlueprintPanelProps {
+  /** 面板句柄：只用于把键盘焦点交给画布（D228），见 `shared/panelFocus.ts`。 */
+  api?: PanelRenderCtx["api"];
+}
+
+export function BlueprintPanel({ api: panelApi }: BlueprintPanelProps = {}): JSX.Element {
   const app = useApp();
   const state = useBlueprintEditorState();
   const docs = useBlueprintDocuments(state);
@@ -151,6 +157,7 @@ export function BlueprintPanel(): JSX.Element {
                       unlinked={unlinkedKeys}
                       layerKey={state.layerKey}
                       refreshKey={state.refreshKey}
+                      api={panelApi}
                       t={app.t}
                     />
                     <NodeInspector

@@ -417,6 +417,8 @@ export function BookReaderPanel({ api: panelApi }: BookReaderPanelProps = {}): J
           // 不该在两栏没开时也成立（结构性保证，不靠回调里再判一次）。
           onBodyClick={railsOpen ? collapseRails : undefined}
           onPositionChange={setVisiblePage}
+          // 键盘焦点交给阅读区（D228）：方向键翻页挂在 `.br-stage` 上，不把焦点送过去就收不到。
+          api={panelApi}
           t={t}
         />
 

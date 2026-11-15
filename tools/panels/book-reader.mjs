@@ -44,6 +44,11 @@ const readerPanelSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/BookReaderPanel.tsx"),
   "utf8",
 );
+/** 阅读区本体（D228 起焦点与方向键都在这里，断言要单独读它）。 */
+const readerStageSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderStage.tsx"),
+  "utf8",
+);
 const moreMenuSrc = readFileSync(
   join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderMoreMenu.tsx"),
   "utf8",
@@ -1512,6 +1517,30 @@ check(
       !/generationRef|api\.bookContent\(|setPages\(/.test(readerHook)
     );
   })(),
+);
+
+// ============ D228：点标签切进阅读器时把键盘焦点交给阅读区 ============
+//
+// 真机实测：点标签进阅读器后焦点留在 DIV.dv-tab 上，方向键翻页**完全没反应**
+// （页脚恒 0.00% / 0.0% / 1 / 13、.br-flow 的 transform 恒 translateX(0px)）；
+// 先给 .br-stage 手动 focus() 再按右方向键，第一次就翻到 2.46% / translateX(-793px)。
+// 可见 D222 的几何判定本身是好的，缺的是"把焦点送过去"这一步。
+//
+// 焦点目标是**阅读区**（键处理挂在 .br-stage 上），不是面板根 .br-root：
+// 面板根没有键处理器，把焦点给根等于换了个地方收不到键。
+check(
+  "图书阅读器：点标签切进面板时把键盘焦点拿到阅读区（与播放器等共用 shared/panelFocus.ts）",
+  /import \{ usePanelFocusOnActivate \} from "\.\.\/\.\.\/shared\/panelFocus";/.test(readerStageSrc) &&
+    /usePanelFocusOnActivate\(api, hostRef\);/.test(readerStageSrc) &&
+    /api\?: PanelRenderCtx\["api"\];/.test(readerStageSrc) &&
+    // 面板真的把句柄传下去了（否则钩子空转，等于没接）。
+    /api=\{panelApi\}/.test(readerPanelSrc),
+);
+check(
+  "图书阅读器：焦点落在阅读区（.br-stage 可聚焦且有键处理），不是没有键处理器的面板根",
+  /ref=\{hostRef\}[\s\S]{0,80}?tabIndex=\{0\}/.test(readerStageSrc) &&
+    /onKeyDown=\{handleKeyDown\}/.test(readerStageSrc) &&
+    !/className="panel br-root" ref=\{rootRef\} tabIndex/.test(readerPanelSrc),
 );
 
 }

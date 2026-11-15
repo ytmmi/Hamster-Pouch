@@ -1199,6 +1199,32 @@ check(
     registrySource,
   ),
 );
+
+// ============ D228：点标签切进面板时把键盘焦点交给面板根 ============
+//
+// 真机实测：点「媒体预览」标签后 document.activeElement 仍是 DIV.dv-tab，
+// 于是 Ctrl+A / Esc / Delete 全部收不到（.mp-panel 根本不在焦点链上）。
+// 修法与其他面板共用同一份实现（shared/panelFocus.ts）：激活即取焦点。
+//
+// 快捷键同时从三个条目容器**收到面板根**：容器是条件渲染的（换视图就卸载），
+// 而 dockview 复用的是面板根；挂两处还会双触发——根与容器在同一条冒泡路径上。
+check(
+  "媒体预览：点标签切进面板时把键盘焦点拿到面板根（与其他面板共用 shared/panelFocus.ts）",
+  /import \{ usePanelFocusOnActivate \} from "\.\.\/shared\/panelFocus";/.test(mediaPanelSrc) &&
+    /usePanelFocusOnActivate\(panelApi, rootRef\);/.test(mediaPanelSrc) &&
+    /const rootRef = useRef<HTMLDivElement \| null>\(null\);/.test(mediaPanelSrc) &&
+    /className="panel mp-panel"[\s\S]{0,160}?ref=\{rootRef\}[\s\S]{0,160}?tabIndex=\{0\}/.test(
+      mediaPanelSrc,
+    ),
+);
+check(
+  "媒体预览：快捷键挂在面板根上（三个视图共用一份），条目容器不再各自带 tabIndex/onKeyDown",
+  /onKeyDown=\{handlePanelKeyDown\}/.test(mediaPanelSrc) &&
+    // 全文件只剩这一个 tabIndex：条目容器上的那个必须已经摘掉。
+    // 先剥注释——说明文字里也写着 `tabIndex={0}`，不剥会把文档当成代码数。
+    (stripComments(mediaPanelSrc).match(/tabIndex=\{0\}/g) ?? []).length === 1 &&
+    !/handleContainerKeyDown/.test(mediaPanelSrc),
+);
 check(
   "三种视图的样式齐全且**共用一个图片尺寸变量**：平铺（固定列宽）/ 自适应（逐行两端对齐）/ 瀑布流（固定列宽）",
   // 平铺：固定列宽 = 图片尺寸。列数由**面板下发**（`--mp-tile-columns`）而不是

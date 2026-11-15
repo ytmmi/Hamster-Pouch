@@ -26,7 +26,9 @@ import type {
   BlueprintNode,
 } from "@hamster-pouch/config";
 import { nodeLayerKey } from "@hamster-pouch/config";
+import type { PanelRenderCtx } from "../core/panelRegistry";
 import type { Translate, TranslationKey } from "../i18n";
+import { usePanelFocusOnActivate } from "../shared/panelFocus";
 import {
   connectTargets,
   portDomId,
@@ -102,6 +104,13 @@ export interface BlueprintCanvasProps {
    * 连线坐标与节点状态一起对齐（用户反馈的"连线后状态没刷新"）。
    */
   refreshKey?: number;
+  /**
+   * 面板句柄：**只为键盘焦点**而来（D228）。
+   *
+   * 画布的 Delete / Backspace 删节点挂在画布自己在 `onPointerDown` 里聚焦，鼠标点进来就能用；
+   * 缺的是"从别的面板点标签切进来"这条路径——那时焦点还在 dockview 的标签上。
+   */
+  api?: PanelRenderCtx["api"];
   t: Translate;
 }
 
@@ -154,9 +163,12 @@ export function BlueprintCanvas({
   unlinked,
   layerKey,
   refreshKey = 0,
+  api,
   t,
 }: BlueprintCanvasProps): JSX.Element {
   const canvasRef = useRef<HTMLDivElement>(null);
+  // 点标签切进本面板时把焦点交给画布（唯一实现见 `shared/panelFocus.ts`，D220/D228）。
+  usePanelFocusOnActivate(api, canvasRef);
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   /** 渲染出来的画布可见区域尺寸（小地图据此画视口指示框）。 */
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });

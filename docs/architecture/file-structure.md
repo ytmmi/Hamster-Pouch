@@ -418,6 +418,8 @@ apps/desktop/src/app_ui/
                       #   ReaderStage.tsx 阅读区（scroll / page / spread 三种翻页方式；
                       #     **阅读位置一律问几何**（分页 D222、滚动 D227）：量每项矩形后交给
                       #     readerView 的纯函数取舍，阅读区里不取点；
+                      #     **点标签切进面板即取焦点**（D228）：api 透传到 ReaderStage，钩子取在
+                      #     .br-stage（方向键处理器所在处），面板根 .br-root 不加 tabIndex；
                       #     分页用 CSS **column-count** 多栏 + translateX；跳章由面板的 key 重挂载重置；
                       #     **分页纸张（D116）**：.br-paper（居中）→ .br-face-layer（N 张纸页，
                       #     在正文之下、pointer-events none）→ .br-flow（正文栏四周内缩一个
@@ -533,7 +535,9 @@ apps/desktop/src/app_ui/
     MetadataPanel.tsx # 元数据面板（顶部摘要含拍摄参数自动行 + EXIF/媒体信息结构化明细 + 折叠原始 JSON，D145/D145-R1；消费宿主设置 ui.sizeUnit/dateFormat/dateShowTime）
     metadataInfo.ts   # 元数据面板的**纯解析**（ffprobe 原始 JSON → 容器/逐流事实、EXIF 摘要十键含拍摄参数 → 事实；不解析来源没有的键）
     metadataFormat.ts # 元数据面板的**纯格式化与行构造**（EXIF 日期重排/方向翻译键/容器别名/逐流明细行/拍摄参数自动行，D145/D145-R1）
-    MediaPreviewPanel.tsx   # 媒体预览主面板（列表行渲染 + 三种视图容器 + 图片尺寸 CSS 变量）
+    MediaPreviewPanel.tsx   # 媒体预览主面板（列表行渲染 + 三种视图容器 + 图片尺寸 CSS 变量；
+                            #   **快捷键挂面板根**（D228）：Ctrl/⌘+A 全选、Esc 取消、Delete 删除都在
+                            #   handlePanelKeyDown 一处，三个条目容器不再各自带 tabIndex/onKeyDown）
     mediaPreviewData.ts     # 面板取数（全库游标翻页 + 排序后的条目流）
     mediaPreviewPaging.ts   # 游标翻页的纯逻辑（drainPages：严格前进 + 页数上限两道循环安全闸门）
     mediaPreviewSession.ts  # 面板设置读取与本会话覆盖（四条设置的缺省/覆盖口径）
@@ -745,6 +749,7 @@ apps/desktop/src/app_ui/
     BlueprintPalette.tsx    # 节点添加面板（**所有类型都可随意创建**，无置灰；层级约束体现在连线上）
     BlueprintJsonView.tsx   # JSON 文本视图（直接改 JSON + 解析回文档）
     BlueprintCanvas.tsx     # 节点画布（拖拽/连线/平移缩放/右键直线刀痕**批量删除**；**只渲染当前层**；挂右下角小地图；
+                            #   **点标签切进面板即取焦点**（D228）：api 由 BlueprintPanel 透传，钩子取在 canvasRef；
                             #   连线体验 D107：**几何命中**（连线 10px / 节点外扩 6px）+ **就近吸附**（端口 34px）+
                             #   拖线时**绿圈高亮可连端口**；端点坐标**四级回落**→ 数据里有边就画得出线）
     BlueprintMinimap.tsx    # 小地图（缩略当前层节点/连线 + 视口指示框；拖动即把视口中心移到该处）

@@ -96,7 +96,8 @@ const RENDERERS: Record<BuiltinPanelId, (ctx: PanelRenderCtx) => JSX.Element> = 
   music: (ctx) => <MusicPlayerPanel api={ctx.api} />,
   tasks: () => <TaskPanel />,
   plugins: () => <PluginPanel />,
-  blueprint: () => <BlueprintPanel />,
+  // 蓝图（D228）：把键盘焦点交给画布——Delete / Backspace 删节点挂在画布上。
+  blueprint: (ctx) => <BlueprintPanel api={ctx.api} />,
 };
 
 /**

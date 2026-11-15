@@ -120,10 +120,22 @@ function stripComments(text) {
   return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
-const HOOK = "usePanelFocusOnActivate(panelApi, rootRef)";
-const panelsWithFocus = [VIDEO_PANEL, MUSIC_PANEL, VIEWER_PANEL];
+// 焦点落在**哪个节点**因面板而异（播放器/查看器/媒体预览是面板根，阅读器是阅读区，
+// 蓝图是画布），所以这里只约束"用同一个钩子、且第二参是某个 ref"，不锁具体名字。
+const HOOK = /usePanelFocusOnActivate\((?:panelApi|api), \w+Ref\)/;
+const MEDIA_PREVIEW = "panels/MediaPreviewPanel.tsx";
+const READER_STAGE = "panels/bookreader/ReaderStage.tsx";
+const BLUEPRINT_CANVAS = "panels/BlueprintCanvas.tsx";
+const panelsWithFocus = [
+  VIDEO_PANEL,
+  MUSIC_PANEL,
+  VIEWER_PANEL,
+  MEDIA_PREVIEW,
+  READER_STAGE,
+  BLUEPRINT_CANVAS,
+];
 report(
-  "面板激活即取键盘焦点只有一份实现（shared/panelFocus.ts，三个面板共用）",
+  "面板激活即取键盘焦点只有一份实现（shared/panelFocus.ts，六个面板共用）",
   read(PANEL_FOCUS).includes("export function usePanelFocusOnActivate(") &&
     read(PANEL_FOCUS).includes("requestAnimationFrame(") &&
     read(PANEL_FOCUS).includes("enteredRef.current = active;") &&
@@ -133,7 +145,7 @@ report(
     read(PANEL_FOCUS).includes("cancelAnimationFrame(frameRef.current)") &&
     read(FOCUS_TARGET).includes("export function shouldTakePanelFocus(") &&
     files.every((f) => f.rel === PANEL_FOCUS || !/function usePanelFocusOnActivate\s*\(/.test(f.text)) &&
-    panelsWithFocus.every((rel) => read(rel).includes(HOOK) && read(rel).includes("shared/panelFocus")) &&
+    panelsWithFocus.every((rel) => HOOK.test(read(rel)) && read(rel).includes("shared/panelFocus")) &&
     // 查看器不再自带那段内联实现（曾只有它有，另外两个面板根本没有）。
     !/enteredRef|focusFrameRef/.test(read(VIEWER_PANEL)),
 );

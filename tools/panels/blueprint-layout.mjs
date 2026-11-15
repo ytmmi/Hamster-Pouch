@@ -15,8 +15,19 @@
  * 注意：`.bp-panel` 这个类名图书预览面板也在用（蓝图段之前另有一段样式），所以基础
  * 规则必须只在蓝图那一段里找，否则会把图书预览的声明当成蓝图的。
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { check, stripComments } from "./harness.mjs";
-import { stylesSource } from "./shared.mjs";
+import { ROOT, registrySource, stylesSource } from "./shared.mjs";
+
+const canvasSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/BlueprintCanvas.tsx"),
+  "utf8",
+);
+const panelSrc = readFileSync(
+  join(ROOT, "apps/desktop/src/app_ui/panels/BlueprintPanel.tsx"),
+  "utf8",
+);
 
 /** 蓝图样式段的起点（`M6：蓝图过渡编辑器` 那行注释之后）。 */
 const SECTION_MARK = "M6：蓝图过渡编辑器";
@@ -98,5 +109,31 @@ export default async function run() {
       return limit >= 400 && inspectorWidth > 0 && leftover >= 300;
     })(),
     "阈值=" + (narrow ? narrow.limit : "（缺）") + "px 检查器=" + (inspector.match(/width:\s*(\d+)px/) ?? [])[1] + "px",
+  );
+
+  // ============ D228：点标签切进蓝图面板时把键盘焦点交给画布 ============
+  //
+  // 画布的 Delete / Backspace 删节点与删连线**只在画布有焦点时**才收得到；
+  // 画布自己的 onPointerDown 已经会 focus 一次（鼠标点进来就能用），缺的是
+  // "从别的面板点标签切进来"这条路径——那时焦点还在 dockview 的标签上。
+  //
+  // 焦点目标必须是**画布**（.bp-canvas），不是面板根：键处理器挂在画布上，
+  // 给根等于换了个地方收不到键。
+  check(
+    "蓝图面板：点标签切进面板时把键盘焦点拿到画布（与播放器等共用 shared/panelFocus.ts）",
+    /import \{ usePanelFocusOnActivate \} from "\.\.\/shared\/panelFocus";/.test(canvasSrc) &&
+      /usePanelFocusOnActivate\(api, canvasRef\);/.test(canvasSrc) &&
+      /api\?: PanelRenderCtx\["api"\];/.test(canvasSrc) &&
+      // 面板把句柄透传给画布，且注册表把 dockview 的面板句柄交给面板——三段缺一即空转。
+      /api=\{panelApi\}/.test(panelSrc) &&
+      /^ {2}blueprint: \(ctx\) => <BlueprintPanel api=\{ctx\.api\} \/>,$/m.test(registrySource),
+  );
+  check(
+    "蓝图面板：焦点落在画布（.bp-canvas 可聚焦且有键处理），不是没有键处理器的面板根",
+    // 同一个根节点上既有 ref 又能聚焦（中间隔着十来行事件处理器，窗口放宽）。
+    /ref=\{canvasRef\}[\s\S]{0,900}?tabIndex=\{0\}/.test(canvasSrc) &&
+      /onKeyDown=\{onKeyDown\}/.test(canvasSrc) &&
+      !/className="bp-canvas"[\s\S]{0,80}?tabIndex=\{-1\}/.test(canvasSrc) &&
+      !/className="panel bp-panel"[\s\S]{0,40}?tabIndex=\{0\}/.test(panelSrc),
   );
 }
