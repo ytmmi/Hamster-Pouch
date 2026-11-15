@@ -399,6 +399,46 @@ export function addCustomMark(
   };
 }
 
+/**
+ * 删掉一个自定义标记名（D229）：名字从菜单清单里摘掉，**并把它从所有目标上一起摘掉**。
+ *
+ * 为什么必须级联：`custom.<scope>` 是"工具清单"，`marks` 里的 `custom:<名>` 是"已经用它打过
+ * 的对象"。只删清单会留下一批认不出来的 token（菜单只能靠 `orphan` 兜底显示，用户得逐个取消，
+ * 而名字已不在清单里 ⇒ 再也建不回同一个语义）；反过来只取消打标，清单里的名字就永远留着，
+ * 建错一个名字便永久多出一行、没有任何入口能清掉它（与 D225 之前 tag 建错只能改名同一个病）。
+ *
+ * 纯函数、不可变；名字不在清单里时返回**原状态**（`useSyncExternalStore` 据此判重，不致重渲染）。
+ */
+export function removeCustomMark(
+  state: PanelMarksState,
+  scope: PanelMarkScope,
+  rawName: string,
+): PanelMarksState {
+  const name = normalizeCustomMarkName(rawName);
+  if (!name || !state.custom[scope].includes(name)) return state;
+  const token = customMarkToken(name);
+  return {
+    ...state,
+    custom: { ...state.custom, [scope]: state.custom[scope].filter((item) => item !== name) },
+    marks: { ...state.marks, [scope]: removeTokenFromTable(state.marks[scope], token) },
+    auto: { ...state.auto, [scope]: removeTokenFromTable(state.auto[scope], token) },
+    dismissed: { ...state.dismissed, [scope]: removeTokenFromTable(state.dismissed[scope], token) },
+  };
+}
+
+/** 从整张「目标键 → token 列表」表里删掉一个 token（空表即删条目，与 {@link writeTokenList} 同口径）。 */
+function removeTokenFromTable(
+  table: Record<string, string[]>,
+  token: string,
+): Record<string, string[]> {
+  const next: Record<string, string[]> = {};
+  for (const [key, tokens] of Object.entries(table)) {
+    const kept = tokens.filter((item) => item !== token);
+    if (kept.length > 0) next[key] = kept;
+  }
+  return next;
+}
+
 /** 解析一张「目标键 → token 列表」表（容错：非对象/空表回落空表）。 */
 function parseMarksTable(raw: unknown): Record<string, string[]> {
   const source = isRecord(raw) ? raw : {};

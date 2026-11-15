@@ -55,6 +55,7 @@ import {
   customMarkName,
   customMarkToken,
   marksOf,
+  removeCustomMark,
   setMark,
   toggleMarkFromMenu,
   type PanelMarkScope,
@@ -135,12 +136,18 @@ export function MarkMenuTree({
     onPersist(toggleMarkFromMenu(marks, scope, targetKey, token, nextOn));
   };
 
-  /** 渲染一行（系统标记与自定义标记共用；`branch` 为 `null` 表示没有子项可折叠）。 */
+  /**
+   * 渲染一行（系统标记与自定义标记共用；`branch` 为 `null` 表示没有子项可折叠）。
+   *
+   * `onRemove` 只有**自定义标记**行传（D229）：系统标记属于蓝图标记清单，不该在菜单里被删；
+   * 自定义标记是用户自己造的工具，造错了必须能删掉。
+   */
   const renderRow = (
     token: string,
     label: string,
     depth: number,
     branch: readonly string[] | null,
+    onRemove?: () => void,
   ): JSX.Element => {
     const on = current.includes(token);
     const auto = on && autoSet.has(token);
@@ -171,6 +178,20 @@ export function MarkMenuTree({
           <span className="mark-menu-check">{on ? "✓" : "\u00a0"}</span>
           {label}
         </button>
+        {onRemove ? (
+          <button
+            className="menu-item small"
+            title={t("mark.menu.customRemove")}
+            aria-label={t("mark.menu.customRemove")}
+            onClick={(e) => {
+              // 删名字是独立动作：不能顺带把这一行「勾选 / 取消」了。
+              e.stopPropagation();
+              onRemove();
+            }}
+          >
+            ✕
+          </button>
+        ) : null}
       </div>
     );
   };
@@ -185,6 +206,17 @@ export function MarkMenuTree({
       }
       return rows;
     });
+
+  /**
+   * 删掉一个自定义标记名（D229）：先确认，再把名字与它在所有目标上的打标一起摘掉。
+   *
+   * 保持菜单打开（与勾选一致）：用户可能连删几个建错的名字，每删一个都重开菜单会更烦。
+   */
+  const removeCustom = (name: string) => {
+    if (!window.confirm(t("mark.menu.customRemoveConfirm", { name }))) return;
+    onPersist(removeCustomMark(marks, scope, name));
+    app.status(t("mark.menu.customRemoved", { name }), "ok");
+  };
 
   /** 提交新建自定义标记：加名字并**立刻打到当前目标上**（省一次开菜单）。 */
   const commitCustom = () => {
@@ -253,7 +285,9 @@ export function MarkMenuTree({
           {t("mark.menu.customAdd")}
         </button>
       )}
-      {customNames.map((name) => renderRow(customMarkToken(name), name, 0, null))}
+      {customNames.map((name) =>
+        renderRow(customMarkToken(name), name, 0, null, () => removeCustom(name)),
+      )}
 
       <div className="menu-sep" />
 

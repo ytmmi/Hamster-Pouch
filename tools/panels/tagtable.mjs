@@ -361,4 +361,88 @@ check(
     ),
   );
 }
+
+// ---- D229：自定义标记的删除入口 ----
+//
+// 立论：`custom.<scope>` 是"用户自己造的工具清单"，D229 之前**只有追加、没有任何删除入口**
+// （addCustomMark 是唯一的写入点，serialize 只读）。建错一个名字就永久留在菜单里，且它已经
+// 打到的对象上那条 `custom:<名>` token 也无法回收 —— 与 D225 之前 tag 建错只能改名同一个病。
+//
+// 两条口径必须同时成立，缺一条都是半成品：
+// 1. 名字要从 `custom.<scope>` 摘掉（否则菜单里那行永远在）；
+// 2. 名字打出去的所有 token 要**级联**从 marks / auto / dismissed 三张表里一起摘掉
+//    （只删清单会留下一批认不出来的 token，用户得逐个目标手动取消）。
+{
+  const markMenuSrc = stripComments(
+    readFileSync(join(ROOT, "apps/desktop/src/app_ui/panels/markMenu.tsx"), "utf8"),
+  );
+  const marks = await import(
+    pathToFileURL(join(ROOT, "apps/desktop/src/app_ui/shared/panelMarks.ts")).href
+  );
+  const i18nSrc = (f) => readFileSync(join(ROOT, "apps/desktop/src/app_ui/i18n/" + f), "utf8");
+
+  const base = marks.emptyPanelMarksState();
+  const added = marks.addCustomMark(base, "albums", "  临时标记  ");
+  const token = marks.customMarkToken(added.name);
+  // 同一个名字打到两个目标上（其中一个还记成自动标记，另一个在 dismissed 里）。
+  const onTwo = marks.setMark(
+    marks.setMark(added.state, "albums", "a1", token, true),
+    "albums",
+    "a2",
+    token,
+    true,
+  );
+  const withSources = {
+    ...onTwo,
+    auto: { ...onTwo.auto, albums: { a1: [token] } },
+    dismissed: { ...onTwo.dismissed, albums: { a2: [token] } },
+  };
+  const removed = marks.removeCustomMark(withSources, "albums", added.name);
+  const onlyOther = marks.setMark(added.state, "albums", "a2", "manga", true);
+  const keptOthers = marks.removeCustomMark(
+    marks.setMark(onlyOther, "albums", "a2", token, true),
+    "albums",
+    added.name,
+  );
+  check(
+    "D229：removeCustomMark 同时摘掉名字与它打出去的全部 token（marks / auto / dismissed 三张表级联）",
+    // ① 名字真的没了，且表单被清空（空表条目一并删掉，不留 `a1: []`）。
+    JSON.stringify(removed.custom.albums) === "[]" &&
+      JSON.stringify(removed.marks.albums) === "{}" &&
+      JSON.stringify(removed.auto.albums) === "{}" &&
+      JSON.stringify(removed.dismissed.albums) === "{}" &&
+      // ② 同一目标上的**别的**标记不受牵连（只摘这一个 token）。
+      JSON.stringify(marks.marksOf(keptOthers, "albums", "a2")) === JSON.stringify(["manga"]) &&
+      // ③ 另一个 scope 完全不动（相册与源各存一份）。
+      JSON.stringify(removed.custom.sources) === "[]" &&
+      // ④ 名字不在清单里 ⇒ 原状态原引用（useSyncExternalStore 靠它判重）。
+      marks.removeCustomMark(removed, "albums", added.name) === removed &&
+      // ⑤ 空名/纯空白不改变任何状态。
+      marks.removeCustomMark(added.state, "albums", "   ") === added.state,
+  );
+  check(
+    "D229：菜单给自定义标记行单独一个删除按钮，先 window.confirm 再 removeCustomMark（系统标记行没有）",
+    /import \{[^}]*removeCustomMark/s.test(markMenuSrc) &&
+      // 确认框在写回之前（顺序反了就是"问完已经删完了"）。
+      markMenuSrc.indexOf("window.confirm(t(\"mark.menu.customRemoveConfirm\"") <
+        markMenuSrc.indexOf("onPersist(removeCustomMark(") &&
+      /onPersist\(removeCustomMark\(marks, scope, name\)\)/.test(markMenuSrc) &&
+      // 删除按钮只由 onRemove 控制，而 onRemove 只在自定义标记行传（系统标记树那三处不传）。
+      /\{onRemove \? \(/.test(markMenuSrc) &&
+      /renderRow\(customMarkToken\(name\), name, 0, null, \(\) => removeCustom\(name\)\)/.test(
+        markMenuSrc,
+      ) &&
+      // 反面：树里的系统标记行不得带第 5 个参数（系统标记属于蓝图清单，不该在菜单里被删）。
+      !/renderRow\(node\.id, markLabel\(node\.id, t\), depth, childIds,/.test(markMenuSrc),
+  );
+  check(
+    "D229：三条删除文案三语齐备",
+    ["mark.menu.customRemove", "mark.menu.customRemoveConfirm", "mark.menu.customRemoved"].every(
+      (key) =>
+        ["zh-CN.ts", "zh-TW.ts", "en.ts"].every((f) =>
+          new RegExp('"' + key + '":').test(i18nSrc(f)),
+        ),
+    ),
+  );
+}
 }

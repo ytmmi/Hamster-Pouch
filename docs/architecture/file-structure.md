@@ -316,7 +316,9 @@ apps/desktop/src/app_ui/
                           #   改为 v2 四表模型）：状态模型（自定义标记清单 + 目标键 → 标记 token +
                           #   `auto` 自动同步来源表 + `dismissed` 用户亲手取消表）+ 容错解析（任何脏
                           #   数据 / 更高版本都落回空状态，绝不抛异常，v1 旧值按"全为手工标记"兼容）
-                          #   + 序列化 + 打标/取消 + 自定义标记增删；另含 `derivedMarkOfMediaType`
+                          #   + 序列化 + 打标/取消 + 自定义标记增删（D229 补 `removeCustomMark`：
+                          #   摘名字的同时对 marks / auto / dismissed 三张表级联摘 `custom:<名>` token，
+                          #   名字不在清单里返回原状态原引用）；另含 `derivedMarkOfMediaType`
                           #   （相册属性 → 同名标记）、`autoMarksForMediaType`（`unlimited` / 空 →
                           #   不打标记）、`toggleMarkFromMenu`（菜单唯一入口：取消自动标记记 `dismissed`、
                           #   重新勾上即转为用户标记）与 `syncObjectMarks` / `syncAlbumAutoMark`
@@ -342,7 +344,9 @@ apps/desktop/src/app_ui/
                       #   + `autoMarksForAlbum`（`usePanelMarks` 已于 D207 搬到
                       #   `core/panelMarksStore.ts`：本文件不再持有模块级 store）。D139 起**自动标记与
                       #   用户标记行为完全一致**（可取消、落库），`autoMarks` 只用于把系统同步
-                      #   来的那几项画成灰黑色；「不可取消」那套口径已整体作废
+                      #   来的那几项画成灰黑色；「不可取消」那套口径已整体作废。D229 起自定义标记行
+                      #   多一个 `.menu-item.small` 的 ✕（`renderRow` 第 5 参 `onRemove`，只有自定义标记
+                      #   行传；系统标记行不传），点 ✕ 先 `window.confirm` 再落库，菜单保持打开
     album/            # 相册树的纯逻辑（D210）：tree.ts —— 拖放协议（`ALBUM_DRAG_MIME`）、树组装
                       #   （`buildAlbumTree`，同级 sort_order + 创建时间兜底，与后端读侧同口径）、
                       #   有效媒体属性（`effectiveMediaType` 沿父链继承，顶层 multimedia）、包含与
