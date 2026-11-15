@@ -79,7 +79,7 @@
 | --- | --- | --- |
 | 取值域（枚举） | `crates/hp-core/src/blueprint_types.rs` | `NodeType` / `GroupMode` / `HideDirection` / `Trigger` / `ActionOp` / `EdgeKind` / `TokenLevel` / `OverlayAnchor` |
 | 结构（字段） | `crates/hp-core/src/blueprint_node.rs` | `BlueprintNode` / `BlueprintEdge` / `BlueprintLayer` / `BlueprintPosition` / `OverlaySize` |
-| 硬错误 | `crates/hp-core/src/blueprint_validate.rs` | 拒绝保存；见第 6 节 |
+| 硬错误 | `crates/hp-core/src/blueprint_validate/`（D218 按规则族分文件：`fields.rs` / `classes.rs` / `state.rs` / `edges.rs` / `layers.rs`） | 拒绝保存；见第 6 节 |
 | 软告警（未接通） | `crates/hp-core/src/blueprint_warnings.rs` | 不阻塞保存；见第 6 节 |
 | 迁移与版本闸门 | `crates/hp-core/src/blueprint_migrate.rs` / `blueprint.rs` | `schema_version` 权威在文档内（D52/D58） |
 | **节点类型注册表（前端）** | `packages/config/src/blueprintNodes.ts`（`BLUEPRINT_NODE_REGISTRY`） | **单一事实来源**；内置 **12** 种 + 插件注册项 |
@@ -89,7 +89,7 @@
 | 节点显示层 | `apps/desktop/src/app_ui/panels/blueprintLabels.ts` | 本地化显示名/摘要/字段标签 |
 | **插件注册入口** | `crates/hp-core/src/plugin_contribution.rs` | 贡献点 `blueprintNode`（RFC 0010 决策 5/6） |
 
-**实测对齐缺口（已知，2026-10-10 已加门禁）**：`blueprintPorts.ts` 的端口可用性目前靠人工维护，与 `blueprint_validate.rs` 的包含层级规则是两处独立表述，改动一侧容易漏另一侧。第 2–4 节即为**双方共用的定义表**；两侧的取值域断言由 `pnpm check:blueprint-nodes` 覆盖。
+**实测对齐缺口（已知，2026-10-10 已加门禁）**：`blueprintPorts.ts` 的端口可用性目前靠人工维护，与 `blueprint_validate/` 的包含层级规则是两处独立表述，改动一侧容易漏另一侧。第 2–4 节即为**双方共用的定义表**；两侧的取值域断言由 `pnpm check:blueprint-nodes` 覆盖。
 
 > **2026-10-10 实例（真实缺陷）**：`mark` 声明了 `parents: ["control"]`，但 `control.children` 只写了 `["class"]`——**漏了 `mark`**。由于画布连线（`containmentAllows`）与 Rust 校验（`can_contain`）都**只读父节点的 `children`**、不读子节点的 `parents`，结果是**「面板 → 标记」被判为非法边，线上根本连不出来**（用户反馈："面板节点无法链接标记节点"）。
 >
@@ -120,7 +120,7 @@
 - `layout_block` 不能嵌套 `layout_block`（布局块嵌套列为 RFC 0007 开放点）；`overlay` 不能 contains `layout_block` / `overlay` / `class` / `subclass` / `mark` / `object`。
 - 规则三节点（`event`/`condition`/`action`）**不参与结构 `contains`**，只通过 `on` / `fires` / `guards` 连线。
 - `interface` 的显示名取自**层名**（D51）；节点上**不存** `name`。
-- `control`（面板）的 `panel_id` 引用**面板注册表**（`docs/spec/panel-standard.md`）；该面板的 `has_class` 决定其下**能否**挂 `class`（类目）节点——Rust `find_panel_class_violations`（`crates/hp-core/src/blueprint_validate.rs`）**只拦 `control → class`** 这一条边，别的不管（2026-11-01 / D134 按实现修正）。
+- `control`（面板）的 `panel_id` 引用**面板注册表**（`docs/spec/panel-standard.md`）；该面板的 `has_class` 决定其下**能否**挂 `class`（类目）节点——Rust `find_panel_class_violations`（`crates/hp-core/src/blueprint_validate/classes.rs`）**只拦 `control → class`** 这一条边，别的不管（2026-11-01 / D134 按实现修正）。
 - **v3 起标记不再直挂面板**（D137，**撤销** D134/D136 的"标记直挂面板、不受 `has_class` 约束"口径）：标记的结构父是**对象**，而对象的结构父是**类目或子类**。于是 `has_class = false` 的面板下**既**建不了类目、**也**到不了标记——"面板开关只管类目"这件事现在表现为"整条 `面板 ⊃ 类目 ⊃ 对象 ⊃ 标记` 链从类目处断开"。**D135 起**相册 / 源面板的 `has_class` 已是 `true`（它们各自有条目分类层）。
 
 #### 2.0.1 三轴模型：类目 / 子类 / 标记（2026-10-10 / D102；标记取值域 2026-11-01 / D134 扩为 10 项）

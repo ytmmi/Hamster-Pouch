@@ -833,7 +833,7 @@ HamsterPouch/
     hp-core/                  # 领域模型：仓库、媒体源、虚拟相册、图像、tag、评分
                               # （蓝图域按职责分文件：blueprint.rs 图文档 / blueprint_types.rs 取值域 /
                               #   blueprint_node.rs 结构 / blueprint_row.rs 存储行 /
-                              #   blueprint_validate.rs 硬错误 / blueprint_warnings.rs 软告警 /
+                              #   blueprint_validate/{mod,fields,classes,state,edges,layers}.rs 硬错误（D218 按规则族分文件）/ blueprint_warnings.rs 软告警 /
                               #   blueprint_migrate.rs 版本迁移 / blueprint_tests.rs 测试夹具）
                               # （蓝图**节点类型注册表**域：blueprint_registry.rs 注册表与查询视图 /
                               #   blueprint_node_decl.rs 节点声明取值域与结构 /

@@ -120,7 +120,7 @@
 >
 > **`has_class` 只约束类目**（2026-11-01 / D134 修正，**v3 / D137 再次收窄**）：本节此前写"`has_class`
 > 是类目与标记的同一个开关"，与 Rust 实现不符——`find_panel_class_violations`
-> （`crates/hp-core/src/blueprint_validate.rs`）只拦 `control → class`。但**"标记不归它管"
+> （`crates/hp-core/src/blueprint_validate/classes.rs`）只拦 `control → class`。但**"标记不归它管"
 > 不等于"任何面板都能挂标记"**：D134 时代后一句成立，是因为那时 `mark.parents` 是
 > `["control"]`；**v3 / D137 起 `mark.parents` 是 `["object"]`**，于是 `control → mark`
 > 这条边在**任何**面板下都非法（`containmentAllows` 按 `control.children` 直接拒绝）——
@@ -163,7 +163,7 @@
 > 分类层，只是当时的 `false` 没有如实反映它）。判据该跟着事实走，不能反过来。
 > 此前写 `false` 直接导致「类目连到相册 / 源面板后**读回灰显**」——前端 `blueprintLint` 判
 > `panel-has-no-class`、Rust `find_panel_class_violations`
-> （`crates/hp-core/src/blueprint_validate.rs`，与前者**同一份判据的两次落点**）对内置面板报
+> （`crates/hp-core/src/blueprint_validate/classes.rs`，与前者**同一份判据的两次落点**）对内置面板报
 > **硬错误**，用户看到的却是"连上了却读不回"。**根因是 `has_class` 而不是连线逻辑**
 > （`kindForEdge` / `connectPatch` 实测都正确）。
 > TS（`packages/config/src/panels.ts` 的 `BUILTIN_PANEL_SPECS`）与 Rust 侧**同步**改为 `true`
