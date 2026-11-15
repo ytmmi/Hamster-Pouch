@@ -743,7 +743,8 @@ impl RepoDb {
     pub fn count_pending_dimensions(&self) -> HpResult<i64> {
         self.conn()
             .query_row(
-                "SELECT COUNT(*) FROM files WHERE media_type = 'image' AND width IS NULL",
+                "SELECT COUNT(*) FROM files WHERE media_type = 'image' AND width IS NULL \
+                   AND missing_status = 0",
                 [],
                 |r| r.get(0),
             )
@@ -766,6 +767,7 @@ impl RepoDb {
                 "SELECT f.id, f.relative_path, s.local_path \
                  FROM files f JOIN sources s ON s.id = f.source_id \
                  WHERE f.media_type = 'image' AND f.width IS NULL \
+                   AND f.missing_status = 0 \
                    AND (?1 IS NULL OR f.id > ?1) \
                  ORDER BY f.id LIMIT ?2",
             )

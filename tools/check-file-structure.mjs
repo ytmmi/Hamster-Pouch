@@ -20,9 +20,10 @@ const modSrc = stripComments(read("mod"));
 const previewSrc = stripComments(read("preview"));
 const taskSrc = stripComments(read("task"));
 const mainSrc = readFileSync(join(ROOT, "apps/desktop/src-tauri/src/main.rs"), "utf8");
+const repoFileSrc = stripComments(readFileSync(join(ROOT, "crates/hp-repo/src/file_repo.rs"), "utf8"));
 
 let passed = 0;
-const total = 6;
+const total = 7;
 function report(ok, label, detail) {
   if (ok) passed += 1;
   const extra = ok || !detail || !detail.length ? "" : " — " + detail.join("、");
@@ -72,6 +73,21 @@ const registryNeedles = [
 ];
 const registryMissing = registryNeedles.filter((needle) => !mainSrc.includes(needle));
 report(registryMissing.length === 0, "main.rs 的 invoke_handler 指向子模块路径（否则 __cmd__* 找不到）", registryMissing);
+
+// ⑦ 缺失行不再参与回填（D223）：文件确实不在了（父目录还在）就记 missing_status = 1 并跳过，
+// 否则每次打开仓库都重试一批永远读不到的行，状态栏永远挂着「失败 N」。
+const missingNeedles = [
+  "if !abs.exists() {",
+  "abs.parent().map(|dir| dir.exists()).unwrap_or(false)",
+  "db.set_file_missing(&row.file_id, 1)?;",
+];
+const missingAbsent = missingNeedles.filter((needle) => !taskSrc.includes(needle));
+const pendingFilters = (repoFileSrc.match(/AND (?:f\.)?missing_status = 0/g) || []).length;
+const pendingTotal = (repoFileSrc.match(/width IS NULL/g) || []).length;
+const missingDetail = missingAbsent.slice();
+if (pendingFilters < 2) missingDetail.push("待回填查询里 missing_status = 0 只出现 " + pendingFilters + " 次");
+if (pendingTotal < 2) missingDetail.push("width IS NULL 查询只剩 " + pendingTotal + " 处");
+report(missingAbsent.length === 0 && pendingFilters >= 2 && pendingTotal >= 2, "缺失文件记标记并退出回填队列（父目录仍在才算缺失，源离线仍按失败重试）", missingDetail);
 
 console.log("");
 console.log(`[check-file-structure] ${passed}/${total} 通过`);

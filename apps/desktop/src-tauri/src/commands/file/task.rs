@@ -230,7 +230,9 @@ pub(crate) fn start_backfill(
 ///
 /// 两条刻意的取舍：
 /// - **读头失败只记数，不写 NULL 之外的东西**：文件可能只是暂时不可达（移动硬盘没插），
-///   把它标成"失败"会让下次不再尝试；保持 `NULL` 就是"还没成功过"。
+///   把它标成"失败"会让下次不再尝试；保持 `NULL` 就是"还没成功过"。**唯一的例外**是
+///   「父目录在、文件不在」——那是删掉了，记 `missing_status = 1` 并跳过（D223），扫描
+///   重新看到这个文件时 upsert 会把 `missing_status` 写回 0，所以这条标记会自愈。
 /// - **每行之间让一下**：回填是后台任务，扫描/浏览正在同时跑，`sleep(1ms)` 让 OS
 ///   把 CPU 让给前台；节流进度也只按时间，不按行数。
 fn run_backfill(
@@ -291,6 +293,21 @@ fn run_backfill(
                 row.relative_path
                     .replace('/', std::path::MAIN_SEPARATOR_STR),
             );
+            // 文件确实不在了（**父目录还在**）→ 记缺失并跳过本轮：缺失行不再参与回填，
+            // 否则每次打开仓库都要重试一批永远读不到的文件，状态栏永远挂着「失败 N」。
+            // 父目录也不在 = 源离线（移动硬盘没插），只算失败、保持 NULL，下次插上再试。
+            if !abs.exists() {
+                if abs.parent().map(|dir| dir.exists()).unwrap_or(false) {
+                    db.set_file_missing(&row.file_id, 1)?;
+                    processed += 1;
+                    emit(processed, false);
+                    continue;
+                }
+                failed += 1;
+                processed += 1;
+                emit(processed, false);
+                continue;
+            }
             match hp_media::display_dimensions(&abs) {
                 Some((w, h)) => {
                     if db.backfill_dimensions(&row.file_id, w, h)? {

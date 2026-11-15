@@ -279,7 +279,7 @@ CREATE TABLE files (
   scan_time                 TEXT NOT NULL,
   verify_status             TEXT NOT NULL,     -- ok|changed|missing|unreadable|placeholder
   thumb_status              INTEGER NOT NULL DEFAULT 0, -- 0=未生成 1=已生成 -1=失败
-  missing_status            INTEGER NOT NULL DEFAULT 0, -- 软删除/缺失标记
+  missing_status            INTEGER NOT NULL DEFAULT 0, -- 软删除/缺失标记（回填遇「父目录在、文件不在」时由 D223 置 1，扫描 upsert 写回 0）
   media_info_json           TEXT,              -- 视频全量媒体信息（ffprobe 探测后缓存；迁移 repo/0002 以 ALTER TABLE 追加，故位于列尾）
   width                     INTEGER,           -- 图片**显示宽度**（EXIF 方向已应用；迁移 repo/0015 追加，可空 = 未索引/未回填，缺陷 0043）
   height                    INTEGER,           -- 图片**显示高度**（与 width 同口径）
