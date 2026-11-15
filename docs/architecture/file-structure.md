@@ -194,6 +194,12 @@ apps/desktop/src/app_ui/
                         #   整包写回会抹掉对方 scope 的标记），订阅表交给 `core/createStore`；
                         #   读写失败口径（读失败当没设置过、写失败报状态栏不弹框）随 store 一起搬来，
                         #   视图文件只剩渲染与接线
+    pluginRegistryHost.ts # 插件注册表**宿主侧登记**（RFC 0010 决策 3/4/5/7）：把 `plugin.contributions`
+                        #   的三项重建/注销进三张注册表（幂等；失败不抛，注册项缺席 = 蓝图按
+                        #   "未接通"处理）；形状翻译在 `pluginContributionsMap.ts`
+    pluginContributionsMap.ts # 贡献点 → 注册表项的**纯映射**（D221 从 `pluginRegistryHost.ts` 拆出）：
+                        #   不碰注册表、不调 IPC，因此门禁能用真实线上样本直接驱动；两层命名
+                        #   （桥接层驼峰 / 内嵌插件声明蛇形）的出处写在文件头，别再"统一"掉
     playerPlayStore.ts  # 媒体播放器的**播放请求通道**（`requestPlayerPlay` / `subscribePlayerPlay`）：
                         #   蓝图双击视频只投递"播放哪个文件"，由面板解析路径并播放——
                         #   宿主不持有播放状态，也就没有"面板还没挂载"的时序竞争

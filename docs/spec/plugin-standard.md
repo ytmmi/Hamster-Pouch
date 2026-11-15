@@ -159,6 +159,7 @@ plugin-package/
 - **注册权边界**：插件**可以**注册**面板**与**蓝图节点类型**，**不可以**注册**控件**（26 种 `kind` 是宿主内置白名单，D62 不变）；贡献点里出现控件 `kind` 声明一律忽略并记录（RFC 0010 决策 2）。
 - 插件**不能**通过贡献点创建自由 React 组件、独立窗口、自定义 CSS/配色（D44 边界），也不能直接编写蓝图（RFC 0007 非目标）。插件注册的**蓝图节点类型必须纯声明**（无自定义渲染/逻辑，RFC 0010 决策 6）。
 - 插件注册的面板可被蓝图以 `control`（**面板**）节点引用，`panel_id` 用**完整** `plugin.<plugin_id>.<local_id>`（`docs/spec/panel-standard.md` 第 6 节）。
+- **`plugin.contributions` 视图的键名分两层**（D221）：桥接层视图字段是驼峰——`panels` / `nodeTypes` / `settingsSections`，每项里 `pluginId` / `titleKey` / `hasClass` / `blueprintNode` / `readOnly`；而**内嵌的插件声明**（`settings[]` 的 `title_key` / `requires_capability`、`mount` 三项、蓝图节点声明的 `label_key` / `name_from_layer` / `provides_name` / `evaluation_role`）保持上面各表与示例里的蛇形——它们与 manifest 同形。真机曾因两层写反（前端全按蛇形读）让整批插件注册一次都没生效；`tools/check-plugin-wire.mjs` 5 条断言 + `plugin_contributions.rs` 的序列化键名用例把两侧都钉住。
 - **插件缺失时的行为**：插件未安装/未启用/宿主 API 不兼容时，蓝图里由它注册的节点类型按**未接通**处理——软告警 + 画布灰显、**允许保存**、节点与边原样保留、插件恢复后自动恢复（RFC 0010 决策 6）；面板引用同理。
 
 ## 5. 能力（`capabilities`）白名单

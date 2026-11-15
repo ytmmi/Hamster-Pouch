@@ -28,13 +28,12 @@ import {
   type BlueprintNodeSpec,
   type PanelSpec,
   type PluginSettingsSection,
-  type SettingCategory,
-  type SettingInputKind,
-  type SettingValue,
 } from "@hamster-pouch/config";
 
 import * as api from "../shared/api";
-import type { BlueprintNodeDeclDto, PluginContributions } from "../shared/types";
+import type { PluginContributions } from "../shared/types";
+// 纯映射（D221）：形状翻译在 pluginContributionsMap.ts，本文件只做登记 / 注销。
+import { toNodeSpec, toPanelSpec, toSettingsSection } from "./pluginContributionsMap";
 
 /** 登记结果（供诊断与界面展示）。 */
 export interface PluginRegistrationResult {
@@ -43,116 +42,6 @@ export interface PluginRegistrationResult {
   panelCount: number;
   nodeTypeCount: number;
   settingsSectionCount: number;
-}
-
-/** 把一条面板声明转成注册表项（宿主填充 `origin`，插件不得自称）。 */
-function toPanelSpec(item: PluginContributions["panels"][number]): PanelSpec | null {
-  if (!item.id.startsWith(`plugin.${item.plugin_id}.`)) return null;
-  return {
-    id: item.id,
-    titleKey: item.title_key,
-    category: toPanelCategory(item.category),
-    hasClass: item.has_class,
-    blueprintNode: item.blueprint_node,
-    settings: (item.settings ?? []).map((s) => ({
-      key: s.key,
-      kind: toSettingKind(s.kind),
-      title_key: s.title_key,
-      default: s.default as SettingValue | undefined,
-      ...(s.scope === "app" || s.scope === "repo" ? { scope: s.scope } : {}),
-      ...(s.requires_capability ? { requires_capability: s.requires_capability } : {}),
-    })),
-    mount: item.mount,
-    readOnly: item.read_only,
-    origin: { kind: "plugin", plugin_id: item.plugin_id },
-  };
-}
-
-/** 把一条节点类型声明转成注册表项（纯声明；不含代码/样式）。 */
-function toNodeSpec(item: BlueprintNodeDeclDto): BlueprintNodeSpec | null {
-  if (!item.type.startsWith("plugin.") || !item.plugin_id) return null;
-  if (!item.type.startsWith(`plugin.${item.plugin_id}.`)) return null;
-  return {
-    type: item.type,
-    label: item.label_key,
-    labelKey: item.label_key,
-    role: toNodeRole(item.role),
-    nameFromLayer: item.name_from_layer,
-    providesName: item.provides_name,
-    fields: (item.fields ?? []).map((f) => ({
-      name: f.name,
-      type: f.type as BlueprintNodeSpec["fields"][number]["type"],
-      required: f.required,
-      softWhenMissing: f.softWhenMissing,
-      values: f.values,
-    })),
-    parents: item.parents ?? [],
-    children: item.children ?? [],
-    events: (item.events ?? []) as BlueprintNodeSpec["events"],
-    ports: (item.ports ?? []).map((p) => ({
-      id: p.id,
-      side: p.side === "out" ? ("out" as const) : ("in" as const),
-      edge: p.edge as NonNullable<BlueprintNodeSpec["ports"]>[number]["edge"],
-    })),
-    ...(item.severity
-      ? {
-          severity: {
-            fieldIssue:
-              item.severity.fieldIssue === "soft" ? ("soft" as const) : ("hard" as const),
-            missingRef:
-              item.severity.missingRef === "hard" ? ("hard" as const) : ("soft" as const),
-          },
-        }
-      : {}),
-    ...(item.evaluation_role ? { evaluationRole: toEvaluationRole(item.evaluation_role) } : {}),
-    origin: { kind: "plugin", plugin_id: item.plugin_id },
-  };
-}
-
-function toPanelCategory(raw: string): PanelSpec["category"] {
-  return raw === "source" || raw === "media" || raw === "info" || raw === "system"
-    ? raw
-    : "other";
-}
-
-function toSettingKind(raw: string): SettingInputKind {
-  const allowed: readonly SettingInputKind[] = [
-    "switch",
-    "textInput",
-    "numberInput",
-    "select",
-    "slider",
-    "checkbox",
-  ];
-  return (allowed as readonly string[]).includes(raw)
-    ? (raw as SettingInputKind)
-    : "textInput";
-}
-
-function toNodeRole(raw: string): BlueprintNodeSpec["role"] {
-  return raw === "root" || raw === "container" || raw === "logic" ? raw : "structural";
-}
-
-function toEvaluationRole(raw: string): NonNullable<BlueprintNodeSpec["evaluationRole"]> {
-  return raw === "trigger" || raw === "condition" || raw === "action" ? raw : "structural";
-}
-
-function toSettingsSection(
-  section: PluginContributions["settings_sections"][number],
-): PluginSettingsSection {
-  return {
-    plugin_id: section.plugin_id,
-    title_key: section.title_key,
-    category: section.category as SettingCategory,
-    settings: (section.settings ?? []).map((s) => ({
-      key: s.key,
-      kind: toSettingKind(s.kind),
-      title_key: s.title_key,
-      ...(s.default !== undefined ? { default: s.default as SettingValue } : {}),
-      ...(s.scope === "app" || s.scope === "repo" ? { scope: s.scope } : {}),
-      ...(s.requires_capability ? { requires_capability: s.requires_capability } : {}),
-    })),
-  };
 }
 
 /** 插件 id 集合（用于"本轮不再出现的插件"逐个注销）。 */
@@ -186,12 +75,12 @@ export async function refreshPluginRegistrations(
   }
 
   const panels = contributions.panels.map(toPanelSpec).filter((p): p is PanelSpec => p !== null);
-  const nodes = contributions.node_types
-    .map((item) => ({ spec: toNodeSpec(item), pluginId: item.plugin_id }))
+  const nodes = contributions.nodeTypes
+    .map((item) => ({ spec: toNodeSpec(item), pluginId: item.pluginId }))
     .filter(
       (n): n is { spec: BlueprintNodeSpec; pluginId: string } => n.spec !== null && !!n.pluginId,
     );
-  const sections = contributions.settings_sections.map(toSettingsSection);
+  const sections = contributions.settingsSections.map(toSettingsSection);
 
   registerPluginPanels(panels);
   registerBlueprintNodeSpecs(nodes.map((n) => n.spec));

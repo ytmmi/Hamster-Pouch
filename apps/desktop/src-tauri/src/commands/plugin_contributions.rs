@@ -43,6 +43,7 @@ pub(crate) struct SettingsSectionItem {
 /// `plugin_id` 与声明字段**平铺**：前端拿到的每一项都是一份可直接登记的纯声明
 /// （`type` 已是 `plugin.<plugin_id>.<local_id>`）。
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct NodeContributionItem {
     plugin_id: String,
     #[serde(flatten)]
@@ -117,4 +118,142 @@ pub(crate) fn plugin_contributions(
         })
     })();
     api_from_hp(outcome)
+}
+
+#[cfg(test)]
+mod wire_shape_tests {
+    //! 缺陷 0042 的同族钉子（D221）：`plugin.contributions` 是**桥接层视图**，顶层三项
+    //! 与每项的字段必须是驼峰（`pluginId` / `titleKey` / `nodeTypes` / `settingsSections`）；
+    //! 内嵌的插件声明（`settings[]` / `mount` / 节点声明的 `label_key`）保持 manifest 的
+    //! 蛇形。真机症状：前端按驼峰读，结构体漏了 `rename_all` 时
+    //! `contributions.node_types.map(...)` 抛 TypeError，整批插件注册一次都不生效。
+
+    use super::*;
+    use hp_core::{BlueprintNodeDecl, NodeFieldDecl, PanelMount, PanelSettingDecl};
+
+    fn setting() -> PanelSettingDecl {
+        PanelSettingDecl {
+            key: "grid_size".into(),
+            kind: "numberInput".into(),
+            title_key: "palette.gridSize".into(),
+            default: None,
+            scope: None,
+            requires_capability: None,
+        }
+    }
+
+    fn contributions() -> PluginContributions {
+        PluginContributions {
+            panels: vec![PanelContributionItem {
+                plugin_id: "dev.hamsterpouch.palette".into(),
+                id: "plugin.dev.hamsterpouch.palette.palette".into(),
+                title_key: "panel.palette".into(),
+                category: "system".into(),
+                has_class: false,
+                blueprint_node: "control".into(),
+                settings: vec![setting()],
+                read_only: true,
+                mount: PanelMount::default(),
+            }],
+            node_types: vec![NodeContributionItem {
+                plugin_id: "dev.hamsterpouch.palette".into(),
+                node: BlueprintNodeDecl {
+                    node_type: "plugin.dev.hamsterpouch.palette.swatch".into(),
+                    label_key: "palette.node.swatch".into(),
+                    role: "structural".into(),
+                    name_from_layer: false,
+                    provides_name: true,
+                    fields: vec![NodeFieldDecl {
+                        name: "name".into(),
+                        field_type: "string".into(),
+                        required: false,
+                        soft_when_missing: true,
+                        values: vec![],
+                    }],
+                    parents: vec![],
+                    children: vec![],
+                    events: vec![],
+                    ports: vec![],
+                    severity: None,
+                    evaluation_role: None,
+                },
+            }],
+            settings_sections: vec![SettingsSectionItem {
+                plugin_id: "dev.hamsterpouch.palette".into(),
+                title_key: "palette.settings.title".into(),
+                category: "plugin".into(),
+                settings: vec![setting()],
+            }],
+        }
+    }
+
+    fn keys(value: &serde_json::Value) -> Vec<String> {
+        let mut keys: Vec<String> = value
+            .as_object()
+            .expect("返回体应是对象")
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    #[test]
+    fn contributions_view_serializes_camel_case_keys() {
+        let json = serde_json::to_value(contributions()).expect("序列化应成功");
+
+        assert_eq!(
+            keys(&json),
+            vec!["nodeTypes", "panels", "settingsSections"],
+            "顶层三项必须是驼峰：{json:?}"
+        );
+
+        let panel = &json["panels"][0];
+        let panel_keys = keys(panel);
+        for expected in [
+            "blueprintNode",
+            "hasClass",
+            "pluginId",
+            "readOnly",
+            "titleKey",
+        ] {
+            assert!(
+                panel_keys.iter().any(|k| k == expected),
+                "面板项缺少驼峰键 {expected}：{panel_keys:?}"
+            );
+        }
+        assert!(
+            !panel_keys.iter().any(|k| k == "plugin_id"),
+            "不得再出蛇形键"
+        );
+        // `mount` 是 manifest 形状，刻意保持蛇形（`docs/spec/panel-standard.md` 5.4）。
+        assert!(
+            keys(&panel["mount"]).iter().any(|k| k == "overlay_content"),
+            "mount 三项沿用 manifest 的蛇形名"
+        );
+
+        let node = &json["nodeTypes"][0];
+        let node_keys = keys(node);
+        assert!(
+            node_keys.iter().any(|k| k == "pluginId"),
+            "节点项缺 pluginId：{node_keys:?}"
+        );
+        assert!(node_keys.iter().any(|k| k == "type"), "节点项缺 type");
+        assert!(
+            node_keys.iter().any(|k| k == "label_key"),
+            "节点声明的 label_key 沿用 manifest 的蛇形名"
+        );
+        assert!(
+            keys(&node["fields"][0])
+                .iter()
+                .any(|k| k == "softWhenMissing"),
+            "fields[].softWhenMissing 是逐字段 rename 的驼峰"
+        );
+
+        let section = &json["settingsSections"][0];
+        let section_keys = keys(section);
+        assert!(section_keys.iter().any(|k| k == "pluginId"));
+        assert!(section_keys.iter().any(|k| k == "titleKey"));
+        assert!(section_keys.iter().any(|k| k == "settings"));
+    }
 }
