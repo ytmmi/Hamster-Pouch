@@ -74,6 +74,8 @@ import {
   readerColumnsPerScreen,
   readerPagedLayout,
   readerPagination,
+  readerProbePoint,
+  readerVisiblePageIndex,
   shouldLoadMorePages,
   READER_DESK_PADDING,
   READER_DESK_PADDING_FULLSCREEN_Y,
@@ -318,20 +320,65 @@ export function ReaderStage({
      * 页边距在纸张**内部**（`padding`），因此这个点必然落在正文栏里。
      * 滚动模式没有平移，仍用内容框（它随滚动上移，语义正确）。
      */
-    const basis = paged && paperRef.current ? paperRef.current.getBoundingClientRect() : flowRect;
-    const probeX = paged
-      ? basis.left + pagedLayout.margin + 4
-      : basis.left + Math.min(basis.width / 2, 40);
-    const rawY = Math.max(hostRect.top + 2, basis.top + 2);
-    const probeY = Math.min(rawY, Math.min(hostRect.bottom, basis.bottom) - 2);
-
-    const probe = document.elementFromPoint(probeX, probeY);
-    const pageEl = probe?.closest?.("[data-page-index]") as HTMLElement | null;
-
+    /*
+     * **分页模式不取点，直接量几何**（2026-11-15 真机实测后的第二次修正）。
+     *
+     * 取点在这块已经栽过三次：以 `.br-stage` 为基准落到页边距（拿到舞台自身）、
+     * 以被 `translateX` 平移的 `.br-flow` 为基准落到视口外（`null`）、以纸张为基准又
+     * 落进纸张的 24px 内边距（拿到 `.br-paper` 自身）。即便越过内边距，正文栏顶部
+     * 还常有 30–40px 的首行留白（标题上边距、图片块上下留白），点一进空白就返回
+     * `.br-flow`——真机上同一个点在两次翻页之间分别命中 `br-flow` / `br-paper`，
+     * `visibleIndex` 于是恒为 -1，页脚恒显 `0.00% / 0.0% / 1 / 13`。
+     *
+     * 现在的口径是**问几何**：视口内容左缘落在哪一项的并集盒里，那一项就是正在读的
+     * 项（`readerVisiblePageIndex`，纯函数，喂进去的是每项的矩形数字）。滚动模式没有
+     * 平移、内容框随滚动上移，仍用取点（探测点由 `readerProbePoint` 算）。
+     */
+    const paperRect = paperRef.current?.getBoundingClientRect() ?? null;
+    const viewportLeft = (paperRect?.left ?? 0) + pagedLayout.margin;
     let visibleIndex = -1;
+    let pageEl: HTMLElement | null = null;
+    if (paged) {
+      const elements = Array.from(
+        flowRef.current?.querySelectorAll<HTMLElement>("[data-page-index]") ?? [],
+      );
+      const pages = elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          index: Number(element.dataset.pageIndex ?? "-1"),
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+        };
+      });
+      visibleIndex = readerVisiblePageIndex({
+        vpLeft: viewportLeft,
+        vpTop: hostRect.top,
+        vpBottom: hostRect.bottom,
+        pages,
+      });
+      pageEl =
+        elements.find((element) => Number(element.dataset.pageIndex ?? "-1") === visibleIndex) ??
+        null;
+    } else {
+      const { x: probeX, y: probeY } = readerProbePoint({
+        paged: false,
+        margin: pagedLayout.margin,
+        hostTop: hostRect.top,
+        hostBottom: hostRect.bottom,
+        basisLeft: flowRect.left,
+        basisTop: flowRect.top,
+        basisBottom: flowRect.bottom,
+        basisWidth: flowRect.width,
+      });
+      const probe = document.elementFromPoint(probeX, probeY);
+      pageEl = (probe?.closest?.("[data-page-index]") as HTMLElement | null) ?? null;
+      visibleIndex = pageEl ? Number(pageEl.dataset.pageIndex ?? "-1") : -1;
+    }
+
     let offsetInPage = 0;
     if (pageEl) {
-      visibleIndex = Number(pageEl.dataset.pageIndex ?? "-1");
       const pageRect = pageEl.getBoundingClientRect();
       if (paged) {
         /*

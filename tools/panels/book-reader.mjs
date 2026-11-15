@@ -247,6 +247,89 @@ check(
   `single=${JSON.stringify(readerView.readerPagination(3000, 600, 1, 32))} spread=${JSON.stringify(readerView.readerPagination(3000, 600, 2, 32))}`,
 );
 
+check(
+  "③ 阅读位置按**几何**判定（视口左缘落在哪一项的并集盒里），不再单点取点",
+  (() => {
+    // 2026-11-15 真机实测的缺陷：页脚恒为「当前进度 0.00% 本章进度 0.0% 章节数 1 / 13」
+    // （翻页也不动）。根因是 reportPosition 用 `elementFromPoint` 单点取页——
+    // 第一版把探测点挪进纸张内容盒（`paper.top + margin + 4`）后仍然失败：
+    // 真机上同一个点一次命中 `.br-flow`、一次命中 `.br-paper`，因为正文栏顶部
+    // 常有 30–40px 首行留白（标题上边距、图片块留白），点一进空白就 `closest` 到 null。
+    //
+    // 现在的口径是**问几何**：视口内容左缘（`paper.left + margin`）落在哪一项的
+    // 并集盒里，那一项就是"正在读的项"。这里钉三件事：纯函数的算术、组件的接线、
+    // 以及"分页分支不得再取点"。
+    const box = (index, left, right, top, bottom) => ({ index, left, right, top, bottom });
+    // 真机页 8 的实测值：跨栏项的并集盒横跨 265 → 29162（右缘远在视口之外）。
+    const spanning = readerView.readerVisiblePageIndex({
+      vpLeft: 265,
+      vpTop: 95,
+      vpBottom: 739,
+      pages: [box(12, 265, 29162, 127, 707)],
+    });
+    // 视口在第 2 栏时，只占第 1 栏的项（右缘 650 < 1180）必须被跳过、选中第 2 栏的项。
+    const secondColumn = readerView.readerVisiblePageIndex({
+      vpLeft: 1180,
+      vpTop: 95,
+      vpBottom: 739,
+      pages: [box(3, 265, 650, 127, 707), box(4, 1180, 1560, 127, 707)],
+    });
+    // 整项都被推到视口左边（都读完了）——这一屏没有"正在读"的项。
+    const allBehind = readerView.readerVisiblePageIndex({
+      vpLeft: 1180,
+      vpTop: 95,
+      vpBottom: 739,
+      pages: [box(1, 265, 600, 127, 707), box(2, 620, 1000, 127, 707)],
+    });
+    // 纵向不相交（该项在另一屏）：横向再合适也不能算。
+    const offScreenVertically = readerView.readerVisiblePageIndex({
+      vpLeft: 265,
+      vpTop: 95,
+      vpBottom: 739,
+      pages: [box(9, 265, 29162, 800, 1200)],
+    });
+    // 平局（同一左缘）取序号较小者：先读到的是前者。
+    const tieBreak = readerView.readerVisiblePageIndex({
+      vpLeft: 265,
+      vpTop: 95,
+      vpBottom: 739,
+      pages: [box(6, 265, 29162, 127, 707), box(5, 265, 29162, 127, 707)],
+    });
+    // 滚动模式仍用取点：基准是内容框上缘（+2 避开边框），x 取「中间或 40px」较小者。
+    const scroll = readerView.readerProbePoint({
+      paged: false,
+      margin: 24,
+      hostTop: 10,
+      hostBottom: 600,
+      basisLeft: 100,
+      basisTop: 300,
+      basisBottom: 900,
+      basisWidth: 800,
+    });
+    const stage = readFileSync(
+      join(ROOT, "apps/desktop/src/app_ui/panels/bookreader/ReaderStage.tsx"),
+      "utf8",
+    );
+    const stageCode = stripComments(stage);
+    return (
+      spanning === 12 &&
+      secondColumn === 4 &&
+      allBehind === -1 &&
+      offScreenVertically === -1 &&
+      tieBreak === 5 &&
+      scroll.y === 302 &&
+      scroll.x === 140 &&
+      // 接线：分页分支必须调纯函数、且喂的是每项的矩形（不是取点）。
+      /readerVisiblePageIndex\(\{/.test(stageCode) &&
+      /querySelectorAll<HTMLElement>\("\[data-page-index\]"\)/.test(stageCode) &&
+      // 反向：分页分支不得再取点；`paged: true` 的探测点算式已无调用方。
+      !/paged: true,/.test(stageCode) &&
+      !/basis\.top \+ 2/.test(stageCode)
+    );
+  })(),
+  `span=${readerView.readerVisiblePageIndex({ vpLeft: 265, vpTop: 95, vpBottom: 739, pages: [{ index: 12, left: 265, right: 29162, top: 127, bottom: 707 }] })}`,
+);
+
 // ============ 分页纸张几何 + 仿真背景 + 2026-10-18 五项修订 ============
 //
 // 用户口径（2026-10-17）："单页应为一个居中容器，双页应为一对居中的容器，
@@ -1167,11 +1250,16 @@ check(
       // 时，只检查变量名字面写法的断言仍然全绿——变量名没变、变的是它装了什么）。
       /const flowRect = flow\.getBoundingClientRect\(\);/.test(code) &&
       !/const flowRect = host\.getBoundingClientRect\(\);/.test(code) &&
-      /const basis = paged && paperRef\.current \? paperRef\.current\.getBoundingClientRect\(\) : flowRect;/.test(
-        code,
-      ) &&
-      /basis\.left \+ pagedLayout\.margin \+ 4/.test(code) &&
-      /Math\.max\(hostRect\.top \+ 2, basis\.top \+ 2\)/.test(code) &&
+      // **分页模式的上报基准是纸张**（视口，不随 `translateX` 平移），滚动模式是内容框。
+      // 2026-11-15 真机实测后分页改成"量几何"：视口内容左缘 = 纸张左缘 + 纸内页边距，
+      // 它落在哪一项的并集盒里，那一项就是正在读的项（单点取点会落进首行留白）。
+      // 反向断言钉住旧算式与旧取点（`basis.top + 2` / `paged: true` 的探测点）。
+      /const paperRect = paperRef\.current\?\.getBoundingClientRect\(\) \?\? null;/.test(code) &&
+      /const viewportLeft = \(paperRect\?\.left \?\? 0\) \+ pagedLayout\.margin;/.test(code) &&
+      /readerVisiblePageIndex\(\{/.test(code) &&
+      /readerProbePoint\(\{/.test(code) &&
+      !/basis\.top \+ 2/.test(code) &&
+      !/paged: true,/.test(code) &&
       // 纸张必须真的挂上了 ref（否则 `paperRef.current` 恒为 null、退回被平移的内容框）。
       /className="br-paper"\s+ref=\{paperRef\}/.test(code) &&
       // **页内比例的分母必须是"这一项的宽"**（`.br-page` 的并集盒 = 该项总内容宽）：
