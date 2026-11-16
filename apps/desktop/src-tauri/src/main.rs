@@ -27,6 +27,8 @@ mod mcp;
 // 媒体源实时监听接线（D9）：挂载的源 → `file.changed|missing|restored` 事件。
 mod source_watch;
 mod tasks;
+// 版本号与编译管线（D230）：开发管线四段版本靠 HP_APP_VERSION 注入，见 build.rs。
+mod version;
 
 /// 应用级共享状态（Arc 包装以支持后台扫描线程）。
 #[derive(Clone)]

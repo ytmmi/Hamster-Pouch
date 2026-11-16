@@ -32,7 +32,7 @@
 # - **不缓存 `target/`**：本机实测根 `target` 5.2GB + 桥接层 3.6GB（≈8.8GB），
 #   超出 GitHub 单仓库 10GB 缓存配额的一半以上，且 Windows 上打包/解包 8GB
 #   往往比冷编译更慢。只缓存 `~/.cargo/registry`（依赖源码，几百 MB，稳赚）。
-# - **不构建发布包**（`pnpm app:build`）：那是分发环节（便携包 + Release 资产），
+# - **不构建发布包**（`pnpm app:release` / 开发包则是 `pnpm app:build`）：那是分发环节（便携包 + Release 资产），
 #   成本高于 PR 上的收益；发布通道单独一条、**手动触发**：
 #   `.github/workflows/release.yml`（`workflow_dispatch`，只在要发版本时跑）。
 # - **不拉 Git LFS**：仓库**已无** LFS 资产（2026-11-11 / D162，缺陷 0047：mpv 移出，

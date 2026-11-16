@@ -250,9 +250,10 @@ apps/desktop/src/app_ui/
                         #   （Vite 认 `*.ico` 资源、WebView2 原生可解码），不复制第二份二进制
     aboutUpdate.ts      # 更新检查的**纯逻辑**（D140，可无 Tauri 断言）：`parseVersion` / `compareVersions` /
                         #   `pickLatestRelease` / `evaluateUpdate` / `checkForUpdate`。数据源是 GitHub
-                        #   Releases（tag 形如 `v0.1.1-Alpha`）；只认 x.y.z 三段、容忍 v 前缀与 `-Alpha` 后缀；
+                        #   Releases（tag 形如 `v0.1.1-beta`）；只比较 x.y.z 三段、容忍 v 前缀与任意后缀、
+                        #   也容忍开发包的四段 `x.y.z.a-Alpha`（第四段是本地开发迭代号，线上没有对应产物，D230）；
                         #   **失败关闭**（解析失败返回 0、`!response.ok` 抛错而不是谎报"已是最新"）；
-                        #   跳过 draft、**不跳过 prerelease**（本项目所有版本都带 `-Alpha`）；
+                        #   跳过 draft、**不跳过 prerelease**；
                         #   结论是**三态** `latest` / `outdated` / `unavailable`——"列表为空或 tag
                         #   都不像版本号"必须与"确认已最新"分开，否则首发前会谎称已是最新
   menu/               # 顶部功能条、右键菜单
@@ -1077,16 +1078,32 @@ HamsterPouch/
                               #   序列后台翻完 / 胶片栏有界窗口 + 深处跳图；语料 = real-source-prep
                               #   写入的 4700 张真实照片。**缺陷 0042（分页游标键名蛇形 → 真机翻页
                               #   从未生效）就是这条链首跑抓到的**——夹具桩测不到真实序列化）
-                              # **版本号工具 `version.mjs`**（D140，纯 Node 无依赖，`pnpm version:next` /
-                              #   `pnpm check:version`）：`--current` 显示当前版本、`--next` 预览 +1、`--write <v>`
-                              #   指定版本、`--apply` 按 `HP_VERSION` 或 +1 落盘；`bumpPatch` 只对 x.y.z 的 z 段
-                              #   数字 +1，后缀 `-Alpha` 与 `+build` **逐字保留**（`0.1.0-Alpha` → `0.1.1-Alpha`）。
-                              #   三处版本文件（`tauri.conf.json` / 桥接 `Cargo.toml` / `apps/desktop/package.json`）
-                              #   同源写入，用**定点替换而非 `JSON.stringify`**（后者会把 `"scope": ["**"]`
-                              #   展开成多行，产生与版本无关的 diff 噪声）。
+                              # **版本号工具 `version.mjs`**（D140 / D230，纯 Node 无依赖，`pnpm version:next` /
+                              #   `pnpm check:version`）：版本事实在 `tools/versions.json` 的 `release` / `dev`
+                              #   两个字段里，CLI 用全局 `--pipeline dev|release` 选管线（缺省 release）：
+                              #   `--current` 显示、`--next` 预览 +1、`--write <v>` 指定、`--apply` 按 `HP_VERSION`
+                              #   或 +1 落盘、`--verify` 校验三处发布副本与 `versions.json` 一致。
+                              #   **开发管线**是四段 `X.Y.Z.A-Alpha`，`bumpDev` 只把 A 段 +1，后缀必须是 -Alpha（D231：
+                              #   自动推导时三段会重新对齐到当前发布版本，避免长期各走各的越差越远）
+                              #   （大小写不限）；**发布管线**是 `X.Y.Z`，`bumpPatch` 只把 Z 段 +1，后缀（`-beta`
+                              #   或无）与 `+build` **逐字保留**，并**拒绝 -Alpha**（那是开发管线独占的）。
+                              #   写开发版本只动 `versions.json` 的 `dev` 字段，**不碰**任何发布副本；写发布版本
+                              #   才派生三处（`tauri.conf.json` / 桥接 `Cargo.toml` / `apps/desktop/package.json`），
+                              #   用**定点替换而非 `JSON.stringify`**（后者会把 `"scope": ["**"]` 展开成多行，
+                              #   产生与版本无关的 diff 噪声）。
+                              # **构建编排 `build.mjs`**（D230 / D231）：`pnpm app:build` = `--pipeline dev`、
+                              #   `pnpm app:release` = `--pipeline release`；一次只跑一条管线，把 `HP_APP_VERSION`
+                              #   与 `HP_APP_PIPELINE` 传给 tauri 与打包脚本——四段版本就这样绕过 cargo 的三段限制。
+                              #   **版本号只在真实编译时落盘**（D231）：`--dry-run` 与 `HP_SKIP_TAURI_BUILD=1` 都不写
+                              #   `versions.json`，编译失败则把版本号回滚到编译前的值——避免「版本升了、产物却没
+                              #   出来」的悬空版本，也保证只提交代码不动版本号。两条管线的偏差由 `version.mjs` 的
+                              #   `pipelineDrift()` 判定：`X.Y.Z` 相差 ≤1 只说明，>1 或 major/minor 不同打警告；
+                              #   发布管线在编译前必须由开发者确认版本号（交互终端输 `yes`，回车取消，输别的合法
+                              #   版本号则改用它；`CI=true` 与 `--yes` 跳过确认）。
                               # **发布产物命名 `artifact-name.mjs`**（D153，纯 Node 无依赖，`pnpm check:artifact-name`）：
-                              #   `--version <v> [--zip]` 打印 `Hamster-Pouch-v0.1.13-Alpha-Windows-x64-Portable.zip`
-                              #   形式的产物名（五段：软件名-版本-平台-架构-安装方式），`--self-test` 做纯函数自检。
+                              #   `--version <v> [--zip]` 打印 `Hamster-Pouch-v0.1.1-beta-Windows-x64-Portable.zip`
+                              #   形式的产物名（五段：软件名-版本-平台-架构-安装方式；版本段也接受开发管线的四段
+                              #   `0.1.1.1-Alpha`），`--self-test` 做纯函数自检。
                               #   是**唯一命名源**——`release.yml` 的 zip 名、artifact 名、Release 资产路径都向它取；
                               #   逐段字符集校验，版本先过 `version.mjs` 的 `normalizeVersion` 再摘 `+` 构建元数据。
                               # **随包插件资产**（D156）：`bundled-assets.json` 是唯一事实源
@@ -1140,7 +1157,7 @@ hp-dto -> hp-core（跨层 DTO；由 ts-rs 生成 packages/shared-types）
 ## 实现注意
 
 - 面板布局表放全局配置库，每行带 `repo_id`；读取布局时必须按当前仓库过滤。
-- 桌面应用构建走 `pnpm app:build`（= `tauri build --no-bundle`），**不要直接用 `cargo build --release`**：前者会重新打包 `apps/desktop/dist` 前端产物并嵌入二进制，后者在前端已构建过时会认为资产未变而**静默沿用旧的内嵌产物**，表现为"改了前端但运行的是旧界面"。
+- 桌面应用构建走 `pnpm app:build`（开发管线）或 `pnpm app:release`（发布管线），两者核心都是 `tauri build --no-bundle` 加按管线的打包，**不要直接用 `cargo build --release`**：前者会重新打包 `apps/desktop/dist` 前端产物并嵌入二进制，后者在前端已构建过时会认为资产未变而**静默沿用旧的内嵌产物**，表现为"改了前端但运行的是旧界面"。
 - **换图标必须逼 `build.rs` 重跑**（D125）：`tauri_build` 的 `cargo:rerun-if-changed` 只盯 `tauri.conf.json` 与 `capabilities`，**不盯 `icons/icon.ico`**；只换图标文件时构建脚本不重跑，链接沿用旧 `resource.lib` ⇒ **"编译成功"但 exe 里还是旧图标**。做法：换完 `apps/desktop/src-tauri/icons/icon.ico` 后 `touch apps/desktop/src-tauri/tauri.conf.json`（只改 mtime、内容不变，git 仍干净）再 `pnpm app:build`，最后取 exe 内嵌帧与 `icon.ico` 的 32px 帧逐像素比对确认（`magick compare -metric AE` 应为 0；取帧用 `[System.Drawing.Icon]::ExtractAssociatedIcon`）。
 - **应用图标只有一处**：`apps/desktop/src-tauri/icons/icon.ico`（七帧 16/24/32/48/64/128/256、全部 32 位，256 帧为 PNG 载荷）。`tauri.conf.json` 没有 `bundle` 段、构建走 `--no-bundle`，故 PNG 组与 `.icns` 非必需；前端**唯一**的引用点是「关于」页（D140-R1：`AboutPanel.tsx` 直接 `import appIconUrl from "../../../src-tauri/icons/icon.ico"`，Vite 认 `*.ico` 资产、WebView2 能原生解码该 ICO 的 256×256 帧，因此不需要 PNG 副本，也不新增第二份二进制）⇒ 这个 `.ico` 就是唯一品牌面。**不要用 ImageMagick 的 ICO writer 生成它**——它会把小帧降成 8 位调色板 DIB，透明只剩 1 位 AND mask，圆角发毛（详见 D125）。
 - 前端资产文件名带内容哈希，重建后旧哈希文件会被删除；若 WebView2 缓存了旧 `index.html`，可能引用已删除的 chunk 而白屏，排查时可清理 `%LOCALAPPDATA%\<identifier>\EBWebView`。

@@ -24,7 +24,7 @@
  * ## 用法
  *
  * ```bash
- * pnpm app:build                                        # 产物在 target/release/release/
+ * pnpm app:release                                      # 产物在 target/release/release/
  * node tools/render-probe.mjs --port=9333
  * node tools/render-probe.mjs --out=apps/desktop/perf/results/render-probe.json
  * ```
@@ -445,7 +445,7 @@ function toMarkdown(result) {
 
 async function main() {
   if (!existsSync(EXE)) {
-    console.error(`找不到 app：${EXE}\n先跑 pnpm app:build`);
+    console.error(`找不到 app：${EXE}\n先跑 pnpm app:release（发布包落在 target/release/release/）`);
     process.exit(2);
   }
 

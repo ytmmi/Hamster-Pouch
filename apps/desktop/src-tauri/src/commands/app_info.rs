@@ -6,8 +6,13 @@
 //!
 //! 为什么事实在 Rust 而不是前端常量：`tauri build` 打出来的包用的是
 //! `apps/desktop/src-tauri/Cargo.toml` 的 `version`，前端 `package.json` 的版本
-//! 与它没有强制同步关系；只有 `env!("CARGO_PKG_VERSION")` 才**必然**等于
+//! 与它没有强制同步关系；只有编译期烙进二进制的那一个才**必然**等于
 //! 安装包自己的版本，这正是更新比较要用的那一个。
+//!
+//! 版本号的来源是 `crate::version::app_version()`（D230）：发布构建取
+//! `CARGO_PKG_VERSION`（三段 `X.Y.Z[-beta]`）；开发构建的四段版本
+//! `X.Y.Z.A-Alpha` 由构建脚本以 `HP_APP_VERSION` 注入。**不要**在这里直接写
+//! `env!("CARGO_PKG_VERSION")`——那会把开发版本显示成发布版本的三段。
 //!
 //! 形状遵循 **D76**（`{ ok, data?, error? }`，全部**已包装**），见
 //! `docs/spec/commands-events.md` §3.19。
@@ -16,6 +21,7 @@ use tauri::State;
 
 use crate::AppState;
 use crate::commands::shared::{ApiError, ApiResponse, api_err, api_ok};
+use crate::version;
 
 /// 许可证标识（SPDX）：与仓库 `LICENSE` 一致（GPL-3.0-or-later）。
 const LICENSE: &str = "GPL-3.0-or-later";
@@ -29,8 +35,11 @@ const OPEN_URL_PREFIX: &str = "https://github.com/";
 /// 「关于」页的事实区。
 #[derive(serde::Serialize)]
 pub(crate) struct AppInfoResult {
-    /// 安装包版本（= `Cargo.toml` 的 `version`，形如 `0.1.0-Alpha`）。
+    /// 安装包版本：开发包形如 `0.1.1.1-Alpha`（四段），发布包形如 `0.1.1-beta`。
+    /// 来源见 `crate::version::app_version()`。
     version: String,
+    /// 编译管线：`dev` 或 `release`（D230）。前端据此区分两种版本口径。
+    pipeline: String,
     /// 构建时间（本地时间，形如 `2026/11/05 23:10:42`）；本地构建取不到时为空串。
     build_time: String,
     /// 构建时 HEAD 短哈希；本地构建取不到时为空串。
@@ -57,7 +66,8 @@ fn build_env(name: &str) -> String {
 #[tauri::command]
 pub(crate) fn app_info(_state: State<AppState>) -> ApiResponse<AppInfoResult> {
     api_ok(AppInfoResult {
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: version::app_version().to_string(),
+        pipeline: version::pipeline().to_string(),
         build_time: build_env("HP_BUILD_TIME"),
         commit: build_env("HP_BUILD_COMMIT"),
         license: LICENSE.to_string(),

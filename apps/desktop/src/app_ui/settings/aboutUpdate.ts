@@ -6,9 +6,13 @@
  * 组件（`AboutPanel.tsx`）只负责把这里的结果渲染成界面。
  *
  * 数据源：`.github/workflows/release.yml` 发布的 GitHub Release，tag 形如
- * `v<version>`（`v0.1.1-Alpha`）。**版本号后缀（`-Alpha`）不参与比较**——
- * 手里只有"数字段的新旧"这一个可靠信号，把 `-Alpha`/`-Beta` 排序会把预发布
- * 当成比同号正式版更新，而本项目当前**全部**产物都带 `-Alpha`。
+ * `v<version>`（`v0.1.1-beta`）。**版本号后缀与第四段数字都不参与比较**——
+ * 手里只有"数字段的新旧"这一个可靠信号。
+ *
+ * 为什么忽略第四段（D230）：开发包是四段 `X.Y.Z.A-Alpha`，`A` 是开发迭代号，
+ * 线上永远不会有对应产物。拿它去比只会得出"本地 0.1.1.1 比线上 0.1.1 新"这种
+ * 无意义的结论。所以只比 `X.Y.Z`：同一个 `X.Y.Z` 的开发包与发布包在更新检查里
+ * 等价，`A` 只用于区分本地两次构建。
  */
 
 import type { GitHubRelease } from "../shared/types/app";
@@ -36,15 +40,18 @@ export interface UpdateFound {
 }
 
 /**
- * 取版本号的数字三段：`v0.1.1-Alpha` → `{0,1,1}`。
+ * 取版本号的数字三段：`v0.1.1-beta` → `{0,1,1}`、`0.1.1.1-Alpha` → `{0,1,1}`。
  *
  * 容忍前缀 `v`/`V`、容忍后缀（`-Alpha`、`-beta.2`、`+build`）、容忍首尾空白；
- * 只要开头是 `x.y.z` 就算成功。**不**接受两段（`0.1`）或四段，
- * 因为那说明 tag 命名跑偏了，宁可不认也不要猜。
+ * 只要开头是 `x.y.z` 就算成功。开发包的四段 `x.y.z.a` 也认，但**只取前三段**
+ * （第四段是本地开发迭代号，线上没有对应产物，见文件头注释）。
+ * **不**接受两段（`0.1`）——那说明 tag 命名跑偏了，宁可不认也不要猜。
  */
 export function parseVersion(text: string | null | undefined): VersionParts | null {
   if (typeof text !== "string") return null;
-  const match = /^[vV]?(\d+)\.(\d+)\.(\d+)/.exec(text.trim());
+  // 第四段用 (?:\.[0-9]+)? 显式吃掉：不认第四段时 "0.1.1.1-Alpha" 的尾部会留在
+  // 正则之外，被当成"后缀"静默忽略，谁也不知道这里到底接不接受四段。写明更好读。
+  const match = /^[vV]?(\d+)\.(\d+)\.(\d+)(?:\.[0-9]+)?/.exec(text.trim());
   if (match === null) return null;
   const major = Number(match[1]);
   const minor = Number(match[2]);

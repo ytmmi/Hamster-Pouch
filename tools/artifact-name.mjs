@@ -33,7 +33,7 @@
  */
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
-import { normalizeVersion, readAppVersion } from "./version.mjs";
+import { normalizeAnyVersion, readAppVersion } from "./version.mjs";
 
 /** 软件名（仓库英文名，与 GitHub 仓库 / 发布页标题一致）。 */
 export const PRODUCT = "Hamster-Pouch";
@@ -76,7 +76,7 @@ export function artifactBase({
   method = METHOD,
 } = {}) {
   // 先按 semver 校验（非法版本号不能进文件名），再摘掉 `+构建元数据`。
-  const bare = normalizeVersion(version).split("+")[0];
+  const bare = normalizeAnyVersion(version).split("+")[0];
   const segments = [product, `v${bare}`, platform, arch, method];
   for (const segment of segments) {
     if (!SEGMENT_RE.test(segment)) {
@@ -128,17 +128,21 @@ function selfTest() {
 
   console.log("[artifact-name] 自检：");
 
-  check("当前版本（0.1.13-Alpha）的基名逐字正确", () => {
+  check("发布版本（0.1.1-beta）的基名逐字正确", () => {
+    eq(artifactBase({ version: "0.1.1-beta" }), "Hamster-Pouch-v0.1.1-beta-Windows-x64-Portable");
+  });
+
+  check("开发版本（0.1.1.1-Alpha，四段）同样能成形（D230）", () => {
     eq(
-      artifactBase({ version: "0.1.13-Alpha" }),
-      "Hamster-Pouch-v0.1.13-Alpha-Windows-x64-Portable",
+      artifactBase({ version: "0.1.1.1-Alpha" }),
+      "Hamster-Pouch-v0.1.1.1-Alpha-Windows-x64-Portable",
     );
   });
 
   check("带 .zip 的文件名 = 基名 + .zip", () => {
     eq(
-      artifactFileName({ version: "0.1.13-Alpha" }),
-      "Hamster-Pouch-v0.1.13-Alpha-Windows-x64-Portable.zip",
+      artifactFileName({ version: "0.1.1-beta" }),
+      "Hamster-Pouch-v0.1.1-beta-Windows-x64-Portable.zip",
     );
   });
 
@@ -160,16 +164,18 @@ function selfTest() {
     // 参照样本来自用户原话（2026-11-10）：软件名-v版本-平台-架构-安装方式。
     // 软件名自身可以含连字符（CC-Switch / Hamster-Pouch），所以不能按 `-` 切段数，
     // 只能按"每一段的形状"整体匹配。
+    // 版本段允许可选的第四段数字：开发管线是 X.Y.Z.A-Alpha（D230），
+    // 发布管线是 X.Y.Z[-beta]，同一条正则要同时套住两种产物名。
     const SHAPE =
-      /^(?<name>[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)-v(?<ver>\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)*)-(?<plat>[A-Z][A-Za-z]+)-(?<arch>[a-z0-9]+)-(?<method>[A-Z][A-Za-z]+)$/;
+      /^(?<name>[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)-v(?<ver>\d+\.\d+\.\d+(?:\.\d+)?(?:-[A-Za-z0-9.]+)*)-(?<plat>[A-Z][A-Za-z]+)-(?<arch>[a-z0-9]+)-(?<method>[A-Z][A-Za-z]+)$/;
     const sample = "CC-Switch-v4.0.25-Windows-arm64-Portable";
-    const ours = artifactBase({ version: "0.1.13-Alpha" });
+    const ours = artifactBase({ version: "0.1.1-beta" });
     const sampleMatch = SHAPE.exec(sample);
     const ourMatch = SHAPE.exec(ours);
     if (!sampleMatch) throw new Error(`参照样本不满足五段形状：${sample}`);
     if (!ourMatch) throw new Error(`产物名不满足五段形状：${ours}`);
     eq(ourMatch.groups.name, PRODUCT, "软件名段：");
-    eq(ourMatch.groups.ver, "0.1.13-Alpha", "版本段：");
+    eq(ourMatch.groups.ver, "0.1.1-beta", "版本段：");
     eq(ourMatch.groups.plat, "Windows", "平台段：");
     eq(ourMatch.groups.arch, "x64", "架构段：");
     eq(ourMatch.groups.method, "Portable", "安装方式段：");
@@ -183,13 +189,15 @@ function selfTest() {
   });
 
   check("产物名不含 Windows 文件名非法字符与空白", () => {
-    const name = artifactFileName({ version: "0.1.13-Alpha" });
+    const name = artifactFileName({ version: "0.1.1.1-Alpha" });
     if (/[\\/:*?"<>|\s]/.test(name)) throw new Error(`含非法字符：${name}`);
   });
 
   check("版本号非法时抛错（不静默产出怪名字）", () => {
     throws(() => artifactBase({ version: "0.1" }), "两段版本号");
     throws(() => artifactBase({ version: "0.1.3/evil" }), "含路径分隔符的版本号");
+    throws(() => artifactBase({ version: "0.1.1.1-beta" }), "四段却带 -beta（两条管线都没有这种版本）");
+    throws(() => artifactBase({ version: "0.1.1-Alpha" }), "三段却带 -Alpha（-Alpha 只给四段开发版本）");
     throws(() => artifactBase({ version: "" }), "空版本号");
   });
 

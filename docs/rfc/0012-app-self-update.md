@@ -17,16 +17,16 @@
 
 | 事项 | 事实 | 锚点 |
 | --- | --- | --- |
-| 发布形态 | 便携文件夹，不是安装器：`tauri build --no-bundle` + 打包脚本手工铺 `data\system\` | `package.json:13`、`tools/package-build.mjs` |
+| 发布形态 | 便携文件夹，不是安装器：`tauri build --no-bundle` + 打包脚本手工铺 `data\system\` | `package.json:14`（`app:release`）、`tools/package-build.mjs` |
 | 产物 | `release\` 总 391 MB；exe 49,016,832 B；`external-cli\` 288 MB；`plugins\` 23 MB；`data\` 35 MB | 实测 `apps/desktop/src-tauri/target/release/release/` |
-| 版本号 | `0.1.13-Alpha`，三处同源（`tauri.conf.json` / `Cargo.toml` / `package.json`），由 `tools/version.mjs` 读写；`pnpm app:build` 第一步自动 patch+1 | `tauri.conf.json:4`、`apps/desktop/src-tauri/Cargo.toml:3` |
+| 版本号 | 发布管线 `0.1.1-beta`，事实在 `tools/versions.json` 的 `release` 字段，派生三处副本（`tauri.conf.json` / `Cargo.toml` / `package.json`）；开发管线 `0.1.1.1-Alpha` 只存 `dev` 字段、不进 cargo（D230） | `tools/versions.json`、`tools/version.mjs`、`apps/desktop/src-tauri/src/version.rs` |
 | 现有更新能力 | 只有「发现」：前端直连 `api.github.com/repos/ytmmi/Hamster-Pouch/releases?per_page=100`，10 s 超时，纯函数判三态 | `apps/desktop/src/app_ui/settings/aboutUpdate.ts:172`（`RELEASES_API_URL`）、`:176`（`FETCH_TIMEOUT_MS`）、`:110`（`pickLatestRelease`）、`:151`（`evaluateUpdate`） |
 | 关于页 | 状态文案 + 「检查更新」/「去 GitHub 更新」按钮 + `ui.autoCheckUpdate` 开关 | `apps/desktop/src/app_ui/settings/AboutPanel.tsx:27,111-116,193,218-224` |
 | 数据住址 | `<exe 同目录>\data\`：`system\`（全局库 + 基底词库）、`user\`（每仓库一个库 + 封面）、`plugins\`、`thumbnails\`、`debug.log` | `apps/desktop/src-tauri/src/main.rs:87`（`resolve_data_dir`）、`commands/shared.rs:176-182`（`app_data_root`） |
 | 启动/退出 | `main()` 里 `.plugin(dialog)` → `.setup` → `manage(state)` → `generate_handler!` → `.run(...)`；**没有 `RunEvent` 钩子** | `main.rs:120-358`（`:123` plugin、`:124` setup、末尾裸 `.run`） |
 | 进程模型 | **无单实例锁**：双击图标会起第二个进程，两个进程抢同一个 `data\` | 全仓无 `single-instance` 依赖 |
 | HTTP | `apps/desktop/src-tauri/Cargo.toml` 里**没有任何 HTTP 客户端**；`ureq` / `reqwest` 均未出现 | `commands-events.md:620` 把这一点当作「检查更新不走 Rust」的理由 |
-| 发布链路 | 手动 `workflow_dispatch` → `pnpm app:build` → fail-closed 自检（exe / ffmpeg / mpv / plugins/system / 基底词库，mpv ≥ 50 MB 防 LFS 指针）→ `7z -mx=3` 打整夹 zip → `gh release create/upload --clobber` | `.github/workflows/release.yml` |
+| 发布链路 | 手动 `workflow_dispatch` → `pnpm app:release` → fail-closed 自检（exe / ffmpeg / mpv / plugins/system / 基底词库，mpv ≥ 50 MB 防 LFS 指针）→ `7z -mx=3` 打整夹 zip → `gh release create/upload --clobber` | `.github/workflows/release.yml` |
 | 整包内容 | zip 里的 exe 就是 `target\release\` 那份被**复制**进去的同一个文件 | `tools/package-build.mjs:486`（`await cp(EXE, join(relDir, "hamster-pouch-desktop.exe"))`） |
 | 前端可执行面 | `csp: null`：将来任何一处 XSS 都能在 WebView 里跑任意脚本 → 能调任意 IPC 命令 | `tauri.conf.json:23` |
 

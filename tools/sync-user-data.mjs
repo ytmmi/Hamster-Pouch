@@ -17,7 +17,7 @@
  *   - 快照是「保留开发期测试数据」的手段：每次编译后执行一次（pnpm data:sync），测试库不丢。
  *   - 快照/恢复前请**先退出应用**：WAL 模式下一次写事务会同时改动 <db> / <db>-wal / <db>-shm，
  *     应用运行中复制可能拿到不一致的组合。
- *   - 发布构建（pnpm app:build = tauri build --no-bundle）**不执行**本脚本，
+ *   - 发布构建（pnpm app:release = tauri build --no-bundle + 发布包打包）**不执行**本脚本，
  *     构建产物里不包含任何用户数据（数据只留在 exe 同目录的 data\，从不进入 dist\ 或打包物）。
  */
 
@@ -123,5 +123,5 @@ await copyInto(DATA_DIR, snapDir);
 console.log(`[sync-user-data] 已快照用户数据: ${snapDir}`);
 console.log(`[sync-user-data] 快照根: ${SNAPSHOT_ROOT}（git 已忽略 backups/，不入库）`);
 console.log(
-  "[sync-user-data] 发布构建（pnpm app:build）不含用户数据：数据只留在 exe 同目录的 data\\，从不进入 dist\\ 或打包物；pnpm clean 清理时会保留 data\\。",
+  "[sync-user-data] 发布构建（pnpm app:release）不含用户数据：数据只留在 exe 同目录的 data\\，从不进入 dist\\ 或打包物；pnpm clean 清理时会保留 data\\。",
 );

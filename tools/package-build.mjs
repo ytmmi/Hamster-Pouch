@@ -75,9 +75,11 @@
  * 缩略图文件集包含关系、布局 `updated_at`。实测记录见 `docs/issues/README.md` 第 33 轮状态段
  * （`dev-20261110-133941`：schema 13→14（迁移 0014）、蓝图 51→60 节点、布局 2273→2195 字节）。
  *
- * 用法：
- *   node tools/package-build.mjs      # 或 pnpm app:package
- *   （`pnpm app:build` 成功后会顺带执行本脚本，即「每次编译新建一个」）
+ * 用法（`--pipeline` **必填**，一次只产一条管线的包，D230）：
+ *   node tools/package-build.mjs --pipeline dev       # 或 pnpm app:package
+ *   node tools/package-build.mjs --pipeline release   # 或 pnpm app:package:release
+ *   （`pnpm app:build` / `pnpm app:release` 成功后都会带着管线名执行本脚本，
+ *     即「每次编译新建一个」；两条管线的落点分别是 `dev/dev-<时间戳>/` 与 `release/`）
  */
 
 import { execFileSync } from "node:child_process";
@@ -393,7 +395,10 @@ function countHardLinks(dir) {
 
 // 前置检查：必须有编译产物
 if (!(await stat(EXE).catch(() => null))?.isFile()) {
-  console.error(`[package-build] 未找到编译产物: ${EXE}\n  请先运行 pnpm app:build`);
+  console.error(
+    `[package-build] 未找到编译产物: ${EXE}\n  请先运行 ` +
+      (pipeline === "dev" ? "pnpm app:build" : "pnpm app:release"),
+  );
   process.exit(1);
 }
 
@@ -415,200 +420,284 @@ for (const [label, p] of [
   }
 }
 
-// ---- 1) 开发包：exe + 用户数据（每次编译新建一个，命名带时间戳）----
-const devDir = join(BASE, "dev", `dev-${stampLocal()}`);
-await mkdir(devDir, { recursive: true });
-await cp(EXE, join(devDir, "hamster-pouch-desktop.exe"));
-let devSize = (await stat(join(devDir, "hamster-pouch-desktop.exe"))).size;
+// ---- 管线开关：一次运行只产出**一条**管线的包（D230）----
+// 开发包与发布包结构完全不同（前者带用户数据、后者只带系统内容）。此前两者在同一次运行里
+// 顺序产出，容易让人以为「编了开发包就等于发了版」；现在用 --pipeline 显式选一条。
+/** 从 argv 里读 --pipeline（必填；写错就报错，不静默退回某条默认管线）。 */
+function parsePipeline(argv) {
+  let pipeline = "";
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === "--pipeline") {
+      pipeline = String(argv[i + 1] ?? "").trim();
+      i += 1;
+    } else if (argv[i].startsWith("--pipeline=")) {
+      pipeline = argv[i].slice("--pipeline=".length).trim();
+    }
+  }
+  if (!pipeline) {
+    console.error(
+      "[package-build] 必须显式指定 --pipeline dev 或 --pipeline release\n" +
+        "  dev: 开发包（exe + 用户数据，版本形如 0.1.1.1-Alpha）\n" +
+        "  release: 发布包（exe + 系统内容，版本形如 0.1.1-beta）\n" +
+        "  一次运行只产出一条管线的包；两条管线互不改写对方版本（D230）",
+    );
+    process.exit(1);
+  }
+  if (pipeline !== "dev" && pipeline !== "release") {
+    console.error("[package-build] 未知管线: " + pipeline + "（只能是 dev / release）");
+    process.exit(1);
+  }
+  return pipeline;
+}
+const pipeline = parsePipeline(process.argv.slice(2));
+console.log("[package-build] 管线: " + pipeline);
+if (pipeline === "dev") {
+  console.log("[package-build] 开发包（X.Y.Z.A-Alpha）：带用户数据，不改发布版本");
+} else {
+  console.log("[package-build] 发布包（X.Y.Z[-beta]）：只带系统内容，不改开发版本");
+}
+
+// 编译机上的活动数据快照：两条管线都要读（dev 整份复制、release 只取系统内容）
 const dataStat = await stat(DATA).catch(() => null);
-if (dataStat?.isDirectory()) {
-  await cp(DATA, join(devDir, "data"), { recursive: true });
-  devSize += await dirSize(DATA);
 
-  // 自包含：把包内全局库注册表从「暂存路径」改写为「包内路径」，
-  // 使开发包可整体带走（仓库库路径 / 插件 source_ref 都指向包内 data\）。
-  //
-  // **先归一化 `\.\` 再替换**：活动库里可能残留 `<exe>\src-tauri\.\target\release\data\…`
-  // 这种带 `.` 段的路径（某次启动写进去的）。`replace()` 是纯前缀匹配，多出的 `\.\`
-  // 会让前缀对不上、**静默不改写**——包于是不自包含，却仍然打印"打包成功"
-  // （实测：`plugin_registry.source_ref` 留在活动 data 里）。改完再复核一遍并报警。
-  const gdb = join(devDir, "data", "system", "hamster-pouch-global.sqlite3");
-  if (await stat(gdb).catch(() => null)) {
-    const pkgData = join(devDir, "data");
-    const norm = (col) => `replace(${col}, '\\.\\', '\\')`;
-    const sql =
-      `UPDATE repos SET repo_db_path = replace(${norm("repo_db_path")}, '${DATA}', '${pkgData}');` +
-      `UPDATE plugin_registry SET source_ref = replace(${norm("source_ref")}, '${DATA}', '${pkgData}');`;
-    try {
-      execFileSync("sqlite3", [gdb, sql], { stdio: "ignore" });
-      const q =
-        `SELECT count(*) FROM repos WHERE repo_db_path LIKE '${DATA}%' OR repo_db_path LIKE '${pkgData}%';` +
-        `SELECT count(*) FROM plugin_registry WHERE source_ref LIKE '${DATA}%';`;
-      const [inside, stale] = execFileSync("sqlite3", [gdb, q], { encoding: "utf8" })
-        .trim()
-        .split(/\r?\n/)
-        .map((n) => Number(n.trim()));
-      if (inside === 0 || stale !== 0) {
-        console.warn(
-          `[package-build] 注册表自包含复核未通过：仓库库落在包内 ${inside} 行、插件仍指向活动数据 ${stale} 行`,
-        );
+if (pipeline === "dev") {
+  // ---- 1) 开发包：exe + 用户数据（每次编译新建一个，命名带时间戳）----
+  const devDir = join(BASE, "dev", `dev-${stampLocal()}`);
+  await mkdir(devDir, { recursive: true });
+  await cp(EXE, join(devDir, "hamster-pouch-desktop.exe"));
+  let devSize = (await stat(join(devDir, "hamster-pouch-desktop.exe"))).size;
+  if (dataStat?.isDirectory()) {
+    await cp(DATA, join(devDir, "data"), { recursive: true });
+    devSize += await dirSize(DATA);
+
+    // 自包含：把包内全局库注册表从「暂存路径」改写为「包内路径」，
+    // 使开发包可整体带走（仓库库路径 / 插件 source_ref 都指向包内 data\）。
+    //
+    // **先归一化 `\.\` 再替换**：活动库里可能残留 `<exe>\src-tauri\.\target\release\data\…`
+    // 这种带 `.` 段的路径（某次启动写进去的）。`replace()` 是纯前缀匹配，多出的 `\.\`
+    // 会让前缀对不上、**静默不改写**——包于是不自包含，却仍然打印"打包成功"
+    // （实测：`plugin_registry.source_ref` 留在活动 data 里）。改完再复核一遍并报警。
+    const gdb = join(devDir, "data", "system", "hamster-pouch-global.sqlite3");
+    if (await stat(gdb).catch(() => null)) {
+      const pkgData = join(devDir, "data");
+      const norm = (col) => `replace(${col}, '\\.\\', '\\')`;
+      const sql =
+        `UPDATE repos SET repo_db_path = replace(${norm("repo_db_path")}, '${DATA}', '${pkgData}');` +
+        `UPDATE plugin_registry SET source_ref = replace(${norm("source_ref")}, '${DATA}', '${pkgData}');`;
+      try {
+        execFileSync("sqlite3", [gdb, sql], { stdio: "ignore" });
+        const q =
+          `SELECT count(*) FROM repos WHERE repo_db_path LIKE '${DATA}%' OR repo_db_path LIKE '${pkgData}%';` +
+          `SELECT count(*) FROM plugin_registry WHERE source_ref LIKE '${DATA}%';`;
+        const [inside, stale] = execFileSync("sqlite3", [gdb, q], { encoding: "utf8" })
+          .trim()
+          .split(/\r?\n/)
+          .map((n) => Number(n.trim()));
+        if (inside === 0 || stale !== 0) {
+          console.warn(
+            `[package-build] 注册表自包含复核未通过：仓库库落在包内 ${inside} 行、插件仍指向活动数据 ${stale} 行`,
+          );
+        }
+      } catch (e) {
+        console.error(`[package-build] 改写包内全局库注册表失败（${e.message}），包内数据可能不自包含`);
+        process.exit(1);
       }
-    } catch (e) {
-      console.error(`[package-build] 改写包内全局库注册表失败（${e.message}），包内数据可能不自包含`);
-      process.exit(1);
     }
   }
-}
 
-// 附带已签名但**不随发布**的插件包（plugins-dist/ 下的 tagdict-* 词典扩展
-// 与 tagrel-* 关系扩展，见 RFC 0008 D36.5）
-const pluginsDist = join(ROOT, "plugins-dist");
-let pluginsDistHasData = false;
-try {
-  pluginsDistHasData = (await stat(pluginsDist)).isDirectory();
-} catch { /* 目录不存在时不附加 */ }if (pluginsDistHasData) {
-  for (const dirEntry of await readdir(pluginsDist, { withFileTypes: true })) {
-    if (dirEntry.isDirectory() && !dirEntry.name.startsWith(".")) {
-      const src = join(pluginsDist, dirEntry.name);
-      await cp(src, join(devDir, "plugins-dist", dirEntry.name), { recursive: true });
-    }
-  }
-  console.log(`[package-build]   附加: plugins-dist/（已签名扩展插件，不含用户数据）`);
-}
-
-// 附带内置基底词库到 data/system/ 下
-if (await copyBaseDict(join(devDir, "data"))) {
-  console.log(`[package-build]   附加: data\\system\\tag_lib_base.sqlite3（内置基底词库）`);
-}
-// 清掉已退役的旧基底库：RFC 0008 起由 tag_lib_base.sqlite3 取代。
-// 它可能来自旧的 DATA 暂存缓存；留着会被误当成有效词库（旧 schema）。
-await rm(join(devDir, "data", "system", "tag_dict_base.sqlite3"), { force: true });
-
-// 系统插件的签名**随插件目录一起走**：`plugins/system/<目录>/SHA256SUMS(.sig)` 由
-// `placeBundledRuntime` 整目录带进包（exe 同级，`plugin.installBundled` 的来源根），
-// 发布分支再从**仓库根**复制系统插件目录进 `data\plugins\`。
-// 这里曾有一段把 `system/palette` 的签名单独同步到 `data\plugins\palette` 的代码：
-// 目标目录既不是插件 id 也不是版本目录（安装布局是 `<root>\<id>\<version>\`），
-// 是一处陈旧残留，已随 palette 插件删除。
-// 随包运行时资产：external-cli\（ffmpeg 运行时子集 + 可选 mpv）+ plugins\system\（随包插件来源）。
-// 放在 exe 同级 —— 与仓库内布局同构，find_upwards 从 exe 目录第一跳即命中。
-// dev 包走硬链接（零额外占用），见 placeFile。
-const devBundled = await placeBundledRuntime(devDir, "硬链接优先", true);
-devSize += devBundled.external.bytes + devBundled.plugins.bytes + devBundled.mpv.bytes;
-verifyBundledRuntime(devDir, { allowLink: true, mpvExpected: devBundled.mpv.present });
-
-console.log(`[package-build] 开发包: ${devDir}`);
-console.log(
-  `[package-build]   内容: exe + data\\（用户数据）+ external-cli\\ + plugins\\system\\ 共 ${fmtMB(devSize)}`,
-);
-
-// ---- 2) 发布包：exe + 系统数据库 + 系统插件（不含用户数据）----
-const relDir = join(BASE, "release");
-await mkdir(relDir, { recursive: true });
-await cp(EXE, join(relDir, "hamster-pouch-desktop.exe"));
-
-// 发布包只保留「系统内容」：复制暂存 data\ 后清掉用户库/缓存/日志与**非系统插件**，
-// 再按**已安装布局**补回系统插件目录，发布全局库同时清空仓库注册表与按仓库授权、
-// 并只保留本次落盘的系统插件注册。
-let systemPlugins = [];
-if (dataStat?.isDirectory()) {
-  await cp(DATA, join(relDir, "data"), { recursive: true });
-  for (const sub of ["user", "thumbnails"]) {
-    await rm(join(relDir, "data", sub), { recursive: true, force: true });
-  }
-  await rm(join(relDir, "data", "debug.log"), { force: true });
-
-  // 系统插件的**来源是仓库根** `plugins/system/*/`——它就是 `plugin.installBundled` 的来源根，
-  // 也是 `placeBundledRuntime` 整目录带进包的那一批。**不再**按活动数据的注册表反查：
-  // 注册表可能留着"仓库里已删掉"的系统插件行（palette 就是这么把已删插件带回发布包的）。
-  const sysPluginRoot = join(ROOT, "plugins", "system");
-  const sysPluginDirs = [];
+  // 附带已签名但**不随发布**的插件包（plugins-dist/ 下的 tagdict-* 词典扩展
+  // 与 tagrel-* 关系扩展，见 RFC 0008 D36.5）
+  const pluginsDist = join(ROOT, "plugins-dist");
+  let pluginsDistHasData = false;
   try {
-    for (const entry of await readdir(sysPluginRoot, { withFileTypes: true })) {
-      if (entry.isDirectory() && existsSync(join(sysPluginRoot, entry.name, "plugin.manifest"))) {
-        sysPluginDirs.push(entry.name);
+    pluginsDistHasData = (await stat(pluginsDist)).isDirectory();
+  } catch { /* 目录不存在时不附加 */ }if (pluginsDistHasData) {
+    for (const dirEntry of await readdir(pluginsDist, { withFileTypes: true })) {
+      if (dirEntry.isDirectory() && !dirEntry.name.startsWith(".")) {
+        const src = join(pluginsDist, dirEntry.name);
+        await cp(src, join(devDir, "plugins-dist", dirEntry.name), { recursive: true });
       }
     }
-  } catch { /* 目录不存在则跳过 */ }
+    console.log(`[package-build]   附加: plugins-dist/（已签名扩展插件，不含用户数据）`);
+  }
 
-  // 落盘必须按**已安装布局** `data\plugins\<id>\<version>\`：加载路径是 `install.rs` 的
-  // `version_dir(id, version)`，而**目录名不保证等于插件 id**（`plugins/system/python-core/`
-  // 的 id 是 `dev.hamsterpouch.system.python_core`）。此前按目录名平铺复制
-  // （`data\plugins\python-core\`）——既不是任何插件 id、也没有版本层，宿主永远不会读它：
-  // 那是**死副本**，且与"没有注册行的孤儿目录"长得一模一样。
-  const relPlugins = join(relDir, "data", "plugins");
-  await rm(relPlugins, { recursive: true, force: true });
-  const installedSystem = [];
-  for (const name of sysPluginDirs) {
-    let manifest;
-    try {
-      manifest = await readPluginManifest(join(sysPluginRoot, name));
-    } catch (e) {
-      console.log(`[package-build]   警告: 系统插件 ${name} 的清单不可用，跳过（${e.message}）`);
-      continue;
+  // 附带内置基底词库到 data/system/ 下
+  if (await copyBaseDict(join(devDir, "data"))) {
+    console.log(`[package-build]   附加: data\\system\\tag_lib_base.sqlite3（内置基底词库）`);
+  }
+  // 清掉已退役的旧基底库：RFC 0008 起由 tag_lib_base.sqlite3 取代。
+  // 它可能来自旧的 DATA 暂存缓存；留着会被误当成有效词库（旧 schema）。
+  await rm(join(devDir, "data", "system", "tag_dict_base.sqlite3"), { force: true });
+
+  // 系统插件的签名**随插件目录一起走**：`plugins/system/<目录>/SHA256SUMS(.sig)` 由
+  // `placeBundledRuntime` 整目录带进包（exe 同级，`plugin.installBundled` 的来源根），
+  // 发布分支再从**仓库根**复制系统插件目录进 `data\plugins\`。
+  // 这里曾有一段把 `system/palette` 的签名单独同步到 `data\plugins\palette` 的代码：
+  // 目标目录既不是插件 id 也不是版本目录（安装布局是 `<root>\<id>\<version>\`），
+  // 是一处陈旧残留，已随 palette 插件删除。
+  // 随包运行时资产：external-cli\（ffmpeg 运行时子集 + 可选 mpv）+ plugins\system\（随包插件来源）。
+  // 放在 exe 同级 —— 与仓库内布局同构，find_upwards 从 exe 目录第一跳即命中。
+  // dev 包走硬链接（零额外占用），见 placeFile。
+  const devBundled = await placeBundledRuntime(devDir, "硬链接优先", true);
+  devSize += devBundled.external.bytes + devBundled.plugins.bytes + devBundled.mpv.bytes;
+  verifyBundledRuntime(devDir, { allowLink: true, mpvExpected: devBundled.mpv.present });
+
+  console.log(`[package-build] 开发包: ${devDir}`);
+  console.log(
+    `[package-build]   内容: exe + data\\（用户数据）+ external-cli\\ + plugins\\system\\ 共 ${fmtMB(devSize)}`,
+  );
+
+} else {
+  // ---- 2) 发布包：exe + 系统数据库 + 系统插件（不含用户数据）----
+  const relDir = join(BASE, "release");
+  await mkdir(relDir, { recursive: true });
+  await cp(EXE, join(relDir, "hamster-pouch-desktop.exe"));
+
+  // 发布包只保留「系统内容」：复制暂存 data\ 后清掉用户库/缓存/日志与**非系统插件**，
+  // 再按**已安装布局**补回系统插件目录，发布全局库同时清空仓库注册表与按仓库授权、
+  // 并只保留本次落盘的系统插件注册。
+  let systemPlugins = [];
+  if (dataStat?.isDirectory()) {
+    await cp(DATA, join(relDir, "data"), { recursive: true });
+    for (const sub of ["user", "thumbnails"]) {
+      await rm(join(relDir, "data", sub), { recursive: true, force: true });
     }
-    const dest = join(relPlugins, manifest.json.id, manifest.json.version);
-    await cp(join(sysPluginRoot, name), dest, { recursive: true });
-    installedSystem.push({ manifest, versionDir: dest });
-    systemPlugins.push(manifest.json.id);
+    await rm(join(relDir, "data", "debug.log"), { force: true });
+
+    // 系统插件的**来源是仓库根** `plugins/system/*/`——它就是 `plugin.installBundled` 的来源根，
+    // 也是 `placeBundledRuntime` 整目录带进包的那一批。**不再**按活动数据的注册表反查：
+    // 注册表可能留着"仓库里已删掉"的系统插件行（palette 就是这么把已删插件带回发布包的）。
+    const sysPluginRoot = join(ROOT, "plugins", "system");
+    const sysPluginDirs = [];
+    try {
+      for (const entry of await readdir(sysPluginRoot, { withFileTypes: true })) {
+        if (entry.isDirectory() && existsSync(join(sysPluginRoot, entry.name, "plugin.manifest"))) {
+          sysPluginDirs.push(entry.name);
+        }
+      }
+    } catch { /* 目录不存在则跳过 */ }
+
+    // 落盘必须按**已安装布局** `data\plugins\<id>\<version>\`：加载路径是 `install.rs` 的
+    // `version_dir(id, version)`，而**目录名不保证等于插件 id**（`plugins/system/python-core/`
+    // 的 id 是 `dev.hamsterpouch.system.python_core`）。此前按目录名平铺复制
+    // （`data\plugins\python-core\`）——既不是任何插件 id、也没有版本层，宿主永远不会读它：
+    // 那是**死副本**，且与"没有注册行的孤儿目录"长得一模一样。
+    const relPlugins = join(relDir, "data", "plugins");
+    await rm(relPlugins, { recursive: true, force: true });
+    const installedSystem = [];
+    for (const name of sysPluginDirs) {
+      let manifest;
+      try {
+        manifest = await readPluginManifest(join(sysPluginRoot, name));
+      } catch (e) {
+        console.log(`[package-build]   警告: 系统插件 ${name} 的清单不可用，跳过（${e.message}）`);
+        continue;
+      }
+      const dest = join(relPlugins, manifest.json.id, manifest.json.version);
+      await cp(join(sysPluginRoot, name), dest, { recursive: true });
+      installedSystem.push({ manifest, versionDir: dest });
+      systemPlugins.push(manifest.json.id);
+    }
+
+    // 发布全局库：清仓库注册/按仓库授权；**系统插件注册按刚落盘的安装目录重写**，
+    // 做到"随包即已安装"（首次运行播种走 `alreadyInstalled` 复用，并把 `source_ref`
+    // 修正为**本机**包内路径——`install_or_reuse_registry_row`）。非系统插件注册一律删除。
+    const relGdb = join(relDir, "data", "system", "hamster-pouch-global.sqlite3");
+    if (await stat(relGdb).catch(() => null)) {
+      const installedAt = new Date().toISOString();
+      const rows = installedSystem
+        .map(({ manifest, versionDir }) => {
+          const m = manifest.json;
+          const cols = [
+            m.id,
+            m.name,
+            m.version,
+            "system",
+            "system",
+            versionDir,
+            m.runtime?.kind ?? "external-process",
+            installedAt,
+            manifest.text,
+          ].map(sqlStr);
+          return (
+            "INSERT OR REPLACE INTO plugin_registry " +
+            "(id, name, version, trust_level, source_kind, source_ref, runtime_kind, installed_at, manifest_json) " +
+            `VALUES (${cols.join(", ")});`
+          );
+        })
+        .join(" ");
+      const sql =
+        "DELETE FROM repos; " +
+        "DELETE FROM layout_bindings; " +
+        // 发布包只带**一份**演示布局：随包分发的是产品默认形状，不携带开发机上的测试预设
+        // （如「媒体-测试-1」）。保留 `layout.default` 指向的那份并改名为「演示布局」，其余删除；
+        // 无默认指针时这条删除是空操作（保留首次运行自建/播种路径）。origin 固定为 user，
+        // 避免首启播种逻辑把它当成「未被改动的 seeded 预设」替换掉。
+        "DELETE FROM layout_presets WHERE id <> " +
+        "(SELECT value FROM app_settings WHERE key = 'layout.default'); " +
+        "UPDATE layout_presets SET name = '演示布局', origin = 'user' " +
+        "WHERE id = (SELECT value FROM app_settings WHERE key = 'layout.default'); " +
+        // 演示布局原来绑定的蓝图是**仓库级**数据（`data\\user\\repos\\` 整个不进包），
+        // 留着就是一串指向不存在记录的悬空 id。清空后由内置默认蓝图
+        // （`packages/config/src/blueprintDefault.ts`，D155）在用户建仓库时播种——
+        // 布局与蓝图因此始终同源，不会再出现「界面上有标签页、画布上没有该层」。
+        "UPDATE layout_presets SET blueprint_ids_json = '[]' " +
+        "WHERE id = (SELECT value FROM app_settings WHERE key = 'layout.default'); " +
+        "DELETE FROM plugin_repo_state; " +
+        "DELETE FROM plugin_registry; " +
+        // 按仓库的设置键一并清掉：`repo.default` 指向已删仓库会让首屏误判「有默认仓库」
+        // （repoOpen 失败），应用级布局因此套不上（缺陷 0044 的复发路径）。
+        "DELETE FROM app_settings WHERE key = 'repo.default'" +
+        " OR key LIKE 'blueprint.currentLayer.%'" +
+        " OR key LIKE 'panelMarks.%'; " +
+        rows;
+      execFileSync("sqlite3", [relGdb, sql], { stdio: "ignore" });
+      await verifyDemoLayoutMatchesDefaultBlueprint(relGdb);
+    }
   }
 
-  // 发布全局库：清仓库注册/按仓库授权；**系统插件注册按刚落盘的安装目录重写**，
-  // 做到"随包即已安装"（首次运行播种走 `alreadyInstalled` 复用，并把 `source_ref`
-  // 修正为**本机**包内路径——`install_or_reuse_registry_row`）。非系统插件注册一律删除。
-  const relGdb = join(relDir, "data", "system", "hamster-pouch-global.sqlite3");
-  if (await stat(relGdb).catch(() => null)) {
-    const installedAt = new Date().toISOString();
-    const rows = installedSystem
-      .map(({ manifest, versionDir }) => {
-        const m = manifest.json;
-        const cols = [
-          m.id,
-          m.name,
-          m.version,
-          "system",
-          "system",
-          versionDir,
-          m.runtime?.kind ?? "external-process",
-          installedAt,
-          manifest.text,
-        ].map(sqlStr);
-        return (
-          "INSERT OR REPLACE INTO plugin_registry " +
-          "(id, name, version, trust_level, source_kind, source_ref, runtime_kind, installed_at, manifest_json) " +
-          `VALUES (${cols.join(", ")});`
-        );
-      })
-      .join(" ");
-    const sql =
-      "DELETE FROM repos; " +
-      "DELETE FROM layout_bindings; " +
-      // 发布包只带**一份**演示布局：随包分发的是产品默认形状，不携带开发机上的测试预设
-      // （如「媒体-测试-1」）。保留 `layout.default` 指向的那份并改名为「演示布局」，其余删除；
-      // 无默认指针时这条删除是空操作（保留首次运行自建/播种路径）。origin 固定为 user，
-      // 避免首启播种逻辑把它当成「未被改动的 seeded 预设」替换掉。
-      "DELETE FROM layout_presets WHERE id <> " +
-      "(SELECT value FROM app_settings WHERE key = 'layout.default'); " +
-      "UPDATE layout_presets SET name = '演示布局', origin = 'user' " +
-      "WHERE id = (SELECT value FROM app_settings WHERE key = 'layout.default'); " +
-      // 演示布局原来绑定的蓝图是**仓库级**数据（`data\\user\\repos\\` 整个不进包），
-      // 留着就是一串指向不存在记录的悬空 id。清空后由内置默认蓝图
-      // （`packages/config/src/blueprintDefault.ts`，D155）在用户建仓库时播种——
-      // 布局与蓝图因此始终同源，不会再出现「界面上有标签页、画布上没有该层」。
-      "UPDATE layout_presets SET blueprint_ids_json = '[]' " +
-      "WHERE id = (SELECT value FROM app_settings WHERE key = 'layout.default'); " +
-      "DELETE FROM plugin_repo_state; " +
-      "DELETE FROM plugin_registry; " +
-      // 按仓库的设置键一并清掉：`repo.default` 指向已删仓库会让首屏误判「有默认仓库」
-      // （repoOpen 失败），应用级布局因此套不上（缺陷 0044 的复发路径）。
-      "DELETE FROM app_settings WHERE key = 'repo.default'" +
-      " OR key LIKE 'blueprint.currentLayer.%'" +
-      " OR key LIKE 'panelMarks.%'; " +
-      rows;
-    execFileSync("sqlite3", [relGdb, sql], { stdio: "ignore" });
-    await verifyDemoLayoutMatchesDefaultBlueprint(relGdb);
+  // 发布包必须带内置基底库：它随应用分发（RFC 0008 / D36 第一层），与「编译机本地活动数据」
+  // 无关——**全新克隆（CI）里没有 target\release\data\**，但基底库仍是发布包的一部分。
+  // 因此这一步在 data 分支**之外**无条件执行（开发包同理，见上）；同时清掉已退役的旧基底库
+  // （RFC 0008 起由 tag_lib_base.sqlite3 取代，留着会让运行时读到旧 schema）。
+  await rm(join(relDir, "data", "system", "tag_dict_base.sqlite3"), { force: true });
+  const relBaseDict = await copyBaseDict(join(relDir, "data"));
+  if (relBaseDict) {
+    console.log(`[package-build]   发布包附加: data\\system\\tag_lib_base.sqlite3（内置基底词库）`);
+  } else {
+    console.log(
+      "[package-build]   警告: 未找到内置基底词库源 tools/tagdict/output/tag_lib_base.sqlite3" +
+        "（发布包将不含基底词库，目标机 tag 词库功能受限）",
+    );
   }
+  if (!dataStat?.isDirectory()) {
+    console.log(
+      "[package-build]   无编译期活动数据（全新克隆/CI）：包内不含 data\\system\\ 全局库与用户数据，" +
+        "全局库由目标机首次运行自建",
+    );
+  }
+  // 随包运行时资产：与开发包同源同内容，但**真实复制**（release 是可分发实体，
+  // 不依赖本机 NTFS 硬链接）。`plugins\system\` 与 `data\plugins\` 是两回事：
+  // 后者是**已安装**的运行时插件目录，前者是 `plugin.installBundled` 的**随包来源**根。
+  const relBundled = await placeBundledRuntime(relDir, "真实复制", false);
+  verifyBundledRuntime(relDir, { allowLink: false, mpvExpected: relBundled.mpv.present });
+
+  console.log(
+    `[package-build] 发布包: ${join(relDir, "hamster-pouch-desktop.exe")} + data\\system\\（系统数据库）` +
+      (systemPlugins.length > 0 ? ` + data\\plugins\\（系统插件 ${systemPlugins.join(", ")}）` : "") +
+      ` + external-cli\\ffmpeg\\（${relBundled.external.files} 文件 / ${fmtMB(relBundled.external.bytes)}）` +
+      (relBundled.mpv.present ? ` + external-cli\\mpv\\（${relBundled.mpv.files} 文件 / ${fmtMB(relBundled.mpv.bytes)}）` : "") +
+      ` + plugins\\system\\（${relBundled.plugins.files} 文件）`,
+  );
+  console.log(
+    "[package-build]   不含用户数据：user\\repos\\、非系统插件、thumbnails\\、debug.log 均不带；发布全局库仓库注册表与按仓库授权已清空",
+  );
+  console.log(
+    "[package-build]   资产都在 exe 同级，与仓库内布局同构 ⇒ 包整夹搬走后 find_upwards 仍命中（D14 真正成立）",
+  );
 }
+
+console.log("[package-build] 完成: " + pipeline + " 管线");
 
 /**
  * 一体校验（D155）：随包「演示布局」与内置默认蓝图必须**同源**。
@@ -650,43 +739,3 @@ async function verifyDemoLayoutMatchesDefaultBlueprint(gdbPath) {
     `[package-build]   一体校验通过: 演示布局 ${graph.layers.length} 层 / 蓝图 ${graph.nodes.length} 节点同源`,
   );
 }
-
-// 发布包必须带内置基底库：它随应用分发（RFC 0008 / D36 第一层），与「编译机本地活动数据」
-// 无关——**全新克隆（CI）里没有 target\release\data\**，但基底库仍是发布包的一部分。
-// 因此这一步在 data 分支**之外**无条件执行（开发包同理，见上）；同时清掉已退役的旧基底库
-// （RFC 0008 起由 tag_lib_base.sqlite3 取代，留着会让运行时读到旧 schema）。
-await rm(join(relDir, "data", "system", "tag_dict_base.sqlite3"), { force: true });
-const relBaseDict = await copyBaseDict(join(relDir, "data"));
-if (relBaseDict) {
-  console.log(`[package-build]   发布包附加: data\\system\\tag_lib_base.sqlite3（内置基底词库）`);
-} else {
-  console.log(
-    "[package-build]   警告: 未找到内置基底词库源 tools/tagdict/output/tag_lib_base.sqlite3" +
-      "（发布包将不含基底词库，目标机 tag 词库功能受限）",
-  );
-}
-if (!dataStat?.isDirectory()) {
-  console.log(
-    "[package-build]   无编译期活动数据（全新克隆/CI）：包内不含 data\\system\\ 全局库与用户数据，" +
-      "全局库由目标机首次运行自建",
-  );
-}
-// 随包运行时资产：与开发包同源同内容，但**真实复制**（release 是可分发实体，
-// 不依赖本机 NTFS 硬链接）。`plugins\system\` 与 `data\plugins\` 是两回事：
-// 后者是**已安装**的运行时插件目录，前者是 `plugin.installBundled` 的**随包来源**根。
-const relBundled = await placeBundledRuntime(relDir, "真实复制", false);
-verifyBundledRuntime(relDir, { allowLink: false, mpvExpected: relBundled.mpv.present });
-
-console.log(
-  `[package-build] 发布包: ${join(relDir, "hamster-pouch-desktop.exe")} + data\\system\\（系统数据库）` +
-    (systemPlugins.length > 0 ? ` + data\\plugins\\（系统插件 ${systemPlugins.join(", ")}）` : "") +
-    ` + external-cli\\ffmpeg\\（${relBundled.external.files} 文件 / ${fmtMB(relBundled.external.bytes)}）` +
-    (relBundled.mpv.present ? ` + external-cli\\mpv\\（${relBundled.mpv.files} 文件 / ${fmtMB(relBundled.mpv.bytes)}）` : "") +
-    ` + plugins\\system\\（${relBundled.plugins.files} 文件）`,
-);
-console.log(
-  "[package-build]   不含用户数据：user\\repos\\、非系统插件、thumbnails\\、debug.log 均不带；发布全局库仓库注册表与按仓库授权已清空",
-);
-console.log(
-  "[package-build]   资产都在 exe 同级，与仓库内布局同构 ⇒ 包整夹搬走后 find_upwards 仍命中（D14 真正成立）",
-);

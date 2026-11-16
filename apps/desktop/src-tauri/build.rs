@@ -45,16 +45,37 @@ fn main() {
     // 提交短哈希：源码不是 git 工作区时（例如从 zip 解出来的源码包）取不到，写空串即可。
     let commit = output_of("git", &["rev-parse", "--short", "HEAD"]).unwrap_or_default();
 
+    // 版本号与管线：开发管线的四段版本（X.Y.Z.A-Alpha）cargo 收不下，
+    // 只能由 tools/build.mjs 以 HP_APP_VERSION 传进来，再烙成编译期常量
+    // （见 src/version.rs）。发布构建也会传一份（等于 CARGO_PKG_VERSION），
+    // 没传时 version.rs 自动退回 CARGO_PKG_VERSION。
+    let app_version = std::env::var("HP_APP_VERSION")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_default();
+    let app_pipeline = std::env::var("HP_APP_PIPELINE")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_default();
+
     println!("cargo:rustc-env=HP_BUILD_TIME={build_time}");
     println!("cargo:rustc-env=HP_BUILD_COMMIT={commit}");
+    println!("cargo:rustc-env=HP_APP_VERSION={app_version}");
+    println!("cargo:rustc-env=HP_APP_PIPELINE={app_pipeline}");
 
     // 显式声明重跑条件：build.rs 自身 + src 目录。
     // 只声明 build.rs 会让"改了源码重新构建"复用上一次的时间戳——时间会冻结在"最后一次
     // 改 build.rs"的那次构建，而"这个 exe 是什么时候编的"必须跟着真正的重编走。
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src");
-    // 外部注入的时间戳变了也必须重跑，否则 cargo 会复用上次编译进来的值。
+    // 外部注入的时间戳/版本变了也必须重跑，否则 cargo 会复用上次编译进来的值。
+    // 这三个变量缺一不可：开发管线连续两次构建常常只变 HP_APP_VERSION 的 A 段，
+    // 漏声明就会把"新版本号"的包打成旧版本号。
     println!("cargo:rerun-if-env-changed=HP_BUILD_TIME");
+    println!("cargo:rerun-if-env-changed=HP_APP_VERSION");
+    println!("cargo:rerun-if-env-changed=HP_APP_PIPELINE");
 
     tauri_build::build()
 }

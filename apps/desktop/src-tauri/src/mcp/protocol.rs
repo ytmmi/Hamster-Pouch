@@ -98,7 +98,7 @@ fn initialize_result() -> Value {
         "serverInfo": {
             "name": SERVER_NAME,
             "title": "仓鼠颊 Hamster Pouch",
-            "version": env!("CARGO_PKG_VERSION"),
+            "version": crate::version::app_version(),
         },
         "instructions": "仓鼠颊是本机资源管理软件。这里的工具作用在「当前在应用里打开的仓库」上：\
     先用 repo_current 确认仓库，再用 file_query / source_tree / tag_tree 了解内容。\
@@ -181,14 +181,17 @@ mod tests {
         assert_eq!(result["capabilities"]["tools"]["listChanged"], json!(false));
     }
 
-    /// 服务信息三件套齐全，且版本取自 `CARGO_PKG_VERSION`（不手写）。
+    /// 服务信息三件套齐全，且版本取自二进制自带的版本号（不手写）。
+    ///
+    /// 断言的是「与 `crate::version::app_version()` 一致」而不是某个字面量：
+    /// 开发构建下它是四段 `X.Y.Z.A-Alpha`，硬编码三段版本在这里就会红。
     #[test]
     fn initialize_reports_server_identity() {
         let result = initialize_result();
         assert_eq!(result["serverInfo"]["name"], json!(SERVER_NAME));
         assert_eq!(
             result["serverInfo"]["version"],
-            json!(env!("CARGO_PKG_VERSION"))
+            json!(crate::version::app_version())
         );
         let instructions = result["instructions"]
             .as_str()
