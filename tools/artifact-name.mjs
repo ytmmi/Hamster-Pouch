@@ -237,7 +237,7 @@ function main(argv) {
     throw new Error(`无法识别的参数 ${JSON.stringify(arg)}\n${USAGE}`);
   }
 
-  const resolved = version ? normalizeVersion(version) : readAppVersion();
+  const resolved = version ? normalizeAnyVersion(version) : readAppVersion();
   const base = artifactBase({ version: resolved });
   console.log(withZip ? `${base}.zip` : base);
   return 0;
