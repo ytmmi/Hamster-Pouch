@@ -6,8 +6,8 @@
  *
  * | 段 | 手段 | 谁受益 |
  * | --- | --- | --- |
- * | 解析 URL（IPC） | `shared/imageUrl.ts` 的结果缓存 + in-flight 去重 | 全部格式 |
- * | **后端生成**预览 | `resolveImageUrl` 内部触发 `preview.get` | HEIC/HEIF（实测 102 MP 需 0.8 s） |
+ * | 解析 URL（IPC） | `shared/mediaUrl.ts` 的结果缓存 + in-flight 去重 | 全部格式 |
+ * | **后端生成**预览 | `resolveMediaUrl` 内部触发 `preview.get` | HEIC/HEIF（实测 102 MP 需 0.8 s） |
  * | 读盘 + 解码 | `new Image()` 预热浏览器图像缓存 | JPEG/PNG 等原图 |
  *
  * ## 三条边界（都不是可选项）
@@ -26,7 +26,7 @@
 
 import { useEffect, useRef } from "react";
 
-import { resolveImageUrl } from "../../shared/imageUrl";
+import { resolveMediaUrl } from "../../shared/mediaUrl";
 import type { FileItem } from "../../shared/types";
 import { preloadTargets } from "./viewerPreload";
 
@@ -95,7 +95,7 @@ export function useViewerPreload({
 
       // 解析 URL：HEIC/HEIF 会在这一步触发后端**全分辨率生成**（缓存命中即秒回），
       // 其余格式只是一次 `file.path`。失败降级为 `null`，此处静默忽略。
-      void resolveImageUrl(repoId, file.id, file.relative_path).then((url) => {
+      void resolveMediaUrl(repoId, file.id, file.relative_path).then((url) => {
         if (!url) return;
         // 大图只到"生成/解析"为止（见文件头第 2 条边界）。
         if (file.size > PRELOAD_DECODE_MAX_BYTES) return;
