@@ -115,6 +115,17 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
   const audioRef = useRef<HTMLVideoElement>(null);
   const [durationMs, setDurationMs] = useState(0);
   const [positionMs, setPositionMs] = useState(0);
+  /**
+   * 拖动进度条中：**以本地值为准**，不吃 `timeupdate` / `seeked` 打回来的旧位置。
+   *
+   * 原生 `<input type="range">` 拖动时 pointer 与 thumb 是**脱钩**的：这期间若把 `value`
+   * 按元素真实位置重写一遍，thumb 会弹回旧位置；更糟的是松手时 `event.target.value`
+   * 读到的也已经是旧值，于是 `commitSeek` 跳回原地——表现为"点了进度条却没跳"
+   * （用户 2026-11-17 报障：偶发，因为 `timeupdate` 只有 ~4Hz，落不落在拖动窗口里是概率）。
+   * 与媒体播放器同款时序（D234）。
+   */
+  const scrubbingRef = useRef(false);
+  const [scrubMs, setScrubMs] = useState<number | null>(null);
   /** 元素是否在播（唱片转动、播放/暂停图标用；来源是 DOM 真实事件）。 */
   const [playing, setPlaying] = useState(false);
   /**
@@ -208,6 +219,9 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
       autoPlayRef.current = autoplay;
       setPositionMs(0);
       setDurationMs(0);
+      // 换曲时清掉拖动残留：否则 scrubbingRef 一直为真，新曲的进度条永远不前进。
+      scrubbingRef.current = false;
+      setScrubMs(null);
       // 切歌先落"暂停"这一态：图标由元素事件驱动，但换源到真正出声之间有一段
       // 异步间隙，不先落下来的话旧曲目的"||"会一直挂着（用户真机反馈的现象）。
       setPlaying(false);
@@ -326,6 +340,8 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
         setSourceUrl(url);
         setPositionMs(0);
         setDurationMs(0);
+        scrubbingRef.current = false;
+        setScrubMs(null);
       } catch {
         // 预载失败不弹错：等用户真的点播放时 `loadAndPlay` 会报出来。
       }
@@ -455,18 +471,18 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
     return audio.currentTime * 1000;
   }, []);
 
-  /** 播放位置推进 → 进度条 / 歌词。 */
+  /** 播放位置推进 → 进度条 / 歌词（拖动中不被覆盖）。 */
   const onTimeUpdate = () => {
     const audio = audioRef.current;
-    if (audio) {
+    if (audio && !scrubbingRef.current) {
       setPositionMs(Math.round(audio.currentTime * 1000));
     }
   };
 
-  /** 拖动定位完成 → 以新位置刷新进度条。 */
+  /** 拖动定位完成 → 以新位置刷新进度条（拖动中同样不覆盖）。 */
   const onSeeked = () => {
     const audio = audioRef.current;
-    if (audio) {
+    if (audio && !scrubbingRef.current) {
       setPositionMs(Math.round(audio.currentTime * 1000));
     }
   };
@@ -510,6 +526,22 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
     }
     audio.currentTime = Math.max(0, Math.min(ms / 1000, audio.duration));
   }, []);
+
+  /** 进度条拖动中：只更新本地显示值，不动元素。 */
+  const onScrub = (ms: number) => {
+    scrubbingRef.current = true;
+    setScrubMs(ms);
+  };
+
+  /** 松手才真正定位：先松开"本地为准"，再交给唯一入口 `commitSeek`。 */
+  const onScrubCommit = (ms: number) => {
+    scrubbingRef.current = false;
+    setScrubMs(null);
+    commitSeek(ms);
+  };
+
+  /** 进度条显示的播放头：拖动中取本地值，否则取元素推进出来的位置。 */
+  const displayPosition = scrubMs ?? positionMs;
 
   /**
    * ← / → 切换上一首/下一首（与图像查看器同一套键盘语言）。
@@ -588,7 +620,7 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
             artist={artist}
             hazeColors={media.hazeColors}
             lyrics={media.lyrics}
-            positionMs={positionMs}
+            positionMs={displayPosition}
             readPositionMs={readPositionMs}
             durationMs={durationMs}
             playing={playing}
@@ -600,8 +632,8 @@ export function MusicPlayerPanel({ api: panelApi }: MusicPlayerPanelProps): JSX.
             onPrev={() => stepTrack(-1)}
             onNext={() => stepTrack(1)}
             onToggle={togglePlay}
-            onSeek={(ms) => setPositionMs(ms)}
-            onSeekCommit={commitSeek}
+            onSeek={onScrub}
+            onSeekCommit={onScrubCommit}
             onVolume={onVolumeInput}
             onVolumeCommit={commitVolume}
             onToggleShuffle={() => setMode((current) => toggleShuffleMode(current))}

@@ -169,5 +169,45 @@ report(
     !/formatMs\(displayPosition\)/.test(read(VIDEO_PANEL)),
 );
 
+/**
+ * D234：拖动进度条期间以本地值为准。
+ *
+ * 视频面板一直有这套时序，音乐面板没有——于是音乐面板拖到一半就被 ~4Hz 的
+ * `timeupdate` 用元素真实位置覆盖回去，thumb 弹回旧位置，松手时 `event.target.value`
+ * 读到的也是旧值，表现为"点了进度条却没跳"（偶发，取决于 timeupdate 落不落在拖动窗口里）。
+ * 四处必须同时在场，少一处就等于没修：
+ * ① `onTimeUpdate` / `onSeeked` 都有 `!scrubbingRef.current` 守卫；
+ * ② 拖动用 `onScrub` 只落本地值、松手用 `onScrubCommit` 才走唯一入口 `commitSeek`；
+ * ③ 显示的播放头是 `displayPosition = scrubMs ?? positionMs`；
+ * ④ 换曲时清残留（`scrubbingRef.current = false` + `setScrubMs(null)` ≥2 处：载入 + 预载）。
+ */
+const guardedByScrub = (src, name) => {
+  const start = src.indexOf(`const ${name} = () => {`);
+  if (start < 0) return false;
+  const end = src.indexOf("\n  };", start);
+  const body = end > start ? src.slice(start, end) : src.slice(start, start + 400);
+  // 守卫必须就在 setPositionMs 外面：allow 只在"函数体内"匹配，防止借下一个函数的守卫蒙混过关。
+  return /if \([^)]*!scrubbingRef\.current\)\s*\{[^}]*setPositionMs\(/.test(body);
+};
+
+report(
+  "两个播放面板的进度条都\"拖动中本地为准\"（守卫 / onScrub / displayPosition / 换曲清残留）",
+  [VIDEO_PANEL, MUSIC_PANEL].every((rel) => {
+    const src = read(rel);
+    const resets = (src.match(/setScrubMs\(null\)/g) ?? []).length;
+    return (
+      guardedByScrub(src, "onTimeUpdate") &&
+      guardedByScrub(src, "onSeeked") &&
+      /const onScrub = \(\w+: number\) => \{[\s\S]{0,120}?scrubbingRef\.current = true;/.test(src) &&
+      /const onScrubCommit = \(\w+: number\) => \{[\s\S]{0,160}?scrubbingRef\.current = false;[\s\S]{0,80}?setScrubMs\(null\);[\s\S]{0,80}?commitSeek\(\w+\);/.test(
+        src,
+      ) &&
+      /const displayPosition = scrubMs \?\? positionMs;/.test(src) &&
+      /positionMs=\{displayPosition\}/.test(src) &&
+      resets >= 2
+    );
+  }),
+);
+
 console.log(`\n[check-player-shared] ${passed}/${total} 通过`);
 process.exit(passed === total ? 0 : 1);
