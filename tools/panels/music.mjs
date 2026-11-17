@@ -1159,4 +1159,32 @@ check(
     /\.player-transport-side-end \{[^}]*justify-content: flex-end/.test(stylesSource),
 );
 
+check(
+  "D235：样式 2 的曲名与艺人分两行，艺人小一号（不再是同一行的「曲名 — 艺人」）",
+  // 用户 2026-11-17：「作者/演唱者改为放在乐曲名下面，并小一号字体」。
+  // 旧排版把两者塞进一行，为了让艺人看得见，曲名被钉在 62% 宽以内，稍长的曲名就被截成
+  // "洛…"。断言四件事：标题块改成纵向、艺人字号是相对单位的小一号、曲名的 62% 上限撤掉、
+  // 分隔符"—"在两个文件里都不再出现（改回横排必然把分隔符带回来）。
+  (() => {
+    const ruleBody = (selector) => {
+      const at = stylesSource.indexOf(selector + " {");
+      const end = at >= 0 ? stylesSource.indexOf("}", at) : -1;
+      return at >= 0 && end > at ? stylesSource.slice(at, end) : "";
+    };
+    const head = ruleBody(".player-info-head");
+    const title = ruleBody(".player-info-title");
+    const artist = ruleBody(".player-info-artist");
+    return (
+      /flex-direction: column/.test(head) &&
+      /font-size: 0\.[0-9]+em/.test(artist) &&
+      !/max-width: 62%/.test(title)
+    );
+  })() &&
+    // JSX 里必须是"曲名在前、艺人在后"：顺序反了就变成"艺人 / 曲名"。
+    /className="player-info-title">\{props\.title\}<\/span>[\s\S]{0,120}?className="player-info-artist">\{props\.artist\}/
+      .test(musicStageSrc) &&
+    !/player-info-dash/.test(musicStageSrc) &&
+    !/player-info-dash/.test(stylesSource),
+);
+
 }

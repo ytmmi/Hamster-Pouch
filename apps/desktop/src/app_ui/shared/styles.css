@@ -6258,9 +6258,18 @@ button.danger {
 }
 
 .player-info-head {
+  /*
+   * 曲名在上、艺人小一号在下（用户 2026-11-17：「作者/演唱者改为放在乐曲名下面，并小
+   * 一号字体」）。旧排版是**一行**"曲名 — 艺人"：为了让艺人名不被挤掉，曲名被钉在 62%
+   * 宽以内，稍长的曲名就被截成"洛…"。改成两行后两者各占满左列，截断只落在真正过长的
+   * 那个上。艺人字号用相对单位（0.68em）而不是第二组 clamp()，面板怎么缩放都保持
+   * "小一号"。
+   */
   display: flex;
-  align-items: baseline;
-  gap: 0.5em;
+  flex-direction: column;
+  align-items: stretch;
+  /* 曲名与艺人是一个标题块的两个层级，不是两条并列信息：气口只留一点。 */
+  gap: 0.08em;
   min-width: 0;
   font-size: clamp(13px, 3cqh, 30px);
   line-height: 1.25;
@@ -6271,22 +6280,19 @@ button.danger {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  /* 曲名先按内容占位：艺人名很长时该被截的是**艺人**，不是把曲名挤成"洛…"。 */
-  flex: 0 0 auto;
-  max-width: 62%;
-}
-
-.player-info-dash {
-  opacity: 0.5;
-  font-weight: 400;
+  /* 独占一行后不再需要为艺人留宽度（旧的 62% 上限随之取消）。 */
+  max-width: 100%;
 }
 
 .player-info-artist {
+  font-size: 0.68em;
   font-weight: 400;
+  /* 与样式 1 的 .player-track-artist 同档弱化：层级靠字号 + 透明度，不靠分隔符。 */
+  opacity: 0.75;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1 1 auto;
+  max-width: 100%;
 }
 
 /* 大唱片：右上角、被面板边缘裁掉一部分（参考图就是这么裁的）。 */
@@ -6898,7 +6904,7 @@ button.danger {
   position: relative;
   z-index: 50;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: stretch;
   user-select: none;
 }

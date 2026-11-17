@@ -222,16 +222,15 @@ export function MusicStage(props: MusicStageProps) {
       ) : (
         <div className="player-layout" data-variant="disc">
           <div className="player-info" data-has-lyrics={items && items.length > 0 ? "true" : "false"}>
+            {/*
+              曲名在上、艺人小一号在下（用户 2026-11-17：「作者/演唱者改为放在乐曲名下面，
+              并小一号字体」）。旧排版是一行"曲名 — 艺人"，为了让艺人看得见，曲名被钉死在
+              62% 宽，长曲名会被截成"洛…"；拆成两行后两者都能占满左列，截断只落在真正
+              过长的那个上。
+            */}
             <div className="player-info-head">
               <span className="player-info-title">{props.title}</span>
-              {props.artist ? (
-                <>
-                  <span className="player-info-dash" aria-hidden="true">
-                    —
-                  </span>
-                  <span className="player-info-artist">{props.artist}</span>
-                </>
-              ) : null}
+              {props.artist ? <span className="player-info-artist">{props.artist}</span> : null}
             </div>
             <Lyrics
             items={items}
