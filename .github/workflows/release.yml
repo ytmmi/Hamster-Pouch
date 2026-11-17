@@ -44,7 +44,8 @@
 # 本流程只跑**发布管线**：三段 `X.Y.Z`（可带 `-beta`，如 `0.1.1-beta`）。
 # 权威是 `tools/versions.json` 的 `release` 字段；`node tools/version.mjs` 由它派生
 # 三处副本（tauri.conf.json / 桥接 crate 的 Cargo.toml / apps/desktop/package.json）。
-# 手动触发时 `version` 留空 ⇒ **patch 数字 +1、后缀原样保留**；填了 ⇒ 原样使用。
+# 手动触发时 `version` 留空 ⇒ **沿用 `versions.json` 里的当前发布版本、不打号**（D232：发布是
+# 人工决策，脚本不替人挑号）；填 `next` ⇒ 让脚本把 patch +1、后缀原样保留；填具体版本 ⇒ 原样使用。
 #
 # 开发管线（四段 `X.Y.Z.A-Alpha`）**不在本流程里**：它只写 `tools/versions.json` 的
 # `dev` 字段，不碰任何发布副本，因此跑这里不会顺手把开发版本推上去，反之亦然。
@@ -55,7 +56,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "发布版本号（留空则把当前发布版本的 patch 数字 +1 并保留后缀，例如 0.1.1-beta → 0.1.2-beta；填写则原样使用，需形如 X.Y.Z 或 X.Y.Z-beta。四段 -Alpha 属于开发管线，这里会被拒绝）"
+        description: "发布版本号（留空 = 沿用 tools/versions.json 里的当前发布版本、不改号；填 next = 由脚本把 patch +1 并保留后缀，例如 0.1.1-beta → 0.1.2-beta；填具体版本 = 原样使用，需形如 X.Y.Z 或 X.Y.Z-beta。四段 -Alpha 属于开发管线，这里会被拒绝）"
         required: false
         default: ""
       publish:
@@ -154,8 +155,9 @@ jobs:
 
       # 版本推导的**唯一入口**是 `node tools/build.mjs --pipeline release`
       # （`pnpm app:release` 的全部内容）：
-      #   - 这里给了版本号 ⇒ 导出 HP_VERSION，脚本按发布管线校验后原样采用；
-      #   - 留空 ⇒ 什么也不设，脚本把当前**发布版本**的 patch 数字 +1（后缀保留）。
+      #   - 留空 ⇒ 什么也不设，脚本**沿用当前发布版本、不改号**（D232 的默认）；
+      #   - 填 `next` ⇒ 导出 HP_BUMP=1，脚本把当前发布版本的 patch 数字 +1（后缀保留）；
+      #   - 填具体版本 ⇒ 导出 HP_VERSION，脚本按发布管线校验后原样采用。
       # 推导结果写进 tools/versions.json 的 release 字段并回写三处副本，
       # 所以下面「解析版本号」读到的已是**本次构建真正用的**版本，不再是构建前的旧值。
       - name: 指定版本（可选）
@@ -164,12 +166,19 @@ jobs:
         # 会被引号/反引号注入。中转后它只是一个环境变量的值，脚本行为由 version.mjs 校验。
         env:
           INPUT_VERSION: ${{ inputs.version }}
-        run: echo "HP_VERSION=$INPUT_VERSION" >> "$GITHUB_ENV"
+        run: |
+          set -euo pipefail
+          if [ "$INPUT_VERSION" = "next" ]; then
+            echo "HP_BUMP=1" >> "$GITHUB_ENV"
+          else
+            echo "HP_VERSION=$INPUT_VERSION" >> "$GITHUB_ENV"
+          fi
 
       # 复用仓库自己的打包脚本（不在 workflow 里重写打包逻辑）：
       # tauri build --no-bundle 产出 exe，package-build --pipeline release 产出自包含文件夹。
       # 这里**不能**用 app:build：那是开发管线，产的是 dev/ 下的四段版本包。
       - name: 构建（pnpm app:release）
+        # HP_BUMP=1 ⇒ 显式要求 +1；否则 build.mjs 沿用 versions.json 的当前发布版本（D232）。
         run: pnpm app:release
 
       # fail-closed 自检：残包比不发布更糟。缺任何必需项就在这里红，

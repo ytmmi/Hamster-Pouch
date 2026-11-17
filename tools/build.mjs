@@ -2,7 +2,7 @@
  * build.mjs：两条编译管线的**唯一编排入口**。
  *
  *   pnpm app:build      # 开发管线：X.Y.Z.A-Alpha（默认把 A 段 +1）
- *   pnpm app:release    # 发布管线：X.Y.Z[-beta]（默认把 Z 段 +1）
+ *   pnpm app:release    # 发布管线：X.Y.Z[-beta]（默认沿用当前版本，--bump 才把 Z 段 +1）
  *
  * 一次运行只做一条管线，**绝不碰另一条**（D230）：
  *  - 开发管线：只把新版本写进 tools/versions.json 的 dev 字段，然后把四段版本
@@ -21,9 +21,9 @@
  * 差值 >1（或有 major/minor 不同）时打印提示——见 version.mjs 的 pipelineDrift()。
  * 开发管线自动推导时把三段**重新对齐到当前发布版本**，所以两条管线不会越差越远。
  *
- * 发布管线**必须由开发者确认版本号**（产出会挂到 GitHub Release）：交互终端里会
- * 打印版本明细并要求输入 yes；回车取消，直接输入别的版本号则改用它。CI 与
- * `--yes` 跳过确认。开发管线不问（默认 A 段 +1）。
+ * 发布管线**默认不改版本号**（D232），并且**必须由开发者确认**（产出会挂到 GitHub
+ * Release）：交互终端里会打印版本明细并要求输入 yes；回车取消，直接输入别的版本号
+ * 则改用它。要发新号得显式 `--bump`。CI 与 `--yes` 跳过确认。开发管线不问（默认 A 段 +1）。
  *
  * 版本号只在**真实编译**时变更：只有真的跑 cargo/tauri 编译，才把新版本写进
  * tools/versions.json。--dry-run 与 HP_SKIP_TAURI_BUILD=1（只打包、只看计划）
@@ -32,14 +32,21 @@
  *
  * 参数：
  *   --pipeline dev|release   必填（scripts 里已经带上）
+ *   --bump                   推导下一个版本（发布管线 Z 段 +1；开发管线本来就是默认行为）
  *   --no-bump                不推导下一个版本，直接用当前版本（重打同一个版本）
  *   --version <版本>          指定版本（等价于 HP_VERSION，优先级最高）
  *   --yes                    跳过发布构建前的版本确认（CI 自动跳过，无需此开关）
  *   --dry-run                 只打印将要做什么，不写文件、不编译、不打包、不改版本号
  *   --skip-package            只编译，不执行 tools/package-build.mjs
+ *   --self-test               纯函数自检（pnpm check:build-plan），不读磁盘、不改版本号
  *
- * 环境变量：HP_VERSION（等同 --version）、HP_SKIP_TAURI_BUILD=1（只打包不编译，版本号不变更）、
- * CI=true（CI 里不做交互确认）。
+ * **两条管线的默认推导方式不同**（D232）：开发管线默认 `A` 段 +1（迭代很密，每次构建
+ * 都该有个新号）；发布管线默认**沿用当前版本**——发布是人工决策，脚本不替人挑号，重打
+ * 同一个版本（补资产、重跑流水线）也不会被莫名抬号。要发新号就显式加 `--bump`，
+ * 或者用 `--version <版本>` / HP_VERSION 直接指定。
+ *
+ * 环境变量：HP_VERSION（等同 --version）、HP_BUMP=1（等同 --bump，给 release.yml 的 `version=next`
+ * 用）、HP_SKIP_TAURI_BUILD=1（只打包不编译，版本号不变更）、CI=true（CI 里不做交互确认）。
  */
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
@@ -65,15 +72,28 @@ const ROOT = process.env.HP_PROJECT_ROOT
   : resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const USAGE = [
-  "用法：node tools/build.mjs --pipeline dev|release [--no-bump] [--version <版本>] [--yes] [--dry-run] [--skip-package]",
-  "  --pipeline dev      开发管线（X.Y.Z.A-Alpha），只写 dev 版本",
-  "  --pipeline release  发布管线（X.Y.Z[-beta]），写 release 版本并派生三处副本",
+  "用法：node tools/build.mjs --pipeline dev|release [--bump|--no-bump] [--version <版本>] [--yes] [--dry-run] [--skip-package]",
+  "  --pipeline dev      开发管线（X.Y.Z.A-Alpha），只写 dev 版本；默认 A 段 +1",
+  "  --pipeline release  发布管线（X.Y.Z[-beta]），写 release 版本并派生三处副本；默认沿用当前版本",
+  "  --bump              推导下一个版本（发布管线 Z 段 +1；开发管线本来就是默认行为）",
+  "  --no-bump           沿用当前版本（开发管线用它重打同一个迭代号）",
   "  --yes               跳过发布构建前的版本确认（CI 里自动跳过）",
+  "  --self-test         纯函数自检（pnpm check:build-plan）",
 ].join("\n");
 
-/** 解析命令行开关（不认识的一律报错，避免拼错后静默跑错管线）。 */
-function parseArgs(argv) {
-  const opts = { pipeline: "", dryRun: false, skipPackage: false, bump: true, version: "", yes: false };
+/** 管线默认是否推导新版本号（D232）：开发每次都 +1；发布**沿用当前版本**。 */
+export function defaultBump(pipeline) {
+  return normalizePipeline(pipeline) === "dev";
+}
+
+/**
+ * 解析命令行开关（不认识的一律报错，避免拼错后静默跑错管线）。
+ *
+ * `bump` 是三态：`true` = 显式 `--bump`、`false` = 显式 `--no-bump`、`null` = 没说，
+ * 落到 `defaultBump(pipeline)` 上——**开发管线默认 +1，发布管线默认不动号**（D232）。
+ */
+function parseBuildArgs(argv) {
+  const opts = { pipeline: "", dryRun: false, skipPackage: false, bump: null, version: "", yes: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--pipeline") {
@@ -86,6 +106,8 @@ function parseArgs(argv) {
       i += 1;
     } else if (arg.startsWith("--version=")) {
       opts.version = arg.slice("--version=".length).trim();
+    } else if (arg === "--bump") {
+      opts.bump = true;
     } else if (arg === "--no-bump") {
       opts.bump = false;
     } else if (arg === "--dry-run") {
@@ -102,6 +124,10 @@ function parseArgs(argv) {
     }
   }
   if (!opts.pipeline) throw new Error("必须显式指定 --pipeline dev 或 --pipeline release\n" + USAGE);
+  // HP_BUMP=1 等同 --bump：workflow 的手动输入里没法传命令行开关，只能走环境变量。
+  const envBump = String(process.env.HP_BUMP ?? "").trim().toLowerCase();
+  if (opts.bump === null && (envBump === "1" || envBump === "true")) opts.bump = true;
+  if (opts.bump === null) opts.bump = defaultBump(opts.pipeline);
   return opts;
 }
 
@@ -116,36 +142,126 @@ export function planVersion(opts) {
   const pipeline = normalizePipeline(opts.pipeline);
   const explicit = String(opts.version || process.env.HP_VERSION || "").trim();
   const versions = readVersions();
-  const current = versions[pipeline];
   const releaseNext = bumpPatch(versions.release);
-  const plan = { pipeline, current, next: current, releaseNext, source: "", warning: "" };
+  const core = decideVersionPlan({
+    pipeline,
+    current: versions[pipeline],
+    releaseVersion: versions.release,
+    explicit,
+    bump: opts.bump,
+  });
+  return { pipeline, current: versions[pipeline], next: core.next, releaseNext, source: core.source, warning: core.warning };
+}
 
-  if (explicit) {
-    plan.next = normalizeByPipeline(pipeline, explicit);
+/**
+ * 纯函数版的核心决策：不读磁盘、不写文件，只做「用哪个号」这一步。
+ *
+ * 抽出来是为了自检（`pnpm check:build-plan`）能在没有 versions.json 的情况下把两条
+ * 管线的默认行为都跑一遍。`bump` 省略（`undefined` / `null`）时落到
+ * `defaultBump(pipeline)`：**开发 +1，发布沿用当前版本**（D232）。
+ */
+export function decideVersionPlan({ pipeline, current, releaseVersion, explicit = "", bump }) {
+  const plan = { pipeline: normalizePipeline(pipeline), current, next: current, source: "", warning: "" };
+  const shouldBump = bump === undefined || bump === null ? defaultBump(plan.pipeline) : Boolean(bump);
+  const text = String(explicit ?? "").trim();
+
+  if (text) {
+    plan.next = normalizeByPipeline(plan.pipeline, text);
     plan.source = "指定版本";
-  } else if (!opts.bump) {
+  } else if (!shouldBump) {
     plan.source = "沿用当前版本";
   } else {
-    plan.next = bumpByPipeline(pipeline, current);
+    plan.next = bumpByPipeline(plan.pipeline, current);
     plan.source = "自动 +1";
   }
 
-  if (pipeline === "dev") {
+  if (plan.pipeline === "dev") {
     const iteration = devIteration(plan.next);
-    if (explicit) {
+    if (text) {
       const mine = tripletParts(plan.next);
-      const official = tripletParts(versions.release);
+      const official = tripletParts(releaseVersion);
       if (mine.major !== official.major || mine.minor !== official.minor || mine.patch !== official.patch) {
         plan.warning =
-          "指定的开发版本 " + plan.next + " 的 X.Y.Z 与发布版本 " + versions.release +
+          "指定的开发版本 " + plan.next + " 的 X.Y.Z 与发布版本 " + releaseVersion +
           " 不同（两条管线应共用同一组 X.Y.Z，这里照你给的写，不改）";
       }
-    } else if (opts.bump) {
-      plan.next = composeDevVersion(versions.release, iteration);
+    } else if (shouldBump) {
+      plan.next = composeDevVersion(releaseVersion, iteration);
       plan.source = "自动 A+1，X.Y.Z 对齐发布版本";
     }
   }
   return plan;
+}
+
+/**
+ * 纯函数自检（`pnpm check:build-plan`）：把「默认要不要动版本号」这条口径钉死。
+ *
+ * 这里只测纯函数，不读 versions.json、不碰 git——发布管线默认沿用当前版本是
+ * D232 的核心约定，被谁改回去都必须当场红。
+ */
+export function selfTest() {
+  let count = 0;
+  const eq = (actual, expected, what) => {
+    count += 1;
+    if (actual !== expected) {
+      throw new Error("自检失败：" + what + " —— 期望 " + JSON.stringify(expected) + "，实际 " + JSON.stringify(actual));
+    }
+  };
+  const throws = (fn, what) => {
+    count += 1;
+    let hit = false;
+    try {
+      fn();
+    } catch {
+      hit = true;
+    }
+    if (!hit) throw new Error("自检失败：" + what + " —— 期望抛错，实际没有");
+  };
+
+  // ① 默认值：开发 +1，发布沿用当前版本（D232 的核心）。
+  eq(defaultBump("dev"), true, "开发管线默认推导新版本号");
+  eq(defaultBump("release"), false, "发布管线默认沿用当前版本号");
+  throws(() => defaultBump("nightly"), "未知管线应当报错");
+
+  // ② 发布管线：不传 bump 时号不动，显式 --bump 才 +1。
+  const releaseQuiet = decideVersionPlan({ pipeline: "release", current: "0.1.1-beta", releaseVersion: "0.1.1-beta" });
+  eq(releaseQuiet.next, "0.1.1-beta", "发布管线默认不改号");
+  eq(releaseQuiet.source, "沿用当前版本", "发布管线默认的来源说明");
+  const releaseBump = decideVersionPlan({
+    pipeline: "release", current: "0.1.1-beta", releaseVersion: "0.1.1-beta", bump: true,
+  });
+  eq(releaseBump.next, "0.1.2-beta", "发布管线 --bump 时 Z 段 +1");
+  eq(releaseBump.source, "自动 +1", "发布管线 --bump 的来源说明");
+  const releaseSpan = decideVersionPlan({
+    pipeline: "release", current: "0.1.1-beta", releaseVersion: "0.1.1-beta", explicit: "0.3.0",
+  });
+  eq(releaseSpan.next, "0.3.0", "显式版本号优先于一切推导");
+  eq(releaseSpan.source, "指定版本", "显式版本号的来源说明");
+
+  // ③ 开发管线：默认 A 段 +1，并把 X.Y.Z 对齐到发布版本。
+  const devDefault = decideVersionPlan({
+    pipeline: "dev", current: "0.1.1.3-Alpha", releaseVersion: "0.1.5-beta",
+  });
+  eq(devDefault.next, "0.1.5.4-Alpha", "开发管线默认 A+1 且 X.Y.Z 对齐发布版本");
+  const devHold = decideVersionPlan({
+    pipeline: "dev", current: "0.1.1.3-Alpha", releaseVersion: "0.1.1-beta", bump: false,
+  });
+  eq(devHold.next, "0.1.1.3-Alpha", "开发管线 --no-bump 时号不动");
+  eq(devHold.source, "沿用当前版本", "开发管线 --no-bump 的来源说明");
+
+  // ④ 开发管线显式指定了不同 X.Y.Z：照写，但必须留一条 warning。
+  const devDrift = decideVersionPlan({
+    pipeline: "dev", current: "0.1.1.3-Alpha", releaseVersion: "0.1.1-beta", explicit: "0.2.0.7-Alpha",
+  });
+  eq(devDrift.next, "0.2.0.7-Alpha", "显式开发版本照写");
+  eq(devDrift.warning !== "", true, "X.Y.Z 与发布版本不一致时应留 warning");
+
+  // ⑤ 同样的输入、只换管线：开发动号、发布不动号 —— 这条红了说明口径又被改回去了。
+  const devSame = decideVersionPlan({ pipeline: "dev", current: "0.1.1.1-Alpha", releaseVersion: "0.1.1-beta" });
+  eq(devSame.next, "0.1.1.2-Alpha", "同样输入下开发管线应当动号");
+  eq(releaseQuiet.next, "0.1.1-beta", "同样输入下发布管线应当不动号");
+
+  console.log("[build] 自检通过（" + count + " 项）");
 }
 
 /** 打印两条管线的 X.Y.Z 偏差：正常打一行，>1 打警告（不阻断构建）。 */
@@ -169,14 +285,16 @@ function reportDrift(plan, versions) {
  * 直接输入另一个合法版本号 = 改用它。
  */
 async function confirmRelease(plan, versions, opts) {
-  console.log(
-    [
-      "[build] 即将构建**发布包**（会挂到 GitHub Release）：",
-      "  当前发布版本: " + versions.release,
-      "  本次发布版本: " + plan.next + "（" + plan.source + "）",
-      "  开发版本保持: " + versions.dev + "（发布构建不改开发版本）",
-    ].join("\n"),
-  );
+  const lines = [
+    "[build] 即将构建**发布包**（会挂到 GitHub Release）：",
+    "  当前发布版本: " + versions.release,
+    "  本次发布版本: " + plan.next + "（" + plan.source + "）",
+    "  开发版本保持: " + versions.dev + "（发布构建不改开发版本）",
+  ];
+  if (plan.next === versions.release) {
+    lines.push("  提示: 发布管线默认沿用当前版本号；要 Z 段 +1 请加 --bump，或在下面的提示里直接输入新版本号");
+  }
+  console.log(lines.join("\n"));
 
   if (opts.yes) {
     console.log("[build] --yes：跳过版本确认，使用 " + plan.next);
@@ -230,7 +348,11 @@ function run(cmd, args, env) {
 }
 
 async function main(argv) {
-  const opts = parseArgs(argv);
+  if (argv.includes("--self-test")) {
+    selfTest();
+    return 0;
+  }
+  const opts = parseBuildArgs(argv);
   const plan = planVersion(opts);
   const versions = readVersions();
   // 只有真的跑 cargo/tauri 编译才算「真实构建」：这时才允许改版本号。

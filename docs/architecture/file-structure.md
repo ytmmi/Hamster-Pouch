@@ -1100,6 +1100,11 @@ HamsterPouch/
                               #   `pipelineDrift()` 判定：`X.Y.Z` 相差 ≤1 只说明，>1 或 major/minor 不同打警告；
                               #   发布管线在编译前必须由开发者确认版本号（交互终端输 `yes`，回车取消，输别的合法
                               #   版本号则改用它；`CI=true` 与 `--yes` 跳过确认）。
+                              #   **两条管线的默认推导不同**（D232）：开发管线默认 `A` 段 +1（迭代密，每次构建
+                              #   都该有个新号）；发布管线默认**沿用当前版本**，重打同一个版本不会莫名抬号，要发新号
+                              #   得显式 `--bump`（或 `--version` / `HP_VERSION` / `HP_BUMP=1`）。默认值由纯函数
+                              #   `defaultBump(pipeline)` 决定，决策逻辑抽在纯函数 `decideVersionPlan()` 里，
+                              #   `node tools/build.mjs --self-test`（`pnpm check:build-plan`）把这条口径钉死。
                               # **发布产物命名 `artifact-name.mjs`**（D153，纯 Node 无依赖，`pnpm check:artifact-name`）：
                               #   `--version <v> [--zip]` 打印 `Hamster-Pouch-v0.1.1-beta-Windows-x64-Portable.zip`
                               #   形式的产物名（五段：软件名-版本-平台-架构-安装方式；版本段也接受开发管线的四段
