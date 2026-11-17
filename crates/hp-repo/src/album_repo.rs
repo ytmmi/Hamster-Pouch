@@ -543,6 +543,7 @@ impl RepoDb {
              WHERE m.album_id = ?1
                AND s.repo_id = ?2
                AND s.mounted = 1
+               AND f.missing_status = 0
                AND (   (?3 = 1 AND f.media_type = 'image')
                     OR (?4 = 1 AND f.media_type = 'video')
                     OR (?5 = 1 AND f.media_type = 'audio'))
@@ -659,6 +660,7 @@ impl RepoDb {
              JOIN sources s ON s.id = f.source_id
              WHERE m.album_id = ?1
                AND s.mounted = 1
+               AND f.missing_status = 0
                AND {excluded}",
             excluded = EXCLUDED_PATH_PREDICATE
         );

@@ -68,6 +68,9 @@ pub(crate) fn visible_members(db: &RepoDb, album_id: &str) -> HpResult<Vec<FileI
             if is_excluded_path(&file.relative_path, prefixes) {
                 continue; // 被排除子目录下的文件不展示
             }
+            if file.missing_status != 0 {
+                continue; // 磁盘上已消失、只剩索引残影的文件不展示（D233）
+            }
             if media_type.contains(file.media_type) {
                 out.push(file);
             }

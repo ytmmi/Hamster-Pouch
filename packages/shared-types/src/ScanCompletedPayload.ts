@@ -3,7 +3,11 @@
 /**
  * `scan.completed` 载荷。
  */
-export type ScanCompletedPayload = { taskId: string, sourceId: string, indexed: number, changed: number, missing: number, skipped: number, 
+export type ScanCompletedPayload = { taskId: string, sourceId: string, indexed: number, changed: number, missing: number, 
+/**
+ * 本轮清理掉的旧索引行数（上一轮判定缺失、这一轮仍不在 → 真删；D233）。
+ */
+removed: number, skipped: number, 
 /**
  * 是否被用户取消（取消不是错误，统计为已完成部分）。
  */

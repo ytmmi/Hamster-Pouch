@@ -559,6 +559,9 @@ pub struct ScanCompletedPayload {
     pub changed: u64,
     #[ts(type = "number")]
     pub missing: u64,
+    /// 本轮清理掉的旧索引行数（上一轮判定缺失、这一轮仍不在 → 真删；D233）。
+    #[ts(type = "number")]
+    pub removed: u64,
     #[ts(type = "number")]
     pub skipped: u64,
     /// 是否被用户取消（取消不是错误，统计为已完成部分）。

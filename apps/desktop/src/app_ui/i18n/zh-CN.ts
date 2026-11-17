@@ -242,7 +242,7 @@ export const zhCN = {
 
   // 源
   "source.treeFailed": "源目录树加载失败：{err}",
-  "source.scanCompleted": "扫描完成：索引 {indexed} / 变更 {changed} / 缺失 {missing}",
+  "source.scanCompleted": "扫描完成：索引 {indexed} / 变更 {changed} / 缺失 {missing} / 清理 {removed}",
   "source.scanError": "扫描错误：{err}",
   "source.mountFailed": "挂载失败：{err}",
   "source.unmountFailed": "卸载失败：{err}",

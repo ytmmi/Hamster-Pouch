@@ -185,13 +185,14 @@ fn move_rename_preserves_identity() {
     );
 }
 
-/// 缺失检测的口径：**索引里有、磁盘上真的没有**才标 missing（RFC 0001）。
+/// 缺失检测的口径：**索引里有、磁盘上真的没有**才动这行（RFC 0001）。
 ///
-/// 这条同时钉住两件事：删除的文件必须被标出来（`exists()` 兜底路径不能失效），
-/// 而内容未变、这次仍被遍历到的文件**一个都不能**被误标（`docs/issues/0018` 第 43 轮
-/// 把"遍历见过即算在"作为第一手证据，只有没见过的行才走 stat 兜底）。
+/// 这条同时钉住三件事：删除的文件必须被标出来（`exists()` 兜底路径不能失效）、
+/// 内容未变且这次仍被遍历到的文件**一个都不能**被误标（`docs/issues/0018` 第 43 轮
+/// 把"遍历见过即算在"作为第一手证据，只有没见过的行才走 stat 兜底）、以及**清理分两步**
+/// （D233）：首次发现只置 `missing_status = 1` 保住标签 / 相册成员，**下一轮**仍然不在才真删行。
 #[test]
-fn missing_is_marked_only_for_vanished_files() {
+fn vanished_file_is_marked_then_removed_on_next_scan() {
     let tmp = tempfile::tempdir().expect("创建临时目录失败");
     let (mut db, source) = setup(&tmp);
     let dir = Path::new(&source.local_path);
@@ -200,12 +201,15 @@ fn missing_is_marked_only_for_vanished_files() {
 
     let first = scan(&mut db, &source, false).expect("首次扫描失败");
     assert_eq!(first.missing, 0, "首次扫描没有可缺失的行");
+    assert_eq!(first.removed, 0, "首次扫描没有可清理的行");
 
     std::fs::remove_file(dir.join("gone.png")).expect("删除文件失败");
 
-    // 第二遍是**增量**扫描：keep.png 内容未变（照旧遍历到），gone.png 已消失。
+    // 第一遍是**增量**扫描：keep.png 内容未变（照旧遍历到），gone.png 已消失。
+    // 这一遍只置位、不删行——网络盘掉线、移动硬盘拔出一瞬间不该把整库清空。
     let second = scan(&mut db, &source, false).expect("二次扫描失败");
     assert_eq!(second.missing, 1, "只应标出真正消失的那一个");
+    assert_eq!(second.removed, 0, "首次发现只置 missing_status，不删行");
     assert_eq!(second.indexed, 0, "内容未变的文件不该被重算或重建");
 
     let keep = db
@@ -220,8 +224,64 @@ fn missing_is_marked_only_for_vanished_files() {
     let gone = db
         .get_file_by_path(source.id.as_str(), "gone.png")
         .expect("查询失败")
-        .expect("行仍在（只标状态，不删行）");
+        .expect("首轮只标状态，行必须还在（标签 / 相册成员要保住）");
     assert_eq!(gone.verify_status, VerifyStatus::Missing);
+
+    // 第二遍仍在磁盘上找不到 → 真删行。用户报的"改名 + 换封面后旧索引永不消失、
+    // 在媒体预览里是个点不开的空文件"，缺的就是这一步。
+    let third = scan(&mut db, &source, false).expect("三次扫描失败");
+    assert_eq!(third.removed, 1, "上一轮已判定缺失、这轮仍然不在 → 删行");
+    assert_eq!(third.missing, 0, "已删掉的行不该再计一次缺失");
+    assert!(
+        db.get_file_by_path(source.id.as_str(), "gone.png")
+            .expect("查询失败")
+            .is_none(),
+        "旧索引行必须真的消失"
+    );
+    assert!(
+        db.get_file_by_path(source.id.as_str(), "keep.png")
+            .expect("查询失败")
+            .is_some(),
+        "清理不得波及仍然存在的文件"
+    );
+}
+
+/// 从回收站 / 备份原样恢复的缺失行必须能被扫回来（D233）。
+///
+/// 恢复后的文件 `size` + `mtime` 与删除前一模一样，而"未变化即跳过"的判据只看这两个字段：
+/// 若不在 `unchanged` 里追加 `missing_status == 0`，这行会永久停在隐藏状态（视图层过滤掉它），
+/// 表现为"文件明明回来了、面板里却还是没有"。
+#[test]
+fn restored_file_comes_back_even_when_size_and_mtime_unchanged() {
+    let tmp = tempfile::tempdir().expect("创建临时目录失败");
+    let (mut db, source) = setup(&tmp);
+    let dir = Path::new(&source.local_path);
+    let path = dir.join("back.png");
+    make_png(&path, 3);
+    let mtime = hp_scanner::file_stat(&path).expect("stat 失败").1;
+
+    scan(&mut db, &source, false).expect("首次扫描失败");
+
+    // 移走（模拟删除）→ 扫描置缺失；再原样放回，size/mtime 都不变。
+    let parked = tmp.path().join("back.png.parked");
+    std::fs::rename(&path, &parked).expect("移走失败");
+    let marked = scan(&mut db, &source, false).expect("二次扫描失败");
+    assert_eq!(marked.missing, 1);
+    std::fs::rename(&parked, &path).expect("放回失败");
+    assert_eq!(
+        hp_scanner::file_stat(&path).expect("stat 失败").1,
+        mtime,
+        "前提：放回后 mtime 未变（否则这条测试钉不住 unchanged 判据）"
+    );
+
+    let back = scan(&mut db, &source, false).expect("三次扫描失败");
+    assert_eq!(back.missing, 0);
+    assert_eq!(back.removed, 0, "文件回来了，绝不能删行");
+    let row = db
+        .get_file_by_path(source.id.as_str(), "back.png")
+        .expect("查询失败")
+        .expect("仍应索引");
+    assert_eq!(row.verify_status, VerifyStatus::Ok);
 }
 
 #[test]

@@ -132,7 +132,7 @@ pub enum PurgePhase {
 ///
 /// 上述派生表都按 `file_id` 关联，因此可以直接走下面统一的
 /// `DELETE FROM {table} WHERE file_id IN (SELECT id FROM files WHERE source_id = ?1)`。
-const DERIVED_TABLES: &[&str] = &[
+pub(crate) const DERIVED_TABLES: &[&str] = &[
     "album_member",
     "file_tags",
     "file_auto_tags",

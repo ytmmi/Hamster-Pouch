@@ -31,6 +31,11 @@ pub struct ScanPrepareRow {
     pub marks: Vec<FileMark>,
     /// `color_refs.color_json`；`None` = 还没有调色板行。`locked: true` 时重扫不得覆盖（D82）。
     pub color_json: Option<String>,
+    /// `files.missing_status`（0 = 正常，非 0 = 上一轮已判定缺失，D233）。
+    ///
+    /// 扫描据此把"旧索引"分两步清掉：首次发现磁盘上没有 → 只置缺失位（保留标签 / 相册成员，
+    /// RFC 0001 的"不立即删除"）；**下一次**扫描确认它仍然不在 → 真删行。
+    pub missing_status: i64,
     /// 该行是否已被收敛成「仅索引」（`files.index_only`，迁移 0016）。
     ///
     /// 扫描据此判断**排除状态有没有变**：`true` 表示衍生产物已被有意清除，若这行现已回到
@@ -39,11 +44,19 @@ pub struct ScanPrepareRow {
     pub index_only: bool,
 }
 
-/// 缺失检测用的最小行：`(id, relative_path)`，不带标记、不带其余 18 列。
+/// 缺失检测用的最小行，不带标记、不带其余列。
+///
+/// `missing_status` 是"上一轮就判过缺失"的证据：扫描据此把清理分成两步——首次发现磁盘上没有
+/// 只置位（保留标签 / 相册成员，RFC 0001「不立即删除索引」），**再下一次**仍没有才真删行（D233）。
+/// `content_hash` 只用于删行后判断"这份内容还有没有别处可见"，从而决定要不要清缩略图缓存。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFileLocation {
     pub id: String,
     pub relative_path: String,
+    /// 0 = 正常；非 0 = 上一轮扫描已判定缺失。
+    pub missing_status: i64,
+    /// 已存内容哈希；`None` = 占位行或从未算过。
+    pub content_hash: Option<String>,
 }
 
 /// `file.query` 的过滤条件。
@@ -415,7 +428,7 @@ impl RepoDb {
     pub fn list_relative_paths_by_source(&self, source_id: &str) -> HpResult<Vec<String>> {
         let mut stmt = self
             .conn()
-            .prepare("SELECT relative_path FROM files WHERE source_id = ?1")
+            .prepare("SELECT relative_path FROM files WHERE source_id = ?1 AND missing_status = 0")
             .map_err(|e| store_err("查询源文件相对路径", e))?;
         let rows = stmt
             .query_map(params![source_id], |row| row.get::<_, String>(0))
@@ -434,7 +447,7 @@ impl RepoDb {
             .conn()
             .prepare(
                 "SELECT f.id, f.relative_path, f.size, f.mtime, f.content_hash, f.index_only,
-                        c.color_json
+                        c.color_json, f.missing_status
                  FROM files f LEFT JOIN color_refs c ON c.file_id = f.id
                  WHERE f.source_id = ?1",
             )
@@ -450,6 +463,7 @@ impl RepoDb {
                     marks: Vec::new(),
                     index_only: row.get::<_, i64>(5)? != 0,
                     color_json: row.get(6)?,
+                    missing_status: row.get(7)?,
                 })
             })
             .map_err(|e| store_err("读取扫描准备行", e))?
@@ -476,13 +490,18 @@ impl RepoDb {
     ) -> HpResult<Vec<SourceFileLocation>> {
         let mut stmt = self
             .conn()
-            .prepare("SELECT id, relative_path FROM files WHERE source_id = ?1")
+            .prepare(
+                "SELECT id, relative_path, missing_status, content_hash \
+                 FROM files WHERE source_id = ?1",
+            )
             .map_err(|e| store_err("查询源文件位置", e))?;
         let rows = stmt
             .query_map(params![source_id], |row| {
                 Ok(SourceFileLocation {
                     id: row.get(0)?,
                     relative_path: row.get(1)?,
+                    missing_status: row.get(2)?,
+                    content_hash: row.get(3)?,
                 })
             })
             .map_err(|e| store_err("读取源文件位置", e))?
@@ -556,6 +575,7 @@ impl RepoDb {
              FROM files f JOIN sources s ON s.id = f.source_id
              WHERE s.repo_id = ?1
                AND s.mounted = 1
+               AND f.missing_status = 0
                AND ((?2 = 0 AND ?3 = 0 AND ?4 = 0 AND ?5 = 0 AND ?6 = 0)
                     OR (?2 = 1 AND f.media_type = 'image')
                     OR (?3 = 1 AND f.media_type = 'video')
@@ -839,9 +859,14 @@ impl RepoDb {
         Ok(())
     }
 
-    /// 批量删除文件索引行及其引用数据（标签 / 评分 / 色彩 / 相册成员 / 同步排除）。
+    /// 批量删除文件索引行及其**全部**引用数据（标签 / 自动标签 / 标记 / 评分 / 色彩 /
+    /// 封面 / 批注 / 相册成员 / 同步排除）。
     ///
-    /// `files` 的外键无级联，需先清理引用行再删主行；返回删除的文件行数。
+    /// 清表清单直接复用卸载源的那张 [`crate::purge_repo::DERIVED_TABLES`]：两处若各写一份，
+    /// 迟早会像 D233 修复前那样漏表（`delete_files` 当时只清 5 张，删一张被批注过的图会
+    /// 留下指向已删文件的孤儿行）。`files` 的外键不保证级联生效，因此这里显式逐表清。
+    ///
+    /// 返回删除的文件行数。
     pub fn delete_files(&mut self, file_ids: &[String]) -> HpResult<u64> {
         let tx = self
             .conn()
@@ -849,13 +874,7 @@ impl RepoDb {
             .map_err(|e| store_err("开启文件删除事务", e))?;
         let mut deleted = 0u64;
         for file_id in file_ids {
-            for table in [
-                "file_tags",
-                "ratings",
-                "color_refs",
-                "album_member",
-                "album_sync_exclusion",
-            ] {
+            for table in crate::purge_repo::DERIVED_TABLES {
                 tx.execute(
                     &format!("DELETE FROM {table} WHERE file_id = ?1"),
                     params![file_id],

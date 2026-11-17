@@ -113,6 +113,7 @@ export function startTaskEvents(): () => void {
             indexed: p.indexed,
             changed: p.changed,
             missing: p.missing,
+            removed: p.removed,
           }),
           "ok",
         );

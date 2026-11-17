@@ -70,8 +70,10 @@ pub struct ScanOutcome {
     pub indexed: u64,
     /// 内容变化重建的文件数。
     pub changed: u64,
-    /// 标记缺失的文件数。
+    /// 标记缺失的文件数（首次发现磁盘上已没有，只置位、不删行）。
     pub missing: u64,
+    /// 清理掉的旧索引行数（上一轮已判定缺失、这一轮仍然不在，真删；D233）。
+    pub removed: u64,
     /// 未知类型跳过数。
     pub skipped: u64,
     /// 是否被用户取消（取消不再视为错误，返回已完成的部分统计）。
@@ -378,6 +380,7 @@ impl Scanner {
                     Some(row) => {
                         !(options.full || row.size != size || row.mtime != mtime)
                             && row.index_only == excluded
+                            && row.missing_status == 0
                     }
                     None => false,
                 };
@@ -500,17 +503,54 @@ impl Scanner {
         //
         //    **必须在写库之后做**：移动/重命名识别（`upsert_or_move`）会改既有行的路径，
         //    拿写前的快照按"旧路径已消失"判定就会把刚迁走的行误标 missing。
+        //
+        //    **清理分两步**（D233）：首次发现磁盘上没有 → 只置 missing_status = 1（保留标签 /
+        //    相册成员，也避免网络盘掉线、移动硬盘拔出一瞬间把整库清空）；**下一轮**扫描发现
+        //    它仍然不在 → 真删行。用户报的「改名 + 换内嵌封面后旧索引永远留着、在媒体预览里
+        //    是个点不开的空文件」根因就在这里：旧实现把第二个参数硬编码成 0，连置位都没做，
+        //    行自然永不消失。
+        //
+        //    视图层（file.query / 目录树 / 相册）已过滤 missing_status = 0，所以第一步之后
+        //    这个「空文件」就从界面上消失了；第二步只是把库里那行也收掉。
         let walked: HashSet<&str> = prepared_list
             .iter()
             .map(|prep| prep.relative_path.as_str())
             .collect();
+        let mut vanished: Vec<(String, Option<String>)> = Vec::new();
         for loc in db.list_file_locations_by_source(source_id)? {
             if walked.contains(loc.relative_path.as_str()) {
                 continue;
             }
-            if !root.join(&loc.relative_path).exists() {
-                db.update_file_status(&loc.id, VerifyStatus::Missing, 0)?;
+            if root.join(&loc.relative_path).exists() {
+                continue;
+            }
+            if loc.missing_status == 0 {
+                db.update_file_status(&loc.id, VerifyStatus::Missing, 1)?;
                 outcome.missing += 1;
+            } else {
+                vanished.push((loc.id, loc.content_hash));
+            }
+        }
+        if !vanished.is_empty() {
+            let ids: Vec<String> = vanished.iter().map(|(id, _)| id.clone()).collect();
+            outcome.removed = db.delete_files(&ids)?;
+            // 缩略图 / 调色板缓存按**内容哈希**存放，所以只清「这份内容已没有任何可见副本」
+            // 的那些（与 purge_excluded_derivatives 同一口径）。判哈希必须在删行**之后**：
+            // 行还在时 has_visible_content_hash 会看见它自己，永远判成「还有人要」。
+            if let Some(cache) = options.thumbnail_cache.as_ref() {
+                let mut seen: HashSet<&str> = HashSet::new();
+                for (_, hash) in &vanished {
+                    let Some(hash) = hash.as_deref() else {
+                        continue;
+                    };
+                    if !seen.insert(hash) {
+                        continue;
+                    }
+                    if db.has_visible_content_hash(hash)? {
+                        continue;
+                    }
+                    cache.purge_hash(hash);
+                }
             }
         }
 

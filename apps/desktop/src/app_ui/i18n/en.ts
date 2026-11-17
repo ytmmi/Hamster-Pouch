@@ -236,7 +236,7 @@ export const en: Record<keyof DictZhCN, string> = {
   "repo.defaultFailed": "Failed to set default repository: {err}",
 
   "source.treeFailed": "Failed to load source tree: {err}",
-  "source.scanCompleted": "Scan complete: indexed {indexed} / changed {changed} / missing {missing}",
+  "source.scanCompleted": "Scan complete: indexed {indexed} / changed {changed} / missing {missing} / removed {removed}",
   "source.scanError": "Scan error: {err}",
   "source.mountFailed": "Failed to mount: {err}",
   "source.unmountFailed": "Failed to unmount: {err}",

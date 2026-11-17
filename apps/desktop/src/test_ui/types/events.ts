@@ -22,6 +22,7 @@ export interface ScanCompletedPayload {
   indexed: number;
   changed: number;
   missing: number;
+  removed: number;
   skipped: number;
 }
 

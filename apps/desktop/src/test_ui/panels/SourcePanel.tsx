@@ -77,7 +77,7 @@ export function SourcePanel({
         unlisteners.push(
           await listenHp<ScanCompletedPayload>("scan.completed", (e) => {
             onStatus(
-              `扫描完成: 索引 ${e.payload.indexed}, 变更 ${e.payload.changed}, 缺失 ${e.payload.missing}, 跳过 ${e.payload.skipped}`,
+              `扫描完成: 索引 ${e.payload.indexed}, 变更 ${e.payload.changed}, 缺失 ${e.payload.missing}, 清理 ${e.payload.removed}, 跳过 ${e.payload.skipped}`,
               "ok",
             );
             setScanProgress(null);

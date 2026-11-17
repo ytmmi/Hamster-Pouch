@@ -234,7 +234,7 @@ export const zhTW: Record<keyof DictZhCN, string> = {
   "repo.defaultFailed": "設定預設倉庫失敗：{err}",
 
   "source.treeFailed": "源目錄樹載入失敗：{err}",
-  "source.scanCompleted": "掃描完成：索引 {indexed} / 變更 {changed} / 缺失 {missing}",
+  "source.scanCompleted": "掃描完成：索引 {indexed} / 變更 {changed} / 缺失 {missing} / 清理 {removed}",
   "source.scanError": "掃描錯誤：{err}",
   "source.mountFailed": "掛載失敗：{err}",
   "source.unmountFailed": "卸載失敗：{err}",

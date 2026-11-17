@@ -587,6 +587,7 @@ pub(crate) fn start_source_scan(
                     indexed: outcome.indexed,
                     changed: outcome.changed,
                     missing: outcome.missing,
+                    removed: outcome.removed,
                     skipped: outcome.skipped,
                     cancelled: outcome.cancelled,
                 },

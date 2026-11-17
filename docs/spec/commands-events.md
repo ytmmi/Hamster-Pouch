@@ -620,7 +620,7 @@ libmpv 播放路径 2026-09 起休眠（播放器面板改走 DOM `<video>`，�
 | 事件 | 载荷 |
 | --- | --- |
 | `scan.progress` | `{ taskId, sourceId, processed, total, phase, pausable }`（**2026-09 追加 `pausable`**：整源扫描为 `true`；**单文件 `file.reanalyze` 复用同一条事件**但为 `false`（没有暂停点）→ 浮窗据此不渲染暂停按钮。单文件分析的进度帧是 `total = 0` = 总数未知 → 不定进度条） |
-| `scan.completed` | `{ taskId, sourceId, indexed, changed, missing }` |
+| `scan.completed` | `{ taskId, sourceId, indexed, changed, missing, removed, skipped, cancelled }`（**2026-11-17 补全（D233）**：本节此前只列了前四项，实现里 `skipped` / `cancelled` 早就发出去了。`removed` 是**新增**：本轮清理掉的行数——上一轮扫描已把某行标成缺失、这一轮它仍然不在磁盘上 → 真删（详见 D233 与缺陷 0049）。浮窗文案随之显示「索引 n / 变更 n / 缺失 n / 清理 n」） |
 | `scan.error` | `{ taskId, sourceId, error }` |
 | `source.unmount.progress` | `{ taskId, sourceId, phase, processed, total }`（**2026-09 补入**：正文 §3.2 与代码早就有它，本节此前**漏列**；`phase` ∈ `counting`/`syncRules`/`children`/`derived`/`files`/`source`，`total == 0` 表示该阶段总数未知（界面按不定进度显示）。发射点 `apps/desktop/src-tauri/src/commands/source.rs:347`，DTO `source.rs:90`；前端监听 `apps/desktop/src/app_ui/core/taskStore.ts`） |
 | `source.unmount.completed` | `{ taskId, sourceId, cancelled, members, files, tags, ratings, colors, syncAlbums, childSources }`（**2026-09 补入**，同上：本节此前漏列。`cancelled` 为真时整个事务回滚、什么都没删；发射点 `apps/desktop/src-tauri/src/commands/source.rs:284`，DTO `source.rs:101`） |
