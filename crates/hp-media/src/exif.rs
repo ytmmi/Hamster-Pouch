@@ -97,7 +97,16 @@ pub fn extract_exif(path: &Path) -> HpResult<ImageExif> {
 pub fn orientation_of(path: &Path) -> Option<u32> {
     let file = std::fs::File::open(path).ok()?;
     let mut reader = std::io::BufReader::new(file);
-    let exif = Reader::new().read_from_container(&mut reader).ok()?;
+    orientation_from_reader(&mut reader)
+}
+
+/// 从**已经打开的**读取器里取方向（`pub(crate)`：给"一次开文件同时拿尺寸"用）。
+///
+/// 调用方负责把读取器定位到文件开头：EXIF 的容器解析从偏移 0 开始扫。
+pub(crate) fn orientation_from_reader<R: std::io::BufRead + std::io::Seek>(
+    reader: &mut R,
+) -> Option<u32> {
+    let exif = Reader::new().read_from_container(reader).ok()?;
     exif.get_field(Tag::Orientation, In::PRIMARY)
         .and_then(|f| f.value.get_uint(0))
 }

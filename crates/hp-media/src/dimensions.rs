@@ -31,6 +31,29 @@ pub fn header_dimensions(path: &Path) -> Option<(u32, u32)> {
     reader.into_dimensions().ok()
 }
 
+/// **一次开文件**同时拿到存储尺寸与 EXIF 方向（2026-11-23 P2-2）。
+///
+/// [`header_dimensions`] 与 [`crate::exif::orientation_of`] 各自 `File::open` 一次，而索引期
+/// 每张待重算的图片都要问这两件**同一份头**里的事：实测真实库（12 530 文件）上单张省
+/// 30–100 µs，全库约 0.3–1.2 s。
+///
+/// 实现上是"开一次 → 先取 EXIF → 再 `seek(0)` 让 `image` 读头"：两个消费者共用同一个
+/// `BufReader`，`into_inner` 之后显式归零是因为缓冲区已经提前读走了若干字节。
+/// 任一步失败返回 `None`（与两个单独函数各自的"读不到就 None"同口径）。
+pub fn header_dimensions_and_orientation(path: &Path) -> Option<((u32, u32), Option<u32>)> {
+    crate::ensure_libheif_hooks();
+    let mut reader = std::io::BufReader::new(std::fs::File::open(path).ok()?);
+    let orientation = crate::exif::orientation_from_reader(&mut reader);
+    // 缓冲区已经把文件指针推到了预读位置，必须显式归零再交给 `image` 读头。
+    std::io::Seek::seek(&mut reader, std::io::SeekFrom::Start(0)).ok()?;
+    let dimensions = image::ImageReader::new(reader)
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    Some((dimensions, orientation))
+}
+
 /// 读图片头得到**显示尺寸**（EXIF 方向已应用）；读不到返回 `None`。
 pub fn display_dimensions(path: &Path) -> Option<(u32, u32)> {
     let (width, height) = header_dimensions(path)?;

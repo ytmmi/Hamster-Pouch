@@ -31,7 +31,9 @@ pub use artwork::{
 };
 pub use cache::{ThumbFormat, ThumbnailCache};
 pub use decode::{decode_image_fallback, ensure_libheif_hooks};
-pub use dimensions::{apply_orientation, display_dimensions, header_dimensions};
+pub use dimensions::{
+    apply_orientation, display_dimensions, header_dimensions, header_dimensions_and_orientation,
+};
 pub use exif::{ImageExif, extract_exif, orientation_of};
 pub use palette::{
     DEFAULT_PALETTE_SIZE, PALETTE_FORMAT_VERSION, Palette, dominant_colors_from_image,

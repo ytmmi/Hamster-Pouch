@@ -43,6 +43,32 @@ pub struct Prepared {
     /// 限流时读一次头、`compute` 里又读一次同一份头。只有"要重算的图片"有值，
     /// 未变化的图一个字节都不碰。
     pub image_probe: Option<ImageProbe>,
+    /// 既有行的**内容哈希**与**感知哈希**（`None` = 库里没有）。
+    ///
+    /// 只用于"内容一字节未变 → 派生数据可以原样复用"这条判断（2026-11-23 P0-2）：
+    /// 全量重扫会忽略 size/mtime 重新核对，核对的手段是**重算内容哈希**（便宜），
+    /// 而缩略图 / dHash / 调色板 / 媒体信息是同一份内容的纯函数产物（昂贵），
+    /// 哈希相等就没有理由再算一遍——实测 12 267 张 AVIF 的全量重扫 1572 s 里绝大部分是解码。
+    pub existing_content_hash: Option<String>,
+    pub existing_perceptual_hash: Option<String>,
+    /// 那枚 dHash 是**哪个算法版本**算出来的。复用的前提之一必须是它与当前
+    /// [`hp_hash::PERCEPTUAL_HASH_ALGO_VERSION`] 相等，否则复用会把旧算法的值
+    /// 盖上新的版本戳，库从此谎报这些 dHash 出自新算法（去重会错配且不报错）。
+    pub existing_perceptual_hash_algo_version: Option<i64>,
+    /// 既有行的缩略图状态与调色板（`Some` 且非空 = 库里有这份产物）。
+    pub existing_thumb_status: ThumbStatus,
+    pub existing_color_json: Option<String>,
+    /// 本轮**允许**复用既有派生数据（缩略图 / dHash / 调色板）吗？
+    ///
+    /// 由扫描在准备阶段一次性定：只有「该源上一次完整重算用的派生参数 == 当前
+    /// [`DERIVATION_VERSION`]」才为真。参数一变（缩略图档位、WebP 质量、dHash 算法…），
+    /// 磁盘上的旧缩略图与旧 dHash 就不再是「同一份内容的等价产物」，必须重算——
+    /// 否则改了参数却看不到任何变化，而且没有任何报错。
+    pub reuse_derivations: bool,
+    /// 既有行的 `files.index_only`（新文件 = `false`）。写库阶段据此**跳过无用的 UPDATE**：
+    /// 这一列不在 `upsert_file` 的列清单里，旧实现每写一行都恒发一条 `UPDATE files SET
+    /// index_only = ?`——绝大多数行本来就与排除态一致，那条 UPDATE 是纯浪费（实测 8.8 µs/行）。
+    pub existing_index_only: bool,
     /// 该路径是否**落在被排除子树下**（`source_exclusion`，D149 + 2026-11-12 口径）。
     ///
     /// 为真时这份内容**只建索引**：不读内容、不算哈希、不出缩略图、不算感知哈希与调色板、
@@ -86,6 +112,85 @@ pub fn pixel_cost(prepared: &Prepared) -> u64 {
     }
 }
 
+/// 派生数据参数版本：**只要任何一种派生产物的生成参数变了，就把它 +1**。
+///
+/// 覆盖的参数面：扫描解码上限（`SCAN_DECODE_BOUND`）、缩略图档位与编码质量
+/// （`IMAGE_THUMB_MAX_DIM` / `IMAGE_THUMB_DIM_LADDER` / `IMAGE_THUMB_WEBP_QUALITY`）、
+/// dHash 算法与之依赖的解码分辨率、调色板抽取参数。
+///
+/// 为什么需要它：内容哈希没变时扫描会**直接复用磁盘上那份缩略图与库里那枚 dHash**
+/// （见 [`reuse_image_derivations`]）。如果只改参数不认版本，复用的仍是旧参数产物，
+/// 表现为「改了缩略图质量 / 换了 dHash 算法，扫描跑完却什么都没变，也不报错」。
+/// 有了这一版，升级参数 → 版本不等 → 该源退回逐张解码重算一次，然后重新盖章。
+///
+/// **按源记录**（`repo_meta.derivation_version:<source_id>`）：一个仓库可以挂多个源，
+/// 源 A 重算过不代表源 B 的磁盘产物也出自当前参数。
+pub const DERIVATION_VERSION: i64 = 1;
+/// **内容未变时复用既有派生数据**（2026-11-23 P0-2）；不满足前提返回 `None`，走老路重算。
+///
+/// 前提（缺一不可）：
+/// 1. 库里存过内容哈希，且与刚重算的一致——这是"内容没变"的**事实判据**；
+/// 2. 库里存过非空的 dHash——空的说明上次就没算出来，得再给一次机会；
+/// 3. 缩略图状态是 `Generated` 且（配了缓存目录时）缓存文件确实还在；
+/// 4. 调色板要么不需要重算（手动锁定 D82），要么库里已经有——否则"缺失的调色板"
+///    永远补不上，因为补它需要整图解码。
+///
+/// 复用时**不回写调色板**（`palette: None`）：库里那行本来就是对的，重写一遍只会多一次
+/// `upsert_color_ref`。
+fn reuse_image_derivations(
+    prepared: &Prepared,
+    content: &ContentHash,
+    options: &ScanOptions,
+) -> Option<Computed> {
+    // 版本门在最外层：该源的派生参数与当前不符时，磁盘上的产物一律不可信。
+    if !prepared.reuse_derivations {
+        return None;
+    }
+    if prepared.existing_content_hash.as_deref() != Some(content.value.as_str()) {
+        return None;
+    }
+    if prepared.want_palette && prepared.existing_color_json.is_none() {
+        return None;
+    }
+    // 版本必须**逐值相等**才复用：`algo_version` 升级后，库里那枚 dHash 出自旧算法，
+    // 复用它等于把旧值盖上新的版本戳（写库只写 `perceptual_hash` 与版本号两列），
+    // 从此库里声称这些 dHash 由新算法产出——去重 / 相似检索会静默错配。
+    if prepared.existing_perceptual_hash_algo_version != Some(hp_hash::PERCEPTUAL_HASH_ALGO_VERSION)
+    {
+        return None;
+    }
+    let perceptual = match prepared.existing_perceptual_hash.as_deref() {
+        Some(value) if !value.is_empty() => PerceptualHash {
+            value: value.to_string(),
+            algo: hp_hash::PERCEPTUAL_HASH_ALGO.to_string(),
+            algo_version: hp_hash::PERCEPTUAL_HASH_ALGO_VERSION,
+        },
+        _ => return None,
+    };
+    if prepared.existing_thumb_status != ThumbStatus::Generated {
+        return None;
+    }
+    if let Some(cache) = options.thumbnail_cache.as_ref()
+        && !cache.path_for_image(&content.value).exists()
+    {
+        // 缓存目录被清过 / 换了位置：`thumb_status` 指向的文件不在了，得重建。
+        return None;
+    }
+    let probe = prepared
+        .image_probe
+        .unwrap_or_else(|| crate::scan_compute::probe_image(&prepared.path));
+    Some(Computed {
+        content: Some(content.clone()),
+        perceptual: Some(perceptual),
+        palette: None,
+        thumb_status: Some(ThumbStatus::Generated),
+        media_info: None,
+        width: probe.display.map(|(w, _)| w),
+        height: probe.display.map(|(_, h)| h),
+        unreadable: false,
+    })
+}
+
 /// 纯计算：读文件、算哈希、抽帧 / 出缩略图。**不访问数据库、不写索引**。
 ///
 /// 视频抽帧会写缩略图缓存（`ThumbnailCache`），那是按内容哈希分文件的独立路径，
@@ -112,6 +217,24 @@ pub fn compute(prepared: &Prepared, options: &ScanOptions) -> Computed {
                     ..Computed::default()
                 };
             };
+            // **内容没变就复用派生数据**（2026-11-23 P0-2）。
+            //
+            // 全量重扫的语义是"忽略 size/mtime 重新核对"，不是"无条件重算一切"：只要重算
+            // 出来的内容哈希与库里一致，缩略图 / dHash / 调色板 / 媒体信息就是同一份内容的
+            // 同一份纯函数产物。旧实现只按 size/mtime 判"跳过"，因此每次 `--full` 都要把
+            // 12 267 张 AVIF 从头解码一遍（真实库实测 1572 s，其中解码占绝大部分）。
+            //
+            // 复用是有**前置条件**的，缺一不可：
+            // - 哈希相等：内容确实没变（这是唯一的事实判据，不是启发式）；
+            // - 缩略图缓存目录已配置且缓存文件仍在：否则 `thumb_status` 会指向一个不存在的文件；
+            // - 库里的 dHash 不是空串（`Failed` 的图下次还得给它一次机会）。
+            //
+            // 调色板**不**作为前置条件：手动锁定（D82）本来就不归扫描管，未锁定的缺失调色板
+            // 是历史遗留，靠 `want_palette` 那条老路补齐即可——但那时哈希已相等，
+            // 我们必须仍然解码一次（`want_palette` 只影响要不要算调色板，不影响其它产物）。
+            if let Some(reused) = reuse_image_derivations(prepared, &content, options) {
+                return reused;
+            }
             // **一张图只解码一次**，这张图同时喂三个消费者：dHash、调色板、缩略图。
             // （第 44 轮 / D161：缩略图此前会**再解码一次**——冷缓存全量扫描实测
             // 120 张 AVIF 从 20.3 s 涨到 40.9 s，多出来的就是这第二次解码加第二次
@@ -378,6 +501,13 @@ mod tests {
             unchanged,
             existing_id: None,
             existing_marks: Vec::new(),
+            existing_content_hash: None,
+            existing_perceptual_hash: None,
+            existing_perceptual_hash_algo_version: None,
+            existing_thumb_status: ThumbStatus::NotGenerated,
+            existing_color_json: None,
+            reuse_derivations: true,
+            existing_index_only: false,
             want_palette,
             image_probe: None,
             excluded: false,

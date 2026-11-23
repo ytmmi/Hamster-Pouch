@@ -26,21 +26,39 @@ use crate::derivatives::purge_excluded_derivatives;
 use crate::media_type::{default_file_marks, detect_media_type};
 use crate::scan_compute;
 use crate::scan_pool;
-use crate::scan_task::{Computed, Prepared, compute, pixel_cost};
+use crate::scan_task::{Computed, DERIVATION_VERSION, Prepared, compute, pixel_cost};
 
 /// 遍历阶段的进度上报间隔：**固定间隔**刷新，不做逐文件上报——海量小文件下
 /// 逐文件发事件会把事件通道打满、拖累扫描本身（用户口径 2026-10-06：
 /// "可以固定间隔刷新，无需完全实时，防止拖累性能"）。
 const WALK_REPORT_INTERVAL: Duration = Duration::from_millis(100);
 
+/// 遍历阶段的**一个文件**：路径 + 当时就从目录枚举里拿到的 size/mtime。
+///
+/// **为什么把 stat 提前到遍历**(2026-11-23 P2-1)：`WalkDir` 在 Windows 上直接把
+/// `FindNextFileW` 的 `WIN32_FIND_DATA` 存进 `DirEntry`，`DirEntry::metadata()`
+/// 就是克隆那份缓存、**不发任何系统调用**（walkdir 2.5 `dent.rs` 的 `metadata_internal`
+/// 在 `cfg(windows)` + `follow_link == false` 时走 `self.metadata.clone()`）。
+/// 而准备阶段的 `file_stat` 是 `std::fs::metadata`，一次真 syscall。实测同一批文件两路
+/// 结果**逐条完全一致**（20 000 个小文本：match=20000 / mismatch=0；真实库 12 530 文件：
+/// match=12530 / mismatch=0，含纳秒 mtime 字符串），而耗时是 0.36 µs vs 43.4 µs（20 000
+/// 文件单目录）与 1.6 µs vs 16.6 µs（真实库）——即省掉整段 stat。
+///
+/// 代价是每个条目多 32 字节常驻（一个 `i64` + 一个 `String`），5 万文件约 1.6 MB。
+#[derive(Debug, Clone)]
+struct WalkedFile {
+    path: PathBuf,
+    /// `None` = 拿不到元数据（符号链接、权限不足等），准备阶段按"跳过"处理，与旧口径一致。
+    stat: Option<(i64, String)>,
+}
+
 /// 准备阶段**并行采集**的每文件元数据（第 43 轮）。
 ///
-/// 两个字段互相独立、都只是系统调用：`detect_media_type` 对已知扩展名零 IO
-/// （只有无法识别时才嗅探 16 字节 magic），`file_stat` 一次 `metadata`。
-/// 它们不需要数据库、不需要解码，因此可以按块并行——串行版本在慢盘上是大头。
+/// 只剩媒体类型：`detect_media_type` 对已知扩展名零 IO（只有无法识别时才嗅探 16 字节
+/// magic），不需要数据库、不需要解码，因此可以按块并行——串行版本在慢盘上是大头。
+/// stat 已经挪到遍历阶段（见 [`WalkedFile`]），这里不再重复。
 struct PrepareMeta {
     media_type: Option<MediaType>,
-    stat: Option<(i64, String)>,
 }
 
 /// 扫描阶段。
@@ -226,7 +244,9 @@ impl Scanner {
         // 因此补上**首帧**（首个文件，一次性）与**收尾帧**（真实总数，一次性），
         // 中间一律走固定间隔——既不漏掉短遍历，也不逐文件上报拖累性能。
         let mut outcome = ScanOutcome::default();
-        let mut entries: Vec<PathBuf> = Vec::new();
+        // `WalkDir` 不报总数，因此只能从空 `Vec` 起步（倍增策略下 5 万文件约 16 次扩容，
+        // 每次搬整个数组；实测遍历本身 2 万文件只花 0.01 s，扩容不是瓶颈，不做猜测性预分配）。
+        let mut entries: Vec<WalkedFile> = Vec::new();
         let mut last_walk_report = Instant::now();
         for entry in WalkDir::new(root).follow_links(false).into_iter() {
             if !self.wait_if_paused(extra_cancel)? {
@@ -235,7 +255,15 @@ impl Scanner {
             }
             match entry {
                 Ok(e) if e.file_type().is_file() => {
-                    entries.push(e.into_path());
+                    // **在遍历时就取元数据**（P2-1）：Windows 上这一步是克隆目录枚举
+                    // 已带回来的 `WIN32_FIND_DATA`，不发系统调用；放到准备阶段再
+                    // `fs::metadata` 就是逐文件一次真 syscall（实测 16.6–43.4 µs/文件）。
+                    // 取不到就记 `None`，准备阶段照旧当"跳过"处理。
+                    let stat = entry_stat(&e);
+                    entries.push(WalkedFile {
+                        path: e.into_path(),
+                        stat,
+                    });
                     let discovered = entries.len() as u64;
                     // **首个文件立即上报一次**（一次性首帧：让"已发现"从 0 立刻动起来，
                     // 否则只靠时间节流时，几百毫秒内跑完的遍历一帧都不发，浮窗会一直
@@ -245,6 +273,7 @@ impl Scanner {
                         last_walk_report = Instant::now();
                         let current = entries
                             .last()
+                            .map(|f| f.path.as_path())
                             .and_then(|p| p.parent())
                             .and_then(|p| p.strip_prefix(root).ok())
                             .map(|p| p.to_string_lossy().replace('\\', "/"))
@@ -303,6 +332,12 @@ impl Scanner {
         // 前缀集合一次取回即可（这张表只记被排除的目录本身，行数是个位数）。
         let exclusion_prefixes = db.source_exclusion_prefixes(source_id)?;
 
+        // **派生参数版本门**（2026-11-23）：该源上一次完整重算时用的参数与当前不一致
+        // （老库、刚升级、从没扫全过），磁盘上的缩略图与库里的 dHash 就不可信，
+        // 本轮一律禁止复用、退回逐张解码。见 `scan_task::DERIVATION_VERSION`。
+        let stored_derivation_version = db.derivation_version(source_id)?;
+        let reuse_derivations = stored_derivation_version == Some(DERIVATION_VERSION);
+
         let mut existing_rows: HashMap<String, ScanPrepareRow> = db
             .list_files_for_scan(source_id)?
             .into_iter()
@@ -313,9 +348,9 @@ impl Scanner {
         // 准备阶段整段不发帧会让浮窗看起来停在原地（而且 `TaskOverlay` 超过 5 s
         // 没有进度就会走"卡住"对账）。这里按同一间隔上报"正在准备的条目"。
         let mut last_prepare_report = Instant::now();
-        // **元数据采集并行化**（第 43 轮）：`detect_media_type` 与 `stat` 相互独立、
-        // 都只是系统调用，而网络盘/机械盘上 5 万次 stat 串行能吃掉十几秒。
-        // 块大小取 32 个核的宽度：再大只把取消与进度的粒度拉粗，并不提升吞吐。
+        // **媒体类型判定并行化**（第 43 轮）：它只是系统调用（未知扩展名时嗅探 16 字节），
+        // 不需要数据库、不需要解码。块大小取 32 个核的宽度：再大只把取消与进度的粒度拉粗。
+        // stat 已挪到遍历阶段（P2-1），这里只剩类型判定。
         let prepare_chunk = (scan_pool::worker_count() * 32).clamp(1, 2048);
         for chunk in entries.chunks(prepare_chunk) {
             if !self.wait_if_paused(extra_cancel)? {
@@ -330,6 +365,7 @@ impl Scanner {
                     phase: ScanPhase::Indexing,
                     current: chunk
                         .first()
+                        .map(|f| f.path.as_path())
                         .and_then(|p| p.strip_prefix(root).ok())
                         .map(|p| p.to_string_lossy().replace('\\', "/")),
                 });
@@ -337,14 +373,14 @@ impl Scanner {
 
             let metas = scan_pool::map_bounded(
                 chunk,
-                |_p: &PathBuf| 1,
-                |p: &PathBuf| PrepareMeta {
-                    media_type: detect_media_type(p),
-                    stat: file_stat(p),
+                |_f: &WalkedFile| 1,
+                |f: &WalkedFile| PrepareMeta {
+                    media_type: detect_media_type(&f.path),
                 },
             );
 
-            for (path, meta) in chunk.iter().zip(metas) {
+            for (found, meta) in chunk.iter().zip(metas) {
+                let path = found.path.as_path();
                 let relative = match path.strip_prefix(root) {
                     Ok(r) => r,
                     Err(_) => continue,
@@ -359,7 +395,9 @@ impl Scanner {
                     }
                 };
 
-                let (size, mtime) = match meta.stat {
+                // stat 来自遍历阶段（`DirEntry::metadata` 的缓存值），口径与 `file_stat`
+                // 逐字节相同（同一份 `WIN32_FIND_DATA`），只是省掉了 syscall。
+                let (size, mtime) = match found.stat.clone() {
                     Some(v) => v,
                     None => {
                         outcome.skipped += 1;
@@ -409,8 +447,24 @@ impl Scanner {
                 let image_probe = (media_type == MediaType::Image && !unchanged && !excluded)
                     .then(|| scan_compute::probe_image(path));
 
+                // 既有行的**派生数据快照**（2026-11-23 P0-2）：内容哈希一致时并行段据此
+                // 直接复用缩略图 / dHash / 调色板，不再整图解码。
+                let existing_content_hash =
+                    existing.as_ref().and_then(|row| row.content_hash.clone());
+                let existing_perceptual_hash = existing
+                    .as_ref()
+                    .and_then(|row| row.perceptual_hash.clone());
+                let existing_perceptual_hash_algo_version = existing
+                    .as_ref()
+                    .and_then(|row| row.perceptual_hash_algo_version);
+                let existing_thumb_status = existing
+                    .as_ref()
+                    .map(|row| row.thumb_status)
+                    .unwrap_or(ThumbStatus::NotGenerated);
+                let existing_color_json = existing.as_ref().and_then(|row| row.color_json.clone());
+                let existing_index_only = existing.as_ref().is_some_and(|row| row.index_only);
                 prepared_list.push(Prepared {
-                    path: path.clone(),
+                    path: path.to_path_buf(),
                     relative_path,
                     media_type,
                     size,
@@ -418,6 +472,13 @@ impl Scanner {
                     unchanged,
                     existing_id: existing.as_ref().map(|row| row.id.clone()),
                     existing_marks: existing.map(|row| row.marks).unwrap_or_default(),
+                    existing_content_hash,
+                    existing_perceptual_hash,
+                    existing_perceptual_hash_algo_version,
+                    existing_thumb_status,
+                    existing_color_json,
+                    reuse_derivations,
+                    existing_index_only,
                     want_palette,
                     image_probe,
                     excluded,
@@ -434,11 +495,27 @@ impl Scanner {
         //    **取消语义与旧实现一致**：取消**在文件粒度**上检查（见下面写库循环），
         //    因此"取消 → 立刻返回"的响应性与旧实现相同；并行计算本身不可中断
         //    （单张图的解码/抽帧一旦开始就停不下来，旧实现同样如此），
-        //    块大小取"核数"以保证取消的等待上限只有一块的计算时间。
-        let chunk_size = scan_pool::worker_count().max(1);
+        //    计算块取"核数 × 8"以保证取消的等待上限只有一小批的计算时间。
+        //
+        //    **计算块与提交块是两件事**（2026-11-23 P1-1）：计算块决定"取消最迟等多久"，
+        //    提交块决定"多少次 fsync"。旧实现用同一个 `chunk_size = 核数`，等于每 16 行
+        //    提交一次；实测 20 000 行 19 参 upsert：16 行一提交 83.8 µs/行、512 行 54.2、
+        //    20000 行 52.0。这里让事务**跨计算块累积**，攒满 `WRITE_COMMIT_ROWS` 才提交，
+        //    两个目标各自拿到最优：取消粒度仍是文件级，提交次数降到 1/16。
+        const WRITE_COMMIT_ROWS: usize = 256;
+        let compute_chunk = (scan_pool::worker_count() * 8).clamp(1, 4096);
         let mut processed: u64 = 0;
-        for chunk in prepared_list.chunks(chunk_size) {
+        let mut uncommitted: usize = 0;
+        // 事务**懒开**：这一轮可能一行都不用写（全部 `unchanged`），此时既不该开事务，
+        // 更不能让它悬着——`scan_source` 结束前不提交，下一次扫描的 `BEGIN IMMEDIATE`
+        // 就会撞上 `cannot start a transaction within a transaction`（`m2_scan` 的
+        // `restored_file_comes_back_even_when_size_and_mtime_unchanged` 就是这么红的）。
+        let mut in_tx = false;
+        for chunk in prepared_list.chunks(compute_chunk) {
             if !self.wait_if_paused(extra_cancel)? {
+                if in_tx {
+                    db.commit_write_batch()?;
+                }
                 outcome.cancelled = true;
                 return Ok(outcome);
             }
@@ -454,18 +531,24 @@ impl Scanner {
                 });
             }
 
-            let computed =
-                scan_pool::map_bounded(chunk, pixel_cost, |p: &Prepared| compute(p, options));
+            // 任务跑在**常驻线程池**上，闭包必须 `'static`：把本块要用到的选项复制一份
+            // （`ScanOptions` 全是路径与 `Duration`，克隆成本可忽略），比让调用方
+            // 把生命周期一路传下去简单得多。
+            let compute_options = options.clone();
+            let computed = scan_pool::map_bounded(chunk, pixel_cost, move |p: &Prepared| {
+                compute(p, &compute_options)
+            });
 
-            // **一块一个写事务**（第 43 轮）：旧实现每条语句各自自动提交（`files` upsert
-            // + 每条标记 + 可选 color_ref），5 万文件十几万次 WAL 提交。包进事务后提交
-            // 次数降到"每块一次"，而**取消语义不变**：块内取消照样提交已写部分再返回
-            // （逐文件自动提交时取消后同样保留已写行），出错则先回滚再上抛。
-            db.begin_write_batch()?;
+            // **写事务跨计算块累积**（第 43 轮起有事务边界，2026-11-23 P1-1 起改为跨块累积）：
+            // 旧实现每条语句各自自动提交（`files` upsert + 每条标记 + 可选 color_ref），
+            // 5 万文件十几万次 WAL 提交。**取消语义不变**：取消时先把已写部分提交再返回，
+            // 出错则先回滚再上抛。
             for (prep, comp) in chunk.iter().zip(computed) {
                 // **文件粒度**的取消/暂停检查：与旧实现逐文件循环的响应性一致。
                 if !self.wait_if_paused(extra_cancel)? {
-                    db.commit_write_batch()?;
+                    if in_tx {
+                        db.commit_write_batch()?;
+                    }
                     outcome.cancelled = true;
                     return Ok(outcome);
                 }
@@ -475,13 +558,26 @@ impl Scanner {
                     phase: ScanPhase::Indexing,
                     current: Some(prep.relative_path.clone()),
                 });
+                if !in_tx {
+                    db.begin_write_batch()?;
+                    in_tx = true;
+                }
                 if let Err(e) = self.write_one(db, source, prep, comp, &mut outcome) {
                     // 回滚本身失败不该盖住真正的原因：吞掉它的错误，上抛写库错误。
                     let _ = db.rollback_write_batch();
                     return Err(e);
                 }
                 processed += 1;
+                uncommitted += 1;
+                if uncommitted >= WRITE_COMMIT_ROWS {
+                    db.commit_write_batch()?;
+                    in_tx = false;
+                    uncommitted = 0;
+                }
             }
+            // 取消点：块尾不提交——剩余行留给下一次提交点，取消时在下面统一收口。
+        }
+        if in_tx {
             db.commit_write_batch()?;
         }
 
@@ -554,6 +650,12 @@ impl Scanner {
             }
         }
 
+        // **盖章**：只有「全量 + 没被取消」的扫描才敢说「这个源的每一行派生都出自当前参数」。
+        // 增量扫描会按 size/mtime 跳过未变文件，那些行盘上仍是旧参数的产物，盖了章就再也不会重算。
+        if options.full && stored_derivation_version != Some(DERIVATION_VERSION) {
+            db.set_derivation_version(source_id, DERIVATION_VERSION)?;
+        }
+
         Ok(outcome)
     }
 
@@ -606,6 +708,14 @@ impl Scanner {
                 .as_ref()
                 .map(|row| row.marks.clone())
                 .unwrap_or_default(),
+            existing_content_hash: None,
+            existing_perceptual_hash: None,
+            existing_perceptual_hash_algo_version: None,
+            existing_thumb_status: ThumbStatus::NotGenerated,
+            existing_color_json: color_json.clone(),
+            // 单文件「重新分析」= 用户显式要求重算，永远不复用磁盘上的旧产物。
+            reuse_derivations: false,
+            existing_index_only: false,
             want_palette,
             image_probe,
             // 单文件「重新分析」是用户的**显式要求**：按完整口径算一遍，并把 `index_only`
@@ -716,7 +826,11 @@ impl Scanner {
         // `upsert_file` 的列清单里刻意没有这一列（它不属于索引语义，且 `FileIndexRow`
         // 的 20 列被相册分页的追加列下标依赖），新行默认 0，这里再按当前口径改写。
         // 只在"要写这一行"的路径上执行——未变化的行在上面早退，不产生无用 UPDATE。
-        db.set_file_index_only(id.as_str(), prep.excluded)?;
+        // 既有行的 `index_only` 与当前排除态一致时**不发 UPDATE**（2026-11-23 P1-1）：
+        // 绝大多数重算的行本来就没变过排除状态，旧实现每行恒发一条按主键的 UPDATE。
+        if is_new || prep.existing_index_only != prep.excluded {
+            db.set_file_index_only(id.as_str(), prep.excluded)?;
+        }
 
         // **标记单独落库**（D102）：它在 `file_marks` 一对多表，不在 `files` 行里。
         // 用"补齐到目标集合"（`INSERT OR IGNORE`）而不是"清空重写"：既保证幂等，
@@ -864,11 +978,29 @@ fn palette_locked(color_json: Option<&str>) -> bool {
 /// 口径比较"磁盘现状 vs 索引里记的值"，两处各算一份必然漂移。
 pub fn file_stat(path: &Path) -> Option<(i64, String)> {
     let meta = std::fs::metadata(path).ok()?;
-    let size = meta.len() as i64;
+    Some((meta.len() as i64, mtime_nanos(&meta)?))
+}
+
+/// 从**目录枚举结果**里取 size/mtime，**省掉一次 `metadata` 系统调用**（P2-1）。
+///
+/// Windows 上 `WalkDir` 的 `DirEntry` 直接把 `FindNextFileW` 的 `WIN32_FIND_DATA` 存下来，
+/// `DirEntry::metadata()` 只是克隆那份缓存（walkdir 2.5 `dent.rs` 的 `metadata_internal`：
+/// `cfg(windows)` 且 `follow_link == false` 时走 `self.metadata.clone()`）；其它平台上
+/// 它会退回真正的 `symlink_metadata`，结果同样正确，只是没有那次豁免。
+///
+/// **口径必须与 [`file_stat`] 完全一致**（size + epoch 纳秒字符串）：实时监听
+/// （`watcher::decide`）拿 `file_stat` 与索引里的值比较，两处若各算一份必然漂移。
+fn entry_stat(entry: &walkdir::DirEntry) -> Option<(i64, String)> {
+    let meta = entry.metadata().ok()?;
+    Some((meta.len() as i64, mtime_nanos(&meta)?))
+}
+
+/// 把 `SystemTime` 的 mtime 折成 epoch 纳秒十进制字符串（口径只有这一处）。
+fn mtime_nanos(meta: &std::fs::Metadata) -> Option<String> {
     let mtime = meta.modified().ok()?;
     let nanos = mtime
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
-    Some((size, nanos.to_string()))
+    Some(nanos.to_string())
 }

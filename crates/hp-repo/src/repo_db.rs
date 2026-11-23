@@ -33,6 +33,16 @@ const REPO_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/repo/0016_index_only.sql"),
 ];
 
+/// `repo_meta` 里「某源派生参数版本」的键名前缀。
+///
+/// 存在 `repo_meta`（每源一行）而不是 `files` 的新列上：它是**扫描状态**，不是文件的属性，
+/// 也不该被当成业务事实同步到别处。`repo_meta` 本来就有 `key/value` 两列，零迁移成本。
+const DERIVATION_VERSION_KEY_PREFIX: &str = "derivation_version:";
+
+fn derivation_version_key(source_id: &str) -> String {
+    format!("{DERIVATION_VERSION_KEY_PREFIX}{source_id}")
+}
+
 /// 仓库库句柄。
 pub struct RepoDb {
     conn: hp_db::Db,
@@ -165,6 +175,24 @@ impl RepoDb {
         self.conn
             .execute_batch("ROLLBACK")
             .map_err(|e| store_err("回滚写批次", e))
+    }
+
+    /// 读某个源的「派生数据参数版本」。
+    ///
+    /// 值记录该源**上一轮完整重算时**用的派生参数（缩略图档位、WebP 质量、dHash 算法…）。
+    /// 扫描用它判断「磁盘上那些缩略图 / dHash 能不能直接复用」：与当前版本不等就不复用，
+    /// 退回逐张解码重算。没有这一行（老库、刚升级、从没扫全过）同样视为「不知道」，一律不复用。
+    ///
+    /// **按源分开记**：一个仓库可以挂多个源，源 A 扫全了不代表源 B 的派生也出自当前参数；
+    /// 共用一行会让源 B 的旧缩略图被误判成「可以复用」。
+    pub fn derivation_version(&self, source_id: &str) -> HpResult<Option<i64>> {
+        let raw = self.meta(&derivation_version_key(source_id))?;
+        Ok(raw.and_then(|value| value.trim().parse::<i64>().ok()))
+    }
+
+    /// 记录某个源的派生数据参数版本（由扫描在**确认每一行都重算过**之后写入）。
+    pub fn set_derivation_version(&mut self, source_id: &str, version: i64) -> HpResult<()> {
+        self.set_meta(&derivation_version_key(source_id), &version.to_string())
     }
 
     /// 关闭仓库库：WAL 检查点后释放连接。

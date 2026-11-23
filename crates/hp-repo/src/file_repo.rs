@@ -42,6 +42,20 @@ pub struct ScanPrepareRow {
     /// 可见范围（用户取消了排除），就必须**强制重算**而不是按 size/mtime 判"未变化"跳过——
     /// 跳过会让它的哈希与缩略图永远回不来。
     pub index_only: bool,
+    /// `files.thumb_status`（0 未生成 / 1 已生成 / -1 失败）。
+    ///
+    /// 与下一列一起构成「派生数据是否齐全」的判据（2026-11-23 扫描速度专项 P0-2）：
+    /// 全量重扫会忽略 size/mtime 重新核对，但**内容哈希一致时派生数据本来就是同一份**，
+    /// 只要缩略图与感知哈希都在，就没有理由再整图解码一次（实测 12 267 张 AVIF 的
+    /// `--full` 是 1572 s，其中解码占绝大部分）。
+    pub thumb_status: ThumbStatus,
+    /// `files.perceptual_hash`（16 位十六进制 dHash）；`None` = 从来没算成功过。
+    pub perceptual_hash: Option<String>,
+    /// `files.perceptual_hash_algo_version`；复用时用它挡「旧版本算的 dHash 被盖上版本戳」。
+    ///
+    /// 缺了它，`PERCEPTUAL_HASH_ALGO_VERSION` 一升级，全量重扫就会把旧算法的值与新版本号
+    /// 一起写回库——库里从此声称这些 dHash 是新算法的产物，而去重 / 相似检索会静默错配。
+    pub perceptual_hash_algo_version: Option<i64>,
 }
 
 /// 缺失检测用的最小行，不带标记、不带其余列。
@@ -178,8 +192,14 @@ impl RepoDb {
     /// 这里恒写 `NULL`，把"标记"这件事完全交给 [`RepoDb::set_file_marks`]。
     /// 用户的标记因此不会被重扫打回（扫描只在标记**为空**时补默认值，见 `hp-scanner`）。
     pub fn upsert_file(&mut self, row: &FileIndexRow) -> HpResult<()> {
-        self.conn()
-            .execute(
+        // **语句缓存**（2026-11-23 扫描速度专项）：扫描期这一句每行都要执行一次，
+        // 旧实现走 Connection::execute，等于每行重新 prepare + 编译一次 SQL。
+        // 实测（20 000 行 19 参真实 files 表，WAL，synchronous 保持 FULL）：
+        // 每行重新 prepare 104.7 µs → 复用编译结果 48.5 µs（2×）；再与「每 256 行一次提交」
+        // 叠起来是 11.3 µs/行（约 9×）。
+        let mut stmt = self
+            .conn()
+            .prepare_cached(
                 "INSERT INTO files (id, source_id, relative_path, media_type, subtype,
                      content_hash, content_hash_algo, content_hash_algo_version,
                      perceptual_hash, perceptual_hash_algo, perceptual_hash_algo_version,
@@ -206,29 +226,30 @@ impl RepoDb {
                      -- 免得一次读头失败的重扫把回填成果抹掉（0043）。
                      width = COALESCE(excluded.width, files.width),
                      height = COALESCE(excluded.height, files.height)",
-                params![
-                    row.id.as_str(),
-                    row.source_id.as_str(),
-                    row.relative_path,
-                    row.media_type.as_str(),
-                    row.content_hash,
-                    row.content_hash_algo,
-                    row.content_hash_algo_version,
-                    row.perceptual_hash,
-                    row.perceptual_hash_algo,
-                    row.perceptual_hash_algo_version,
-                    row.size,
-                    row.mtime,
-                    row.scan_time,
-                    row.verify_status.as_str(),
-                    row.thumb_status.as_i64(),
-                    row.missing_status,
-                    row.media_info_json,
-                    row.width,
-                    row.height,
-                ],
             )
-            .map_err(|e| store_err("写入文件索引", e))?;
+            .map_err(|e| store_err("准备写入文件索引", e))?;
+        stmt.execute(params![
+            row.id.as_str(),
+            row.source_id.as_str(),
+            row.relative_path,
+            row.media_type.as_str(),
+            row.content_hash,
+            row.content_hash_algo,
+            row.content_hash_algo_version,
+            row.perceptual_hash,
+            row.perceptual_hash_algo,
+            row.perceptual_hash_algo_version,
+            row.size,
+            row.mtime,
+            row.scan_time,
+            row.verify_status.as_str(),
+            row.thumb_status.as_i64(),
+            row.missing_status,
+            row.media_info_json,
+            row.width,
+            row.height,
+        ])
+        .map_err(|e| store_err("写入文件索引", e))?;
         Ok(())
     }
 
@@ -238,11 +259,12 @@ impl RepoDb {
     /// 读写：扫描在写完行之后按 `Prepared::excluded` 调一次，代价是一条按主键的 UPDATE。
     pub fn set_file_index_only(&mut self, file_id: &str, index_only: bool) -> HpResult<()> {
         require_nonempty(file_id, "文件 ID")?;
-        self.conn()
-            .execute(
-                "UPDATE files SET index_only = ?2 WHERE id = ?1",
-                params![file_id, index_only as i64],
-            )
+        // 与 upsert_file 同款：扫描期这一句每行一次，语句缓存省掉重复编译。
+        let mut stmt = self
+            .conn()
+            .prepare_cached("UPDATE files SET index_only = ?2 WHERE id = ?1")
+            .map_err(|e| store_err("准备写入仅索引标记", e))?;
+        stmt.execute(params![file_id, index_only as i64])
             .map_err(|e| store_err("写入仅索引标记", e))?;
         Ok(())
     }
@@ -447,7 +469,8 @@ impl RepoDb {
             .conn()
             .prepare(
                 "SELECT f.id, f.relative_path, f.size, f.mtime, f.content_hash, f.index_only,
-                        c.color_json, f.missing_status
+                        c.color_json, f.missing_status, f.thumb_status, f.perceptual_hash,
+                        f.perceptual_hash_algo_version
                  FROM files f LEFT JOIN color_refs c ON c.file_id = f.id
                  WHERE f.source_id = ?1",
             )
@@ -464,6 +487,11 @@ impl RepoDb {
                     index_only: row.get::<_, i64>(5)? != 0,
                     color_json: row.get(6)?,
                     missing_status: row.get(7)?,
+                    // 越界/未知取值按"未生成"处理：多一次重算，不会把已有缩略图判成好。
+                    thumb_status: ThumbStatus::from_i64(row.get(8)?)
+                        .unwrap_or(ThumbStatus::NotGenerated),
+                    perceptual_hash: row.get(9)?,
+                    perceptual_hash_algo_version: row.get(10)?,
                 })
             })
             .map_err(|e| store_err("读取扫描准备行", e))?

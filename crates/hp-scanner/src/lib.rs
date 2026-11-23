@@ -14,6 +14,7 @@ pub use scan_compute::{
     ImageDerivations, ImageProbe, analyze_image, image_pixel_cost, probe_image,
 };
 pub use scan_pool::{PIXEL_BUDGET_MP, map_bounded, pixel_cost, worker_count};
+pub use scan_task::DERIVATION_VERSION;
 pub use scanner::{ScanOptions, ScanOutcome, ScanPhase, ScanProgress, Scanner, file_stat};
 pub use watcher::{
     KnownFile, SourceWatcher, WatchDecision, decide, is_relevant_event, relative_key,

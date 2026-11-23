@@ -60,7 +60,10 @@ pub struct ImageProbe {
 
 /// 读一次头，得到像素配额与显示尺寸。读不到时配额退化为 1、尺寸为 `None`。
 pub fn probe_image(path: &Path) -> ImageProbe {
-    let Some((width, height)) = hp_media::header_dimensions(path) else {
+    // **一次开文件**同时取尺寸与 EXIF 方向（P2-2）：旧实现 `header_dimensions` 与
+    // `orientation_of` 各开一次同一份头，而这份头只有几十 KiB——多开的那次全是固定成本。
+    let Some(((width, height), orientation)) = hp_media::header_dimensions_and_orientation(path)
+    else {
         return ImageProbe {
             pixel_cost: 1,
             display: None,
@@ -68,11 +71,7 @@ pub fn probe_image(path: &Path) -> ImageProbe {
     };
     ImageProbe {
         pixel_cost: crate::scan_pool::pixel_cost(width, height),
-        display: Some(hp_media::apply_orientation(
-            width,
-            height,
-            hp_media::orientation_of(path),
-        )),
+        display: Some(hp_media::apply_orientation(width, height, orientation)),
     }
 }
 
