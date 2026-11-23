@@ -142,3 +142,4 @@ plugins-dist/*
 # （`app:build` 只读 `icons/icon.ico`），与插件入口 exe 同理不入库。
 # 图标最终的形态、七帧位深口径与"换图标必须逼 build.rs 重跑"这条坑见 D125。
 .icon-scratch/
+/参考
