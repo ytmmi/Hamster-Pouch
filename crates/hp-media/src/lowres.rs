@@ -206,7 +206,11 @@ pub(crate) fn decode_lowres_thumbnail_known(
     let scale = format!(
         "scale='min({max_dim},iw)':'min({max_dim},ih)':force_original_aspect_ratio=decrease"
     );
+    // 线程按全局预算摊薄，口径与 `decode_image_with_ffmpeg` 一致（见 process::DispatchSlot）。
+    let slot = crate::process::dispatch_slot();
     let mut cmd = hidden_command(ffmpeg_bin);
+    cmd.arg("-threads").arg(slot.threads().to_string());
+    cmd.args(["-filter_threads", "1"]);
     cmd.args(["-hide_banner", "-loglevel", "error", "-lowres"])
         .arg(level.to_string())
         .arg("-i")

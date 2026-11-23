@@ -178,7 +178,14 @@ pub(crate) fn decode_image_with_ffmpeg(
     max_dim: u32,
     timeout: Duration,
 ) -> HpResult<image::DynamicImage> {
+    // 线程按全局预算摊薄（[`crate::process::DispatchSlot`]）：并发越高每个进程越接近
+    // 单线程。实测 16 并发下比默认快 25%，且解码产物逐字节相同（24/24 PNG 字节一致）。
+    let slot = crate::process::dispatch_slot();
     let mut cmd = hidden_command(ffmpeg_bin);
+    // `-threads` 作为输入侧选项设置**解码器**线程数；`-filter_threads` 压住 `scale`
+    // 滤镜的 swscale 线程池——320 缩放用不上多线程，默认值纯属线程开销。
+    cmd.arg("-threads").arg(slot.threads().to_string());
+    cmd.args(["-filter_threads", "1"]);
     cmd.args(["-hide_banner", "-loglevel", "error", "-i"])
         .arg(src);
     if max_dim < u32::MAX {

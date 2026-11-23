@@ -85,8 +85,13 @@ fn extract_frame(
     timeout: Duration,
     skip_black: Option<Duration>,
 ) -> HpResult<Frame> {
+    // 线程按全局预算摊薄，口径与 `decode_image_with_ffmpeg` 一致（见 process::DispatchSlot）：
+    // 视频抽帧同样落在扫描热路径上，并发时也吃满线程。
+    let slot = crate::process::dispatch_slot();
     // `hidden_command`：GUI 父进程下不新建控制台窗口（源扫描抽帧）。
     let mut cmd = hidden_command(ffmpeg_bin);
+    cmd.arg("-threads").arg(slot.threads().to_string());
+    cmd.args(["-filter_threads", "1"]);
     cmd.args(["-y"]);
     if let Some(window) = skip_black {
         // `-t` 放在 `-i` **之前**：这是输入侧限长，黑屏搜索最多向前解码 `window`。

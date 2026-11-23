@@ -3,12 +3,69 @@
 use std::ffi::OsStr;
 use std::io::Read;
 use std::process::{Command, Output, Stdio};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use hp_core::{HpError, HpResult};
 
 /// 轮询间隔。
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// 当前在跑的媒体子进程数（见 [`DispatchSlot`]）。
+static ACTIVE_CHILDREN: AtomicUsize = AtomicUsize::new(0);
+
+/// 媒体子进程的**线程总预算**：逻辑核数。
+///
+/// 每个 `ffmpeg` 默认按核数开解码线程（dav1d）与滤镜线程（swscale）。扫描期十几路
+/// 并发时会有上百个线程抢同一批物理核——实测 16 并发只吃到 5.76/16 核，`stime` 从
+/// 62.5 ms 涨到 121.1 ms（近 2×），吞吐在 conc≈14 就封顶在 7.4–8.0 files/s。
+/// 把线程当成一份预算按在跑进程数摊薄后，同一硬件上 24 并发可达 18.0 files/s。
+fn thread_budget() -> usize {
+    static BUDGET: OnceLock<usize> = OnceLock::new();
+    *BUDGET.get_or_init(|| {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+            .max(1)
+    })
+}
+
+/// 一次媒体子进程派发的名额：构造时占位，`Drop` 时释放。
+///
+/// 用法是「先拿名额 → 用 [`DispatchSlot::threads`] 决定子进程线程数 → 跑进程」，
+/// 名额活到子进程结束，于是同一时刻在跑的所有进程看到的是同一份预算除数。
+///
+/// 线程数是**软上限**而非并发闸门：本类型不阻塞，只影响每个子进程分到多少线程。
+pub(crate) struct DispatchSlot;
+
+/// 预算摊薄：把 `budget` 个线程按 `active` 个在跑进程均分，至少 1。
+///
+/// 均分而不是「每个都拿满」是关键：`-threads 1` 在高并发下最快，但在低并发下
+/// 反而比默认慢 5–12%（实测 conc=1 时 361.0 vs 322.4 ms/张），所以不能写死，
+/// 只能让并发度自己决定摊到几线程。
+fn shard_threads(budget: usize, active: usize) -> usize {
+    (budget / active.max(1)).max(1)
+}
+
+impl DispatchSlot {
+    /// 本次派发应给子进程的线程数：预算 ÷ 当前在跑进程数，至少 1。
+    pub(crate) fn threads(&self) -> usize {
+        shard_threads(thread_budget(), ACTIVE_CHILDREN.load(Ordering::Relaxed))
+    }
+}
+
+impl Drop for DispatchSlot {
+    fn drop(&mut self) {
+        ACTIVE_CHILDREN.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// 取一个媒体子进程派发名额（见 [`DispatchSlot`]）。
+pub(crate) fn dispatch_slot() -> DispatchSlot {
+    ACTIVE_CHILDREN.fetch_add(1, Ordering::Relaxed);
+    DispatchSlot
+}
 
 /// 构造一个**不弹控制台窗口**的子进程命令。
 ///
@@ -167,6 +224,30 @@ mod tests {
         cmd.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 30"]);
         let result = run_with_timeout(&mut cmd, Duration::from_secs(1));
         assert!(matches!(result, Err(HpError::Io(_))));
+    }
+
+    #[test]
+    fn slot_shards_thread_budget_across_active_children() {
+        // 预算摊薄的纯函数部分：不碰全局计数，结果确定。
+        assert_eq!(shard_threads(16, 1), 16, "独占时拿满预算");
+        assert_eq!(shard_threads(16, 2), 8);
+        assert_eq!(shard_threads(16, 16), 1);
+        assert_eq!(shard_threads(16, 32), 1, "超额并发时退化为单线程而非 0");
+        assert_eq!(shard_threads(16, 0), 16, "没有在跑进程时按 1 处理");
+        assert_eq!(shard_threads(1, 1), 1);
+        assert_eq!(shard_threads(0, 1), 1, "预算为 0 也至少给 1 线程");
+    }
+
+    #[test]
+    fn dispatch_slot_threads_stay_within_budget() {
+        let slot = dispatch_slot();
+        let threads = slot.threads();
+        assert!(threads >= 1, "线程数至少 1，实际 {threads}");
+        assert!(
+            threads <= thread_budget(),
+            "线程数不得超过预算 {}，实际 {threads}",
+            thread_budget()
+        );
     }
 
     #[test]
