@@ -12,15 +12,22 @@
 //! 并在这一批静默结束后请求一次增量扫描，把文件真正接进索引。扫描走
 //! `commands::source::start_source_scan`，与用户点「扫描」是同一道闸门，不会抢任务。
 //!
+//! **已索引文件被改写**（第 119 轮 / D238）：`size` 或 `mtime` 变了 → 发
+//! `file.changed`，并**同样**请一次增量扫描。此前这里只发事件不扫描，于是
+//! 覆盖保存过的文件永远停着旧的 `content_hash` / 缩略图 / dHash / 调色板——
+//! 索引说它有变化，可界面上还是旧图，而且永远不会自愈。逐文件调
+//! `file.reanalyze` 也能修，但一次拖进 200 个文件就是 200 个任务 + 200 个浮窗；
+//! 增量扫描在 D236 之后真实库只要 0.09–0.21 s，一次扫掉整批更便宜。
+//!
 //! 三条限流，让「往文件夹里拖 500 张图」不会变成 500 次扫描：
 //!
-//! - `CREATE_QUIET`（1.5 s）：新增先攒着，等这一波停了才动扫描；
+//! - `CHANGE_QUIET`（1.5 s）：新增/改写先攒着，等这一波停了才动扫描；
 //! - `SCAN_MIN_INTERVAL`（30 s）：两次**自动**扫描之间至少隔这么久；
-//! - `MAX_DEFER`（30 s）：即便一直被限流压着，最迟也要在首次发现新增后 30 s 内扫一次。
+//! - `MAX_DEFER`（30 s）：即便一直被限流压着，最迟也要在首次发现变更后 30 s 内扫一次。
 //!
 //! 另两条边界仍然成立：**只看已挂载源**；**只改 `missing_status`**（`file.created`
-//! 不写库，索引行交给扫描建）。前端**暂不消费**这几条事件（该刷新什么、要不要提示
-//! 用户属交互决策）——事件先按契约发出来，消费侧另行接线。
+//! 不写库，索引行交给扫描建）。三条 `file.*` 事件已有前端消费者：
+//! `app_ui/core/taskStore.ts` 把它们合并成一次去抖刷新（不弹浮窗、不改状态栏文案）。
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -42,8 +49,8 @@ const QUIET: Duration = Duration::from_millis(900);
 const TICK: Duration = Duration::from_millis(150);
 /// 单批上限：一段时间里狂改上万文件时，宁可多分几批也不要一次查爆 SQLite。
 const MAX_BATCH: usize = 512;
-/// 新增文件后等这么久（且这一批里再没有新事件）才请求扫描：把「拖一批图」合并成一次。
-const CREATE_QUIET: Duration = Duration::from_millis(1500);
+/// 新增或改写文件后等这么久（且这一批里再没有新事件）才请求扫描：把「拖一批图」合并成一次。
+const CHANGE_QUIET: Duration = Duration::from_millis(1500);
 /// 两次**自动**扫描的最小间隔：更新一个 4 G 视频不会把 CPU 打满。
 const SCAN_MIN_INTERVAL: Duration = Duration::from_secs(30);
 /// 自动扫描的最长推迟：持续有新建时也不能一直不扫。
@@ -191,8 +198,8 @@ fn watch_loop(
     };
     let mut pending: HashSet<PathBuf> = HashSet::new();
     let mut last_event = Instant::now();
-    // 自动增量扫描的调度状态：等到过一次 `file.created` 后置位，扫过再清。
-    let mut created_at: Option<Instant> = None;
+    // 自动增量扫描的调度状态：发现过需要重扫的变更（新增或改写）后置位，扫过再清。
+    let mut change_at: Option<Instant> = None;
     let mut last_scan: Option<Instant> = None;
     while !stop.load(Ordering::Relaxed) {
         let mut got = false;
@@ -212,26 +219,26 @@ fn watch_loop(
             last_event = Instant::now();
         }
         if !pending.is_empty() && last_event.elapsed() >= QUIET {
-            let saw_created = flush(&app, &repo_path, &repo_id, &source_id, &root, &mut pending);
-            if saw_created && created_at.is_none() {
-                created_at = Some(Instant::now());
+            let needs_scan = flush(&app, &repo_path, &repo_id, &source_id, &root, &mut pending);
+            if needs_scan && change_at.is_none() {
+                change_at = Some(Instant::now());
             }
             last_event = Instant::now();
         }
-        if let Some(first) = created_at {
-            // 这一批静默过了（没有新路径在攒）、且这一波新增也安静了，才轮到扫描。
-            let quiet_enough = pending.is_empty() && last_event.elapsed() >= CREATE_QUIET;
+        if let Some(first) = change_at {
+            // 这一批静默过了（没有新路径在攒）、且这一波变更也安静了，才轮到扫描。
+            let quiet_enough = pending.is_empty() && last_event.elapsed() >= CHANGE_QUIET;
             if quiet_enough {
                 let rate_ok = last_scan.is_none_or(|t| t.elapsed() >= SCAN_MIN_INTERVAL);
                 let too_long = first.elapsed() >= MAX_DEFER;
                 if rate_ok || too_long {
                     match request_incremental_scan(&app, &source_id) {
                         Ok(_) => {
-                            created_at = None;
+                            change_at = None;
                             last_scan = Some(Instant::now());
                         }
                         Err(e) => {
-                            // 闸门被手动任务占着：不清 created_at，也不打日志刷屏——
+                            // 闸门被手动任务占着：不清 change_at，也不打日志刷屏——
                             // 记一次时间戳，30 s 后再试（`MAX_DEFER` 兜底）。
                             diag_log(&format!("[watch] 自动扫描未启动 {source_id}: {e}"));
                             last_scan = Some(Instant::now());
@@ -253,7 +260,7 @@ fn flush(
     root: &Path,
     pending: &mut HashSet<PathBuf>,
 ) -> bool {
-    let mut saw_created = false;
+    let mut needs_scan = false;
     let paths: Vec<PathBuf> = pending.iter().take(MAX_BATCH).cloned().collect();
     for p in &paths {
         pending.remove(p);
@@ -282,6 +289,8 @@ fn flush(
             mtime: r.mtime.clone(),
             missing: r.missing_status != 0,
         });
+        // `created` / `modified` 都意味着索引行已经陈旧，交给同一次增量扫描去补；
+        // `missing` / `restored` 只动 `missing_status`，写库当场就能落定，不必扫描。
         match decide(known.as_ref(), hp_scanner::file_stat(&path)) {
             Some(WatchDecision::Missing { file_id }) => {
                 mark(&mut db, &file_id, 1);
@@ -303,18 +312,21 @@ fn flush(
                     },
                 );
             }
-            Some(WatchDecision::Modified { file_id }) => app.emit_hp(
-                "file.changed",
-                FileChangedPayload {
-                    repo_id: repo_id.to_string(),
-                    file_id,
-                    change: "modified".into(),
-                },
-            ),
+            Some(WatchDecision::Modified { file_id }) => {
+                needs_scan = true;
+                app.emit_hp(
+                    "file.changed",
+                    FileChangedPayload {
+                        repo_id: repo_id.to_string(),
+                        file_id,
+                        change: "modified".into(),
+                    },
+                );
+            }
             // 库里没有、磁盘上有：新到的文件。此刻还没有 fileId，先报"在哪里"，
-            // 索引行由随后的自动增量扫描建立（见 watch_loop 的 created_at 调度）。
+            // 索引行由随后的自动增量扫描建立（见 watch_loop 的 change_at 调度）。
             Some(WatchDecision::Created) => {
-                saw_created = true;
+                needs_scan = true;
                 app.emit_hp(
                     "file.created",
                     FileCreatedPayload {
@@ -327,7 +339,7 @@ fn flush(
             None => {}
         }
     }
-    saw_created
+    needs_scan
 }
 
 /// 请求一次**自动**增量扫描（走与「扫描」按钮完全相同的闸门）。

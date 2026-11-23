@@ -7,16 +7,20 @@
  *   ② 同一个文件回到盘上 → `missing_status` 翻 0，并发出 `file.restored`；
  *   ③ 盘上**新增**（不在索引里）→ 发 `file.created`，并自动排队一次增量扫描把它接进索引
  *      （2026-11-11 第 37 轮裁决 4：原「新增不发」边界已推翻）；
- *   ③ 文件内容/大小变化 → 发出 `file.changed { change: "modified" }`；
- *   ④ 磁盘**新增**文件（不在索引里）→ **不发**事件、**不落库**（本轮刻意边界，防重扫自激）；
+ *   ④ 文件内容/大小变化 → 发出 `file.changed { change: "modified" }`，**并同样重扫**
+ *      （2026-11-23 第 119 轮 / D238：此前只发事件，覆盖保存过的文件永远停着旧哈希与旧图）；
  *   ⑤ 只读文件（Access 事件）→ **不发** `file.changed`；
- *   ⑥ 源被卸载后监听线程停掉 → 再改文件不发事件、索引已被清空。
+ *   ⑥ 源被卸载后监听线程停掉 → 再改文件不发事件、索引已被清空；
+ *   ⑦ 定期全量校验兜底（同轮 / D238）：成功扫描会盖章 `repo_meta` 的
+ *      `verify_checkpoint:<sourceId>`；把该戳人为改老 7 小时后重开仓库，
+ *      调度器（开仓后等 60 s 再每 5 min 一跳）必须自己发起一次扫描。
  *
  * 做法与 `tools/real-b-class-verify.mjs` 一致：启动**最新开发包**（`target/release/dev/dev-*`），
  * 用 WebView2 的 CDP 端口驱动真实进程：
  *   - 库侧证据：直接读包内仓库库（`node:sqlite`）看 `files.missing_status`；
- *   - 事件侧证据：在页面里用 `__TAURI_INTERNALS__` 直接 `plugin:event|listen` 订阅三条事件
- *     （前端本轮**不消费**这三条事件，所以只能这样接）。
+ *   - 事件侧证据：在页面里用 `__TAURI_INTERNALS__` 直接 `plugin:event|listen` 订阅三条事件。
+ *     前端（`app_ui/core/taskStore.ts`）也消费了它们，但只做一次去抖刷新、不改状态栏、
+ *     不弹浮窗——从 DOM 上读不出「事件来过」，所以仍然走进程内订阅取证。
  *
  * 用法：
  *   node tools/real-watch-verify.mjs
@@ -110,6 +114,48 @@ function readFileRow(repoDbPath, sourceId, relativePath) {
         )
         .get(sourceId, relativePath) ?? null
     );
+  } finally {
+    db.close();
+  }
+}
+
+/** 读 `repo_meta` 的一个键（定期全量校验的 checkpoint 就存在这里）。 */
+function readMeta(repoDbPath, key) {
+  const db = new DatabaseSync(repoDbPath, { readOnly: true });
+  try {
+    return db.prepare("select value from repo_meta where key = ?1").get(key)?.value ?? null;
+  } finally {
+    db.close();
+  }
+}
+
+/** 读出全部 `verify_checkpoint:*` 键（调度器挑源就靠它们）。 */
+function listCheckpoints(repoDbPath) {
+  const db = new DatabaseSync(repoDbPath, { readOnly: true });
+  try {
+    return db.prepare("select key, value from repo_meta where key like 'verify_checkpoint:%' order by key").all();
+  } finally {
+    db.close();
+  }
+}
+
+/** 已挂载的源（调度器只在这些里面挑）。 */
+function listMountedSources(repoDbPath) {
+  const db = new DatabaseSync(repoDbPath, { readOnly: true });
+  try {
+    return db.prepare("select id, local_path from sources where mounted <> 0").all();
+  } finally {
+    db.close();
+  }
+}
+
+/** 覆盖写 `repo_meta` 的一个键（把 checkpoint 改老，逼兜底调度器立刻动手）。 */
+function writeMeta(repoDbPath, key, value) {
+  const db = new DatabaseSync(repoDbPath);
+  try {
+    db.prepare(
+      "insert into repo_meta(key, value) values(?, ?) on conflict(key) do update set value = excluded.value",
+    ).run(key, value);
   } finally {
     db.close();
   }
@@ -381,19 +427,47 @@ async function main() {
     };
   });
 
-  // ③ 内容变化 → file.changed { change: "modified" }
-  await step("005", "文件内容变化 → file.changed change=modified", async () => {
+  // ④ 内容变化 → file.changed { change: "modified" }，**并自动重扫**（D238）
+  await step("005", "文件内容变化 → file.changed change=modified + 自动重扫更新索引", async () => {
     const before = readFileRow(repo.dbPath, sourceId, "b.png");
-    writeFileSync(join(FIXTURE, "b.png"), Buffer.concat([PNG_1X1, Buffer.alloc(64, 7)]));
+    const from = (await ev(READ_EVENTS_EVAL)).length;
+    const bigger = Buffer.concat([PNG_1X1, Buffer.alloc(64, 7)]);
+    writeFileSync(join(FIXTURE, "b.png"), bigger);
     const changed = await waitFor(async () => {
       const events = await ev(READ_EVENTS_EVAL);
       return events.find((e) => e.name === "file:changed" && e.payload?.fileId === before?.id);
     }, { timeout: 15000, label: "file.changed" });
+    // D238 起「改写」与「新增」走同一条自动扫描调度（静默 1.5 s 之后发起），
+    // 所以索引行必须被真正更新——只发事件的旧行为会让 size/mtime 永远停在旧值。
+    const rescan = await waitFor(
+      () => {
+        const row = readFileRow(repo.dbPath, sourceId, "b.png");
+        return row && row.size === bigger.length ? row : null;
+      },
+      { timeout: 120000, interval: 500, label: "改写后自动重扫" },
+    );
+    const completed = await waitFor(
+      async () => {
+        const evs = (await ev(READ_EVENTS_EVAL)).slice(from);
+        return evs.find((e) => e.name === "scan:completed" && e.payload?.sourceId === sourceId) ?? null;
+      },
+      { timeout: 20000, interval: 250, label: "改写后的 scan.completed" },
+    );
     return {
-      status: changed.ok && changed.value?.payload?.change === "modified" ? "PASS" : "FAIL",
-      evidence: { before, event: changed.value ?? null, row: readFileRow(repo.dbPath, sourceId, "b.png") },
+      status:
+        changed.ok && changed.value?.payload?.change === "modified" && rescan.ok && completed.ok
+          ? "PASS"
+          : "FAIL",
+      evidence: {
+        before,
+        event: changed.value ?? null,
+        rescan: rescan.ok ? { size: rescan.value.size, mtime: rescan.value.mtime } : rescan.error,
+        scanCompleted: completed.value?.payload ?? completed.error,
+        row: readFileRow(repo.dbPath, sourceId, "b.png"),
+      },
       notes: [
-        "库内 size/mtime 由扫描器维护，监听只发事件不改行（本轮刻意不做自愈重扫）",
+        "D238：改写不再只发事件——content_hash / 缩略图 / dHash / 调色板必须在这次自动扫描里更新",
+        "限流：CHANGE_QUIET 1.5 s / SCAN_MIN_INTERVAL 30 s / MAX_DEFER 30 s",
       ],
     };
   });
@@ -442,7 +516,7 @@ async function main() {
       },
       notes: [
         "载荷是 {repoId, sourceId, relativePath}——此刻还没有 fileId，索引行由自动扫描建立",
-        "限流：CREATE_QUIET 1.5s / SCAN_MIN_INTERVAL 30s / MAX_DEFER 30s",
+        "限流：CHANGE_QUIET 1.5 s / SCAN_MIN_INTERVAL 30 s / MAX_DEFER 30 s",
       ],
     };
   });
@@ -456,8 +530,64 @@ async function main() {
     return { status: after === before ? "PASS" : "FAIL", evidence: { before, after } };
   });
 
-  // ⑥ 卸载源 → 线程停掉、索引清空、之后改动不再发事件
-  await step("008", "卸载源 → 监听停止 + 索引清空 + 不再发事件", async () => {
+  // ⑦ 定期全量校验兜底（D238）：把 checkpoint 改老 → 重开仓库 → 调度器自己发起扫描
+  //
+  // 调度器的节奏是「开仓后等 STARTUP_DELAY = 60 s，之后每 TICK = 5 min 一跳」，跳到才看有没有到期的源。
+  // 所以这一条必须等满一个 tick（60 s + 5 min）；写库发生在重开仓库之前，线程读到的就是改过的值。
+  //
+  // 注意：它每轮只挑**一个**「最久没校验」的源，仓库里除了夹具源还有别的真实源，所以
+  // 断言不能盯死夹具源——改成「全部改老 + 看它实际挑了谁 + 那个源被盖了新章」。
+  await step("008", "定期全量校验兜底：checkpoint 全部改老 → 重开仓库 → 调度器自动发起扫描", async () => {
+    // 调度器每轮只挑一个「最久没校验」的已挂载源，不一定是夹具源——仓库里还有真实源。
+    // 所以先把**全部**已挂载源的戳都改老，再断言「它挑中的那个源扫完后被盖了新章」。
+    const stale = Date.now() - 7 * 60 * 60 * 1000;
+    const before = listCheckpoints(repo.dbPath);
+    const from = (await ev(READ_EVENTS_EVAL)).length;
+    // 关仓（停调度线程）→ 改戳 → 重开（起新线程，读到改过的值）
+    const closed = await invoke("repo_close");
+    if (!closed?.ok) throw new Error(`repo_close 失败：${JSON.stringify(closed)}`);
+    for (const source of listMountedSources(repo.dbPath)) {
+      writeMeta(repo.dbPath, `verify_checkpoint:${source.id}`, String(stale));
+    }
+    const reopened = await invoke("repo_open", { repoId: repo.id });
+    if (!reopened?.ok) throw new Error(`repo_open 失败：${JSON.stringify(reopened)}`);
+    // 开仓后 60 s 才第一次跳，跳完立即发扫描；给足一个 tick + 扫描本身的时间。
+    const fired = await waitFor(
+      async () => {
+        const evs = (await ev(READ_EVENTS_EVAL)).slice(from);
+        return evs.find((e) => e.name === "scan:completed") ?? null;
+      },
+      { timeout: 480000, interval: 2000, label: "兜底扫描" },
+    );
+    const picked = fired.value?.payload?.sourceId ?? null;
+    // 盖章在 `run_scan` 收尾、事件在其后发出，但落库时刻仍要轮询确认。
+    const stamped = await waitFor(
+      () => {
+        const value = readMeta(repo.dbPath, `verify_checkpoint:${picked}`);
+        return value !== null && Number(value) > stale ? Number(value) : null;
+      },
+      { timeout: 30000, interval: 500, label: "兜底扫描后盖章" },
+    );
+    return {
+      status: fired.ok && picked !== null && stamped.ok ? "PASS" : "FAIL",
+      evidence: {
+        checkpointsBefore: before,
+        forcedTo: stale,
+        pickedSourceId: picked,
+        pickedIsFixture: picked === sourceId,
+        stampedAt: stamped.value ?? stamped.error,
+        scanPayload: fired.value?.payload ?? fired.error,
+      },
+      notes: [
+        "调度器只挑一个源（最久没校验的那个），不保证选中夹具源",
+        "盖章只在扫描**成功收尾**后发生：仍是 forcedTo 说明它没跑成",
+        "目录不可用的源会被跳过；其余的源等下个 tick",
+      ],
+    };
+  });
+
+  // ⑨ 卸载源 → 线程停掉、索引清空、之后改动不再发事件
+  await step("009", "卸载源 → 监听停止 + 索引清空 + 不再发事件", async () => {
     const res = await invoke("source_unmount", { repoId: repo.id, sourceId });
     if (!res?.ok) throw new Error(`source_unmount 失败：${JSON.stringify(res)}`);
     const cleared = await waitFor(() => countSourceFiles(repo.dbPath, sourceId) === 0, {

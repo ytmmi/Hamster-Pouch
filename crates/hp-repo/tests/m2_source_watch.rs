@@ -117,3 +117,42 @@ fn same_relative_path_in_two_sources_is_disambiguated_by_source() {
 
     db.close().expect("关闭失败");
 }
+
+/// 定期全量校验兜底（D238）的落点：**按源**记「上次校验到什么时候」。
+///
+/// 三条语义缺一不可：从未校验过返回 `None`（不是 0——`0` 会被当成 1970 年，
+/// 于是"新挂的源"与"刚校验完的源"在所有比较里混为一谈）；写入后能原样读回；
+/// 一个源的戳不会串到另一个源（一个仓库可挂多个源，源 A 扫完不代表源 B 校验过）。
+#[test]
+fn verify_checkpoint_is_per_source_and_round_trips() {
+    let path = temp_path("verify");
+    let mut db = RepoDb::create(&path, "仓库").expect("创建仓库失败");
+    let a = db
+        .mount_source("repo-1", "C:/a", None, None)
+        .expect("挂载失败");
+    let b = db
+        .mount_source("repo-1", "C:/b", None, None)
+        .expect("挂载失败");
+
+    // 从未校验：`None`，不是 0。
+    assert_eq!(db.verify_checkpoint(a.id.as_str()).expect("读取失败"), None);
+
+    db.set_verify_checkpoint(a.id.as_str(), 1_766_000_000_000)
+        .expect("写入失败");
+    assert_eq!(
+        db.verify_checkpoint(a.id.as_str()).expect("读取失败"),
+        Some(1_766_000_000_000)
+    );
+    // 另一个源仍是从未校验。
+    assert_eq!(db.verify_checkpoint(b.id.as_str()).expect("读取失败"), None);
+
+    // 覆盖写：同一源的戳是"最近一次"而不是第一条。
+    db.set_verify_checkpoint(a.id.as_str(), 1_767_000_000_000)
+        .expect("写入失败");
+    assert_eq!(
+        db.verify_checkpoint(a.id.as_str()).expect("读取失败"),
+        Some(1_767_000_000_000)
+    );
+
+    db.close().expect("关闭失败");
+}

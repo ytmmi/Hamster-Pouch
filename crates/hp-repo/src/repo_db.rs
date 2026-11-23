@@ -43,6 +43,17 @@ fn derivation_version_key(source_id: &str) -> String {
     format!("{DERIVATION_VERSION_KEY_PREFIX}{source_id}")
 }
 
+/// `repo_meta` 里「某源上次全量校验时刻」的键名前缀。
+///
+/// 值存 **epoch 毫秒**（不是 `now_iso()` 那套 RFC 3339 文本）：它唯一的用途是算「距今过了
+/// 多久」，从不显示、也不与其它时间列比较排序——D214 约束的是那些被抓出来展示 / 排序的
+/// 时间列，把毫秒整数塞进去只会多一次解析。与派生版本同理放在 `repo_meta`（零迁移）。
+const VERIFY_CHECKPOINT_KEY_PREFIX: &str = "verify_checkpoint:";
+
+fn verify_checkpoint_key(source_id: &str) -> String {
+    format!("{VERIFY_CHECKPOINT_KEY_PREFIX}{source_id}")
+}
+
 /// 仓库库句柄。
 pub struct RepoDb {
     conn: hp_db::Db,
@@ -193,6 +204,23 @@ impl RepoDb {
     /// 记录某个源的派生数据参数版本（由扫描在**确认每一行都重算过**之后写入）。
     pub fn set_derivation_version(&mut self, source_id: &str, version: i64) -> HpResult<()> {
         self.set_meta(&derivation_version_key(source_id), &version.to_string())
+    }
+
+    /// 读某个源**上一次成功完成全量校验**的时刻（epoch 毫秒）；没有记录返回 `None`。
+    ///
+    /// 监听（`source_watch`）只覆盖「文件改动的瞬间」——程序没运行时改的、通知丢了的那部分，
+    /// 索引里就一直停在旧状态。D9 写的「定期全量校验兜底」就是补这个洞：调度器按这个时刻
+    /// 判断某个源该不该再全量核一遍。
+    ///
+    /// 按源分开记，理由与派生版本相同：一个仓库可以挂多个源，核过 A 不代表 B 也核过。
+    pub fn verify_checkpoint(&self, source_id: &str) -> HpResult<Option<i64>> {
+        let raw = self.meta(&verify_checkpoint_key(source_id))?;
+        Ok(raw.and_then(|value| value.trim().parse::<i64>().ok()))
+    }
+
+    /// 记录某个源刚完成一次**未被取消**的全量校验（epoch 毫秒）。
+    pub fn set_verify_checkpoint(&mut self, source_id: &str, at_millis: i64) -> HpResult<()> {
+        self.set_meta(&verify_checkpoint_key(source_id), &at_millis.to_string())
     }
 
     /// 关闭仓库库：WAL 检查点后释放连接。

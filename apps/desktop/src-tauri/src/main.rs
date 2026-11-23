@@ -26,7 +26,9 @@ mod commands;
 mod mcp;
 // 媒体源实时监听接线（D9）：挂载的源 → `file.changed|missing|restored` 事件。
 mod source_watch;
+// 定期全量校验兜底（D9 的另一半）：漏掉的变化隔几小时由一次增量扫描补齐。
 mod tasks;
+mod verify_schedule;
 // 版本号与编译管线（D230）：开发管线四段版本靠 HP_APP_VERSION 注入，见 build.rs。
 mod version;
 

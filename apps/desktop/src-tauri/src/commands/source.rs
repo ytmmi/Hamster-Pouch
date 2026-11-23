@@ -678,9 +678,23 @@ fn run_scan(
     };
 
     let cancel = control.cancel_flag();
-    state
-        .scanner
-        .scan_source_with_cancel(&cancel, &mut db, &source, &options, &mut progress)
+    let outcome = state.scanner.scan_source_with_cancel(
+        &cancel,
+        &mut db,
+        &source,
+        &options,
+        &mut progress,
+    )?;
+    // 成功收尾才给"定期全量校验兜底"盖章：这一轮已经把磁盘与索引逐文件核过一遍，
+    // 兜底不必再挑它。**取消的扫描不算**——它没走完，磁盘与索引未必对齐；
+    // 失败也走不到这里（上面的 `?` 已经提前返回）。
+    if !outcome.cancelled
+        && let Err(e) = db.set_verify_checkpoint(source_id, crate::verify_schedule::now_millis())
+    {
+        // 盖章失败不影响扫描结果，最坏结果只是这个源下一轮又被兜底挑中。
+        crate::commands::shared::diag_log(&format!("[verify] 校验时间戳写入失败 {source_id}: {e}"));
+    }
+    Ok(outcome)
 }
 
 /// 取消请求的受理结果。`cancelled: false` = 目标不是当前任务（已结束或从未存在），

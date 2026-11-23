@@ -21,6 +21,10 @@ import { createStore } from "./createStore";
 import type { Translate, TranslationKey } from "../i18n";
 import type {
   FileBackfillCompletedPayload,
+  FileChangedPayload,
+  FileCreatedPayload,
+  FileMissingPayload,
+  FileRestoredPayload,
   FileBackfillProgressPayload,
   ScanCompletedPayload,
   ScanErrorPayload,
@@ -41,6 +45,28 @@ interface TaskActions {
 const store = createStore<TaskProgress | null>(null);
 let actions: TaskActions | null = null;
 let started = false;
+/** 实时文件变更的合并刷新定时器（`null` = 当前没有待执行的刷新）。 */
+let fileRefreshTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+
+/**
+ * 实时文件变更（`file.created|changed|missing|restored`）的合并刷新窗口。
+ *
+ * 取 400 ms：比 watch 侧的 900 ms 静默去抖短，因此"一批拖进来"通常只触发一次；
+ * 又不至于短到把同一次写入产生的连续几条事件拆成两次刷新。
+ */
+const FILE_REFRESH_DELAY_MS = 400;
+
+/** 排一次合并刷新：窗口内的后续事件只延长时间，不叠加次数。 */
+function scheduleFileRefresh() {
+  if (fileRefreshTimer !== null) {
+    globalThis.clearTimeout(fileRefreshTimer);
+  }
+  fileRefreshTimer = globalThis.setTimeout(() => {
+    fileRefreshTimer = null;
+    // 回调时刻才取 `actions`：切语言、换仓库都不会让这次刷新落到旧的闭包上。
+    actions?.refresh();
+  }, FILE_REFRESH_DELAY_MS);
+}
 
 /** 更新任务进度（`null` = 无任务）。同一对象重复写入不再触发重渲染（D205）。 */
 export function setTask(next: TaskProgress | null) {
@@ -232,10 +258,27 @@ export function startTaskEvents(): () => void {
       a.status(a.t("source.unmountFailed", { err: e.payload.error }), "error");
       a.refresh();
     }),
+
+    // ── 实时文件变更（D9 / D238）──
+    // 这四条**不弹浮窗、不改状态栏文案**：它们是"磁盘上发生了点什么"的通知，
+    // 不是用户发起的任务。watch 侧已经按 900 ms 静默去抖并在需要时自动补一次
+    // 增量扫描，前端只负责让界面别停在旧数据上。
+    //
+    // 四种事件合并成**一次**去抖刷新：往文件夹里拖 200 张图会来 200 条 `file.created`，
+    // 逐条 `refresh()` 等于把每个面板的库查询重跑 200 遍（`refresh()` 会让全部面板
+    // 的 `useEffect` 重新拉数据）。等这一波安静下来再刷一次，代价与拖 1 张图相同。
+    listenHp<FileCreatedPayload>("file.created", () => scheduleFileRefresh()),
+    listenHp<FileChangedPayload>("file.changed", () => scheduleFileRefresh()),
+    listenHp<FileMissingPayload>("file.missing", () => scheduleFileRefresh()),
+    listenHp<FileRestoredPayload>("file.restored", () => scheduleFileRefresh()),
   ];
 
   return () => {
     started = false;
+    if (fileRefreshTimer !== null) {
+      globalThis.clearTimeout(fileRefreshTimer);
+      fileRefreshTimer = null;
+    }
     for (const un of unlisten) {
       void un.then((fn) => fn());
     }

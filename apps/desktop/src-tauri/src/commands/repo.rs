@@ -328,6 +328,9 @@ pub(crate) fn repo_open(
 
         // 实时监听（D9）：仓库一打开就把"已挂载源 → 文件变更事件"的线接上。
         crate::source_watch::service().sync(&app, Path::new(&row.repo_db_path), &repo_id);
+        // 定期全量校验兜底（D9 的另一半）：实时监听漏掉的变化（进程没开的时段、
+        // notify 缓冲区溢出、移动盘拔插）靠它隔几小时自愈一次。
+        crate::verify_schedule::service().start(&app, Path::new(&row.repo_db_path), &repo_id);
 
         // 图片尺寸回填（0043 阶段 2）：打开仓库后低优先级补齐 `files.width` 为 NULL
         // 的行。**失败不阻塞开仓**——回填是后台补偿，不是开仓的前置条件；已有任务在跑时
@@ -351,7 +354,8 @@ pub(crate) fn repo_open(
 #[tauri::command]
 pub(crate) fn repo_close(state: State<AppState>) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
-        // 先停监听线程：它们各自持有仓库库连接，得在关库之前收手。
+        // 先停监听与兜底调度线程：它们各自持有仓库库连接，得在关库之前收手。
+        crate::verify_schedule::service().stop();
         crate::source_watch::service().stop_all();
         if let Some(repo) = take_open_repo(&state)? {
             repo.db.close()?;
@@ -558,9 +562,10 @@ pub(crate) fn repo_rename(
 #[tauri::command]
 pub(crate) fn repo_delete(repo_id: String, state: State<AppState>) -> ApiResponse<()> {
     let outcome = (|| -> HpResult<()> {
-        // 若删除的是当前打开仓库：先停监听线程（它们各自持有仓库库连接），再按 id 卸句柄。
+        // 若删除的是当前打开仓库：先停监听与兜底调度线程（它们各自持有仓库库连接），再按 id 卸句柄。
         // 判断与卸下在同一次持锁内完成——分成两步的话，中间被别的命令换库就会关错库。
         if let Some(repo) = take_open_repo_if(&state, &repo_id)? {
+            crate::verify_schedule::service().stop();
             crate::source_watch::service().stop_all();
             repo.db.close()?;
         }
